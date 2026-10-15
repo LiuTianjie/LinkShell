@@ -31,7 +31,7 @@ import {
 import { nestHistory, nestUnder } from "../nesting.js";
 import { configOptions, effective, settingsFrom, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
-import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop } from "./desktop-ipc.js";
+import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop, updateSettingsThroughDesktop } from "./desktop-ipc.js";
 
 export interface CodexDriverOptions {
   socketPath: string;
@@ -165,7 +165,6 @@ const HELD_SEND = "会话开在电脑的另一个 Codex 里，这条消息没能
 const HELD_STOP = "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机停下它。请在电脑上停止；一直这样的话，重启一下 Codex 桌面 App。";
 const HELD_NOW =
   "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机插进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。一直这样的话，重启一下 Codex 桌面 App。";
-const HELD_CONFIG = "会话开在电脑的另一个 Codex 里，模型、推理强度和权限要在那边改。";
 const HELD_COMMAND = "会话开在电脑的另一个 Codex 里，要在那边关掉它之后才能从手机做。";
 
 interface PendingApproval {
@@ -848,7 +847,15 @@ export class CodexDriver implements AgentDriver {
   }
 
   private desktopMessage(threadId: string, input: unknown[], clientMessageId: string) {
-    return { input, text: textOf(input as Record<string, unknown>[]), clientMessageId, cwd: this.cwds.get(threadId) };
+    const current = this.settings.get(threadId) ?? {};
+    const overrides = this.overrides.get(threadId) ?? {};
+    return {
+      input,
+      text: textOf(input as Record<string, unknown>[]),
+      clientMessageId,
+      cwd: this.cwds.get(threadId),
+      turnParams: turnOverrides(overrides, { model: overrides.model ?? current.model, effort: overrides.effort ?? current.effort }),
+    };
   }
 
   /**
@@ -1272,10 +1279,9 @@ export class CodexDriver implements AgentDriver {
 
   /** Model, reasoning effort and permissions apply from the next turn on. */
   async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
-    // The process that holds it starts its turns with its own settings.
-    if (this.observed.has(nativeId)) throw RpcError.app("busy", HELD_CONFIG);
     const models = await this.loadModels();
-    const current = effective(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, models);
+    const base = this.settings.get(nativeId) ?? {};
+    const current = effective(base, this.overrides.get(nativeId) ?? {}, models);
     const next: CodexOverrides = { ...this.overrides.get(nativeId) };
     if (optionId === "model") {
       if (!models.some((m) => m.model === value) && value !== current.model) {
@@ -1300,6 +1306,18 @@ export class CodexDriver implements AgentDriver {
       throw RpcError.app("not_supported", `Codex has no setting ${optionId}`);
     }
     this.overrides.set(nativeId, next);
+    if (this.observed.has(nativeId) && this.desktopBusPath) {
+      const updated = effective(base, next, models);
+      const threadSettings = turnOverrides(next, { model: updated.model, effort: updated.effort });
+      await updateSettingsThroughDesktop(
+        this.desktopBusPath,
+        nativeId,
+        threadSettings,
+        optionId === "permissions" ? (this.observed.get(nativeId)?.turnId ?? null) : null,
+      ).catch((error: unknown) => {
+        this.host?.log(`[codex] desktop settings sync for ${nativeId}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
     await this.announceConfig(nativeId);
   }
 

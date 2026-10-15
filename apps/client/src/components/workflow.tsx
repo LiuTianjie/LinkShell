@@ -207,17 +207,24 @@ export function WorkflowCardContent({ record, sessionId }: { record: WorkflowRec
   );
 }
 
-export function LiveWorkflowsBar({ sessionId }: { sessionId: string }) {
+export function LiveWorkflowsBar({ sessionId, subagentsRunning = 0 }: { sessionId: string; subagentsRunning?: number }) {
   const records = useClient((state) => state.workflows[sessionId]);
   const live = useMemo(() => Object.values(records ?? {}).filter((record) => workflowIsLive(record.workflow)), [records]);
   const taskRecords = useClient((state) => state.tasks[sessionId]);
   const taskCount = Object.values(taskRecords ?? {}).filter((task) => task.state === "running").length;
   if (taskCount) return <PressableScale accessibilityRole="button" accessibilityLabel={`${taskCount} 个后台任务运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
     <Icon sf="terminal" md="terminal" size={18} color={colors.running} />
-    <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{taskCount} 个后台任务运行中{live.length ? ` · ${live.length} 个工作流` : ""}</Text>
+    <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{taskCount} 个后台任务运行中{live.length ? ` · ${live.length} 个工作流` : subagentsRunning ? ` · ${subagentsRunning} 个子 Agent` : ""}</Text>
     <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
   </PressableScale>;
-  if (!live.length) return null;
+  if (!live.length) {
+    if (!subagentsRunning) return null;
+    return <PressableScale accessibilityRole="button" accessibilityLabel={`${subagentsRunning} 个子 Agent 运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <Icon sf="square.stack.3d.up" md="layers" size={18} color={colors.running} />
+      <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{subagentsRunning} 个子 Agent 运行中</Text>
+      <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
+    </PressableScale>;
+  }
   const first = live[0]!;
   const counts = workflowCounts(first.workflow);
   const phase = workflowCurrentPhase(first.workflow);

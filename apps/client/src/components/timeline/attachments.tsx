@@ -40,6 +40,7 @@ const FETCH_DELAY = 180;
 
 /** Pictures already asked for: a row that comes back shows its picture without that wait. */
 const requested = new Set<string>();
+const resolvedUris = new Map<string, string>();
 
 /** Width ÷ height of pictures seen, so a row keeps its height when it comes back. */
 const ratios = new Map<string, number>();
@@ -47,6 +48,8 @@ const ratios = new Map<string, number>();
 export interface LoadedImage {
   /** Ready to draw; undefined while loading or after a failure. */
   uri?: string;
+  /** True when the URI was already resolved before this mount (no fade-in needed). */
+  cached: boolean;
   failed: boolean;
   retry: () => void;
 }
@@ -61,17 +64,24 @@ export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
   const { loadImage } = useActions();
   const reference = sessionId && !block.data && block.uri && REFERENCE.test(block.uri) ? block.uri : undefined;
   const key = reference ? `${sessionId} ${reference}` : undefined;
-  const [loaded, setLoaded] = useState<{ key: string; uri: string } | null>(null);
+  const cachedUri = key ? resolvedUris.get(key) : undefined;
+  const [loaded, setLoaded] = useState<{ key: string; uri: string } | null>(() => (key && cachedUri ? { key, uri: cachedUri } : null));
   const [failed, setFailed] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!sessionId || !reference || !key) return;
+    const hit = resolvedUris.get(key);
+    if (hit) {
+      setLoaded((current) => (current?.key === key && current.uri === hit ? current : { key, uri: hit }));
+      return;
+    }
     let cancelled = false;
     const load = () => {
       requested.add(key);
       loadImage(sessionId, reference).then(
         (uri) => {
+          resolvedUris.set(key, uri);
           if (!cancelled) setLoaded({ key, uri });
         },
         () => {
@@ -98,9 +108,10 @@ export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
     setAttempt((value) => value + 1);
   }, []);
 
-  if (!key) return { uri: imageSource(block).uri, failed: false, retry };
+  if (!key) return { uri: imageSource(block).uri, cached: true, failed: false, retry };
+  if (cachedUri) return { uri: cachedUri, cached: true, failed: false, retry };
   // State from another picture (a recycled row) doesn't count.
-  return { uri: loaded?.key === key ? loaded.uri : undefined, failed: failed === key, retry };
+  return { uri: loaded?.key === key ? loaded.uri : undefined, cached: false, failed: failed === key, retry };
 }
 
 /** Pinch, pan and double-tap zoom; a downward swipe at 1× dismisses. */
@@ -309,7 +320,7 @@ export const ImageThumb = memo(function ImageThumb({
               source={{ uri: image.uri }}
               style={frame}
               contentFit="cover"
-              transition={160}
+              transition={image.cached ? 0 : 120}
               onLoad={
                 onRatio
                   ? (event) => {
@@ -506,7 +517,7 @@ function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock
   const onRatio = useCallback(
     (value: number) => {
       if (known) ratios.set(known, value);
-      setRatio(value);
+      setRatio((current) => (Math.abs(current - value) > 0.02 ? value : current));
     },
     [known],
   );

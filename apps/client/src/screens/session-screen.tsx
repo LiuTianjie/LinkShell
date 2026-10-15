@@ -382,7 +382,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
               branch={branch}
               ownBranch={!!summary.worktree}
               live={turnActive}
-              actions={hasSubagents ? 2 : 1}
+              actions={(hasSubagents ? 1 : 0) + (changeCount > 0 ? 1 : 0) + 1}
             />
           ),
         }}
@@ -390,6 +390,17 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <HeaderActions
         actions={[
           ...toolbarActions,
+          ...(changeCount > 0
+            ? [
+                {
+                  kind: "button" as const,
+                  key: "changes",
+                  icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
+                  label: `查看改动（${changeCount} 个文件）`,
+                  onPress: openChanges,
+                },
+              ]
+            : []),
           // Every sub-agent the session started, a tap away: the ones still working (counted on the button) and the finished ones.
           ...(hasSubagents
             ? [
@@ -498,60 +509,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onFailedMessage={onFailedMessage}
         onScroll={onScroll}
         earlier={earlier}
-        header={
-          Platform.OS === "ios" ? (
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingBottom: 8 }}>
-              <Pressable
-                onPress={() => {
-                  haptics.selection();
-                  router.push({ pathname: "/files", params: { path: summary.cwd } });
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`项目目录 ${baseName(summary.worktree?.source ?? summary.cwd)}`}
-                style={({ pressed }) => ({
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  paddingLeft: 5,
-                  paddingRight: 10,
-                  height: 28,
-                  borderRadius: 14,
-                  borderCurve: "continuous",
-                  backgroundColor: pressed ? colors.fillStrong : colors.fill,
-                  flexShrink: 1,
-                })}
-              >
-                <AgentTile agent={summary.agent} size={18} />
-                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, fontWeight: "600", flexShrink: 1 }]}>
-                  {baseName(summary.worktree?.source ?? summary.cwd)}
-                </Text>
-                {branch ? <BranchTag branch={branch} max={16} own={!!summary.worktree} /> : null}
-              </Pressable>
-              {changeCount > 0 ? (
-                <Pressable
-                  onPress={openChanges}
-                  accessibilityRole="button"
-                  accessibilityLabel={`查看 ${changeCount} 个文件改动`}
-                  style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 4,
-                    paddingHorizontal: 10,
-                    height: 28,
-                    borderRadius: 14,
-                    borderCurve: "continuous",
-                    backgroundColor: pressed ? colors.fillStrong : colors.accentSoft,
-                  })}
-                >
-                  <Icon sf="plus.forwardslash.minus" md="difference" size={11} color={colors.accent} />
-                  <Text style={[type.caption, { color: colors.accent, fontWeight: "600", fontVariant: ["tabular-nums"] }]}>
-                    {changeCount} 个改动
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null
-        }
       />
       </TimelineQuestions.Provider>
       </TimelineFork.Provider>
@@ -618,7 +575,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                 <AgentInteractions agent={summary.agent} />
                 {summary.asyncQuestions?.length ? <AsyncQuestionCard sessionId={id} questions={summary.asyncQuestions} agentName={look.name} disabled={!online} /> : null}
                 {view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}
-                {tasksRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} /> : null}
+                {tasksRunning > 0 || subagentsRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} subagentsRunning={subagentsRunning} /> : null}
               </>
           }
           onSend={commandControls.send}

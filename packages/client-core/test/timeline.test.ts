@@ -400,3 +400,44 @@ describe("async questions", () => {
     expect(answeredQuestions("<send_user_message_question_reply>\nnot json\n</send_user_message_question_reply>")).toEqual([]);
   });
 });
+
+describe("Codex automation & heartbeat message formatting", () => {
+  it("parses <heartbeat> and <codex_automation_message> envelopes and strips agent <heartbeat> blocks", async () => {
+    const { automationMessage, cleanAgentHeartbeatText, userMessageText } = await import("../src/user-message.js");
+    const heartbeatBlocks = [
+      text(
+        "<heartbeat>\n<automation_id>daily-check</automation_id>\n<current_time_iso>2026-10-15T09:00:00Z</current_time_iso>\n<instructions>\nCheck CI status and summarize failures.\n</instructions>\n</heartbeat>",
+      ),
+    ];
+    expect(automationMessage(heartbeatBlocks)).toEqual({
+      kind: "heartbeat",
+      automationId: "daily-check",
+      timeIso: "2026-10-15T09:00:00Z",
+      instructions: "Check CI status and summarize failures.",
+    });
+    expect(userMessageText(heartbeatBlocks)).toBe("Check CI status and summarize failures.");
+
+    const agentWithHeartbeat =
+      "All checks passed on main.\n<heartbeat><decision>notify</decision><message>All checks passed.</message></heartbeat>";
+    expect(cleanAgentHeartbeatText(agentWithHeartbeat)).toEqual({
+      text: "All checks passed on main.",
+      heartbeat: {
+        automationId: undefined,
+        decision: "notify",
+        message: "All checks passed.",
+      },
+    });
+
+    const agentOnlyHeartbeat =
+      "<heartbeat><decision>notify</decision><message>Daily summary ready.</message></heartbeat>";
+    expect(cleanAgentHeartbeatText(agentOnlyHeartbeat)).toEqual({
+      text: "Daily summary ready.",
+      heartbeat: {
+        automationId: undefined,
+        decision: "notify",
+        message: "Daily summary ready.",
+      },
+    });
+  });
+});
+

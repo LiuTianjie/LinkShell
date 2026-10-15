@@ -27,6 +27,7 @@ const VERSIONS = {
   owner: 1,
   start: 2,
   steer: 1,
+  settings: 2,
   /** With the turn it is meant for, or (older) without. */
   interrupt: { withTurn: 4, anyTurn: 3 },
 };
@@ -104,6 +105,7 @@ export interface DesktopMessage {
   text: string;
   clientMessageId: string;
   cwd?: string;
+  turnParams?: Record<string, unknown>;
 }
 
 /**
@@ -144,10 +146,31 @@ export async function startThroughDesktop(socketPath: string, threadId: string, 
     "thread-follower-start-turn",
     {
       conversationId: threadId,
-      turnStart: { request: { threadId, input: message.input, clientUserMessageId: message.clientMessageId }, context: {} },
+      turnStart: { request: { threadId, input: message.input, clientUserMessageId: message.clientMessageId, ...message.turnParams }, context: {} },
     },
     VERSIONS.start,
     30_000,
+  );
+}
+
+/** Updates model, reasoning effort or permission settings in the window that runs `threadId`. */
+export async function updateSettingsThroughDesktop(
+  socketPath: string,
+  threadId: string,
+  threadSettings: Record<string, unknown>,
+  activeTurnId: string | null = null,
+): Promise<void> {
+  await askOwner(
+    socketPath,
+    threadId,
+    "thread-follower-update-thread-settings",
+    {
+      conversationId: threadId,
+      threadSettings,
+      activeTurnId,
+    },
+    VERSIONS.settings,
+    10_000,
   );
 }
 

@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   ANTIGRAVITY_ACP_VERSION,
   antigravityAuthStatus,
+  cleanAntigravityUserInput,
   extractAntigravityAuthUrl,
+  parseAntigravityTranscript,
   resolveAntigravityLaunch,
 } from "../src/drivers/acp/antigravity.js";
 import { mapPermissionRequest, normalizeAcpUpdate } from "../src/drivers/acp/mapper.js";
@@ -177,4 +179,79 @@ describe("Antigravity ACP protocol mapping", () => {
     expect(perm!.update.detail).toContain("rm -rf /tmp/test");
     expect(perm!.update.detail).toContain("This command modifies files outside the workspace.");
   });
+
+  it("parses Antigravity Desktop transcript.jsonl into HistoryItems", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-transcript-"));
+    try {
+      const transcriptPath = join(root, "transcript.jsonl");
+      const lines = [
+        JSON.stringify({
+          step_index: 1,
+          type: "USER_INPUT",
+          created_at: "2026-10-15T10:00:00Z",
+          content: "<USER_REQUEST>\nFix the desktop transcript parser\n</USER_REQUEST>",
+        }),
+        JSON.stringify({
+          step_index: 2,
+          type: "PLANNER_RESPONSE",
+          created_at: "2026-10-15T10:00:02Z",
+          thinking: "Let me check the transcript format.",
+          content: "I will inspect the logs and implement the parser.",
+          tool_calls: [
+            {
+              id: "call_view_1",
+              name: "view_file",
+              args: { AbsolutePath: "/Users/test/file.ts", toolSummary: "View file.ts" },
+            },
+          ],
+        }),
+        JSON.stringify({
+          step_index: 3,
+          type: "GENERIC",
+          created_at: "2026-10-15T10:00:03Z",
+          content: "1: export const ok = true;",
+        }),
+      ];
+      writeFileSync(transcriptPath, `${lines.join("\n")}\n`);
+
+      expect(cleanAntigravityUserInput("<USER_REQUEST>\nhello world\n</USER_REQUEST>")).toBe("hello world");
+      const parsed = parseAntigravityTranscript(transcriptPath);
+      expect(parsed.nextLine).toBe(3);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.items[0]).toMatchObject({
+        itemId: "agy:user:1",
+        updates: [
+          {
+            sessionUpdate: "user_message_chunk",
+            messageId: "agy:user:1",
+            content: { type: "text", text: "Fix the desktop transcript parser" },
+          },
+        ],
+      });
+      expect(parsed.items[1]?.itemId).toBe("agy:step:2");
+      expect(parsed.items[1]?.updates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "Let me check the transcript format." },
+          }),
+          expect.objectContaining({
+            sessionUpdate: "tool_call",
+            toolCallId: "call_view_1",
+            kind: "read",
+            status: "completed",
+            rawInput: { file_path: "/Users/test/file.ts" },
+            rawOutput: { output: "1: export const ok = true;" },
+          }),
+          expect.objectContaining({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "I will inspect the logs and implement the parser." },
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
+

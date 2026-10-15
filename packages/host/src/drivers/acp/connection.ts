@@ -170,10 +170,10 @@ export class AcpConnection {
       // down without losing the client's v1 capabilities. Later messages are version-specific.
       ...(version === 2 ? { info, capabilities: { auth: remote ? {} : { terminal: {} }, elicitation, ...editor } } : {}),
     }, 30_000);
-    // Google's Antigravity ACP server (`antigravity-acp-server`) returns `protocolVersion: 2`
-    // while using ACP v1's `agentCapabilities` / `agentInfo` / `authMethods[].id` wire schema.
-    const hybridV1 = raw.protocolVersion === 2 && raw.agentCapabilities !== undefined && raw.capabilities === undefined;
-    if (raw.protocolVersion !== 1 && !hybridV1 && !(version === 2 && raw.protocolVersion === 2)) {
+    // Google's Antigravity ACP server (`antigravity-acp-server`) is configured with `protocolVersion: 2`
+    // and returns `protocolVersion: 2` while using ACP v1's `agentCapabilities` / `agentInfo` / `authMethods[].id` wire schema.
+    const hybridV1 = version === 2 && raw.protocolVersion === 2 && raw.agentCapabilities !== undefined && raw.capabilities === undefined;
+    if (raw.protocolVersion !== 1 && !(version === 2 && raw.protocolVersion === 2)) {
       await this.stop(); throw new AcpProtocolError(raw.protocolVersion, version);
     }
     if (raw.protocolVersion === 2 && !hybridV1) {

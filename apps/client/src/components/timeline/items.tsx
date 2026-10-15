@@ -13,7 +13,7 @@ import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { AgentInbox } from "./agent-inbox";
 import { useTimelineFork, useTimelineQuestions } from "./context";
-import { questionReplies, userMessageText } from "@/lib/user-message";
+import { automationMessage, cleanAgentHeartbeatText, questionReplies, userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
@@ -29,6 +29,7 @@ export const UserMessage = memo(function UserMessage({
   onFailedPress?: (item: Of<"user">) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const automation = automationMessage(item.blocks);
   const raw = userMessageText(item.blocks);
   const replies = questionReplies(raw);
   const text = replies ? replies.map((reply) => reply.answer || "已跳过").join("\n\n") : raw;
@@ -41,7 +42,7 @@ export const UserMessage = memo(function UserMessage({
   return (
     <View style={{ alignItems: "flex-end", gap: 4 }}>
       {images.length ? <Attachments blocks={images} align="end" thumb={116} /> : null}
-      {text || links.length ? (
+      {text || links.length || automation ? (
         <Pressable
           disabled={!item.failed && !long}
           onPress={() => {
@@ -67,6 +68,14 @@ export const UserMessage = memo(function UserMessage({
               gap: 6,
             }}
           >
+            {automation ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <Icon sf="clock.arrow.circlepath" md="schedule" size={12} color={colors.secondaryLabel} />
+                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, fontWeight: "600", flexShrink: 1 }]}>
+                  {automation.title || (automation.automationId ? `定时任务 · ${automation.automationId}` : "定时任务")}
+                </Text>
+              </View>
+            ) : null}
             {links.map((link, index) => (link.type === "resource_link" ? <LinkChip key={index} block={link} onBubble /> : null))}
             {replies?.map((reply, index) => (
               <Text key={index} numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
@@ -97,15 +106,16 @@ export const UserMessage = memo(function UserMessage({
 });
 
 export const AgentMessage = memo(function AgentMessage({ item, last = false }: { item: Of<"agent">; last?: boolean }) {
-  const hasText = item.text.trim().length > 0;
+  const { text: displayText } = cleanAgentHeartbeatText(item.text);
+  const hasText = displayText.trim().length > 0;
   if (!hasText && !item.attachments?.length) return null;
   return (
     <View style={{ gap: 8 }}>
       {item.senderSessionId || item.recipientSessionId ? <Text selectable style={[type.caption, { color: colors.secondaryLabel }]}>{item.senderSessionId ?? "Agent"} → {item.recipientSessionId ?? "当前会话"}</Text> : null}
-      {hasText ? <Markdown text={item.text} streaming={item.streaming} /> : null}
+      {hasText ? <Markdown text={displayText} streaming={item.streaming} /> : null}
       {item.attachments?.length ? <Attachments blocks={item.attachments} /> : null}
       {item.questions?.length && !item.streaming ? <AsyncQuestions questions={item.questions} /> : null}
-      {last && hasText && !item.streaming ? <ReplyActions item={item} /> : null}
+      {last && hasText && !item.streaming ? <ReplyActions item={{ ...item, text: displayText }} /> : null}
     </View>
   );
 });

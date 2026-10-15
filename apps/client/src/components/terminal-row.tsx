@@ -1,8 +1,11 @@
 import type { TerminalInfo } from "@linkshell/wire";
+import * as Clipboard from "expo-clipboard";
 import { router } from "expo-router";
 import { memo } from "react";
-import { useColorScheme, View } from "react-native";
+import { Alert, useColorScheme, View } from "react-native";
+import { useConnection } from "@/lib/client";
 import { baseName, relativeTime } from "@/lib/format";
+import { haptics } from "@/lib/haptics";
 import { terminalState } from "@/lib/terminals";
 import { colors } from "@/theme/colors";
 import { Icon } from "./icon";
@@ -11,6 +14,22 @@ import { LiveDot } from "./status";
 
 export function openTerminal(id: string) {
   router.push({ pathname: "/terminal/[id]", params: { id } });
+}
+
+function confirmDeleteTerminal(terminal: TerminalInfo, close: () => void) {
+  const state = terminalState(terminal);
+  Alert.alert(
+    state.ended ? `删除“${state.title}”？` : `关闭并删除“${state.title}”？`,
+    state.ended ? "这条终端记录会从列表里移除。" : "正在运行的终端进程会被停止，并从列表里移除。",
+    [
+      { text: "取消", style: "cancel" },
+      {
+        text: "删除",
+        style: "destructive",
+        onPress: close,
+      },
+    ],
+  );
 }
 
 /** A terminal's icon, sized like an agent tile: a console square. An ended one keeps its tile and greys its prompt. */
@@ -53,6 +72,7 @@ export const TerminalRow = memo(function TerminalRow({
   showProject?: boolean;
   now: number;
 }) {
+  const { link } = useConnection();
   const state = terminalState(terminal);
   const project = showProject ? baseName(terminal.cwd) : undefined;
   return (
@@ -67,7 +87,30 @@ export const TerminalRow = memo(function TerminalRow({
       warn={state.failed}
       position={position}
       onPress={() => openTerminal(terminal.id)}
+      href={{ pathname: "/terminal/[id]", params: { id: terminal.id } }}
       accessibilityLabel={["终端", state.title, project, state.detail].filter(Boolean).join("，")}
+      menu={[
+        {
+          title: "复制工作目录",
+          icon: { sf: "folder", md: "folder" },
+          onPress: () => {
+            void Clipboard.setStringAsync(terminal.cwd);
+            haptics.success();
+          },
+        },
+        {
+          title: "删除",
+          icon: { sf: "trash", md: "delete" },
+          destructive: true,
+          onPress: () =>
+            confirmDeleteTerminal(terminal, () => {
+              void link
+                .call("terminals.close", { terminalId: terminal.id })
+                .then(() => haptics.success())
+                .catch((error: unknown) => Alert.alert("删除失败", error instanceof Error ? error.message : String(error)));
+            }),
+        },
+      ]}
     />
   );
 });

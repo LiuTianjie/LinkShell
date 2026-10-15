@@ -179,7 +179,7 @@ export function describeTool(item: ToolItem): ToolDescription {
   const changes = fileChanges(item.content);
   const input = record(item.rawInput);
   // Richer detail when the host knows it; the same for every agent.
-  if (item.detail) return describeDetail(item.detail, changes);
+  if (item.detail) return describeDetail(item.detail, changes, input);
   switch (item.toolKind) {
     case "execute": {
       const command = tidyCommand(commandOf(item) ?? cleanToolTitle(item.title));
@@ -219,10 +219,29 @@ const subagentVerb: Record<Extract<ToolDetail, { type: "subagent" }>["action"], 
   list: "查看子 Agent",
 };
 
-function describeDetail(detail: ToolDetail, changes: FileChange[]): ToolDescription {
+function describeDetail(detail: ToolDetail, changes: FileChange[], input: Record<string, unknown> = {}): ToolDescription {
   switch (detail.type) {
-    case "mcp":
+    case "mcp": {
+      if ((detail.server === "codex_app" || detail.server === "codex_apps") && detail.tool === "automation_update") {
+        const mode = str(input.mode);
+        const status = str(input.status);
+        const verb =
+          mode === "create"
+            ? "创建定时任务"
+            : mode === "delete"
+              ? "删除定时任务"
+              : mode === "view"
+                ? "查看定时任务"
+                : status === "PAUSED"
+                  ? "暂停定时任务"
+                  : status === "ACTIVE"
+                    ? "启用定时任务"
+                    : "更新定时任务";
+        const subject = str(input.name) ?? str(input.id) ?? "";
+        return { verb, subject, code: false, glyph: { sf: "clock.arrow.circlepath", md: "schedule" }, changes };
+      }
       return { verb: detail.server.replace(/[_-]/g, " "), subject: detail.tool.replace(/_/g, " "), code: false, glyph: { sf: "puzzlepiece.extension", md: "extension" }, changes };
+    }
     case "subagent":
       return { verb: detail.workflow ? "工作流" : subagentVerb[detail.action], subject: detail.task ?? "", code: false, glyph: { sf: "square.stack.3d.up", md: "layers" }, changes };
     case "skill":
