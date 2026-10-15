@@ -211,6 +211,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       configuration.bundlePolicy = .maxBundle
       configuration.rtcpMuxPolicy = .require
       configuration.continualGatheringPolicy = .gatherContinually
+      // Link-local interfaces (awdl, 169.254, fe80) reach no computer: not worth a candidate pair.
+      configuration.disableLinkLocalNetworks = true
       configuration.iceServers = ((rtc["iceServers"] as? [[String: Any]]) ?? []).compactMap { server in
         guard let urls = server["urls"] as? [String], !urls.isEmpty else { return nil }
         return RTCIceServer(urlStrings: urls)

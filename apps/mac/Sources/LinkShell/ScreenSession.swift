@@ -117,6 +117,11 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var roundTripCount = Rate()
   /// The path last written to the log, so a viewer's log says which one its video took.
   private var pathSaid: String?
+  /// Local addresses on a virtual interface (container bridges and the like): a host candidate
+  /// on one of these reaches no phone, so it is not offered. Read once, when the session starts.
+  private var virtualAddresses: Set<String> = []
+  /// Host candidates dropped for being on a virtual interface, for the log.
+  private var droppedCandidates = 0
 
   init(request: ScreenRequest, options: Options, link: Link) {
     self.request = request
@@ -146,6 +151,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
 
     let factory = Engine.screenFactory(maximumFrameRate: frameRate)
     peerFactory = factory
+    virtualAddresses = Networks.virtualAddresses()
     let configuration = RTCConfiguration()
     configuration.sdpSemantics = .unifiedPlan
     configuration.iceServers = request.iceServers
@@ -153,6 +159,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     configuration.rtcpMuxPolicy = .require
     // A phone changes network (Wi-Fi to cellular) without the connection being made again.
     configuration.continualGatheringPolicy = .gatherContinually
+    // Link-local interfaces (awdl, llw, 169.254, fe80) reach no phone: not worth a candidate pair.
+    configuration.disableLinkLocalNetworks = true
     configuration.enableDscp = true
     let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
     guard let connection = factory.peerConnection(with: configuration, constraints: constraints, delegate: self) else {
@@ -388,6 +396,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
     DispatchQueue.main.async {
       guard !self.closed else { return }
+      // A host candidate on a container bridge or other virtual interface is not sent: the phone
+      // can't reach it, and pairing against it only slows the check. srflx and the real LAN stay.
+      if Networks.isUselessHost(candidate.sdp, virtual: self.virtualAddresses) {
+        self.droppedCandidates += 1
+        return
+      }
       self.link.emit(["t": "rtc.ice", "v": self.viewer, "candidate": candidate.sdp, "sdpMid": candidate.sdpMid ?? NSNull(), "sdpMLineIndex": Int(candidate.sdpMLineIndex)])
       if !Launch.has("--loopback-network") { self.loopback?.add(candidate) }
     }
@@ -397,7 +411,24 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
   func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
   func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
-  func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+  func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
+    guard newState == .complete else { return }
+    let dropped = droppedCandidates
+    DispatchQueue.main.async {
+      guard !self.closed else { return }
+      if dropped > 0 { self.link.log("gathering done: \(dropped) host candidate\(dropped == 1 ? "" : "s") on a virtual interface not offered") }
+    }
+  }
+
+  /// Which STUN server a candidate could not be gathered from, so a slow or missing srflx has a
+  /// reason in the log (701: the server could not be reached at all).
+  func peerConnection(_ peerConnection: RTCPeerConnection, didFailToGatherIceCandidate event: RTCIceCandidateErrorEvent) {
+    let url = event.url, code = event.errorCode, text = event.errorText
+    DispatchQueue.main.async {
+      guard !self.closed else { return }
+      self.link.log("STUN \(url) did not answer: \(code) \(text)")
+    }
+  }
   func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
   func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
 
