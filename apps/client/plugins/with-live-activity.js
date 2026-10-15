@@ -434,9 +434,6 @@ module.exports = function withLiveActivity(config) {
           LD_RUNPATH_SEARCH_PATHS: '"$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"',
           MARKETING_VERSION: marketingVersion,
           PRODUCT_BUNDLE_IDENTIFIER: `"${extBundleId}"`,
-          // Match the Swift module name of LinkShellAttentionAttributes in LinkLayoutModule.swift
-          // so ActivityKit's runtime type lookup matches across main app and widget extension.
-          PRODUCT_MODULE_NAME: "LinkLayout",
           PRODUCT_NAME: `"$(TARGET_NAME)"`,
           SKIP_INSTALL: "YES",
           SWIFT_EMIT_LOC_STRINGS: "NO",

@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell-client",
-    "version": "2.3.26",
+    "version": "2.3.27",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -22,7 +22,7 @@
         "NSMicrophoneUsageDescription": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
         "NSSpeechRecognitionUsageDescription": "LinkShell 需要使用语音识别，将你说的话实时转换为文字。"
       },
-      "buildNumber": "20326"
+      "buildNumber": "20327"
     },
     "android": {
       "adaptiveIcon": {
@@ -33,7 +33,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bd.linkshell",
-      "versionCode": 20326
+      "versionCode": 20327
     },
     "web": {
       "favicon": "./assets/favicon.png"
