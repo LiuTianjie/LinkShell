@@ -87,6 +87,15 @@ enum Tuning {
   /// DSCP marking and the pacer's order, where a network honours it.
   static let networkPriority = RTCPriority.high
 
+  // MARK: Making the first connection (`ScreenSession.scheduleRestart`)
+
+  /// If no path has connected this many seconds after an offer, ICE is restarted and the offer
+  /// re-sent: a stalled first gathering often clears on a fresh one. Kept well under the viewer's
+  /// own 25 s patience so both restarts are tried before it gives up to the socket fallback.
+  static let iceRestartAfter: TimeInterval = 8
+  /// How many times to restart before leaving it to the viewer's fallback.
+  static let iceRestartLimit = 2
+
   // MARK: The video track's frame rate (`FrameRate`), judged once a second while connected
 
   /// At the start, and after a change of rate, nothing is concluded for this many seconds: the

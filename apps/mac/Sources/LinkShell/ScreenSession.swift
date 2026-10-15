@@ -87,6 +87,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var statsTimer: DispatchSourceTimer?
   private var cursorTimer: DispatchSourceTimer?
   private var shapeTimer: DispatchSourceTimer?
+  /// Whether a path has ever connected: once it has, a stall is handled by the disconnect
+  /// timers, not by restarting ICE.
+  private var everConnected = false
+  /// How many times ICE has been restarted because the first attempt did not connect in time.
+  private var iceRestarts = 0
+  private var restartTimer: DispatchSourceTimer?
   private var said = ""
   private var strip: ClockStrip?
   private var motion: MotionWindow?
@@ -253,6 +259,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     statsTimer?.cancel()
     cursorTimer?.cancel()
     shapeTimer?.cancel()
+    restartTimer?.cancel()
+    restartTimer = nil
     // The viewer left: nothing stays pressed.
     control?.releaseAll()
     capturer?.stop()
@@ -299,8 +307,29 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     loopback?.add(RTCIceCandidate(sdp: sdp, sdpMLineIndex: Int32((message["sdpMLineIndex"] as? Int) ?? 0), sdpMid: message["sdpMid"] as? String))
   }
 
+  /// Waits for the first attempt to connect; if it hasn't by `iceRestartAfter`, restarts ICE and
+  /// re-offers, up to `iceRestartLimit` times. A stall often clears on a fresh gathering (the
+  /// browser viewer reconnected within seconds after the old 25 s give-up), and this spares the
+  /// viewer that wait. Once a path connects the timer is cancelled; it never runs under loopback.
+  private func scheduleRestart() {
+    guard !options.loopback, iceRestarts < Tuning.iceRestartLimit else { return }
+    restartTimer?.cancel()
+    let timer = DispatchSource.makeTimerSource(queue: .main)
+    timer.schedule(deadline: .now() + Tuning.iceRestartAfter)
+    timer.setEventHandler { [weak self] in
+      guard let self, !self.closed, !self.everConnected, let connection = self.connection else { return }
+      self.iceRestarts += 1
+      self.link.log("no path yet after \(Int(Tuning.iceRestartAfter)) s: restarting ICE (attempt \(self.iceRestarts))")
+      connection.restartIce()
+      self.offer()
+    }
+    timer.resume()
+    restartTimer = timer
+  }
+
   private func offer() {
     guard let connection else { return }
+    scheduleRestart()
     let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
     connection.offer(for: constraints) { [weak self] description, error in
       guard let description else {
@@ -439,6 +468,12 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard now != said else { return }
     said = now
     link.emit(["t": "rtc.state", "v": viewer, "ice": Self.name(ice), "connection": Self.name(connection)])
+    // A path is up: no more restarting, a later stall is the disconnect timers' to handle.
+    if connection == .connected {
+      everConnected = true
+      restartTimer?.cancel()
+      restartTimer = nil
+    }
     // A viewer that can't be heard can't let go of what it holds.
     if [.disconnected, .failed, .closed].contains(connection) { control?.releaseAll() }
   }
