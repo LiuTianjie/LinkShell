@@ -55,7 +55,7 @@ interface NativeLayoutModuleType {
   isLiveActivityAvailable?: () => Promise<boolean>;
   syncLiveActivity?: (payload: LiveActivityPayload) => Promise<boolean>;
   endLiveActivity?: () => Promise<void>;
-  addListener?: (eventName: string, listener: (event: any) => void) => { remove: () => void };
+  addListener?: <T = unknown>(eventName: string, listener: (event: T) => void) => { remove: () => void };
 }
 
 const nativeLayout = requireOptionalNativeModule<NativeLayoutModuleType>("LinkLayout");

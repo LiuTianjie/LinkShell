@@ -426,7 +426,6 @@ let cachedExpoAudio: typeof import("expo-audio") | null | undefined;
 function getExpoAudio(): typeof import("expo-audio") | null {
   if (cachedExpoAudio !== undefined) return cachedExpoAudio;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     cachedExpoAudio = require("expo-audio") as typeof import("expo-audio");
   } catch {
     cachedExpoAudio = null;

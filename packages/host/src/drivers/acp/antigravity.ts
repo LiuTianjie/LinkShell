@@ -10,7 +10,6 @@ import {
   type AgentAuth,
   type ContentBlock,
   type SessionConfigOption,
-  type SessionState,
   type SessionUpdate,
   type ToolKind,
 } from "@linkshell/wire";
