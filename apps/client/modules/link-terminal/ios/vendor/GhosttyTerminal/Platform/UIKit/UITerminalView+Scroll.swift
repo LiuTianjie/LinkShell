@@ -37,8 +37,6 @@
     }
 
     extension UITerminalView {
-        static let touchScrollMultiplier: CGFloat = 3.0
-
         @objc func handleScrollWheelGesture(_ gesture: UIPanGestureRecognizer) {
             guard pointer.session.reported == nil else { return }
             switch gesture.state {
@@ -156,7 +154,16 @@
             }
             // Match the finger's distance in a mouse-tracking TUI, as the
             // system scrollback driver does for the ordinary shell.
-            let multiplier: CGFloat = surface?.isMouseCaptured == true ? 1 : Self.touchScrollMultiplier
+            //
+            // `delta` is in view points, but ghostty's precision scroll reads
+            // the offset in backing pixels (it accumulates against
+            // `cell_height_px`). The scrollback driver converts with
+            // `resolvedDisplayScale()` for the same reason (see
+            // `applySubRowScrollOffset`); do the same here so one point of
+            // finger travel is one point of content on every display scale,
+            // instead of the 1/scale it shrank to when a hard-coded multiplier
+            // of 1 stood in for the scale on a captured surface.
+            let multiplier = resolvedDisplayScale()
             let mods = TerminalScrollModifiers(precision: true, momentum: momentum)
             surface?.sendMouseScroll(x: Double(delta.x * multiplier), y: Double(delta.y * multiplier), mods: mods.rawValue)
         }
