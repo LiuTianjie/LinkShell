@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   itemToHistory,
   mapApprovalRequest,
+  mapQuestionRequest,
   mapNotification,
   spawnedThreads,
   subagentHistory,
@@ -23,6 +24,41 @@ function mapper() {
 }
 
 describe("codex mapper", () => {
+  it("exposes fieldless MCP consent as a permission without granting persistent access", () => {
+    const request = mapQuestionRequest("mcpServer/elicitation/request", {
+      threadId: "t", serverName: "cua_repl", mode: "form",
+      message: 'Allow Computer Use to use "Device Hub"?',
+      _meta: { callId: "computer-tool", persist: ["session", "always"] },
+      requestedSchema: { type: "object", properties: {} },
+    }, "mcp-1")!;
+    expect(request.update).toMatchObject({
+      sessionUpdate: "ls_permission", requestId: "mcp-1", toolCallId: "computer-tool",
+      title: 'Allow Computer Use to use "Device Hub"?', detail: "来自 MCP 服务 cua_repl",
+    });
+    expect(request.update.questions).toBeUndefined();
+    expect(request.update.options.map((option) => option.optionId)).toEqual(["accept", "decline", "cancel"]);
+    expect(request.respond("accept")).toEqual({ action: "accept", content: {}, _meta: null });
+    expect(request.respond("decline")).toEqual({ action: "decline", content: null, _meta: null });
+    expect(request.cancel?.()).toEqual({ action: "cancel", content: null, _meta: null });
+    expect(request.respond("cancel")).toEqual(request.cancel?.());
+  });
+
+  it("does not turn unsupported MCP fields or URL requests into empty consent", () => {
+    for (const requestedSchema of [undefined, { type: "object", properties: {}, required: ["missing"] }, {
+      type: "object", properties: { nested: { type: "object" } }, required: ["nested"],
+    }]) {
+      expect(mapQuestionRequest("mcpServer/elicitation/request", { threadId: "t", mode: "form", requestedSchema }, "r")).toBeUndefined();
+    }
+    expect(mapQuestionRequest("mcpServer/elicitation/request", {
+      threadId: "t", mode: "url", requestedSchema: { type: "object", properties: {} },
+    }, "r")).toBeUndefined();
+    const form = mapQuestionRequest("mcpServer/elicitation/request", {
+      threadId: "t", mode: "form", requestedSchema: { type: "object", properties: { name: { type: "string" } } },
+    }, "r")!;
+    expect(form.update.questions).toHaveLength(1);
+    expect(form.cancel?.()).toEqual({ action: "cancel", content: null, _meta: null });
+  });
+
   it("recognizes desktop sub-agents in history and live notifications", () => {
     const { map } = mapper();
     const item = { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "child", agentPath: "/root/reviewer" };

@@ -316,6 +316,37 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(phone.of(sessionId).some((e) => JSON.stringify(e.update).includes("also check tests"))).toBe(true);
   });
 
+  it("shows fieldless MCP consent on both clients and cancels it before interrupting only its session", async () => {
+    const createPending = async (clientMessageId: string) => {
+      const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+      const id = session.id;
+      await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+      await laptop.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+      await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId, content: text("MCP_CONFIRM") });
+      const event = await waitFor(() => phone.of(id).find((event) => event.update.sessionUpdate === "ls_permission"));
+      if (event.update.sessionUpdate !== "ls_permission") throw new Error("missing confirmation");
+      await waitFor(() => laptop.of(id).some((item) => item.seq === event.seq));
+      expect(host.hub.getSession(id)).toMatchObject({ state: "waiting", pendingPermissions: 1 });
+      return { id, requestId: event.update.requestId };
+    };
+    const first = await createPending("mcp-stop");
+    const second = await createPending("mcp-still-waiting");
+    await phone.client.call("sessions.cancel", { sessionId: first.id });
+    await waitFor(() => phone.turnsEnded(first.id).length === 1);
+    expect(phone.turnsEnded(first.id)[0]!.update).toMatchObject({ stopReason: "cancelled" });
+    expect(host.hub.getSession(first.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
+    expect(host.hub.getSession(second.id)).toMatchObject({ state: "waiting", pendingPermissions: 1 });
+    await waitFor(() => laptop.of(first.id).some((event) => event.update.sessionUpdate === "ls_permission_resolved"));
+    await phone.client.call("sessions.permission", { sessionId: second.id, requestId: second.requestId, optionId: "cancel" });
+    await waitFor(() => phone.turnsEnded(second.id).length === 1);
+    expect(host.hub.getSession(second.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
+
+    const allowed = await createPending("mcp-allow");
+    await phone.client.call("sessions.permission", { sessionId: allowed.id, requestId: allowed.requestId, optionId: "accept" });
+    await waitFor(() => phone.turnsEnded(allowed.id).length === 1);
+    expect(phone.agentText(allowed.id)).toBe('echo: mcp {"action":"accept","content":{},"_meta":null}');
+  });
+
   it("broadcasts an approval to every client and applies whichever answer comes first", async () => {
     await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "c4", content: text("RUN the build") });
     const request = await waitFor(() => phone.of(sessionId).find((e) => e.update.sessionUpdate === "ls_permission"));

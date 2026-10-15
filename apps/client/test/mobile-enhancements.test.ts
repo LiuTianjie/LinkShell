@@ -1,4 +1,5 @@
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
+import { emptyView } from "@linkshell/client-core";
 import { describe, expect, it, vi } from "vitest";
 
 const saved = new Map<string, string>();
@@ -170,7 +171,7 @@ describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () 
     const s = makeSession({ id: "agy-1", agent: "antigravity", title: "重构桌面端", state: "idle" });
     const views = {
       "agy-1": {
-        id: "agy-1",
+        ...emptyView("agy-1"),
         agent: "antigravity",
         cwd: "/Users/test/linkshell",
         state: "running" as const,

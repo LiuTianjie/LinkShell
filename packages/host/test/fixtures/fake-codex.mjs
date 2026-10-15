@@ -220,6 +220,28 @@ async function runTurn(thread, turn, text) {
   const threadId = thread.meta.id;
   notifyThread(thread, "turn/started", { threadId, turn: { id: turn.id, items: [], status: "inProgress" } });
   setStatus(thread);
+  if (text.includes("MCP_CONFIRM")) {
+    const result = await new Promise((resolve) => {
+      const id = nextServerRequestId++;
+      thread.pendingMcp = true;
+      pendingServerRequests.set(id, (_decision, result) => {
+        if (!pendingServerRequests.delete(id)) return;
+        thread.pendingMcp = false;
+        notifyThread(thread, "serverRequest/resolved", { threadId, requestId: id });
+        resolve(result);
+      });
+      for (const conn of thread.subscribers) send(conn, {
+        jsonrpc: "2.0", id, method: "mcpServer/elicitation/request",
+        params: {
+          threadId, turnId: turn.id, serverName: "cua_repl", mode: "form",
+          message: 'Allow Computer Use to use "Device Hub"?',
+          _meta: { callId: "computer-tool" }, requestedSchema: { type: "object", properties: {} },
+        },
+      });
+    });
+    if (result.action === "cancel") return finishTurn(thread, turn, "interrupted");
+    text = `mcp ${JSON.stringify(result)}`;
+  }
   if (text.includes("RUN")) {
     const command = { type: "commandExecution", id: randomUUID(), command: "echo hi", cwd: thread.meta.cwd, status: "inProgress" };
     const decision = await requestApproval(thread, turn, command);
@@ -475,6 +497,9 @@ const handlers = {
   },
   "turn/interrupt": (params) => {
     const thread = threads.get(params.threadId);
+    // The real server can hang on this ordering; fail fast so a regression
+    // cannot pass merely because the fixture interrupts every pending tool.
+    if (thread?.pendingMcp) throw { code: -32603, message: "MCP confirmation must be resolved before interrupt" };
     const turn = thread?.active;
     if (turn && turn.id === params.turnId) {
       turn.interrupted = true;

@@ -762,6 +762,8 @@ export interface ApprovalRequest {
   respond(optionId: string): unknown;
   /** For a request with questions: the result that carries the user's answers. */
   answer?: (answers: QuestionAnswer[]) => unknown;
+  /** MCP confirmations must be answered before interrupting their pending tool. */
+  cancel?: () => unknown;
 }
 
 export function mapApprovalRequest(method: string, rawParams: unknown, requestId: string): ApprovalRequest | undefined {
@@ -906,10 +908,39 @@ export function mapQuestionRequest(method: string, rawParams: unknown, requestId
   if (method === "mcpServer/elicitation/request") {
     const mode = str(params.mode);
     const message = str(params.message);
-    const form = mode === "form" || mode === "openai/form" || mode === "openaiForm" ? formQuestions(params.requestedSchema, message) : undefined;
+    const isForm = mode === "form" || mode === "openai/form" || mode === "openaiForm";
+    const schema = obj(params.requestedSchema);
+    const properties = obj(schema?.properties);
+    const server = str(params.serverName);
+    const cancel = () => ({ action: "cancel", content: null, _meta: null });
+    // Computer Use asks for consent with an empty object schema: no fields to
+    // fill in still needs a visible permission card and an explicit response.
+    if (isForm && schema?.type === "object" && properties && Object.keys(properties).length === 0 && arr(schema.required).length === 0) {
+      return {
+        threadId,
+        update: {
+          sessionUpdate: "ls_permission",
+          requestId,
+          toolCallId: str(obj(params._meta)?.callId),
+          title: message ?? "MCP 服务请求确认",
+          detail: server ? `来自 MCP 服务 ${server}` : undefined,
+          options: [
+            { optionId: "accept", name: "允许一次", kind: "allow_once" },
+            { optionId: "decline", name: "拒绝", kind: "reject_once" },
+            { optionId: "cancel", name: "拒绝并停止", kind: "reject_once" },
+          ],
+        },
+        respond: (optionId) => optionId === "cancel" ? cancel() : {
+          action: optionId === "accept" ? "accept" : "decline",
+          content: optionId === "accept" ? {} : null,
+          _meta: null,
+        },
+        cancel,
+      };
+    }
+    const form = isForm ? formQuestions(params.requestedSchema, message) : undefined;
     // A page to open (sign-in for an MCP server) belongs on the computer.
     if (!form) return undefined;
-    const server = str(params.serverName);
     return {
       threadId,
       update: {
@@ -922,6 +953,7 @@ export function mapQuestionRequest(method: string, rawParams: unknown, requestId
       },
       respond: (optionId) => ({ action: optionId === "cancel" ? "cancel" : "decline", content: null, _meta: null }),
       answer: (answers) => ({ action: "accept", content: formContent(form, answers), _meta: null }),
+      cancel,
     };
   }
   return undefined;

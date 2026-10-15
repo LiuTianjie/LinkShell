@@ -1405,7 +1405,18 @@ export class CodexDriver implements AgentDriver {
       return this.stopElsewhere(nativeId);
     }
     const turnId = this.stateOf(nativeId).activeTurnId;
-    if (!turnId) return;
+    let cancelledRequest = false;
+    for (const [requestId, pending] of this.approvals) {
+      if (pending.threadId !== nativeId || !pending.request.cancel) continue;
+      this.approvals.delete(requestId);
+      pending.answer(pending.request.cancel());
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId: "cancel" });
+      cancelledRequest = true;
+    }
+    // Let RpcPeer flush the MCP replies first. Codex can wait for them while
+    // aborting a tool; sending only turn/interrupt can leave it stuck forever.
+    if (cancelledRequest) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (!turnId || this.stateOf(nativeId).activeTurnId !== turnId) return;
     await this.rpcFor(nativeId, "turn/interrupt", { threadId: nativeId, turnId });
   }
 
@@ -1414,6 +1425,7 @@ export class CodexDriver implements AgentDriver {
     if (!pending || pending.threadId !== nativeId) {
       throw RpcError.app("not_found", "this permission request is no longer pending");
     }
+    if (optionId === "cancel" && pending.request.cancel) return this.cancel(nativeId);
     this.approvals.delete(requestId);
     pending.answer(pending.request.respond(optionId));
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
