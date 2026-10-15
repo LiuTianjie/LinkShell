@@ -256,9 +256,18 @@ export class Gateway {
     if (frame.token) {
       if (!this.options.verifyToken) throw new RelayError("accounts_disabled", "this gateway doesn't support accounts");
       const account = await this.options.verifyToken(frame.token);
-      if (!account) throw new RelayError("token_invalid", "account token is invalid or expired");
-      userId = account.userId;
-      email = account.email;
+      if (account) {
+        userId = account.userId;
+        email = account.email;
+      } else if (existing?.userId) {
+        // Once a peer's Ed25519 key is bound to an account, keep that binding if its local OAuth
+        // token later expires or fails to refresh while the computer is unattended.
+        userId = existing.userId;
+      } else {
+        throw new RelayError("token_invalid", "account token is invalid or expired");
+      }
+    } else if (existing?.userId && this.options.verifyToken) {
+      userId = existing.userId;
     }
     const refusal = await this.options.admit?.({ role: role as PeerRole, userId });
     if (refusal) throw new RelayError("not_admitted", refusal);

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GatewayStatus } from "@linkshell/wire";
-import { getValidToken, isLoggedIn } from "../auth.js";
+import { getValidToken, isLoggedIn, loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
 // node:sqlite prints an ExperimentalWarning on load; it is expected here and
@@ -189,7 +189,8 @@ export async function refreshGateway(waitMs: number): Promise<GatewayStatus | un
 
 export function describeGateway(gateway: GatewayStatus): string {
   if (gateway.status === "off") return "off (linkshell login for the official one, or linkshell host --gateway <url>)";
-  const account = gateway.account ? `, account ${gateway.account.email ?? gateway.account.userId}` : "";
+  const label = gateway.account ? (gateway.account.email ?? loadAuth()?.email ?? gateway.account.userId) : undefined;
+  const account = label ? `, account ${label}` : "";
   const problem = gateway.error ? `  ⚠ ${gateway.error.message}` : "";
   return `${gateway.status} ${gateway.url}${account}${problem}`;
 }

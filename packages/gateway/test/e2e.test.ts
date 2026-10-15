@@ -360,9 +360,15 @@ describe("gateway v2 end to end", () => {
     expect(machines).toMatchObject([{ via: "account", online: true }]);
     expect((await connect(phone.relay, phone.identity, machines[0]!).call("machine.info", {})).hostname).toBeTruthy();
 
+    // Once its Ed25519 key is bound to Alice's account, a reconnect without a fresh OAuth token
+    // still comes back online on Alice's account.
+    computer.token = undefined;
+    await local.call("gateway.refresh", {});
+    await until(async () => (await local.call("gateway.status", {})).status === "online");
+    expect((await local.call("gateway.status", {})).account).toMatchObject({ userId: "alice" });
+
     // Logging out takes it off the gateway.
     computer.gateway = undefined;
-    computer.token = undefined;
     expect((await local.call("gateway.refresh", {})).status).toBe("off");
     await until(async () => (await phone.relay.request("machines.list", {})).machines.every((machine) => !machine.online));
     await until(() => changes.at(-1) === "off");

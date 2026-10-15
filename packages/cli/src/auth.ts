@@ -51,46 +51,55 @@ const SUPABASE_ANON_KEY =
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
 
+let inflightRefresh: Promise<AuthTokens | null> | null = null;
+
 /**
  * Refresh the access token using the refresh token.
  * Returns updated tokens or null if refresh failed.
  */
 export async function refreshAccessToken(): Promise<AuthTokens | null> {
-  const auth = loadAuth();
-  if (!auth?.refreshToken) return null;
+  if (inflightRefresh) return inflightRefresh;
+  inflightRefresh = (async () => {
+    const auth = loadAuth();
+    if (!auth?.refreshToken) return null;
+    if (auth.expiresAt - Date.now() >= 60_000) return auth;
 
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ refresh_token: auth.refreshToken }),
+          signal: AbortSignal.timeout(30_000),
         },
-        body: JSON.stringify({ refresh_token: auth.refreshToken }),
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    if (!res.ok) return null;
-    const body = (await res.json()) as {
-      access_token: string;
-      refresh_token: string;
-      expires_in: number;
-      user: { id: string; email?: string };
-    };
-    const tokens: AuthTokens = {
-      accessToken: body.access_token,
-      refreshToken: body.refresh_token,
-      expiresAt: Date.now() + body.expires_in * 1000,
-      userId: body.user.id,
-      email: body.user.email,
-    };
-    saveAuth(tokens);
-    return tokens;
-  } catch {
-    return null;
-  }
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        access_token: string;
+        refresh_token: string;
+        expires_in: number;
+        user: { id: string; email?: string };
+      };
+      const tokens: AuthTokens = {
+        accessToken: body.access_token,
+        refreshToken: body.refresh_token,
+        expiresAt: Date.now() + body.expires_in * 1000,
+        userId: body.user.id,
+        email: body.user.email ?? auth.email,
+      };
+      saveAuth(tokens);
+      return tokens;
+    } catch {
+      return null;
+    }
+  })().finally(() => {
+    inflightRefresh = null;
+  });
+  return inflightRefresh;
 }
 
 /**
@@ -100,8 +109,8 @@ export async function getValidToken(): Promise<string | null> {
   const auth = loadAuth();
   if (!auth) return null;
 
-  // If token expires in less than 60s, refresh
-  if (auth.expiresAt - Date.now() < 60_000) {
+  // If token expires in less than 120s, refresh
+  if (auth.expiresAt - Date.now() < 120_000) {
     const refreshed = await refreshAccessToken();
     return refreshed?.accessToken ?? null;
   }
