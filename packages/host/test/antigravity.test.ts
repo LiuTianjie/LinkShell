@@ -253,5 +253,104 @@ describe("Antigravity ACP protocol mapping", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("parses Goal Mode lifecycle, strips HTML/system tags, extracts model selection, and loads uploaded images", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-goal-"));
+    try {
+      const imgPath = join(root, "upload.png");
+      const pngBytes = Buffer.from("89504e470d0a1a0a", "hex");
+      writeFileSync(imgPath, pngBytes);
+
+      const transcriptPath = join(root, "transcript_full.jsonl");
+      const lines = [
+        JSON.stringify({
+          step_index: 10,
+          type: "USER_INPUT",
+          content:
+            "<USER_REQUEST>\n/goal Optimize pipeline under 15 minutes\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Argon (Medium) to Gemini 4 Argon (High).\n</USER_SETTINGS_CHANGE>\n<ADDITIONAL_METADATA>\n/goal is a [Slash Command]:\nOnce complete, include <!-- GOAL_COMPLETE --> in your response.\n</ADDITIONAL_METADATA>",
+          media: [{ mime_type: "image/png", uri: imgPath }],
+        }),
+        JSON.stringify({
+          step_index: 11,
+          type: "SYSTEM_MESSAGE",
+          content:
+            "The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\nStop hook blocked termination: You are still working toward the user's goal. Do not stop until the task is fully complete.\n\nTime spent so far: 1h 8m\nContinuation: #2\n\nOriginal request: Optimize pipeline under 15 minutes\n</SYSTEM_MESSAGE>",
+        }),
+        JSON.stringify({
+          step_index: 12,
+          type: "PLANNER_RESPONSE",
+          content: "All deliverables verified and complete.\n\n<!-- GOAL_COMPLETE -->",
+        }),
+      ];
+      writeFileSync(transcriptPath, `${lines.join("\n")}\n`);
+
+      const parsed = parseAntigravityTranscript(transcriptPath, 0);
+      expect(parsed.lastModelLabel).toBe("Gemini 4 Argon (High)");
+      expect(parsed.goal).toEqual({
+        objective: "Optimize pipeline under 15 minutes",
+        status: "complete",
+        iterations: 2,
+        timeUsedSeconds: 4080,
+      });
+      expect(parsed.items).toHaveLength(3);
+
+      // Step 10: user message with image + stripped /goal text + active ls_goal update
+      expect(parsed.items[0]?.updates).toEqual([
+        {
+          sessionUpdate: "user_message_chunk",
+          messageId: "agy:user:10",
+          content: { type: "image", mimeType: "image/png", data: pngBytes.toString("base64") },
+        },
+        {
+          sessionUpdate: "user_message_chunk",
+          messageId: "agy:user:10",
+          content: { type: "text", text: "Optimize pipeline under 15 minutes" },
+        },
+        {
+          sessionUpdate: "ls_goal",
+          goal: { objective: "Optimize pipeline under 15 minutes", status: "active" },
+        },
+      ]);
+
+      // Step 11: SYSTEM_MESSAGE goal continuation progress
+      expect(parsed.items[1]?.updates).toEqual([
+        {
+          sessionUpdate: "ls_goal",
+          goal: {
+            objective: "Optimize pipeline under 15 minutes",
+            status: "active",
+            iterations: 2,
+            timeUsedSeconds: 4080,
+          },
+        },
+      ]);
+
+      // Step 12: PLANNER_RESPONSE strips <!-- GOAL_COMPLETE --> and emits ls_goal complete
+      expect(parsed.items[2]?.updates).toEqual([
+        {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "agy:msg:12",
+          content: { type: "text", text: "All deliverables verified and complete." },
+        },
+        {
+          sessionUpdate: "ls_message_done",
+          messageId: "agy:msg:12",
+          role: "agent",
+        },
+        {
+          sessionUpdate: "ls_goal",
+          goal: {
+            objective: "Optimize pipeline under 15 minutes",
+            status: "complete",
+            iterations: 2,
+            timeUsedSeconds: 4080,
+          },
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
+
 

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +10,9 @@ import {
   RpcError,
   type AgentAuth,
   type ContentBlock,
+  type GoalChange,
   type SessionConfigOption,
+  type SessionGoal,
   type SessionUpdate,
   type ToolKind,
 } from "@linkshell/wire";
@@ -297,6 +300,14 @@ interface TranscriptToolCall {
   args?: Record<string, unknown>;
 }
 
+interface TranscriptMedia {
+  mime_type?: string;
+  mimeType?: string;
+  uri?: string;
+  inline_data?: string;
+  inlineData?: string;
+}
+
 interface TranscriptStep {
   step_index?: number;
   source?: string;
@@ -306,7 +317,19 @@ interface TranscriptStep {
   content?: string;
   thinking?: string;
   tool_calls?: TranscriptToolCall[];
+  media?: TranscriptMedia[];
 }
+
+const ANTIGRAVITY_DESKTOP_COMMANDS = [
+  { name: "goal", description: "设定持续目标，让 Antigravity 持续推进直到完成", hint: "<目标描述>" },
+  { name: "plan", description: "先制定分步执行计划，再动手实现", hint: "<任务描述>" },
+  { name: "boost", description: "深度思考、多视角分析与严格验证模式", hint: "<复杂问题或任务>" },
+  { name: "teamwork-preview", description: "启动多 Agent 协作团队共同完成大型项目", hint: "<项目任务>" },
+  { name: "grill-me", description: "通过互动提问对齐方案细节与设计决策", hint: "<主题>" },
+  { name: "compact", description: "压缩并总结当前对话上下文以释放窗口空间" },
+  { name: "schedule", description: "创建定时任务或后台周期自动化", hint: "<定时指令>" },
+  { name: "learn", description: "总结并持久化当前经验与约定供后续会话使用" },
+];
 
 function unquoteArg(value: unknown): unknown {
   if (typeof value !== "string") return value;
@@ -337,12 +360,124 @@ function parseToolArgs(raw: Record<string, unknown> | undefined): Record<string,
   return result;
 }
 
+function stripTruncationMarkers(text: string): string {
+  return text.replace(/\n?\.\.\.\s*<truncated\s+\d+\s+bytes>\s*\.\.\.\n?/gi, "\n").replace(/<truncated\s+\d+\s+bytes>/gi, "");
+}
+
 export function cleanAntigravityUserInput(content: string): string {
-  const requestMatch = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i.exec(content);
-  if (requestMatch) return requestMatch[1]!.trim();
-  return content
-    .replace(/<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE|SYSTEM_MESSAGE|CONTEXT_SUMMARY)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE|SYSTEM_MESSAGE|CONTEXT_SUMMARY)>/gi, "")
+  const closedMatch = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i.exec(content);
+  if (closedMatch) return stripTruncationMarkers(closedMatch[1]!).trim();
+  const openMatch = /<USER_REQUEST>\s*([\s\S]*?)(?:<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE|SYSTEM_MESSAGE|CONTEXT_SUMMARY|EPILOGUE|GOAL_MODE|PLAN|TEAMWORK|BOOST)>|$)/i.exec(content);
+  if (openMatch) return stripTruncationMarkers(openMatch[1]!).trim();
+  return stripTruncationMarkers(
+    content.replace(
+      /<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE|SYSTEM_MESSAGE|CONTEXT_SUMMARY|EPILOGUE|GOAL_MODE|PLAN|TEAMWORK|BOOST|GOAL)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE|SYSTEM_MESSAGE|CONTEXT_SUMMARY|EPILOGUE|GOAL_MODE|PLAN|TEAMWORK|BOOST|GOAL)>/gi,
+      "",
+    ),
+  )
+    .replace(/<!--\s*GOAL_(?:COMPLETE|CANCELLED)\s*-->/gi, "")
     .trim();
+}
+
+export function cleanAntigravityAgentContent(content: string): {
+  text: string;
+  goalComplete: boolean;
+  goalCancelled: boolean;
+} {
+  const goalComplete = /<!--\s*GOAL_COMPLETE\s*-->/i.test(content);
+  const goalCancelled = /<!--\s*GOAL_CANCELLED\s*-->/i.test(content);
+  const text = stripTruncationMarkers(content)
+    .replace(/<!--\s*GOAL_(?:COMPLETE|CANCELLED)\s*-->/gi, "")
+    .replace(
+      /<(?:SYSTEM_MESSAGE|EPILOGUE|GOAL_MODE|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s\S]*?<\/(?:SYSTEM_MESSAGE|EPILOGUE|GOAL_MODE|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>/gi,
+      "",
+    )
+    .trim();
+  return { text, goalComplete, goalCancelled };
+}
+
+function extractModelSelectionFromContent(content: string | undefined): string | undefined {
+  if (!content) return undefined;
+  const regex = /changed setting `Model Selection` from .*? to ([^\r\n.<]+?)\.?\s*(?:<\/USER_SETTINGS_CHANGE>|\r|\n|$)/gi;
+  let last: string | undefined;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    if (match[1]?.trim()) last = match[1].trim();
+  }
+  return last;
+}
+
+function parseGoalDurationSeconds(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  let total = 0;
+  let matched = false;
+  const hours = /(\d+)\s*h/i.exec(raw);
+  const mins = /(\d+)\s*m/i.exec(raw);
+  const secs = /(\d+)\s*s/i.exec(raw);
+  if (hours?.[1]) {
+    total += Number(hours[1]) * 3600;
+    matched = true;
+  }
+  if (mins?.[1]) {
+    total += Number(mins[1]) * 60;
+    matched = true;
+  }
+  if (secs?.[1]) {
+    total += Number(secs[1]);
+    matched = true;
+  }
+  return matched ? total : undefined;
+}
+
+function parseGoalSystemMessage(
+  content: string | undefined,
+  previousGoal: SessionGoal | null,
+): SessionGoal | undefined {
+  if (!content || !/Stop hook blocked termination:\s*You are still working toward the user's goal/i.test(content)) {
+    return undefined;
+  }
+  const iterMatch = /Continuation:\s*#(\d+)/i.exec(content);
+  const timeMatch = /Time spent so far:\s*([^\r\n]+)/i.exec(content);
+  const origMatch = /Original request:\s*([\s\S]*?)(?:<\/SYSTEM_MESSAGE>|$)/i.exec(content);
+  const rawObjective = origMatch?.[1]?.trim().replace(/^\/goal(?:\s+|$)/i, "").trim();
+  const objective = rawObjective || previousGoal?.objective || "持续目标";
+  const iterations = iterMatch?.[1] ? Number(iterMatch[1]) : previousGoal?.iterations;
+  const timeUsedSeconds = parseGoalDurationSeconds(timeMatch?.[1]) ?? previousGoal?.timeUsedSeconds;
+  return {
+    objective,
+    status: "active",
+    ...(iterations !== undefined ? { iterations } : {}),
+    ...(timeUsedSeconds !== undefined ? { timeUsedSeconds } : {}),
+  };
+}
+
+function readStepMediaBlocks(media: TranscriptMedia[] | undefined): ContentBlock[] {
+  if (!Array.isArray(media) || media.length === 0) return [];
+  const blocks: ContentBlock[] = [];
+  for (const entry of media) {
+    const mimeType = entry.mime_type || entry.mimeType || "image/png";
+    const inline = entry.inline_data || entry.inlineData;
+    if (typeof inline === "string" && inline.length > 0) {
+      blocks.push({ type: "image", mimeType, data: inline });
+      continue;
+    }
+    const rawUri = entry.uri;
+    if (typeof rawUri === "string" && rawUri.length > 0) {
+      const filePath = rawUri.startsWith("file://") ? fileURLToPath(rawUri) : rawUri;
+      try {
+        if (existsSync(filePath)) {
+          const stat = statSync(filePath);
+          if (stat.isFile() && stat.size > 0 && stat.size <= 15 * 1024 * 1024) {
+            const data = readFileSync(filePath).toString("base64");
+            blocks.push({ type: "image", mimeType, data });
+          }
+        }
+      } catch {
+        // ignore unreadable media file
+      }
+    }
+  }
+  return blocks;
 }
 
 function mapAntigravityToolCall(
@@ -393,6 +528,8 @@ function mapAntigravityToolCall(
     rawInput = { url: typeof args.Url === "string" ? args.Url : summary };
   }
 
+  const cleanedOutput = outputText ? stripTruncationMarkers(outputText) : undefined;
+
   return {
     sessionUpdate: "tool_call",
     toolCallId,
@@ -401,16 +538,25 @@ function mapAntigravityToolCall(
     kind,
     status: "completed",
     rawInput,
-    ...(outputText ? { rawOutput: { output: outputText } } : {}),
+    ...(cleanedOutput ? { rawOutput: { output: cleanedOutput } } : {}),
     ...(locations ? { locations } : {}),
   };
 }
 
 /**
- * Converts an Antigravity Desktop `transcript.jsonl` file into LinkShell's
- * `HistoryItem[]` list.
+ * Converts an Antigravity Desktop `transcript_full.jsonl` (or `transcript.jsonl`)
+ * file into LinkShell's `HistoryItem[]` list, tracking Goal Mode (`ls_goal`),
+ * model changes (`<USER_SETTINGS_CHANGE>`), and uploaded media.
  */
-export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0): { items: HistoryItem[]; nextLine: number } {
+export function parseAntigravityTranscript(
+  transcriptPath: string,
+  fromLine = 0,
+): {
+  items: HistoryItem[];
+  nextLine: number;
+  lastModelLabel?: string;
+  goal?: SessionGoal | null;
+} {
   if (!existsSync(transcriptPath)) return { items: [], nextLine: fromLine };
   let lines: string[];
   try {
@@ -418,7 +564,44 @@ export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0)
   } catch {
     return { items: [], nextLine: fromLine };
   }
-  if (fromLine >= lines.length) return { items: [], nextLine: lines.length };
+
+  let activeGoal: SessionGoal | null = null;
+  let lastModelLabel: string | undefined;
+
+  // Scan lines prior to `fromLine` so incremental parsing retains active goal & model state.
+  const scanLimit = Math.min(fromLine, lines.length);
+  for (let i = 0; i < scanLimit; i++) {
+    try {
+      const step = JSON.parse(lines[i]!) as TranscriptStep;
+      if (step.type === "USER_INPUT" && typeof step.content === "string") {
+        const modelLabel = extractModelSelectionFromContent(step.content);
+        if (modelLabel) lastModelLabel = modelLabel;
+        const rawText = cleanAntigravityUserInput(step.content);
+        if (/^\/goal\s+(?:clear|stop|off|reset|none|cancel)\s*$/i.test(rawText)) {
+          activeGoal = null;
+        } else if (/^\/goal(?:\s+|$)/i.test(rawText) || /\/goal is a \[Slash Command\]:/i.test(step.content)) {
+          const objective = rawText.replace(/^\/goal(?:\s+|$)/i, "").trim() || "持续目标";
+          activeGoal = { objective, status: "active" };
+        } else if (activeGoal?.status === "complete") {
+          activeGoal = null;
+        }
+      } else if (step.type === "SYSTEM_MESSAGE") {
+        const nextGoal = parseGoalSystemMessage(step.content, activeGoal);
+        if (nextGoal) activeGoal = nextGoal;
+      } else if (step.type === "PLANNER_RESPONSE" && typeof step.content === "string") {
+        const { goalComplete, goalCancelled } = cleanAntigravityAgentContent(step.content);
+        if (goalCancelled) {
+          activeGoal = null;
+        } else if (goalComplete) {
+          activeGoal = { ...(activeGoal ?? { objective: "持续目标" }), status: "complete" };
+        }
+      }
+    } catch {
+      // ignore malformed historical line
+    }
+  }
+
+  if (fromLine >= lines.length) return { items: [], nextLine: lines.length, lastModelLabel, goal: activeGoal };
 
   const parsed: { index: number; step: TranscriptStep }[] = [];
   for (let i = fromLine; i < lines.length; i++) {
@@ -427,7 +610,7 @@ export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0)
       parsed.push({ index: step.step_index ?? i, step });
     } catch {
       // skip partial trailing JSON line
-      return { items: [], nextLine: i };
+      return { items: [], nextLine: i, lastModelLabel, goal: activeGoal };
     }
   }
 
@@ -435,35 +618,80 @@ export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0)
   for (let i = 0; i < parsed.length; i++) {
     const { index: stepIndex, step } = parsed[i]!;
     if (step.type === "USER_INPUT") {
-      const text = typeof step.content === "string" ? cleanAntigravityUserInput(step.content) : "";
-      if (!text) continue;
+      if (typeof step.content === "string") {
+        const modelLabel = extractModelSelectionFromContent(step.content);
+        if (modelLabel) lastModelLabel = modelLabel;
+      }
+      const rawText = typeof step.content === "string" ? cleanAntigravityUserInput(step.content) : "";
+      const mediaBlocks = readStepMediaBlocks(step.media);
+      let displayText = rawText;
+      let goalUpdate: SessionUpdate | undefined;
+
+      if (/^\/goal\s+(?:clear|stop|off|reset|none|cancel)\s*$/i.test(rawText)) {
+        activeGoal = null;
+        goalUpdate = { sessionUpdate: "ls_goal", goal: null };
+      } else if (/^\/goal(?:\s+|$)/i.test(rawText) || (typeof step.content === "string" && /\/goal is a \[Slash Command\]:/i.test(step.content))) {
+        const objective = rawText.replace(/^\/goal(?:\s+|$)/i, "").trim() || "持续目标";
+        displayText = objective;
+        activeGoal = { objective, status: "active" };
+        goalUpdate = { sessionUpdate: "ls_goal", goal: activeGoal };
+      } else if (activeGoal?.status === "complete") {
+        activeGoal = null;
+        goalUpdate = { sessionUpdate: "ls_goal", goal: null };
+      }
+
+      if (!displayText && mediaBlocks.length === 0 && !goalUpdate) continue;
       const messageId = `agy:user:${stepIndex}`;
+      const updates: SessionUpdate[] = [];
+      for (const mediaBlock of mediaBlocks) {
+        updates.push({
+          sessionUpdate: "user_message_chunk",
+          messageId,
+          content: mediaBlock,
+        });
+      }
+      if (displayText) {
+        updates.push({
+          sessionUpdate: "user_message_chunk",
+          messageId,
+          content: { type: "text", text: displayText },
+        });
+      }
+      if (goalUpdate) {
+        updates.push(goalUpdate);
+      }
       items.push({
         itemId: messageId,
-        updates: [
-          {
-            sessionUpdate: "user_message_chunk",
-            messageId,
-            content: { type: "text", text },
-          },
-        ],
+        updates,
       });
+    } else if (step.type === "SYSTEM_MESSAGE") {
+      const nextGoal = parseGoalSystemMessage(step.content, activeGoal);
+      if (nextGoal) {
+        activeGoal = nextGoal;
+        items.push({
+          itemId: `agy:goal:${stepIndex}`,
+          updates: [{ sessionUpdate: "ls_goal", goal: activeGoal }],
+        });
+      }
     } else if (step.type === "PLANNER_RESPONSE") {
       const updates: SessionUpdate[] = [];
-      if (typeof step.thinking === "string" && step.thinking.trim()) {
-        const thoughtId = `agy:thought:${stepIndex}`;
-        updates.push(
-          {
-            sessionUpdate: "agent_thought_chunk",
-            messageId: thoughtId,
-            content: { type: "text", text: step.thinking.trim() },
-          },
-          {
-            sessionUpdate: "ls_message_done",
-            messageId: thoughtId,
-            role: "thought",
-          },
-        );
+      if (typeof step.thinking === "string") {
+        const cleanThought = stripTruncationMarkers(step.thinking).trim();
+        if (cleanThought) {
+          const thoughtId = `agy:thought:${stepIndex}`;
+          updates.push(
+            {
+              sessionUpdate: "agent_thought_chunk",
+              messageId: thoughtId,
+              content: { type: "text", text: cleanThought },
+            },
+            {
+              sessionUpdate: "ls_message_done",
+              messageId: thoughtId,
+              role: "thought",
+            },
+          );
+        }
       }
 
       const calls = Array.isArray(step.tool_calls) ? step.tool_calls : [];
@@ -481,19 +709,29 @@ export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0)
       }
 
       if (typeof step.content === "string" && step.content.trim()) {
-        const messageId = `agy:msg:${stepIndex}`;
-        updates.push(
-          {
-            sessionUpdate: "agent_message_chunk",
-            messageId,
-            content: { type: "text", text: step.content.trim() },
-          },
-          {
-            sessionUpdate: "ls_message_done",
-            messageId,
-            role: "agent",
-          },
-        );
+        const { text: cleanText, goalComplete, goalCancelled } = cleanAntigravityAgentContent(step.content);
+        if (cleanText) {
+          const messageId = `agy:msg:${stepIndex}`;
+          updates.push(
+            {
+              sessionUpdate: "agent_message_chunk",
+              messageId,
+              content: { type: "text", text: cleanText },
+            },
+            {
+              sessionUpdate: "ls_message_done",
+              messageId,
+              role: "agent",
+            },
+          );
+        }
+        if (goalCancelled) {
+          activeGoal = null;
+          updates.push({ sessionUpdate: "ls_goal", goal: null });
+        } else if (goalComplete) {
+          activeGoal = { ...(activeGoal ?? { objective: "持续目标" }), status: "complete" };
+          updates.push({ sessionUpdate: "ls_goal", goal: activeGoal });
+        }
       }
 
       if (updates.length > 0) {
@@ -505,7 +743,7 @@ export function parseAntigravityTranscript(transcriptPath: string, fromLine = 0)
     }
   }
 
-  return { items, nextLine: lines.length };
+  return { items, nextLine: lines.length, lastModelLabel, goal: activeGoal };
 }
 
 interface LanguageServerConnection {
@@ -576,23 +814,48 @@ function parseWorkspaceCwd(workspaceUrisJson: string | undefined, fallbackCwd: s
   return fallbackCwd;
 }
 
+function resolveDesktopTranscriptPath(dataDir: string, nativeId: string): string {
+  const logsDir = join(dataDir, "brain", nativeId, ".system_generated", "logs");
+  const fullPath = join(logsDir, "transcript_full.jsonl");
+  if (existsSync(fullPath)) return fullPath;
+  return join(logsDir, "transcript.jsonl");
+}
+
+function extForMimeType(mimeType: string): string {
+  const sub = mimeType.split("/")[1]?.toLowerCase() ?? "png";
+  if (sub === "jpeg" || sub === "jpg") return "jpg";
+  if (sub === "webp") return "webp";
+  if (sub === "gif") return "gif";
+  return "png";
+}
+
+interface DesktopWatcher {
+  timer: ReturnType<typeof setInterval>;
+  nextLine: number;
+  lastSize: number;
+  running: boolean;
+  detached: boolean;
+  selectedModel?: string;
+  lastModelLabel?: string;
+  goal?: SessionGoal | null;
+  pendingClientMessages: { clientMessageId: string; text: string }[];
+}
+
 /**
  * Specialized driver for Google Antigravity:
  * - Drives `agy_acp_server.par` / `agy-acp` over ACP when installed.
  * - Also discovers and interacts with Antigravity Desktop (`/Applications/Antigravity.app`,
- *   `~/.gemini/antigravity/conversation_summaries.db`, `brain/<id>/.system_generated/logs/transcript.jsonl`,
+ *   `~/.gemini/antigravity/conversation_summaries.db`, `brain/<id>/.system_generated/logs/transcript_full.jsonl`,
  *   and its local `language_server` Connect-RPC service) so users with only the Desktop app
- *   get full session visibility, history, model selection, and messaging.
+ *   get full session visibility, history, Goal Mode, image messaging, and model selection.
  */
 export class AntigravityDriver extends AcpDriver {
   private desktopMode = false;
   private desktopSummaryTimer?: ReturnType<typeof setInterval>;
   private readonly desktopSessionStates = new Map<string, "running" | "idle">();
-  private readonly desktopWatchers = new Map<
-    string,
-    { timer: ReturnType<typeof setInterval>; nextLine: number; lastSize: number; running: boolean; selectedModel?: string }
-  >();
+  private readonly desktopWatchers = new Map<string, DesktopWatcher>();
   private desktopModelsCache?: { value: string; name: string; description?: string }[];
+  private desktopDefaultModel?: string;
 
   constructor(options: { env?: NodeJS.ProcessEnv; hostVersion: string }) {
     super(antigravitySpec(), options);
@@ -660,6 +923,11 @@ export class AntigravityDriver extends AcpDriver {
             const prev = this.desktopSessionStates.get(s.nativeId);
             this.desktopSessionStates.set(s.nativeId, nextState);
             if (prev !== undefined && prev !== nextState) {
+              if (nextState === "running") {
+                this.host?.update(this.id, s.nativeId, { sessionUpdate: "ls_turn", state: "started" });
+              } else {
+                this.host?.update(this.id, s.nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+              }
               this.host?.update(this.id, s.nativeId, {
                 sessionUpdate: "ls_status",
                 state: nextState,
@@ -688,7 +956,25 @@ export class AntigravityDriver extends AcpDriver {
   private transcriptPathFor(nativeId: string): string | undefined {
     const desktop = resolveAntigravityDesktop(this.options.env ?? process.env);
     if (!desktop) return undefined;
-    return join(desktop.dataDir, "brain", nativeId, ".system_generated", "logs", "transcript.jsonl");
+    return resolveDesktopTranscriptPath(desktop.dataDir, nativeId);
+  }
+
+  private desktopAliasesFor(nativeId: string): Map<string, string> {
+    try {
+      const raw = this.host?.state(this.id, nativeId).get("agy-desktop-aliases");
+      if (!raw) return new Map();
+      return new Map(JSON.parse(raw) as [string, string][]);
+    } catch {
+      return new Map();
+    }
+  }
+
+  private saveDesktopAliases(nativeId: string, aliases: Map<string, string>): void {
+    try {
+      this.host?.state(this.id, nativeId).set("agy-desktop-aliases", JSON.stringify([...aliases]));
+    } catch {
+      // ignore state write errors
+    }
   }
 
   private isConversationRunningInDesktop(nativeId: string, statusCol?: string): boolean {
@@ -753,11 +1039,13 @@ export class AntigravityDriver extends AcpDriver {
           const cwd = parseWorkspaceCwd(row.workspace_uris, home);
           const updatedAt = Date.parse(row.last_modified_time) || Date.now();
           let title = row.title?.trim() || undefined;
-          if (!title) {
-            const transcriptPath = join(desktop.dataDir, "brain", row.conversation_id, ".system_generated", "logs", "transcript.jsonl");
-            const { items } = parseAntigravityTranscript(transcriptPath, 0);
-            const firstUser = items.find((entry) => entry.updates.some((u) => u.sessionUpdate === "user_message_chunk"));
-            const chunk = firstUser?.updates.find((u) => u.sessionUpdate === "user_message_chunk");
+          let model: string | undefined;
+          const transcriptPath = resolveDesktopTranscriptPath(desktop.dataDir, row.conversation_id);
+          if (!title && existsSync(transcriptPath)) {
+            const parsed = parseAntigravityTranscript(transcriptPath, 0);
+            model = parsed.lastModelLabel;
+            const firstUser = parsed.items.find((entry) => entry.updates.some((u) => u.sessionUpdate === "user_message_chunk"));
+            const chunk = firstUser?.updates.find((u) => u.sessionUpdate === "user_message_chunk" && u.content.type === "text");
             if (chunk?.sessionUpdate === "user_message_chunk" && chunk.content.type === "text") {
               title = chunk.content.text.split("\n")[0]?.slice(0, 100).trim() || undefined;
             }
@@ -771,6 +1059,7 @@ export class AntigravityDriver extends AcpDriver {
             nativeId: row.conversation_id,
             cwd,
             title,
+            ...(model ? { model } : {}),
             createdAt: updatedAt,
             updatedAt,
             state,
@@ -791,12 +1080,12 @@ export class AntigravityDriver extends AcpDriver {
       try {
         const dirs = readdirSync(join(desktop.dataDir, "brain"));
         for (const id of dirs) {
-          const transcriptPath = join(desktop.dataDir, "brain", id, ".system_generated", "logs", "transcript.jsonl");
+          const transcriptPath = resolveDesktopTranscriptPath(desktop.dataDir, id);
           if (!existsSync(transcriptPath)) continue;
           const stat = statSync(transcriptPath);
-          const { items } = parseAntigravityTranscript(transcriptPath, 0);
-          const firstUser = items.find((entry) => entry.updates.some((u) => u.sessionUpdate === "user_message_chunk"));
-          const chunk = firstUser?.updates.find((u) => u.sessionUpdate === "user_message_chunk");
+          const parsed = parseAntigravityTranscript(transcriptPath, 0);
+          const firstUser = parsed.items.find((entry) => entry.updates.some((u) => u.sessionUpdate === "user_message_chunk"));
+          const chunk = firstUser?.updates.find((u) => u.sessionUpdate === "user_message_chunk" && u.content.type === "text");
           const title =
             chunk?.sessionUpdate === "user_message_chunk" && chunk.content.type === "text"
               ? chunk.content.text.split("\n")[0]?.slice(0, 100).trim()
@@ -805,6 +1094,7 @@ export class AntigravityDriver extends AcpDriver {
             nativeId: id,
             cwd: home,
             title,
+            ...(parsed.lastModelLabel ? { model: parsed.lastModelLabel } : {}),
             createdAt: stat.mtimeMs,
             updatedAt: stat.mtimeMs,
             state: "idle",
@@ -840,8 +1130,28 @@ export class AntigravityDriver extends AcpDriver {
           label?: string;
           modelOrAlias?: { model?: string; alias?: string };
           tagTitle?: string;
+          isRecommended?: boolean;
         }[];
+        clientModelSorts?: {
+          name?: string;
+          groups?: { modelLabels?: string[] }[];
+        }[];
+        defaultOverrideModelConfig?: {
+          modelOrAlias?: { model?: string; alias?: string };
+        };
       }>(conn, "GetCascadeModelConfigData", {});
+
+      const defaultOverride =
+        data.defaultOverrideModelConfig?.modelOrAlias?.model ??
+        data.defaultOverrideModelConfig?.modelOrAlias?.alias;
+      if (defaultOverride) this.desktopDefaultModel = defaultOverride;
+
+      const sortOrder = new Map<string, number>();
+      const sortedLabels = data.clientModelSorts?.[0]?.groups?.flatMap((g) => g.modelLabels ?? []) ?? [];
+      sortedLabels.forEach((label, idx) => {
+        if (!sortOrder.has(label)) sortOrder.set(label, idx);
+      });
+
       const models = (data.clientModelConfigs ?? [])
         .map((entry) => {
           const value = entry.modelOrAlias?.model ?? entry.modelOrAlias?.alias;
@@ -854,6 +1164,15 @@ export class AntigravityDriver extends AcpDriver {
           };
         })
         .filter((entry): entry is { value: string; name: string; description?: string } => Boolean(entry));
+
+      if (sortOrder.size > 0) {
+        models.sort((a, b) => {
+          const rankA = sortOrder.get(a.name) ?? 9999;
+          const rankB = sortOrder.get(b.name) ?? 9999;
+          return rankA - rankB;
+        });
+      }
+
       if (models.length > 0) this.desktopModelsCache = models;
       return models;
     } catch {
@@ -861,54 +1180,143 @@ export class AntigravityDriver extends AcpDriver {
     }
   }
 
-  private async emitDesktopConfig(nativeId: string, selectedModel?: string): Promise<void> {
-    const models = await this.loadDesktopModels();
-    if (models.length === 0) return;
-    let defaultModel = selectedModel;
-    if (!defaultModel) {
-      const desktop = resolveAntigravityDesktop(this.options.env ?? process.env);
-      if (desktop && existsSync(join(desktop.dataDir, "antigravity_state.pbtxt"))) {
-        try {
-          const stateText = readFileSync(join(desktop.dataDir, "antigravity_state.pbtxt"), "utf8");
-          const match = /last_selected_agent_model:\s*(\S+)/.exec(stateText);
-          if (match?.[1] && models.some((m) => m.value === match[1])) defaultModel = match[1];
-        } catch {
-          // ignore
+  private async resolveSessionModel(
+    nativeId: string,
+    models: { value: string; name: string; description?: string }[],
+    explicitModel?: string,
+  ): Promise<{ value: string; name: string; description?: string }> {
+    const matchByValueOrName = (candidate: string | undefined) => {
+      if (!candidate) return undefined;
+      return models.find((m) => m.value === candidate || m.name === candidate);
+    };
+
+    const watcher = this.desktopWatchers.get(nativeId);
+    const persistedSelected = this.host?.state(this.id, nativeId).get("agy-selected-model");
+    const chosen =
+      matchByValueOrName(explicitModel) ??
+      matchByValueOrName(watcher?.selectedModel) ??
+      matchByValueOrName(persistedSelected) ??
+      matchByValueOrName(watcher?.lastModelLabel);
+    if (chosen) return chosen;
+
+    const desktop = resolveAntigravityDesktop(this.options.env ?? process.env);
+    const conn = await findRunningLanguageServer(desktop);
+    if (conn) {
+      try {
+        const meta = await callLanguageServer<{
+          generatorMetadata?: {
+            plannerConfig?: {
+              planModel?: string;
+              requestedModel?: { model?: string; alias?: string };
+            };
+            chatModel?: { model?: string };
+          }[];
+        }>(conn, "GetCascadeTrajectoryGeneratorMetadata", { cascadeId: nativeId });
+        const entries = meta.generatorMetadata ?? [];
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i]!;
+          const candidate =
+            entry.plannerConfig?.requestedModel?.model ??
+            entry.plannerConfig?.requestedModel?.alias ??
+            entry.plannerConfig?.planModel ??
+            entry.chatModel?.model;
+          const found = matchByValueOrName(candidate);
+          if (found) return found;
         }
+      } catch {
+        // ignore metadata RPC failure
       }
     }
-    const current = defaultModel && models.some((m) => m.value === defaultModel) ? defaultModel : models[0]!.value;
+
+    const fromDefault = matchByValueOrName(this.desktopDefaultModel);
+    if (fromDefault) return fromDefault;
+
+    if (desktop && existsSync(join(desktop.dataDir, "antigravity_state.pbtxt"))) {
+      try {
+        const stateText = readFileSync(join(desktop.dataDir, "antigravity_state.pbtxt"), "utf8");
+        const match = /last_selected_agent_model:\s*(\S+)/.exec(stateText);
+        const found = matchByValueOrName(match?.[1]);
+        if (found) return found;
+      } catch {
+        // ignore
+      }
+    }
+
+    return models[0]!;
+  }
+
+  private async emitDesktopConfig(nativeId: string, selectedModel?: string): Promise<void> {
+    this.host?.update(this.id, nativeId, {
+      sessionUpdate: "available_commands_update",
+      availableCommands: ANTIGRAVITY_DESKTOP_COMMANDS,
+    });
+    const models = await this.loadDesktopModels();
+    if (models.length === 0) return;
+    const matched = await this.resolveSessionModel(nativeId, models, selectedModel);
     const options: SessionConfigOption[] = [
       {
         id: "model",
         name: "Model",
         category: "model",
-        current,
+        current: matched.value,
         values: models,
       },
     ];
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
+    this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", model: matched.name });
   }
 
-  private startWatchingDesktopTranscript(nativeId: string, transcriptPath: string, initialLine: number): void {
+  private startWatchingDesktopTranscript(
+    nativeId: string,
+    initialLine: number,
+    initialMeta?: { lastModelLabel?: string; goal?: SessionGoal | null },
+  ): DesktopWatcher {
     const existing = this.desktopWatchers.get(nativeId);
     if (existing) clearInterval(existing.timer);
 
-    const lastSize = existsSync(transcriptPath) ? statSync(transcriptPath).size : 0;
-    const watcher = {
+    const activePath = this.transcriptPathFor(nativeId);
+    const lastSize = activePath && existsSync(activePath) ? statSync(activePath).size : 0;
+    const initialRunning = this.isConversationRunningInDesktop(nativeId);
+    this.desktopSessionStates.set(nativeId, initialRunning ? "running" : "idle");
+
+    const watcher: DesktopWatcher = {
       nextLine: initialLine,
       lastSize,
-      running: this.isConversationRunningInDesktop(nativeId),
-      selectedModel: existing?.selectedModel,
+      running: initialRunning,
+      detached: false,
+      selectedModel: existing?.selectedModel ?? this.host?.state(this.id, nativeId).get("agy-selected-model") ?? undefined,
+      lastModelLabel: initialMeta?.lastModelLabel ?? existing?.lastModelLabel,
+      goal: initialMeta?.goal !== undefined ? initialMeta.goal : existing?.goal,
+      pendingClientMessages: existing?.pendingClientMessages ?? [],
       timer: setInterval(() => {
-        if (existsSync(transcriptPath)) {
+        const currentPath = this.transcriptPathFor(nativeId);
+        if (currentPath && existsSync(currentPath)) {
           try {
-            const stat = statSync(transcriptPath);
-            if (stat.size > watcher.lastSize) {
+            const stat = statSync(currentPath);
+            if (stat.size !== watcher.lastSize) {
               watcher.lastSize = stat.size;
-              const { items, nextLine } = parseAntigravityTranscript(transcriptPath, watcher.nextLine);
-              watcher.nextLine = nextLine;
-              for (const item of items) {
+              const parsed = parseAntigravityTranscript(currentPath, watcher.nextLine);
+              watcher.nextLine = parsed.nextLine;
+              if (parsed.lastModelLabel && parsed.lastModelLabel !== watcher.lastModelLabel) {
+                watcher.lastModelLabel = parsed.lastModelLabel;
+                void this.emitDesktopConfig(nativeId);
+              }
+              if (parsed.goal !== undefined) {
+                watcher.goal = parsed.goal;
+              }
+              for (const item of parsed.items) {
+                if (item.itemId.startsWith("agy:user:") && watcher.pendingClientMessages.length > 0) {
+                  const pending = watcher.pendingClientMessages.shift()!;
+                  const aliases = this.desktopAliasesFor(nativeId);
+                  aliases.set(item.itemId, `local-${pending.clientMessageId}`);
+                  this.saveDesktopAliases(nativeId, aliases);
+                  // Emit only non-user_message_chunk updates (such as ls_goal) since the user message was already echoed with local-${clientMessageId}.
+                  const nonUserUpdates = item.updates.filter((u) => u.sessionUpdate !== "user_message_chunk");
+                  for (const update of nonUserUpdates) {
+                    this.host?.update(this.id, nativeId, update);
+                  }
+                  continue;
+                }
                 item.updates.forEach((update, idx) => {
                   this.host?.update(this.id, nativeId, update, idx === item.updates.length - 1 ? item.itemId : undefined);
                 });
@@ -921,30 +1329,49 @@ export class AntigravityDriver extends AcpDriver {
         const nowRunning = this.isConversationRunningInDesktop(nativeId);
         if (nowRunning !== watcher.running) {
           watcher.running = nowRunning;
+          this.desktopSessionStates.set(nativeId, nowRunning ? "running" : "idle");
           if (nowRunning) {
             this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "started" });
             this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "running", turnActive: true });
           } else {
             this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
             this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle", turnActive: false });
+            if (watcher.detached) {
+              clearInterval(watcher.timer);
+              this.desktopWatchers.delete(nativeId);
+            }
           }
         }
       }, 1500),
     };
     watcher.timer.unref?.();
     this.desktopWatchers.set(nativeId, watcher);
+    return watcher;
   }
 
   override async attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]> {
     const transcriptPath = this.transcriptPathFor(nativeId);
     if (this.desktopMode || (transcriptPath && existsSync(transcriptPath))) {
       await this.ensureStarted();
-      const { items, nextLine } = transcriptPath ? parseAntigravityTranscript(transcriptPath, 0) : { items: [], nextLine: 0 };
-      if (transcriptPath) {
-        this.startWatchingDesktopTranscript(nativeId, transcriptPath, nextLine);
-      }
+      const parsed = transcriptPath ? parseAntigravityTranscript(transcriptPath, 0) : { items: [], nextLine: 0 };
+      const aliases = this.desktopAliasesFor(nativeId);
+      const items = parsed.items.map((item) => {
+        const aliasedId = aliases.get(item.itemId);
+        return aliasedId ? { ...item, itemId: aliasedId } : item;
+      });
+      this.startWatchingDesktopTranscript(nativeId, parsed.nextLine, {
+        lastModelLabel: parsed.lastModelLabel,
+        goal: parsed.goal,
+      });
       const running = this.isConversationRunningInDesktop(nativeId);
+      this.desktopSessionStates.set(nativeId, running ? "running" : "idle");
+      if (!running) {
+        this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+      }
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: running ? "running" : "idle", turnActive: running });
+      if (parsed.goal !== undefined) {
+        this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal: parsed.goal });
+      }
       void this.emitDesktopConfig(nativeId, this.desktopWatchers.get(nativeId)?.selectedModel);
       return items;
     }
@@ -954,8 +1381,13 @@ export class AntigravityDriver extends AcpDriver {
   override async detach(nativeId: string): Promise<void> {
     const watcher = this.desktopWatchers.get(nativeId);
     if (watcher) {
-      clearInterval(watcher.timer);
-      this.desktopWatchers.delete(nativeId);
+      if (watcher.running) {
+        // Keep watching until the active turn completes so turn end and final messages are recorded.
+        watcher.detached = true;
+      } else {
+        clearInterval(watcher.timer);
+        this.desktopWatchers.delete(nativeId);
+      }
     }
     await super.detach(nativeId);
   }
@@ -975,15 +1407,36 @@ export class AntigravityDriver extends AcpDriver {
     });
     const nativeId = response.cascadeId;
     if (!nativeId) throw RpcError.app("agent_unavailable", "Antigravity 未返回新会话 ID");
-    const transcriptPath = this.transcriptPathFor(nativeId);
-    if (transcriptPath) this.startWatchingDesktopTranscript(nativeId, transcriptPath, 0);
+    const watcher = this.startWatchingDesktopTranscript(nativeId, 0);
     if (options.model) {
-      const watcher = this.desktopWatchers.get(nativeId);
-      if (watcher) watcher.selectedModel = options.model;
+      watcher.selectedModel = options.model;
+      this.host?.state(this.id, nativeId).set("agy-selected-model", options.model);
     }
     void this.emitDesktopConfig(nativeId, options.model);
     const now = Date.now();
     return { nativeId, cwd: options.cwd, createdAt: now, updatedAt: now, state: "idle" };
+  }
+
+  async goal(nativeId: string, change: GoalChange): Promise<SessionGoal | null> {
+    if (!this.desktopMode && !this.desktopWatchers.has(nativeId)) {
+      throw RpcError.app("not_supported", "这个 Agent 通过 /goal 命令管理目标");
+    }
+    const watcher = this.desktopWatchers.get(nativeId);
+    if (change.action === "get") {
+      return watcher?.goal ?? null;
+    }
+    if (change.action === "clear") {
+      if (watcher) watcher.goal = null;
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal: null });
+      return null;
+    }
+    if (change.action === "set") {
+      const nextGoal: SessionGoal = { objective: change.objective, status: "active" };
+      if (watcher) watcher.goal = nextGoal;
+      await this.prompt(nativeId, [{ type: "text", text: `/goal ${change.objective}` }], `goal-${Date.now()}`);
+      return nextGoal;
+    }
+    return watcher?.goal ?? null;
   }
 
   override async prompt(
@@ -1005,23 +1458,109 @@ export class AntigravityDriver extends AcpDriver {
       .map((block) => (block.type === "text" ? block.text : ""))
       .join("\n")
       .trim();
-    if (!text) throw RpcError.app("invalid_params", "nothing to send");
-    const fullText = context ? `${context}\n\n${text}` : text;
-    const selectedModel = this.desktopWatchers.get(nativeId)?.selectedModel;
+    const imageBlocks = content.filter((block): block is Extract<ContentBlock, { type: "image" }> => block.type === "image");
+    if (!text && imageBlocks.length === 0) throw RpcError.app("invalid_params", "nothing to send");
 
+    if (/^\/goal\s+(?:clear|stop|off|reset|none|cancel)\s*$/i.test(text) && imageBlocks.length === 0) {
+      const watcher = this.desktopWatchers.get(nativeId);
+      if (watcher) watcher.goal = null;
+      this.host?.update(this.id, nativeId, {
+        sessionUpdate: "user_message_chunk",
+        messageId: `local-${clientMessageId}`,
+        content: { type: "text", text },
+      });
+      this.host?.update(
+        this.id,
+        nativeId,
+        { sessionUpdate: "ls_message_done", messageId: `local-${clientMessageId}`, role: "user" },
+        `local-${clientMessageId}`,
+      );
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal: null });
+      return "started";
+    }
+
+    let watcher = this.desktopWatchers.get(nativeId);
+    if (!watcher) {
+      const parsed = transcriptPath ? parseAntigravityTranscript(transcriptPath, 0) : undefined;
+      watcher = this.startWatchingDesktopTranscript(nativeId, parsed?.nextLine ?? 0, parsed);
+    }
+
+    // Echo user message with `local-${clientMessageId}` so the mobile client's optimistic bubble is confirmed in-place.
+    watcher.pendingClientMessages.push({ clientMessageId, text });
+    const displayBlocks: ContentBlock[] = content.map((block) => {
+      if (block.type === "text" && /^\/goal(?:\s+|$)/i.test(block.text.trim())) {
+        const cleaned = block.text.trim().replace(/^\/goal(?:\s+|$)/i, "").trim() || block.text;
+        return { type: "text", text: cleaned };
+      }
+      return block;
+    });
+    for (const block of displayBlocks) {
+      this.host?.update(this.id, nativeId, {
+        sessionUpdate: "user_message_chunk",
+        messageId: `local-${clientMessageId}`,
+        content: block,
+      });
+    }
+    this.host?.update(
+      this.id,
+      nativeId,
+      { sessionUpdate: "ls_message_done", messageId: `local-${clientMessageId}`, role: "user" },
+      `local-${clientMessageId}`,
+    );
+
+    if (/^\/goal(?:\s+|$)/i.test(text)) {
+      const objective = text.replace(/^\/goal(?:\s+|$)/i, "").trim() || "持续目标";
+      const nextGoal: SessionGoal = { objective, status: "active" };
+      watcher.goal = nextGoal;
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal: nextGoal });
+    } else if (watcher.goal?.status === "complete") {
+      watcher.goal = null;
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_goal", goal: null });
+    }
+
+    const media: { mimeType: string; inlineData: string; uri?: string }[] = [];
+    if (imageBlocks.length > 0 && desktop) {
+      const uploadDir = join(desktop.dataDir, "brain", nativeId, ".user_uploaded");
+      try {
+        mkdirSync(uploadDir, { recursive: true });
+      } catch {
+        // ignore mkdir error
+      }
+      for (const img of imageBlocks) {
+        if (!img.data) continue;
+        const ext = extForMimeType(img.mimeType);
+        const fileName = `media_${Date.now()}_${randomBytes(4).toString("hex")}.${ext}`;
+        const filePath = join(uploadDir, fileName);
+        let savedUri: string | undefined;
+        try {
+          writeFileSync(filePath, Buffer.from(img.data, "base64"));
+          savedUri = filePath;
+        } catch {
+          // fallback to inlineData only
+        }
+        media.push({
+          mimeType: img.mimeType,
+          inlineData: img.data,
+          ...(savedUri ? { uri: savedUri } : {}),
+        });
+      }
+    }
+
+    const fullText = context ? (text ? `${context}\n\n${text}` : context) : text;
+    const selectedModel = watcher.selectedModel;
+
+    watcher.running = true;
+    this.desktopSessionStates.set(nativeId, "running");
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "started" });
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "running", turnActive: true });
 
     await callLanguageServer(conn, "SendUserCascadeMessage", {
       cascadeId: nativeId,
-      items: [{ text: fullText }],
+      items: [{ text: fullText || "请查看附图" }],
+      ...(media.length > 0 ? { media } : {}),
       ...(selectedModel ? { cascadeConfig: { plannerConfig: { requestedModel: { model: selectedModel } } } } : {}),
     });
 
-    if (transcriptPath && !this.desktopWatchers.has(nativeId)) {
-      const { nextLine } = parseAntigravityTranscript(transcriptPath, 0);
-      this.startWatchingDesktopTranscript(nativeId, transcriptPath, nextLine);
-    }
     return "started";
   }
 
@@ -1035,6 +1574,9 @@ export class AntigravityDriver extends AcpDriver {
           killBackgroundTasks: false,
         }).catch(() => {});
       }
+      const watcher = this.desktopWatchers.get(nativeId);
+      if (watcher) watcher.running = false;
+      this.desktopSessionStates.set(nativeId, "idle");
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "cancelled" });
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle", turnActive: false });
       return;
@@ -1047,6 +1589,7 @@ export class AntigravityDriver extends AcpDriver {
       if (optionId !== "model") throw RpcError.app("not_supported", `Antigravity 暂不支持设置 ${optionId}`);
       const watcher = this.desktopWatchers.get(nativeId);
       if (watcher) watcher.selectedModel = value;
+      this.host?.state(this.id, nativeId).set("agy-selected-model", value);
       await this.emitDesktopConfig(nativeId, value);
       return;
     }

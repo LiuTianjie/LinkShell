@@ -8,6 +8,7 @@ import { SheetHeader } from "@/components/sheet-header";
 import { Button } from "@/components/button";
 import { goalStatus } from "@/components/goal-card";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
+import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -22,6 +23,7 @@ export function GoalScreen() {
   const { link } = useConnection();
   const actions = useActions();
   const codex = session?.agent === "codex";
+  const agentName = agentLook(session?.agent ?? "").name;
   const [objective, setObjective] = useState(goal?.objective ?? "");
   const [budget, setBudget] = useState(goal?.tokenBudget?.toString() ?? "");
   const [editing, setEditing] = useState(false);
@@ -47,7 +49,7 @@ export function GoalScreen() {
         const text = change.action === "set" ? `/goal ${change.objective}` : change.action === "clear" ? "/goal clear" : "/goal";
         const delivery = await actions.send(id, [{ type: "text", text }], { now: true });
         if (delivery === "failed") throw new Error("目标命令未发送成功，请在会话中重试");
-        setNotice(delivery === "queued" ? "目标命令已排队，等待 Claude 执行" : "已发送目标命令，执行结果会显示在会话中");
+        setNotice(delivery === "queued" ? `目标命令已排队，等待 ${agentName} 执行` : "已发送目标命令，执行结果会显示在会话中");
       }
       setEditing(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -56,7 +58,7 @@ export function GoalScreen() {
   const save = () => {
     const tokenBudget = budget.trim() ? Number(budget) : undefined;
     if (!objective.trim() || (codex && objective.trim().length > 4000)) { setError("请输入目标，Codex 目标最多 4000 字符"); return; }
-    if (!codex && ["clear", "stop", "off", "reset", "none", "cancel"].includes(objective.trim())) { setError("这是 Claude 的清除指令，请输入具体的完成条件"); return; }
+    if (!codex && ["clear", "stop", "off", "reset", "none", "cancel"].includes(objective.trim())) { setError(`这是 ${agentName} 的清除指令，请输入具体的完成条件`); return; }
     if (codex && tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0)) { setError("Token 预算必须为正整数"); return; }
     void change({ action: "set", objective: objective.trim(), ...(codex && tokenBudget !== undefined ? { tokenBudget } : {}) });
   };
@@ -64,7 +66,7 @@ export function GoalScreen() {
   const disabled = busy || !online || !offered || readOnly;
   return <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }} keyboardShouldPersistTaps="handled" bottomOffset={24}>
     <SheetHeader title="持续目标" />
-    <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{codex ? "设定完成条件，让 Codex 持续推进；可以暂停、继续或清除目标。" : "设定完成条件，让 Claude 持续推进；达到条件后自动清除，也可以提前清除。"}</Text>
+    <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{codex ? "设定完成条件，让 Codex 持续推进；可以暂停、继续或清除目标。" : `设定完成条件，让 ${agentName} 持续推进；达到条件后自动清除，也可以提前清除。`}</Text>
     {goal ? <View style={{ gap: 6 }}>
       <Text style={[type.headline, { color: colors.accent }]}>{goalStatus[goal.status]}</Text>
       <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{goal.tokensUsed !== undefined ? `已用 ${goal.tokensUsed.toLocaleString()} tokens` : goal.iterations !== undefined ? `已检查 ${goal.iterations} 轮` : "目标已设置"}</Text>

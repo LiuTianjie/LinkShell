@@ -89,6 +89,7 @@
       ],
       "./plugins/with-brand-colors.js",
       "./plugins/with-network-security.js",
+      "./plugins/with-live-activity.js",
       [
         "expo-camera",
         {

@@ -1,7 +1,8 @@
+import type { PromptProgress, SessionView } from "@linkshell/client-core";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useSyncExternalStore } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import {
   setNativeShortcutItems,
   syncNativeLiveActivity,
@@ -174,6 +175,73 @@ export function phaseLabel(phase: AttentionPhase): string {
   }
 }
 
+export function mergeLiveViewsIntoSessions(
+  sessions: SessionSummary[],
+  views?: Record<string, SessionView>,
+  promptProgress?: Record<string, PromptProgress>,
+): SessionSummary[] {
+  if (!views && !promptProgress) return sessions;
+  return sessions.map((session) => {
+    const view = views?.[session.id];
+    const progress = promptProgress?.[session.id];
+    if (!view && !progress) return session;
+    const isTurnActive = Boolean(progress || view?.turnActive || view?.state === "running");
+    const hasViewPerm = Boolean(view?.permissions?.length);
+    const nextState = hasViewPerm
+      ? "waiting"
+      : isTurnActive
+        ? "running"
+        : view?.state ?? session.state;
+
+    let activity = session.activity;
+    if (!activity && isTurnActive && view?.items?.length) {
+      for (let i = view.items.length - 1; i >= 0; i--) {
+        const item = view.items[i]!;
+        if (item.kind === "tool") {
+          activity = { kind: "tool", title: item.title, toolKind: item.toolKind };
+          break;
+        }
+        if (item.kind === "thought") {
+          activity = { kind: "thinking" };
+          break;
+        }
+        if (item.kind === "agent") {
+          activity = { kind: "responding" };
+          break;
+        }
+      }
+    }
+    if (!activity && isTurnActive && view?.goal?.status === "active") {
+      activity = { kind: "tool", title: `目标 · ${view.goal.objective}` };
+    }
+
+    const firstPerm = view?.permissions?.[0];
+    const permission =
+      session.permission ??
+      (firstPerm
+        ? {
+            requestId: firstPerm.requestId,
+            childSessionId: firstPerm.childSessionId,
+            toolCallId: firstPerm.toolCallId,
+            title: firstPerm.title,
+            detail: firstPerm.detail,
+            tool: firstPerm.tool,
+            url: firstPerm.url,
+            options: firstPerm.options,
+            questions: firstPerm.questions,
+          }
+        : undefined);
+
+    return {
+      ...session,
+      ...(view?.title ? { title: view.title } : {}),
+      state: nextState,
+      ...(activity ? { activity } : {}),
+      ...(permission ? { permission, pendingPermissions: Math.max(session.pendingPermissions, view?.permissions?.length ?? 1) } : {}),
+    };
+  });
+}
+
 /**
  * Builds the aggregated single-card iOS Live Activity / Dynamic Island payload
  * for a computer, sorting attention-first (`waiting` > `failed` > `running`).
@@ -183,8 +251,11 @@ export function buildLiveActivityPayload(
   sessions: SessionSummary[],
   terminals: TerminalInfo[],
   online: boolean,
+  views?: Record<string, SessionView>,
+  promptProgress?: Record<string, PromptProgress>,
 ): LiveActivityPayload {
-  const live = sessions.filter((s) => !s.archived);
+  const enriched = mergeLiveViewsIntoSessions(sessions, views, promptProgress);
+  const live = enriched.filter((s) => !s.archived);
   const waiting = live.filter((s) => needsAttention(s));
   const failed = live.filter((s) => !needsAttention(s) && s.state === "error");
   const runningSessions = live.filter((s) => !needsAttention(s) && s.state === "running");
@@ -205,6 +276,7 @@ export function buildLiveActivityPayload(
 
   if (hero) {
     const phase = classifySessionPhase(hero, online);
+    const heroGoal = views?.[hero.id]?.goal;
     const subtitle =
       phase === "waiting_for_approval" || phase === "waiting_for_input"
         ? hero.permission?.title ?? hero.asyncQuestions?.[0]?.title ?? "需要你的确认"
@@ -212,7 +284,9 @@ export function buildLiveActivityPayload(
           ? hero.preview
             ? plainPreview(hero.preview)
             : "上一轮执行出错"
-          : activityText(hero.activity);
+          : heroGoal?.status === "active" && !hero.activity
+            ? `目标 · ${heroGoal.objective}`
+            : activityText(hero.activity);
 
     return {
       active: true,
@@ -305,18 +379,30 @@ export function useIOSAttentionSync(
   sessions: SessionSummary[],
   terminals: TerminalInfo[],
   online: boolean,
+  views?: Record<string, SessionView>,
+  promptProgress?: Record<string, PromptProgress>,
 ) {
   const pinned = usePinnedSessionIds();
 
   useEffect(() => {
     if (Platform.OS !== "ios") return;
-    const shortcuts = buildIOSShortcutItems(sessions, pinned);
+    const shortcuts = buildIOSShortcutItems(mergeLiveViewsIntoSessions(sessions, views, promptProgress), pinned);
     void setNativeShortcutItems(shortcuts);
-  }, [sessions, pinned]);
+  }, [sessions, views, promptProgress, pinned]);
 
   useEffect(() => {
     if (Platform.OS !== "ios") return;
-    const payload = buildLiveActivityPayload(computerName, sessions, terminals, online);
-    void syncNativeLiveActivity(payload);
-  }, [computerName, sessions, terminals, online]);
+    const sync = () => {
+      const payload = buildLiveActivityPayload(computerName, sessions, terminals, online, views, promptProgress);
+      void syncNativeLiveActivity(payload);
+    };
+    sync();
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "inactive" || nextState === "background" || nextState === "active") {
+        sync();
+      }
+    });
+    return () => sub.remove();
+  }, [computerName, sessions, terminals, online, views, promptProgress]);
 }
+

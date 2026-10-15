@@ -16,6 +16,7 @@ vi.mock("expo-audio", () => ({
 }));
 vi.mock("react-native", () => ({
   Platform: { OS: "ios", select: (obj: Record<string, unknown>) => obj.ios ?? obj.default },
+  AppState: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
 }));
 vi.mock("expo-haptics", () => ({
   impactAsync: vi.fn(),
@@ -59,6 +60,7 @@ const {
   clearSessionSnooze,
   isSessionPinned,
   isSessionSnoozed,
+  mergeLiveViewsIntoSessions,
   phasePriority,
   snoozeSession,
   toggleSessionPinned,
@@ -162,6 +164,38 @@ describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () 
     expect(payload.runningCount).toBe(1);
     expect(payload.failedCount).toBe(1);
     expect(payload.deepLink).toBe("linkshell:///session/wait");
+  });
+
+  it("enriches idle SessionSummary with live SessionView turn state, active tool, and goal for Dynamic Island", () => {
+    const s = makeSession({ id: "agy-1", agent: "antigravity", title: "重构桌面端", state: "idle" });
+    const views = {
+      "agy-1": {
+        id: "agy-1",
+        agent: "antigravity",
+        cwd: "/Users/test/linkshell",
+        state: "running" as const,
+        turnActive: true,
+        items: [],
+        permissions: [],
+        commands: [],
+        configs: [],
+        tasks: [],
+        goal: {
+          objective: "完成全部单元测试",
+          status: "active" as const,
+          iterations: 2,
+        },
+        lastSeq: 10,
+      },
+    };
+    const merged = mergeLiveViewsIntoSessions([s], views);
+    expect(merged[0]?.state).toBe("running");
+
+    const payload = buildLiveActivityPayload("MacBook-Pro", [s], [], true, views);
+    expect(payload.active).toBe(true);
+    expect(payload.phase).toBe("running");
+    expect(payload.agent).toBe("antigravity");
+    expect(payload.subtitle).toContain("目标 · 完成全部单元测试");
   });
 
   it("wakes a snoozed session immediately if it needs attention or starts running", () => {

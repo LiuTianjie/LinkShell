@@ -922,7 +922,14 @@ export class SessionHub {
     if (seq < 1) return [];
     const events = STANDING.flatMap((kind) => this.store.latestOfKind(sessionId, kind, seq));
     const [turn] = this.store.latestOfKind(sessionId, "ls_turn", seq);
-    if (turn?.update.sessionUpdate === "ls_turn" && turn.update.state === "started") events.push(turn);
+    const [status] = this.store.latestOfKind(sessionId, "ls_status", seq);
+    const statusEndedTurn =
+      status &&
+      turn &&
+      status.seq > turn.seq &&
+      status.update.sessionUpdate === "ls_status" &&
+      (status.update.turnActive === false || (status.update.state !== "running" && status.update.state !== "waiting"));
+    if (turn?.update.sessionUpdate === "ls_turn" && turn.update.state === "started" && !statusEndedTurn) events.push(turn);
     if (live.permissions.size > 0) {
       for (const event of this.store.latestOfKind(sessionId, "ls_permission", seq, 50)) {
         if (event.update.sessionUpdate === "ls_permission" && live.permissions.has(event.update.requestId)) events.push(event);

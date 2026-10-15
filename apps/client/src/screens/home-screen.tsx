@@ -24,6 +24,7 @@ import { haptics } from "@/lib/haptics";
 import {
   buildLiveActivityPayload,
   isSessionSnoozed,
+  mergeLiveViewsIntoSessions,
   useIOSAttentionSync,
   usePinnedSessionIds,
   useSnoozedSessions,
@@ -424,15 +425,20 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
 
   // Re-bucket when the day changes, not on every tick.
   const day = new Date(now).toDateString();
+  const views = useClient((state) => state.views);
+  const promptProgress = useClient((state) => state.promptProgress);
   const { terminals } = useTerminals();
-  const allSessions = useMemo(() => Object.values(sessionsById), [sessionsById]);
+  const allSessions = useMemo(
+    () => mergeLiveViewsIntoSessions(Object.values(sessionsById), views, promptProgress),
+    [sessionsById, views, promptProgress],
+  );
   const computerName = machine ? machine.hostname.replace(/\.local$/, "") : "电脑";
 
-  useIOSAttentionSync(computerName, allSessions, terminals, online);
+  useIOSAttentionSync(computerName, allSessions, terminals, online, views, promptProgress);
 
   const liveActivityPayload = useMemo(
-    () => buildLiveActivityPayload(computerName, allSessions, terminals, online),
-    [computerName, allSessions, terminals, online],
+    () => buildLiveActivityPayload(computerName, allSessions, terminals, online, views, promptProgress),
+    [computerName, allSessions, terminals, online, views, promptProgress],
   );
 
   const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(
