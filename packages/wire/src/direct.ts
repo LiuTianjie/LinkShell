@@ -14,8 +14,14 @@ export const DIRECT_CHUNK = 16 * 1024;
 /**
  * STUN servers used when a host names none: they only tell each side its
  * public address. (Several, because none of them is reachable everywhere.)
+ *
+ * No stun.l.google.com: on a network that routes its traffic through a proxy
+ * (common in China) it answers with the proxy's address, not the host's own,
+ * so the candidate it yields names a place the phone can't reach — a slow,
+ * useless srflx. The two Chinese servers answer in tens of milliseconds here;
+ * Cloudflare is the one abroad, for a host whose network reaches it directly.
  */
-export const DEFAULT_ICE_SERVERS = ["stun:stun.cloudflare.com:3478", "stun:stun.chat.bilibili.com:3478", "stun:stun.l.google.com:19302"];
+export const DEFAULT_ICE_SERVERS = ["stun:stun.chat.bilibili.com:3478", "stun:stun.miwifi.com:3478", "stun:stun.cloudflare.com:3478"];
 
 export type DirectFrame =
   | { type: "data"; stream: number; data: Uint8Array }
