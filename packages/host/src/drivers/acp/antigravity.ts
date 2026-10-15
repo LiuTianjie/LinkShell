@@ -587,6 +587,8 @@ function parseWorkspaceCwd(workspaceUrisJson: string | undefined, fallbackCwd: s
  */
 export class AntigravityDriver extends AcpDriver {
   private desktopMode = false;
+  private desktopSummaryTimer?: ReturnType<typeof setInterval>;
+  private readonly desktopSessionStates = new Map<string, "running" | "idle">();
   private readonly desktopWatchers = new Map<
     string,
     { timer: ReturnType<typeof setInterval>; nextLine: number; lastSize: number; running: boolean; selectedModel?: string }
@@ -652,12 +654,33 @@ export class AntigravityDriver extends AcpDriver {
         models: true,
       };
       this.current = { installed: true, version: desktop.version };
+      if (!this.desktopSummaryTimer) {
+        this.desktopSummaryTimer = setInterval(() => {
+          for (const s of this.listDesktopSessions(30)) {
+            const nextState = s.state === "running" ? "running" : "idle";
+            const prev = this.desktopSessionStates.get(s.nativeId);
+            this.desktopSessionStates.set(s.nativeId, nextState);
+            if (prev !== undefined && prev !== nextState) {
+              this.host?.update(this.id, s.nativeId, {
+                sessionUpdate: "ls_status",
+                state: nextState,
+                turnActive: nextState === "running",
+              });
+            }
+          }
+        }, 3000);
+        this.desktopSummaryTimer.unref?.();
+      }
       return;
     }
     await super.boot();
   }
 
   override async stop(): Promise<void> {
+    if (this.desktopSummaryTimer) {
+      clearInterval(this.desktopSummaryTimer);
+      this.desktopSummaryTimer = undefined;
+    }
     for (const watcher of this.desktopWatchers.values()) clearInterval(watcher.timer);
     this.desktopWatchers.clear();
     await super.stop();
@@ -673,8 +696,30 @@ export class AntigravityDriver extends AcpDriver {
     const desktop = resolveAntigravityDesktop(this.options.env ?? process.env);
     if (!desktop) return false;
     const lockPath = join(desktop.dataDir, "presence", `${nativeId}.lock`);
-    if (statusCol && statusCol !== "CASCADE_RUN_STATUS_RUNNING") return false;
-    return existsSync(lockPath) && statusCol === "CASCADE_RUN_STATUS_RUNNING";
+    if (!existsSync(lockPath)) return false;
+    let status = statusCol;
+    if (status === undefined) {
+      const dbPath = join(desktop.dataDir, "conversation_summaries.db");
+      if (existsSync(dbPath)) {
+        let db: DatabaseSync | undefined;
+        try {
+          db = new DatabaseSync(dbPath, { readOnly: true });
+          const row = db
+            .prepare("SELECT status FROM conversation_summaries WHERE conversation_id = ?")
+            .get(nativeId) as { status?: string } | undefined;
+          status = row?.status;
+        } catch {
+          // ignore
+        } finally {
+          try {
+            db?.close();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+    return status === "CASCADE_RUN_STATUS_RUNNING";
   }
 
   private listDesktopSessions(limit: number): DiscoveredSession[] {
@@ -719,13 +764,17 @@ export class AntigravityDriver extends AcpDriver {
             }
           }
           const running = this.isConversationRunningInDesktop(row.conversation_id, row.status);
+          const state = running ? "running" : "idle";
+          if (!this.desktopSessionStates.has(row.conversation_id)) {
+            this.desktopSessionStates.set(row.conversation_id, state);
+          }
           results.push({
             nativeId: row.conversation_id,
             cwd,
             title,
             createdAt: updatedAt,
             updatedAt,
-            state: running ? "running" : "idle",
+            state,
           });
         }
       } catch {
@@ -850,24 +899,36 @@ export class AntigravityDriver extends AcpDriver {
     const watcher = {
       nextLine: initialLine,
       lastSize,
-      running: false,
+      running: this.isConversationRunningInDesktop(nativeId),
       selectedModel: existing?.selectedModel,
       timer: setInterval(() => {
-        if (!existsSync(transcriptPath)) return;
-        let stat;
-        try {
-          stat = statSync(transcriptPath);
-        } catch {
-          return;
+        if (existsSync(transcriptPath)) {
+          try {
+            const stat = statSync(transcriptPath);
+            if (stat.size > watcher.lastSize) {
+              watcher.lastSize = stat.size;
+              const { items, nextLine } = parseAntigravityTranscript(transcriptPath, watcher.nextLine);
+              watcher.nextLine = nextLine;
+              for (const item of items) {
+                item.updates.forEach((update, idx) => {
+                  this.host?.update(this.id, nativeId, update, idx === item.updates.length - 1 ? item.itemId : undefined);
+                });
+              }
+            }
+          } catch {
+            // ignore stat/read errors
+          }
         }
-        if (stat.size <= watcher.lastSize) return;
-        watcher.lastSize = stat.size;
-        const { items, nextLine } = parseAntigravityTranscript(transcriptPath, watcher.nextLine);
-        watcher.nextLine = nextLine;
-        for (const item of items) {
-          item.updates.forEach((update, idx) => {
-            this.host?.update(this.id, nativeId, update, idx === item.updates.length - 1 ? item.itemId : undefined);
-          });
+        const nowRunning = this.isConversationRunningInDesktop(nativeId);
+        if (nowRunning !== watcher.running) {
+          watcher.running = nowRunning;
+          if (nowRunning) {
+            this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "started" });
+            this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "running", turnActive: true });
+          } else {
+            this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+            this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle", turnActive: false });
+          }
         }
       }, 1500),
     };
@@ -883,7 +944,7 @@ export class AntigravityDriver extends AcpDriver {
       if (transcriptPath) {
         this.startWatchingDesktopTranscript(nativeId, transcriptPath, nextLine);
       }
-      const running = this.isConversationRunningInDesktop(nativeId, "CASCADE_RUN_STATUS_RUNNING");
+      const running = this.isConversationRunningInDesktop(nativeId);
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: running ? "running" : "idle", turnActive: running });
       void this.emitDesktopConfig(nativeId, this.desktopWatchers.get(nativeId)?.selectedModel);
       return items;
