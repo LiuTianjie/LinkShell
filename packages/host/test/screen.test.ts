@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeInputApp, shippedApp } from "../src/input.js";
-import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, videoWidth, videoMaxFps } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, resolvedCandidate, videoWidth, videoMaxFps } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -96,5 +96,28 @@ describe("receiver frame-rate capabilities", () => {
     expect(videoMaxFps("60")).toBe(60);
     expect(videoMaxFps("30")).toBe(30);
     for (const value of [null, "", "0", "240", "120.0", "NaN", "-1"]) expect(videoMaxFps(value)).toBeUndefined();
+  });
+});
+
+describe("a browser's mDNS host candidates", () => {
+  const hidden = "candidate:1 1 udp 2122260223 9b36eaa1-2f4f-4e7a-9f31-6a0d2d7c1f55.local 51820 typ host generation 0";
+
+  it("reach the app as the address they stand for", async () => {
+    expect(await resolvedCandidate(hidden, async () => "192.168.100.120")).toBe(
+      "candidate:1 1 udp 2122260223 192.168.100.120 51820 typ host generation 0",
+    );
+  });
+
+  it("are passed on unchanged when the name does not resolve", async () => {
+    expect(
+      await resolvedCandidate(hidden, () => Promise.reject(new Error("ENOTFOUND"))),
+    ).toBe(hidden);
+  });
+
+  it("leave a candidate that already carries an address alone", async () => {
+    const plain = "candidate:2 1 udp 1686052607 203.0.113.7 51821 typ srflx raddr 0.0.0.0 rport 0";
+    const never = () => Promise.reject(new Error("should not be asked"));
+    expect(await resolvedCandidate(plain, never)).toBe(plain);
+    expect(await resolvedCandidate("", never)).toBe("");
   });
 });

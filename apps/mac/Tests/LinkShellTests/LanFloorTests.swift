@@ -94,13 +94,31 @@ final class LanFloorTests: XCTestCase {
     XCTAssertNil(applied(&floor, Array(repeating: second(rtt: 4), count: 200)))
   }
 
-  /// Packets queueing in the sender lift the floor before the round trip shows anything.
-  func testSenderQueueingLiftsTheFloor() {
+  /// Packets queueing in the sender lift the floor before the round trip shows anything, once the
+  /// floor has settled: raising the estimate to it is itself what fills the pacer at first.
+  func testSenderQueueingLiftsTheFloorOnceItHasSettled() {
     var floor = LanFloor()
     for _ in 0..<Tuning.lanFloorWindow { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
     var queued = second(rtt: 4)
     queued.sendDelayMs = 300
+    for _ in 0..<Tuning.lanFloorSettle {
+      guard case .keep = floor.judge(queued, ceiling: ceiling) else { return XCTFail("the settling floor was lifted") }
+    }
     guard case .lift = floor.judge(queued, ceiling: ceiling) else { return XCTFail("queueing kept the floor") }
+  }
+
+  /// The burst the floor itself causes goes away by the time it has settled, and keeps the floor.
+  func testTheFloorSurvivesTheQueueItCauses() {
+    var floor = LanFloor()
+    for _ in 0..<Tuning.lanFloorWindow { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
+    var queued = second(rtt: 4)
+    // 84 ms and 141 ms were measured on two Macs as the floor was set, both on the local network.
+    queued.sendDelayMs = 141
+    for _ in 0..<Tuning.lanFloorSettle { _ = floor.judge(queued, ceiling: ceiling) }
+    XCTAssertNotNil(floor.floor)
+    for _ in 0..<20 { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
+    XCTAssertNotNil(floor.floor)
+    XCTAssertEqual(floor.lifts, 0)
   }
 
   /// A busy sender queue keeps the floor from being set at all.

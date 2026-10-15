@@ -44,6 +44,9 @@ struct LanFloor {
   /// Seconds the path has been calm since the floor was last lifted; and how often it was.
   private var calm = 0
   private(set) var lifts = 0
+  /// Seconds the floor has been in force. While this is under `Tuning.lanFloorSettle` the
+  /// queueing the floor itself caused is not read as the network refusing it.
+  private var held = 0
 
   /// `ceiling`: the most the encoding may send; the floor is never above it.
   mutating func judge(_ second: Second, ceiling: Int) -> Action {
@@ -55,11 +58,15 @@ struct LanFloor {
     let lost = second.fractionLost ?? 0
     let waited = second.sendDelayMs ?? 0
     if let floor {
+      held += 1
       if !local { return lift("the media left the local network") }
       if lost > Tuning.lanFloorLiftLoss { return lift(String(format: "%.0f%% of packets were lost", lost * 100)) }
-      // Packets queueing in the sender: the network is not taking what the floor lets out.
-      if waited > Tuning.lanFloorLiftSendDelayMs { return lift(String(format: "packets waited %.0f ms to be sent", waited)) }
-      if rtts.count >= Tuning.lanFloorWindow, let lowest = rtts.min(), lowest > Tuning.lanFloorLiftRttMs {
+      // Packets queueing in the sender: the network is not taking what the floor lets out. Not
+      // while the floor is settling, when the queue is the encoder answering the new rate.
+      if held > Tuning.lanFloorSettle, waited > Tuning.lanFloorLiftSendDelayMs {
+        return lift(String(format: "packets waited %.0f ms to be sent", waited))
+      }
+      if held > Tuning.lanFloorSettle, rtts.count >= Tuning.lanFloorWindow, let lowest = rtts.min(), lowest > Tuning.lanFloorLiftRttMs {
         return lift(String(format: "the round trip stayed above %.0f ms", lowest))
       }
       let wanted = min(Tuning.lanFloor, ceiling)
@@ -78,6 +85,7 @@ struct LanFloor {
     guard calm >= (lifts == 0 ? 1 : Tuning.lanFloorRecalm) else { return .keep }
     let wanted = min(Tuning.lanFloor, ceiling)
     floor = wanted
+    held = 0
     return .apply(wanted)
   }
 
@@ -85,6 +93,7 @@ struct LanFloor {
     floor = nil
     rtts.removeAll()
     calm = 0
+    held = 0
     lifts += 1
     return .lift(reason)
   }

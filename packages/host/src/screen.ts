@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
@@ -202,6 +203,42 @@ export function videoMaxFps(asked: string | null): number | undefined {
 }
 // A 5K display's 5120 would be past what the encoder and a phone's decoder carry at 60 frames.
 const VIDEO_WIDEST = 3840;
+
+/**
+ * The address in an ICE candidate's SDP (`candidate:<foundation> <component> <transport>
+ * <priority> <address> <port> typ <type> …`), and the same line with another address in its place.
+ */
+const candidateAddress = (sdp: string): string | undefined => sdp.split(" ")[4];
+
+function withCandidateAddress(sdp: string, address: string): string {
+  const fields = sdp.split(" ");
+  fields[4] = address;
+  return fields.join(" ");
+}
+
+/**
+ * A browser hides the computer it runs on by offering its host candidates under a random mDNS
+ * name (`<uuid>.local`) instead of an address: Chrome and Safari both do, and a page cannot turn
+ * it off. libwebrtc in LinkShell.app does not resolve a remote candidate's name, so every one of
+ * those pairs stays in checking and the video falls back to a reflexive path through the
+ * internet — on the local network, where the floor under the bandwidth estimate (`LanFloor`) is
+ * never then set, so the estimate starves and the picture is encoded far below the link's means.
+ *
+ * The host runs on that same local network and can resolve the name (mDNSResponder on macOS,
+ * Avahi where it is installed), so it does it here, before the candidate reaches the app. An
+ * address that doesn't resolve is passed on as it came: the app will do no worse with it.
+ */
+export async function resolvedCandidate(sdp: string, resolve: (name: string) => Promise<string> = mdns): Promise<string> {
+  const address = candidateAddress(sdp);
+  if (!address?.toLowerCase().endsWith(".local")) return sdp;
+  try {
+    return withCandidateAddress(sdp, await resolve(address));
+  } catch {
+    return sdp;
+  }
+}
+
+const mdns = async (name: string) => (await lookup(name, { family: 4 })).address;
 
 /** The loopback viewer server; started on first use, one capture per watching device. */
 export class ScreenShare {
@@ -572,6 +609,8 @@ export class ScreenShare {
 
     // The picture as a video track; down this socket when that can't be had, or didn't get across.
     let video: { app: HelperApp; id: string } | undefined;
+    /** The viewer's answer and candidates, kept in the order they arrived (`resolvedCandidate`). */
+    let signals: Promise<void> = Promise.resolve();
     const endVideo = () => {
       if (!video) return;
       video.app.endVideo(video.id);
@@ -623,7 +662,17 @@ export class ScreenShare {
       if (kind === "ack") pacer.ack(Number((message as { n?: unknown }).n), Date.now());
       else if (kind === "rtc.answer" || kind === "rtc.ice") {
         const signal = videoSignal.safeParse(message);
-        if (signal.success && video) video.app.signal(video.id, signal.data);
+        if (!signal.success) return;
+        // Resolving a name takes a moment, and the answer must still reach the app before the
+        // candidates that followed it: each signal waits for the one before.
+        signals = signals
+          .then(async () => {
+            const data = signal.data;
+            if (!video) return;
+            video.app.signal(video.id, data.t === "rtc.ice" ? { ...data, candidate: await resolvedCandidate(data.candidate) } : data);
+          })
+          // One signal that couldn't be passed on must not take the ones behind it with it.
+          .catch(() => {});
       }
       // The viewer's decoder lost its place (it skipped ahead, or failed): it can only carry on from a keyframe.
       // (Named apart from the viewer's own events: whatever isn't one of these kinds is taken for a pointer or key event.)

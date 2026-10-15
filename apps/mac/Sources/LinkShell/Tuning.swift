@@ -80,6 +80,13 @@ enum Tuning {
   /// take shows here first, before the round trip or loss do.
   static let lanFloorSendDelayMs = 10.0
   static let lanFloorLiftSendDelayMs = 50.0
+  /// Seconds after the floor is set during which sender queueing alone does not lift it. Raising
+  /// the estimate to the floor is itself what fills the pacer: the encoder answers the new rate
+  /// with larger frames, and the queue they make reads as congestion the floor caused. Measured
+  /// on two Macs over the local network, that burst showed as 84 ms and 141 ms of queueing and
+  /// lifted the floor within 9–27 s of it being set. Round trip and loss still lift it at once:
+  /// those say the path itself is full, not that the pacer has a moment's work in hand.
+  static let lanFloorSettle = 5
   /// Calm seconds before a lifted floor comes back, and lifts after which it never does.
   static let lanFloorRecalm = 30
   static let lanFloorMaxLifts = 2
