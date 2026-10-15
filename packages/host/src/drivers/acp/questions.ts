@@ -10,13 +10,30 @@ export interface AcpQuestionRequest {
 }
 
 /** Private extensions belong to their agent, not to every process speaking ACP. */
-export function questionMethod(agent: string, method: string): "form" | "cursor" | "grok" | "grok-form" | undefined {
+export function questionMethod(agent: string, method: string, params?: unknown): "form" | "cursor" | "grok" | "grok-form" | "antigravity-interaction" | undefined {
   if (method === "elicitation/create") return "form";
   if (agent === "cursor" && (method === "cursor/ask_question" || method === "_cursor/ask_question")) return "cursor";
   if (agent === "grok" && (method === "x.ai/ask_user_question" || method === "_x.ai/ask_user_question")) return "grok";
   if (agent === "grok" && (method === "x.ai/mcp/elicit" || method === "_x.ai/mcp/elicit")) return "grok-form";
+  if (agent === "antigravity" && method === "session/request_permission") {
+    const toolCallId = (params as { toolCall?: { toolCallId?: unknown } } | undefined)?.toolCall?.toolCallId;
+    if (typeof toolCallId === "string" && toolCallId.startsWith("interaction_")) return "antigravity-interaction";
+  }
   return undefined;
 }
+
+const antigravityInteractionSchema = z.object({
+  sessionId: z.string().optional(),
+  toolCall: z.object({
+    toolCallId: z.string().min(1),
+    title: z.string().optional(),
+  }),
+  options: z.array(z.object({
+    optionId: z.string().min(1),
+    name: z.string().min(1),
+    kind: z.string().optional(),
+  })).min(1),
+});
 
 const cursorSchema = z.object({
   toolCallId: z.string().min(1), title: z.string().optional(),
@@ -38,10 +55,41 @@ function unique(values: string[]) { if (new Set(values).size !== values.length) 
 
 /** The UI gets one question model; only these adapters know each agent's response format. */
 export function mapAcpQuestions(agent: string, method: string, params: unknown, requestId: string): AcpQuestionRequest {
-  const kind = questionMethod(agent, method);
+  const kind = questionMethod(agent, method, params);
   const update = (title: string, questions: Question[], toolCallId?: string, detail?: string): PermissionUpdate => ({
     sessionUpdate: "ls_permission", requestId, title, questions, toolCallId, detail, options: QUESTION_OPTIONS,
   });
+  if (kind === "antigravity-interaction") {
+    const parsed = antigravityInteractionSchema.safeParse(params);
+    if (!parsed.success) throw invalid();
+    const request = parsed.data;
+    unique(request.options.map((option) => option.optionId));
+    const prompt = request.toolCall.title?.trim() || "Antigravity 有问题需要你回答";
+    return {
+      update: update("Antigravity 有问题需要你回答", [{
+        id: request.toolCall.toolCallId,
+        header: "提问",
+        text: prompt,
+        kind: "choice",
+        options: request.options.map((option) => ({
+          value: option.optionId,
+          label: option.name,
+        })),
+      }], request.toolCall.toolCallId),
+      answer: (answers) => {
+        const picked = answers.find((entry) => entry.id === request.toolCall.toolCallId)?.values[0]
+          ?? answers[0]?.values[0];
+        if (!picked || !request.options.some((option) => option.optionId === picked)) throw invalid();
+        return { outcome: { outcome: "selected", optionId: picked } };
+      },
+      respond: (optionId) => {
+        if (request.options.some((option) => option.optionId === optionId)) {
+          return { outcome: { outcome: "selected", optionId } };
+        }
+        return { outcome: { outcome: "cancelled" } };
+      },
+    };
+  }
   if (kind === "cursor") {
     const parsed = cursorSchema.safeParse(params);
     if (!parsed.success) throw invalid();

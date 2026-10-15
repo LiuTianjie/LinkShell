@@ -52,7 +52,47 @@ export interface AcpConnectionOptions {
   onRequest: (method: string, params: unknown, id: RpcId) => unknown;
   onNotification?: (method: string, params: unknown) => void;
   onCancelRequest?: (id: RpcId) => void;
+  onStdoutLine?: (line: string) => void;
   onExit: (reason: string) => void;
+}
+
+function filterJsonStdout(
+  source: ReadableStream<Uint8Array>,
+  onStdoutLine?: (line: string) => void,
+): ReadableStream<Uint8Array> {
+  const decoder = new StringDecoder("utf8");
+  const encoder = new TextEncoder();
+  let buffer = "";
+  const flushLine = (line: string, controller: TransformStreamDefaultController<Uint8Array>) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      controller.enqueue(encoder.encode(`${line}\n`));
+    } else {
+      onStdoutLine?.(trimmed);
+    }
+  };
+  return source.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        buffer += decoder.write(Buffer.from(chunk));
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+          buffer = buffer.slice(newlineIndex + 1);
+          flushLine(line, controller);
+          newlineIndex = buffer.indexOf("\n");
+        }
+      },
+      flush(controller) {
+        buffer += decoder.end();
+        if (buffer.trim()) {
+          flushLine(buffer.replace(/\r$/, ""), controller);
+        }
+        buffer = "";
+      },
+    }),
+  );
 }
 
 /** One version-negotiated ACP connection. Native credentials remain owned by the agent. */
@@ -85,9 +125,22 @@ export class AcpConnection {
       this.child = child;
       // The SDK codec decodes incrementally: JSON lines and UTF-8 characters may
       // both span stdout buffers. The same codec accepts v2 JSON-RPC batches.
-      stream = ndJsonStream(Writable.toWeb(child.stdin!), Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>, { maxMessageBytes: 32 * 1024 * 1024 });
+      // Filter non-JSON stdout banners (e.g. Antigravity's OAuth sign-in URL) before ndJsonStream.
+      const filteredStdout = filterJsonStdout(
+        Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
+        this.options.onStdoutLine,
+      );
+      stream = ndJsonStream(Writable.toWeb(child.stdin!), filteredStdout, { maxMessageBytes: 32 * 1024 * 1024 });
       const stderr = new StringDecoder("utf8");
-      child.stderr?.on("data", (chunk: Buffer) => { this.stderrTail = (this.stderrTail + stderr.write(chunk)).slice(-4000); });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        const text = stderr.write(chunk);
+        this.stderrTail = (this.stderrTail + text).slice(-4000);
+        if (this.options.onStdoutLine) {
+          for (const line of text.split(/\r?\n/)) {
+            if (line.trim()) this.options.onStdoutLine(line.trim());
+          }
+        }
+      });
       child.once("exit", (code, signal) => this.lost(`${this.options.command} exited (${signal ?? code})${this.stderrTail ? `: ${this.stderrTail.trim().split("\n").slice(-3).join(" | ")}` : ""}`));
       child.once("error", (error) => this.lost(error.message));
     }
@@ -117,10 +170,13 @@ export class AcpConnection {
       // down without losing the client's v1 capabilities. Later messages are version-specific.
       ...(version === 2 ? { info, capabilities: { auth: remote ? {} : { terminal: {} }, elicitation, ...editor } } : {}),
     }, 30_000);
-    if (raw.protocolVersion !== 1 && !(version === 2 && raw.protocolVersion === 2)) {
+    // Google's Antigravity ACP server (`antigravity-acp-server`) returns `protocolVersion: 2`
+    // while using ACP v1's `agentCapabilities` / `agentInfo` / `authMethods[].id` wire schema.
+    const hybridV1 = raw.protocolVersion === 2 && raw.agentCapabilities !== undefined && raw.capabilities === undefined;
+    if (raw.protocolVersion !== 1 && !hybridV1 && !(version === 2 && raw.protocolVersion === 2)) {
       await this.stop(); throw new AcpProtocolError(raw.protocolVersion, version);
     }
-    if (raw.protocolVersion === 2) {
+    if (raw.protocolVersion === 2 && !hybridV1) {
       const caps = object(raw.capabilities), session = object(caps.session), prompt = object(session.prompt), mcp = object(session.mcp);
       this.initializeResult = {
         protocolVersion: 2, agentInfo: object(raw.info), _meta: object(raw._meta),
@@ -134,7 +190,7 @@ export class AcpConnection {
         },
         authMethods: (Array.isArray(raw.authMethods) ? raw.authMethods : []).map((entry) => { const method = object(entry); return { ...method, id: String(method.methodId), env: Array.isArray(method.env) ? Object.fromEntries(method.env.map((entry) => [object(entry).name, object(entry).value])) : undefined }; }),
       };
-    } else this.initializeResult = raw as AcpInitializeResult;
+    } else this.initializeResult = { ...(raw as AcpInitializeResult), protocolVersion: 1 };
     return this.initializeResult;
   }
 

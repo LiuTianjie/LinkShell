@@ -73,5 +73,13 @@ export const agentMarks: Record<string, AgentMark> = {
       "light": "#EDECEC",
       "dark": "#14120B"
     }
+  },
+  "antigravity": {
+    "svg": "<svg viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M19.86 19.37c.86.65 2.14-.14 1.5-1.15-3.17-5.02-5-13.22-9.36-13.22-4.36 0-6.19 8.2-9.36 13.22-.64 1.01.64 1.8 1.5 1.15 2.98-2.25 5.14-4.18 7.86-4.18s4.88 1.93 7.86 4.18z\" fill=\"url(#agy-grad)\"/><defs><linearGradient id=\"agy-grad\" x1=\"3\" y1=\"19\" x2=\"20\" y2=\"5\" gradientUnits=\"userSpaceOnUse\"><stop stop-color=\"#4285F4\"/><stop offset=\"0.38\" stop-color=\"#34A853\"/><stop offset=\"0.72\" stop-color=\"#FBBC05\"/><stop offset=\"1\" stop-color=\"#EA4335\"/></linearGradient></defs></svg>",
+    "full": false,
+    "bg": {
+      "light": "#EFF3FF",
+      "dark": "#191E2B"
+    }
   }
 };

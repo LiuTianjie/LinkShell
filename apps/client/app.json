@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkShell",
     "slug": "linkshell-client",
-    "version": "2.3.24",
+    "version": "2.3.25",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,9 +17,12 @@
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false,
-        "CADisableMinimumFrameDurationOnPhone": true
+        "CADisableMinimumFrameDurationOnPhone": true,
+        "NSSupportsLiveActivities": true,
+        "NSMicrophoneUsageDescription": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
+        "NSSpeechRecognitionUsageDescription": "LinkShell 需要使用语音识别，将你说的话实时转换为文字。"
       },
-      "buildNumber": "20324"
+      "buildNumber": "20325"
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +33,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bd.linkshell",
-      "versionCode": 20324
+      "versionCode": 20325
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -62,8 +65,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false,
-          "recordAudioAndroid": false,
+          "microphonePermission": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
+          "recordAudioAndroid": true,
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }

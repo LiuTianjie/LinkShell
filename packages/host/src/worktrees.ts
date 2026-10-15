@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type GitInfo } from "@linkshell/wire";
@@ -68,6 +68,26 @@ function slug(label: string): string {
 }
 
 /**
+ * Copies local `.env*` files from `sourceDir` into `targetDir` when git didn't
+ * check them out, so agents in a new worktree don't fail on missing env vars.
+ */
+function copyEnvFiles(sourceDir: string, targetDir: string): void {
+  try {
+    for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !/^\.env(?:\..+)?$/.test(entry.name)) continue;
+      const src = join(sourceDir, entry.name);
+      const dst = join(targetDir, entry.name);
+      if (existsSync(dst)) continue;
+      if (statSync(src).size <= 1024 * 1024) {
+        copyFileSync(src, dst);
+      }
+    }
+  } catch {
+    // Best-effort env bootstrap.
+  }
+}
+
+/**
  * Makes a worktree of the repository `cwd` is in, on a new branch at its
  * current commit. Uncommitted changes stay where they are.
  */
@@ -89,7 +109,10 @@ export async function createWorktree(cwd: string, home: string, label: string): 
   }
   // Git resolves symlinks in its root (e.g. /var -> /private/var on macOS).
   // Compare physical paths so an alias cannot turn the suffix into ../ segments.
-  return { path, cwd: join(path, relative(realpathSync(info.root), realpathSync(cwd))), branch, source: info.root, base };
+  const subCwd = join(path, relative(realpathSync(info.root), realpathSync(cwd)));
+  copyEnvFiles(info.root, path);
+  if (subCwd !== path) copyEnvFiles(cwd, subCwd);
+  return { path, cwd: subCwd, branch, source: info.root, base };
 }
 
 /** Whether removing the worktree would lose work: uncommitted changes, and commits since it was made. */

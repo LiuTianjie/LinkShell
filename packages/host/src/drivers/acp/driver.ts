@@ -676,6 +676,7 @@ export class AcpDriver implements AgentDriver {
           this.host?.update(this.id, sessionId, { sessionUpdate: "ls_permission_resolved", requestId });
         }
       },
+      onStdoutLine: (line) => this.onStdoutLine(line),
       onExit: (reason) => this.onExit(reason),
     });
     this.connection = connection;
@@ -688,7 +689,7 @@ export class AcpDriver implements AgentDriver {
         audio: caps.promptCapabilities?.audio === true,
         embeddedContext: caps.promptCapabilities?.embeddedContext === true,
       };
-      this.current = { installed: true, version: this.current.version };
+      this.current = { installed: true, version: this.current.version || init.agentInfo?.version };
       this.restartDelay = 1000;
     } catch (error) {
       await connection.stop();
@@ -698,6 +699,21 @@ export class AcpDriver implements AgentDriver {
         problem: `${this.label} failed to start: ${error instanceof Error ? error.message : String(error)}`,
       };
       if (!(error instanceof AcpProtocolError)) this.scheduleRestart();
+    }
+  }
+
+  protected onStdoutLine(line: string): void {
+    const match = /Open the following link to authenticate the ACP server:\s*(https?:\/\/\S+)/i.exec(line);
+    if (!match?.[1]) return;
+    const url = match[1];
+    this.host?.log(`[${this.id}] OAuth sign-in URL: ${url}`);
+    for (const [sessionId, state] of this.sessions) {
+      if (!state.loaded) continue;
+      this.host?.notice?.(this.id, sessionId, {
+        severity: "info",
+        title: `请完成 ${this.label} 登录授权`,
+        description: `在浏览器打开此链接完成登录：${url}`,
+      });
     }
   }
 
@@ -928,7 +944,7 @@ export class AcpDriver implements AgentDriver {
       const controller = new AbortController(); this.serviceRequests.set(id, controller);
       return this.services.request(method, params, controller.signal).finally(() => this.serviceRequests.delete(id));
     }
-    if (questionMethod(this.id, method)) return this.onQuestions(method, params, id);
+    if (questionMethod(this.id, method, params)) return this.onQuestions(method, params, id);
     if (method !== "session/request_permission") {
       throw new RpcError(-32601, `LinkShell does not implement ${method}`);
     }

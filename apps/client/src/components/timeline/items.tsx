@@ -359,13 +359,41 @@ export const Notice = memo(function Notice({ item }: { item: Of<"notice"> }) {
 });
 
 export const ErrorCard = memo(function ErrorCard({ item }: { item: Of<"error"> }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <View style={{ backgroundColor: colors.dangerSoft, borderRadius: 18, borderCurve: "continuous", padding: 14, gap: 6 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Icon sf="exclamationmark.octagon.fill" md="report" size={16} color={colors.danger} />
-        <Text style={[type.subhead, { color: colors.danger, fontWeight: "600" }]}>出错了</Text>
+    <View
+      style={{
+        backgroundColor: colors.dangerSoft,
+        borderRadius: 18,
+        borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: "rgba(255,69,58,0.28)",
+        padding: 14,
+        gap: 8,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Icon sf="exclamationmark.octagon.fill" md="report" size={16} color={colors.danger} />
+          <Text style={[type.subhead, { color: colors.danger, fontWeight: "600" }]}>出错了</Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            void Clipboard.setStringAsync(item.message);
+            haptics.selection();
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="复制错误信息"
+          style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+        >
+          <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={12} color={colors.secondaryLabel} />
+          <Text style={[type.caption, { color: colors.secondaryLabel }]}>{copied ? "已复制" : "复制"}</Text>
+        </Pressable>
       </View>
-      <Text selectable style={[type.subhead, { color: colors.label }]}>
+      <Text selectable style={[type.subhead, { color: colors.label, lineHeight: 20 }]}>
         {item.message}
       </Text>
       {item.hint ? (

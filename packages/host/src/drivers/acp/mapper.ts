@@ -182,11 +182,77 @@ function parentOf(update: Record<string, unknown>): string | undefined {
   return str(obj(obj(update._meta)?.claudeCode)?.parentToolUseId);
 }
 
+function normalizeRawInput(rawInput: unknown): unknown {
+  const input = obj(rawInput);
+  if (!input) return rawInput;
+  const command = str(input.command) ?? str(input.CommandLine) ?? str(input.command_line) ?? str(input.commandLine);
+  const cwd = str(input.cwd) ?? str(input.Cwd) ?? str(input.WorkingDirectory) ?? str(input.working_dir) ?? str(input.workingDirectory);
+  const path = str(input.path) ?? str(input.file_path) ?? str(input.AbsolutePath) ?? str(input.TargetFile);
+  const url = str(input.url) ?? str(input.Url);
+  if (
+    (command && input.command === undefined) ||
+    (cwd && input.cwd === undefined) ||
+    (path && input.path === undefined && input.file_path === undefined) ||
+    (url && input.url === undefined)
+  ) {
+    return {
+      ...input,
+      ...(command && input.command === undefined ? { command } : {}),
+      ...(cwd && input.cwd === undefined ? { cwd } : {}),
+      ...(path && input.path === undefined && input.file_path === undefined ? { path } : {}),
+      ...(url && input.url === undefined ? { url } : {}),
+    };
+  }
+  return rawInput;
+}
+
+function normalizeRawOutput(rawOutput: unknown): unknown {
+  const output = obj(rawOutput);
+  if (!output) return rawOutput;
+  const combined = str(output.output) ?? str(output.combinedOutput) ?? str(output.combined_output);
+  const exitCode = typeof output.exitCode === "number" ? output.exitCode : typeof output.exit_code === "number" ? output.exit_code : undefined;
+  if ((combined && output.output === undefined) || (exitCode !== undefined && output.exitCode === undefined)) {
+    return {
+      ...output,
+      ...(combined && output.output === undefined ? { output: combined } : {}),
+      ...(exitCode !== undefined && output.exitCode === undefined ? { exitCode } : {}),
+    };
+  }
+  return rawOutput;
+}
+
+function isAntigravitySubagentCall(update: Record<string, unknown>): boolean {
+  const meta = obj(update._meta);
+  if (meta?.is_mcp_tool_call === true) return false;
+  const title = str(update.title)?.trim();
+  const name = str(update.name)?.trim();
+  return (
+    title === "Running start_subagent" ||
+    title === "Run start_subagent?" ||
+    name === "start_subagent" ||
+    name === "invoke_subagent"
+  );
+}
+
 function toolDetail(update: Record<string, unknown>): ToolDetail | undefined {
   const claudeTool = str(obj(obj(update._meta)?.claudeCode)?.toolName);
   if (claudeTool) return describeClaudeTool(claudeTool, obj(update.rawInput) ?? {}).detail;
   // Claude's adapter reports `/compact` (and compacting by itself) as a call of no tool.
   if (update.kind === "think" && str(update.title) === "Compact conversation") return { type: "compaction" };
+  if (isAntigravitySubagentCall(update)) {
+    const input = obj(update.rawInput);
+    const firstSubagent = obj(arr(input?.Subagents)[0]);
+    const agentType = str(input?.subagent_type) ?? str(input?.agent_name) ?? str(input?.TypeName) ?? str(firstSubagent?.TypeName);
+    const name = str(input?.Role) ?? str(firstSubagent?.Role) ?? agentType;
+    const task = str(input?.task) ?? str(input?.task_description) ?? str(input?.prompt) ?? str(input?.Prompt) ?? str(firstSubagent?.Prompt);
+    return {
+      type: "subagent",
+      action: "spawn",
+      ...(agentType ? { agentType } : {}),
+      ...(name ? { name } : {}),
+      ...(task ? { task } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -221,8 +287,8 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         name: str(update.name),
         kind: toolKind(update.kind),
         status: toolStatus(update.status) ?? "pending",
-        rawInput: update.rawInput,
-        rawOutput: update.rawOutput,
+        rawInput: normalizeRawInput(update.rawInput),
+        rawOutput: normalizeRawOutput(update.rawOutput),
         content: toolContent(update.content),
         locations: locations(update.locations),
         detail: toolDetail(update),
@@ -243,10 +309,10 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         name: str(update.name),
         kind: typeof update.kind === "string" ? toolKind(update.kind) : undefined,
         locations: locations(update.locations),
-        rawInput: update.rawInput,
+        rawInput: normalizeRawInput(update.rawInput),
         detail: workflow ? undefined : toolDetail(update),
         content: toolContent(update.content),
-        rawOutput: update.rawOutput,
+        rawOutput: normalizeRawOutput(update.rawOutput),
       };
     }
     case "plan":
@@ -518,31 +584,43 @@ export interface AcpPermissionRequest {
   update: Extract<SessionUpdate, { sessionUpdate: "ls_permission" }>;
 }
 
+function extractSecurityWarning(rawMeta: unknown): string | undefined {
+  const raw = obj(rawMeta)?.["agy.security.warning"];
+  if (typeof raw === "string") return raw.trim() || undefined;
+  const warning = obj(raw);
+  if (!warning) return undefined;
+  return [str(warning.title), str(warning.message)].filter(Boolean).join("：") || undefined;
+}
+
 export function mapPermissionRequest(params: unknown, requestId: string): AcpPermissionRequest | undefined {
   const payload = obj(params);
   const subject = obj(payload?.subject);
   const toolCall = obj(payload?.toolCall) ?? (subject?.type === "tool_call" ? obj(subject.toolCall) : subject?.type === "command" ? { toolCallId: subject.toolCallId, kind: "execute", rawInput: { command: subject.command, cwd: subject.cwd } } : undefined);
+  let securityWarning = extractSecurityWarning(payload?._meta) ?? extractSecurityWarning(toolCall?._meta);
   const options: PermissionOption[] = arr(payload?.options).flatMap((entry) => {
     const option = obj(entry);
     const kind = option?.kind;
     if (!str(option?.optionId) || (kind !== "allow_once" && kind !== "allow_always" && kind !== "reject_once" && kind !== "reject_always")) {
       return [];
     }
+    securityWarning ??= extractSecurityWarning(option?._meta);
     return [{ optionId: str(option?.optionId)!, name: str(option?.name) ?? str(option?.optionId)!, kind }];
   });
   if (options.length === 0) return undefined;
-  const rawInput = obj(toolCall?.rawInput);
-  const detail = str(rawInput?.command) ?? str(rawInput?.file_path) ?? str(rawInput?.path) ?? str(rawInput?.url);
+  const normalizedInput = normalizeRawInput(toolCall?.rawInput);
+  const rawInput = obj(normalizedInput);
+  const baseDetail = str(payload?.description) ?? (subject?.type === "command" ? str(subject.command) : undefined) ?? str(rawInput?.command) ?? str(rawInput?.file_path) ?? str(rawInput?.path) ?? str(rawInput?.url);
+  const detail = [baseDetail, securityWarning].filter(Boolean).join("\n") || undefined;
   return {
     update: {
       sessionUpdate: "ls_permission",
       requestId,
       toolCallId: str(toolCall?.toolCallId),
       title: str(payload?.title) ?? str(toolCall?.title) ?? "需要授权",
-      detail: str(payload?.description) ?? (subject?.type === "command" ? str(subject.command) : undefined) ?? detail,
+      detail,
       tool: toolCall ? {
         title: str(toolCall.title), kind: typeof toolCall.kind === "string" ? toolKind(toolCall.kind) : undefined,
-        rawInput: toolCall.rawInput, content: toolContent(toolCall.content), locations: locations(toolCall.locations),
+        rawInput: normalizedInput, content: toolContent(toolCall.content), locations: locations(toolCall.locations),
       } : undefined,
       options,
     },

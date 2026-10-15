@@ -30,6 +30,7 @@ export interface TerminalTheme {
 export interface TerminalFile { uri: string; name: string; size?: number }
 export interface TerminalKeyModifiers { shift?: boolean; ctrl?: boolean; alt?: boolean }
 export interface NativeTerminalHandle {
+  supportsReplay(): boolean;
   write(data: string): Promise<void>;
   reset(): Promise<void>;
   focus(): Promise<void>;
@@ -43,8 +44,8 @@ export interface NativeTerminalHandle {
   endReplay(): Promise<void>;
 }
 
-type NativeViewRef = Omit<NativeTerminalHandle, "key"> & {
-  key(name: string, shift: boolean, ctrl: boolean, alt: boolean): Promise<void>;
+type NativeViewRef = Omit<NativeTerminalHandle, "key" | "supportsReplay"> & {
+  key?(name: string, shift: boolean, ctrl: boolean, alt: boolean): Promise<void>;
 };
 interface NativeProps extends ViewProps {
   theme: TerminalTheme;
@@ -69,11 +70,46 @@ export interface NativeTerminalProps extends ViewProps {
   onModifiers: (modifiers: { ctrl: boolean }) => void;
 }
 
+function encodeFallbackKey(name: string, modifiers: TerminalKeyModifiers = {}): string | undefined {
+  const special: Record<string, string> = {
+    enter: modifiers.shift ? "\x1b[13;2u" : "\r",
+    escape: "\x1b",
+    tab: modifiers.shift ? "\x1b[Z" : "\t",
+    up: "\x1b[A",
+    down: "\x1b[B",
+    right: "\x1b[C",
+    left: "\x1b[D",
+    backspace: "\x7f",
+    home: "\x1b[H",
+    end: "\x1b[F",
+    pageUp: "\x1b[5~",
+    pageDown: "\x1b[6~",
+  };
+  if (special[name]) {
+    const seq = special[name]!;
+    return modifiers.alt && !seq.startsWith("\x1b") ? `\x1b${seq}` : seq;
+  }
+  if (name.length === 1) {
+    let ch = modifiers.shift ? name.toUpperCase() : name;
+    if (modifiers.ctrl) {
+      const code = ch.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) ch = String.fromCharCode(code - 64);
+    }
+    return modifiers.alt ? `\x1b${ch}` : ch;
+  }
+  return undefined;
+}
+
 export const NativeTerminal = forwardRef<NativeTerminalHandle, NativeTerminalProps>(function NativeTerminal(
   { onInput, onResize, onFile, onError, onModifiers, onFontSize, ...props }, ref,
 ) {
   const view = useRef<NativeViewRef>(null);
   const mounted = useRef(true);
+  const fallbackCtrl = useRef(false);
+  const onInputRef = useRef(onInput);
+  const onModifiersRef = useRef(onModifiers);
+  onInputRef.current = onInput;
+  onModifiersRef.current = onModifiers;
   const ready = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
   if (!ready.current) {
     let resolve!: () => void;
@@ -90,25 +126,89 @@ export const NativeTerminal = forwardRef<NativeTerminalHandle, NativeTerminalPro
       await run(view.current);
     };
     return {
+      supportsReplay: () => typeof view.current?.beginReplay === "function" && typeof view.current?.replay === "function",
       write: (data) => call((native) => native.write(data)),
       reset: () => call((native) => native.reset()),
       focus: () => call((native) => native.focus()),
       blur: () => call((native) => native.blur()),
-      key: (name, modifiers = {}) => call((native) => native.key(name, !!modifiers.shift, !!modifiers.ctrl, !!modifiers.alt)),
-      paste: (text) => call((native) => native.paste(text)),
-      pasteClipboard: () => call((native) => native.pasteClipboard()),
-      toggleCtrl: () => call((native) => native.toggleCtrl()),
-      beginReplay: (reset) => call((native) => native.beginReplay(reset)),
-      replay: (data, cols, rows) => call((native) => native.replay(data, cols, rows)),
-      endReplay: () => call((native) => native.endReplay()),
+      key: (name, modifiers = {}) =>
+        call(async (native) => {
+          if (typeof native.key === "function") {
+            await native.key(name, !!modifiers.shift, !!modifiers.ctrl, !!modifiers.alt);
+            return;
+          }
+          const seq = encodeFallbackKey(name, { ...modifiers, ctrl: modifiers.ctrl || fallbackCtrl.current });
+          if (fallbackCtrl.current) {
+            fallbackCtrl.current = false;
+            onModifiersRef.current({ ctrl: false });
+          }
+          if (seq) onInputRef.current(seq);
+        }),
+      paste: (text) =>
+        call(async (native) => {
+          if (typeof native.paste === "function") {
+            await native.paste(text);
+          } else {
+            onInputRef.current(text);
+          }
+        }),
+      pasteClipboard: () =>
+        call(async (native) => {
+          if (typeof native.pasteClipboard === "function") {
+            await native.pasteClipboard();
+          }
+        }),
+      toggleCtrl: () =>
+        call(async (native) => {
+          if (typeof native.toggleCtrl === "function") {
+            await native.toggleCtrl();
+          } else {
+            fallbackCtrl.current = !fallbackCtrl.current;
+            onModifiersRef.current({ ctrl: fallbackCtrl.current });
+          }
+        }),
+      beginReplay: (reset) =>
+        call(async (native) => {
+          if (typeof native.beginReplay === "function") {
+            await native.beginReplay(reset);
+          } else if (reset && typeof native.reset === "function") {
+            await native.reset();
+          }
+        }),
+      replay: (data, cols, rows) =>
+        call(async (native) => {
+          if (typeof native.replay === "function") {
+            await native.replay(data, cols, rows);
+          } else {
+            await native.write(data);
+          }
+        }),
+      endReplay: () =>
+        call(async (native) => {
+          if (typeof native.endReplay === "function") {
+            await native.endReplay();
+          }
+        }),
     };
   }, []);
   return <NativeView {...props} ref={view}
-    onInput={(event) => onInput(event.nativeEvent.data)}
+    onInput={(event) => {
+      const raw = event.nativeEvent.data;
+      if (fallbackCtrl.current && raw.length === 1) {
+        fallbackCtrl.current = false;
+        onModifiers({ ctrl: false });
+        const seq = encodeFallbackKey(raw, { ctrl: true });
+        if (seq) {
+          onInput(seq);
+          return;
+        }
+      }
+      onInput(raw);
+    }}
     onResize={(event) => { ready.current?.resolve(); onResize(event.nativeEvent.cols, event.nativeEvent.rows); }}
-    onFontSize={(event) => onFontSize(event.nativeEvent.size)}
-    onFile={(event) => onFile(event.nativeEvent)}
-    onError={(event) => onError(event.nativeEvent.message)}
-    onModifiers={(event) => onModifiers(event.nativeEvent)}
+    onFontSize={(event) => onFontSize?.(event.nativeEvent.size)}
+    onFile={(event) => onFile?.(event.nativeEvent)}
+    onError={(event) => onError?.(event.nativeEvent.message)}
+    onModifiers={(event) => onModifiers?.(event.nativeEvent)}
   />;
 });

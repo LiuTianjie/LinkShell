@@ -95,6 +95,15 @@ describe("worktrees", () => {
       await removeWorktree(made);
     }
   });
+
+  it("copies untracked .env* files from the repository root and sub-cwd into a new worktree", async () => {
+    writeFileSync(join(repo, ".env"), "ROOT_SECRET=1\n");
+    writeFileSync(join(repo, "packages", "api", ".env.local"), "API_PORT=8080\n");
+    const made = await createWorktree(join(repo, "packages", "api"), home, "env bootstrap");
+    expect(existsSync(join(made.path, ".env"))).toBe(true);
+    expect(existsSync(join(made.cwd, ".env.local"))).toBe(true);
+    await removeWorktree(made);
+  });
 });
 
 class ForkingDriver implements AgentDriver {

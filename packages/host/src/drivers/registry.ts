@@ -1,6 +1,7 @@
 import type { AgentDriver } from "./types.js";
 import type { AcpRemoteAgent } from "@linkshell/wire";
 import { AcpDriver, type AcpAgentSpec } from "./acp/driver.js";
+import { AntigravityDriver, antigravitySpec } from "./acp/antigravity.js";
 import { ClaudeDriver } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
 
@@ -12,6 +13,7 @@ import { CodexDriver } from "./codex/driver.js";
  */
 export const ACP_AGENTS: AcpAgentSpec[] = [
   { id: "gemini", label: "Gemini", tier: "remote", command: "gemini", args: ["--acp"] },
+  antigravitySpec(),
   // Lists sessions over ACP (including ones made in its own CLI).
   { id: "copilot", label: "Copilot", tier: "remote", command: "copilot", args: ["--acp"], discover: true },
   { id: "grok", label: "Grok", tier: "remote", command: "grok", args: ["agent", "stdio"], discover: true, cachedAuthMethod: "cached_token" },
@@ -38,7 +40,11 @@ export function defaultDrivers(options: DefaultDriverOptions): AgentDriver[] {
       claudeCommand: options.claudeCommand,
       adapter: options.claudeAdapter,
     }),
-    ...ACP_AGENTS.map((spec) => new AcpDriver(spec, { env: options.env, hostVersion: options.hostVersion })),
+    ...ACP_AGENTS.map((spec) =>
+      spec.id === "antigravity"
+        ? new AntigravityDriver({ env: options.env, hostVersion: options.hostVersion })
+        : new AcpDriver(spec, { env: options.env, hostVersion: options.hostVersion }),
+    ),
     ...(options.agents ?? []).map((spec) => remoteDriver(spec, options)),
   ];
 }

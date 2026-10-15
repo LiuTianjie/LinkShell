@@ -23,6 +23,11 @@ const looks: Record<string, AgentLook> = {
     short: "Gemini",
     login: "gemini",
   },
+  antigravity: {
+    name: "Google Antigravity",
+    short: "Antigravity",
+    login: "agy-acp",
+  },
   copilot: {
     name: "GitHub Copilot",
     short: "Copilot",

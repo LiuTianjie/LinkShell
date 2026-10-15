@@ -29,10 +29,12 @@ import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
 import { PermissionContext } from "./permission-context";
 import { openAuthorization } from "@/lib/authorization";
+import { mergeVoiceTranscript, useVoiceInput } from "@/lib/voice-input";
 import { PlusMenu } from "./plus-menu";
 import { QueuePanel } from "./queue-panel";
 import { QuestionCard } from "./question-card";
 import { UsageRing } from "./usage-ring";
+import { VoiceInputBar } from "./voice-input-bar";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -180,14 +182,16 @@ export function Composer(props: ComposerProps) {
     setTimeout(() => setFlash((current) => (current === message ? null : current)), 2600);
   };
 
-  const send = async () => {
-    if (!hasContent || inputDisabled) return;
+  const sendWithText = async (overrideText?: string) => {
+    const body = (overrideText ?? text).trim();
+    const canSend = body.length > 0 || attachments.length > 0;
+    if (!canSend || inputDisabled) return;
     haptics.light();
     const content: ContentBlock[] = [
       ...attachments.map((attachment): ContentBlock => attachment.kind === "resource"
         ? { type: "resource", resource: { uri: attachment.uri, mimeType: attachment.mimeType, ...(attachment.text === undefined ? { blob: attachment.data } : { text: attachment.text }) } }
         : { type: attachment.kind === "audio" ? "audio" : "image", mimeType: attachment.mimeType, data: attachment.data }),
-      ...(trimmed ? [{ type: "text" as const, text: normalizeCommandText(trimmed) }] : []),
+      ...(body ? [{ type: "text" as const, text: normalizeCommandText(body) }] : []),
     ];
     setText("");
     setAttachments([]);
@@ -196,11 +200,20 @@ export function Composer(props: ComposerProps) {
       if (delivery === "steered") showFlash("已插话，正在调整方向");
       else if (delivery === "failed") haptics.error();
     } catch (error) {
-      setText((current) => current || text);
+      setText((current) => current || (overrideText ?? text));
       setAttachments((current) => current.length ? current : attachments);
       Alert.alert("命令未执行", error instanceof Error ? error.message : String(error));
     }
   };
+
+  const send = () => sendWithText();
+  const holdModeRef = useRef(false);
+  const voice = useVoiceInput({
+    currentText: text,
+    onChangeText: setText,
+    onSendAfterStop: (finalText) => void sendWithText(finalText),
+    onError: (message) => showFlash(message),
+  });
 
   // A queued message comes back to be edited: its text ahead of what's being typed, its pictures beside the others.
   const editQueued = async (clientMessageId: string) => {
@@ -436,44 +449,97 @@ export function Composer(props: ComposerProps) {
         </Animated.View>
       ) : (
         <Glass style={{ borderRadius: 26, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
-          <View style={{ flexDirection: compact ? "row" : "column", alignItems: compact ? "center" : "stretch", gap: compact ? 4 : 0 }}>
+          <View style={{ flexDirection: compact && !voice.recording ? "row" : "column", alignItems: compact && !voice.recording ? "center" : "stretch", gap: compact && !voice.recording ? 4 : 0 }}>
           <TextInput
             ref={input}
             value={text}
             onChangeText={setText}
             editable={!inputDisabled}
             multiline
-            placeholder={blocked ? blocked.title : placeholder}
+            placeholder={blocked ? blocked.title : voice.recording ? "正在聆听…（说话会自动转为文字）" : placeholder}
             placeholderTextColor={colors.placeholder as string}
             selectionColor={colors.accent}
-            style={[type.callout, { color: colors.label, maxHeight: textMaxHeight, minHeight: 44, flex: compact ? 1 : undefined, minWidth: 0, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 }]}
+            style={[type.callout, { color: colors.label, maxHeight: textMaxHeight, minHeight: 44, flex: compact && !voice.recording ? 1 : undefined, minWidth: 0, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 }]}
             accessibilityLabel="消息"
             submitBehavior="newline"
           />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 4 : 6, minHeight: 44, paddingLeft: 2 }}>
-            <PlusMenu
-              canAttachImages={canAttachImages}
-              canAttachAudio={canAttachAudio}
-              canAttachFiles={canAttachFiles}
-              hasCommands={hasCommands}
-              disabled={inputDisabled || (!canAttachImages && !canAttachAudio && !canAttachFiles && !hasCommands)}
-              onPickPhoto={() => void addImage(false)}
-              onTakePhoto={() => void addImage(true)}
-              onPickAudio={() => void addDocument(true)}
-              onPickFile={() => void addDocument(false)}
-              onCommands={props.onCommands}
+          {voice.recording ? (
+            <VoiceInputBar
+              elapsedSeconds={voice.elapsedSeconds}
+              levels={voice.levels}
+              canceling={voice.canceling}
+              hasText={hasContent}
+              onCancel={() => void voice.cancel()}
+              onFinish={() => void voice.stop(false)}
+              onSendNow={() => void voice.stop(true)}
+              onInjectPhrase={(phrase) => {
+                haptics.selection();
+                setText((current) => mergeVoiceTranscript(current, phrase));
+              }}
             />
-            {/* (Commands: the + menu, or `/` in the input.) */}
-            {!compact ? <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>
-              {configShown.length ? <ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} /> : null}
-            </View> : null}
-            {!compact ? <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /> : null}
-            {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
-            {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}
-            {turnActive && !hasContent ? null : (
-              <RoundButton label={turnActive ? "排队" : "发送"} wide={turnActive && !compact} onPress={() => void send()} disabled={!hasContent || inputDisabled} tone="send" />
-            )}
-          </View>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 4 : 6, minHeight: 44, paddingLeft: 2 }}>
+              <PlusMenu
+                canAttachImages={canAttachImages}
+                canAttachAudio={canAttachAudio}
+                canAttachFiles={canAttachFiles}
+                hasCommands={hasCommands}
+                disabled={inputDisabled || (!canAttachImages && !canAttachAudio && !canAttachFiles && !hasCommands)}
+                onPickPhoto={() => void addImage(false)}
+                onTakePhoto={() => void addImage(true)}
+                onPickAudio={() => void addDocument(true)}
+                onPickFile={() => void addDocument(false)}
+                onCommands={props.onCommands}
+              />
+              {/* (Commands: the + menu, or `/` in the input.) */}
+              {!compact ? <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>
+                {configShown.length ? <ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} /> : null}
+              </View> : null}
+              {!compact ? <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /> : null}
+              <Pressable
+                disabled={inputDisabled}
+                accessibilityRole="button"
+                accessibilityLabel="语音输入（点击或按住说话）"
+                hitSlop={6}
+                onPress={() => {
+                  holdModeRef.current = false;
+                  void voice.start();
+                }}
+                onLongPress={() => {
+                  holdModeRef.current = true;
+                  void voice.start();
+                }}
+                onTouchMove={(event) => {
+                  if (!holdModeRef.current || !voice.recording) return;
+                  const y = event.nativeEvent.locationY;
+                  voice.setCanceling(y < -30);
+                }}
+                onPressOut={() => {
+                  if (!holdModeRef.current || !voice.recording) return;
+                  holdModeRef.current = false;
+                  if (voice.canceling) void voice.cancel();
+                  else void voice.stop(false);
+                }}
+                style={({ pressed }) => ({
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: inputDisabled ? 0.45 : 1,
+                  transform: [{ scale: pressed ? 0.94 : 1 }],
+                })}
+              >
+                <Icon sf="mic.fill" md="mic" size={16} color={colors.label} />
+              </Pressable>
+              {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
+              {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}
+              {turnActive && !hasContent ? null : (
+                <RoundButton label={turnActive ? "排队" : "发送"} wide={turnActive && !compact} onPress={() => void send()} disabled={!hasContent || inputDisabled} tone="send" />
+              )}
+            </View>
+          )}
           </View>
         </Glass>
       )}

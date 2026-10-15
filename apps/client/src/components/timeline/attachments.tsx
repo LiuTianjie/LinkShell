@@ -1,7 +1,6 @@
 import type { ContentBlock } from "@linkshell/wire";
 import { Image } from "expo-image";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { Buffer } from "buffer";
 import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, View } from "react-native";
@@ -412,10 +411,35 @@ export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: 
   );
 }
 
+let cachedExpoAudio: typeof import("expo-audio") | null | undefined;
+function getExpoAudio(): typeof import("expo-audio") | null {
+  if (cachedExpoAudio !== undefined) return cachedExpoAudio;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    cachedExpoAudio = require("expo-audio") as typeof import("expo-audio");
+  } catch {
+    cachedExpoAudio = null;
+  }
+  return cachedExpoAudio;
+}
+
 function AudioAttachment({ block }: { block: AudioBlock }) {
+  const expoAudio = getExpoAudio();
+  if (!expoAudio) {
+    return (
+      <View style={{ minHeight: 48, borderRadius: 16, paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon sf="waveform" md="graphic_eq" size={18} color={colors.secondaryLabel} />
+        <Text style={[type.footnote, { color: colors.secondaryLabel }]}>音频附件</Text>
+      </View>
+    );
+  }
+  return <NativeAudioAttachment block={block} expoAudio={expoAudio} />;
+}
+
+function NativeAudioAttachment({ block, expoAudio }: { block: AudioBlock; expoAudio: typeof import("expo-audio") }) {
   const loaded = useImage(block);
-  const player = useAudioPlayer(null, { updateInterval: 250 });
-  const status = useAudioPlayerStatus(player);
+  const player = expoAudio.useAudioPlayer(null, { updateInterval: 250 });
+  const status = expoAudio.useAudioPlayerStatus(player);
   const cached = useRef<File | null>(null);
   const source = useRef<string | undefined>(undefined);
   const pending = useRef(false);
@@ -429,7 +453,7 @@ function AudioAttachment({ block }: { block: AudioBlock }) {
     if (loaded.failed) { loaded.retry(); return; }
     if (!loaded.uri) return;
     try {
-      await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false });
+      await expoAudio.setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false });
       if (status.playing) { player.pause(); return; }
       if (source.current !== loaded.uri) {
         let uri = loaded.uri;

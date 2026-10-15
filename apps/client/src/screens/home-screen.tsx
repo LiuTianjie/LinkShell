@@ -4,11 +4,12 @@ import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { Icon } from "@/components/icon";
+import { AttentionIsland } from "@/components/attention-island";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { NeedCard } from "@/components/need-card";
 import { SectionHeader } from "@/components/section-header";
@@ -19,6 +20,15 @@ import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
+import { haptics } from "@/lib/haptics";
+import {
+  buildLiveActivityPayload,
+  isSessionSnoozed,
+  useIOSAttentionSync,
+  usePinnedSessionIds,
+  useSnoozedSessions,
+  type HomeFilterMode,
+} from "@/lib/session-attention";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -79,39 +89,130 @@ function dayBucket(ts: number, now: number): string {
   return "更早";
 }
 
-function buildItems(sessions: SessionSummary[], terminals: TerminalInfo[], now: number): { items: Item[]; waiting: number; running: number } {
-  const live = sessions.filter((s) => !s.archived);
+function buildItems(
+  sessions: SessionSummary[],
+  terminals: TerminalInfo[],
+  now: number,
+  options: {
+    pinnedIds?: string[];
+    snoozedMap?: Record<string, number>;
+    filter?: HomeFilterMode;
+  } = {},
+): {
+  items: Item[];
+  waiting: number;
+  running: number;
+  failed: number;
+  pinnedCount: number;
+  snoozedCount: number;
+} {
+  const pinnedSet = new Set(options.pinnedIds ?? []);
+  const snoozedMap = options.snoozedMap ?? {};
+  const filter = options.filter ?? "all";
+
+  const liveAll = sessions.filter((s) => !s.archived);
+  const snoozedSessions = liveAll.filter((s) => isSessionSnoozed(s, now, snoozedMap)).sort(newest);
+  const live = liveAll.filter((s) => !isSessionSnoozed(s, now, snoozedMap));
+
   const waiting = live.filter((s) => needsAttention(s)).sort(newest);
+  const failed = live.filter((s) => !needsAttention(s) && s.state === "error").sort(newest);
   const busyTerminals = terminals.filter((t) => terminalState(t).busy);
   const running: Entry[] = [
-    ...live.filter((s) => s.state === "running" && !needsAttention(s)).map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
+    ...live
+      .filter((s) => s.state === "running" && !needsAttention(s))
+      .map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
     ...busyTerminals.map((terminal): Entry => ({ kind: "terminal", terminal, at: terminal.activeAt })),
   ].sort((a, b) => b.at - a.at);
+
+  const pinned = live
+    .filter((s) => !needsAttention(s) && s.state !== "running" && s.state !== "error" && pinnedSet.has(s.id))
+    .sort(newest);
+
   const recent: Entry[] = [
-    ...live.filter((s) => !needsAttention(s) && s.state !== "running").map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
+    ...live
+      .filter((s) => !needsAttention(s) && s.state !== "running" && s.state !== "error" && !pinnedSet.has(s.id))
+      .map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
     ...terminals.filter((t) => !busyTerminals.includes(t)).map((terminal): Entry => ({ kind: "terminal", terminal, at: terminal.activeAt })),
   ].sort((a, b) => b.at - a.at);
+
   const items: Item[] = [];
 
-  // Nothing waiting: the summary line already says so; no empty section.
-  if (waiting.length) {
-    items.push({ type: "header", key: "h-need", title: "需要你", count: waiting.length, warn: true });
-    for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
+  if (filter === "attention") {
+    if (waiting.length) {
+      items.push({ type: "header", key: "h-need", title: "需要你", count: waiting.length, warn: true });
+      for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
+    }
+    if (failed.length) {
+      items.push({ type: "header", key: "h-fail", title: "出错", count: failed.length, warn: true });
+      failed.forEach((session, index) => items.push({ type: "row", key: `err-${session.id}`, session, position: positionOf(index, failed.length) }));
+    }
+  } else if (filter === "running") {
+    if (running.length) {
+      items.push({ type: "header", key: "h-run", title: "进行中", count: running.length });
+      running.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, running.length), "r")));
+    }
+  } else if (filter === "pinned") {
+    const allPinned = liveAll.filter((s) => pinnedSet.has(s.id)).sort(newest);
+    if (allPinned.length) {
+      items.push({ type: "header", key: "h-pin", title: "已置顶", count: allPinned.length });
+      allPinned.forEach((session, index) => items.push({ type: "row", key: `pin-${session.id}`, session, position: positionOf(index, allPinned.length) }));
+    }
+  } else if (filter === "terminals") {
+    const sortedTerminals = [...terminals].sort((a, b) => b.activeAt - a.activeAt);
+    if (sortedTerminals.length) {
+      items.push({ type: "header", key: "h-term", title: "终端", count: sortedTerminals.length });
+      sortedTerminals.forEach((terminal, index) =>
+        items.push({ type: "terminal", key: `term-${terminal.id}`, terminal, position: positionOf(index, sortedTerminals.length) }),
+      );
+    }
+  } else if (filter === "snoozed") {
+    if (snoozedSessions.length) {
+      items.push({ type: "header", key: "h-snooze", title: "稍后处理", count: snoozedSessions.length });
+      snoozedSessions.forEach((session, index) =>
+        items.push({ type: "row", key: `snz-${session.id}`, session, position: positionOf(index, snoozedSessions.length) }),
+      );
+    }
+  } else {
+    // Default "all" view: Attention-first hierarchy (Waiting > Failed > Running > Pinned > Day buckets)
+    if (waiting.length) {
+      items.push({ type: "header", key: "h-need", title: "需要你", count: waiting.length, warn: true });
+      for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
+    }
+    if (failed.length) {
+      items.push({ type: "header", key: "h-fail", title: "出错", count: failed.length, warn: true });
+      failed.forEach((session, index) =>
+        items.push({ type: "row", key: `err-${session.id}`, session, position: positionOf(index, failed.length) }),
+      );
+    }
+    if (running.length) {
+      items.push({ type: "header", key: "h-run", title: "进行中", count: running.length });
+      running.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, running.length), "r")));
+    }
+    if (pinned.length) {
+      items.push({ type: "header", key: "h-pin", title: "已置顶", count: pinned.length });
+      pinned.forEach((session, index) =>
+        items.push({ type: "row", key: `pin-${session.id}`, session, position: positionOf(index, pinned.length) }),
+      );
+    }
+    const buckets = new Map<string, Entry[]>();
+    for (const entry of recent) {
+      const bucket = dayBucket(entry.at, now);
+      buckets.set(bucket, [...(buckets.get(bucket) ?? []), entry]);
+    }
+    for (const [title, group] of buckets) {
+      items.push({ type: "header", key: `h-${title}`, title });
+      group.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, group.length), "c")));
+    }
   }
-  if (running.length) {
-    items.push({ type: "header", key: "h-run", title: "进行中", count: running.length });
-    running.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, running.length), "r")));
-  }
-  const buckets = new Map<string, Entry[]>();
-  for (const entry of recent) {
-    const bucket = dayBucket(entry.at, now);
-    buckets.set(bucket, [...(buckets.get(bucket) ?? []), entry]);
-  }
-  for (const [title, group] of buckets) {
-    items.push({ type: "header", key: `h-${title}`, title });
-    group.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, group.length), "c")));
-  }
-  return { items, waiting: waiting.length, running: running.length };
+
+  return {
+    items,
+    waiting: waiting.length,
+    running: running.length,
+    failed: failed.length,
+    pinnedCount: liveAll.filter((s) => pinnedSet.has(s.id)).length,
+    snoozedCount: snoozedSessions.length,
+  };
 }
 
 /**
@@ -137,18 +238,36 @@ function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], word
   return items;
 }
 
-/** Which computer, and only the one thing worth saying: what's waiting on you. */
+/** Which computer (tap to switch), and only the one thing worth saying: what's waiting on you. */
 function Summary({ waiting, small = false }: { waiting: number; small?: boolean }) {
   const machine = useClient((state) => state.machine);
   const online = useClient((state) => state.status === "online");
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4, paddingTop: 2 }}>
+    <Pressable
+      onPress={() => {
+        haptics.selection();
+        router.push("/computers");
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`当前电脑：${machine ? machine.hostname.replace(/\.local$/, "") : "电脑"}，点击切换设备`}
+      hitSlop={6}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        gap: 6,
+        paddingHorizontal: 4,
+        paddingTop: 2,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} />
       <Text numberOfLines={1} style={[small ? type.footnote : type.subhead, { color: colors.secondaryLabel, flexShrink: 1 }]}>
         {machine ? machine.hostname.replace(/\.local$/, "") : "电脑"}
       </Text>
+      <Icon sf="chevron.up.chevron.down" md="unfold_more" size={11} color={colors.tertiaryLabel} />
       {waiting ? <Text style={[small ? type.footnote : type.subhead, { color: colors.waiting, fontWeight: "600" }]}>· {waiting} 项需要你</Text> : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -286,6 +405,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
   const insets = usePageInsets();
   const tabInset = useFloatingTabInset();
   const sessionsById = useClient((state) => state.sessions);
+  const machine = useClient((state) => state.machine);
+  const online = useClient((state) => state.status === "online");
   const loaded = useClient((state) => state.sessionsLoaded);
   const error = useClient((state) => state.sessionsError);
   const offline = useClient((state) => unreachable(state.status));
@@ -294,19 +415,54 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
   const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<HomeFilterMode>("all");
   const words = useMemo(() => searchWords(query), [query]);
   const searching = words.length > 0;
+
+  const pinnedIds = usePinnedSessionIds();
+  const snoozedMap = useSnoozedSessions();
 
   // Re-bucket when the day changes, not on every tick.
   const day = new Date(now).toDateString();
   const { terminals } = useTerminals();
-  const { items, waiting } = useMemo(
-    () => buildItems(Object.values(sessionsById), terminals, Date.now()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is not read: it is what says the buckets are stale.
-    [sessionsById, terminals, day],
+  const allSessions = useMemo(() => Object.values(sessionsById), [sessionsById]);
+  const computerName = machine ? machine.hostname.replace(/\.local$/, "") : "电脑";
+
+  useIOSAttentionSync(computerName, allSessions, terminals, online);
+
+  const liveActivityPayload = useMemo(
+    () => buildLiveActivityPayload(computerName, allSessions, terminals, online),
+    [computerName, allSessions, terminals, online],
   );
-  const empty = loaded && Object.keys(sessionsById).length === 0;
-  const results = useMemo(() => (searching ? searchItems(Object.values(sessionsById), terminals, words) : []), [searching, sessionsById, terminals, words]);
+
+  const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(
+    () =>
+      buildItems(allSessions, terminals, Date.now(), {
+        pinnedIds,
+        snoozedMap,
+        filter,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is not read: it is what says the buckets are stale.
+    [allSessions, terminals, day, pinnedIds, snoozedMap, filter],
+  );
+  const empty = loaded && Object.keys(sessionsById).length === 0 && terminals.length === 0;
+  const results = useMemo(() => (searching ? searchItems(allSessions, terminals, words) : []), [searching, allSessions, terminals, words]);
+
+  const filterChips = useMemo(() => {
+    const chips: { key: HomeFilterMode; label: string; count?: number }[] = [{ key: "all", label: "全部" }];
+    if (waiting + failed > 0) chips.push({ key: "attention", label: "需处理", count: waiting + failed });
+    if (running > 0) chips.push({ key: "running", label: "进行中", count: running });
+    if (pinnedCount > 0) chips.push({ key: "pinned", label: "已置顶", count: pinnedCount });
+    if (terminals.length > 0) chips.push({ key: "terminals", label: "终端", count: terminals.length });
+    if (snoozedCount > 0) chips.push({ key: "snoozed", label: "稍后", count: snoozedCount });
+    return chips;
+  }, [waiting, failed, running, pinnedCount, terminals.length, snoozedCount]);
+
+  useEffect(() => {
+    if (filter !== "all" && !filterChips.some((c) => c.key === filter)) {
+      setFilter("all");
+    }
+  }, [filter, filterChips]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -334,6 +490,19 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
     [now, compact, onSelect, selectedId],
   );
 
+  const openHeroFromIsland = useCallback(() => {
+    const deep = liveActivityPayload.deepLink ?? "";
+    const sessionMatch = /\/session\/([^/?#]+)/.exec(deep);
+    if (sessionMatch?.[1]) {
+      onSelect(sessionMatch[1]);
+      return;
+    }
+    const termMatch = /\/terminal\/([^/?#]+)/.exec(deep);
+    if (termMatch?.[1]) {
+      router.push({ pathname: "/terminal/[id]", params: { id: termMatch[1] } });
+    }
+  }, [liveActivityPayload.deepLink, onSelect]);
+
   return (
     <>
       <LegendList
@@ -341,7 +510,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         keyExtractor={(item) => item.key}
         getItemType={(item) => item.type}
         renderItem={renderItem}
-        extraData={selectedId + String(now)}
+        extraData={`${selectedId ?? ""}:${now}:${filter}:${pinnedIds.join(",")}`}
         estimatedItemSize={64}
         recycleItems
         contentInsetAdjustmentBehavior="never"
@@ -362,7 +531,87 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                 {Platform.OS !== "ios" && !inlineControls ? <Pressable accessibilityRole="button" accessibilityLabel="新建会话" onPress={NEW_SESSION.onPress} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="square.and.pencil" md="edit_square" size={22} color={colors.accent} /></Pressable> : null}
               </View>
               {inlineControls || (loaded && !empty) ? <PageSearch value={query} onChangeText={setQuery} placeholder="搜索会话" action={inlineControls ? NEW_SESSION : undefined} /> : null}
+              {!searching && filterChips.length > 1 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}
+                >
+                  {filterChips.map((chip) => {
+                    const active = filter === chip.key;
+                    return (
+                      <Pressable
+                        key={chip.key}
+                        onPress={() => {
+                          haptics.selection();
+                          setFilter(chip.key);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`筛选：${chip.label}`}
+                        style={({ pressed }) => ({
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 5,
+                          height: 32,
+                          paddingHorizontal: 12,
+                          borderRadius: 16,
+                          borderCurve: "continuous",
+                          borderWidth: StyleSheet.hairlineWidth,
+                          borderColor: active ? colors.accent : colors.separator,
+                          backgroundColor: active ? colors.accent : pressed ? colors.fillStrong : colors.card,
+                        })}
+                      >
+                        <Text
+                          style={[
+                            type.caption,
+                            {
+                              color: active ? colors.onAccent : colors.label,
+                              fontWeight: active ? "600" : "500",
+                            },
+                          ]}
+                        >
+                          {chip.label}
+                        </Text>
+                        {chip.count !== undefined ? (
+                          <View
+                            style={{
+                              minWidth: 18,
+                              height: 18,
+                              paddingHorizontal: 5,
+                              borderRadius: 9,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: active ? "rgba(255,255,255,0.22)" : colors.fill,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                color: active ? colors.onAccent : colors.secondaryLabel,
+                                fontWeight: "600",
+                                fontVariant: ["tabular-nums"],
+                              }}
+                            >
+                              {chip.count}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
             </View>
+            {!searching &&
+            liveActivityPayload.active &&
+            (liveActivityPayload.phase === "stale" ||
+              filter === "pinned" ||
+              filter === "terminals" ||
+              filter === "snoozed") ? (
+              <AttentionIsland payload={liveActivityPayload} onOpenHero={openHeroFromIsland} />
+            ) : null}
             <ConnectionBanner />
           </View>
         }

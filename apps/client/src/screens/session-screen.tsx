@@ -306,15 +306,60 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   // list (which aligns its content to the bottom, as a chat should).
   // Notices ("the terminal quit") don't start a conversation; messages and tools do.
   // Nor is it the start while earlier history is still to load.
-  const started = hasEarlier || items.some((item) => item.kind === "user" || item.kind === "agent" || item.kind === "tool" || item.kind === "thought" || item.kind === "plan");
+  const started =
+    hasEarlier ||
+    items.some(
+      (item) =>
+        item.kind === "user" ||
+        item.kind === "agent" ||
+        item.kind === "tool" ||
+        item.kind === "thought" ||
+        item.kind === "plan" ||
+        item.kind === "error" ||
+        item.kind === "turn-end" ||
+        item.kind === "permission-result",
+    );
+  const openChanges = () => {
+    haptics.selection();
+    if (onOpenPanel) onOpenPanel("changes");
+    else if (workspace) workspace.show("changes");
+    else router.push({ pathname: "/session/[id]/changes", params: { id } });
+  };
   const intro =
     loading || started || hasDraft || view?.goal ? null : (
-      <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 32 }}>
+      <View style={{ alignItems: "center", gap: 12, paddingHorizontal: 28 }}>
         <AgentTile agent={summary.agent} size={56} />
-        <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
-        <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
-          {tier ? tierCopy[tier].detail : `在 ${baseName(summary.cwd)} 里开始对话`}
-        </Text>
+        <View style={{ alignItems: "center", gap: 4 }}>
+          <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
+          <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
+            {tier ? tierCopy[tier].detail : `在 ${baseName(summary.cwd)} 里开始对话`}
+          </Text>
+        </View>
+        {online && tier !== "terminal" ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 }}>
+            {["查看最近 git 改动", "运行测试并排查问题", "梳理当前项目结构"].map((starter) => (
+              <Pressable
+                key={starter}
+                onPress={() => {
+                  haptics.selection();
+                  void commandControls.send([{ type: "text", text: starter }]);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`发送：${starter}`}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 13,
+                  paddingVertical: 7,
+                  borderRadius: 16,
+                  borderCurve: "continuous",
+                  backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                })}
+              >
+                <Text style={[type.footnote, { color: colors.label, fontWeight: "500" }]}>{starter}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
     );
 
@@ -453,6 +498,60 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onFailedMessage={onFailedMessage}
         onScroll={onScroll}
         earlier={earlier}
+        header={
+          Platform.OS === "ios" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingBottom: 8 }}>
+              <Pressable
+                onPress={() => {
+                  haptics.selection();
+                  router.push({ pathname: "/files", params: { path: summary.cwd } });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`项目目录 ${baseName(summary.worktree?.source ?? summary.cwd)}`}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  paddingLeft: 5,
+                  paddingRight: 10,
+                  height: 28,
+                  borderRadius: 14,
+                  borderCurve: "continuous",
+                  backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                  flexShrink: 1,
+                })}
+              >
+                <AgentTile agent={summary.agent} size={18} />
+                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, fontWeight: "600", flexShrink: 1 }]}>
+                  {baseName(summary.worktree?.source ?? summary.cwd)}
+                </Text>
+                {branch ? <BranchTag branch={branch} max={16} own={!!summary.worktree} /> : null}
+              </Pressable>
+              {changeCount > 0 ? (
+                <Pressable
+                  onPress={openChanges}
+                  accessibilityRole="button"
+                  accessibilityLabel={`查看 ${changeCount} 个文件改动`}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 10,
+                    height: 28,
+                    borderRadius: 14,
+                    borderCurve: "continuous",
+                    backgroundColor: pressed ? colors.fillStrong : colors.accentSoft,
+                  })}
+                >
+                  <Icon sf="plus.forwardslash.minus" md="difference" size={11} color={colors.accent} />
+                  <Text style={[type.caption, { color: colors.accent, fontWeight: "600", fontVariant: ["tabular-nums"] }]}>
+                    {changeCount} 个改动
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null
+        }
       />
       </TimelineQuestions.Provider>
       </TimelineFork.Provider>
@@ -461,7 +560,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       )}
 
       {intro ? (
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
+        <Animated.View pointerEvents="box-none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
           {intro}
         </Animated.View>
       ) : null}

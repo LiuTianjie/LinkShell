@@ -74,7 +74,17 @@ function tail(text: string): { text: string; hidden: number } {
   return { text: lines.slice(-MAX_OUTPUT_LINES).join("\n"), hidden: lines.length - MAX_OUTPUT_LINES };
 }
 
-export function DiffView({ change, maxLines = 200 }: { change: FileChange; maxLines?: number }) {
+export function DiffView({
+  change,
+  maxLines = 200,
+  lineComments,
+  onPressLine,
+}: {
+  change: FileChange;
+  maxLines?: number;
+  lineComments?: Record<number, string>;
+  onPressLine?: (lineIndex: number, lineText: string) => void;
+}) {
   const lines = change.lines.slice(0, maxLines);
   return (
     <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", overflow: "hidden" }}>
@@ -91,22 +101,61 @@ export function DiffView({ change, maxLines = 200 }: { change: FileChange; maxLi
             const sign = line[0];
             const added = sign === "+";
             const removed = sign === "-";
-            return (
+            const comment = lineComments?.[index];
+            const rowText = (
               <Text
-                key={index}
-                selectable
+                selectable={!onPressLine}
                 style={{
                   fontFamily: mono,
                   fontSize: 12,
                   lineHeight: 18,
                   paddingHorizontal: 10,
                   color: added ? colors.diffAddText : removed ? colors.diffDelText : colors.codeText,
-                  backgroundColor: added ? colors.diffAdd : removed ? colors.diffDel : undefined,
+                  backgroundColor: comment ? colors.accentSoft : added ? colors.diffAdd : removed ? colors.diffDel : undefined,
                 }}
               >
                 {added ? "+ " : removed ? "− " : "  "}
                 {line.slice(1) || " "}
               </Text>
+            );
+            if (!onPressLine) return <View key={index}>{rowText}</View>;
+            return (
+              <View key={index}>
+                <Pressable
+                  onPress={() => {
+                    haptics.selection();
+                    onPressLine(index, line);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`批注代码行：${line.slice(1).trim() || "空行"}`}
+                >
+                  {rowText}
+                </Pressable>
+                {comment ? (
+                  <Pressable
+                    onPress={() => {
+                      haptics.selection();
+                      onPressLine(index, line);
+                    }}
+                    style={{
+                      marginHorizontal: 10,
+                      marginVertical: 4,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 10,
+                      backgroundColor: colors.accentSoft,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Icon sf="text.bubble.fill" md="comment" size={12} color={colors.accent} />
+                    <Text style={[type.caption, { color: colors.accent, fontWeight: "600", flex: 1 }]}>
+                      批注：{comment}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             );
           })}
           {change.lines.length > maxLines ? (

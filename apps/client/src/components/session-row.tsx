@@ -17,6 +17,14 @@ import { OwnedFloatingMenu, type FloatingMenuHandle } from "./app-menu";
 import { haptics } from "@/lib/haptics";
 import { useActions } from "@/lib/client";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
+import {
+  clearSessionSnooze,
+  isSessionSnoozed,
+  snoozeSession,
+  toggleSessionPinned,
+  usePinnedSessionIds,
+  useSnoozedSessions,
+} from "@/lib/session-attention";
 import { LiveDot, stateColor } from "./status";
 
 /** The agent tile beside a row's title. */
@@ -265,12 +273,45 @@ export const SessionRow = memo(function SessionRow({
   const look = agentLook(session.agent);
   const running = session.state === "running";
   const failed = session.state === "error";
+  const pinnedIds = usePinnedSessionIds();
+  const snoozedMap = useSnoozedSessions();
+  const pinned = pinnedIds.includes(session.id);
+  const snoozed = isSessionSnoozed(session, now, snoozedMap);
   // A session in a worktree belongs to the project the worktree was made from.
   const project = showProject ? baseName(session.worktree?.source ?? session.cwd) : undefined;
   const branch = session.worktree?.branch;
   const title = sessionTitle(session);
   const actions = useActions();
   const menu: RowMenuItem[] = [
+    {
+      title: pinned ? "取消置顶" : "置顶会话",
+      icon: pinned ? { sf: "pin.slash", md: "push_pin" } : { sf: "pin.fill", md: "push_pin" },
+      onPress: () => {
+        haptics.selection();
+        toggleSessionPinned(session.id);
+      },
+    },
+    ...(!session.archived
+      ? [
+          snoozed
+            ? {
+                title: "取消稍后提醒",
+                icon: { sf: "bell.fill", md: "notifications_active" } as const,
+                onPress: () => {
+                  haptics.selection();
+                  clearSessionSnooze(session.id);
+                },
+              }
+            : {
+                title: "稍后处理（1 小时）",
+                icon: { sf: "clock", md: "schedule" } as const,
+                onPress: () => {
+                  haptics.selection();
+                  snoozeSession(session.id, 3600_000);
+                },
+              },
+        ]
+      : []),
     { title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(session) },
     {
       title: session.archived ? "取消归档" : "归档",
@@ -294,7 +335,17 @@ export const SessionRow = memo(function SessionRow({
       leading={<SessionAvatar session={session} size={ICON} />}
       title={title}
       time={relativeTime(session.updatedAt, now)}
-      accessory={needsUserInput(session) ? <UserInputBadge /> : <DriverGlyph session={session} />}
+      accessory={
+        needsUserInput(session) ? (
+          <UserInputBadge />
+        ) : (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            {pinned ? <Icon sf="pin.fill" md="push_pin" size={11} color={colors.accent} /> : null}
+            {snoozed ? <Icon sf="clock.fill" md="schedule" size={11} color={colors.tertiaryLabel} /> : null}
+            <DriverGlyph session={session} />
+          </View>
+        )
+      }
       project={project}
       branch={branch}
       detail={detail ?? (project || branch ? undefined : look.name)}

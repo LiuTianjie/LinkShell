@@ -1,0 +1,322 @@
+import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
+import Storage from "expo-sqlite/kv-store";
+import { useEffect, useSyncExternalStore } from "react";
+import { Platform } from "react-native";
+import {
+  setNativeShortcutItems,
+  syncNativeLiveActivity,
+  type LiveActivityPayload,
+  type ShortcutItemInput,
+} from "../../modules/link-layout";
+import { agentLook } from "@/theme/agents";
+import { activityText, needsAttention, needsUserInput, plainPreview, sessionTitle } from "./describe";
+import { baseName } from "./format";
+import { terminalState } from "./terminals";
+
+export type AttentionPhase =
+  | "waiting_for_approval"
+  | "waiting_for_input"
+  | "failed"
+  | "running"
+  | "starting"
+  | "completed"
+  | "stale";
+
+export type HomeFilterMode = "all" | "attention" | "running" | "pinned" | "terminals" | "snoozed";
+
+const PINNED_KEY = "sessions.pinned.v1";
+const SNOOZED_KEY = "sessions.snoozed.v1";
+
+const listeners = new Set<() => void>();
+function notify() {
+  for (const listener of listeners) listener();
+}
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+let pinnedIds: string[] = [];
+let snoozedUntilById: Record<string, number> = {};
+
+try {
+  const rawPinned = Storage.getItemSync(PINNED_KEY);
+  if (rawPinned) {
+    const parsed = JSON.parse(rawPinned);
+    if (Array.isArray(parsed)) pinnedIds = parsed.filter((id): id is string => typeof id === "string");
+  }
+  const rawSnoozed = Storage.getItemSync(SNOOZED_KEY);
+  if (rawSnoozed) {
+    const parsed = JSON.parse(rawSnoozed);
+    if (parsed && typeof parsed === "object") snoozedUntilById = parsed as Record<string, number>;
+  }
+} catch {
+  // Missing storage must never break the home list.
+}
+
+function savePinned(next: string[]) {
+  pinnedIds = next;
+  try {
+    Storage.setItemSync(PINNED_KEY, JSON.stringify(next));
+  } catch {
+    // Keep in memory for this run.
+  }
+  notify();
+}
+
+function saveSnoozed(next: Record<string, number>) {
+  snoozedUntilById = next;
+  try {
+    Storage.setItemSync(SNOOZED_KEY, JSON.stringify(next));
+  } catch {
+    // Keep in memory for this run.
+  }
+  notify();
+}
+
+export function isSessionPinned(sessionId: string): boolean {
+  return pinnedIds.includes(sessionId);
+}
+
+export function toggleSessionPinned(sessionId: string): boolean {
+  const exists = pinnedIds.includes(sessionId);
+  const next = exists ? pinnedIds.filter((id) => id !== sessionId) : [sessionId, ...pinnedIds];
+  savePinned(next);
+  return !exists;
+}
+
+export function snoozeSession(sessionId: string, durationMs: number, now = Date.now()): void {
+  saveSnoozed({
+    ...snoozedUntilById,
+    [sessionId]: now + Math.max(60_000, durationMs),
+  });
+}
+
+export function clearSessionSnooze(sessionId: string): void {
+  if (!(sessionId in snoozedUntilById)) return;
+  const next = { ...snoozedUntilById };
+  delete next[sessionId];
+  saveSnoozed(next);
+}
+
+/**
+ * A snoozed session stays hidden until its timer expires, UNLESS it needs user
+ * attention, fails, or starts running again — urgent events wake it immediately.
+ */
+export function isSessionSnoozed(
+  session: SessionSummary,
+  now = Date.now(),
+  snoozedMap: Record<string, number> = snoozedUntilById,
+): boolean {
+  const until = snoozedMap[session.id];
+  if (!until || until <= now) return false;
+  if (needsAttention(session) || session.state === "running" || session.state === "error") return false;
+  return true;
+}
+
+const getPinnedSnapshot = () => pinnedIds;
+const getSnoozedSnapshot = () => snoozedUntilById;
+
+export function usePinnedSessionIds(): string[] {
+  return useSyncExternalStore(subscribe, getPinnedSnapshot, getPinnedSnapshot);
+}
+
+export function useSnoozedSessions(): Record<string, number> {
+  return useSyncExternalStore(subscribe, getSnoozedSnapshot, getSnoozedSnapshot);
+}
+
+/** Classify a session into the 7-phase attention hierarchy (t3code model). */
+export function classifySessionPhase(session: SessionSummary, online = true): AttentionPhase {
+  if (!online || session.state === "offline") return "stale";
+  if (needsUserInput(session)) return "waiting_for_input";
+  if (session.state === "waiting" || needsAttention(session)) return "waiting_for_approval";
+  if (session.state === "error") return "failed";
+  if (session.state === "running") return "running";
+  if (session.state === "unknown") return "starting";
+  return "completed";
+}
+
+export function phasePriority(phase: AttentionPhase): number {
+  switch (phase) {
+    case "waiting_for_approval":
+    case "waiting_for_input":
+      return 0;
+    case "failed":
+      return 1;
+    case "running":
+    case "starting":
+      return 2;
+    case "completed":
+      return 3;
+    case "stale":
+      return 4;
+  }
+}
+
+export function phaseLabel(phase: AttentionPhase): string {
+  switch (phase) {
+    case "waiting_for_approval":
+      return "等待确认";
+    case "waiting_for_input":
+      return "等待回答";
+    case "failed":
+      return "执行出错";
+    case "running":
+      return "正在运行";
+    case "starting":
+      return "正在启动";
+    case "completed":
+      return "已完成";
+    case "stale":
+      return "状态已过期";
+  }
+}
+
+/**
+ * Builds the aggregated single-card iOS Live Activity / Dynamic Island payload
+ * for a computer, sorting attention-first (`waiting` > `failed` > `running`).
+ */
+export function buildLiveActivityPayload(
+  computerName: string,
+  sessions: SessionSummary[],
+  terminals: TerminalInfo[],
+  online: boolean,
+): LiveActivityPayload {
+  const live = sessions.filter((s) => !s.archived);
+  const waiting = live.filter((s) => needsAttention(s));
+  const failed = live.filter((s) => !needsAttention(s) && s.state === "error");
+  const runningSessions = live.filter((s) => !needsAttention(s) && s.state === "running");
+  const busyTerminals = terminals.filter((t) => terminalState(t).busy);
+  const runningCount = runningSessions.length + busyTerminals.length;
+
+  const candidates = [...waiting, ...failed, ...runningSessions].sort((a, b) => {
+    const pa = phasePriority(classifySessionPhase(a, online));
+    const pb = phasePriority(classifySessionPhase(b, online));
+    if (pa !== pb) return pa - pb;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  const hero = candidates[0];
+  if (!hero && busyTerminals.length === 0) {
+    return { active: false, computerName };
+  }
+
+  if (hero) {
+    const phase = classifySessionPhase(hero, online);
+    const subtitle =
+      phase === "waiting_for_approval" || phase === "waiting_for_input"
+        ? hero.permission?.title ?? hero.asyncQuestions?.[0]?.title ?? "需要你的确认"
+        : phase === "failed"
+          ? hero.preview
+            ? plainPreview(hero.preview)
+            : "上一轮执行出错"
+          : activityText(hero.activity);
+
+    return {
+      active: true,
+      computerName,
+      phase,
+      title: sessionTitle(hero),
+      subtitle,
+      project: baseName(hero.worktree?.source ?? hero.cwd),
+      agent: hero.agent,
+      waitingCount: waiting.length,
+      runningCount,
+      failedCount: failed.length,
+      deepLink: `linkshell:///session/${hero.id}`,
+    };
+  }
+
+  const busy = busyTerminals[0]!;
+  const tState = terminalState(busy);
+  return {
+    active: true,
+    computerName,
+    phase: online ? "running" : "stale",
+    title: tState.title || "终端运行中",
+    subtitle: tState.detail || baseName(busy.cwd),
+    project: baseName(busy.cwd),
+    agent: "terminal",
+    waitingCount: 0,
+    runningCount,
+    failedCount: 0,
+    deepLink: `linkshell:///terminal/${busy.id}`,
+  };
+}
+
+/**
+ * Builds up to 4 iOS Home Screen Quick Actions:
+ * 1 static "新建会话" + up to 3 top attention/pinned/recent sessions.
+ */
+export function buildIOSShortcutItems(
+  sessions: SessionSummary[],
+  pinned: string[] = pinnedIds,
+): ShortcutItemInput[] {
+  const pinnedSet = new Set(pinned);
+  const topSessions = sessions
+    .filter((s) => !s.archived)
+    .sort((a, b) => {
+      const attA = Number(needsAttention(a));
+      const attB = Number(needsAttention(b));
+      if (attA !== attB) return attB - attA;
+      const runA = Number(a.state === "running");
+      const runB = Number(b.state === "running");
+      if (runA !== runB) return runB - runA;
+      const pinA = Number(pinnedSet.has(a.id));
+      const pinB = Number(pinnedSet.has(b.id));
+      if (pinA !== pinB) return pinB - pinA;
+      return b.updatedAt - a.updatedAt;
+    })
+    .slice(0, 3);
+
+  return [
+    {
+      id: "linkshell.new-session",
+      title: "新建会话",
+      subtitle: "在当前电脑上启动 Agent",
+      icon: "square.and.pencil",
+      href: "/new",
+    },
+    ...topSessions.map((session): ShortcutItemInput => {
+      const waiting = needsAttention(session);
+      const running = session.state === "running";
+      const project = baseName(session.worktree?.source ?? session.cwd);
+      const agent = agentLook(session.agent).short;
+      const statusPrefix = waiting ? "⚠️ 待确认 · " : running ? "⚡️ 运行中 · " : "";
+      return {
+        id: `linkshell.session.${session.id}`,
+        title: sessionTitle(session),
+        subtitle: `${statusPrefix}${project} · ${agent}`,
+        icon: waiting ? "hand.raised.fill" : running ? "bolt.horizontal.circle.fill" : "bubble.left.and.text.bubble.right",
+        href: `/session/${session.id}`,
+      };
+    }),
+  ];
+}
+
+/**
+ * Hook that keeps iOS Home Screen Quick Actions and ActivityKit Live Activities
+ * automatically synchronized with the current computer's sessions and terminals.
+ */
+export function useIOSAttentionSync(
+  computerName: string,
+  sessions: SessionSummary[],
+  terminals: TerminalInfo[],
+  online: boolean,
+) {
+  const pinned = usePinnedSessionIds();
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    const shortcuts = buildIOSShortcutItems(sessions, pinned);
+    void setNativeShortcutItems(shortcuts);
+  }, [sessions, pinned]);
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    const payload = buildLiveActivityPayload(computerName, sessions, terminals, online);
+    void syncNativeLiveActivity(payload);
+  }, [computerName, sessions, terminals, online]);
+}
