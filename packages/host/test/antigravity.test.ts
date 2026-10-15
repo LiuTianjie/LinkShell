@@ -267,7 +267,7 @@ describe("Antigravity ACP protocol mapping", () => {
           step_index: 10,
           type: "USER_INPUT",
           content:
-            "<USER_REQUEST>\n/goal Optimize pipeline under 15 minutes\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Argon (Medium) to Gemini 4 Argon (High).\n</USER_SETTINGS_CHANGE>\n<ADDITIONAL_METADATA>\n/goal is a [Slash Command]:\nOnce complete, include <!-- GOAL_COMPLETE --> in your response.\n</ADDITIONAL_METADATA>",
+            "<USER_REQUEST>\n/goal Optimize pipeline under 15 minutes\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Argon (Medium) to Gemini 4 Argon (High). No need to comment on this change if the user doesn't ask about it.\n</USER_SETTINGS_CHANGE>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Argon (High) to None.\n</USER_SETTINGS_CHANGE>\n<ADDITIONAL_METADATA>\n/goal is a [Slash Command]:\nOnce complete, include <!-- GOAL_COMPLETE --> in your response.\n</ADDITIONAL_METADATA>",
           media: [{ mime_type: "image/png", uri: imgPath }],
         }),
         JSON.stringify({

@@ -398,11 +398,14 @@ export function cleanAntigravityAgentContent(content: string): {
 
 function extractModelSelectionFromContent(content: string | undefined): string | undefined {
   if (!content) return undefined;
-  const regex = /changed setting `Model Selection` from .*? to ([^\r\n.<]+?)\.?\s*(?:<\/USER_SETTINGS_CHANGE>|\r|\n|$)/gi;
+  const regex = /changed setting `?Model Selection`? from .*? to ([^\r\n.<]+?)(?:\.(?:\s|$)|<\/USER_SETTINGS_CHANGE>|\r|\n|$)/gi;
   let last: string | undefined;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
-    if (match[1]?.trim()) last = match[1].trim();
+    const candidate = match[1]?.trim();
+    if (candidate && candidate.toLowerCase() !== "none") {
+      last = candidate;
+    }
   }
   return last;
 }
@@ -1245,6 +1248,45 @@ export class AntigravityDriver extends AcpDriver {
     return models[0]!;
   }
 
+  private async resolvePlanModelEnum(
+    conn: LanguageServerConnection,
+    nativeId: string,
+    explicitModel?: string,
+  ): Promise<string> {
+    const models = await this.loadDesktopModels();
+    if (models.length > 0) {
+      const matched = await this.resolveSessionModel(nativeId, models, explicitModel);
+      if (matched?.value) return matched.value;
+    }
+    if (explicitModel?.startsWith("MODEL_")) return explicitModel;
+    if (nativeId) {
+      try {
+        const meta = await callLanguageServer<{
+          generatorMetadata?: {
+            plannerConfig?: {
+              planModel?: string;
+              requestedModel?: { model?: string };
+            };
+            chatModel?: { model?: string };
+          }[];
+        }>(conn, "GetCascadeTrajectoryGeneratorMetadata", { cascadeId: nativeId });
+        const entries = meta.generatorMetadata ?? [];
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i]!;
+          const candidate =
+            entry.plannerConfig?.planModel ??
+            entry.plannerConfig?.requestedModel?.model ??
+            entry.chatModel?.model;
+          if (candidate?.startsWith("MODEL_")) return candidate;
+        }
+      } catch {
+        // ignore metadata RPC failure
+      }
+    }
+    if (this.desktopDefaultModel?.startsWith("MODEL_")) return this.desktopDefaultModel;
+    return "MODEL_PLACEHOLDER_M418";
+  }
+
   private async emitDesktopConfig(nativeId: string, selectedModel?: string): Promise<void> {
     this.host?.update(this.id, nativeId, {
       sessionUpdate: "available_commands_update",
@@ -1299,7 +1341,9 @@ export class AntigravityDriver extends AcpDriver {
               watcher.nextLine = parsed.nextLine;
               if (parsed.lastModelLabel && parsed.lastModelLabel !== watcher.lastModelLabel) {
                 watcher.lastModelLabel = parsed.lastModelLabel;
-                void this.emitDesktopConfig(nativeId);
+                watcher.selectedModel = parsed.lastModelLabel;
+                this.host?.state(this.id, nativeId).set("agy-selected-model", parsed.lastModelLabel);
+                void this.emitDesktopConfig(nativeId, parsed.lastModelLabel);
               }
               if (parsed.goal !== undefined) {
                 watcher.goal = parsed.goal;
@@ -1400,19 +1444,19 @@ export class AntigravityDriver extends AcpDriver {
     if (!conn) {
       throw RpcError.app("agent_unavailable", "请先在电脑上打开 Antigravity 桌面端应用");
     }
+    const requestedModel = await this.resolvePlanModelEnum(conn, "", options.model);
     const response = await callLanguageServer<{ cascadeId?: string }>(conn, "StartCascade", {
+      source: "CORTEX_TRAJECTORY_SOURCE_CASCADE_CLIENT",
       workspaceUris: [pathToFileURL(options.cwd).href],
-      overrideWorkspaceUris: true,
-      ...(options.model ? { requestedModel: options.model } : {}),
+      requestedModel,
     });
     const nativeId = response.cascadeId;
     if (!nativeId) throw RpcError.app("agent_unavailable", "Antigravity 未返回新会话 ID");
     const watcher = this.startWatchingDesktopTranscript(nativeId, 0);
-    if (options.model) {
-      watcher.selectedModel = options.model;
-      this.host?.state(this.id, nativeId).set("agy-selected-model", options.model);
-    }
-    void this.emitDesktopConfig(nativeId, options.model);
+    const selectedModel = options.model ?? requestedModel;
+    watcher.selectedModel = selectedModel;
+    this.host?.state(this.id, nativeId).set("agy-selected-model", selectedModel);
+    void this.emitDesktopConfig(nativeId, selectedModel);
     const now = Date.now();
     return { nativeId, cwd: options.cwd, createdAt: now, updatedAt: now, state: "idle" };
   }
@@ -1547,7 +1591,7 @@ export class AntigravityDriver extends AcpDriver {
     }
 
     const fullText = context ? (text ? `${context}\n\n${text}` : context) : text;
-    const selectedModel = watcher.selectedModel;
+    const planModel = await this.resolvePlanModelEnum(conn, nativeId, watcher.selectedModel);
 
     watcher.running = true;
     this.desktopSessionStates.set(nativeId, "running");
@@ -1558,7 +1602,34 @@ export class AntigravityDriver extends AcpDriver {
       cascadeId: nativeId,
       items: [{ text: fullText || "请查看附图" }],
       ...(media.length > 0 ? { media } : {}),
-      ...(selectedModel ? { cascadeConfig: { plannerConfig: { requestedModel: { model: selectedModel } } } } : {}),
+      cascadeConfig: {
+        plannerConfig: {
+          supportsLatexRendering: true,
+          toolConfig: {
+            runCommand: {
+              autoCommandConfig: {
+                autoExecutionPolicy: "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER",
+              },
+            },
+            notifyUser: {},
+          },
+          planModel,
+          useAiCredits: false,
+        },
+        executorConfig: {
+          useCoreDirect: true,
+        },
+        conversationHistoryConfig: {},
+      },
+      customAgentSpec: {
+        builtinAgent: {
+          defaultAgent: {
+            isGoogle: false,
+            isInteractive: true,
+            surface: "AGENT_SURFACE_HUB",
+          },
+        },
+      },
     });
 
     return "started";
