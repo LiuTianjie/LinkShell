@@ -336,6 +336,15 @@ export class TerminalManager {
     for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value;
     Object.assign(env, { TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "LinkShell" });
     env.LANG ??= "en_US.UTF-8";
+    // Let Claude Code use its DECSTBM renderer, which scrolls the transcript
+    // with scroll regions (SU/SD) instead of repainting whole rows. The phone's
+    // ghostty core animates those region scrolls with a short ease, so a
+    // captured TUI scrolls as smoothly as the local shell's scrollback. Claude
+    // still gates it on synchronized-output support, which the phone's ghostty
+    // reports, and ignores it on the alternate screen's own terms; a program
+    // that doesn't know the variable is unaffected. `??=` so a user's own
+    // setting wins.
+    env.CLAUDE_CODE_DECSTBM ??= "1";
     Object.assign(env, options.launch?.env);
     const pty = spawn(shell, options.launch?.args ?? (process.platform === "win32" ? [] : ["-l"]), {
       name: "xterm-256color",
