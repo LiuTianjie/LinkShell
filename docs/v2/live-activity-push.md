@@ -27,6 +27,35 @@ App ID 开启能力后，本地 Release 构建使用现有自动签名流程更�
 
 ## 更新链路
 
+```mermaid
+flowchart TD
+    App["iPhone 上的 LinkShell App"]
+    Activity["iOS ActivityKit<br/>锁屏 / 灵动岛卡片"]
+    Gateway["LinkShell 网关<br/>只转发端到端加密的密文"]
+    Host["电脑上的 Host"]
+    Agents["Agent / 终端状态变化"]
+    Push["独立私有推送服务<br/>push.itool.tech"]
+    Auth["Supabase Auth"]
+    Key["部署环境中的 APNs .p8 私钥"]
+    Apple["Apple APNs"]
+
+    App -->|"前台创建活动，取得专属 Activity token"| Activity
+    App -->|"HTTPS 注册：活动 token、单活动授权、登录凭证"| Push
+    Push -->|"注册时验证登录账号"| Auth
+    App <-->|"加密的授权交接 / 查看任务 / 提交操作"| Gateway
+    Gateway <-->|"密文转发"| Host
+    Agents --> Host
+    Host -->|"HTTPS：最新状态摘要 + 单活动授权"| Push
+    Key -.->|"只注入推送服务"| Push
+    Push -->|"HTTP/2：签名的 update / end 推送"| Apple
+    Apple -->|"由 iOS 更新或结束卡片"| Activity
+    Activity -.->|"点按钮：解锁、打开 App、核对后提交"| App
+```
+
+**建立一次活动后，后台更新不依赖 App 的 JS 或手机到网关的连接继续运行。** Host 在电脑上独立观察任务，将最新摘要发给私有服务，Apple 再把它交给 iOS。电脑、推送服务和 Apple 之间仍需要网络；这版必须先在 App 前台创建活动，不支持远程新建卡片。
+
+**按钮操作走 App 到 Host 的加密连接。** App Intent 要求设备认证，打开 App 并交接一次性选择；App 自动选择对应电脑、重连、核对会话和请求仍有效后提交。请求已过期或提交结果不确定时，不会自动重放审批。下面的 token、授权和私钥是三种不同的东西：活动 token 指定哪张卡片，单活动授权允许 Host 更新这一张卡片，`.p8` 私钥只让推送服务向 Apple 证明身份。
+
 1. App 在前台创建 `Activity.request(..., pushType: .token)`，原生持续观察 `pushTokenUpdates`，同时恢复已存在的活动。普通 APNs device token 不能代替这个 token。
 2. 已登录的 App 将活动 token 和随机生成的单活动授权交给 HTTPS 服务。服务用 Supabase Auth 的 `/auth/v1/user` 校验账号，活动绑定账号，重复注册和 token 轮换不会延长活动寿命。客户端将授权存入 Keychain。
 3. App 通过原有端到端加密的 Host RPC 交接授权、活动 ID 和电脑标识。Host 将它们存到 `~/.linkshell/live-activities.json`（0600）。它不接收 APNs 私钥或账户 refresh token。
