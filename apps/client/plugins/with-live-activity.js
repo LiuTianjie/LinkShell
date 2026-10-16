@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const TARGET_NAME = "LinkShellLiveActivity";
 const SOURCE_FILE = "LinkShellLiveActivity.swift";
+const ACTION_FILE = "LinkShellActivityActionIntent.swift";
 const INFO_PLIST_FILE = "LinkShellLiveActivity-Info.plist";
 
 const INFO_PLIST_CONTENT = `<?xml version="1.0" encoding="UTF-8"?>
@@ -50,18 +51,25 @@ public struct LinkShellAttentionAttributes: ActivityAttributes {
     public var subtitle: String
     public var project: String
     public var agent: String
+    public var agents: [String]?
+    public var actions: [LiveActivityAction]?
+    public var hasMoreActions: Bool?
     public var waitingCount: Int
     public var runningCount: Int
     public var failedCount: Int
     public var deepLink: String
   }
   public var computerName: String
+  public var computerKey: String?
+  public var remoteUpdates: Bool?
 }
 
 @available(iOS 16.2, *)
-extension LinkShellAttentionAttributes.ContentState {
-  var agentDisplayName: String {
-    switch agent.lowercased() {
+struct ActivityAgent: Identifiable {
+  let id: String
+
+  var name: String {
+    switch id {
     case "claude": return "Claude"
     case "codex": return "Codex"
     case "antigravity": return "Antigravity"
@@ -71,25 +79,12 @@ extension LinkShellAttentionAttributes.ContentState {
     case "grok": return "Grok"
     case "opencode": return "OpenCode"
     case "terminal": return "终端"
-    default: return agent.isEmpty ? "Agent" : agent.capitalized
+    default: return id.isEmpty ? "Agent" : id.capitalized
     }
   }
 
-  var agentShortBadge: String {
-    switch agent.lowercased() {
-    case "claude": return "C"
-    case "codex": return "Cx"
-    case "antigravity": return "Ag"
-    case "cursor": return "Cu"
-    case "gemini": return "G"
-    case "opencode": return "OC"
-    case "terminal": return ">_"
-    default: return String(agentDisplayName.prefix(2))
-    }
-  }
-
-  var agentSymbolName: String {
-    switch agent.lowercased() {
+  var symbolName: String {
+    switch id {
     case "terminal": return "terminal.fill"
     case "antigravity": return "sparkles"
     case "codex": return "cpu.fill"
@@ -98,8 +93,8 @@ extension LinkShellAttentionAttributes.ContentState {
     }
   }
 
-  var agentAccentColor: Color {
-    switch agent.lowercased() {
+  var accentColor: Color {
+    switch id {
     case "claude": return Color(red: 0.85, green: 0.47, blue: 0.34)
     case "codex": return Color(red: 0.39, green: 0.40, blue: 0.95)
     case "antigravity": return Color(red: 0.26, green: 0.52, blue: 0.96)
@@ -109,39 +104,42 @@ extension LinkShellAttentionAttributes.ContentState {
     default: return Color(red: 0.39, green: 0.40, blue: 0.95)
     }
   }
+}
+
+@available(iOS 16.2, *)
+extension LinkShellAttentionAttributes.ContentState {
+  var displayAgents: [ActivityAgent] {
+    var seen = Set<String>()
+    // Older activities contain only the featured agent.
+    return ([agent] + (agents ?? [])).compactMap { raw in
+      let id = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      guard !id.isEmpty, seen.insert(id).inserted else { return nil }
+      return ActivityAgent(id: id)
+    }
+  }
 
   var phaseSymbolName: String {
     switch phase {
     case "waiting_for_approval": return "hand.raised.fill"
     case "waiting_for_input": return "questionmark.bubble.fill"
     case "failed": return "exclamationmark.triangle.fill"
-    case "running": return "bolt.horizontal.circle.fill"
+    case "running": return "waveform"
     case "starting": return "sparkles"
     case "completed": return "checkmark.circle.fill"
     default: return "clock.badge.exclamationmark"
     }
   }
 
-  var phaseShortLabel: String {
+  var phaseCount: Int {
     switch phase {
-    case "waiting_for_approval":
-      return waitingCount > 1 ? "\\(waitingCount) 待确认" : "待确认"
-    case "waiting_for_input":
-      return waitingCount > 1 ? "\\(waitingCount) 待回答" : "待回答"
-    case "failed":
-      return failedCount > 1 ? "\\(failedCount) 出错" : "出错"
-    case "running":
-      return runningCount > 1 ? "\\(runningCount) 运行中" : "运行中"
-    case "starting":
-      return "启动中"
-    case "completed":
-      return "已完成"
-    default:
-      return "待刷新"
+    case "waiting_for_approval", "waiting_for_input": return waitingCount
+    case "failed": return failedCount
+    case "running", "starting": return runningCount
+    default: return 0
     }
   }
 
-  var phasePillLabel: String {
+  var phaseAccessibilityLabel: String {
     switch phase {
     case "waiting_for_approval": return "等待确认"
     case "waiting_for_input": return "等待回答"
@@ -194,7 +192,7 @@ extension ActivityViewContext where Attributes == LinkShellAttentionAttributes {
 
 @available(iOS 16.2, *)
 struct AgentBadgeView: View {
-  let state: LinkShellAttentionAttributes.ContentState
+  let agent: ActivityAgent
   var size: CGFloat = 22
 
   private static let icons: [String: UIImage] = {
@@ -219,7 +217,7 @@ struct AgentBadgeView: View {
 
   var body: some View {
     let corner = size * 0.26
-    if let uiImage = Self.icons[state.agent.lowercased()] {
+    if let uiImage = Self.icons[agent.id] {
       Image(uiImage: uiImage)
         .resizable()
         .interpolation(.high)
@@ -234,12 +232,12 @@ struct AgentBadgeView: View {
     } else {
       ZStack {
         RoundedRectangle(cornerRadius: corner, style: .continuous)
-          .fill(state.agentAccentColor.opacity(0.24))
+          .fill(agent.accentColor.opacity(0.24))
         RoundedRectangle(cornerRadius: corner, style: .continuous)
-          .strokeBorder(state.agentAccentColor.opacity(0.65), lineWidth: 1)
-        Image(systemName: state.agentSymbolName)
+          .strokeBorder(agent.accentColor.opacity(0.65), lineWidth: 1)
+        Image(systemName: agent.symbolName)
           .font(.system(size: size * 0.5, weight: .semibold))
-          .foregroundColor(state.agentAccentColor)
+          .foregroundColor(agent.accentColor)
       }
       .frame(width: size, height: size)
     }
@@ -247,53 +245,214 @@ struct AgentBadgeView: View {
 }
 
 @available(iOS 16.2, *)
-struct LockScreenBannerView: View {
-  let context: ActivityViewContext<LinkShellAttentionAttributes>
+struct AgentStackView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+  var size: CGFloat = 26
+  var limit: Int = 3
+  @Environment(\\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\\.isLuminanceReduced) private var isLuminanceReduced
 
   var body: some View {
-    let state = context.displayState
+    let agents = state.displayAgents
+    let visible = Array(agents.prefix(limit))
+    HStack(spacing: -size * 0.38) {
+      ForEach(Array(visible.enumerated()), id: \\.element.id) { index, agent in
+        AgentBadgeView(agent: agent, size: size)
+          .padding(2)
+          .background(RoundedRectangle(cornerRadius: size * 0.26 + 2).fill(Color.black))
+          .zIndex(Double(limit - index))
+          .transition(.opacity)
+      }
+      if agents.count > limit {
+        Text("+\\(agents.count - limit)")
+          .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+          .foregroundColor(.white.opacity(0.9))
+          .minimumScaleFactor(0.7)
+          .frame(width: size, height: size)
+          .background(RoundedRectangle(cornerRadius: size * 0.26).fill(Color(white: 0.2)))
+          .padding(2)
+          .background(RoundedRectangle(cornerRadius: size * 0.26 + 2).fill(Color.black))
+          .padding(.leading, size * 0.38)
+      }
+    }
+    .fixedSize()
+    .animation(reduceMotion || isLuminanceReduced ? nil : .easeInOut(duration: 0.35), value: agents.map(\\.id))
+    .opacity(state.phase == "stale" ? 0.55 : 1)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(agents.map(\\.name).joined(separator: "、"))
+  }
+}
+
+@available(iOS 16.2, *)
+struct StatusGlyphView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+  @Environment(\\.isLuminanceReduced) private var isLuminanceReduced
+  @Environment(\\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    if #available(iOS 17.0, *), !isLuminanceReduced && !reduceMotion {
+      Image(systemName: state.phaseSymbolName)
+        .contentTransition(.symbolEffect(.replace))
+        // Live Activities animate data updates, not an indefinitely running timer.
+        .symbolEffect(.pulse, options: .nonRepeating, value: state.phase == "running" ? state.subtitle : state.phase)
+    } else {
+      Image(systemName: state.phaseSymbolName)
+    }
+  }
+}
+
+@available(iOS 16.2, *)
+struct StatusIndicatorView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+  var size: CGFloat = 28
+  var showsCount = true
+
+  var body: some View {
+    HStack(spacing: 5) {
+      StatusGlyphView(state: state)
+        .font(.system(size: size * 0.48, weight: .semibold))
+      if showsCount && state.phaseCount > 1 {
+        Text(state.phaseCount > 99 ? "99+" : String(state.phaseCount))
+          .font(.system(size: size * 0.45, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+          .contentTransition(.numericText())
+      }
+    }
+    .foregroundColor(state.phaseColor)
+    .padding(.horizontal, showsCount && state.phaseCount > 1 ? 8 : 0)
+    .frame(minWidth: size, minHeight: size)
+    .background(Capsule().fill(state.phaseColor.opacity(0.15)))
+    .fixedSize()
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(state.phaseAccessibilityLabel)
+    .accessibilityValue(state.phaseCount > 1 ? "\\(state.phaseCount) 个任务" : "")
+  }
+}
+
+@available(iOS 16.2, *)
+struct ActivityCountsView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+
+  var body: some View {
+    HStack(spacing: 10) {
+      count(state.runningCount, symbol: "waveform", color: Color(red: 0.22, green: 0.84, blue: 0.42), label: "运行")
+      count(state.waitingCount, symbol: "hand.raised.fill", color: Color(red: 0.98, green: 0.65, blue: 0.10), label: "待处理")
+      count(state.failedCount, symbol: "exclamationmark.triangle.fill", color: Color(red: 0.95, green: 0.30, blue: 0.30), label: "出错")
+    }
+    .font(.system(size: 11, weight: .medium))
+  }
+
+  @ViewBuilder
+  private func count(_ value: Int, symbol: String, color: Color, label: String) -> some View {
+    if value > 0 {
+      HStack(spacing: 4) {
+        Image(systemName: symbol)
+        Text(String(value)).monospacedDigit()
+      }
+      .foregroundColor(color.opacity(0.85))
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\\(value) 个任务\\(label)")
+    }
+  }
+}
+
+@available(iOS 16.2, *)
+struct ActivityTextView: View {
+  let text: String
+  @Environment(\\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\\.isLuminanceReduced) private var isLuminanceReduced
+
+  var body: some View {
+    Text(text)
+      .contentTransition(.opacity)
+      .animation(reduceMotion || isLuminanceReduced ? nil : .easeInOut(duration: 0.3), value: text)
+  }
+}
+
+@available(iOS 16.2, *)
+struct ActivityActionsView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+
+  var body: some View {
+    if state.phase != "stale", let url = URL(string: state.deepLink),
+       !(state.actions ?? []).isEmpty || state.hasMoreActions == true {
+      if #available(iOS 17.0, *), !(state.actions ?? []).isEmpty {
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 8) {
+            ForEach(state.actions ?? []) { action in
+              Button(intent: LinkShellActivityActionIntent(action: action)) {
+                Text(action.label)
+                  .font(.system(size: 13, weight: .semibold))
+                  .lineLimit(1)
+                  .fixedSize()
+                  .padding(.horizontal, 14)
+                  .frame(minHeight: 36)
+                  .foregroundColor(action.role == "allow" ? Color.black : Color.white.opacity(0.94))
+                  .background(Capsule().fill(action.role == "allow" ? state.phaseColor : Color.white.opacity(0.12)))
+              }
+              .buttonStyle(.plain)
+            }
+            if state.hasMoreActions == true {
+              Link(destination: url) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                .foregroundColor(state.phaseColor)
+                .accessibilityLabel("查看全部选项")
+            }
+          }
+          .fixedSize(horizontal: true, vertical: false)
+          detailsLink(url)
+        }
+      } else {
+        detailsLink(url)
+      }
+    }
+  }
+
+  private func detailsLink(_ url: URL) -> some View {
+    Link(destination: url) {
+      HStack(spacing: 5) {
+        Text("查看全部选项")
+        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+      }
+      .font(.system(size: 12, weight: .medium))
+      .foregroundColor(state.phaseColor)
+      .frame(minHeight: 28)
+    }
+  }
+}
+
+@available(iOS 16.2, *)
+struct LockScreenBannerView: View {
+  let state: LinkShellAttentionAttributes.ContentState
+
+  var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
-        AgentBadgeView(state: state, size: 24)
-        Text(state.agentDisplayName)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundColor(.white)
+        AgentStackView(state: state)
         if !state.project.isEmpty {
-          Text("· \\(state.project)")
+          ActivityTextView(text: state.project)
             .font(.system(size: 12, weight: .medium))
             .foregroundColor(.white.opacity(0.68))
             .lineLimit(1)
         }
         Spacer(minLength: 4)
-        HStack(spacing: 4) {
-          Image(systemName: state.phaseSymbolName)
-            .font(.system(size: 11, weight: .semibold))
-          Text(state.phasePillLabel)
-            .font(.system(size: 11, weight: .semibold))
+        StatusIndicatorView(state: state)
+      }
+
+      Link(destination: URL(string: state.deepLink) ?? URL(string: "linkshell:///")!) {
+        VStack(alignment: .leading, spacing: 8) {
+          ActivityTextView(text: state.title)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(.white)
+            .lineLimit(1)
+          ActivityTextView(text: state.effectiveSubtitle)
+            .font(.system(size: 13))
+            .foregroundColor(.white.opacity(0.78))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .foregroundColor(state.phaseColor)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(state.phaseColor.opacity(0.18))
-        .clipShape(Capsule())
       }
-
-      Text(state.title)
-        .font(.system(size: 15, weight: .semibold))
-        .foregroundColor(.white)
-        .lineLimit(1)
-
-      HStack(spacing: 6) {
-        Text(state.effectiveSubtitle)
-          .font(.system(size: 13))
-          .foregroundColor(.white.opacity(0.78))
-          .lineLimit(1)
-        Spacer(minLength: 4)
-        Text(context.attributes.computerName)
-          .font(.system(size: 11, weight: .medium))
-          .foregroundColor(.white.opacity(0.5))
-          .lineLimit(1)
-      }
+      .accessibilityHint("打开任务详情，查看和选择全部选项")
+      ActivityActionsView(state: state)
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 14)
@@ -306,21 +465,17 @@ struct LockScreenBannerView: View {
 struct LinkShellAttentionWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: LinkShellAttentionAttributes.self) { context in
-      LockScreenBannerView(context: context)
+      LockScreenBannerView(state: context.displayState)
         .widgetURL(URL(string: context.state.deepLink))
     } dynamicIsland: { context in
       let state = context.displayState
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
           HStack(spacing: 7) {
-            AgentBadgeView(state: state, size: 24)
-            VStack(alignment: .leading, spacing: 1) {
-              Text(state.agentDisplayName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white)
-                .lineLimit(1)
-              Text(state.project.isEmpty ? context.attributes.computerName : state.project)
-                .font(.system(size: 11))
+            AgentStackView(state: state, size: 24)
+            if !state.project.isEmpty {
+              ActivityTextView(text: state.project)
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.white.opacity(0.65))
                 .lineLimit(1)
             }
@@ -328,76 +483,41 @@ struct LinkShellAttentionWidget: Widget {
           .padding(.leading, 4)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          HStack(spacing: 4) {
-            Image(systemName: state.phaseSymbolName)
-              .font(.system(size: 11, weight: .semibold))
-            Text(state.phasePillLabel)
-              .font(.system(size: 12, weight: .semibold))
-          }
-          .foregroundColor(state.phaseColor)
-          .padding(.horizontal, 9)
-          .padding(.vertical, 5)
-          .background(state.phaseColor.opacity(0.18))
-          .clipShape(Capsule())
-          .padding(.trailing, 4)
+          StatusIndicatorView(state: state)
+            .padding(.trailing, 4)
         }
         DynamicIslandExpandedRegion(.bottom) {
           VStack(alignment: .leading, spacing: 6) {
-            Text(state.title)
-              .font(.system(size: 14, weight: .semibold))
-              .foregroundColor(.white)
-              .lineLimit(1)
+            Link(destination: URL(string: state.deepLink) ?? URL(string: "linkshell:///")!) {
+              ActivityTextView(text: state.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            }
             HStack(spacing: 6) {
-              Image(systemName: state.phaseSymbolName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(state.phaseColor)
-              Text(state.effectiveSubtitle)
+              ActivityTextView(text: state.effectiveSubtitle)
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.8))
                 .lineLimit(1)
               Spacer(minLength: 4)
-              if state.phase != "stale" && state.waitingCount + state.runningCount > 1 {
-                Text("\\(state.runningCount) 运行 · \\(state.waitingCount) 待处理")
-                  .font(.system(size: 11, weight: .medium))
-                  .foregroundColor(.white.opacity(0.55))
-              } else {
-                Text(context.attributes.computerName)
-                  .font(.system(size: 11, weight: .medium))
-                  .foregroundColor(.white.opacity(0.55))
-                  .lineLimit(1)
+              if state.phase != "stale" && state.waitingCount + state.runningCount + state.failedCount > 1 {
+                ActivityCountsView(state: state)
+                  .fixedSize()
               }
             }
+            ActivityActionsView(state: state)
           }
           .padding(.horizontal, 6)
           .padding(.top, 4)
         }
       } compactLeading: {
-        HStack(spacing: 5) {
-          AgentBadgeView(state: state, size: 20)
-          Text(state.agentShortBadge)
-            .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundColor(.white)
-        }
-        .padding(.leading, 2)
+        AgentStackView(state: state, size: 20, limit: 2)
+          .padding(.leading, 2)
       } compactTrailing: {
-        HStack(spacing: 4) {
-          Image(systemName: state.phaseSymbolName)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(state.phaseColor)
-          Text(state.phaseShortLabel)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(state.phaseColor)
-            .lineLimit(1)
-        }
-        .padding(.trailing, 2)
+        StatusIndicatorView(state: state, size: 22)
+          .padding(.trailing, 2)
       } minimal: {
-        ZStack {
-          Circle()
-            .fill(state.phaseColor.opacity(0.22))
-          Image(systemName: state.phaseSymbolName)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(state.phaseColor)
-        }
+        StatusIndicatorView(state: state, size: 22, showsCount: false)
       }
       .widgetURL(URL(string: state.deepLink))
       .keylineTint(state.phaseColor)
@@ -414,6 +534,17 @@ struct LinkShellLiveActivityBundle: WidgetBundle {
 }
 `;
 
+function ensureActionSource(proj, targetId) {
+  const sources = proj.hash.project.objects.PBXSourcesBuildPhase;
+  const files = proj.pbxBuildFileSection();
+  const refs = proj.pbxFileReferenceSection();
+  const target = proj.pbxNativeTargetSection()[targetId];
+  const present = (target.buildPhases || []).some(({ value }) =>
+    sources[value]?.files?.some((file) => String(refs[files[file.value]?.fileRef]?.path || "").replaceAll('"', "").endsWith(`/${ACTION_FILE}`)),
+  );
+  if (!present) proj.addBuildPhase([`${TARGET_NAME}/${ACTION_FILE}`], "PBXSourcesBuildPhase", "Live Activity Actions", targetId);
+}
+
 module.exports = function withLiveActivity(config) {
   return withXcodeProject(config, (config) => {
     const projectRoot = config.modRequest.platformProjectRoot;
@@ -421,9 +552,16 @@ module.exports = function withLiveActivity(config) {
     fs.mkdirSync(extDir, { recursive: true });
     fs.writeFileSync(path.join(extDir, INFO_PLIST_FILE), INFO_PLIST_CONTENT);
     fs.writeFileSync(path.join(extDir, SOURCE_FILE), SWIFT_SOURCE_CONTENT);
+    const actionSource = fs.readFileSync(path.join(__dirname, "../modules/link-layout/ios/LiveActivityAction.swift"), "utf8")
+      + "\n" + fs.readFileSync(path.join(__dirname, "live-activity/LiveActivityActionIntent.swift"), "utf8");
+    fs.writeFileSync(path.join(extDir, ACTION_FILE), actionSource);
 
     const proj = config.modResults;
     if (proj.pbxTargetByName(TARGET_NAME)) {
+      const existing = proj.pbxTargetByName(TARGET_NAME);
+      const targetId = Object.keys(proj.pbxNativeTargetSection()).find((key) => proj.pbxNativeTargetSection()[key] === existing);
+      ensureActionSource(proj, targetId);
+      ensureActionSource(proj, proj.getFirstTarget().uuid);
       return config;
     }
 
@@ -439,19 +577,22 @@ module.exports = function withLiveActivity(config) {
     const target = proj.addTarget(TARGET_NAME, "app_extension", TARGET_NAME, extBundleId);
 
     // Create PBXGroup for extension files and attach to main project group.
-    const extGroup = proj.addPbxGroup([SOURCE_FILE, INFO_PLIST_FILE], TARGET_NAME, TARGET_NAME);
+    const extGroup = proj.addPbxGroup([SOURCE_FILE, ACTION_FILE, INFO_PLIST_FILE], TARGET_NAME, TARGET_NAME);
     const mainGroupId = proj.getFirstProject().firstProject.mainGroup;
     proj.addToPbxGroup(extGroup.uuid, mainGroupId);
 
     // Add Sources, Frameworks, and Resources build phases to the extension target.
     proj.addBuildPhase(
-      [`${TARGET_NAME}/${SOURCE_FILE}`],
+      [`${TARGET_NAME}/${SOURCE_FILE}`, `${TARGET_NAME}/${ACTION_FILE}`],
       "PBXSourcesBuildPhase",
       "Sources",
       target.uuid,
     );
     proj.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
     proj.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", target.uuid);
+    // Both targets need the intent metadata. Execution takes place in the app,
+    // where the Expo module can consume the authenticated selection.
+    ensureActionSource(proj, proj.getFirstTarget().uuid);
 
     // Ensure the Copy Files phase on the main app target embeds the .appex with RemoveHeadersOnCopy.
     const buildFiles = proj.pbxBuildFileSection();

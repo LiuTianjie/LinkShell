@@ -19,13 +19,13 @@ import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
+import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { Welcome } from "@/components/welcome";
 import { haptics } from "@/lib/haptics";
 import {
   buildLiveActivityPayload,
   isSessionSnoozed,
   mergeLiveViewsIntoSessions,
-  useIOSAttentionSync,
   usePinnedSessionIds,
   useSnoozedSessions,
   type HomeFilterMode,
@@ -241,7 +241,9 @@ function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], word
 
 /** Which computer (tap to switch), and only the one thing worth saying: what's waiting on you. */
 function Summary({ waiting, small = false }: { waiting: number; small?: boolean }) {
-  const machine = useClient((state) => state.machine);
+  const { computer } = useConnection();
+  const names = useComputerNames((state) => state.names);
+  const name = computerDisplayName(computer, names);
   const online = useClient((state) => state.status === "online");
   return (
     <Pressable
@@ -250,7 +252,7 @@ function Summary({ waiting, small = false }: { waiting: number; small?: boolean 
         router.push("/computers");
       }}
       accessibilityRole="button"
-      accessibilityLabel={`当前电脑：${machine ? machine.hostname.replace(/\.local$/, "") : "电脑"}，点击切换设备`}
+      accessibilityLabel={`当前电脑：${name}，点击切换设备`}
       hitSlop={6}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -264,7 +266,7 @@ function Summary({ waiting, small = false }: { waiting: number; small?: boolean 
     >
       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} />
       <Text numberOfLines={1} style={[small ? type.footnote : type.subhead, { color: colors.secondaryLabel, flexShrink: 1 }]}>
-        {machine ? machine.hostname.replace(/\.local$/, "") : "电脑"}
+        {name}
       </Text>
       <Icon sf="chevron.up.chevron.down" md="unfold_more" size={11} color={colors.tertiaryLabel} />
       {waiting ? <Text style={[small ? type.footnote : type.subhead, { color: colors.waiting, fontWeight: "600" }]}>· {waiting} 项需要你</Text> : null}
@@ -406,7 +408,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
   const insets = usePageInsets();
   const tabInset = useFloatingTabInset();
   const sessionsById = useClient((state) => state.sessions);
-  const machine = useClient((state) => state.machine);
+  const { computer } = useConnection();
+  const names = useComputerNames((state) => state.names);
   const online = useClient((state) => state.status === "online");
   const loaded = useClient((state) => state.sessionsLoaded);
   const error = useClient((state) => state.sessionsError);
@@ -432,9 +435,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
     () => mergeLiveViewsIntoSessions(Object.values(sessionsById), views, promptProgress),
     [sessionsById, views, promptProgress],
   );
-  const computerName = machine ? machine.hostname.replace(/\.local$/, "") : "电脑";
-
-  useIOSAttentionSync(computerName, allSessions, terminals, online, views, promptProgress);
+  const computerName = computerDisplayName(computer, names);
 
   const liveActivityPayload = useMemo(
     () => buildLiveActivityPayload(computerName, allSessions, terminals, online, views, promptProgress),

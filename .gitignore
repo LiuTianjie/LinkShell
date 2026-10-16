@@ -27,6 +27,11 @@ temp/
 .env.local
 .env.*.local
 
+# Local APNs credentials; only placeholder configuration belongs in Git.
+.secrets/
+*.p8
+*.p12
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

@@ -28,6 +28,10 @@ packages/gateway/web-client/
 .env
 .env.local
 .env.*.local
+**/.env*
+**/.secrets/
+**/*.p8
+**/*.p12
 
 # OS / editor
 .DS_Store

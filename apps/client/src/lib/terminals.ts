@@ -37,37 +37,4 @@ export function useTerminals(): { terminals: TerminalInfo[]; loaded: boolean } {
   return { terminals, loaded };
 }
 
-const SHELLS = /^-?(zsh|bash|sh|fish|dash|ksh|tcsh|nu|pwsh|powershell)\b/;
-
-/**
- * A start command as a one-line title. The UI font has no Nerd Font glyphs
- * (private-use code points), which would show as boxes; the terminal itself
- * draws them with its symbol font.
- */
-export function commandTitle(command: string): string {
-  return command.replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, "").replace(/\s+/g, " ").trim();
-}
-
-/** How a terminal reads in a list: its title, what it's doing, and whether it has ended. */
-export function terminalState(terminal: TerminalInfo) {
-  const ended = terminal.exitCode !== undefined || terminal.interrupted === true;
-  const foreground = ended || SHELLS.test(terminal.title) ? undefined : terminal.title;
-  const failed = !terminal.interrupted && typeof terminal.exitCode === "number" && terminal.exitCode !== 0;
-  const detail = terminal.interrupted
-    ? "电脑重启时中断"
-    : ended
-      ? failed
-        ? `已退出 · 代码 ${terminal.exitCode}`
-        : "已结束"
-      : foreground
-        ? `正在运行 ${foreground}`
-        : "空闲";
-  return {
-    title: (terminal.command && commandTitle(terminal.command)) || "终端",
-    mono: Boolean(terminal.command),
-    ended,
-    busy: Boolean(foreground),
-    failed,
-    detail,
-  };
-}
+export { terminalState, commandTitle } from "@linkshell/wire";

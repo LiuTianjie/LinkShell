@@ -29,10 +29,10 @@ afterEach(async () => {
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "lsh-client-"));
-  const host: RunningHost = await startHost({
+  const launch = (version: string, tcpPort: number) => startHost({
     home,
-    version: "test",
-    tcpPort: 0,
+    version,
+    tcpPort,
     drivers: () => [
       new AcpDriver(
         { id: "fake", label: "Fake", tier: "remote", command: FAKE_ACP, args: [], version: { command: FAKE_ACP, args: ["--version"] }, discover: true },
@@ -41,6 +41,7 @@ async function setup() {
     ],
     log: () => {},
   });
+  let host: RunningHost = await launch("test", 0);
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
   cleanups.push(() => host.stop());
   const sockets: SocketLike[] = [];
@@ -61,7 +62,11 @@ async function setup() {
   cleanups.push(() => store.getState().disconnect());
   store.getState().connect();
   await waitFor(() => store.getState().sessionsLoaded);
-  return { host, link, store, sockets };
+  return { host, link, store, sockets, restart: async (version: string) => {
+    const port = host.server.tcpAddress()!;
+    await host.stop();
+    host = await launch(version, port);
+  } };
 }
 
 const text = (t: string) => [{ type: "text" as const, text: t }];
@@ -69,6 +74,18 @@ const agentText = (store: ClientStore, id: string) =>
   (store.getState().views[id]?.items ?? []).flatMap((i) => (i.kind === "agent" ? [i.text] : [])).join("|");
 
 describe("client core against a real host", () => {
+  it("keeps an open conversation and resumes it after the host changes version", async () => {
+    const { store, restart } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w", prompt: text("before upgrade") });
+    await waitFor(() => agentText(store, session.id) === "echo: before upgrade");
+    await restart("upgraded");
+    await waitFor(() => store.getState().machine?.hostVersion === "upgraded" && store.getState().ready[session.id]);
+    expect(agentText(store, session.id)).toBe("echo: before upgrade");
+    await store.getState().send(session.id, text("after upgrade"));
+    await waitFor(() => agentText(store, session.id) === "echo: before upgrade|echo: after upgrade");
+    expect(store.getState().views[session.id]!.items.filter((item) => item.kind === "user")).toHaveLength(2);
+  });
+
   it("lets interactive authentication wait longer than one second when its timeout is disabled", async () => {
     const { host, link } = await setup();
     const auth = vi.spyOn(host.hub, "authenticate").mockImplementation(async () => {

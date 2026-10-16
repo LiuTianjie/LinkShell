@@ -14,6 +14,7 @@ import { baseName, shortPath } from "@/lib/format";
 import { openTerminal, TerminalTile } from "@/components/terminal-row";
 import { AppMenu } from "@/components/app-menu";
 import { onDirectoryPicked } from "@/lib/directory-pick";
+import { BROWSE_DIRECTORY_ACTION, newSessionDirectory } from "@/lib/new-session-directory";
 import { haptics } from "@/lib/haptics";
 import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
@@ -73,8 +74,6 @@ function ChoiceCard({
     </Pressable>
   );
 }
-const OTHER = "\u0000other";
-
 function lastAgent(): string | null {
   try {
     return Storage.getItemSync(LAST_AGENT_KEY);
@@ -119,7 +118,8 @@ export function NewSessionScreen() {
     }
     return list;
   }, [projects, picked]);
-  const [cwd, setCwd] = useState<string>(() => params.cwd ?? projects[0]?.cwd ?? "");
+  const [selectedCwd, setCwd] = useState<string | undefined>(params.cwd);
+  const cwd = newSessionDirectory(selectedCwd, projects, machine?.home);
   useEffect(
     () =>
       onDirectoryPicked((path) => {
@@ -252,10 +252,10 @@ export function NewSessionScreen() {
                 subtitle: shortPath(project.cwd),
                 state: project.cwd === cwd ? ("on" as const) : ("off" as const),
               })),
-              { id: OTHER, title: "浏览电脑上的目录…", image: "folder.badge.plus" },
+              { id: BROWSE_DIRECTORY_ACTION, title: "浏览电脑上的目录…", image: "folder.badge.plus" },
             ]}
             onPressAction={({ nativeEvent }) => {
-              if (nativeEvent.event === OTHER) router.push("/browse");
+              if (nativeEvent.event === BROWSE_DIRECTORY_ACTION) router.push("/browse");
               else setCwd(nativeEvent.event);
             }}
           >

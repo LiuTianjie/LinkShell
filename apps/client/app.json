@@ -20,7 +20,6 @@
         "CADisableMinimumFrameDurationOnPhone": true,
         "NSSupportsLiveActivities": true,
         "UIBackgroundModes": [
-          "audio",
           "fetch"
         ],
         "NSMicrophoneUsageDescription": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",

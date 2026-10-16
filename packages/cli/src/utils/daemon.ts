@@ -5,6 +5,27 @@ import { spawn } from "node:child_process";
 
 const LINKSHELL_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 
+// Only launch settings, never the shell's credentials or agent API keys.
+const HOST_ENV = ["LINKSHELL_GATEWAY", "LINKSHELL_DEV_PORT", "LINKSHELL_MACHINE_NAME", "LINKSHELL_ICE_SERVERS", "LINKSHELL_CLAUDE_COMMAND", "LINKSHELL_CLAUDE_ADAPTER", "LINKSHELL_PUSH_SERVICE_URL"] as const;
+const hostLaunchFile = join(LINKSHELL_DIR, "host-launch.json");
+
+export function saveHostLaunch(pid: number, tcpPort?: number): void {
+  const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  if (tcpPort !== undefined) env.LINKSHELL_DEV_PORT = String(tcpPort);
+  writeFileSync(hostLaunchFile, `${JSON.stringify({ pid, env })}\n`, { mode: 0o600 });
+}
+
+export function readHostLaunch(pid: number): NodeJS.ProcessEnv {
+  try {
+    const saved = JSON.parse(readFileSync(hostLaunchFile, "utf8")) as { pid?: number; env?: Record<string, unknown> };
+    const env = saved.env;
+    if (saved.pid !== pid || !env) return {};
+    return Object.fromEntries(HOST_ENV.flatMap((key) => typeof env[key] === "string" ? [[key, env[key]]] : []));
+  } catch {
+    return {};
+  }
+}
+
 // "bridge" is the 1.x daemon: nothing starts one any more, but `linkshell stop` still ends one left running.
 type ServiceName = "gateway" | "bridge" | "host";
 
@@ -36,7 +57,7 @@ export function readPid(service: ServiceName): number | null {
     const file = pidFile(service);
     if (!existsSync(file)) return null;
     const pid = Number(readFileSync(file, "utf8").trim());
-    if (!pid || isNaN(pid)) return null;
+    if (!Number.isSafeInteger(pid) || pid <= 0) return null;
     try {
       process.kill(pid, 0);
       return pid;
@@ -52,6 +73,7 @@ export function readPid(service: ServiceName): number | null {
 export function removePid(service: ServiceName): void {
   try { unlinkSync(pidFile(service)); } catch {}
   try { unlinkSync(metadataFile(service)); } catch {}
+  if (service === "host") { try { unlinkSync(hostLaunchFile); } catch {} }
 }
 
 export function getLogFile(service: ServiceName): string {
@@ -72,7 +94,7 @@ export function rotateLog(log: string, maxBytes = MAX_LOG_BYTES): void {
   }
 }
 
-export function spawnDaemon(service: ServiceName, args: string[]): number {
+export function spawnDaemon(service: ServiceName, args: string[], env: NodeJS.ProcessEnv = process.env): number {
   mkdirSync(LINKSHELL_DIR, { recursive: true });
   const log = logFile(service);
   rotateLog(log);
@@ -88,7 +110,7 @@ export function spawnDaemon(service: ServiceName, args: string[]): number {
       detached: true,
       stdio: ["ignore", out, err],
       // The launching terminal's environment is the most faithful one agents can get.
-      env: { ...process.env, LINKSHELL_ENV_FROM_TERMINAL: "1" },
+      env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: "1" },
     },
   );
 
@@ -108,5 +130,30 @@ export function stopDaemon(service: ServiceName): boolean {
   } catch {
     removePid(service);
     return false;
+  }
+}
+
+/** The PID file disappears before shutdown finishes; wait for the process, not that file. */
+export async function stopDaemonAndWait(service: ServiceName, timeoutMs = 30_000, expectedPid?: number): Promise<boolean> {
+  const pid = expectedPid ?? readPid(service);
+  if (!pid) return false;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        if (readPid(service) === null) removePid(service);
+        return true;
+      }
+      throw error;
+    }
+    if (Date.now() >= deadline) throw new Error(`LinkShell ${service} did not stop within ${timeoutMs / 1000}s; see ${getLogFile(service)}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }

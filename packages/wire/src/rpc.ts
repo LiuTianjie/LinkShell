@@ -2,6 +2,7 @@ import { z } from "zod";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import { acpAgentSettingsSchema, acpFeaturesSchema, acpRemoteAgentSchema, acpProviderSchema } from "./acp.js";
 import { editorRequestSchema, editorResultSchema } from "./editor.js";
+import { liveActivityIdSchema, liveActivitySubscriptionSchema } from "./live-activity.js";
 import {
   backgroundTaskSchema,
   agentInfoSchema,
@@ -106,6 +107,14 @@ const acpMethods = {
 } as const;
 
 const coreMethods = {
+  "liveActivities.subscribe": {
+    params: liveActivitySubscriptionSchema,
+    result: z.object({}),
+  },
+  "liveActivities.unsubscribe": {
+    params: z.object({ activityId: liveActivityIdSchema }),
+    result: z.object({}),
+  },
   "machine.info": {
     params: empty,
     result: machineInfoSchema,

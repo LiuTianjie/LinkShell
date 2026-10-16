@@ -1,29 +1,30 @@
-import { execSync } from "node:child_process";
-import { createRequire } from "node:module";
-import { withRunningHost } from "./host.js";
-
-const require = createRequire(import.meta.url);
-const pkg = require("../../../../package.json") as { version: string };
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { join, sep } from "node:path";
+import { runUpgradeWorker, type CliCommand } from "./upgrade-worker.js";
 
 function isBrewInstall(): boolean {
   try {
-    const out = execSync("brew list linkshell 2>/dev/null", {
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return out.length > 0;
+    // A separate Homebrew installation must not change how this CLI upgrades.
+    return realpathSync(process.argv[1]!).includes(`${sep}Cellar${sep}linkshell${sep}`);
   } catch {
     return false;
   }
 }
 
+function installedCli(brew: boolean): CliCommand {
+  const options: ExecFileSyncOptionsWithStringEncoding = { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] };
+  if (brew) {
+    const prefix = execFileSync("brew", ["--prefix", "linkshell"], options).trim();
+    return { command: join(prefix, "bin", "linkshell"), args: [] };
+  }
+  const root = execFileSync("npm", ["root", "--global"], options).trim();
+  return { command: process.execPath, args: [join(root, "linkshell-cli", "dist", "cli", "src", "index.js")] };
+}
+
 async function fetchLatestVersion(): Promise<string | null> {
   try {
-    const res = await fetch(
-      "https://registry.npmjs.org/linkshell-cli/latest",
-      { signal: AbortSignal.timeout(10_000) },
-    );
+    const res = await fetch("https://registry.npmjs.org/linkshell-cli/latest", { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return null;
     const body = (await res.json()) as { version?: string };
     return body.version ?? null;
@@ -32,19 +33,8 @@ async function fetchLatestVersion(): Promise<string | null> {
   }
 }
 
-/** The background host keeps running the version it was started with. */
-async function noteRunningHost(latest: string): Promise<void> {
-  const running = await withRunningHost((client) => client.call("machine.info", {})).catch(() => undefined);
-  if (!running || running.hostVersion === latest) return;
-  process.stderr.write(`  The running host is still ${running.hostVersion}. Restart it to use ${latest} (stops running agent turns):\n`);
-  process.stderr.write("    linkshell host stop && linkshell host --daemon\n\n");
-}
-
-export async function runUpgrade(): Promise<void> {
-  const current = pkg.version;
-  process.stderr.write(`\n  Current version: ${current}\n`);
-  process.stderr.write("  Checking for updates...\n\n");
-
+export async function runUpgrade(current: string): Promise<void> {
+  process.stderr.write(`\n  Current version: ${current}\n  Checking for updates...\n\n`);
   const latest = await fetchLatestVersion();
   if (!latest) {
     process.stderr.write("  \x1b[31m✗\x1b[0m Could not reach npm registry.\n\n");
@@ -52,34 +42,35 @@ export async function runUpgrade(): Promise<void> {
     return;
   }
 
-  if (latest === current) {
-    process.stderr.write(`  \x1b[32m✓\x1b[0m Already on the latest version (${current}).\n\n`);
-    return;
-  }
-
-  process.stderr.write(`  New version available: ${current} → \x1b[32m${latest}\x1b[0m\n\n`);
-
-  if (isBrewInstall()) {
-    process.stderr.write("  Upgrading via Homebrew...\n");
+  let cli: CliCommand = { command: process.execPath, args: [...process.execArgv, process.argv[1]!] };
+  if (latest !== current) {
+    const brew = isBrewInstall();
+    const manager = brew ? "brew" : "npm";
+    const args = brew ? ["upgrade", "linkshell"] : ["install", "-g", "linkshell-cli@latest"];
+    process.stderr.write(`  New version available: ${current} → \x1b[32m${latest}\x1b[0m\n  Upgrading via ${brew ? "Homebrew" : "npm"}...\n`);
     try {
-      execSync("brew upgrade linkshell", { stdio: "inherit", timeout: 120_000 });
-      process.stderr.write("\n  \x1b[32m✓\x1b[0m Upgraded successfully.\n\n");
-      await noteRunningHost(latest);
-    } catch {
-      process.stderr.write("\n  \x1b[31m✗\x1b[0m Homebrew upgrade failed. Try manually:\n");
-      process.stderr.write("    brew upgrade linkshell\n\n");
+      execFileSync(manager, args, { stdio: "inherit", timeout: 120_000 });
+      cli = installedCli(brew);
+    } catch (error) {
+      process.stderr.write(`\n  \x1b[31m✗\x1b[0m Upgrade failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(`  Retry with: ${manager} ${args.join(" ")}\n\n`);
       process.exitCode = 1;
+      return;
     }
   } else {
-    process.stderr.write("  Upgrading via npm...\n");
-    try {
-      execSync("npm install -g linkshell-cli@latest", { stdio: "inherit", timeout: 120_000 });
-      process.stderr.write("\n  \x1b[32m✓\x1b[0m Upgraded successfully.\n\n");
-      await noteRunningHost(latest);
-    } catch {
-      process.stderr.write("\n  \x1b[31m✗\x1b[0m npm upgrade failed. Try manually:\n");
-      process.stderr.write("    npm install -g linkshell-cli@latest\n\n");
-      process.exitCode = 1;
-    }
+    process.stderr.write(`  CLI is already on the latest version (${current}). Checking the host...\n`);
+  }
+
+  try {
+    const installed = execFileSync(cli.command, [...cli.args, "--version"], { encoding: "utf8", timeout: 10_000 }).trim();
+    if (installed !== latest) throw new Error(`Expected CLI ${latest}, but the installed command reports ${installed}. The running host was left alone.`);
+    // npm replaces files; Homebrew can remove the old Cellar directory. Only
+    // the newly installed CLI can safely launch the new host without cached code.
+    process.stderr.write(await runUpgradeWorker(cli));
+    process.stderr.write(`\n  \x1b[32m✓\x1b[0m LinkShell ${latest} is ready.\n\n`);
+  } catch (error) {
+    process.stderr.write(`\n  \x1b[31m✗\x1b[0m Could not finish the host update: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write("  Check linkshell host status, then run linkshell upgrade again to retry.\n\n");
+    process.exitCode = 1;
   }
 }

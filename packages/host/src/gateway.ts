@@ -131,7 +131,9 @@ export class GatewayLink {
   }
 
   stop(): void {
-    for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "host stopping");
+    // Devices keep their own gateway socket open. Close their tunnels before
+    // leaving so they reconnect now instead of waiting for an RPC heartbeat.
+    for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "host stopping", true);
     this.relay.stop();
   }
 
@@ -141,7 +143,7 @@ export class GatewayLink {
 
   /** Signs in to the gateway again: the account on this computer changed. */
   reauthenticate(): void {
-    for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway reconnecting");
+    for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway reconnecting", true);
     this.relay.reauthenticate();
   }
 

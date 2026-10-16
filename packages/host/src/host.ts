@@ -14,6 +14,7 @@ import { HostStore } from "./store.js";
 import { removeLegacyCopilotHooks } from "./legacy.js";
 import { withoutClaudeSession } from "./shell-env.js";
 import { TerminalManager } from "./terminals.js";
+import { LiveActivityRelay } from "./live-activities.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
@@ -179,6 +180,13 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     // LINKSHELL_ICE_SERVERS: STUN servers for the direct channel, comma separated ("off": never direct).
     ...(iceServers ? { direct: { iceServers } } : {}),
   });
+  const liveActivities = new LiveActivityRelay({
+    path: join(paths.home, "live-activities.json"), hub, terminals,
+    computerName: () => machineInfo().hostname,
+    serviceUrl: process.env.LINKSHELL_PUSH_SERVICE_URL,
+    log,
+  });
+  liveActivities.start();
   const server = new HostRpcServer({
     hub,
     terminals,
@@ -186,6 +194,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     socketPath: paths.hostSocket,
     tcpPort: options.tcpPort,
     log,
+    liveActivities,
   });
   await server.start();
 
@@ -236,6 +245,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     stop() {
       stopping ??= (async () => {
         gateway?.stop();
+        liveActivities.stop();
         await server.stop();
         terminals.stop();
         await hub.stop();

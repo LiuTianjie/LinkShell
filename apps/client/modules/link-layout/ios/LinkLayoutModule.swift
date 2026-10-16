@@ -15,12 +15,17 @@ public struct LinkShellAttentionAttributes: ActivityAttributes {
     public var subtitle: String
     public var project: String
     public var agent: String
+    public var agents: [String]?
+    public var actions: [LiveActivityAction]?
+    public var hasMoreActions: Bool?
     public var waitingCount: Int
     public var runningCount: Int
     public var failedCount: Int
     public var deepLink: String
   }
   public var computerName: String
+  public var computerKey: String?
+  public var remoteUpdates: Bool?
 }
 #endif
 
@@ -36,13 +41,32 @@ public class LinkLayoutModule: Module {
   private var lastLevelSentAt: TimeInterval = 0
   private var simulatorWaveTimer: Timer?
   private var activeActivityId: String?
-  private var keepAlivePlayer: AVAudioPlayer?
-  private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+  private var pushTokenTasks: [String: Task<Void, Never>] = [:]
+  private var activityStateTasks: [String: Task<Void, Never>] = [:]
+  private var activityActionObserver: NSObjectProtocol?
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
-    Events("onSpeechResult", "onSpeechLevel", "onSpeechError")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken")
+    OnCreate { [weak self] in
+      Task { @MainActor [weak self] in self?.observeExistingActivities() }
+      self?.activityActionObserver = NotificationCenter.default.addObserver(forName: LiveActivityActionQueue.notification, object: nil, queue: .main) { [weak self] notification in
+        if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onLiveActivityAction", ["id": id]) }
+      }
+    }
+    OnDestroy { [weak self] in
+      if let self {
+        Task { @MainActor in
+          self.pushTokenTasks.values.forEach { $0.cancel() }
+          self.activityStateTasks.values.forEach { $0.cancel() }
+          self.pushTokenTasks.removeAll()
+          self.activityStateTasks.removeAll()
+        }
+      }
+      if let observer = self?.activityActionObserver { NotificationCenter.default.removeObserver(observer) }
+    }
     Constants([
+      "liveActivityPushURL": Self.pushServiceURL,
       "viewControllerStatusBarAppearance": Bundle.main.object(forInfoDictionaryKey: "UIViewControllerBasedStatusBarAppearance") as? Bool ?? true
     ])
     AsyncFunction("requestLandscape") { [weak self] in
@@ -122,6 +146,25 @@ public class LinkLayoutModule: Module {
       guard let self else { return }
       await self.endNativeLiveActivity()
     }
+
+    AsyncFunction("consumeLiveActivityAction") { (id: String) -> [String: Any]? in
+      guard let action = LiveActivityActionQueue.consume(id),
+            let data = try? JSONEncoder().encode(action) else { return nil }
+      return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }.runOnQueue(.main)
+
+    AsyncFunction("getLiveActivityPushRegistration") { () async -> [String: String]? in
+      await self.liveActivityPushRegistration()
+    }
+    AsyncFunction("setLiveActivityPushReady") { (id: String) in
+      if #available(iOS 16.2, *), Activity<LinkShellAttentionAttributes>.activities.contains(where: { $0.id == id && ($0.activityState == .active || $0.activityState == .stale) }) {
+        UserDefaults.standard.set(true, forKey: "LinkShellLiveActivity.remote." + id)
+      }
+    }.runOnQueue(.main)
+
+    AsyncFunction("pendingLiveActivityActionId") { () -> String? in
+      LiveActivityActionQueue.pendingID()
+    }.runOnQueue(.main)
 
     View(LinkLayoutView.self) {
       Events("onMetrics")
@@ -276,90 +319,53 @@ public class LinkLayoutModule: Module {
     }
     recognitionTask = nil
 
-    // Explicitly deactivate AVAudioSession so background music / podcasts resume immediately,
-    // unless background Live Activity keep-alive is currently active.
-    if keepAlivePlayer?.isPlaying == true {
-      try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-      try? AVAudioSession.sharedInstance().setActive(true)
-    } else {
-      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    // Recording has ended; let background music and podcasts resume.
+    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+  }
+
+  private static var pushServiceURL: String {
+    Bundle.main.object(forInfoDictionaryKey: "LinkShellLiveActivityPushURL") as? String ?? ""
+  }
+
+  @MainActor private func observeExistingActivities() {
+    if #available(iOS 16.2, *), !Self.pushServiceURL.isEmpty {
+      for activity in Activity<LinkShellAttentionAttributes>.activities { observePushToken(activity) }
     }
   }
 
-  private static func makeSilentWavData() -> Data {
-    let sampleRate: UInt32 = 8000
-    let numSamples: UInt32 = 8000 // 1 second of 16-bit mono silence
-    let dataSize = numSamples * 2
-    let fileSize = 36 + dataSize
-    var header = Data(capacity: Int(44 + dataSize))
-    header.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
-    withUnsafeBytes(of: fileSize.littleEndian) { header.append(contentsOf: $0) }
-    header.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
-    header.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
-    withUnsafeBytes(of: UInt32(16).littleEndian) { header.append(contentsOf: $0) }
-    withUnsafeBytes(of: UInt16(1).littleEndian) { header.append(contentsOf: $0) } // PCM
-    withUnsafeBytes(of: UInt16(1).littleEndian) { header.append(contentsOf: $0) } // Mono
-    withUnsafeBytes(of: sampleRate.littleEndian) { header.append(contentsOf: $0) }
-    withUnsafeBytes(of: (sampleRate * 2).littleEndian) { header.append(contentsOf: $0) }
-    withUnsafeBytes(of: UInt16(2).littleEndian) { header.append(contentsOf: $0) }
-    withUnsafeBytes(of: UInt16(16).littleEndian) { header.append(contentsOf: $0) }
-    header.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
-    withUnsafeBytes(of: dataSize.littleEndian) { header.append(contentsOf: $0) }
-    header.append(Data(count: Int(dataSize)))
-    return header
-  }
-
-  private func startBackgroundKeepAliveIfNeeded() {
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-      if self.backgroundTaskId == .invalid {
-        self.backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "LinkShellLiveActivitySync") { [weak self] in
-          guard let self else { return }
-          if self.backgroundTaskId != .invalid {
-            UIApplication.shared.endBackgroundTask(self.backgroundTaskId)
-            self.backgroundTaskId = .invalid
-          }
+  @available(iOS 16.2, *)
+  @MainActor private func observePushToken(_ activity: Activity<LinkShellAttentionAttributes>) {
+    guard !Self.pushServiceURL.isEmpty, pushTokenTasks[activity.id] == nil else { return }
+    pushTokenTasks[activity.id] = Task { [weak self] in
+      for await _ in activity.pushTokenUpdates {
+        if Task.isCancelled { break }
+        self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id])
+      }
+    }
+    activityStateTasks[activity.id] = Task { [weak self] in
+      for await state in activity.activityStateUpdates {
+        if Task.isCancelled { break }
+        if state == .ended || state == .dismissed {
+          UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.remote." + activity.id)
+          self?.pushTokenTasks.removeValue(forKey: activity.id)?.cancel()
+          self?.activityStateTasks.removeValue(forKey: activity.id)
+          self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
+          break
         }
       }
-      if self.keepAlivePlayer?.isPlaying == true {
-        return
-      }
-      // Do not override category while speech recognition is actively recording.
-      if self.audioEngine == nil {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true)
-      }
-      if self.keepAlivePlayer == nil {
-        let wav = Self.makeSilentWavData()
-        if let player = try? AVAudioPlayer(data: wav, fileTypeHint: AVFileType.wav.rawValue) {
-          player.numberOfLoops = -1
-          player.volume = 0.0
-          player.prepareToPlay()
-          self.keepAlivePlayer = player
-        }
-      }
-      self.keepAlivePlayer?.play()
     }
   }
 
-  private func stopBackgroundKeepAlive() {
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-      if let player = self.keepAlivePlayer {
-        if player.isPlaying {
-          player.stop()
-        }
-        self.keepAlivePlayer = nil
-        if self.audioEngine == nil {
-          try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
-      }
-      if self.backgroundTaskId != .invalid {
-        UIApplication.shared.endBackgroundTask(self.backgroundTaskId)
-        self.backgroundTaskId = .invalid
+  @MainActor private func liveActivityPushRegistration() -> [String: String]? {
+    guard !Self.pushServiceURL.isEmpty else { return nil }
+    if #available(iOS 16.2, *) {
+      for activity in Activity<LinkShellAttentionAttributes>.activities where activity.activityState == .active || activity.activityState == .stale {
+        observePushToken(activity)
+        guard let token = activity.pushToken, let computerKey = activity.attributes.computerKey else { continue }
+        return ["activityId": activity.id, "computerKey": computerKey, "token": token.map { String(format: "%02x", $0) }.joined()]
       }
     }
+    return nil
   }
 
   private static func measureLevel(buffer: AVAudioPCMBuffer) -> (Double, Double) {
@@ -377,19 +383,24 @@ public class LinkLayoutModule: Module {
     return (db, normalized)
   }
 
-  private func syncNativeLiveActivity(payload: [String: Any]) async -> Bool {
+  @MainActor private func syncNativeLiveActivity(payload: [String: Any]) async -> Bool {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
       guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-        stopBackgroundKeepAlive()
         return false
       }
+      let pushEnabled = !Self.pushServiceURL.isEmpty
+      // A suspended phone is not an offline host. Once handed to the host, APNs
+      // owns background freshness; cached JS must not overwrite those updates.
+      let remotelyManaged = Activity<LinkShellAttentionAttributes>.activities.contains {
+        ($0.activityState == .active || $0.activityState == .stale) && UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + $0.id)
+      }
+      if remotelyManaged && (UIApplication.shared.applicationState != .active || payload["phase"] as? String == "stale") { return true }
       let active = (payload["active"] as? Bool) ?? false
       if !active {
         await endNativeLiveActivity()
         return true
       }
-      startBackgroundKeepAliveIfNeeded()
       let computerName = (payload["computerName"] as? String) ?? "电脑"
       let state = LinkShellAttentionAttributes.ContentState(
         phase: (payload["phase"] as? String) ?? "running",
@@ -397,22 +408,37 @@ public class LinkLayoutModule: Module {
         subtitle: (payload["subtitle"] as? String) ?? "",
         project: (payload["project"] as? String) ?? "",
         agent: (payload["agent"] as? String) ?? "claude",
+        agents: payload["agents"] as? [String],
+        actions: (payload["actions"] as? [[String: Any]]).flatMap { actions in
+          guard let data = try? JSONSerialization.data(withJSONObject: actions) else { return nil }
+          return try? JSONDecoder().decode([LiveActivityAction].self, from: data)
+        },
+        hasMoreActions: payload["hasMoreActions"] as? Bool,
         waitingCount: (payload["waitingCount"] as? Int) ?? 0,
         runningCount: (payload["runningCount"] as? Int) ?? 0,
         failedCount: (payload["failedCount"] as? Int) ?? 0,
         deepLink: (payload["deepLink"] as? String) ?? "linkshell:///"
       )
-      // Rolling: every sync (at least once a minute while the app is kept alive) pushes it forward, so it only
-      // takes effect when the app was killed and nothing is syncing any more.
+      // Freshness expires if neither foreground updates nor APNs reach the activity.
       let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(180))
+      let computerKey = payload["computerKey"] as? String
       for activity in Activity<LinkShellAttentionAttributes>.activities {
+        guard activity.activityState == .active || activity.activityState == .stale else { continue }
+        if activity.attributes.computerKey != computerKey || activity.attributes.computerName != computerName || (activity.attributes.remoteUpdates ?? false) != pushEnabled {
+          await activity.end(nil, dismissalPolicy: .immediate)
+          continue
+        }
+        observePushToken(activity)
         await activity.update(content)
         activeActivityId = activity.id
         return true
       }
       do {
-        let attributes = LinkShellAttentionAttributes(computerName: computerName)
-        let created = try Activity.request(attributes: attributes, content: content, pushType: nil)
+        guard UIApplication.shared.applicationState == .active else { return false }
+        let attributes = LinkShellAttentionAttributes(computerName: computerName, computerKey: computerKey, remoteUpdates: pushEnabled)
+        let created = try Activity.request(attributes: attributes, content: content, pushType: pushEnabled ? .token : nil)
+        observePushToken(created)
+        sendEvent("onLiveActivityPushToken", ["activityId": created.id])
         activeActivityId = created.id
         return true
       } catch {
@@ -423,13 +449,13 @@ public class LinkLayoutModule: Module {
     return false
   }
 
-  private func endNativeLiveActivity() async {
-    stopBackgroundKeepAlive()
+  @MainActor private func endNativeLiveActivity() async {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
       activeActivityId = nil
       for activity in Activity<LinkShellAttentionAttributes>.activities {
         await activity.end(nil, dismissalPolicy: .immediate)
+        sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
       }
     }
     #endif

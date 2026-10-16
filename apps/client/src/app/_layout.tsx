@@ -8,6 +8,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import { ClientProvider } from "@/lib/client";
+import { IOSAttentionSync } from "@/components/ios-attention-sync";
+import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
 import { colors, palette } from "@/theme/colors";
 
 const light = { ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: palette.light.accent, background: "#f2f2f7" } };
@@ -23,12 +25,15 @@ export default function RootLayout() {
       <KeyboardProvider>
         <ThemeProvider value={scheme === "dark" ? dark : light}>
           <ClientProvider>
+            {Platform.OS === "ios" ? <IOSAttentionSync /> : null}
+            {Platform.OS === "ios" ? <LiveActivityActionNavigation /> : null}
             {/* Android's literal theme colors must reach memoized rows and native
                 views too; rebuild the tree when the system appearance changes. */}
             <Fragment key={Platform.OS === "android" ? (scheme ?? "light") : "tree"}>
               {!nativeStatusBar ? <StatusBar style="auto" /> : null}
               <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal", ...(nativeStatusBar ? { statusBarStyle: "auto", statusBarHidden: false } as const : {}), headerStyle: { backgroundColor: colors.background as string } }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="activity" options={{ title: "实时活动" }} />
                 <Stack.Screen name="acp" options={{ title: "ACP", contentStyle: sheetContent }} />
                 <Stack.Screen name="session/[id]/index" options={{ title: "", headerTransparent: true, headerStyle: { backgroundColor: "transparent" }, headerShadowVisible: false }} />
                 <Stack.Screen name="session/[id]/workflow/[call]" options={{ title: "工作流" }} />
@@ -136,6 +141,7 @@ export default function RootLayout() {
                   }}
                 />
                 <Stack.Screen name="archived" options={{ title: "已归档" }} />
+                <Stack.Screen name="rename-computer" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
                 <Stack.Screen name="screen" options={{ title: "屏幕" }} />
                 <Stack.Screen
                   name="ports"

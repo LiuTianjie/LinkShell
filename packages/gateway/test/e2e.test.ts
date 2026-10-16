@@ -105,6 +105,30 @@ async function pairByQr(local: HostClient, relay: RelayClient, identity: Identit
 }
 
 describe("gateway v2 end to end", () => {
+  it.each(["paired", "account"])("automatically reconnects a %s phone after a host upgrade with the same identity", async (mode) => {
+    const token = mode === "account" ? "token-alice" : undefined;
+    const { url, host, local } = await world({ machineToken: token });
+    const phone = device(url, "Existing phone", token);
+    await phone.relay.waitOnline(5000);
+    const machine = mode === "paired"
+      ? (await pairByQr(local, phone.relay, phone.identity)).machine
+      : (await phone.relay.request("machines.list", {})).machines[0]!;
+    const link = connect(phone.relay, phone.identity, machine);
+    const before = await link.call("machine.info", {});
+    expect((await link.call("sessions.list", {})).sessions).toEqual([]);
+    await host.stop();
+    // The phone has no heartbeat in this test: only the host's close frame
+    // can move it out of the old encrypted channel without user interaction.
+    await until(() => link.status !== "online", 1500);
+    const next = await startHost({ home: host.paths.home, version: "upgraded", drivers: () => [], log: () => {}, gateway: { url, token: () => token } });
+    cleanups.push(() => next.stop());
+    await until(() => link.status === "online");
+    expect(await link.call("machine.info", {})).toMatchObject({ machineId: before.machineId, hostVersion: "upgraded" });
+    expect(phone.relay.status).toBe("online");
+    expect((await phone.relay.request("machines.list", {})).machines).toMatchObject([{ id: machine.id, online: true, via: mode }]);
+    expect((await link.call("fs.list", { path: host.paths.home })).path).toBe(host.paths.home);
+  });
+
   it("pairs by QR and runs RPC and a terminal through the tunnel, sealed", async () => {
     const { url, local, routed } = await world();
     const phone = device(url, "iPhone");

@@ -1,5 +1,6 @@
 import type { PromptProgress, SessionView } from "@linkshell/client-core";
-import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
+import { buildLiveActivitySnapshot, liveActivityContent, type AttentionPhase, type SessionSummary, type TerminalInfo } from "@linkshell/wire";
+export { classifySessionPhase, phasePriority, type AttentionPhase } from "@linkshell/wire";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useSyncExternalStore } from "react";
 import { AppState, Platform } from "react-native";
@@ -10,18 +11,8 @@ import {
   type ShortcutItemInput,
 } from "../../modules/link-layout";
 import { agentLook } from "@/theme/agents";
-import { activityText, needsAttention, needsUserInput, plainPreview, sessionTitle } from "./describe";
+import { needsAttention, sessionTitle } from "./describe";
 import { baseName } from "./format";
-import { terminalState } from "./terminals";
-
-export type AttentionPhase =
-  | "waiting_for_approval"
-  | "waiting_for_input"
-  | "failed"
-  | "running"
-  | "starting"
-  | "completed"
-  | "stale";
 
 export type HomeFilterMode = "all" | "attention" | "running" | "pinned" | "terminals" | "snoozed";
 
@@ -128,34 +119,6 @@ export function useSnoozedSessions(): Record<string, number> {
   return useSyncExternalStore(subscribe, getSnoozedSnapshot, getSnoozedSnapshot);
 }
 
-/** Classify a session into the 7-phase attention hierarchy (t3code model). */
-export function classifySessionPhase(session: SessionSummary, online = true): AttentionPhase {
-  if (!online || session.state === "offline") return "stale";
-  if (needsUserInput(session)) return "waiting_for_input";
-  if (session.state === "waiting" || needsAttention(session)) return "waiting_for_approval";
-  if (session.state === "error") return "failed";
-  if (session.state === "running") return "running";
-  if (session.state === "unknown") return "starting";
-  return "completed";
-}
-
-export function phasePriority(phase: AttentionPhase): number {
-  switch (phase) {
-    case "waiting_for_approval":
-    case "waiting_for_input":
-      return 0;
-    case "failed":
-      return 1;
-    case "running":
-    case "starting":
-      return 2;
-    case "completed":
-      return 3;
-    case "stale":
-      return 4;
-  }
-}
-
 export function phaseLabel(phase: AttentionPhase): string {
   switch (phase) {
     case "waiting_for_approval":
@@ -245,82 +208,14 @@ export function mergeLiveViewsIntoSessions(
   });
 }
 
-/**
- * Builds the aggregated single-card iOS Live Activity / Dynamic Island payload
- * for a computer, sorting attention-first (`waiting` > `failed` > `running`).
- */
+/** Uses the same projection as the background host sender. */
 export function buildLiveActivityPayload(
-  computerName: string,
-  sessions: SessionSummary[],
-  terminals: TerminalInfo[],
-  online: boolean,
-  views?: Record<string, SessionView>,
-  promptProgress?: Record<string, PromptProgress>,
+  computerName: string, sessions: SessionSummary[], terminals: TerminalInfo[], online: boolean,
+  views?: Record<string, SessionView>, promptProgress?: Record<string, PromptProgress>, computerKey = "",
 ): LiveActivityPayload {
-  const enriched = mergeLiveViewsIntoSessions(sessions, views, promptProgress);
-  const live = enriched.filter((s) => !s.archived);
-  const waiting = live.filter((s) => needsAttention(s));
-  const failed = live.filter((s) => !needsAttention(s) && s.state === "error");
-  const runningSessions = live.filter((s) => !needsAttention(s) && s.state === "running");
-  const busyTerminals = terminals.filter((t) => terminalState(t).busy);
-  const runningCount = runningSessions.length + busyTerminals.length;
-
-  const candidates = [...waiting, ...failed, ...runningSessions].sort((a, b) => {
-    const pa = phasePriority(classifySessionPhase(a, online));
-    const pb = phasePriority(classifySessionPhase(b, online));
-    if (pa !== pb) return pa - pb;
-    return b.updatedAt - a.updatedAt;
-  });
-
-  const hero = candidates[0];
-  if (!hero && busyTerminals.length === 0) {
-    return { active: false, computerName };
-  }
-
-  if (hero) {
-    const phase = classifySessionPhase(hero, online);
-    const heroGoal = views?.[hero.id]?.goal;
-    const subtitle =
-      phase === "waiting_for_approval" || phase === "waiting_for_input"
-        ? hero.permission?.title ?? hero.asyncQuestions?.[0]?.title ?? "需要你的确认"
-        : phase === "failed"
-          ? hero.preview
-            ? plainPreview(hero.preview)
-            : "上一轮执行出错"
-          : heroGoal?.status === "active" && !hero.activity
-            ? `目标 · ${heroGoal.objective}`
-            : activityText(hero.activity);
-
-    return {
-      active: true,
-      computerName,
-      phase,
-      title: sessionTitle(hero),
-      subtitle,
-      project: baseName(hero.worktree?.source ?? hero.cwd),
-      agent: hero.agent,
-      waitingCount: waiting.length,
-      runningCount,
-      failedCount: failed.length,
-      deepLink: `linkshell:///session/${hero.id}`,
-    };
-  }
-
-  const busy = busyTerminals[0]!;
-  const tState = terminalState(busy);
-  return {
-    active: true,
-    computerName,
-    phase: online ? "running" : "stale",
-    title: tState.title || "终端运行中",
-    subtitle: tState.detail || baseName(busy.cwd),
-    project: baseName(busy.cwd),
-    agent: "terminal",
-    waitingCount: 0,
-    runningCount,
-    failedCount: 0,
-    deepLink: `linkshell:///terminal/${busy.id}`,
-  };
+  const goals = Object.fromEntries(Object.entries(views ?? {}).flatMap(([id, view]) => view.goal ? [[id, view.goal]] : []));
+  const snapshot = buildLiveActivitySnapshot(computerName, mergeLiveViewsIntoSessions(sessions, views, promptProgress), terminals, online, computerKey, goals);
+  return { ...snapshot, ...(snapshot.active ? liveActivityContent(snapshot) : {}), computerKey };
 }
 
 /**
@@ -384,23 +279,25 @@ export function useIOSAttentionSync(
   online: boolean,
   views?: Record<string, SessionView>,
   promptProgress?: Record<string, PromptProgress>,
+  computerKey = "",
+  enabled = true,
 ) {
   const pinned = usePinnedSessionIds();
 
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
+    if (Platform.OS !== "ios" || !enabled) return;
     const shortcuts = buildIOSShortcutItems(mergeLiveViewsIntoSessions(sessions, views, promptProgress), pinned);
     void setNativeShortcutItems(shortcuts);
-  }, [sessions, views, promptProgress, pinned]);
+  }, [sessions, views, promptProgress, pinned, enabled]);
 
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
+    if (Platform.OS !== "ios" || !enabled) return;
     const sync = () => {
-      const payload = buildLiveActivityPayload(computerName, sessions, terminals, online, views, promptProgress);
+      const payload = buildLiveActivityPayload(computerName, sessions, terminals, online, views, promptProgress, computerKey);
       void syncNativeLiveActivity(payload);
     };
     sync();
-    // Sync every 60s in both foreground and background while online (native keep-alive keeps active tasks running in background).
+    // Refresh while the runtime is executing; iOS can still suspend background JS.
     const heartbeat = setInterval(() => {
       if (online) sync();
     }, 60_000);
@@ -413,6 +310,6 @@ export function useIOSAttentionSync(
       clearInterval(heartbeat);
       sub.remove();
     };
-  }, [computerName, sessions, terminals, online, views, promptProgress]);
+  }, [computerName, sessions, terminals, online, views, promptProgress, computerKey, enabled]);
 }
 

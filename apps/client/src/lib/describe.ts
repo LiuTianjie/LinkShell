@@ -1,24 +1,12 @@
-import { unwrapShellCommand } from "@linkshell/wire";
-import type { PermissionOption, SessionActivity, SessionSummary, ToolCallContent, ToolDetail, ToolKind } from "@linkshell/wire";
+import { toolVerb, cleanToolTitle, tidyCommand } from "@linkshell/wire";
+export { toolVerb, cleanToolTitle, tidyCommand, activityText, permissionChoices, sessionTitle, plainPreview, needsUserInput, needsAttention, type PermissionChoice } from "@linkshell/wire";
+import type { ToolCallContent, ToolDetail, ToolKind } from "@linkshell/wire";
 import type { TimelineItem } from "@linkshell/client-core";
 import type { IconProps } from "@/components/icon";
 import { baseName } from "./format";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 type Glyph = Pick<IconProps, "sf" | "md">;
-
-export const toolVerb: Record<ToolKind, string> = {
-  read: "读取",
-  edit: "编辑",
-  delete: "删除",
-  move: "移动",
-  search: "搜索",
-  execute: "运行",
-  think: "思考",
-  fetch: "获取",
-  switch_mode: "切换模式",
-  other: "",
-};
 
 export const toolGlyph: Record<ToolKind, Glyph> = {
   read: { sf: "doc.text", md: "description" },
@@ -33,33 +21,12 @@ export const toolGlyph: Record<ToolKind, Glyph> = {
   other: { sf: "wrench.and.screwdriver", md: "build" },
 };
 
-const ENGLISH_VERB = /^(read|reading|edit|editing|write|writing|update|create|delete|search|searching|list|run|running|fetch|grep|glob|find|view|open)\b[:\s]+/i;
-
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-/** Drops the agent's own English verb and wrapping backticks from a tool title. */
-export function cleanToolTitle(title: string): string {
-  return title.replace(ENGLISH_VERB, "").replace(/^`(.+)`$/s, "$1").trim();
-}
-
-/** Drops the shell wrapper and environment prefixes agents put around a command. */
-export function tidyCommand(command: string): string {
-  let text = unwrapShellCommand(command).trim();
-  // "export TZ=…;", "TZ=… cmd", "cd dir &&" are noise on a phone.
-  for (;;) {
-    const next = text
-      .replace(/^export\s+\w+=(?:'[^']*'|"[^"]*"|\S*)\s*(?:;|&&|\n)\s*/, "")
-      .replace(/^\w+=(?:'[^']*'|"[^"]*"|\S+)\s+(?=\S)/, "");
-    if (next === text) break;
-    text = next;
-  }
-  return text || command;
 }
 
 export function commandOf(item: Pick<ToolItem, "rawInput" | "title">): string | undefined {
@@ -257,81 +224,4 @@ function describeDetail(detail: ToolDetail, changes: FileChange[], input: Record
     case "review":
       return { verb: "", subject: detail.phase === "started" ? "开始代码审查" : "代码审查完成", code: false, glyph: { sf: "eye", md: "rate_review" }, changes };
   }
-}
-
-export function activityText(activity: SessionActivity | undefined): string {
-  if (!activity) return "正在运行…";
-  if (activity.kind === "thinking") return "思考中…";
-  if (activity.kind === "responding") return "正在回复…";
-  const verb = activity.toolKind ? toolVerb[activity.toolKind] : "";
-  const subject = activity.title ? (activity.toolKind === "execute" ? tidyCommand(cleanToolTitle(activity.title)) : cleanToolTitle(activity.title)) : "";
-  return [verb, subject].filter(Boolean).join(" ") || "正在使用工具…";
-}
-
-export interface PermissionChoice {
-  option: PermissionOption;
-  label: string;
-  role: "allow" | "always" | "reject" | "stop";
-}
-
-const choiceById: Record<string, { label: string; role: PermissionChoice["role"] }> = {
-  accept: { label: "允许", role: "allow" },
-  acceptForSession: { label: "本会话都允许", role: "always" },
-  decline: { label: "拒绝", role: "reject" },
-  cancel: { label: "拒绝并停止", role: "stop" },
-  turn: { label: "本轮允许", role: "allow" },
-  session: { label: "本会话都允许", role: "always" },
-};
-
-const choiceByKind: Record<PermissionOption["kind"], { label: string; role: PermissionChoice["role"] }> = {
-  allow_once: { label: "允许", role: "allow" },
-  allow_always: { label: "总是允许", role: "always" },
-  reject_once: { label: "拒绝", role: "reject" },
-  reject_always: { label: "总是拒绝", role: "stop" },
-};
-
-/** Localized permission choices, in the order: reject, allow, then the rest. */
-export function permissionChoices(options: PermissionOption[]): PermissionChoice[] {
-  const kinds = new Map<string, number>();
-  for (const option of options) kinds.set(option.kind, (kinds.get(option.kind) ?? 0) + 1);
-  const choices = options.map((option): PermissionChoice => {
-    const known = choiceById[option.optionId];
-    if (known) return { option, ...known };
-    const byKind = choiceByKind[option.kind];
-    // Two options of one kind: the agent's own names tell them apart.
-    return { option, label: (kinds.get(option.kind) ?? 0) > 1 ? option.name : byKind.label, role: byKind.role };
-  });
-  const order: PermissionChoice["role"][] = ["reject", "allow", "always", "stop"];
-  return choices.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
-}
-
-export function sessionTitle(session: Pick<SessionSummary, "title">): string {
-  return session.title?.trim() || "新会话";
-}
-
-/** Markdown flattened to one line of plain text, for list previews. */
-export function plainPreview(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
-    .replace(/(^|\s)#{1,6}\s+/g, "$1")
-    .replace(/(\*\*|__|\*|_|~~)(\S(?:.*?\S)?)\1/g, "$2")
-    .replace(/\|/g, " ")
-    .replace(/\s+/g, " ")
-    // Previews arrive flattened: list bullets end up mid-line ("包括： - 一 - 二").
-    .replace(/([：:。；;，,])\s*[-*•]\s+/g, "$1")
-    .replace(/\s[-*•]\s+(?=\S)/g, " · ")
-    .trim();
-}
-
-/** Async questions need attention even while the agent keeps working. */
-export function needsUserInput(session: SessionSummary): boolean {
-  return !!session.permission?.questions?.length || !!session.asyncQuestions?.length;
-}
-
-export function needsAttention(session: SessionSummary): boolean {
-  return session.state === "waiting" || needsUserInput(session);
 }

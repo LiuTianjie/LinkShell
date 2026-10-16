@@ -137,7 +137,7 @@ describe("terminal snippets, paste chunking, output cleaning, and touchpad gestu
 });
 
 describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () => {
-  it("prioritizes waiting_for_approval and waiting_for_input ahead of failed and running", () => {
+  it("keeps attention priorities for lists but features the latest progress in Live Activities", () => {
     const idle = makeSession({ id: "idle", state: "idle" });
     const running = makeSession({ id: "run", state: "running", updatedAt: 5000 });
     const failed = makeSession({ id: "err", state: "error", updatedAt: 4000 });
@@ -160,11 +160,11 @@ describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () 
 
     const payload = buildLiveActivityPayload("MacBook-Pro", [idle, running, failed, waiting], [], true);
     expect(payload.active).toBe(true);
-    expect(payload.phase).toBe("waiting_for_approval");
+    expect(payload.phase).toBe("running");
     expect(payload.waitingCount).toBe(1);
     expect(payload.runningCount).toBe(1);
     expect(payload.failedCount).toBe(1);
-    expect(payload.deepLink).toBe("linkshell:///session/wait");
+    expect(payload.deepLink).toBe("linkshell:///session/run");
   });
 
   it("enriches idle SessionSummary with live SessionView turn state, active tool, and goal for Dynamic Island", () => {

@@ -211,6 +211,10 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | Check the environment | `linkshell doctor` |
 | Upgrade | `linkshell upgrade` |
 
+From CLI 0.10.40, `linkshell upgrade` also restarts an outdated running host using the newly installed CLI. Login, pairings, computer identity and session history are retained, and clients reconnect automatically. Running agent turns and terminal processes stop during the restart; a stopped host stays stopped. Even if the CLI is already current, the command checks the running host. When upgrading from an older CLI, run `linkshell upgrade` once more after installation to update the host with this new behavior.
+
+The app's computer picker now lets you give each computer a name, saved on that phone, like the browser-local names in the web workspace. Clear the name to restore the host's name. iOS Live Activities show current agent progress and choices; official signed builds can receive background updates through the separate [ActivityKit push service](docs/v2/live-activity-push.md).
+
 > **Coming from 1.x?** 2.0 changed both the app and the computer side: upgrade both and pair again. `linkshell start` and the 1.x app are no longer supported (CLI 0.10 and gateway 0.6 removed them).
 
 ## Development

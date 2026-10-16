@@ -114,6 +114,7 @@ export async function runHostForeground(version: string): Promise<void> {
     claudeAdapter: adapter ? { command: adapter, args: [] } : undefined,
   });
   daemon.savePid("host", process.pid);
+  daemon.saveHostLaunch(process.pid, running.server.tcpAddress());
   const info = running.machineInfo();
   log(`[host] LinkShell host ${version} listening on ${running.paths.hostSocket}`);
   if (devPort !== undefined) log(`[host] development API on ws://127.0.0.1:${running.server.tcpAddress() ?? devPort} (loopback only)`);
@@ -124,8 +125,8 @@ export async function runHostForeground(version: string): Promise<void> {
   }
   const shutdown = async () => {
     log("[host] shutting down");
-    daemon.removePid("host");
     await running.stop();
+    daemon.removePid("host");
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
@@ -134,11 +135,11 @@ export async function runHostForeground(version: string): Promise<void> {
 }
 
 /** Starts the host in the background unless one already answers. */
-export async function ensureHostRunning(): Promise<string> {
+export async function ensureHostRunning(env?: NodeJS.ProcessEnv): Promise<string> {
   const host = await loadHost();
   const { hostSocket } = host.hostPaths();
   if (await host.isHostRunning(hostSocket)) return hostSocket;
-  daemon.spawnDaemon("host", ["host", "--_foreground-host"]);
+  daemon.spawnDaemon("host", ["host", "--_foreground-host"], env);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (await host.isHostRunning(hostSocket)) return hostSocket;

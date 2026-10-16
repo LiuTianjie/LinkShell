@@ -211,6 +211,10 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | 检查环境 | `linkshell doctor` |
 | 升级 | `linkshell upgrade` |
 
+从 CLI 0.10.40 起，`linkshell upgrade` 会用新安装的 CLI 自动重启仍在运行的旧 Host，保留登录、配对、电脑身份和会话历史，客户端自动重连。重启会停止正在执行的 Agent 轮次和终端进程；原本没有运行的 Host 不会被启动。即使 CLI 已是最新版，命令仍会检查 Host。从更早的 CLI 升级时，安装完成后再执行一次 `linkshell upgrade`，即可用新逻辑更新 Host。
+
+App 的设备列表支持给电脑改名，保存在当前手机上，与 Web 端保存在当前浏览器的行为一致；留空可恢复电脑原名。iOS 实时活动显示 Agent 进度和操作选项，官方签名构建可通过独立的 [ActivityKit 推送服务](docs/v2/live-activity-push.md)接收后台更新。
+
 > **从 1.x 升级？** 2.0 的 App 和电脑端都换了，需要两边一起升级，再重新配对一次。`linkshell start` 和 1.x 的 App 已不再支持（CLI 0.10、网关 0.6 起移除）。
 
 ## 开发

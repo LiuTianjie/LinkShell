@@ -32,7 +32,7 @@ linkshell claude    # Claude Code; a message from the phone takes over, any key 
 linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
-Claude Workflow progress, phases and Agent details require CLI 0.10.6 or newer and app 2.3.5 or newer. After upgrading the CLI, restart the host with `linkshell host stop` and `linkshell host --daemon`.
+Claude Workflow progress, phases and Agent details require CLI 0.10.6 or newer and app 2.3.5 or newer. CLI 0.10.40 and newer automatically reconcile the running host with `linkshell upgrade`.
 
 CLI 0.10.19 includes Host 0.4.19 session recovery fixes: stale running states, Codex native
 archives, missing Claude history and lazy ACP reconnection. This update needs only the
@@ -69,7 +69,7 @@ a 120 fps request does not establish sustained 120 fps or stable 4K/60.
 | `linkshell gateway [--port 8787] [--daemon]` | Run a gateway (`gateway status`, `gateway stop`) |
 | `linkshell screen` | Set up watching and controlling the screen (`--check` only reports) |
 | `linkshell doctor` | Check Node, agents, the host and its gateway |
-| `linkshell upgrade` | Upgrade the CLI (restart the host afterwards to run the new version) |
+| `linkshell upgrade` | Upgrade the CLI and restart an outdated running host; preserve login, pairing and history |
 
 ## Run your own gateway
 
@@ -101,6 +101,10 @@ or with Docker: `nickname4th/linkshell-gateway` (see the [self-hosting guide](ht
 ## Coming from 1.x
 
 2.0 changed both the app and the computer side: upgrade both and connect again. From 0.10 the 1.x commands (`linkshell start`, `linkshell list`) are gone, and `linkshell gateway` no longer serves the 1.x app. `linkshell stop` still ends a 1.x bridge left running from before the upgrade.
+
+`linkshell upgrade` uses the newly installed CLI to restart an outdated running host, even when the CLI is already at the latest version. It retains the same home, identity, login and paired devices, waits for the gateway to reconnect, and leaves a stopped host stopped. Running agent turns and terminal processes stop during the restart; saved sessions remain available. The restart worker continues independently if an upgrade closes the host-owned terminal that launched it; its progress is in `~/.linkshell/upgrade.log` (or `LINKSHELL_HOME`).
+
+The first upgrade from a CLI older than 0.10.40 still runs the old updater. Once installation finishes, run `linkshell upgrade` again to bring the host forward. Subsequent upgrades need one invocation.
 
 ## License
 

@@ -1,7 +1,10 @@
 import { useMemo } from "react";
+import { router } from "expo-router";
 import { Pressable, StyleSheet, View } from "react-native";
 import { ComputerArt } from "@/components/computer-art";
 import { Text } from "@/components/fixed-text";
+import { Icon } from "@/components/icon";
+import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { useClient, useConnection } from "@/lib/client";
 import { listComputers, useComputers } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
@@ -11,6 +14,7 @@ import { type } from "@/theme/type";
 const platforms: Record<string, string> = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 
 export function ComputerList({ onSelect }: { onSelect?: () => void }) {
+  const names = useComputerNames((state) => state.names);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
   const relayStatus = useComputers((state) => state.relayStatus);
@@ -22,7 +26,7 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
     <View>
       {computers.map((computer, index) => {
         const selected = computer.key === current.key;
-        const name = computer.kind === "relay" ? computer.machine.name : computer.name;
+        const name = computerDisplayName(computer, names);
         const gateway = computer.kind === "relay" ? relayStatus[computer.gateway] : undefined;
         const online = selected ? status === "online" : computer.kind === "relay" && computer.machine.online && gateway === "online";
         const connecting = selected && (status === "connecting" || status === "reconnecting");
@@ -34,12 +38,13 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
         return (
           <View key={computer.key}>
             {index > 0 ? <View style={{ marginLeft: 52, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} /> : null}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${name}，${stateLabel}${selected ? "，当前电脑" : ""}`}
               accessibilityState={{ selected }}
               onPress={() => { haptics.selection(); useComputers.getState().select(computer.key); onSelect?.(); }}
-              style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 72, paddingVertical: 12, borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}
+              style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minHeight: 72, paddingVertical: 12, borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}
             >
               <ComputerArt name={name} />
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -50,6 +55,12 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
                 <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>{[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}</Text>
               </View>
             </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={`给 ${name} 改名`}
+              onPress={() => { haptics.selection(); router.push({ pathname: "/rename-computer", params: { computer: computer.key } }); }}
+              style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}>
+              <Icon sf="pencil" md="edit" size={18} color={colors.secondaryLabel} />
+            </Pressable>
+            </View>
           </View>
         );
       })}

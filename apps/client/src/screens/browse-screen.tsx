@@ -7,7 +7,7 @@ import { KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-
 import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
-import { useConnection } from "@/lib/client";
+import { useClient, useConnection } from "@/lib/client";
 import { pickDirectory } from "@/lib/directory-pick";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -92,10 +92,12 @@ function Row({ entry, detail, onPress, last }: { entry: DirectoryEntry; detail?:
 /** Browse or search directories, then confirm the current folder in the system toolbar. */
 export function BrowseScreen() {
   const { link } = useConnection();
+  const online = useClient((state) => state.status === "online");
   const insets = usePageInsets();
   const [path, setPath] = useState<string | undefined>(undefined);
   const [listing, setListing] = useState<{ path: string; parent?: string; home: string; entries: DirectoryEntry[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ query: string; entries: DirectoryEntry[] } | null>(null);
   const [searching, setSearching] = useState(false);
@@ -103,6 +105,7 @@ export function BrowseScreen() {
   const crumbBar = useRef<ScrollView>(null);
 
   useEffect(() => {
+    if (!online) return;
     let cancelled = false;
     setError(null);
     link
@@ -116,12 +119,12 @@ export function BrowseScreen() {
     return () => {
       cancelled = true;
     };
-  }, [link, path]);
+  }, [link, online, path, round]);
 
   // Search as you type, after a short pause.
   useEffect(() => {
     const text = query.trim();
-    if (!text) {
+    if (!text || !online) {
       setResults(null);
       setSearching(false);
       return;
@@ -139,7 +142,7 @@ export function BrowseScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [link, query]);
+  }, [link, online, query]);
 
   const trail = useMemo(() => (listing ? crumbs(listing.path, listing.home) : []), [listing]);
   const open = (target: string) => {
@@ -299,7 +302,10 @@ export function BrowseScreen() {
             </View>
           ) : null}
           {error && !searchMode ? (
-            <Text style={[type.subhead, { color: colors.danger, padding: 8 }]}>{error}</Text>
+            <View style={{ gap: 8 }}>
+              <Text style={[type.subhead, { color: colors.danger, padding: 8 }]}>{error}</Text>
+              <Button title="重新读取目录" disabled={!online} onPress={() => setRound((value) => value + 1)} />
+            </View>
           ) : !listing && !searchMode ? (
             <ActivityIndicator style={{ marginTop: 24 }} color={colors.secondaryLabel} />
           ) : rows.length === 0 ? (

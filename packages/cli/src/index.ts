@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { runDoctor } from "./commands/doctor.js";
 import { runSetup } from "./commands/setup.js";
 import { runUpgrade } from "./commands/upgrade.js";
@@ -28,11 +28,17 @@ const hostCmd = program
   .option("--dev-port <port>", "Also serve the host API on 127.0.0.1:<port> (local development clients only)")
   .option("--gateway <url>", "Reach this computer through a gateway (saved; 'off' to disable, 'default' for the official one when logged in)")
   .option("--_foreground-host", undefined) // internal
+  .addOption(new Option("--_upgrade-host").hideHelp())
   .action(async (options) => {
     const { runHostForeground, ensureHostRunning, readHostConfig, writeHostConfig, assertHostRuntime, silenceSqliteWarning, withRunningHost, refreshGateway, describeGateway } =
       await import("./commands/host.js");
     assertHostRuntime();
     silenceSqliteWarning();
+    if (options._upgradeHost) {
+      const { upgradeRunningHost } = await import("./commands/upgrade-host.js");
+      await upgradeRunningHost(pkg.version);
+      return;
+    }
     if (options.devPort) process.env.LINKSHELL_DEV_PORT = String(options.devPort);
     if (options.gateway) {
       const { defaultHome } = await import("@linkshell/host");
@@ -294,9 +300,9 @@ program
 
 program
   .command("upgrade")
-  .description("Upgrade LinkShell to the latest version")
+  .description("Upgrade LinkShell and automatically restart an outdated host")
   .action(async () => {
-    await runUpgrade();
+    await runUpgrade(pkg.version);
   });
 
 program

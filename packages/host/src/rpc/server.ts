@@ -24,6 +24,7 @@ import { DirectPeer } from "../direct.js";
 import { ComputerPreviewServer } from "../computer-preview.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
+import type { LiveActivityRelay } from "../live-activities.js";
 
 // How a development client names this machine: loopback, or the Android emulator's alias for its host's loopback.
 const DEVELOPMENT_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "10.0.2.2"]);
@@ -55,6 +56,7 @@ export interface HostRpcServerOptions {
   /** Optional loopback TCP port, for local development clients. */
   tcpPort?: number;
   log: (message: string) => void;
+  liveActivities?: LiveActivityRelay;
 }
 
 type Handler = (params: never, context: ConnectionContext) => Promise<unknown> | unknown;
@@ -105,6 +107,15 @@ export class HostRpcServer {
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     this.handlers = {
+      "liveActivities.subscribe": (params: P<"liveActivities.subscribe">) => {
+        if (!options.liveActivities) throw RpcError.app("not_supported", "电脑端尚不支持实时活动推送，请更新 CLI");
+        options.liveActivities.subscribe(params);
+        return {};
+      },
+      "liveActivities.unsubscribe": async (params: P<"liveActivities.unsubscribe">) => {
+        await options.liveActivities?.unsubscribe(params.activityId);
+        return {};
+      },
       "agents.editor": (params: P<"agents.editor">) => hub.editor(params),
       "agents.acp": (params: P<"agents.acp">) => hub.acpInfo(params.agent, params.sessionId),
       "agents.pending": () => ({ interactions: hub.pendingInteractions() }),
