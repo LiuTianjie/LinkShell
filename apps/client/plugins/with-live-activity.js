@@ -404,7 +404,8 @@ function ensureSource(proj, targetId, groupId, filename) {
 
 module.exports = function withLiveActivity(config) {
   const bundleId = config.ios?.bundleIdentifier || "com.bd.linkshell";
-  const appGroup = `group.${bundleId}.liveactivity`;
+  // The released app already shares this group with its other extensions.
+  const appGroup = bundleId === "com.bd.linkshell" ? "group.com.bd.linkshell" : `group.${bundleId}.liveactivity`;
   config = withEntitlementsPlist(config, (config) => {
     config.modResults["com.apple.security.application-groups"] = [...new Set([
       ...(config.modResults["com.apple.security.application-groups"] || []), appGroup,
