@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   RpcError,
@@ -377,6 +379,25 @@ export class AcpDriver implements AgentDriver {
     }), ...(settings.additionalDirectories.length ? { additionalDirectories: settings.additionalDirectories } : {}), ...this.sessionMeta() };
   }
 
+  sessionExists(nativeId: string, cwd: string): boolean {
+    if (this.sessions.has(nativeId)) return true;
+    if (this.id === "grok" && this.spec.command === "grok") {
+      const home = this.env.HOME || homedir();
+      const sessionsRoot = join(home, ".grok", "sessions");
+      if (!existsSync(sessionsRoot)) return true;
+      if (cwd && existsSync(join(sessionsRoot, encodeURIComponent(cwd), nativeId))) return true;
+      try {
+        for (const dir of readdirSync(sessionsRoot)) {
+          if (existsSync(join(sessionsRoot, dir, nativeId))) return true;
+        }
+      } catch {
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
   async listSessions(limit: number): Promise<DiscoveredSession[]> {
     if (!this.connection?.alive || !this.connection.capabilities.sessionCapabilities?.list) return [];
     const found: DiscoveredSession[] = [];
@@ -387,6 +408,7 @@ export class AcpDriver implements AgentDriver {
         cursor ? { cursor } : {},
       );
       for (const info of page.sessions ?? []) {
+        if (!this.sessionExists(info.sessionId, info.cwd)) continue;
         if (Array.isArray(info.additionalDirectories) && info.additionalDirectories.every((path) => typeof path === "string" && isAbsolute(path))) this.discoveredDirectories.set(info.sessionId, info.additionalDirectories);
         const updatedAt = info.updatedAt ? Date.parse(info.updatedAt) || Date.now() : Date.now();
         found.push({

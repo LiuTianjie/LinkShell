@@ -112,24 +112,12 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   const seams = useRef(new Set<string>());
   const overdue = useRef(false);
   const [, redraw] = useState(0);
-  const held = useRef<{ key: string; at: number; steady: boolean }[] | null>(null);
   const added = items.length > 0 && shown.current.length > 0 && items[0]!.id !== shown.current[0]!.id;
   const state = added ? list.current?.getState() : undefined;
   const coasting = momentum.current && !!state && reported.current.y < state.scrollLength;
   if (!added || !coasting || overdue.current) {
     const first = added ? shown.current.find(visible) : undefined;
     if (first) seams.current.add(first.id);
-    held.current = null;
-    if (state && !dragging.current && !momentum.current && !pinned.current) {
-      held.current = [];
-      for (let index = state.start; index <= state.end; index++) {
-        const row = state.data[index] as Row | undefined;
-        if (!row) continue;
-        // Messages are never folded away or merged: the surest rows to go by.
-        const steady = row.type === "item" && (row.item.kind === "user" || row.item.kind === "agent");
-        held.current.push({ key: row.key, at: state.positionAtIndex(index) - state.scroll, steady });
-      }
-    }
     shown.current = items;
     overdue.current = false;
   }
@@ -147,36 +135,10 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   const visibleItems = shown.current;
   const rows = useMemo(() => buildRows(visibleItems, Date.now(), open, seams.current, turnActive), [visibleItems, open, turnActive]);
 
-  // The rows just above the screen are measured once they are drawn, and what
-  // they turn out to measure moves the rows below: for some frames after such
-  // a page, keep the row exactly where it was.
-  const settling = useRef(0);
-  useEffect(() => {
-    const candidates = held.current;
-    held.current = null;
-    const state = list.current?.getState();
-    if (!candidates || !state) return;
-    const present = candidates.filter((row) => state.indexByKey(row.key) !== undefined);
-    const row = present.find((candidate) => candidate.steady) ?? present[0];
-    if (!row) return;
-    let frames = 30;
-    cancelAnimationFrame(settling.current);
-    settling.current = requestAnimationFrame(function settle() {
-      const now = list.current?.getState();
-      const index = now?.indexByKey(row.key);
-      if (!now || index === undefined || dragging.current || momentum.current) return;
-      const drift = now.positionAtIndex(index) - now.scroll - row.at;
-      if (Math.abs(drift) > 1) {
-        pinned.current = false;
-        void list.current?.scrollToOffset({ offset: now.scroll + drift, animated: false });
-      }
-      if (--frames > 0) settling.current = requestAnimationFrame(settle);
-    });
-  }, [rows]);
-  useEffect(() => () => cancelAnimationFrame(settling.current), []);
-
   const toEnd = useCallback(() => {
-    if (anchorEnd && pinned.current && !dragging.current) void list.current?.scrollToEnd({ animated: false });
+    if (anchorEnd && pinned.current && !dragging.current && !momentum.current) {
+      void list.current?.scrollToEnd({ animated: false });
+    }
   }, [anchorEnd]);
   // Until that first settling is over, where the list is says nothing about where the user is.
   const settled = useRef(false);
@@ -185,10 +147,31 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
     timers.push(setTimeout(() => (settled.current = true), 1500));
     return () => timers.forEach(clearTimeout);
   }, [toEnd]);
+
+  // Only auto-scroll to end when the tail item changes or a turn starts — never
+  // when toggling a StepsSummary ("运行 X 条命令") or prepending earlier history.
+  const tailItem = visibleItems[visibleItems.length - 1];
+  const tailSignature = useMemo(() => {
+    if (!tailItem) return "";
+    if (tailItem.kind === "agent" || tailItem.kind === "thought") {
+      return `${tailItem.id}:${tailItem.text.length}:${tailItem.streaming ? 1 : 0}`;
+    }
+    if (tailItem.kind === "tool") {
+      return `${tailItem.id}:${tailItem.status}:${tailItem.output?.length ?? 0}`;
+    }
+    return `${tailItem.id}:${tailItem.kind}`;
+  }, [tailItem]);
+  const prevTailSignature = useRef(tailSignature);
+  const prevTurnActive = useRef(turnActive);
   useEffect(() => {
+    const tailChanged = tailSignature !== prevTailSignature.current;
+    const turnStarted = turnActive && !prevTurnActive.current;
+    prevTailSignature.current = tailSignature;
+    prevTurnActive.current = turnActive;
+    if (!tailChanged && !turnStarted) return;
     const frame = requestAnimationFrame(toEnd);
     return () => cancelAnimationFrame(frame);
-  }, [rows, toEnd]);
+  }, [tailSignature, turnActive, toEnd]);
 
   // Earlier history loads a page at a time as the user nears the top: early
   // enough that a page is usually in before they get there, and the next one
@@ -201,15 +184,6 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   const nearStart = useCallback((screens: number) => {
     const state = list.current?.getState();
     return !!state && state.scroll < state.scrollLength * screens;
-  }, []);
-  // The list moves the scroll view to hold its rows in place. A system
-  // animation in flight (a tap on the status bar) can undo that move without
-  // the list hearing of it, leaving its rows drawn where the view isn't.
-  // Once at rest, put the view where the list has it.
-  const hold = useCallback(() => {
-    const state = list.current?.getState();
-    if (!state || dragging.current || momentum.current || Date.now() - reported.current.at < 150) return;
-    if (Math.abs(state.scroll - reported.current.y) > 2) void list.current?.scrollToOffset({ offset: state.scroll, animated: false });
   }, []);
   const loadEarlier = useCallback(
     (asked = false) => {
@@ -225,14 +199,12 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
             return;
           }
           fetching.current = false;
-          hold();
           if (landed && nearStart(EARLIER_SCREENS)) loadEarlier();
         };
         setTimeout(after, 400);
-        setTimeout(hold, 1200);
       });
     },
-    [hold, nearStart],
+    [nearStart],
   );
   // What the session opens with can be shorter than the screen (a run of tool
   // calls folds into one line): once it has settled at the end, look once.
@@ -270,9 +242,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
       }
       reported.current = { y: contentOffset.y, at: Date.now() };
       if (fromEnd < 48) pinned.current = true;
-      else if (dragging.current) pinned.current = false;
-      // Brought to the top without a drag (a tap on the status bar): not following the end any more.
-      else if (settled.current && contentOffset.y < layoutMeasurement.height && fromEnd > layoutMeasurement.height) pinned.current = false;
+      else if (dragging.current || momentum.current || settled.current) pinned.current = false;
       // Only as the user scrolls there: a page can't be held in place while the system animates to the top.
       if (contentOffset.y >= layoutMeasurement.height * EARLIER_SCREENS) stalled.current = false;
       else if (dragging.current || momentum.current) loadEarlier();

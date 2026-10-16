@@ -11,7 +11,13 @@ export function AgentTile({ agent, size = 40, dimmed = false }: { agent: string;
   const mark = agentMarks[agent];
   const look = agentLook(agent);
   const corner = size * 0.26;
-  const xml = useMemo(() => (mark ? mark.svg.replaceAll("currentColor", mark.fg?.[scheme] ?? "#ffffff") : null), [mark, scheme]);
+  const fgColor = mark?.fg?.[scheme] ?? "#ffffff";
+  const xml = useMemo(() => {
+    if (!mark) return null;
+    return mark.svg
+      .replace(/<path(?![^>]*\bfill=)/g, `<path fill="${fgColor}"`)
+      .replaceAll("currentColor", fgColor);
+  }, [mark, fgColor]);
 
   const frame = {
     width: size,
@@ -27,7 +33,7 @@ export function AgentTile({ agent, size = 40, dimmed = false }: { agent: string;
   if (mark && xml && mark.full) {
     return (
       <View style={frame} accessibilityRole="image" accessibilityLabel={look.name}>
-        <SvgXml xml={xml} width={size} height={size} />
+        <SvgXml key={`${agent}-${scheme}-full`} xml={xml} width={size} height={size} />
       </View>
     );
   }
@@ -40,7 +46,7 @@ export function AgentTile({ agent, size = 40, dimmed = false }: { agent: string;
       accessibilityLabel={look.name}
     >
       {xml ? (
-        <SvgXml xml={xml} width={size * 0.62} height={size * 0.62} />
+        <SvgXml key={`${agent}-${scheme}`} xml={xml} width={size * 0.62} height={size * 0.62} color={fgColor} />
       ) : (
         <Text style={{ color: "#ffffff", fontSize: size * 0.44, fontWeight: "700" }}>{look.name.slice(0, 1).toUpperCase()}</Text>
       )}

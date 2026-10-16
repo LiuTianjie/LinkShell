@@ -165,6 +165,8 @@ export interface AgentDriver {
   listSessions(limit: number): Promise<DiscoveredSession[]>;
   /** Native archives, including sessions that disappeared from recent discovery. Never implies deletion. */
   archivedSessions?(): Promise<string[]>;
+  /** Whether a previously discovered session still exists in the agent's native storage on disk. */
+  sessionExists?(nativeId: string, cwd: string): boolean;
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
    * Starts live updates and returns history according to behavior.history.

@@ -318,6 +318,15 @@ export class SessionHub {
         archived: true, state: "idle", asyncQuestions: [],
       });
     }
+    if (driver.sessionExists) {
+      for (const session of this.store.sessionsForAgent(driver.id)) {
+        const live = this.live.get(session.id);
+        if (live?.turnActive || session.state === "running" || session.state === "waiting") continue;
+        if (!driver.sessionExists(session.nativeId, session.cwd)) {
+          this.forget(session.id);
+        }
+      }
+    }
   }
 
   async stop(): Promise<void> {

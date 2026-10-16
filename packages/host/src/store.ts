@@ -461,6 +461,11 @@ export class HostStore {
     return rows.map(toSummary);
   }
 
+  sessionsForAgent(agent: string): SessionSummary[] {
+    const rows = this.db.prepare("SELECT * FROM sessions WHERE agent = ?").all(agent) as unknown as SessionRow[];
+    return rows.map(toSummary);
+  }
+
   listProjects(limit = 50): ProjectSummary[] {
     const rows = this.db
       .prepare(`SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count FROM sessions WHERE archived = 0 GROUP BY cwd`)

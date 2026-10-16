@@ -518,6 +518,10 @@ export function toHistory(
       }
       continue;
     }
+    if (update.sessionUpdate === "ls_turn" && update.state === "ended" && !update.parentToolCallId && group.length === 0 && history.length > 0) {
+      history[history.length - 1]!.updates.push(update);
+      continue;
+    }
     group.push(update);
     groupTs ??= ts;
     if (itemId) {

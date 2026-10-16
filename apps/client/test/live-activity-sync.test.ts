@@ -51,15 +51,15 @@ describe("Live Activity freshness", () => {
     expect(harness.sync).toHaveBeenLastCalledWith(expect.objectContaining({ active: true, phase: "running" }));
   });
 
-  it("does not keep background cached content fresh, and refreshes on return", () => {
+  it("continues syncing active sessions in the background while online, and refreshes on return", () => {
     harness.appState = "background";
     harness.onChange?.("background");
     const backgroundCalls = harness.sync.mock.calls.length;
     vi.advanceTimersByTime(300_000);
-    expect(harness.sync).toHaveBeenCalledTimes(backgroundCalls);
+    expect(harness.sync).toHaveBeenCalledTimes(backgroundCalls + 5);
     harness.appState = "active";
     harness.onChange?.("active");
-    expect(harness.sync).toHaveBeenCalledTimes(backgroundCalls + 1);
+    expect(harness.sync).toHaveBeenCalledTimes(backgroundCalls + 6);
   });
 
   it("removes its timer and listener on unmount", () => {

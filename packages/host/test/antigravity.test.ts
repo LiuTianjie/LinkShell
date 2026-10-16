@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,8 +7,10 @@ import {
   antigravityAuthStatus,
   cleanAntigravityUserInput,
   extractAntigravityAuthUrl,
+  newTranscriptParseState,
   parseAntigravityTranscript,
   resolveAntigravityLaunch,
+  TranscriptTail,
 } from "../src/drivers/acp/antigravity.js";
 import { mapPermissionRequest, normalizeAcpUpdate } from "../src/drivers/acp/mapper.js";
 import { mapAcpQuestions, questionMethod } from "../src/drivers/acp/questions.js";
@@ -351,6 +353,214 @@ describe("Antigravity ACP protocol mapping", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("extracts pending ask_question, incremental GENERIC tool outputs, and ERROR_MESSAGE steps", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-ask-"));
+    try {
+      const transcriptPath = join(root, "transcript_full.jsonl");
+      const initialLines = [
+        JSON.stringify({
+          step_index: 20,
+          type: "PLANNER_RESPONSE",
+          tool_calls: [
+            {
+              id: "call_ask_1",
+              name: "ask_question",
+              args: {
+                toolSummary: "Ask user about background sync",
+                questions: [
+                  {
+                    question: "Should Live Activity stay active in background?",
+                    is_multi_select: false,
+                    options: ["(Recommended) Keep alive while running", "Allow stale after 2m"],
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ];
+      writeFileSync(transcriptPath, `${initialLines.join("\n")}\n`);
+
+      const pass1 = parseAntigravityTranscript(transcriptPath, 0);
+      expect(pass1.nextLine).toBe(1);
+      expect(pass1.lastStepIndex).toBe(20);
+      expect(pass1.pendingAskQuestion).toEqual({
+        stepIndex: 21,
+        toolCallId: "call_ask_1",
+        title: "Ask user about background sync",
+        questions: [
+          {
+            question: "Should Live Activity stay active in background?",
+            options: [
+              { id: "1", text: "(Recommended) Keep alive while running" },
+              { id: "2", text: "Allow stale after 2m" },
+            ],
+          },
+        ],
+      });
+      expect(pass1.items[0]?.updates[0]).toMatchObject({
+        sessionUpdate: "tool_call",
+        toolCallId: "call_ask_1",
+        detail: {
+          type: "question",
+          text: "Should Live Activity stay active in background?",
+        },
+      });
+
+      // Append GENERIC answer output and an ERROR_MESSAGE, then parse incrementally from pass1.nextLine
+      const nextLines = [
+        ...initialLines,
+        JSON.stringify({
+          step_index: 21,
+          type: "GENERIC",
+          content: '[{"Question":"Should Live Activity stay active in background?","SelectedOptions":["(Recommended) Keep alive while running"]}]',
+        }),
+        JSON.stringify({
+          step_index: 22,
+          type: "ERROR_MESSAGE",
+          content: "Rate limit exceeded on upstream model",
+        }),
+      ];
+      writeFileSync(transcriptPath, `${nextLines.join("\n")}\n`);
+
+      const pass2 = parseAntigravityTranscript(transcriptPath, pass1.nextLine);
+      expect(pass2.nextLine).toBe(3);
+      expect(pass2.lastStepIndex).toBe(22);
+      expect(pass2.pendingAskQuestion).toBeUndefined();
+      expect(pass2.items).toHaveLength(2);
+      expect(pass2.items[0]?.updates[0]).toMatchObject({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_ask_1",
+        status: "completed",
+        detail: {
+          type: "question",
+          text: "Should Live Activity stay active in background?",
+        },
+      });
+      expect(pass2.items[1]?.updates[0]).toEqual({
+        sessionUpdate: "ls_error",
+        code: "agent_error",
+        message: "Rate limit exceeded on upstream model",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
+
+describe("Antigravity transcript tail and tool mapping", () => {
+  const line = (step: Record<string, unknown>) => `${JSON.stringify(step)}\n`;
+
+  it("follows a transcript by offset, holding back a half-written line, and settles tool calls when outputs arrive", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-tail-"));
+    try {
+      const path = join(root, "transcript_full.jsonl");
+      const reply = line({
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        tool_calls: [{ id: "call_run", name: "run_command", args: { CommandLine: "pnpm test", Cwd: "/repo", toolSummary: "Run tests" } }],
+        input_tokens: 100,
+        cache_read_tokens: 900,
+        output_tokens: 20,
+      });
+      const output = line({ step_index: 2, type: "GENERIC", status: "DONE", content: "Created At: x\nCompleted At: y\nPASS" });
+      writeFileSync(path, line({ step_index: 0, type: "USER_INPUT", content: "<USER_REQUEST>\nrun tests\n</USER_REQUEST>" }));
+      const tail = new TranscriptTail(path, newTranscriptParseState(), 0);
+      expect(tail.read(path).items.map((item) => item.itemId)).toEqual(["agy:user:0"]);
+
+      // Half of the reply line: nothing yet.
+      appendFileSync(path, reply.slice(0, 40));
+      expect(tail.read(path).items).toEqual([]);
+      appendFileSync(path, reply.slice(40));
+      const pass2 = tail.read(path);
+      expect(pass2.items[0]?.updates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sessionUpdate: "tool_call", toolCallId: "call_run", kind: "execute", status: "in_progress" }),
+          expect.objectContaining({ sessionUpdate: "usage_update", usedTokens: 1000 }),
+        ]),
+      );
+
+      appendFileSync(path, output);
+      expect(tail.read(path).items[0]?.updates[0]).toEqual({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_run",
+        status: "completed",
+        rawOutput: { output: "PASS" },
+      });
+      expect(tail.state.lastStepIndex).toBe(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("maps edits to diffs, failed steps to failed calls, sub-agents, MCP calls and compactions", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-tools-"));
+    try {
+      const path = join(root, "transcript_full.jsonl");
+      writeFileSync(
+        path,
+        [
+          line({
+            step_index: 1,
+            type: "PLANNER_RESPONSE",
+            tool_calls: [
+              { id: "w", name: "write_to_file", args: { TargetFile: "/repo/a.ts", CodeContent: "export {};\n" } },
+              { id: "r", name: "replace_file_content", args: { TargetFile: "/repo/b.ts", TargetContent: "old", ReplacementContent: "new" } },
+              { id: "s", name: "invoke_subagent", args: { Subagents: [{ TypeName: "research", Role: "Researcher", Prompt: "Look around" }] } },
+              { id: "m", name: "call_mcp_tool", args: { ServerName: "supabase", ToolName: "execute_sql", Arguments: { query: "select 1" } } },
+            ],
+          }),
+          line({ step_index: 2, type: "GENERIC", status: "DONE", content: "Created file" }),
+          line({ step_index: 3, type: "GENERIC", status: "ERROR", error: "target content not found" }),
+          line({ step_index: 4, type: "GENERIC", status: "DONE", content: 'Created the following subagents:\n{ "conversationId":  "1387c386-51c1-4a2c-b02a-a266794155bd" }' }),
+          line({ step_index: 5, type: "GENERIC", status: "DONE", content: "[]" }),
+          line({ step_index: 6, type: "CHECKPOINT", content: "# Resuming from a compaction" }),
+        ].join(""),
+      );
+      const { items } = parseAntigravityTranscript(path, 0);
+      const calls = items.flatMap((item) => item.updates).filter((u) => u.sessionUpdate === "tool_call");
+      expect(calls[0]).toMatchObject({ toolCallId: "w", kind: "edit", status: "completed", content: [{ type: "diff", path: "/repo/a.ts", oldText: null, newText: "export {};\n" }] });
+      expect(calls[1]).toMatchObject({ toolCallId: "r", status: "failed", content: [{ type: "diff", oldText: "old", newText: "new" }], rawOutput: { output: "target content not found" } });
+      expect(calls[2]).toMatchObject({
+        toolCallId: "s",
+        detail: { type: "subagent", action: "spawn", agentType: "research", name: "Researcher", task: "Look around", nativeSessionId: "1387c386-51c1-4a2c-b02a-a266794155bd" },
+      });
+      expect(calls[3]).toMatchObject({ toolCallId: "m", detail: { type: "mcp", server: "supabase", tool: "execute_sql" }, rawInput: { query: "select 1" } });
+      expect(calls[4]).toMatchObject({ toolCallId: "agy:checkpoint:6", detail: { type: "compaction" } });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("gives each sub-agent of a multi-agent invoke_subagent its own spawning call", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-spawn-"));
+    try {
+      const path = join(root, "transcript_full.jsonl");
+      writeFileSync(
+        path,
+        line({
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          tool_calls: [{ id: "spawn", name: "invoke_subagent", args: { Subagents: [{ Role: "A", Prompt: "a" }, { Role: "B", Prompt: "b", TypeName: "research" }] } }],
+        }) +
+          line({
+            step_index: 2,
+            type: "GENERIC",
+            content: '{ "conversationId": "11111111-1111-1111-1111-111111111111" }\n{ "conversationId": "22222222-2222-2222-2222-222222222222" }',
+          }),
+      );
+      const calls = parseAntigravityTranscript(path, 0).items.flatMap((item) => item.updates).filter((u) => u.sessionUpdate === "tool_call");
+      expect(calls.map((call) => [call.toolCallId, call.detail?.type === "subagent" ? call.detail.nativeSessionId : undefined])).toEqual([
+        ["spawn", "11111111-1111-1111-1111-111111111111"],
+        ["spawn#1", "22222222-2222-2222-2222-222222222222"],
+      ]);
+      expect(calls[1]).toMatchObject({ title: "B", detail: { name: "B", agentType: "research", task: "b" } });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 
 

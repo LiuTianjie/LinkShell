@@ -15,19 +15,25 @@
 | 连接断开或内容过期 | 灰色「状态已过期」／「待刷新」，提示打开 App 刷新，不继续显示旧的执行动作和运行数量 |
 | 全部完成、只有未启动或离线会话 | 立即结束活动，不保留一张「已完成」卡片 |
 
-锁屏卡片、灵动岛展开、紧凑和最小样式都读取统一的展示状态。系统的 `ActivityViewContext.isStale` 会覆盖缓存的 phase，因此即使 App 已被挂起，也不会把过期内容继续画成绿色运行状态。
+锁屏卡片、灵动岛展开、紧凑和最小样式都读取统一的展示状态。系统的 `ActivityViewContext.isStale` 会覆盖缓存的 phase，因此即使 App 已被系统强杀、不再同步，也不会把过期内容继续画成绿色运行状态。
 
 ## 后台边界
 
-当前 `Activity.request(..., pushType: nil)` 仅接受 App 本地更新，没有接入 ActivityKit APNs 推送。短时间切后台仍可能收到 WebSocket 更新；App 被系统挂起以后，不能保证连接与实时活动持续更新。卡片仍在不证明电脑连接仍在线。
+有正在运行、等待确认或等待回答的会话（或忙碌的终端）时，App 在后台保持运行，实时活动持续同步：
 
-每次本地更新设置两分钟后的 `staleDate`。前台每分钟刷新一次，避免没有新事件的正常会话过期；后台不使用定时器延长缓存有效期。两分钟从最后一次实际更新计算，不是从切后台固定计时。回到前台会刷新连接并恢复会话订阅，期间可能短暂显示离线、随后补齐消息。
+- `LinkLayoutModule.swift` 在实时活动处于活跃状态时，以 `.playback` + `.mixWithOthers` 循环播放一段静音音频（音量 0，不打断其他 App 的声音），同时申请 `beginBackgroundTask`；所有任务结束、活动结束或用户关闭实时活动时立即停止并释放音频会话。`app.json` 为此声明了 `UIBackgroundModes: audio`。
+- JS 端每 60 秒同步一次（前后台都同步，只要在线）；`client.tsx` 在后台有活跃任务时每 12 秒检查一次连接，断了就重连网关和 Host。
+- `staleDate` 每次同步向后推 3 分钟。App 活着时它永远不会生效；只有 App 被系统强杀、不再同步时，卡片才显示「状态已过期」，不会把过期内容一直画成运行中。
 
-这项修复保证过期提示，不提供后台永久保活。要在 App 被挂起后持续更新，需要另行接入 [ActivityKit 推送](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)，并设计状态摘要的传输和隐私边界；不能让现有端到端加密网关直接读取会话明文。
+没有活跃任务时不保活，App 按系统规则挂起，实时活动随之结束。
+
+仍未接入 ActivityKit APNs 推送：App 被强杀（或用户在多任务里划掉）后不会再更新。接入推送需要另行设计状态摘要的传输和隐私边界，不能让端到端加密的网关读取会话明文。
+
+> 后台音频保活依赖 `UIBackgroundModes: audio`。App Store / TestFlight 外部测试的审核可能认为它不属于音频用途（Guideline 2.5.4）；被拒时的替代方案是 ActivityKit 推送。
 
 ## 验证与交付
 
-- 聚合测试覆盖 14 组输入；刷新测试覆盖前台无新事件、后台停止延长有效期、回到前台和卸载清理。
+- 聚合测试覆盖 14 组输入；刷新测试覆盖前台无新事件、后台在线时持续同步、回到前台和卸载清理。
 - iPhone 17 Pro / iOS 26.5 模拟器使用生产 Widget 源码及原生 ActivityKit 更新方法，输入是隔离测试数据。这证明系统中的展示效果，不等同于完整 App 的远程链路或真机长时间后台验证。
 - Widget 源码和原生方法的变更需要新的 iOS 二进制；CLI 更新或 Metro 重载不能更新已安装的 Widget。
 - Codex 空表单授权和停止修复已在 Host 0.4.35 / CLI 0.10.37 交付，与上述 iOS 展示修复独立。

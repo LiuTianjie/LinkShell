@@ -411,8 +411,11 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
           ? upsert(ended, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts })
           : ended;
       }
-    case "ls_status":
-      return { ...view, state: update.state, turnActive: update.turnActive ?? view.turnActive };
+    case "ls_status": {
+      const turnActive = update.turnActive ?? (update.state === "running" || update.state === "waiting");
+      const base = !turnActive && view.turnActive ? settleAll(view, ts) : view;
+      return { ...base, state: update.state, turnActive };
+    }
     case "ls_permission": {
       if (view.permissions.some((p) => p.requestId === update.requestId)) return view;
       return {

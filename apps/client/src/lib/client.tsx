@@ -99,14 +99,38 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     if (connection.key === NO_COMPUTER_KEY) return;
     store.getState().connect();
     connection.streams.start();
-    // Sockets die quietly in the background; come back as soon as the app does.
+    // Keep the socket alive in the background while active sessions are running or waiting,
+    // and reconnect immediately when returning to the foreground.
+    const hasActiveWork = () => {
+      const st = store.getState();
+      return Object.values(st.sessions).some(
+        (s) =>
+          !s.archived &&
+          (s.state === "running" ||
+            s.state === "waiting" ||
+            s.pendingPermissions > 0 ||
+            Boolean(s.asyncQuestions?.length)),
+      );
+    };
+    const bgWatchdog = setInterval(() => {
+      if (AppState.currentState !== "active" && !hasActiveWork()) return;
+      if (store.getState().status !== "online") {
+        reconnectRelays();
+        link.reconnectNow();
+      }
+    }, 12_000);
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") return;
-      reconnectRelays();
-      link.reconnectNow();
-      connection.streams.connect();
+      if (state === "active") {
+        reconnectRelays();
+        link.reconnectNow();
+        connection.streams.connect();
+      } else if (state === "background" && hasActiveWork() && store.getState().status !== "online") {
+        reconnectRelays();
+        link.reconnectNow();
+      }
     });
     return () => {
+      clearInterval(bgWatchdog);
       subscription.remove();
       connection.streams.stop();
       store.getState().disconnect();

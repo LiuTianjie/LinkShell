@@ -185,13 +185,16 @@ export function mergeLiveViewsIntoSessions(
     const view = views?.[session.id];
     const progress = promptProgress?.[session.id];
     if (!view && !progress) return session;
-    const isTurnActive = Boolean(progress || view?.turnActive || view?.state === "running");
+    const isTurnActive = Boolean(
+      progress ||
+      (view ? view.turnActive && view.state !== "idle" && view.state !== "error" : false),
+    );
     const hasViewPerm = Boolean(view?.permissions?.length);
     const nextState = hasViewPerm
       ? "waiting"
       : isTurnActive
         ? "running"
-        : view?.state ?? session.state;
+        : session.state;
 
     let activity = session.activity;
     if (!activity && isTurnActive && view?.items?.length) {
@@ -397,9 +400,9 @@ export function useIOSAttentionSync(
       void syncNativeLiveActivity(payload);
     };
     sync();
-    // Keep unchanged foreground sessions fresh; iOS owns expiry once the app is suspended.
+    // Sync every 60s in both foreground and background while online (native keep-alive keeps active tasks running in background).
     const heartbeat = setInterval(() => {
-      if (AppState.currentState === "active") sync();
+      if (online) sync();
     }, 60_000);
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "inactive" || nextState === "background" || nextState === "active") {

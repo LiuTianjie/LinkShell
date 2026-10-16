@@ -19,6 +19,10 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CADisableMinimumFrameDurationOnPhone": true,
         "NSSupportsLiveActivities": true,
+        "UIBackgroundModes": [
+          "audio",
+          "fetch"
+        ],
         "NSMicrophoneUsageDescription": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
         "NSSpeechRecognitionUsageDescription": "LinkShell 需要使用语音识别，将你说的话实时转换为文字。"
       },
@@ -67,7 +71,7 @@
         {
           "microphonePermission": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
           "recordAudioAndroid": true,
-          "enableBackgroundPlayback": false,
+          "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false
         }
       ],

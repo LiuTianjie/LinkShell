@@ -36,6 +36,8 @@ public class LinkLayoutModule: Module {
   private var lastLevelSentAt: TimeInterval = 0
   private var simulatorWaveTimer: Timer?
   private var activeActivityId: String?
+  private var keepAlivePlayer: AVAudioPlayer?
+  private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
@@ -274,8 +276,90 @@ public class LinkLayoutModule: Module {
     }
     recognitionTask = nil
 
-    // Explicitly deactivate AVAudioSession so background music / podcasts resume immediately.
-    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    // Explicitly deactivate AVAudioSession so background music / podcasts resume immediately,
+    // unless background Live Activity keep-alive is currently active.
+    if keepAlivePlayer?.isPlaying == true {
+      try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+      try? AVAudioSession.sharedInstance().setActive(true)
+    } else {
+      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+  }
+
+  private static func makeSilentWavData() -> Data {
+    let sampleRate: UInt32 = 8000
+    let numSamples: UInt32 = 8000 // 1 second of 16-bit mono silence
+    let dataSize = numSamples * 2
+    let fileSize = 36 + dataSize
+    var header = Data(capacity: Int(44 + dataSize))
+    header.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+    withUnsafeBytes(of: fileSize.littleEndian) { header.append(contentsOf: $0) }
+    header.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+    header.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+    withUnsafeBytes(of: UInt32(16).littleEndian) { header.append(contentsOf: $0) }
+    withUnsafeBytes(of: UInt16(1).littleEndian) { header.append(contentsOf: $0) } // PCM
+    withUnsafeBytes(of: UInt16(1).littleEndian) { header.append(contentsOf: $0) } // Mono
+    withUnsafeBytes(of: sampleRate.littleEndian) { header.append(contentsOf: $0) }
+    withUnsafeBytes(of: (sampleRate * 2).littleEndian) { header.append(contentsOf: $0) }
+    withUnsafeBytes(of: UInt16(2).littleEndian) { header.append(contentsOf: $0) }
+    withUnsafeBytes(of: UInt16(16).littleEndian) { header.append(contentsOf: $0) }
+    header.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+    withUnsafeBytes(of: dataSize.littleEndian) { header.append(contentsOf: $0) }
+    header.append(Data(count: Int(dataSize)))
+    return header
+  }
+
+  private func startBackgroundKeepAliveIfNeeded() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      if self.backgroundTaskId == .invalid {
+        self.backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "LinkShellLiveActivitySync") { [weak self] in
+          guard let self else { return }
+          if self.backgroundTaskId != .invalid {
+            UIApplication.shared.endBackgroundTask(self.backgroundTaskId)
+            self.backgroundTaskId = .invalid
+          }
+        }
+      }
+      if self.keepAlivePlayer?.isPlaying == true {
+        return
+      }
+      // Do not override category while speech recognition is actively recording.
+      if self.audioEngine == nil {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? session.setActive(true)
+      }
+      if self.keepAlivePlayer == nil {
+        let wav = Self.makeSilentWavData()
+        if let player = try? AVAudioPlayer(data: wav, fileTypeHint: AVFileType.wav.rawValue) {
+          player.numberOfLoops = -1
+          player.volume = 0.0
+          player.prepareToPlay()
+          self.keepAlivePlayer = player
+        }
+      }
+      self.keepAlivePlayer?.play()
+    }
+  }
+
+  private func stopBackgroundKeepAlive() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      if let player = self.keepAlivePlayer {
+        if player.isPlaying {
+          player.stop()
+        }
+        self.keepAlivePlayer = nil
+        if self.audioEngine == nil {
+          try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+      }
+      if self.backgroundTaskId != .invalid {
+        UIApplication.shared.endBackgroundTask(self.backgroundTaskId)
+        self.backgroundTaskId = .invalid
+      }
+    }
   }
 
   private static func measureLevel(buffer: AVAudioPCMBuffer) -> (Double, Double) {
@@ -296,12 +380,16 @@ public class LinkLayoutModule: Module {
   private func syncNativeLiveActivity(payload: [String: Any]) async -> Bool {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
-      guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
+      guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+        stopBackgroundKeepAlive()
+        return false
+      }
       let active = (payload["active"] as? Bool) ?? false
       if !active {
         await endNativeLiveActivity()
         return true
       }
+      startBackgroundKeepAliveIfNeeded()
       let computerName = (payload["computerName"] as? String) ?? "电脑"
       let state = LinkShellAttentionAttributes.ContentState(
         phase: (payload["phase"] as? String) ?? "running",
@@ -314,9 +402,9 @@ public class LinkLayoutModule: Module {
         failedCount: (payload["failedCount"] as? Int) ?? 0,
         deepLink: (payload["deepLink"] as? String) ?? "linkshell:///"
       )
-      // Mark stale after 2 minutes without a heartbeat so the Lock Screen never lies when offline.
-      let staleDate = Date().addingTimeInterval(120)
-      let content = ActivityContent(state: state, staleDate: staleDate)
+      // Rolling: every sync (at least once a minute while the app is kept alive) pushes it forward, so it only
+      // takes effect when the app was killed and nothing is syncing any more.
+      let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(180))
       for activity in Activity<LinkShellAttentionAttributes>.activities {
         await activity.update(content)
         activeActivityId = activity.id
@@ -336,6 +424,7 @@ public class LinkLayoutModule: Module {
   }
 
   private func endNativeLiveActivity() async {
+    stopBackgroundKeepAlive()
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
       activeActivityId = nil

@@ -329,7 +329,7 @@ export class ClaudeDriver extends AcpDriver {
   private reportState(nativeId: string, state: SessionState): void {
     if (this.reportedStates.get(nativeId) === state) return;
     this.reportedStates.set(nativeId, state);
-    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state });
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state, turnActive: state === "running" || state === "waiting" });
   }
 
   /**
