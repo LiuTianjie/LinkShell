@@ -534,15 +534,29 @@ struct LinkShellLiveActivityBundle: WidgetBundle {
 }
 `;
 
-function ensureActionSource(proj, targetId) {
-  const sources = proj.hash.project.objects.PBXSourcesBuildPhase;
-  const files = proj.pbxBuildFileSection();
+function ensureSource(proj, targetId, groupId, filename) {
+  const group = proj.getPBXGroupByKey(groupId);
   const refs = proj.pbxFileReferenceSection();
+  let fileRef = group.children.find(({ value }) =>
+    String(refs[value]?.path || "").replaceAll('"', "") === filename,
+  )?.value;
+  if (!fileRef) fileRef = proj.addFile(filename, groupId).fileRef;
+
+  const sources = proj.hash.project.objects.PBXSourcesBuildPhase || {};
+  const files = proj.pbxBuildFileSection();
   const target = proj.pbxNativeTargetSection()[targetId];
   const present = (target.buildPhases || []).some(({ value }) =>
-    sources[value]?.files?.some((file) => String(refs[files[file.value]?.fileRef]?.path || "").replaceAll('"', "").endsWith(`/${ACTION_FILE}`)),
+    sources[value]?.files?.some((file) => files[file.value]?.fileRef === fileRef),
   );
-  if (!present) proj.addBuildPhase([`${TARGET_NAME}/${ACTION_FILE}`], "PBXSourcesBuildPhase", "Live Activity Actions", targetId);
+  if (present) return;
+  if (!(target.buildPhases || []).some(({ value }) => sources[value])) {
+    proj.addBuildPhase([], "PBXSourcesBuildPhase", "Sources", targetId);
+  }
+  // Share the grouped file reference, but give each target its own build file.
+  // addBuildPhase(paths) creates ungrouped references and reuses build files.
+  const file = { uuid: proj.generateUuid(), fileRef, basename: filename, group: "Sources", target: targetId };
+  proj.addToPbxBuildFileSection(file);
+  proj.addToPbxSourcesBuildPhase(file);
 }
 
 module.exports = function withLiveActivity(config) {
@@ -560,8 +574,11 @@ module.exports = function withLiveActivity(config) {
     if (proj.pbxTargetByName(TARGET_NAME)) {
       const existing = proj.pbxTargetByName(TARGET_NAME);
       const targetId = Object.keys(proj.pbxNativeTargetSection()).find((key) => proj.pbxNativeTargetSection()[key] === existing);
-      ensureActionSource(proj, targetId);
-      ensureActionSource(proj, proj.getFirstTarget().uuid);
+      const group = proj.pbxGroupByName(TARGET_NAME);
+      const groupId = Object.keys(proj.hash.project.objects.PBXGroup).find((key) => proj.hash.project.objects.PBXGroup[key] === group);
+      ensureSource(proj, targetId, groupId, SOURCE_FILE);
+      ensureSource(proj, targetId, groupId, ACTION_FILE);
+      ensureSource(proj, proj.getFirstTarget().uuid, groupId, ACTION_FILE);
       return config;
     }
 
@@ -577,22 +594,18 @@ module.exports = function withLiveActivity(config) {
     const target = proj.addTarget(TARGET_NAME, "app_extension", TARGET_NAME, extBundleId);
 
     // Create PBXGroup for extension files and attach to main project group.
-    const extGroup = proj.addPbxGroup([SOURCE_FILE, ACTION_FILE, INFO_PLIST_FILE], TARGET_NAME, TARGET_NAME);
+    const extGroup = proj.addPbxGroup([INFO_PLIST_FILE], TARGET_NAME, TARGET_NAME);
     const mainGroupId = proj.getFirstProject().firstProject.mainGroup;
     proj.addToPbxGroup(extGroup.uuid, mainGroupId);
 
     // Add Sources, Frameworks, and Resources build phases to the extension target.
-    proj.addBuildPhase(
-      [`${TARGET_NAME}/${SOURCE_FILE}`, `${TARGET_NAME}/${ACTION_FILE}`],
-      "PBXSourcesBuildPhase",
-      "Sources",
-      target.uuid,
-    );
+    ensureSource(proj, target.uuid, extGroup.uuid, SOURCE_FILE);
+    ensureSource(proj, target.uuid, extGroup.uuid, ACTION_FILE);
     proj.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
     proj.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", target.uuid);
     // Both targets need the intent metadata. Execution takes place in the app,
     // where the Expo module can consume the authenticated selection.
-    ensureActionSource(proj, proj.getFirstTarget().uuid);
+    ensureSource(proj, proj.getFirstTarget().uuid, extGroup.uuid, ACTION_FILE);
 
     // Ensure the Copy Files phase on the main app target embeds the .appex with RemoveHeadersOnCopy.
     const buildFiles = proj.pbxBuildFileSection();
