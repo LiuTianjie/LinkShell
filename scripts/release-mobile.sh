@@ -1,24 +1,24 @@
 #!/bin/bash
-# Release the mobile app (iOS + Android) by pushing a vX.Y.Z tag. (apps/client)
+# Release the mobile app (iOS + Android) locally from this Mac. (apps/client)
 #
-# Pushing `vX.Y.Z` triggers two self-hosted-macOS workflows:
-#   - .github/workflows/ios-build.yml     → archive + upload to TestFlight
-#   - .github/workflows/android-build.yml → AAB + APK → GitHub Release "LinkShell X.Y.Z"
-#
-# The tag is the single source of truth: CI parses the version from it, rewrites
-# app.json (version + ios.buildNumber + android.versionCode = MAJOR*10000+MINOR*100+PATCH)
-# in its own checkout, and creates the GitHub Release. This script therefore does
-# NOT touch app.json and does NOT create a Release — it only validates, tags, pushes.
+# Runs:
+#   - node apps/client/scripts/release.mjs ios <version>     → archive + upload to TestFlight
+#   - node apps/client/scripts/release.mjs android <version> → AAB + APK in apps/client/build/release
+#   - gh release create v<version> ...                       → GitHub Release "LinkShell <version>"
 #
 # Usage:
-#   ./scripts/release-mobile.sh 1.1.5            # tag HEAD as v1.1.5 and push
+#   ./scripts/release-mobile.sh 2.3.28           # build & publish v2.3.28 locally
 #   ./scripts/release-mobile.sh                  # auto-suggest next patch, then confirm
-#   ./scripts/release-mobile.sh 1.1.5 --yes      # skip confirmation prompt
-#   ./scripts/release-mobile.sh 2.0.1 --skip-typecheck
+#   ./scripts/release-mobile.sh 2.3.28 --yes     # skip confirmation prompt
+#   ./scripts/release-mobile.sh 2.3.28 --skip-typecheck
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 
 # ── Parse args ──────────────────────────────────────────────────────
 VERSION=""
@@ -26,10 +26,10 @@ ASSUME_YES=0
 SKIP_TYPECHECK=0
 for arg in "$@"; do
   case "$arg" in
-    --yes|-y)        ASSUME_YES=1 ;;
+    --yes|-y)         ASSUME_YES=1 ;;
     --skip-typecheck) SKIP_TYPECHECK=1 ;;
-    -*)              echo "Unknown flag: $arg" >&2; exit 1 ;;
-    *)               VERSION="$arg" ;;
+    -*)               echo "Unknown flag: $arg" >&2; exit 1 ;;
+    *)                VERSION="$arg" ;;
   esac
 done
 
@@ -49,39 +49,14 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "✗ Version must be X.Y.Z (e.g. 1.1.5), got: '$VERSION'" >&2
+  echo "✗ Version must be X.Y.Z (e.g. 2.3.28), got: '$VERSION'" >&2
   exit 1
 fi
 TAG="v$VERSION"
 
-# ── Pre-checks ──────────────────────────────────────────────────────
-# Tag points at HEAD's commit; uncommitted changes are NOT included in the build.
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [[ "$BRANCH" != "main" ]]; then
-  echo "⚠️  You are on branch '$BRANCH', not 'main'. The tag will point at this branch's HEAD."
-fi
-
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "⚠️  Working tree has uncommitted changes — they will NOT be in the build (tag points at the last commit):"
-  git status -s
-fi
-
-# Local tag conflict
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-  echo "✗ Tag $TAG already exists locally. Delete it first: git tag -d $TAG" >&2
-  exit 1
-fi
-# Remote tag conflict
-if git ls-remote --tags origin "$TAG" 2>/dev/null | grep -q "refs/tags/$TAG"; then
-  echo "✗ Tag $TAG already exists on origin. Pick a higher version." >&2
-  exit 1
-fi
-
-# Compute build number CI will assign, so you see it before pushing.
 IFS='.' read -r MA MI PA <<< "$VERSION"
 BUILD_CODE=$((MA * 10000 + MI * 100 + PA))
 
-# Typecheck the mobile app (skippable for hotfix re-tags).
 if [[ "$SKIP_TYPECHECK" -eq 0 ]]; then
   echo
   echo "━━━ Typecheck (mobile app) ━━━"
@@ -90,19 +65,18 @@ else
   echo "━━━ Typecheck skipped (--skip-typecheck) ━━━"
 fi
 
-# ── Confirm ─────────────────────────────────────────────────────────
 HEAD_SHA="$(git rev-parse --short HEAD)"
 HEAD_MSG="$(git log -1 --pretty=%s)"
 echo
 echo "──────────────────────────────────────────────"
-echo "  Release mobile $TAG"
+echo "  Local Mobile Release $TAG"
 echo "  version       : $VERSION"
-echo "  buildNumber   : $BUILD_CODE   (ios.buildNumber & android.versionCode, set by CI)"
+echo "  buildNumber   : $BUILD_CODE   (ios.buildNumber & android.versionCode)"
 echo "  HEAD          : $HEAD_SHA  $HEAD_MSG"
-echo "  triggers      : iOS → TestFlight,  Android → GitHub Release (AAB+APK)"
+echo "  actions       : local iOS → TestFlight, local Android → GitHub Release (AAB+APK)"
 echo "──────────────────────────────────────────────"
 if [[ "$ASSUME_YES" -eq 0 ]]; then
-  printf "Push %s now? [y/N] " "$TAG"
+  printf "Build and release %s locally now? [y/N] " "$TAG"
   read -r REPLY
   case "$REPLY" in
     y|Y|yes|YES) ;;
@@ -110,19 +84,29 @@ if [[ "$ASSUME_YES" -eq 0 ]]; then
   esac
 fi
 
-# ── Tag & push ──────────────────────────────────────────────────────
-git tag -a "$TAG" -m "release: $TAG"
-git push origin "$TAG"
-echo "✓ Pushed $TAG"
+trap 'git checkout -- apps/client/app.json 2>/dev/null || true' EXIT
 
-# ── Show triggered CI runs ──────────────────────────────────────────
-if command -v gh >/dev/null 2>&1; then
-  echo
-  echo "Waiting for CI to register the runs..."
-  sleep 5
-  gh run list --limit 5 || true
-  echo
-  echo "Watch:   gh run watch   (pick a run)   |   App Store Connect → TestFlight   |   GitHub → Releases"
+echo
+echo "━━━ Building workspace packages ━━━"
+pnpm -r --filter './packages/*' build
+
+echo
+echo "━━━ Building iOS & uploading to TestFlight ($VERSION) ━━━"
+(cd apps/client && node scripts/release.mjs ios "$VERSION")
+
+echo
+echo "━━━ Building Android AAB + APK ($VERSION) ━━━"
+(cd apps/client && node scripts/release.mjs android "$VERSION")
+
+git checkout -- apps/client/app.json 2>/dev/null || true
+
+echo
+echo "━━━ Publishing GitHub Release $TAG ━━━"
+AAB="apps/client/build/release/LinkShell-${VERSION}.aab"
+APK="apps/client/build/release/LinkShell-${VERSION}.apk"
+if gh release view "$TAG" >/dev/null 2>&1; then
+  gh release upload "$TAG" "$APK" "$AAB" --clobber
 else
-  echo "Install gh CLI to auto-show CI status, or check: GitHub → Actions"
+  gh release create "$TAG" "$APK" "$AAB" --title "LinkShell ${VERSION}" --notes "LinkShell ${VERSION}"
 fi
+echo "✓ Released $TAG (TestFlight + GitHub Release)"

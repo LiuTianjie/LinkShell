@@ -259,28 +259,23 @@ tap 仓库是 `LiuTianjie/homebrew-linkshell`，脚本每次都会重写其中�
 
 发布的 App 是 `com.bd.linkshell`（App Store / APK 上的 LinkShell）。开发版用 `APP_VARIANT=development`（`pnpm --filter @linkshell/client ios|android` 已带上），装成 `com.bd.linkshell.v2`，与正式版并存。见 `apps/client/app.config.js`。
 
-### 推荐：打 tag 走 CI
+移动端构建全部在本机 macOS 上执行（GitHub Actions 无移动端 runner）：
 
 ```bash
-./scripts/release-mobile.sh 2.3.1
+./scripts/release-mobile.sh 2.3.28 --yes
 ```
 
-推送 `vX.Y.Z` 触发两个 self-hosted macOS workflow，都调用 `apps/client/scripts/release.mjs`：
-- `.github/workflows/ios-build.yml` → prebuild、archive、上传 TestFlight
-- `.github/workflows/android-build.yml` → AAB + APK，并创建 GitHub Release `LinkShell X.Y.Z`
-
-版本号来自 tag：`version = X.Y.Z`，`buildNumber / versionCode = MAJOR*10000 + MINOR*100 + PATCH`。
-
-### 本地构建（runner 离线时）
+或分步执行：
 
 ```bash
 cd apps/client
-node scripts/release.mjs ios 2.3.1        # 即根目录的 pnpm prod:ios；不带版本号时用 app.json 里的版本
-node scripts/release.mjs android 2.3.1    # 即 pnpm prod:android；输出 build/release/LinkShell-X.Y.Z.apk / .aab
-gh release create vX.Y.Z build/release/LinkShell-X.Y.Z.apk build/release/LinkShell-X.Y.Z.aab --title "LinkShell X.Y.Z"
+node scripts/release.mjs ios 2.3.28        # prebuild、archive、上传 TestFlight
+node scripts/release.mjs android 2.3.28    # 输出 build/release/LinkShell-2.3.28.apk / .aab
+git checkout -- app.json
+gh release create v2.3.28 build/release/LinkShell-2.3.28.apk build/release/LinkShell-2.3.28.aab --title "LinkShell 2.3.28"
 ```
 
-- ⚠️ **本地构建完，要取消 CI 里的那两个构建**。`gh release create vX.Y.Z`（或手动推 `vX.Y.Z`）会在 GitHub 上产生这个 tag，照样触发 iOS 和 Android 两个 workflow，把同一个版本再构建、再上传一遍。推完马上 `gh run list --limit 5`，对这两个 run 执行 `gh run cancel <id>`。
+- 版本号：`version = X.Y.Z`，`buildNumber / versionCode = MAJOR*10000 + MINOR*100 + PATCH`。
 - 每次都是从干净的 prebuild 开始的完整构建，没有“快速”版本。
 - 在不是自己登录 shell 的环境里构建（脚本、后台任务）要补上环境变量，否则 CocoaPods / Gradle 一上来就失败：`LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ANDROID_HOME=$HOME/Library/Android/sdk`。
 - Android release 用 Expo 模板的 `debug.keystore` 签名，和之前发布的所有版本相同，所以 APK 可以直接覆盖安装。

@@ -129,7 +129,7 @@ When the user asks to release LinkShell, execute the full release workflow, incl
 - `@linkshell/mac` must be published from a Mac with the Developer ID Application certificate (`prepack` refuses to build unsigned).
 - Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only builds: the official gateway is deployed by bumping the image in `luma-gateway.yml`.
 - Tag `cli-vX.Y.Z` marks a CLI release (no CI). `./scripts/update-brew.sh` updates the Homebrew tap.
-- Tag `vX.Y.Z` → the app, on self-hosted macOS runners: iOS to TestFlight, Android AAB + APK to a GitHub release (`./scripts/release-mobile.sh`). Locally: `pnpm prod:ios` / `pnpm prod:android`.
+- Mobile app (`vX.Y.Z`) → built and released locally on macOS (`./scripts/release-mobile.sh X.Y.Z --yes`, or `node scripts/release.mjs ios|android X.Y.Z` + `gh release create vX.Y.Z`): iOS to TestFlight, Android AAB + APK to a GitHub release. There is no GitHub Actions runner for mobile builds.
 - `docs/site/` deploys to GitHub Pages on push to main (`.github/workflows/pages.yml`).
 
 Install channels: `npm i -g linkshell-cli`, `brew install LiuTianjie/linkshell/linkshell`, `curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh`.
