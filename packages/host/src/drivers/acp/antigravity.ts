@@ -2114,6 +2114,7 @@ export class AntigravityDriver extends AcpDriver {
     try {
       const conn = await this.languageServer();
       let foundAction: DesktopPendingAction | undefined;
+      const observedStepIndices = new Set<number>();
 
       if (conn) {
         // Steps carry their full content (~20 KB each): ask only for the newest few, where a waiting one would be.
@@ -2130,6 +2131,7 @@ export class AntigravityDriver extends AcpDriver {
             const info = step.metadata?.sourceTrajectoryStepInfo;
             if (info?.trajectoryId) watcher.trajectoryId = info.trajectoryId;
             const stepIndex = info?.stepIndex ?? stepOffset + idx;
+            observedStepIndices.add(stepIndex);
             if (watcher.resolvedStepIndices.has(stepIndex)) continue;
 
             const isWaiting =
@@ -2193,7 +2195,9 @@ export class AntigravityDriver extends AcpDriver {
         }
       }
 
-      if (!foundAction && transcriptPendingQuestion && !watcher.resolvedStepIndices.has(transcriptPendingQuestion.stepIndex)) {
+      // A transcript can end with ask_question after the native step was canceled.
+      // Only use that fallback when the live response did not contain its step.
+      if (!foundAction && transcriptPendingQuestion && !observedStepIndices.has(transcriptPendingQuestion.stepIndex) && !watcher.resolvedStepIndices.has(transcriptPendingQuestion.stepIndex)) {
         foundAction = {
           kind: "question",
           requestId: `agy-ask:${nativeId}:${transcriptPendingQuestion.stepIndex}`,

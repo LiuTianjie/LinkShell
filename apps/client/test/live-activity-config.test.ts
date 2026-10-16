@@ -15,12 +15,21 @@ it("uses only production APNs in the official build, with no client secret", () 
   vi.stubEnv("LINKSHELL_LIVE_ACTIVITY_PUSH", "1"); vi.stubEnv("APP_VARIANT", ""); vi.stubEnv("LINKSHELL_PUSH_SERVICE_URL", "");
   const app = configure({ config: { ios: { bundleIdentifier: "com.bd.linkshell" } } });
   expect(app.ios.entitlements?.["aps-environment"]).toBe("production");
-  expect(app.ios.infoPlist).toEqual({ LinkShellLiveActivityPushURL: "https://push.itool.tech" });
+  expect(app.ios.infoPlist).toEqual({ LinkShellLiveActivityPushURL: "https://push.itool.tech", LinkShellURLScheme: "linkshell" });
 });
 
-it("rejects a development bundle or an insecure service URL when push is enabled", () => {
+it("rejects the production push service for development and rejects insecure service URLs", () => {
   vi.stubEnv("LINKSHELL_LIVE_ACTIVITY_PUSH", "1"); vi.stubEnv("APP_VARIANT", "development");
-  expect(() => configure({ config: {} })).toThrow(/production/);
+  vi.stubEnv("LINKSHELL_PUSH_SERVICE_URL", "");
+  expect(() => configure({ config: {} })).toThrow(/sandbox/);
   vi.stubEnv("APP_VARIANT", ""); vi.stubEnv("LINKSHELL_PUSH_SERVICE_URL", "http://push.itool.tech");
   expect(() => configure({ config: {} })).toThrow(/HTTPS/);
+});
+
+it("keeps a development push service and URL scheme separate from production", () => {
+  vi.stubEnv("LINKSHELL_LIVE_ACTIVITY_PUSH", "1"); vi.stubEnv("APP_VARIANT", "development");
+  vi.stubEnv("LINKSHELL_PUSH_SERVICE_URL", "https://push-dev.itool.tech");
+  const app = configure({ config: {} });
+  expect(app.ios.entitlements?.["aps-environment"]).toBe("development");
+  expect(app.ios.infoPlist).toEqual({ LinkShellLiveActivityPushURL: "https://push-dev.itool.tech", LinkShellURLScheme: "linkshell-dev" });
 });

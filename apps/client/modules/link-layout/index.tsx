@@ -50,6 +50,7 @@ interface NativeLayoutModuleType {
   pendingLiveActivityActionId?: () => Promise<string | null>;
   liveActivityPushURL?: string;
   getLiveActivityPushRegistration?: () => Promise<NativeLiveActivityRegistration | null>;
+  getLiveActivityPushRegistrations?: () => Promise<NativeLiveActivityRegistration[]>;
   setLiveActivityPushReady?: (id: string) => Promise<void>;
   addListener?: <T = unknown>(eventName: string, listener: (event: T) => void) => { remove: () => void };
 }
@@ -111,14 +112,28 @@ export function isNativeLiveActivityAvailable(): Promise<boolean> {
   return nativeLayout?.isLiveActivityAvailable?.() ?? Promise.resolve(false);
 }
 
+let activityWork: Promise<unknown> = Promise.resolve();
+function serializeActivityWork<T>(work: () => Promise<T>): Promise<T> {
+  const result = activityWork.then(work);
+  activityWork = result.catch(() => {});
+  return result;
+}
+
 export function syncNativeLiveActivity(payload: LiveActivityPayload): Promise<boolean> {
   const bounded = payload.active ? { ...payload, ...liveActivityContent(payload) } : payload;
-  return nativeLayout?.syncLiveActivity?.(bounded) ?? Promise.resolve(false);
+  // ActivityKit methods suspend. Serialize creation/end across rapid snapshots
+  // so a late update cannot recreate an activity after logout or computer switch.
+  return serializeActivityWork(() => nativeLayout?.syncLiveActivity?.(bounded) ?? Promise.resolve(false));
 }
 
 export const liveActivityPushURL = nativeLayout?.liveActivityPushURL || "";
 export function getNativeLiveActivityRegistration(): Promise<NativeLiveActivityRegistration | null> {
   return nativeLayout?.getLiveActivityPushRegistration?.() ?? Promise.resolve(null);
+}
+export async function getNativeLiveActivityRegistrations(): Promise<NativeLiveActivityRegistration[]> {
+  if (nativeLayout?.getLiveActivityPushRegistrations) return nativeLayout.getLiveActivityPushRegistrations();
+  const registration = await getNativeLiveActivityRegistration();
+  return registration ? [registration] : [];
 }
 export function setNativeLiveActivityPushReady(id: string): Promise<void> {
   return nativeLayout?.setLiveActivityPushReady?.(id) ?? Promise.resolve();
@@ -130,7 +145,7 @@ export function subscribeNativeLiveActivityTokens(listener: (event: { activityId
 }
 
 export function endNativeLiveActivity(): Promise<void> {
-  return nativeLayout?.endLiveActivity?.() ?? Promise.resolve();
+  return serializeActivityWork(() => nativeLayout?.endLiveActivity?.() ?? Promise.resolve());
 }
 
 export function consumeNativeLiveActivityAction(id: string): Promise<LiveActivityAction | null> {

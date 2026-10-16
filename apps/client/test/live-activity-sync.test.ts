@@ -26,7 +26,7 @@ vi.mock("../src/lib/client", () => ({ useConnection: vi.fn() }));
 vi.mock("../modules/link-layout", () => ({ setNativeShortcutItems: vi.fn(), syncNativeLiveActivity: harness.sync }));
 const { useIOSAttentionSync } = await import("../src/lib/session-attention");
 
-describe("Live Activity freshness", () => {
+describe("Live Activity foreground synchronization", () => {
   let cleanups: Array<() => void>;
   beforeEach(() => {
     vi.useFakeTimers();
@@ -44,7 +44,7 @@ describe("Live Activity freshness", () => {
     vi.useRealTimers();
   });
 
-  it("refreshes unchanged foreground content before the native two-minute expiry", () => {
+  it("reconciles unchanged foreground content periodically", () => {
     expect(harness.sync).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(180_000);
     expect(harness.sync).toHaveBeenCalledTimes(4);

@@ -1,4 +1,4 @@
-const { withXcodeProject } = require("expo/config-plugins");
+const { withXcodeProject, withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -43,25 +43,10 @@ import SwiftUI
 import UIKit
 import WidgetKit
 
-@available(iOS 16.2, *)
-public struct LinkShellAttentionAttributes: ActivityAttributes {
-  public struct ContentState: Codable, Hashable {
-    public var phase: String
-    public var title: String
-    public var subtitle: String
-    public var project: String
-    public var agent: String
-    public var agents: [String]?
-    public var actions: [LiveActivityAction]?
-    public var hasMoreActions: Bool?
-    public var waitingCount: Int
-    public var runningCount: Int
-    public var failedCount: Int
-    public var deepLink: String
-  }
-  public var computerName: String
-  public var computerKey: String?
-  public var remoteUpdates: Bool?
+private func activityURL(_ value: String) -> URL? {
+  guard var parts = URLComponents(string: value) else { return nil }
+  parts.scheme = Bundle.main.object(forInfoDictionaryKey: "LinkShellURLScheme") as? String ?? "linkshell"
+  return parts.url
 }
 
 @available(iOS 16.2, *)
@@ -147,7 +132,7 @@ extension LinkShellAttentionAttributes.ContentState {
     case "running": return "正在运行"
     case "starting": return "正在启动"
     case "completed": return "已完成"
-    default: return "状态已过期"
+    default: return "连接暂时中断"
     }
   }
 
@@ -167,7 +152,7 @@ extension LinkShellAttentionAttributes.ContentState {
   }
 
   var effectiveSubtitle: String {
-    if phase == "stale" { return "状态已过期，打开 App 刷新" }
+    if phase == "stale" { return "正在重新连接电脑…" }
     let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmed.isEmpty { return trimmed }
     switch phase {
@@ -183,10 +168,7 @@ extension LinkShellAttentionAttributes.ContentState {
 @available(iOS 16.2, *)
 extension ActivityViewContext where Attributes == LinkShellAttentionAttributes {
   var displayState: LinkShellAttentionAttributes.ContentState {
-    // The system can expire content while the app is suspended and cannot send an update.
-    var display = state
-    if isStale { display.phase = "stale" }
-    return display
+    state.displayingSelection(activityID: activityID, computerKey: attributes.computerKey)
   }
 }
 
@@ -330,33 +312,6 @@ struct StatusIndicatorView: View {
 }
 
 @available(iOS 16.2, *)
-struct ActivityCountsView: View {
-  let state: LinkShellAttentionAttributes.ContentState
-
-  var body: some View {
-    HStack(spacing: 10) {
-      count(state.runningCount, symbol: "waveform", color: Color(red: 0.22, green: 0.84, blue: 0.42), label: "运行")
-      count(state.waitingCount, symbol: "hand.raised.fill", color: Color(red: 0.98, green: 0.65, blue: 0.10), label: "待处理")
-      count(state.failedCount, symbol: "exclamationmark.triangle.fill", color: Color(red: 0.95, green: 0.30, blue: 0.30), label: "出错")
-    }
-    .font(.system(size: 11, weight: .medium))
-  }
-
-  @ViewBuilder
-  private func count(_ value: Int, symbol: String, color: Color, label: String) -> some View {
-    if value > 0 {
-      HStack(spacing: 4) {
-        Image(systemName: symbol)
-        Text(String(value)).monospacedDigit()
-      }
-      .foregroundColor(color.opacity(0.85))
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel("\\(value) 个任务\\(label)")
-    }
-  }
-}
-
-@available(iOS 16.2, *)
 struct ActivityTextView: View {
   let text: String
   @Environment(\\.accessibilityReduceMotion) private var reduceMotion
@@ -374,7 +329,7 @@ struct ActivityActionsView: View {
   let state: LinkShellAttentionAttributes.ContentState
 
   var body: some View {
-    if state.phase != "stale", let url = URL(string: state.deepLink),
+    if state.phase != "stale", let url = activityURL(state.deepLink),
        !(state.actions ?? []).isEmpty || state.hasMoreActions == true {
       if #available(iOS 17.0, *), !(state.actions ?? []).isEmpty {
         ViewThatFits(in: .horizontal) {
@@ -420,119 +375,7 @@ struct ActivityActionsView: View {
   }
 }
 
-@available(iOS 16.2, *)
-struct LockScreenBannerView: View {
-  let state: LinkShellAttentionAttributes.ContentState
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        AgentStackView(state: state)
-        if !state.project.isEmpty {
-          ActivityTextView(text: state.project)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(.white.opacity(0.68))
-            .lineLimit(1)
-        }
-        Spacer(minLength: 4)
-        StatusIndicatorView(state: state)
-      }
-
-      Link(destination: URL(string: state.deepLink) ?? URL(string: "linkshell:///")!) {
-        VStack(alignment: .leading, spacing: 8) {
-          ActivityTextView(text: state.title)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(.white)
-            .lineLimit(1)
-          ActivityTextView(text: state.effectiveSubtitle)
-            .font(.system(size: 13))
-            .foregroundColor(.white.opacity(0.78))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-      }
-      .accessibilityHint("打开任务详情，查看和选择全部选项")
-      ActivityActionsView(state: state)
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 14)
-    .activityBackgroundTint(Color.black.opacity(0.85))
-    .activitySystemActionForegroundColor(.white)
-  }
-}
-
-@available(iOS 16.2, *)
-struct LinkShellAttentionWidget: Widget {
-  var body: some WidgetConfiguration {
-    ActivityConfiguration(for: LinkShellAttentionAttributes.self) { context in
-      LockScreenBannerView(state: context.displayState)
-        .widgetURL(URL(string: context.state.deepLink))
-    } dynamicIsland: { context in
-      let state = context.displayState
-      return DynamicIsland {
-        DynamicIslandExpandedRegion(.leading) {
-          HStack(spacing: 7) {
-            AgentStackView(state: state, size: 24)
-            if !state.project.isEmpty {
-              ActivityTextView(text: state.project)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.65))
-                .lineLimit(1)
-            }
-          }
-          .padding(.leading, 4)
-        }
-        DynamicIslandExpandedRegion(.trailing) {
-          StatusIndicatorView(state: state)
-            .padding(.trailing, 4)
-        }
-        DynamicIslandExpandedRegion(.bottom) {
-          VStack(alignment: .leading, spacing: 6) {
-            Link(destination: URL(string: state.deepLink) ?? URL(string: "linkshell:///")!) {
-              ActivityTextView(text: state.title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white)
-                .lineLimit(1)
-            }
-            HStack(spacing: 6) {
-              ActivityTextView(text: state.effectiveSubtitle)
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.8))
-                .lineLimit(1)
-              Spacer(minLength: 4)
-              if state.phase != "stale" && state.waitingCount + state.runningCount + state.failedCount > 1 {
-                ActivityCountsView(state: state)
-                  .fixedSize()
-              }
-            }
-            ActivityActionsView(state: state)
-          }
-          .padding(.horizontal, 6)
-          .padding(.top, 4)
-        }
-      } compactLeading: {
-        AgentStackView(state: state, size: 20, limit: 2)
-          .padding(.leading, 2)
-      } compactTrailing: {
-        StatusIndicatorView(state: state, size: 22)
-          .padding(.trailing, 2)
-      } minimal: {
-        StatusIndicatorView(state: state, size: 22, showsCount: false)
-      }
-      .widgetURL(URL(string: state.deepLink))
-      .keylineTint(state.phaseColor)
-    }
-  }
-}
-
-@main
-@available(iOS 16.2, *)
-struct LinkShellLiveActivityBundle: WidgetBundle {
-  var body: some Widget {
-    LinkShellAttentionWidget()
-  }
-}
-`;
+` + fs.readFileSync(path.join(__dirname, "live-activity/LiveActivityViews.swift"), "utf8");
 
 function ensureSource(proj, targetId, groupId, filename) {
   const group = proj.getPBXGroupByKey(groupId);
@@ -560,92 +403,86 @@ function ensureSource(proj, targetId, groupId, filename) {
 }
 
 module.exports = function withLiveActivity(config) {
+  const bundleId = config.ios?.bundleIdentifier || "com.bd.linkshell";
+  const appGroup = `group.${bundleId}.liveactivity`;
+  config = withEntitlementsPlist(config, (config) => {
+    config.modResults["com.apple.security.application-groups"] = [...new Set([
+      ...(config.modResults["com.apple.security.application-groups"] || []), appGroup,
+    ])];
+    return config;
+  });
+  config = withInfoPlist(config, (config) => {
+    config.modResults.LinkShellLiveActivityAppGroup = appGroup;
+    return config;
+  });
   return withXcodeProject(config, (config) => {
-    const projectRoot = config.modRequest.platformProjectRoot;
-    const extDir = path.join(projectRoot, TARGET_NAME);
+    const extDir = path.join(config.modRequest.platformProjectRoot, TARGET_NAME);
+    const modelFile = "LiveActivityModel.swift";
+    const entitlementsFile = `${TARGET_NAME}.entitlements`;
     fs.mkdirSync(extDir, { recursive: true });
-    fs.writeFileSync(path.join(extDir, INFO_PLIST_FILE), INFO_PLIST_CONTENT);
+    const scheme = Array.isArray(config.scheme) ? config.scheme[0] : config.scheme || "linkshell";
+    fs.writeFileSync(path.join(extDir, INFO_PLIST_FILE), INFO_PLIST_CONTENT.replace("  <key>NSExtension</key>",
+      `  <key>LinkShellURLScheme</key>\n  <string>${scheme}</string>\n  <key>LinkShellLiveActivityAppGroup</key>\n  <string>${appGroup}</string>\n  <key>NSExtension</key>`));
+    fs.writeFileSync(path.join(extDir, entitlementsFile), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.application-groups</key><array><string>${appGroup}</string></array></dict></plist>
+`);
     fs.writeFileSync(path.join(extDir, SOURCE_FILE), SWIFT_SOURCE_CONTENT);
+    fs.copyFileSync(path.join(__dirname, "../modules/link-layout/ios/LiveActivityModel.swift"), path.join(extDir, modelFile));
     const actionSource = fs.readFileSync(path.join(__dirname, "../modules/link-layout/ios/LiveActivityAction.swift"), "utf8")
-      + "\n" + fs.readFileSync(path.join(__dirname, "live-activity/LiveActivityActionIntent.swift"), "utf8");
+      + "\n" + fs.readFileSync(path.join(__dirname, "live-activity/LiveActivityActionIntent.swift"), "utf8")
+      + "\n" + fs.readFileSync(path.join(__dirname, "live-activity/LiveActivityBrowseIntent.swift"), "utf8");
     fs.writeFileSync(path.join(extDir, ACTION_FILE), actionSource);
 
     const proj = config.modResults;
-    if (proj.pbxTargetByName(TARGET_NAME)) {
-      const existing = proj.pbxTargetByName(TARGET_NAME);
-      const targetId = Object.keys(proj.pbxNativeTargetSection()).find((key) => proj.pbxNativeTargetSection()[key] === existing);
+    let targetId, groupId;
+    const existing = proj.pbxTargetByName(TARGET_NAME);
+    if (existing) {
+      targetId = Object.keys(proj.pbxNativeTargetSection()).find((key) => proj.pbxNativeTargetSection()[key] === existing);
       const group = proj.pbxGroupByName(TARGET_NAME);
-      const groupId = Object.keys(proj.hash.project.objects.PBXGroup).find((key) => proj.hash.project.objects.PBXGroup[key] === group);
-      ensureSource(proj, targetId, groupId, SOURCE_FILE);
-      ensureSource(proj, targetId, groupId, ACTION_FILE);
-      ensureSource(proj, proj.getFirstTarget().uuid, groupId, ACTION_FILE);
-      return config;
+      groupId = Object.keys(proj.hash.project.objects.PBXGroup).find((key) => proj.hash.project.objects.PBXGroup[key] === group);
+    } else {
+      proj.hash.project.objects.PBXTargetDependency ||= {};
+      proj.hash.project.objects.PBXContainerItemProxy ||= {};
+      const target = proj.addTarget(TARGET_NAME, "app_extension", TARGET_NAME, `${bundleId}.LiveActivity`);
+      targetId = target.uuid;
+      const group = proj.addPbxGroup([INFO_PLIST_FILE, entitlementsFile], TARGET_NAME, TARGET_NAME);
+      groupId = group.uuid;
+      proj.addToPbxGroup(groupId, proj.getFirstProject().firstProject.mainGroup);
+      proj.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", targetId);
+      proj.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", targetId);
+    }
+    ensureSource(proj, targetId, groupId, SOURCE_FILE);
+    const project = proj.getFirstProject().firstProject;
+    project.attributes.TargetAttributes ||= {};
+    for (const id of [targetId, proj.getFirstTarget().uuid]) {
+      const attributes = project.attributes.TargetAttributes[id] ||= {};
+      attributes.SystemCapabilities ||= {};
+      attributes.SystemCapabilities["com.apple.ApplicationGroups.iOS"] = { enabled: 1 };
+    }
+    for (const filename of [modelFile, ACTION_FILE]) {
+      ensureSource(proj, targetId, groupId, filename);
+      ensureSource(proj, proj.getFirstTarget().uuid, groupId, filename);
     }
 
-    const bundleId = config.ios?.bundleIdentifier || "com.bd.linkshell";
-    const extBundleId = `${bundleId}.LiveActivity`;
-    const marketingVersion = config.version || "2.3.26";
-    const buildNumber = config.ios?.buildNumber || "1";
-
-    // Ensure PBXTargetDependency and PBXContainerItemProxy sections exist before addTarget.
-    proj.hash.project.objects.PBXTargetDependency = proj.hash.project.objects.PBXTargetDependency || {};
-    proj.hash.project.objects.PBXContainerItemProxy = proj.hash.project.objects.PBXContainerItemProxy || {};
-
-    const target = proj.addTarget(TARGET_NAME, "app_extension", TARGET_NAME, extBundleId);
-
-    // Create PBXGroup for extension files and attach to main project group.
-    const extGroup = proj.addPbxGroup([INFO_PLIST_FILE], TARGET_NAME, TARGET_NAME);
-    const mainGroupId = proj.getFirstProject().firstProject.mainGroup;
-    proj.addToPbxGroup(extGroup.uuid, mainGroupId);
-
-    // Add Sources, Frameworks, and Resources build phases to the extension target.
-    ensureSource(proj, target.uuid, extGroup.uuid, SOURCE_FILE);
-    ensureSource(proj, target.uuid, extGroup.uuid, ACTION_FILE);
-    proj.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
-    proj.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", target.uuid);
-    // Both targets need the intent metadata. Execution takes place in the app,
-    // where the Expo module can consume the authenticated selection.
-    ensureSource(proj, proj.getFirstTarget().uuid, extGroup.uuid, ACTION_FILE);
-
-    // Ensure the Copy Files phase on the main app target embeds the .appex with RemoveHeadersOnCopy.
-    const buildFiles = proj.pbxBuildFileSection();
-    for (const key of Object.keys(buildFiles)) {
-      const bf = buildFiles[key];
-      if (bf && typeof bf === "object" && bf.fileRef_comment === `${TARGET_NAME}.appex`) {
-        bf.settings = { ATTRIBUTES: ["RemoveHeadersOnCopy"] };
-      }
+    for (const bf of Object.values(proj.pbxBuildFileSection())) {
+      if (bf && typeof bf === "object" && bf.fileRef_comment === `${TARGET_NAME}.appex`) bf.settings = { ATTRIBUTES: ["RemoveHeadersOnCopy"] };
     }
-
-    // Configure build settings on the extension target's Debug and Release configurations.
-    const configListUuid = target.pbxNativeTarget.buildConfigurationList;
-    const configLists = proj.pbxXCConfigurationList();
-    const configList = configLists[configListUuid];
+    const configList = proj.pbxXCConfigurationList()[proj.pbxNativeTargetSection()[targetId].buildConfigurationList];
     const buildConfigs = proj.pbxXCBuildConfigurationSection();
-    if (configList && Array.isArray(configList.buildConfigurations)) {
-      for (const entry of configList.buildConfigurations) {
-        const bc = buildConfigs[entry.value];
-        if (!bc || !bc.buildSettings) continue;
-        Object.assign(bc.buildSettings, {
-          APPLICATION_EXTENSION_API_ONLY: "YES",
-          CLANG_ENABLE_MODULES: "YES",
-          CODE_SIGN_STYLE: "Automatic",
-          CURRENT_PROJECT_VERSION: buildNumber,
-          DEVELOPMENT_TEAM: "L95PYLFT86",
-          GENERATE_INFOPLIST_FILE: "NO",
-          INFOPLIST_FILE: `"${TARGET_NAME}/${INFO_PLIST_FILE}"`,
-          IPHONEOS_DEPLOYMENT_TARGET: "16.2",
-          LD_RUNPATH_SEARCH_PATHS: '"$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"',
-          MARKETING_VERSION: marketingVersion,
-          PRODUCT_BUNDLE_IDENTIFIER: `"${extBundleId}"`,
-          PRODUCT_NAME: `"$(TARGET_NAME)"`,
-          SKIP_INSTALL: "YES",
-          SWIFT_EMIT_LOC_STRINGS: "NO",
-          SWIFT_VERSION: "5.0",
-          TARGETED_DEVICE_FAMILY: '"1,2"',
-        });
-      }
+    for (const entry of configList?.buildConfigurations || []) {
+      const bc = buildConfigs[entry.value];
+      if (!bc?.buildSettings) continue;
+      Object.assign(bc.buildSettings, {
+        APPLICATION_EXTENSION_API_ONLY: "YES", CLANG_ENABLE_MODULES: "YES", CODE_SIGN_STYLE: "Automatic",
+        CODE_SIGN_ENTITLEMENTS: `"${TARGET_NAME}/${entitlementsFile}"`,
+        CURRENT_PROJECT_VERSION: config.ios?.buildNumber || "1", DEVELOPMENT_TEAM: "L95PYLFT86",
+        GENERATE_INFOPLIST_FILE: "NO", INFOPLIST_FILE: `"${TARGET_NAME}/${INFO_PLIST_FILE}"`, IPHONEOS_DEPLOYMENT_TARGET: "16.2",
+        LD_RUNPATH_SEARCH_PATHS: '"$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"',
+        MARKETING_VERSION: config.version || "2.3.30", PRODUCT_BUNDLE_IDENTIFIER: `"${bundleId}.LiveActivity"`,
+        PRODUCT_NAME: '"$(TARGET_NAME)"', SKIP_INSTALL: "YES", SWIFT_EMIT_LOC_STRINGS: "NO", SWIFT_VERSION: "5.0", TARGETED_DEVICE_FAMILY: '"1,2"',
+      });
     }
-
     return config;
   });
 };

@@ -140,6 +140,7 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private readonly modes = new Map<string, Mode>();
+  private readonly desktopResumes = new Map<string, Promise<void>>();
   private readonly tails = new Map<string, TranscriptTail>();
   private readonly tasks = new Map<string, ClaudeTasks>();
   private readonly activity = new Map<string, ClaudeActivity>();
@@ -465,6 +466,7 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
+    await this.reconcileDesktopWriter(nativeId);
     // Another Claude is in the middle of a turn here: the message waits for it to finish.
     if (this.waiting.get(nativeId)?.length || (await this.elsewhere(nativeId))?.working) {
       const waiting = this.waiting.get(nativeId) ?? [];
@@ -527,6 +529,7 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async cancel(nativeId: string): Promise<void> {
+    await this.reconcileDesktopWriter(nativeId);
     if (this.modes.get(nativeId) === "remote") return super.cancel(nativeId);
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
     if (this.waiting.delete(nativeId)) this.reportWaiting(nativeId);
@@ -691,6 +694,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Makes this host the session's only writer, taking it from the desktop if needed. */
   private async ensureRemote(nativeId: string): Promise<void> {
+    await this.reconcileDesktopWriter(nativeId);
     const state = this.sessions.get(nativeId);
     if (this.modes.get(nativeId) === "remote" && state?.loaded) return;
     const cwd = state?.cwd ?? "";
@@ -797,17 +801,25 @@ export class ClaudeDriver extends AcpDriver {
       }
     }
     for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
-    for (const [nativeId, mode] of this.modes) {
-      if (mode !== "remote" || this.host?.desktop(this.id, nativeId)) continue;
-      if (!this.tails.get(nativeId)?.writtenMeanwhile(writtenByAnotherClaude)) continue;
-      await this.leaveRemote(nativeId).catch(() => {});
+    for (const nativeId of this.modes.keys()) await this.reconcileDesktopWriter(nativeId);
+  }
+
+  /** Input can beat the watcher after a desktop resume; all callers await the same handoff. */
+  private reconcileDesktopWriter(nativeId: string): Promise<void> {
+    const pending = this.desktopResumes.get(nativeId);
+    if (pending) return pending;
+    if (this.modes.get(nativeId) !== "remote" || this.host?.desktop(this.id, nativeId)
+      || !this.tails.get(nativeId)?.writtenMeanwhile(writtenByAnotherClaude)) return Promise.resolve();
+    const handoff = this.leaveRemote(nativeId).then(() => {
       this.emit(nativeId, {
         sessionUpdate: "ls_notice",
         level: "info",
         title: "电脑上继续了这个会话",
         detail: "这里转为实时显示电脑上的进展；再发消息会重新接管。",
       });
-    }
+    }).finally(() => { this.desktopResumes.delete(nativeId); });
+    this.desktopResumes.set(nativeId, handoff);
+    return handoff;
   }
 
   /** Running Claude processes on this session that this host didn't start. */

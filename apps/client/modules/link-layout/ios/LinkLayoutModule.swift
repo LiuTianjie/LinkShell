@@ -6,28 +6,6 @@ import UIKit
 import ActivityKit
 #endif
 
-#if canImport(ActivityKit)
-@available(iOS 16.2, *)
-public struct LinkShellAttentionAttributes: ActivityAttributes {
-  public struct ContentState: Codable, Hashable {
-    public var phase: String
-    public var title: String
-    public var subtitle: String
-    public var project: String
-    public var agent: String
-    public var agents: [String]?
-    public var actions: [LiveActivityAction]?
-    public var hasMoreActions: Bool?
-    public var waitingCount: Int
-    public var runningCount: Int
-    public var failedCount: Int
-    public var deepLink: String
-  }
-  public var computerName: String
-  public var computerKey: String?
-  public var remoteUpdates: Bool?
-}
-#endif
 
 public class LinkLayoutModule: Module {
   private weak var presentationScene: UIWindowScene?
@@ -44,6 +22,7 @@ public class LinkLayoutModule: Module {
   private var pushTokenTasks: [String: Task<Void, Never>] = [:]
   private var activityStateTasks: [String: Task<Void, Never>] = [:]
   private var activityActionObserver: NSObjectProtocol?
+  private var pushRegistrationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
@@ -61,6 +40,7 @@ public class LinkLayoutModule: Module {
           self.activityStateTasks.values.forEach { $0.cancel() }
           self.pushTokenTasks.removeAll()
           self.activityStateTasks.removeAll()
+          self.endPushRegistrationTask()
         }
       }
       if let observer = self?.activityActionObserver { NotificationCenter.default.removeObserver(observer) }
@@ -154,13 +134,19 @@ public class LinkLayoutModule: Module {
     }.runOnQueue(.main)
 
     AsyncFunction("getLiveActivityPushRegistration") { () async -> [String: String]? in
-      await self.liveActivityPushRegistration()
+      await self.liveActivityPushRegistrations().first
     }
-    AsyncFunction("setLiveActivityPushReady") { (id: String) in
-      if #available(iOS 16.2, *), Activity<LinkShellAttentionAttributes>.activities.contains(where: { $0.id == id && ($0.activityState == .active || $0.activityState == .stale) }) {
-        UserDefaults.standard.set(true, forKey: "LinkShellLiveActivity.remote." + id)
+    AsyncFunction("getLiveActivityPushRegistrations") { () async -> [[String: String]] in
+      await self.liveActivityPushRegistrations()
+    }
+    AsyncFunction("setLiveActivityPushReady") { (id: String) async in
+      await MainActor.run {
+        if #available(iOS 16.2, *), Activity<LinkShellAttentionAttributes>.activities.contains(where: { $0.id == id && ($0.activityState == .active || $0.activityState == .stale) }) {
+          UserDefaults.standard.set(true, forKey: "LinkShellLiveActivity.remote." + id)
+          self.endPushRegistrationTask()
+        }
       }
-    }.runOnQueue(.main)
+    }
 
     AsyncFunction("pendingLiveActivityActionId") { () -> String? in
       LiveActivityActionQueue.pendingID()
@@ -346,7 +332,11 @@ public class LinkLayoutModule: Module {
       for await state in activity.activityStateUpdates {
         if Task.isCancelled { break }
         if state == .ended || state == .dismissed {
+          if state == .dismissed, let computerKey = activity.attributes.computerKey {
+            UserDefaults.standard.set(activity.content.state.workloadKey, forKey: "LinkShellLiveActivity.dismissed." + computerKey)
+          }
           UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.remote." + activity.id)
+          LiveActivityBrowsing.clear(activityID: activity.id)
           self?.pushTokenTasks.removeValue(forKey: activity.id)?.cancel()
           self?.activityStateTasks.removeValue(forKey: activity.id)
           self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
@@ -356,16 +346,31 @@ public class LinkLayoutModule: Module {
     }
   }
 
-  @MainActor private func liveActivityPushRegistration() -> [String: String]? {
-    guard !Self.pushServiceURL.isEmpty else { return nil }
+  @MainActor private func liveActivityPushRegistrations() -> [[String: String]] {
+    guard !Self.pushServiceURL.isEmpty else { return [] }
+    var registrations: [[String: String]] = []
     if #available(iOS 16.2, *) {
       for activity in Activity<LinkShellAttentionAttributes>.activities where activity.activityState == .active || activity.activityState == .stale {
         observePushToken(activity)
         guard let token = activity.pushToken, let computerKey = activity.attributes.computerKey else { continue }
-        return ["activityId": activity.id, "computerKey": computerKey, "token": token.map { String(format: "%02x", $0) }.joined()]
+        if !UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + activity.id) { beginPushRegistrationTask() }
+        registrations.append(["activityId": activity.id, "computerKey": computerKey, "token": token.map { String(format: "%02x", $0) }.joined()])
       }
     }
-    return nil
+    return registrations
+  }
+
+  @MainActor private func beginPushRegistrationTask() {
+    guard pushRegistrationBackgroundTask == .invalid else { return }
+    pushRegistrationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Connect live activity updates") { [weak self] in
+      self?.endPushRegistrationTask()
+    }
+  }
+
+  @MainActor private func endPushRegistrationTask() {
+    guard pushRegistrationBackgroundTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(pushRegistrationBackgroundTask)
+    pushRegistrationBackgroundTask = .invalid
   }
 
   private static func measureLevel(buffer: AVAudioPCMBuffer) -> (Double, Double) {
@@ -390,15 +395,18 @@ public class LinkLayoutModule: Module {
         return false
       }
       let pushEnabled = !Self.pushServiceURL.isEmpty
-      // A suspended phone is not an offline host. Once handed to the host, APNs
-      // owns background freshness; cached JS must not overwrite those updates.
+      let computerKey = payload["computerKey"] as? String
+      // Once delegated, the host owns foreground and background updates alike.
+      // A cached phone snapshot must not end an activity before its final alert.
       let remotelyManaged = Activity<LinkShellAttentionAttributes>.activities.contains {
-        ($0.activityState == .active || $0.activityState == .stale) && UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + $0.id)
+        ($0.activityState == .active || $0.activityState == .stale) && $0.attributes.computerKey == computerKey
+          && UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + $0.id)
       }
-      if remotelyManaged && (UIApplication.shared.applicationState != .active || payload["phase"] as? String == "stale") { return true }
+      if remotelyManaged { return true }
       let active = (payload["active"] as? Bool) ?? false
       if !active {
-        await endNativeLiveActivity()
+        if let computerKey { UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.dismissed." + computerKey) }
+        await endNativeLiveActivity(computerKey: computerKey)
         return true
       }
       let computerName = (payload["computerName"] as? String) ?? "电脑"
@@ -414,17 +422,27 @@ public class LinkLayoutModule: Module {
           return try? JSONDecoder().decode([LiveActivityAction].self, from: data)
         },
         hasMoreActions: payload["hasMoreActions"] as? Bool,
+        tasks: (payload["tasks"] as? [[String: Any]]).flatMap { tasks in
+          guard let data = try? JSONSerialization.data(withJSONObject: tasks) else { return nil }
+          return try? JSONDecoder().decode([LiveActivityTask].self, from: data)
+        },
+        noticeId: payload["noticeId"] as? String,
+        selectionVersion: nil,
+        remotePending: pushEnabled ? true : nil,
         waitingCount: (payload["waitingCount"] as? Int) ?? 0,
         runningCount: (payload["runningCount"] as? Int) ?? 0,
         failedCount: (payload["failedCount"] as? Int) ?? 0,
         deepLink: (payload["deepLink"] as? String) ?? "linkshell:///"
       )
-      // Freshness expires if neither foreground updates nor APNs reach the activity.
-      let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(180))
-      let computerKey = payload["computerKey"] as? String
+      // Delivery may be deferred by iOS. Keep the latest snapshot until an
+      // explicit state change instead of declaring a live task dead on a timer.
+      let content = ActivityContent(state: state, staleDate: nil)
       for activity in Activity<LinkShellAttentionAttributes>.activities {
         guard activity.activityState == .active || activity.activityState == .stale else { continue }
-        if activity.attributes.computerKey != computerKey || activity.attributes.computerName != computerName || (activity.attributes.remoteUpdates ?? false) != pushEnabled {
+        // Switching the foreground connection must not revoke another computer's
+        // background delivery grant or dismiss its outstanding approval.
+        guard activity.attributes.computerKey == computerKey else { continue }
+        if (activity.attributes.remoteUpdates ?? false) != pushEnabled {
           await activity.end(nil, dismissalPolicy: .immediate)
           continue
         }
@@ -435,6 +453,8 @@ public class LinkLayoutModule: Module {
       }
       do {
         guard UIApplication.shared.applicationState == .active else { return false }
+        if let computerKey,
+           UserDefaults.standard.string(forKey: "LinkShellLiveActivity.dismissed." + computerKey) == state.workloadKey { return true }
         let attributes = LinkShellAttentionAttributes(computerName: computerName, computerKey: computerKey, remoteUpdates: pushEnabled)
         let created = try Activity.request(attributes: attributes, content: content, pushType: pushEnabled ? .token : nil)
         observePushToken(created)
@@ -449,11 +469,13 @@ public class LinkLayoutModule: Module {
     return false
   }
 
-  @MainActor private func endNativeLiveActivity() async {
+  @MainActor private func endNativeLiveActivity(computerKey: String? = nil) async {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
       activeActivityId = nil
+      endPushRegistrationTask()
       for activity in Activity<LinkShellAttentionAttributes>.activities {
+        if let computerKey, activity.attributes.computerKey != computerKey { continue }
         await activity.end(nil, dismissalPolicy: .immediate)
         sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
       }

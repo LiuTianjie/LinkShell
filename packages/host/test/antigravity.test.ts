@@ -1,9 +1,10 @@
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ANTIGRAVITY_ACP_VERSION,
+  AntigravityDriver,
   antigravityAuthStatus,
   cleanAntigravityUserInput,
   extractAntigravityAuthUrl,
@@ -564,3 +565,37 @@ describe("Antigravity transcript tail and tool mapping", () => {
 
 
 
+
+
+describe("Antigravity desktop question reconciliation", () => {
+  it.each(["DONE", "CANCELED", "ERROR"])("clears a %s native question even when its transcript still contains the tool call", async (status) => {
+    const driver = new AntigravityDriver({ hostVersion: "test", env: { PATH: "" } });
+    const harness = driver as unknown as {
+      languageServer: () => Promise<unknown>;
+      isConversationRunningInDesktop: () => boolean;
+      pollDesktopInteractions: (id: string, watcher: unknown) => Promise<void>;
+    };
+    harness.languageServer = async () => ({ httpPort: 12345, csrfToken: "test" });
+    harness.isConversationRunningInDesktop = () => false;
+    const question = { stepIndex: 4, toolCallId: "call-ask", title: "Choose database", questions: [{ question: "Database?", options: [{ id: "1", text: "SQLite" }] }] };
+    const watcher = {
+      pollingInteractions: false, lastStepIndex: 3, resolvedStepIndices: new Set<number>(),
+      transcriptPending: question,
+      pendingAction: { ...question, kind: "question", requestId: "agy-ask:test:4", trajectoryId: "trajectory" },
+    };
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ steps: [{
+      type: "CORTEX_STEP_TYPE_ASK_QUESTION", status: `CORTEX_STEP_STATUS_${status}`,
+      metadata: { sourceTrajectoryStepInfo: { trajectoryId: "trajectory", stepIndex: 4 } },
+      askQuestion: { questions: question.questions },
+    }] }), { status: 200 }));
+    try {
+      await harness.pollDesktopInteractions("test", watcher);
+      expect(watcher.pendingAction).toBeUndefined();
+      expect(watcher.resolvedStepIndices.has(4)).toBe(true);
+      await harness.pollDesktopInteractions("test", watcher);
+      expect(watcher.pendingAction).toBeUndefined();
+    } finally {
+      request.mockRestore();
+    }
+  });
+});

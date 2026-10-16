@@ -20,12 +20,14 @@ export function PermissionActions({
   disabled = false,
   size = "medium",
   maxExtra = 2,
+  compact = false,
 }: {
   options: PermissionOption[];
   onChoose: (optionId: string) => Promise<void>;
   disabled?: boolean;
   size?: "medium" | "large";
   maxExtra?: number;
+  compact?: boolean;
 }) {
   const [width, setWidth] = useState(0);
   const { fontScale } = useWindowDimensions();
@@ -33,7 +35,8 @@ export function PermissionActions({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const choices = permissionChoices(options);
-  const reject = choices.find((c) => c.role === "reject");
+  // Some ACP agents only offer a stop/cancel choice. Never hide their sole denial.
+  const reject = choices.find((c) => c.role === "reject") ?? choices.find((c) => c.role === "stop");
   const allow = choices.find((c) => c.role === "allow");
   const main = [reject, allow].filter((c): c is PermissionChoice => !!c);
   const extra = choices.filter((c) => !main.includes(c)).slice(0, maxExtra);
@@ -55,7 +58,14 @@ export function PermissionActions({
 
   return (
     <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 8 }}>
-      <View style={{ flexDirection: stacked ? "column" : "row", gap: 8 }}>
+      <View style={{ flexDirection: stacked ? "column" : "row", gap: 8, alignItems: stacked ? "stretch" : "center" }}>
+        {compact && !stacked ? extra.map((choice) => (
+          <Button key={choice.option.optionId} title={choice.label} variant="plain" size="small"
+            busy={busy === choice.option.optionId}
+            disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
+            onPress={() => void choose(choice)} />
+        )) : null}
+        {compact && !stacked ? <View style={{ flex: 1 }} /> : null}
         {main.map((choice) => (
           <Button
             key={choice.option.optionId}
@@ -63,14 +73,14 @@ export function PermissionActions({
             variant={choice.role === "allow" ? "primary" : "tonal"}
             size={size}
             style={{ minHeight: 44, justifyContent: "center" }}
-            wide={!stacked}
+            wide={!stacked && !compact}
             busy={busy === choice.option.optionId}
             disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
             onPress={() => void choose(choice)}
           />
         ))}
       </View>
-      {extra.length ? (
+      {extra.length && (!compact || stacked) ? (
         <View style={{ gap: 4, alignItems: "stretch" }}>
           {extra.map((choice) => (
             <Button

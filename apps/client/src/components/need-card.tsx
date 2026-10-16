@@ -11,7 +11,7 @@ import { mono, type } from "@/theme/type";
 import { Icon } from "./icon";
 import { Button } from "./button";
 import { PermissionActions } from "./permission-actions";
-import { openSession, SessionAvatar, UserInputBadge } from "./session-row";
+import { openSession, SessionAvatar } from "./session-row";
 
 /** A session waiting on the user, with its approval right on the card. */
 export const NeedCard = memo(function NeedCard({ session, now, onPress }: { session: SessionSummary; now: number; onPress?: () => void }) {
@@ -22,15 +22,16 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
   const asks = permission ? !!permission.questions?.length : needsUserInput(session);
   const extra = Math.max(0, session.pendingPermissions + (session.asyncQuestions?.length ?? 0) - 1);
 
+  const prompt = permission?.questions?.[0]?.text ?? question?.title ?? permission?.title ?? "需要你的确认";
+
   return (
     <View
       style={{
         backgroundColor: colors.card,
-        borderRadius: 24,
+        borderRadius: 18,
         borderCurve: "continuous",
-        padding: 14,
+        padding: 16,
         gap: 12,
-        boxShadow: "0 0 0 1px rgba(232,131,12,0.28), 0 6px 20px rgba(232,131,12,0.08)",
       }}
     >
       <Pressable
@@ -39,7 +40,7 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
         accessibilityLabel={`打开 ${sessionTitle(session)}`}
         style={{ flexDirection: "row", gap: 12, alignItems: "center" }}
       >
-        <SessionAvatar session={session} size={38} />
+        <SessionAvatar session={session} size={32} />
         <View style={{ flex: 1, gap: 2 }}>
           <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
             <Text numberOfLines={1} style={[type.headline, { flex: 1, color: colors.label }]}>
@@ -51,28 +52,27 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
             <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
               {baseName(session.cwd)} · {agentLook(session.agent).short}
             </Text>
-            {needsUserInput(session) ? <UserInputBadge /> : null}
           </View>
         </View>
         <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
       </Pressable>
 
-      <View style={{ backgroundColor: colors.waitingSoft, borderRadius: 16, borderCurve: "continuous", padding: 12, gap: 8 }}>
+      <View style={{ gap: 6 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon
             sf={asks ? "questionmark.bubble.fill" : "hand.raised.fill"}
             md={asks ? "help" : "front_hand"}
             size={14}
-            color={colors.waiting}
+            color={colors.secondaryLabel}
           />
-          <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
-            {permission?.title ?? question?.title ?? "需要你的确认"}
+          <Text numberOfLines={3} style={[type.subhead, { flex: 1, color: colors.label }]}>
+            {prompt}
           </Text>
           {extra ? (
-            <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>还有 {extra} 项</Text>
+            <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500" }]}>还有 {extra} 项</Text>
           ) : null}
         </View>
-        {permission?.detail ? (
+        {permission?.detail && permission.detail !== prompt ? (
           <Text selectable numberOfLines={4} style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText }}>
             {permission.detail}
           </Text>
@@ -81,12 +81,16 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
 
       {asks ? (
         // Questions are answered in the session, where there is room for them.
-        <Button title="去回答" variant="primary" wide onPress={onPress ?? (() => openSession(session.id))} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>等待回答</Text>
+          <Button title="回答" variant="tonal" icon={{ sf: "arrow.right", md: "arrow_forward" }} onPress={onPress ?? (() => openSession(session.id))} />
+        </View>
       ) : permission ? (
         <PermissionActions
           key={permission.requestId}
           options={permission.options}
           disabled={!online}
+          compact
           maxExtra={1}
           onChoose={(optionId) => respond(session.id, permission.requestId, optionId)}
         />

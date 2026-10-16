@@ -140,7 +140,7 @@ function buildItems(
 
   if (filter === "attention") {
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "需要你", count: waiting.length, warn: true });
+      items.push({ type: "header", key: "h-need", title: "待处理" });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
@@ -176,7 +176,7 @@ function buildItems(
   } else {
     // Default "all" view: Attention-first hierarchy (Waiting > Failed > Running > Pinned > Day buckets)
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "需要你", count: waiting.length, warn: true });
+      items.push({ type: "header", key: "h-need", title: "待处理" });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
@@ -239,8 +239,8 @@ function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], word
   return items;
 }
 
-/** Which computer (tap to switch), and only the one thing worth saying: what's waiting on you. */
-function Summary({ waiting, small = false }: { waiting: number; small?: boolean }) {
+/** Keep computer identity separate from task counts in the filters. */
+function Summary({ small = false }: { small?: boolean }) {
   const { computer } = useConnection();
   const names = useComputerNames((state) => state.names);
   const name = computerDisplayName(computer, names);
@@ -269,7 +269,6 @@ function Summary({ waiting, small = false }: { waiting: number; small?: boolean 
         {name}
       </Text>
       <Icon sf="chevron.up.chevron.down" md="unfold_more" size={11} color={colors.tertiaryLabel} />
-      {waiting ? <Text style={[small ? type.footnote : type.subhead, { color: colors.waiting, fontWeight: "600" }]}>· {waiting} 项需要你</Text> : null}
     </Pressable>
   );
 }
@@ -534,7 +533,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
           <View>
             <View style={{ paddingTop: (inlineControls ? 8 : 16) + (Platform.OS === "ios" ? 0 : insets.top), paddingBottom: 8, gap: inlineControls ? 8 : 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ flex: 1 }}><Summary waiting={waiting} small={inlineControls} /></View>
+                <View style={{ flex: 1 }}><Summary small={inlineControls} /></View>
                 {Platform.OS !== "ios" && !inlineControls ? <Pressable accessibilityRole="button" accessibilityLabel="新建会话" onPress={NEW_SESSION.onPress} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="square.and.pencil" md="edit_square" size={22} color={colors.accent} /></Pressable> : null}
               </View>
               {inlineControls || (loaded && !empty) ? <PageSearch value={query} onChangeText={setQuery} placeholder="搜索会话" action={inlineControls ? NEW_SESSION : undefined} /> : null}
@@ -566,15 +565,15 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                           borderRadius: 16,
                           borderCurve: "continuous",
                           borderWidth: StyleSheet.hairlineWidth,
-                          borderColor: active ? colors.accent : colors.separator,
-                          backgroundColor: active ? colors.accent : pressed ? colors.fillStrong : colors.card,
+                          borderColor: "transparent",
+                          backgroundColor: active ? colors.fillStrong : pressed ? colors.fill : "transparent",
                         })}
                       >
                         <Text
                           style={[
                             type.caption,
                             {
-                              color: active ? colors.onAccent : colors.label,
+                              color: active ? colors.label : colors.secondaryLabel,
                               fontWeight: active ? "600" : "500",
                             },
                           ]}
@@ -590,13 +589,13 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                               borderRadius: 9,
                               alignItems: "center",
                               justifyContent: "center",
-                              backgroundColor: active ? "rgba(255,255,255,0.22)" : colors.fill,
+                              backgroundColor: "transparent",
                             }}
                           >
                             <Text
                               style={{
                                 fontSize: 11,
-                                color: active ? colors.onAccent : colors.secondaryLabel,
+                                color: colors.secondaryLabel,
                                 fontWeight: "600",
                                 fontVariant: ["tabular-nums"],
                               }}

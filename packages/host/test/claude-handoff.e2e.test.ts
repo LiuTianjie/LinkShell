@@ -672,6 +672,30 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p.userTexts(session.id)).toEqual(["phone first", "desk second"]);
   }, 20_000);
 
+  it("reconciles a resumed desktop writer before phone input instead of waiting for the watcher", async () => {
+    const e = makeEnv();
+    const host = await boot(e, 60_000, 60_000);
+    const p = await phone(host);
+    const { session } = await p.client.call("sessions.create", { agent: "claude", cwd: e.workDir });
+    await p.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await p.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "first", content: text("phone first") });
+    await waitFor(() => p.agentTexts(session.id).includes("echo: phone first") && host.hub.getSession(session.id).state === "idle");
+
+    const plain = spawn(FAKE_CLAUDE, ["--resume", session.nativeId], { cwd: e.workDir, env: e.env, stdio: ["pipe", "ignore", "ignore"] });
+    cleanups.push(() => void plain.kill("SIGKILL"));
+    const gone = new Promise<NodeJS.Signals | null>((resolve) => plain.once("exit", (_code, signal) => resolve(signal)));
+    await waitFor(() => execSync(`ps -ww -o command= -p ${plain.pid}`).toString().includes(session.nativeId));
+    const transcript = findTranscript(e.configDir, session.nativeId)!;
+    appendFileSync(transcript, JSON.stringify({ type: "user", uuid: randomUUID(), isSidechain: false, sessionId: session.nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date().toISOString(), message: { role: "user", content: "a long desktop job" } }) + "\n");
+    expect(host.hub.getSession(session.id).driver).toBe("remote");
+
+    expect(await p.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "waiting", content: text("after the desktop") })).toEqual({ delivery: "queued" });
+    expect(p.userTexts(session.id)).not.toContain("after the desktop");
+    await p.client.call("sessions.cancel", { sessionId: session.id });
+    expect(await gone).toBe("SIGINT");
+    expect(host.hub.getSession(session.id).queue ?? []).toEqual([]);
+  }, 15_000);
+
   it("stop from the phone ends the turn a linkshell claude terminal runs, by taking over", async () => {
     const e = makeEnv();
     const host = await boot(e);

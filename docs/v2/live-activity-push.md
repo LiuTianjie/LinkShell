@@ -1,6 +1,6 @@
 # ActivityKit / APNs 实时活动更新
 
-只更新已有的 iOS 实时活动，不接友盟，不注册传统通知的 device token，不请求通知权限，也不发送 `alert`、声音或角标。TestFlight 和 App Store 使用同一套生产 APNs 配置。推送服务独立维护在私有项目中，开源仓库只包含客户端、Host 和共享协议。APNs 受理与真机显示需要分别验证。
+只更新已有的 iOS 实时活动，不接友盟，不注册传统通知的 device token，不请求通知权限，不发送传统通知或角标。审批、提问、失败和结束通过 ActivityKit 更新携带 `alert` 和默认提示音，实际显示仍由系统控制。TestFlight 和 App Store 使用同一套生产 APNs 配置。推送服务独立维护在私有项目中，开源仓库只包含客户端、Host 和共享协议。APNs 受理与真机显示需要分别验证。
 
 ## 需要准备什么
 
@@ -23,7 +23,7 @@ App ID 开启能力后，本地 Release 构建使用现有自动签名流程更�
 
 `.gitignore` 只防止误提交，不能防止配置进入 App 或镜像。仓库也排除了 Docker 上下文中的 `.env*`、`.secrets/`、`.p8`、`.p12`。私钥不得进入 `EXPO_PUBLIC_*`、Expo `extra`、Info.plist、客户端 JS 或构建日志；Base64 只是便于传输，不是加密。
 
-未设置 `LINKSHELL_LIVE_ACTIVITY_PUSH=1` 时，开源构建只使用本地实时活动更新，不依赖官方服务、私有 Registry 或内部包。远程更新仅给生产 bundle 开启；开发变体误开会在配置阶段报错。
+未设置 `LINKSHELL_LIVE_ACTIVITY_PUSH=1` 时，开源构建只使用本地实时活动更新，不依赖官方服务、私有 Registry 或内部包。生产包使用 production APNs。开发变体必须指定独立的 sandbox 服务地址和对应 bundle ID，误用生产服务会在配置阶段报错。
 
 ## 更新链路
 
@@ -31,8 +31,8 @@ App ID 开启能力后，本地 Release 构建使用现有自动签名流程更�
 2. 已登录的 App 将活动 token 和随机生成的单活动授权交给 HTTPS 服务。服务用 Supabase Auth 的 `/auth/v1/user` 校验账号，活动绑定账号，重复注册和 token 轮换不会延长活动寿命。客户端将授权存入 Keychain。
 3. App 通过原有端到端加密的 Host RPC 交接授权、活动 ID 和电脑标识。Host 将它们存到 `~/.linkshell/live-activities.json`（0600）。它不接收 APNs 私钥或账户 refresh token。
 4. Host 保留独立的会话订阅；手机 socket 关闭后仍观察 Agent 进度和终端变化，主机重启后恢复授权。约 5 秒合并一次变化，最长约 60 秒发送一次新鲜度更新；出错时退避，重试最新快照。
-5. `push.itool.tech` 将摘要通过 HTTP/2 发给 `https://api.push.apple.com`，固定 `apns-push-type: liveactivity` 和 `apns-topic: com.bd.linkshell.push-type.liveactivity`。普通更新优先级 5，新进入待确认/待回答/错误状态和结束用 10；不添加 `alert`。
-6. 全部任务结束发送 `event: end`，立即移除活动。Token 失效、撤销、退出登录、用户关闭活动和授权到期会终止相应更新。Host 离线或 APNs 未及时送达时，`stale-date` 让卡片显示内容过期，不能据此断言电脑离线。
+5. `push.itool.tech` 将摘要通过 HTTP/2 发给 `https://api.push.apple.com`，固定 `apns-push-type: liveactivity` 和 `apns-topic: com.bd.linkshell.push-type.liveactivity`。普通更新优先级 5，新进入待确认/待回答/错误状态和结束用 10；状态转换附带去重的 `alert`，普通进度更新不提醒。
+6. 全部任务结束发送 `event: end`。带结束提醒时锁屏卡片最多保留 5 分钟，其他结束立即移除。Token 失效、撤销、退出登录、用户关闭活动和授权到期会终止相应更新。单次推送延迟不等于电脑离线；不使用短暂的 `stale-date` 把暂停的客户端误标为离线。
 
 服务只持久化账号 ID、活动 token、授权摘要、过期时间和顺序信息，不保存完整会话。为了渲染锁屏，Host 会向推送服务和 Apple 发送经过长度限制的标题、正文摘要、Agent 和选项；这是独立于 E2E 网关的明确数据通路。审批本身仍通过 App 的加密 Host 连接执行，推送服务没有审批接口。
 
@@ -40,7 +40,7 @@ App ID 开启能力后，本地 Release 构建使用现有自动签名流程更�
 
 ## 部署与验证
 
-服务作为独立私有项目部署在 `push.itool.tech`，只有生产 APNs 路径。本仓库不包含服务端源码、私有构建依赖、部署清单或密钥。服务使用独立数据卷，不共享网关的配对数据库。
+生产服务部署在 `push.itool.tech`，开发验证使用独立 sandbox 服务、bundle ID 和数据卷。本仓库不包含服务端源码、私有构建依赖、部署清单或密钥。服务使用独立数据卷，不共享网关的配对数据库。
 
 公开接入可运行 `pnpm --filter @linkshell/host test` 与 `pnpm --filter @linkshell/client test` 验证 Host 状态投影、重试和 App 授权交接。未开启远程更新的构建继续使用本地 ActivityKit。
 

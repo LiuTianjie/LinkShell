@@ -13,11 +13,26 @@ export const liveActivityActionSchema = z.object({
 });
 export type LiveActivityAction = z.infer<typeof liveActivityActionSchema>;
 
+export const liveActivityTaskSchema = z.object({
+  id: z.string().min(1).max(128), kind: z.enum(["session", "terminal"]),
+  phase: z.enum(["waiting_for_approval", "waiting_for_input", "failed", "running", "starting", "completed", "stale"]),
+  title: z.string().max(160), subtitle: z.string().max(360), project: z.string().max(160), agent: z.string().max(80),
+});
+export type LiveActivityTask = z.infer<typeof liveActivityTaskSchema>;
+
+/** A transition, rather than a heartbeat: the receiver can alert exactly once. */
+export const liveActivityNoticeSchema = z.object({
+  id: z.string().min(1).max(128), createdAt: z.number().int().positive(),
+  task: liveActivityTaskSchema,
+});
+export type LiveActivityNotice = z.infer<typeof liveActivityNoticeSchema>;
+
 export const liveActivityContentSchema = z.object({
   phase: z.enum(["waiting_for_approval", "waiting_for_input", "failed", "running", "starting", "completed", "stale"]),
   title: z.string().max(160), subtitle: z.string().max(360), project: z.string().max(160),
   agent: z.string().max(80), agents: z.array(z.string().max(80)).max(12).optional(),
   actions: z.array(liveActivityActionSchema).max(3).optional(), hasMoreActions: z.boolean().optional(),
+  tasks: z.array(liveActivityTaskSchema).max(6).optional(), noticeId: z.string().max(128).optional(),
   waitingCount: z.number().int().min(0), runningCount: z.number().int().min(0), failedCount: z.number().int().min(0),
   deepLink: z.string().max(2048).refine((url) => url.startsWith("linkshell:///")),
 });
@@ -44,13 +59,21 @@ export function liveActivityContent(payload: LiveActivityPayload): LiveActivityC
     project: cut(payload.project, 80), agent: cut(payload.agent, 40),
     agents: payload.agents?.filter((id) => id.length <= 80).slice(0, 12),
     actions, hasMoreActions: payload.hasMoreActions || actions.length !== (payload.actions ?? []).length,
+    tasks: payload.tasks?.map((task) => ({
+      ...task, title: cut(task.title, 48), subtitle: cut(task.subtitle, 80), project: cut(task.project, 32), agent: cut(task.agent, 40),
+    })).filter((task) => liveActivityTaskSchema.safeParse(task).success).slice(0, 6),
+    noticeId: payload.noticeId,
     waitingCount: payload.waitingCount ?? 0, runningCount: payload.runningCount ?? 0, failedCount: payload.failedCount ?? 0,
     deepLink: payload.deepLink && payload.deepLink.length <= 2048 ? payload.deepLink : "linkshell:///",
   };
   const size = () => new TextEncoder().encode(JSON.stringify(state)).length;
-  while (size() > 3500 && state.actions!.length) { state.actions!.pop(); state.hasMoreActions = true; }
-  if (size() > 3500) { state.subtitle = cut(state.subtitle, 60); state.project = ""; state.agents = state.agents?.slice(0, 3); }
-  if (size() > 3500) state.deepLink = "linkshell:///";
+  // Leave room for an ActivityKit alert as well as Apple's envelope. Keep a
+  // second task when possible so the compact snapshot still supports browsing.
+  while (size() > 3300 && (state.tasks?.length ?? 0) > 2) state.tasks!.pop();
+  while (size() > 3300 && state.actions!.length) { state.actions!.pop(); state.hasMoreActions = true; }
+  if (size() > 3300) { state.subtitle = cut(state.subtitle, 60); state.project = ""; state.agents = state.agents?.slice(0, 3); }
+  while (size() > 3300 && state.tasks?.length) state.tasks.pop();
+  if (size() > 3300) state.deepLink = "linkshell:///";
   return state;
 }
 
@@ -126,7 +149,10 @@ export function permissionChoices(options: PermissionOption[]): PermissionChoice
   const kinds = new Map<string, number>();
   for (const option of options) kinds.set(option.kind, (kinds.get(option.kind) ?? 0) + 1);
   const choices = options.map((option): PermissionChoice => {
-    const known = choiceById[option.optionId];
+    // ACP option IDs are agent-local: Gemini's sole `cancel` is a rejection,
+    // while Codex offers it alongside a separate decline/skip action.
+    const soleReject = option.optionId === "cancel" && option.kind === "reject_once" && kinds.get("reject_once") === 1;
+    const known = soleReject ? undefined : choiceById[option.optionId];
     if (known) return { option, ...known };
     const byKind = choiceByKind[option.kind];
     // Two options of one kind: the agent's own names tell them apart.
@@ -308,6 +334,43 @@ export function liveActivityDetailLink(computerKey: string, kind: "session" | "t
   return `linkshell:///activity?computer=${encodeURIComponent(computerKey)}&${kind}=${encodeURIComponent(id)}`;
 }
 
+/** The card describes progress; the session retains the full command and output. */
+function liveActivityProgress(activity: SessionActivity | undefined): string {
+  if (activity?.kind !== "tool" || activity.toolKind !== "execute" || !activity.title) return activityText(activity);
+  const command = tidyCommand(cleanToolTitle(activity.title));
+  if (/^(?:rg|grep|find|fd|ls)\b/.test(command)) return "正在查找项目文件与代码";
+  if (/^(?:cat|sed|head|tail)\b/.test(command)) return "正在阅读项目文件";
+  if (/^git\s+(?:status|diff|log|show|branch)\b/.test(command)) return "正在检查分支与代码改动";
+  if (/^(?:pnpm|npm|yarn|bun|npx)\b/.test(command)) {
+    if (/\b(?:test|vitest|jest)\b/.test(command)) return "正在运行测试";
+    if (/\b(?:typecheck|tsc)\b/.test(command)) return "正在检查类型";
+    if (/\b(?:lint|eslint)\b/.test(command)) return "正在检查代码规范";
+    if (/\bbuild\b/.test(command)) return "正在构建项目";
+    if (/\b(?:install|add)\b/.test(command)) return "正在准备项目依赖";
+  }
+  if (/^xcodebuild\b/.test(command)) return "正在构建 iOS 应用";
+  if (/^(?:python[\d.]*|node|ruby)\b/.test(command)) return "正在执行脚本";
+  if (/^(?:curl|wget)\b/.test(command)) return "正在获取资料";
+  return activityText(activity);
+}
+
+export function liveActivitySessionTask(session: SessionSummary, online = true): LiveActivityTask {
+  const phase = classifySessionPhase(session, online);
+  const subtitle = phase === "waiting_for_approval" || phase === "waiting_for_input"
+    ? session.permission?.title ?? session.asyncQuestions?.[0]?.title ?? "需要你的确认"
+    : phase === "completed" ? plainPreview(session.preview ?? "本轮任务已结束")
+    : phase === "failed" ? plainPreview(session.preview ?? "执行出错，打开任务查看")
+    : session.activity?.kind === "responding" && session.preview ? plainPreview(session.preview) : liveActivityProgress(session.activity);
+  return { id: session.id, kind: "session", phase, title: sessionTitle(session), subtitle,
+    project: baseName(session.worktree?.source ?? session.cwd), agent: session.agent };
+}
+
+export function liveActivityTerminalTask(terminal: TerminalInfo, online = true): LiveActivityTask {
+  const state = terminalState(terminal);
+  return { id: terminal.id, kind: "terminal", phase: !online ? "stale" : state.failed ? "failed" : state.busy ? "running" : "completed",
+    title: state.title, subtitle: state.detail, project: baseName(terminal.cwd), agent: "terminal" };
+}
+
 /**
  * Builds the aggregated single-card iOS Live Activity / Dynamic Island payload
  * for a computer. New progress brings its task and agent to the front together.
@@ -346,6 +409,10 @@ export function buildLiveActivitySnapshot(
     ...candidates.map((session) => ({ agent: session.agent, at: session.updatedAt })),
     ...busyTerminals.map((terminal) => ({ agent: "terminal", at: terminal.activeAt })),
   ].sort((a, b) => b.at - a.at).map((item) => item.agent))];
+  const tasks = [
+    ...candidates.map((session) => ({ task: liveActivitySessionTask(session, online), at: session.createdAt })),
+    ...busyTerminals.map((terminal) => ({ task: liveActivityTerminalTask(terminal, online), at: terminal.createdAt })),
+  ].sort((a, b) => a.at - b.at || a.task.id.localeCompare(b.task.id)).map(({ task }) => task);
 
   if (hero && (!busyTerminals[0] || hero.updatedAt >= busyTerminals[0].activeAt)) {
     const phase = classifySessionPhase(hero, online);
@@ -361,7 +428,7 @@ export function buildLiveActivitySnapshot(
             ? `目标 · ${heroGoal.objective}`
             : hero.activity?.kind === "responding" && hero.preview
               ? plainPreview(hero.preview)
-              : activityText(hero.activity);
+              : liveActivityProgress(hero.activity);
 
     return {
       active: true,
@@ -372,6 +439,7 @@ export function buildLiveActivitySnapshot(
       project: baseName(hero.worktree?.source ?? hero.cwd),
       agent: hero.agent,
       agents,
+      tasks,
       ...(online ? liveActivityActions(hero, computerKey) : { actions: [], hasMoreActions: false }),
       waitingCount: waiting.length,
       runningCount,
@@ -391,6 +459,7 @@ export function buildLiveActivitySnapshot(
     project: baseName(busy.cwd),
     agent: "terminal",
     agents,
+    tasks,
     waitingCount: waiting.length,
     runningCount,
     failedCount: failed.length,
