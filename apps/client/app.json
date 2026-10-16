@@ -70,7 +70,7 @@
         {
           "microphonePermission": "LinkShell 需要使用麦克风，才能通过语音向 Agent 发送消息。",
           "recordAudioAndroid": true,
-          "enableBackgroundPlayback": true,
+          "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }
       ],
