@@ -9,7 +9,7 @@
   <meta name="description"
     content="LinkShell 文档：安装 CLI、启动 host、用官方网关或自建网关连接手机、在终端里用 linkshell claude / codex 接力，以及常见问题。" />
   <meta name="keywords"
-    content="LinkShell, Claude Code, OpenAI Codex, Gemini CLI, GitHub Copilot, coding agent, mobile, remote terminal, handoff, iOS, Android, end-to-end encryption, self-hosted gateway" />
+    content="LinkShell, Claude Code, OpenAI Codex, Gemini CLI, GitHub Copilot, coding agent, mobile, remote desktop, remote Mac, remote terminal, handoff, iOS, Android, end-to-end encryption, self-hosted gateway" />
   <meta name="author" content="LinkShell" />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
@@ -38,7 +38,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
   <meta name="twitter:description"
-    content="Your coding agents keep running on your computer; follow, steer and approve them from your phone." />
+    content="Follow your coding agents from your phone, then open your Mac desktop to inspect the result and take control." />
   <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -60,7 +60,7 @@
           "name": "LinkShell",
           "operatingSystem": "iOS, Android, macOS, Linux",
           "applicationCategory": "DeveloperApplication",
-          "description": "Follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini, Copilot) from your phone, with a terminal and local web previews. End-to-end encrypted.",
+          "description": "Follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini, Copilot) from your phone, with remote desktop control, a terminal and local web previews. End-to-end encrypted.",
           "url": "https://liutianjie.github.io/LinkShell/",
           "downloadUrl": "https://github.com/LiuTianjie/LinkShell/releases/latest",
           "offers": [
@@ -477,15 +477,20 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature" id="remote-desktop">
           <div class="text">
-            <h2><span lang="zh"><span class="nb">需要时，</span><span class="nb">直接看电脑屏幕</span></span><span lang="en">When you need it, <span class="nb">the computer&#39;s screen</span></span></h2>
-            <p><span lang="zh">实时画面：手机和电脑能直连时，视频不经过服务器。支持原生播放的 iOS 版本默认请求最高 120 帧，实际帧率随两端显示器、网络、电量和温控调整；连接失败时自动尝试常规视频和加密中继。可以全屏、横屏；切到触控板模式就能接手鼠标和键盘，还有一页一点即发的快捷操作。（macOS 13 及以上，Apple 芯片或 Intel）</span><span lang="en">Real-time: when the phone and computer can connect directly, video travels through no server. Supported iOS versions request a ceiling of 120 fps for native playback; actual rates depend on both displays, network, power and temperature. Connection failures automatically try standard video and encrypted relay fallback. Full screen or in landscape; switch to trackpad mode to take the mouse and keyboard, with a sheet of one-tap shortcuts. (macOS 13+, Apple silicon or Intel)</span></p>
+            <h2><span lang="zh"><span class="nb">把 Mac 桌面，</span><span class="nb">装进口袋。</span></span><span lang="en">Your Mac. <span class="nb">In your pocket.</span></span></h2>
+            <p><span lang="zh">电脑留在桌上，整个工作台随身带走。Agent 改完代码，就在手机上打开真实桌面：检查网页、操作编辑器、处理弹窗。横屏铺开、全屏查看、双指放大，需要亲自点一下的事，也能当场办完。（完整控制支持 macOS 13 及以上）</span><span lang="en">Bring the whole workspace with you. When an agent finishes a change, open the actual desktop to check a browser, work in your editor or handle a dialog. Turn the phone to landscape, go full screen and pinch to zoom. Take over wherever a human touch is needed. Full control requires macOS 13 or later.</span></p>
           </div>
           <figure class="phone side">
             <img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="手机横屏显示电脑屏幕：浏览器里的页面和终端，切到触控板模式后出现指针" />
             <video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video>
           </figure>
+          <ul class="duo-points">
+            <li><b><span lang="zh">4K 级细节，高刷屏适配</span><span lang="en">4K detail. Ready for high refresh.</span></b><p><span lang="zh">原生画质最高 3840 像素宽，iOS 适配最高 120 Hz 显示。实际画质、帧率与响应速度随设备和网络条件变化。</span><span lang="en">A picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Resolution, frame rate and responsiveness depend on devices and network conditions.</span></p></li>
+            <li><b><span lang="zh">指尖也有精细操控</span><span lang="en">Precision at your fingertips</span></b><p><span lang="zh">慢移精确定位，快移跨越桌面；触控板和「点哪点哪」随手切换，右键、滚动、拖拽都在指尖。</span><span lang="en">Move slowly for precision or swipe across the desktop. Choose trackpad control or direct touch, with right click, scrolling and dragging.</span></p></li>
+            <li><b><span lang="zh">多屏与快捷键，随身带走</span><span lang="en">Your displays and shortcuts, too</span></b><p><span lang="zh">切换显示器、复制粘贴、切换应用，一点就到。长文字和手机剪贴板也能直接发到电脑。</span><span lang="en">Switch displays, copy, paste and change apps with a tap. Send longer text and your phone's clipboard straight to the computer.</span></p></li>
+          </ul>
         </article>
 
         <article class="feature">
@@ -696,8 +701,8 @@
 
         <h2 id="d-screen"><span lang="zh">远程桌面的画面与连接</span><span lang="en">Remote screen quality and connection</span></h2>
         <p><span lang="zh">网页端的「电脑屏幕」页以网格展示多台电脑。每台在线电脑都可独立开始或停止观看、切换显示器和全屏；离线电脑保留在列表中。窄屏自动变为单列。</span><span lang="en">The web Screens page shows a grid of computers. Start or stop each online viewer independently, choose its display or enter fullscreen. Offline computers remain listed, and narrow screens use one column.</span></p>
-        <p><span lang="zh">Mac 使用硬件编码的实时视频，支持原生播放的 iOS 版本默认用原生接收与 Metal 显示，保留同一套悬浮工具栏、手势和键盘。最高 120 帧是请求上限，实际效果取决于电脑与手机的显示器、网络、电量和温控。Android 和浏览器使用常规视频播放器。</span><span lang="en">The Mac sends hardware-encoded real-time video. Supported iOS versions use native reception and Metal display with the same floating controls, gestures and keyboard. The 120 fps ceiling is a request; actual performance depends on both displays, network, power and temperature. Android and browsers use the standard video player.</span></p>
-        <p><span lang="zh">在「连接信息」中选择流畅 1280、标准 1920、高清 2560 或原生宽度（最高 3840，不超过源屏幕）。直连失败时 iOS 先尝试常规视频，再转入加密中继兼容播放；兼容方式自动降低分辨率与帧率，不受这个清晰度选项控制。重新进入或重试会重新尝试首选路径。原生播放需要包含该功能的 iOS 安装包。</span><span lang="en">Connection info offers widths of 1280, 1920, 2560 or native (up to 3840, bounded by the source display). If direct video fails, iOS tries standard video and then encrypted relay playback. Compatibility playback adapts resolution and frame rate independently of this width choice. Reopening or retrying starts with the preferred path again. Native playback requires an iOS app binary that includes it.</span></p>
+        <p><span lang="zh">在手机上打开 Mac 桌面，可以切换显示器、横屏或全屏查看、双指缩放。触控板模式适合精确移动指针，「点哪点哪」适合直接点击；右键、滚动、拖拽和常用 Mac 快捷键都可使用，也能把手机上写好的长文字或剪贴板内容发送过去。完整控制支持 macOS 13 及以上，Linux 支持观看。</span><span lang="en">Open your Mac desktop on the phone, switch displays, use landscape or full screen and pinch to zoom. Choose trackpad mode for precise pointer movement or direct touch to click a spot. Right click, scroll, drag and use familiar Mac shortcuts, or send longer text and your phone's clipboard. Full control requires macOS 13 or later; Linux supports viewing.</span></p>
+        <p><span lang="zh">在「连接信息」中选择流畅 1280、标准 1920、高清 2560 或原生宽度（最高 3840，不超过源屏幕）。iOS 适配最高 120 Hz 显示，实际画质、帧率和延迟取决于两端设备、源显示器、网络、电量和温控。连接不佳时可能降低画质；可以重新进入或重试连接。</span><span lang="en">Connection info offers widths of 1280, 1920, 2560 or native (up to 3840, bounded by the source display). iOS supports displays up to 120 Hz; actual resolution, frame rate and latency depend on both devices, the source display, network, power and temperature. Quality may decrease on a poor connection; reopen the screen or retry to connect again.</span></p>
         <p class="note"><span lang="zh">稳定 120 fps、稳定 4K/60 和真机弱网效果仍待验证。完整技术链路、回退规则和已知问题见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">远程桌面架构与链路图</a>。</span><span lang="en">Sustained 120 fps, stable 4K/60 and real-device weak-network performance remain unproven. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">remote-desktop architecture and diagrams</a> for the paths, fallback rules and known issues.</span></p>
 
         <h2 id="d-iphone-duo"><span lang="zh">iPhone Duo 与自适应布局</span><span lang="en">iPhone Duo and adaptive layouts</span></h2>
