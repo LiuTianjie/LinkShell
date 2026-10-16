@@ -108,11 +108,22 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
     </td>
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-screen.jpg" alt="The phone in landscape showing the computer's screen in trackpad mode" width="100%" /><br />
-      <strong>The computer's screen</strong><br />
-      Real-time video when the two connect directly; latency depends on the Mac and network. Full screen or landscape; trackpad mode takes the mouse and keyboard (macOS 13+, Apple silicon or Intel).
+      <strong>Your Mac, in your pocket</strong><br />
+      Open the desktop, zoom in on the details and take over the mouse and keyboard. Check a browser, work in your editor or handle a dialog, right from your phone.
     </td>
   </tr>
 </table>
+
+### Your Mac, in your pocket
+
+**Bring the whole workspace with you.** An agent finishes a change; you open the actual desktop, check the result and take over wherever a human touch is needed.
+
+- **4K detail. Ready for high refresh displays.** Native resolution mode offers a picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Zoom in to inspect code, small text and design details.
+- **Precision at your fingertips.** Move slowly to place the pointer exactly, or swipe quickly across the desktop. Choose trackpad control or touch the spot you want to click. Right click, scroll and drag are all within reach.
+- **Desktop shortcuts, one tap away.** Copy, paste, switch apps, open Mission Control, take a screenshot or send a function key. Compose longer text on the phone and send it over, including text from your clipboard.
+- **A whole desk on a small screen.** Switch between your Mac's displays, turn the phone to landscape, go full screen and pinch to zoom. Move between the big picture and the detail you need.
+
+Full control requires macOS 13 or later; Linux supports viewing. Available resolution, refresh rate and responsiveness depend on both devices, the source display and the network.
 
 ### Computer Use, from your phone
 
@@ -129,7 +140,6 @@ Currently supports Codex on macOS with compatible Computer Use tools. See [setup
 ### More features
 
 - **Answer its questions.** Codex (including Desktop asynchronous questions), Claude, Cursor and Grok can send structured questions to your phone. Sessions show when input is needed; answer from the question card or skip. Free text is available when the agent supports it; Cursor's extension accepts choices only. See [agent question support](docs/v2/agent-questions.md).
-- **Straight to your computer.** The screen and port previews travel peer to peer whenever a direct path exists (the same network, or through NAT). A Mac's screen uses low-latency H.264 hardware encoding, with the pointer drawn on the phone. Supported iOS builds default to native WebRTC decoding and Metal display, requesting a ceiling of 120 fps within display, power, thermal and network limits. Failure tries standard WebView video, then the encrypted RPC stream through the gateway, bypassing the separate direct data channel for this screen. Android and browsers use the standard viewer. The gateway retains session/signalling duties; no TURN is deployed.
 - **Forks and worktrees.** Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
 - **Sub-agents, Claude Workflows and long sessions.** Follow a Workflow by phase, open each Agent's conversation and tool results, and return to a background run from the bar above the composer. The main conversation keeps a compact summary; Workflow agents stay in their run's details instead of repeating as conversation cards. Consecutive finished Agent steps fold together. The button beside the session title lists its Workflows and sub-agents. Long sessions open at their latest turns; project files are there to browse and read.
 - **Commands and persistent goals.** Type `/`, tap the command button beside the composer, or open Commands from the session menu to search commands and skills without losing an unsent draft. Codex and Claude Code support `/goal` and a dedicated goal screen. Codex can pause, resume and set a token budget; Claude can set or clear a completion condition. Available controls depend on the agent installed on your computer.
@@ -142,7 +152,7 @@ Currently supports Codex on macOS with compatible Computer Use tools. See [setup
 - **Find a session.** Search the home page by title, latest message preview, project path, worktree branch or agent. Results include archived sessions and terminals on the selected computer.
 - **Tidy sessions.** Codex rename, archive and delete update its native records; Claude rename and delete do too, while Claude and other ACP archives stay in LinkShell. Archived Codex sessions leave the active list and remain readable without being restored. Projects and sessions show the current git branch. A computer you no longer use is removed with a long press under My computers.
 - **Recover session history.** Restarting the host rechecks activity instead of retaining stale running flags. Missing or unreadable history shows an explanation while preserving cached messages. See [session recovery and ACP compatibility](docs/v2/session-recovery.md).
-- **Screen and files.** Watch the computer's screen, full screen and in landscape, and take the pointer and keyboard when you need to: a trackpad or tap-where-you-touch, right click, scroll, drag; a sheet of one-tap Mac shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own); and a text box for anything longer, which also takes the phone's clipboard (macOS 13+, Apple silicon or Intel; `linkshell setup` gets the permissions in place). Send photos or files from the phone into the project.
+- **Files from your phone.** Send photos and files straight into the project on your computer, ready for your agent to use.
 
 ## Agents
 
