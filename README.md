@@ -56,7 +56,7 @@ Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-wat
 
 ## Get started
 
-**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
+**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.44/LinkShell-0.10.44-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.44/LinkShell-0.10.44-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
 
 The Mac app can launch at login and starts its background service automatically. Settings offer system, light and dark appearance (dark by default). Usage Statistics on Mac and phone show local Codex/Claude token totals, cache usage, daily trends and model breakdowns; these are log-based counts, not billing or remaining subscription quota.
 
