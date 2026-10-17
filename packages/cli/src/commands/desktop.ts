@@ -36,10 +36,20 @@ export async function desktopSnapshot(version: string) {
 export async function runDesktop(version: string, action: string): Promise<void> {
   silenceSqliteWarning();
   try {
+    if (action === "pair") {
+      const result = await withRunningHost(async client => {
+        const gateway = await client.call("gateway.status", {});
+        if (gateway.status !== "online") throw new Error("请先连接网关。官方网关需要登录 Pro 账号；自建网关可以免登录配对。");
+        return client.call("pairing.start", {}, 20_000);
+      });
+      if (!result) throw new Error("请先启动本机服务");
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return;
+    }
     if (action.startsWith("usage-")) {
-      const match = /^usage-(1|7|30)-(all|codex|claude)$/.exec(action);
+      const match = /^usage-(1|7|30)-(.{1,128})$/.exec(action);
       if (!match) throw new Error("无效的用量筛选条件");
-      const result = await withRunningHost(client => client.call("usage.summary", { days: Number(match[1]) as 1 | 7 | 30, agent: match[2] as "all" | "codex" | "claude" }, 120_000));
+      const result = await withRunningHost(client => client.call("usage.summary", { days: Number(match[1]) as 1 | 7 | 30, agent: match[2]! }, 120_000));
       if (!result) throw new Error("请先启动本机服务");
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;

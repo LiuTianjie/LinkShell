@@ -164,6 +164,8 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   }),
   z.object({
     sessionUpdate: z.literal("usage_update"),
+    // Only accounting-bearing updates are additive; context-window snapshots are not usage.
+    accounting: z.object({ id: z.string(), scope: z.enum(["turn", "session"]), model: z.string().optional(), timestamp: z.number().optional() }).optional(),
     usedTokens: z.number().optional(),
     contextWindow: z.number().optional(),
     cost: z.object({ amount: z.number(), currency: z.string() }).nullable().optional(),

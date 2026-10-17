@@ -20,7 +20,7 @@ async function setup(version: 1 | 2 = 1) {
   const home = mkdtempSync(join(tmpdir(), "linkshell-acp-ext-"));
   writeFileSync(join(home, "acp.json"), JSON.stringify({ settings: { fixture: { protocolVersion: version } } }));
   const log = join(home, "calls.jsonl");
-  const host = await startHost({ home, version: "test", iceServers: false, discoveryIntervalMs: 0, log: () => {}, drivers: () => [new AcpDriver({ id: "fixture", label: "Fixture", tier: "remote", command: process.execPath, args: [fixture], discover: true }, { env: { ...process.env, ACP_TEST_VERSION: String(version), ACP_TEST_LOG: log }, hostVersion: "test" })] });
+  const host = await startHost({ home, env: { ...process.env, CODEX_HOME: join(home, "codex"), CLAUDE_CONFIG_DIR: join(home, "claude") }, version: "test", iceServers: false, discoveryIntervalMs: 0, log: () => {}, drivers: () => [new AcpDriver({ id: "fixture", label: "Fixture", tier: "remote", command: process.execPath, args: [fixture], discover: true }, { env: { ...process.env, ACP_TEST_VERSION: String(version), ACP_TEST_LOG: log }, hostVersion: "test" })] });
   running.push({ home, host });
   const client = await connectHost(host.paths.hostSocket), events: SessionEvent[] = [], notices: SessionNotice[] = [], interactions: PendingPermissionSummary[] = [];
   client.on("session.event", (event) => events.push(event));
@@ -74,6 +74,9 @@ describe("ACP optional capabilities across the host RPC", () => {
     expect(f.notices).toEqual([{ severity: "warning", title: "临时提示" }]);
     expect(f.events.some((event) => event.update.sessionUpdate === "ls_notice" && event.update.title === "临时提示")).toBe(false);
     expect(f.view().usage).toMatchObject({ usedTokens: 50, contextWindow: 1000, cost: { amount: 0.1, currency: "USD" }, tokens: { totalTokens: 20 } });
+    const report = await f.client.call("usage.summary", { days: 1, agent: "fixture" });
+    expect(report.totals).toMatchObject({ totalTokens: 40, records: 2 });
+    expect(report.agents).toEqual(expect.arrayContaining([expect.objectContaining({ id: "fixture", status: "available" })]));
   });
 
   it("clears cancelled approvals and rejects invalid form answers without losing the pending request", async () => {
@@ -141,11 +144,14 @@ describe("ACP 2 asynchronous prompt lifecycle", () => {
     expect(view.items.filter((item) => item.kind === "user")).toHaveLength(2);
     expect(view.items.filter((item) => item.kind === "agent").map((item) => item.text)).toEqual(["replaced one", "replaced two"]);
     expect(f.host.hub.getSession(f.session.id).state).toBe("idle");
+    const report = await f.client.call("usage.summary", { days: 1, agent: "fixture" });
+    expect(report.totals).toMatchObject({ totalTokens: 40, records: 2 });
   });
 
   it("handles idle before the prompt response without remaining stuck", async () => {
     const f = await setup(2); await f.send("FAST"); await waitFor(() => f.ended() === 1);
     expect(f.view().items.filter((item) => item.kind === "user")).toHaveLength(1);
     expect(f.view().state).toBe("idle");
+    expect((await f.client.call("usage.summary", { days: 1, agent: "fixture" })).totals).toMatchObject({ totalTokens: 20, records: 1 });
   });
 });

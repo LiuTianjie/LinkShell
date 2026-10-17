@@ -53,6 +53,7 @@ struct DesktopView: View {
       .padding(10).padding(.bottom, 12).frame(width: 210).background(DesktopStyle.sidebar)
       Rectangle().fill(DesktopStyle.line).frame(width: 1)
       VStack(alignment: .leading, spacing: 0) {
+        if model.selected != "用量统计" {
         HStack(alignment: .top) {
           VStack(alignment: .leading, spacing: 7) {
             Text(model.selected == "总览" ? "这台 Mac" : model.selected).font(.system(size: 28, weight: .semibold))
@@ -70,6 +71,7 @@ struct DesktopView: View {
             .background(RoundedRectangle(cornerRadius: 7).strokeBorder(DesktopStyle.line))
             .disabled(model.busy || model.preview).accessibilityLabel("服务操作")
         }.padding(.bottom, 30)
+        }
         if let problem = model.problem {
           HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
@@ -156,6 +158,7 @@ struct DesktopView: View {
   private var overview: some View {
     VStack(alignment: .leading, spacing: 0) {
       accountSection
+      DesktopPairingView(model: model).padding(.bottom, 20)
       if model.snapshot?.status == "stopped" {
         HStack { Text("启动后台服务后，即可从手机连接这台 Mac。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary); Spacer(); Button("启动服务") { model.action("start") }.disabled(model.busy || model.preview) }.padding(.bottom, 16)
       }
@@ -214,7 +217,8 @@ struct DesktopView: View {
   }
   private var devices: some View {
     VStack(alignment: .leading, spacing: 0) {
-      if model.devices.isEmpty { empty("暂无设备", "在终端运行 linkshell pair 配对手机，或让手机与电脑登录同一账号。") }
+      DesktopPairingView(model: model).padding(.bottom, 24)
+      if model.devices.isEmpty { empty("暂无已配对设备", "在手机中打开「电脑 → 添加电脑」，扫描上方生成的二维码。") }
       ForEach(model.devices) { device in row(device.name, device.online ? "在线" : "离线", good: device.online) }
       if let url = model.snapshot?.gateway?.url { Text(url).font(.system(size: 12, design: .monospaced)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled).padding(.top, 24) }
       if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.footnote).foregroundStyle(.orange).padding(.top, 16) }
@@ -299,6 +303,7 @@ struct DesktopView: View {
       }.padding(.vertical, 20)
       rule
       accountSection
+      DesktopPairingView(model: model).padding(.bottom, 20)
       if model.standalone {
         Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
           .toggleStyle(.switch).padding(.top, 20).disabled(model.preview)

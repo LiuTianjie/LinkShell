@@ -19,7 +19,7 @@ const text = (sessionId, messageId, value) => update(sessionId, version === 2
   ? { sessionUpdate: "agent_message", messageId, content: [{ type: "text", text: value }] }
   : { sessionUpdate: "agent_message_chunk", messageId, content: { type: "text", text: value } });
 const config = () => [{ id: "enabled", name: "Enabled", type: "boolean", currentValue: false }, { id: "model", name: "Model", type: "select", category: "model", currentValue: "a", options: [{ value: "a", name: "A" }, { value: "b", name: "B" }] }];
-const state = (sessionId, value, stopReason) => update(sessionId, { sessionUpdate: "state_update", state: value, ...(stopReason ? { stopReason } : {}) });
+const state = (sessionId, value, stopReason) => update(sessionId, { sessionUpdate: "state_update", state: value, ...(stopReason ? { stopReason } : {}), ...(value === "idle" ? { usage: { totalTokens: 20, inputTokens: 12, outputTokens: 8 } } : {}) });
 const finish = (sessionId, stopReason = "end_turn") => { if (version === 2) state(sessionId, "idle", stopReason); };
 
 async function run(sessionId, prompt) {

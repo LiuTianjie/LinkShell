@@ -60,3 +60,17 @@ LinkShell 的 v2 架构、Codex app-server 的 v2 API、网关的 `/v2/connect` 
 - 真实初始化握手只证明版本与声明的能力；真实问答、接力、审批用 `live:codex` / `live:claude` 验证，手机交互需要单独验证。
 - 2026-10-10 的基础恢复版本真实 Codex 检查 8/8 通过（问答流、审批、多客户端与终端入口）；Claude Code 2.1.168 接力检查 13/13 通过（历史导入、手机继续、交还终端、上下文连续与消息去重）。这不是新增 ACP 扩展的真机证明。配套版本证据见 [ACP 支持说明](acp-support.md)。
 - 配套更新应按 [完整发版 SOP](../release-sop.md) 处理 wire、Host、CLI、App 和网关内置网页。配套版本见 [ACP 支持说明](acp-support.md#配套版本)。
+
+
+## Agent 用量统计
+
+`usage.summary` 的 Agent 列表来自 Host 注册表，包含 Codex、Claude、Gemini、Antigravity、Copilot、Grok、OpenCode、Cursor 和自定义 ACP Agent。桌面端与手机端共用此列表、时间筛选和按 Agent / 模型的汇总。
+
+- Codex / Claude 读取原生日志（含归档、子代理）；继续按累计计数差值或消息 ID 去重。
+- 其他 Agent 统计 Host 持久化的、带 accounting 标记的用量事件。ACP 1 从 prompt 结果收集，ACP 2 从完成工作的 idle 状态收集；不把上下文占用 `usedTokens` 当成消耗。
+- Copilot 的会话累计计数按差值统计。首条以及计数重置后的首条仅建立基线，避免把接入前的历史消耗记到今天。其他 ACP Agent 按完成工作的回合用量解释；准确性依赖 Agent 遵循该语义。
+- Antigravity 按原生 transcript step ID 去重，并使用 step 的 `created_at`；缺少可靠时间戳的旧记录不计入日期统计。
+- 通用 ACP 数据只覆盖 LinkShell 已收到的上报，不会回填所有 Agent 的独立本机历史。旧版 Host 保存但未标明统计口径的事件、没有上报 Token 的会话均不相加。
+- 没有数据的 Agent 仍显示在筛选中，指标显示 `—`，并明确提示“暂无可用数据”；这不代表零消耗。全部页的合计只代表已记录的用量。Token 与记录条数均显示单位，记录数不是网络请求数，缓存读取占比不是缓存命中率。
+
+本轮验证包括模拟 ACP 的 RPC 集成测试、统计去重和累计基线测试，以及原生 macOS 预览截图；截图内数据明确标为示例。尚未逐个真实 Agent 验证其上报行为，也没有手机真机视觉验收。

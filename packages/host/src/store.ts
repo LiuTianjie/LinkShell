@@ -673,6 +673,16 @@ export class HostStore {
     return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
   }
 
+  /** Read numeric usage only; include earlier counters to establish cumulative baselines. */
+  *usageEvents(): Iterable<SessionEvent & { agent: string }> {
+    const rows = this.db.prepare(`SELECT e.session_id, e.seq, e.ts, e.body, s.agent
+      FROM sessions s JOIN event_meta m ON m.session_id = s.id AND m.kind = 'usage_update'
+      JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+      WHERE s.agent NOT IN ('codex', 'claude') ORDER BY e.session_id, e.seq`).iterate();
+    for (const row of rows) yield { sessionId: String(row.session_id), seq: Number(row.seq), ts: Number(row.ts),
+      agent: String(row.agent), update: JSON.parse(String(row.body)) as SessionUpdate };
+  }
+
   /** Every background-task record the session logged, oldest first (each is a whole record: the last per task holds). */
   taskEvents(sessionId: string): SessionEvent[] {
     return this.joined("m.session_id = ? AND m.kind = 'ls_task' ORDER BY m.seq ASC", [sessionId]);

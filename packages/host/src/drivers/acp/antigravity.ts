@@ -949,21 +949,16 @@ export function parseTranscriptSteps(
         }
       }
 
-      // The context in use is the latest reply's prompt; earlier replies in the batch are superseded.
-      if (i === lastPlanner || (lastPlanner >= 0 && parsed[lastPlanner]!.index === stepIndex)) {
-        const input = (step.input_tokens ?? 0) + (step.cache_read_tokens ?? 0);
-        if (input > 0) {
-          updates.push({
-            sessionUpdate: "usage_update",
-            usedTokens: input,
-            tokens: {
-              totalTokens: input + (step.output_tokens ?? 0),
-              inputTokens: step.input_tokens ?? 0,
-              outputTokens: step.output_tokens ?? 0,
-              cachedReadTokens: step.cache_read_tokens ?? 0,
-            },
-          });
-        }
+      // Each step is a distinct usage record; only the latest supplies context occupancy.
+      const input = (step.input_tokens ?? 0) + (step.cache_read_tokens ?? 0);
+      if (input > 0 || (step.output_tokens ?? 0) > 0) {
+        const timestamp = Date.parse(step.created_at ?? "");
+        updates.push({ sessionUpdate: "usage_update",
+          usedTokens: i === lastPlanner || (lastPlanner >= 0 && parsed[lastPlanner]!.index === stepIndex) ? input : undefined,
+          ...(Number.isFinite(timestamp) ? { accounting: { id: `agy:step:${stepIndex}`, scope: "turn" as const, timestamp, model: state.lastModelLabel } } : {}),
+          tokens: { totalTokens: input + (step.output_tokens ?? 0), inputTokens: step.input_tokens ?? 0,
+            outputTokens: step.output_tokens ?? 0, cachedReadTokens: step.cache_read_tokens ?? 0 },
+        });
       }
 
       if (updates.length > 0) items.push({ itemId: `agy:step:${stepIndex}`, updates });

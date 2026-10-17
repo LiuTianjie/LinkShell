@@ -14,6 +14,25 @@ beforeEach(() => { vi.resetAllMocks(); process.exitCode = 0; });
 afterEach(() => { vi.restoreAllMocks(); process.exitCode = 0; });
 
 describe("native desktop snapshots", () => {
+  it("generates pairing without requiring account login", async () => {
+    const offer = { code: "123456", link: "linkshell://pair?test", expiresAt: 1234, gateway: "wss://self.example" };
+    const call = vi.fn().mockResolvedValueOnce({ status: "online" }).mockResolvedValueOnce(offer);
+    vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "pair");
+    expect(call).toHaveBeenCalledWith("pairing.start", {}, 20_000);
+    expect(JSON.parse(String(out.mock.calls[0][0]))).toEqual(offer);
+    expect(runLogin).not.toHaveBeenCalled();
+  });
+  it("explains the gateway prerequisite without starting pairing offline", async () => {
+    const call = vi.fn().mockResolvedValue({ status: "off" });
+    vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "pair");
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(out.mock.calls[0][0])).error).toContain("自建网关");
+    expect(process.exitCode).toBe(1);
+  });
   it("fetches filtered usage without starting or restarting services", async () => {
     const call = vi.fn().mockResolvedValue({ totals: { totalTokens: 123 } });
     vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
@@ -22,6 +41,13 @@ describe("native desktop snapshots", () => {
     expect(call).toHaveBeenCalledWith("usage.summary", { days: 30, agent: "claude" }, 120_000);
     expect(JSON.parse(String(out.mock.calls[0][0]))).toEqual({ totals: { totalTokens: 123 } });
     expect(ensureHostRunning).not.toHaveBeenCalled();
+  });
+  it("passes custom agent IDs through the desktop usage action", async () => {
+    const call = vi.fn().mockResolvedValue({ totals: { totalTokens: 7 } });
+    vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "usage-7-custom-acp");
+    expect(call).toHaveBeenCalledWith("usage.summary", { days: 7, agent: "custom-acp" }, 120_000);
   });
   it("rejects invalid usage filters before making an RPC call", async () => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);

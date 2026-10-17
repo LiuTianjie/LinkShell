@@ -21,6 +21,7 @@
 // whatever it is allowed is asked for again. LINKSHELL_REQUIRE_SIGNED=1, which a release sets,
 // makes a missing identity fatal.
 
+import "./generate-agent-marks.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";

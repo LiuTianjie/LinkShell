@@ -54,7 +54,7 @@ LinkShell 2.3.33 加入可独立连接的 watchOS App：登录已有邮箱/密�
 
 **独立 Mac App（macOS 13+）：** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.44/LinkShell-0.10.44-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.44/LinkShell-0.10.44-x64.dmg)。拖入 Applications，打开后即可登录。内置 CLI、Host 和 Node，随 App 整体更新，无需安装 npm；编程 Agent 仍需自行安装和登录。
 
-Mac App 可设置登录系统时自动启动，并自动拉起后台服务。外观支持跟随系统、浅色和深色，默认保留深色。桌面和手机均可查看 Codex / Claude 的本地 Token、缓存、每日趋势及模型分布；统计来自日志，不代表账单或订阅剩余额度。
+Mac App 可设置登录系统时自动启动，并自动拉起后台服务。外观支持跟随系统、浅色和深色，默认保留深色。桌面和手机均可按全部已注册 Agent 筛选，用原有品牌图标展示 Token、每日趋势及模型明细。Codex / Claude 读取原生日志，其他 Agent 使用 LinkShell 接收到的用量上报；缺失数据显示为暂无数据，统计不代表账单或剩余额度。桌面总览和设备页可生成配对二维码及六位码；免账号配对使用自建网关。
 
 下面的 CLI 安装方式供按需选择。
 

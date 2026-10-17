@@ -461,6 +461,7 @@ describe("Antigravity transcript tail and tool mapping", () => {
         step_index: 1,
         type: "PLANNER_RESPONSE",
         tool_calls: [{ id: "call_run", name: "run_command", args: { CommandLine: "pnpm test", Cwd: "/repo", toolSummary: "Run tests" } }],
+        created_at: "2026-10-17T02:00:00.000Z",
         input_tokens: 100,
         cache_read_tokens: 900,
         output_tokens: 20,
@@ -478,7 +479,7 @@ describe("Antigravity transcript tail and tool mapping", () => {
       expect(pass2.items[0]?.updates).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ sessionUpdate: "tool_call", toolCallId: "call_run", kind: "execute", status: "in_progress" }),
-          expect.objectContaining({ sessionUpdate: "usage_update", usedTokens: 1000 }),
+          expect.objectContaining({ sessionUpdate: "usage_update", usedTokens: 1000, accounting: expect.objectContaining({ id: "agy:step:1", scope: "turn", timestamp: Date.parse("2026-10-17T02:00:00.000Z") }) }),
         ]),
       );
 

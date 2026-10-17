@@ -32,7 +32,7 @@ App 内的 CLI、Host 和 Node 是配套版本。设置里的“安装到 ~/.loc
 
 设置中的“外观”提供跟随系统、浅色和深色，默认保持原有深色。选择立即作用于窗口、设置和菜单栏弹出面板，并在下次打开时保留。
 
-桌面侧栏和手机“电脑”页均提供“用量统计”。支持今天、近 7 天、近 30 天及 Codex / Claude 筛选，展示输入、输出、缓存读取、缓存写入、会话数、每日趋势和模型分布。两端从当前连接的 Host 读取同一份统计，按电脑时区划分日期。
+桌面侧栏和手机“电脑”页均提供“用量统计”。支持今天、近 7 天、近 30 天及全部已注册 Agent 筛选（含自定义 ACP Agent），使用现有品牌 Logo，展示 Token、用量记录、会话数、缓存读取占比、每日趋势和模型明细。两端从当前连接的 Host 读取同一份统计，按电脑时区划分日期。
 
 Host 按需读取 `CODEX_HOME` 下的 `sessions` / `archived_sessions` 和 `CLAUDE_CONFIG_DIR` 下的 `projects`，未设置时使用 `~/.codex`、`~/.claude`。包括本地终端及子代理产生的用量，不限于 LinkShell 创建的会话；最多每分钟重新扫描一次，未变化的文件复用内存缓存。Codex 累计计数转为增量，Claude 重复回复按消息去重；原始对话和日志路径不会传到统计页面。缺失日志无法补算，超出 256 MB 的单文件或读取失败会提示统计不完整。
 
@@ -57,3 +57,8 @@ Host 按需读取 `CODEX_HOME` 下的 `sessions` / `archived_sessions` 和 `CLAU
 已覆盖双架构签名包、精简运行时的 SQLite / PTY / 图片处理检查、隔离旧版经 Sparkle 更新并恢复 Host、真实浏览器登录回调和官方网关在线。Intel 二进制可在 Rosetta 运行，不等于 Intel 真机屏幕采集或性能验收。屏幕媒体行为与已知限制见[屏幕架构说明](v2/screen-realtime.md)。
 
 开发打包与公证命令见 [Mac 开发说明](../apps/mac/README.md#standalone-desktop-distribution)，发布顺序见[发版 SOP](release-sop.md#独立-macos-app桌面界面--内置-cli--host)。品牌资源规范见[图标交付规格](design/brand/图标交付规格.md)。
+
+
+桌面总览和“设备”页均可生成配对二维码与六位配对码，显示有效期，并在新设备配对后提示成功。账号登录与配对入口相互独立；官方网关要求 Pro 账号，自建网关支持免账号配对。生成配对码前必须已有运行中的 Host 和在线网关。
+
+其他 Agent 通过 LinkShell 接收到的 ACP 用量事件参与统计；Copilot 使用会话累计差值，Antigravity transcript 使用原始 step 时间。没有可靠数据的 Agent 保留在筛选中并显示“暂无可用数据”，不表示零消耗。接入前的独立 Agent 历史不会统一补算。详见[用量统计口径](v2/session-recovery.md#agent-用量统计)。

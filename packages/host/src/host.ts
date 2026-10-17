@@ -192,7 +192,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hub,
     terminals,
     machineInfo,
-    usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }),
+    usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }, { agents: () => hub.agents(), events: () => store.usageEvents() }),
     socketPath: paths.hostSocket,
     tcpPort: options.tcpPort,
     log,

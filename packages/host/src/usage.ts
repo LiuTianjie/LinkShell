@@ -4,16 +4,16 @@ import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as yieldToHost } from "node:timers/promises";
-import type { UsageQuery, UsageReport, UsageTotals } from "@linkshell/wire";
+import type { UsageQuery, UsageReport, UsageTotals, SessionEvent } from "@linkshell/wire";
 
-type Agent = "codex" | "claude";
+type NativeAgent = "codex" | "claude";
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json => value && typeof value === "object" ? value as Json : {};
 const count = (value: unknown): number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const text = (value: unknown, fallback: string) => typeof value === "string" && value ? value : fallback;
 export interface UsageRecord {
-  key: string; session: string; agent: Agent; model: string; timestamp: number;
-  inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number;
+  key: string; session: string; agent: string; model: string; timestamp: number;
+  inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens?: number;
 }
 
 /** Native logs are cumulative (Codex) or repeated content blocks (Claude), never additive lines. */
@@ -21,7 +21,7 @@ export class UsageParser {
   private model = "未知模型";
   private session: string;
   private previous = [0, 0, 0, 0];
-  constructor(private agent: Agent, fallbackSession: string) { this.session = fallbackSession; }
+  constructor(private agent: NativeAgent, fallbackSession: string) { this.session = fallbackSession; }
   parse(line: string): UsageRecord | undefined {
     let row: Json;
     try { row = object(JSON.parse(line)); } catch { return; }
@@ -75,7 +75,7 @@ export function summarizeUsage(records: Iterable<UsageRecord>, query: UsageQuery
   const add = (target: Group, row: UsageRecord) => {
     target.totals.records++; target.sessions.add(`${row.agent}:${row.session}`); target.totals.sessions = target.sessions.size;
     for (const key of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const) target.totals[key] += row[key];
-    target.totals.totalTokens += row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens;
+    target.totals.totalTokens += row.totalTokens ?? (row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens);
   };
   for (const row of unique.values()) {
     if (row.timestamp < start.getTime() || row.timestamp > now || (query.agent !== "all" && row.agent !== query.agent)) continue;
@@ -90,6 +90,43 @@ export function summarizeUsage(records: Iterable<UsageRecord>, query: UsageQuery
     models: [...models.values()].map(value => ({ agent: value.agent, model: value.model, ...value.totals })).sort((a, b) => b.totalTokens - a.totalTokens), warnings };
 }
 
+export interface UsageEventSource {
+  agents(): { id: string; label: string }[];
+  events(): Iterable<SessionEvent & { agent: string }>;
+}
+
+/** Context occupancy and older unscoped updates cannot be safely summed. */
+export function* usageEventRecords(events: Iterable<SessionEvent & { agent: string }>): Iterable<UsageRecord> {
+  const previous = new Map<string, number[]>();
+  const seen = new Set<string>();
+  for (const event of events) {
+    const update = event.update;
+    if (event.agent === "codex" || event.agent === "claude" || update.sessionUpdate !== "usage_update" || !update.tokens || !update.accounting) continue;
+    const { tokens, accounting } = update;
+    const key = `${event.sessionId}:${accounting.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const values = [tokens.totalTokens, tokens.inputTokens, tokens.outputTokens, tokens.cachedReadTokens ?? 0, tokens.cachedWriteTokens ?? 0];
+    if (values.some(value => !Number.isSafeInteger(value) || value < 0)) continue;
+    let delta = values;
+    if (accounting.scope === "session") {
+      const baseline = previous.get(event.sessionId);
+      previous.set(event.sessionId, values);
+      // Attaching mid-session must not charge older usage to today's date.
+      if (!baseline || values.some((value, i) => value < baseline[i]!)) continue;
+      delta = values.map((value, i) => value - baseline[i]!);
+    }
+    const [total, input, output, cached, written] = delta as [number, number, number, number, number];
+    if (!total) continue;
+    // ACP implementations differ on whether cache tokens are included in input.
+    const exclusive = total >= input + output + cached + written;
+    yield { key, session: event.sessionId, agent: event.agent, model: accounting.model ?? "未知模型",
+      timestamp: accounting.timestamp ?? event.ts, totalTokens: total,
+      inputTokens: exclusive ? input : Math.max(0, input - cached - written), outputTokens: output,
+      cacheReadTokens: cached, cacheWriteTokens: written };
+  }
+}
+
 /** On-demand, coalesced scans; unchanged files retain only numeric usage, never conversation content. */
 export class UsageStatistics {
   private cache = new Map<string, { stamp: string; records: UsageRecord[] }>();
@@ -99,13 +136,25 @@ export class UsageStatistics {
   constructor(private roots = {
     codex: process.env.CODEX_HOME || join(homedir(), ".codex"),
     claude: process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
-  }) {}
+  }, private source?: UsageEventSource) {}
   async summary(query: UsageQuery): Promise<UsageReport> {
     if (!this.pending && Date.now() - this.scannedAt > 60_000) {
       this.pending = this.scan().then(() => { this.scannedAt = Date.now(); }).finally(() => { this.pending = undefined; });
     }
     await this.pending;
-    return summarizeUsage(this.records(), query, Date.now(), this.warnings);
+    const records = [...this.records(), ...usageEventRecords(this.source?.events() ?? [])];
+    const now = Date.now();
+    const report = summarizeUsage(records, query, now, this.warnings);
+    const catalog = new Map((this.source?.agents() ?? [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }]).map(agent => [agent.id, agent]));
+    for (const record of records) if (!catalog.has(record.agent)) catalog.set(record.agent, { id: record.agent, label: record.agent });
+    report.agents = [...catalog.values()].map(agent => {
+      const totals = summarizeUsage(records, { ...query, agent: agent.id }, now).totals;
+      const native = agent.id === "codex" || agent.id === "claude";
+      return { ...agent, source: native ? "native" : "acp", status: totals.records ? "available" : "no_data",
+        records: totals.records, totalTokens: totals.totalTokens,
+        note: native ? "本机原生日志（含归档）" : agent.id === "copilot" ? "LinkShell 接收的累计用量差值；首条仅建立基线" : "LinkShell 已记录的 Agent 用量；未上报的会话不计入" };
+    });
+    return report;
   }
   private *records() { for (const file of this.cache.values()) yield* file.records; }
   private async scan() {
@@ -113,7 +162,7 @@ export class UsageStatistics {
     // The UI exposes at most 30 days. Older lines still establish Codex's cumulative baseline.
     const since = new Date(); since.setHours(0, 0, 0, 0); since.setDate(since.getDate() - 30);
     let skipped = 0;
-    const visit = async (directory: string, agent: Agent, depth = 0): Promise<void> => {
+    const visit = async (directory: string, agent: NativeAgent, depth = 0): Promise<void> => {
       if (depth > 12) { skipped++; return; }
       let entries;
       try { entries = await readdir(directory, { withFileTypes: true }); }

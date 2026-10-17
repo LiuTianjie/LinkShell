@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -106,6 +106,7 @@ export interface AcpSessionState {
   /** Set while a session/load replays history. */
   replaying?: SessionUpdate[];
   turnActive: boolean;
+  usageTurnId?: string;
   /** session/prompt requests in flight; with steering, a turn spans several. */
   inflight: number;
   queue: PendingPrompt[];
@@ -904,10 +905,16 @@ export class AcpDriver implements AgentDriver {
     const version = this.connection?.protocolVersion ?? 1;
     if (this.acpBehavior.turnCompletion === "state-update" && state && record?.sessionUpdate === "state_update") {
       const status = raw as { state: string; stopReason?: string; usage?: unknown; message?: string };
+      const completing = status.state === "idle" && state.turnActive && !state.replaying;
+      const usage = completing && status.usage ? this.accountedUsage(status.usage, state, state.usageTurnId ?? randomUUID()) : undefined;
+      if (usage) this.onMappedUpdate(sessionId, usage);
       for (const parent of this.children.get(sessionId)?.keys() ?? []) this.subagentUpdate(parent, { sessionId, state: status });
       state.reportedState = status.state === "running" ? "running" : status.state === "requires_action" ? "waiting" : status.state === "idle" ? "idle" : "unknown";
       if (status.state === "running" || status.state === "requires_action") {
-        if (!state.turnActive && !state.replaying) this.emit(sessionId, { sessionUpdate: "ls_turn", state: "started" });
+        if (!state.turnActive && !state.replaying) {
+          state.usageTurnId = randomUUID();
+          this.emit(sessionId, { sessionUpdate: "ls_turn", state: "started" });
+        }
         state.turnActive = true; state.idleReason = undefined;
       } else if (status.state === "idle") {
         if (state.replaying) state.turnActive = false;
@@ -916,8 +923,6 @@ export class AcpDriver implements AgentDriver {
           if (!state.inflight) this.finishTurn(sessionId, state, state.idleReason);
         }
       }
-      const usage = status.usage ? usageUpdate(status.usage) : undefined;
-      if (usage) this.onMappedUpdate(sessionId, usage);
       if (!state.replaying && !this.children.has(sessionId)) this.host?.update(this.id, sessionId, { sessionUpdate: "ls_status", state: this.localState(sessionId), turnActive: state.turnActive });
       return;
     }
@@ -1072,10 +1077,19 @@ export class AcpDriver implements AgentDriver {
 
   protected startTurn(nativeId: string, state: AcpSessionState, content: ContentBlock[], clientMessageId: string, context?: string): void {
     state.turnActive = true;
+    state.usageTurnId = clientMessageId;
     state.reportedState = undefined; state.idleReason = undefined;
     this.echoUserMessage(nativeId, content, clientMessageId);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "started" });
     void this.sendPrompt(nativeId, state, withContext(toAcpPrompt(content), context), clientMessageId);
+  }
+
+  private accountedUsage(value: unknown, state: AcpSessionState, id: string): SessionUpdate | undefined {
+    const update = usageUpdate(value);
+    if (!update || update.sessionUpdate !== "usage_update" || !update.tokens) return undefined;
+    // ACP prompt usage is per completed work; Copilot reports session totals instead.
+    return { ...update, accounting: { id, scope: this.id === "copilot" ? "session" : "turn",
+      model: state.config.find(option => option.category === "model")?.current } };
   }
 
   private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[], clientMessageId: string): Promise<void> {
@@ -1089,7 +1103,7 @@ export class AcpDriver implements AgentDriver {
         state.messageAliases.set(result.messageId, `local-${clientMessageId}`);
         this.host?.state(this.id, nativeId).set("acp-message-aliases", JSON.stringify([...state.messageAliases]));
       } else stopReason = toStopReason(result.stopReason);
-      const usage = result.usage ? usageUpdate(result.usage) : undefined;
+      const usage = completion !== "state-update" && result.usage ? this.accountedUsage(result.usage, state, clientMessageId) : undefined;
       if (usage) this.emit(nativeId, usage);
     } catch (error) {
       stopReason = "error";

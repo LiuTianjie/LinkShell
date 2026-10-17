@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UsageParser, UsageStatistics, summarizeUsage } from "../src/usage.js";
+import { UsageParser, UsageStatistics, summarizeUsage, usageEventRecords } from "../src/usage.js";
+
+import { HostStore } from "../src/store.js";
+import type { SessionEvent } from "@linkshell/wire";
 
 const timestamp = "2026-10-17T02:00:00.000Z";
 const codex = (input: number, output: number, cached = 0, extra = {}) => JSON.stringify({ timestamp, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, output_tokens: output, cached_input_tokens: cached }, ...extra } } });
@@ -58,5 +61,46 @@ describe("native usage statistics", () => {
     expect(JSON.stringify(first)).not.toContain(root);
     expect(JSON.stringify(first)).not.toContain("msg-1");
     expect((await service.summary({ days: 7, agent: "codex" })).totals.records).toBe(1);
+  });
+});
+
+describe("all-agent usage", () => {
+  it("counts scoped work, ignores context snapshots and deduplicates replay", () => {
+    const event = (seq: number, agent = "gemini"): SessionEvent & { agent: string } => ({ agent, sessionId: `${agent}:one`, seq, ts: Date.parse(timestamp),
+      update: { sessionUpdate: "usage_update", accounting: { id: "turn-one", scope: "turn", model: "model-a" }, tokens: { totalTokens: 120, inputTokens: 100, outputTokens: 20, cachedReadTokens: 40 } } });
+    const context: SessionEvent & { agent: string } = { ...event(3), update: { sessionUpdate: "usage_update", usedTokens: 60000, contextWindow: 100000 } };
+    const rows = [...usageEventRecords([event(1), event(2), context, event(4, "custom-agent"), event(5, "codex")])];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ inputTokens: 60, outputTokens: 20, cacheReadTokens: 40, totalTokens: 120 });
+    expect(summarizeUsage(rows, { days: 1, agent: "custom-agent" }, Date.parse(timestamp) + 1).totals.totalTokens).toBe(120);
+  });
+  it("establishes cumulative baseline before the date range, and never charges reset history", () => {
+    const events = [100, 160, 160, 20, 40].map((total, i): SessionEvent & { agent: string } => ({
+      agent: "copilot", sessionId: "copilot:one", seq: i, ts: Date.parse(timestamp) + i,
+      update: { sessionUpdate: "usage_update", accounting: { id: `turn-${i}`, scope: "session" },
+        tokens: { totalTokens: total, inputTokens: total, outputTokens: 0 } },
+    }));
+    expect([...usageEventRecords(events)].map(row => row.totalTokens)).toEqual([60, 20]);
+  });
+  it("keeps every registered agent including custom agents and shows missing reports explicitly", async () => {
+    const root = await mkdtemp(join(tmpdir(), "linkshell-usage-")); temporary.push(root);
+    const store = new HostStore(join(root, "state.db"));
+    try {
+      const now = Date.now();
+      for (const agent of ["gemini", "grok", "custom-agent"]) {
+        store.upsertSession({ id: `${agent}:one`, nativeId: "one", agent, cwd: root, createdAt: now, updatedAt: now });
+        store.appendEvent(`${agent}:one`, { sessionUpdate: "usage_update", accounting: { id: "work-one", scope: "turn" }, tokens: { totalTokens: 42, inputTokens: 40, outputTokens: 2 } }, now);
+      }
+      const ids = ["codex", "claude", "gemini", "antigravity", "copilot", "grok", "opencode", "cursor", "custom-agent"];
+      const service = new UsageStatistics({ codex: join(root, "codex"), claude: join(root, "claude") }, {
+        agents: () => ids.map(id => ({ id, label: id })), events: () => store.usageEvents(),
+      });
+      const report = await service.summary({ days: 7, agent: "all" });
+      expect(report.agents?.map(agent => agent.id)).toEqual(ids);
+      expect(report.totals.totalTokens).toBe(126);
+      expect(report.agents?.find(agent => agent.id === "cursor")).toMatchObject({ status: "no_data", records: 0 });
+      expect((await service.summary({ days: 7, agent: "grok" })).totals.totalTokens).toBe(42);
+      expect(JSON.stringify(report)).not.toContain(root);
+    } finally { store.close(); }
   });
 });

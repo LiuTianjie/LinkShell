@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/mac",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "LinkShell.app: the Mac side of the screen — capture, encoding, WebRTC and input, under the app's own permissions.",
   "license": "MIT",
   "repository": {
@@ -32,6 +32,7 @@
     "access": "public"
   },
   "devDependencies": {
+    "sharp": "0.35.5",
     "ws": "^8.18.1"
   }
 }
