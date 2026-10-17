@@ -130,8 +130,18 @@ warnings for prebuilt dependencies. Temporary release build products were remove
 
 This includes native Swift and two new embedded targets, so it requires a new
 iOS binary. OTA cannot deliver it. The already-uploaded `2.3.32` (20332) contains the earlier companion implementation.
-Choose a new version/build for independent mode and recheck remote tags and App
-Store Connect before releasing. Deploy the gateway adapter first.
+Independent mode was uploaded to App Store Connect as `2.3.33` (20333) on
+2026-10-17. The signed archive contains the iPhone app, Watch app and WidgetKit
+extension with matching versions, and the Watch app has
+`WKRunsIndependentlyOfCompanionApp = true`. Xcode confirmed upload success;
+Apple processing and physical-device acceptance remain unverified.
+
+The official gateway was deployed to `0.6.20`; its public health endpoint and
+HTTPS polling endpoint were verified. npm packages wire `0.2.14`, host `0.4.40`,
+gateway `0.6.20` and CLI `0.10.42` were published, downloaded and checked for
+correct dependency versions. Homebrew was updated, and the local Host was
+upgraded to CLI `0.10.42` with gateway reconnection and doctor checks passing.
+The full release check passed build, typecheck, lint and 1,068 tests.
 
 For an iOS-only TestFlight build, run from the repository root:
 
