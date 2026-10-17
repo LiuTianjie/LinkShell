@@ -93,6 +93,7 @@
       "./plugins/with-brand-colors.js",
       "./plugins/with-network-security.js",
       "./plugins/with-live-activity.js",
+      "./plugins/with-apple-watch.js",
       [
         "expo-camera",
         {

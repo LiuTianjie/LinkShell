@@ -34,6 +34,10 @@
 
 Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它实时干活，随时发消息，一键审批它要的权限，回到电脑前再把会话交还给终端。代码和 Agent 进程都不离开你的电脑，连接全程端到端加密。**支持 iPhone Duo、普通 iPhone 与 Android。**
 
+## Apple Watch
+
+LinkShell 2.3.33 加入可独立连接的 watchOS App：登录已有邮箱/密码账号，或输入电脑上的配对码，即可查看会话、处理简单审批和发送短消息。仍可切换到 iPhone 配套模式。独立连接在 App 前台运行，需要 Gateway 0.6.20 或更新版本。详见[设置与验证范围](docs/v2/apple-watch.md)。
+
 ## 为 iPhone Duo 适配
 
 **展开看全局，折叠继续做。** LinkShell 2.3.7 已适配 iPhone Duo，同时继续支持普通 iPhone。

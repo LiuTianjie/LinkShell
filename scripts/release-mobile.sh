@@ -84,7 +84,14 @@ if [[ "$ASSUME_YES" -eq 0 ]]; then
   esac
 fi
 
-trap 'git checkout -- apps/client/app.json 2>/dev/null || true' EXIT
+# Preserve the caller's config, including uncommitted plugin changes.
+APP_CONFIG_BACKUP="$(mktemp "${TMPDIR:-/tmp}/linkshell-release-config.XXXXXX")"
+cp apps/client/app.json "$APP_CONFIG_BACKUP"
+restore_app_config() {
+  cp "$APP_CONFIG_BACKUP" apps/client/app.json
+  rm -f "$APP_CONFIG_BACKUP"
+}
+trap restore_app_config EXIT
 
 echo
 echo "━━━ Building workspace packages ━━━"
@@ -98,7 +105,7 @@ echo
 echo "━━━ Building Android AAB + APK ($VERSION) ━━━"
 (cd apps/client && node scripts/release.mjs android "$VERSION")
 
-git checkout -- apps/client/app.json 2>/dev/null || true
+cp "$APP_CONFIG_BACKUP" apps/client/app.json
 
 echo
 echo "━━━ Publishing GitHub Release $TAG ━━━"

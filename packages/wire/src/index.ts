@@ -15,3 +15,4 @@ export * from "./questions.js";
 export * from "./acp.js";
 export * from "./editor.js";
 export * from "./live-activity.js";
+export * from "./watch.js";

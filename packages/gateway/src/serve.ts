@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { RELAY_PATH } from "@linkshell/wire";
+import { PollRelay, POLL_PATH } from "./poll.js";
 import { webHandler, type WebOptions } from "./web.js";
 import type { VerifyToken } from "./accounts.js";
 import { clientIp, isLoopback, normalizeIp, RateLimiter, trustedProxySet } from "./rate-limit.js";
@@ -63,11 +64,25 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     options.log?.(`a connection from ${peer} carries X-Forwarded-For, which is ignored: if ${peer} is your reverse proxy, add it to TRUSTED_PROXIES so each user gets their own connection limit`);
   };
 
+  const poll = new PollRelay(relay);
   const serveWeb = webHandler(options.web);
   const server = createServer((request, response) => {
     if (request.method === "GET" && pathOf(request) === "/healthz") {
       // memoryMb: what the process holds, to watch against the container's limit.
       json(response, 200, { ok: true, version, relay: relay.connected, memoryMb: Math.round(process.memoryUsage.rss() / 1048576) });
+      return;
+    }
+    const requestPath = pathOf(request);
+    if (requestPath === POLL_PATH || requestPath?.startsWith(POLL_PATH + "/")) {
+      if (requestPath === POLL_PATH) {
+        const ip = clientIp(request, trustedProxies);
+        noteUntrustedProxy(request);
+        if (!isLoopback(ip) && !connectLimiter.allow(ip)) {
+          json(response, 429, { error: "rate_limited" });
+          return;
+        }
+      }
+      void poll.handle(request, response, requestPath);
       return;
     }
     if (serveWeb(request, response, pathOf(request))) return;
@@ -99,6 +114,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     });
   } catch (error) {
     connectLimiter.destroy();
+    poll.close();
     await relay.stop();
     throw error;
   }
@@ -110,6 +126,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     relay,
     close: async () => {
       connectLimiter.destroy();
+      poll.close();
       // The relay drops its peers first: the server only finishes closing once their sockets are gone.
       await relay.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));

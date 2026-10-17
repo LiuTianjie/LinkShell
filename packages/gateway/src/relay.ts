@@ -43,9 +43,23 @@ export interface GatewayOptions {
   stalledPeerMs?: number;
 }
 
+/** The relay owns authentication/routing; transports only carry opaque v2 frames. */
+export interface GatewaySocket {
+  readonly readyState: number;
+  readonly bufferedAmount: number;
+  on(event: "message", listener: (data: { toString(): string }) => void): unknown;
+  on(event: "close" | "pong", listener: () => void): unknown;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  terminate(): void;
+  ping(): void;
+  pause(): void;
+  resume(): void;
+}
+
 interface Peer {
   record: PeerRecord;
-  socket: WebSocket;
+  socket: GatewaySocket;
   email?: string;
   /** Not being read: a peer it sends to can't keep up. */
   held?: boolean;
@@ -85,7 +99,7 @@ export class Gateway {
   private readonly claimTimes = new Map<string, number[]>();
   private heartbeat?: ReturnType<typeof setInterval>;
   /** Sockets that answered the last ping. */
-  private readonly alive = new WeakSet<WebSocket>();
+  private readonly alive = new WeakSet<GatewaySocket>();
   private stopped = false;
   private readonly log: (message: string) => void;
 
@@ -132,7 +146,7 @@ export class Gateway {
   }
 
   handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
-    this.wss.handleUpgrade(request, socket, head, (ws) => this.accept(ws));
+    this.wss.handleUpgrade(request, socket, head, (ws) => this.acceptTransport(ws));
   }
 
   get connected(): number {
@@ -170,11 +184,12 @@ export class Gateway {
 
   // ── connection ────────────────────────────────────────────────────
 
-  private accept(socket: WebSocket): void {
+  acceptTransport(socket: GatewaySocket): void {
     this.alive.add(socket);
     socket.on("pong", () => this.alive.add(socket));
     const nonce = randomBytes(32).toString("base64url");
     let peer: Peer | undefined;
+    let authenticating = false;
     const send = (frame: ServerFrame) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
     };
@@ -196,10 +211,11 @@ export class Gateway {
       }
       const frame = parsed.data;
       if (!peer) {
-        if (frame.t !== "auth") {
+        if (frame.t !== "auth" || authenticating) {
           socket.close(4001, "auth first");
           return;
         }
+        authenticating = true;
         try {
           peer = await this.authenticate(frame, nonce, socket);
         } catch (error) {
@@ -243,7 +259,7 @@ export class Gateway {
     });
   }
 
-  private async authenticate(frame: Extract<import("@linkshell/wire").ClientFrame, { t: "auth" }>, nonce: string, socket: WebSocket) {
+  private async authenticate(frame: Extract<import("@linkshell/wire").ClientFrame, { t: "auth" }>, nonce: string, socket: GatewaySocket) {
     const { identity, role } = frame;
     if (idOf(identity.signKey) !== identity.id) throw new RelayError("bad_identity", "id doesn't match key");
     if (!verifySignature(identity.signKey, gatewayChallengeMessage(nonce), frame.signature)) {
@@ -271,6 +287,7 @@ export class Gateway {
     }
     const refusal = await this.options.admit?.({ role: role as PeerRole, userId });
     if (refusal) throw new RelayError("not_admitted", refusal);
+    if (socket.readyState !== WebSocket.OPEN) throw new RelayError("closed", "connection closed during authentication");
     const record: PeerRecord = {
       id: identity.id,
       role: role as PeerRole,

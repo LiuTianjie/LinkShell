@@ -22,15 +22,24 @@ public class LinkLayoutModule: Module {
   private var pushTokenTasks: [String: Task<Void, Never>] = [:]
   private var activityStateTasks: [String: Task<Void, Never>] = [:]
   private var activityActionObserver: NSObjectProtocol?
+  private var watchCommandObserver: NSObjectProtocol?
+  private var watchStatusObserver: NSObjectProtocol?
   private var pushRegistrationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
-    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken", "onWatchCommand", "onWatchStatus")
     OnCreate { [weak self] in
+      WatchSessionBridge.shared.start()
       Task { @MainActor [weak self] in self?.observeExistingActivities() }
       self?.activityActionObserver = NotificationCenter.default.addObserver(forName: LiveActivityActionQueue.notification, object: nil, queue: .main) { [weak self] notification in
         if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onLiveActivityAction", ["id": id]) }
+      }
+      self?.watchCommandObserver = NotificationCenter.default.addObserver(forName: WatchCommandQueue.notification, object: nil, queue: .main) { [weak self] notification in
+        if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onWatchCommand", ["id": id]) }
+      }
+      self?.watchStatusObserver = NotificationCenter.default.addObserver(forName: WatchCommandQueue.statusNotification, object: nil, queue: .main) { [weak self] _ in
+        self?.sendEvent("onWatchStatus", WatchSessionBridge.shared.status())
       }
     }
     OnDestroy { [weak self] in
@@ -44,6 +53,8 @@ public class LinkLayoutModule: Module {
         }
       }
       if let observer = self?.activityActionObserver { NotificationCenter.default.removeObserver(observer) }
+      if let observer = self?.watchCommandObserver { NotificationCenter.default.removeObserver(observer) }
+      if let observer = self?.watchStatusObserver { NotificationCenter.default.removeObserver(observer) }
     }
     Constants([
       "liveActivityPushURL": Self.pushServiceURL,
@@ -150,6 +161,27 @@ public class LinkLayoutModule: Module {
 
     AsyncFunction("pendingLiveActivityActionId") { () -> String? in
       LiveActivityActionQueue.pendingID()
+    }.runOnQueue(.main)
+
+    AsyncFunction("getWatchStatus") { () -> [String: Any] in
+      WatchSessionBridge.shared.start()
+      return WatchSessionBridge.shared.status()
+    }.runOnQueue(.main)
+
+    AsyncFunction("syncWatchSnapshot") { (payload: [String: Any]) -> Bool in
+      WatchSessionBridge.shared.syncSnapshot(payload: payload)
+    }.runOnQueue(.main)
+
+    AsyncFunction("pendingWatchCommandId") { () -> String? in
+      WatchCommandQueue.pendingID()
+    }.runOnQueue(.main)
+
+    AsyncFunction("consumeWatchCommand") { (id: String) -> [String: Any]? in
+      WatchCommandQueue.consume(id)
+    }.runOnQueue(.main)
+
+    AsyncFunction("completeWatchCommand") { (id: String, ok: Bool, message: String?) in
+      WatchCommandQueue.complete(id, ok: ok, message: message)
     }.runOnQueue(.main)
 
     View(LinkLayoutView.self) {

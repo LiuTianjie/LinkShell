@@ -34,6 +34,14 @@
 
 Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted. **Supports iPhone Duo, standard iPhones and Android.**
 
+## Apple Watch
+
+LinkShell 2.3.33 adds an independently connected watchOS app: sign in with an
+existing email/password account or enter a computer's pairing code to view
+sessions, handle simple approvals and send short messages. iPhone companion mode
+remains available. Independent connections run while the app is active and need
+Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-watch.md).
+
 ## Made to adapt to iPhone Duo
 
 **Open up your workspace. Fold it and keep going.** LinkShell 2.3.7 supports iPhone Duo alongside standard iPhones.

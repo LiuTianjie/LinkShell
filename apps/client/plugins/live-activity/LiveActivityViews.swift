@@ -159,12 +159,93 @@ struct LockScreenBannerView: View {
   }
 }
 
+@available(iOS 18.0, *)
+struct WatchSmartStackBannerView: View {
+  let context: ActivityViewContext<LinkShellAttentionAttributes>
+
+  var body: some View {
+    let state = context.displayState
+    let actions = Array((state.actions ?? []).prefix(2))
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 6) {
+        AgentBadgeView(agent: ActivityAgent(id: state.agent), size: 20)
+        ActivityTextView(text: state.project.isEmpty ? context.attributes.computerName : state.project)
+          .font(.system(size: 11, weight: .medium, design: .rounded))
+          .foregroundColor(.white.opacity(0.62))
+          .lineLimit(1)
+        Spacer(minLength: 2)
+        StatusIndicatorView(state: state, size: 20, showsCount: true)
+      }
+      VStack(alignment: .leading, spacing: 2) {
+        ActivityTextView(text: state.title)
+          .font(.system(size: 13, weight: .semibold, design: .rounded))
+          .foregroundColor(.white)
+          .lineLimit(1)
+        ActivityTextView(text: state.effectiveSubtitle)
+          .font(.system(size: 11.5))
+          .foregroundColor(.white.opacity(0.70))
+          .lineLimit(actions.isEmpty ? 2 : 1)
+      }
+      if state.phase != "stale", !actions.isEmpty {
+        HStack(spacing: 6) {
+          ForEach(actions) { action in
+            Button(intent: LinkShellActivityActionIntent(action: action)) {
+              Text(action.label)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 26)
+                .foregroundColor(action.role == "allow" ? Color.black : Color.white.opacity(0.95))
+                .background(
+                  Capsule().fill(
+                    action.role == "allow"
+                      ? state.phaseColor
+                      : action.role == "reject" || action.role == "stop"
+                        ? Color(red: 0.95, green: 0.30, blue: 0.30).opacity(0.24)
+                        : Color.white.opacity(0.14)
+                  )
+                )
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+    }
+    .padding(.horizontal, 11)
+    .padding(.vertical, 8)
+    .activityBackgroundTint(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.96))
+    .activitySystemActionForegroundColor(.white)
+  }
+}
+
+@available(iOS 18.0, *)
+struct ActivityAdaptiveBannerView: View {
+  let context: ActivityViewContext<LinkShellAttentionAttributes>
+  @Environment(\.activityFamily) private var activityFamily
+
+  var body: some View {
+    switch activityFamily {
+    case .small:
+      WatchSmartStackBannerView(context: context)
+    case .medium:
+      LockScreenBannerView(context: context)
+    @unknown default:
+      LockScreenBannerView(context: context)
+    }
+  }
+}
+
 @available(iOS 16.2, *)
 struct LinkShellAttentionWidget: Widget {
   var body: some WidgetConfiguration {
-    ActivityConfiguration(for: LinkShellAttentionAttributes.self) { context in
-      LockScreenBannerView(context: context)
-        .widgetURL(activityURL(context.displayState.deepLink))
+    let configuration = ActivityConfiguration(for: LinkShellAttentionAttributes.self) { context in
+      Group {
+        if #available(iOS 18.0, *) {
+          ActivityAdaptiveBannerView(context: context)
+        } else {
+          LockScreenBannerView(context: context)
+        }
+      }
+      .widgetURL(activityURL(context.displayState.deepLink))
     } dynamicIsland: { context in
       let state = context.displayState
       return DynamicIsland {
@@ -208,6 +289,11 @@ struct LinkShellAttentionWidget: Widget {
       .widgetURL(state.waitingCount + state.runningCount + state.failedCount > 1
         ? collectionURL(context.attributes.computerKey) : activityURL(state.deepLink))
       .keylineTint(state.phaseColor)
+    }
+    if #available(iOS 18.0, *) {
+      return configuration.supplementalActivityFamilies([.small])
+    } else {
+      return configuration
     }
   }
 }

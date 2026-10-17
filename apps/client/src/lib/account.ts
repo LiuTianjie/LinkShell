@@ -1,3 +1,4 @@
+import accountConfig from "../../config/account.json";
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync, getRandomBytes } from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import { create } from "zustand";
@@ -7,9 +8,7 @@ import { deleteSecret, readSecret, writeSecret } from "./secure";
 // Signing in lets the phone reach every computer signed in to the same account
 // without pairing. The anon key is public by design.
 
-const SUPABASE_URL = "https://mkbeusztkzffnzjdwmqk.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0";
+const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = accountConfig;
 const KEY = "linkshell.account.v2";
 
 export const SIGN_UP_URL = "https://itool.tech/zh/register";
