@@ -19,6 +19,8 @@ const devTcpPort = Number(process.env.LINKSHELL_DEV_PORT || 7878);
 const bridgeHttpPort = Number(process.env.LINKSHELL_WATCH_BRIDGE_PORT || 7879);
 const sharedSimSnapshotPath = "/tmp/linkshell-watch-snapshot.json";
 
+// Terminal output intentionally contains ANSI and editing control bytes.
+/* eslint-disable no-control-regex */
 function stripTerminalAnsi(raw) {
   if (!raw) return "";
   let cleaned = raw
@@ -39,6 +41,7 @@ function stripTerminalAnsi(raw) {
     .filter((line, idx, arr) => line.length > 0 || (idx > 0 && arr[idx - 1].length > 0));
   return lines.slice(-30).join("\n").slice(-1600);
 }
+/* eslint-enable no-control-regex */
 
 function cleanUserMessageText(raw) {
   if (!raw) return "";
@@ -423,7 +426,7 @@ function convertEventsToWatchTimeline(events, session, maxItems = 14, startSeq =
           kind: "subagent",
           title: subName ? `子代理 · ${subName}` : `子代理 · ${subType}`,
           text: rawTitle.slice(0, 240),
-          ...((cleanOut || existing?.detail) ? { detail: (cleanOut || existing?.detail).slice(-240) } : {}),
+          ...((cleanOut || existing?.detail) ? { detail: String(cleanOut || existing?.detail || "").slice(-240) } : {}),
           subagentType: String(subType).slice(0, 48),
           ...(subName ? { subagentName: String(subName).slice(0, 48) } : {}),
           status: toolStatus,
@@ -472,7 +475,7 @@ function convertEventsToWatchTimeline(events, session, maxItems = 14, startSeq =
                 ? "读取文件"
                 : existing?.title || "工具调用",
         text: (u.title ? cmdText : existing?.text || cmdText).slice(0, 200),
-        ...((cleanOut || existing?.detail) ? { detail: (cleanOut || existing?.detail).slice(-220) } : {}),
+        ...((cleanOut || existing?.detail) ? { detail: String(cleanOut || existing?.detail || "").slice(-220) } : {}),
         status: toolStatus,
       });
     } else if (u.sessionUpdate === "plan" && Array.isArray(u.entries) && u.entries.length > 0) {
