@@ -44,6 +44,7 @@ describe("Watch release target graph", () => {
       expect(targets).toHaveLength(3);
       const watch = targets.find((v) => v.name === '"LinkShellWatch"');
       const widget = targets.find((v) => v.name === '"LinkShellWatchWidgets"');
+      if (!watch || !widget) throw new Error("Watch app or widget target was not generated");
       const embeddedProducts = (target: ProjectTarget) => target.buildPhases.flatMap(({ value }: ProjectReference) =>
         (objects.PBXCopyFilesBuildPhase[value]?.files ?? []).map((file: ProjectReference) => objects.PBXBuildFile[file.value].fileRef));
       expect(embeddedProducts(objects.PBXNativeTarget.HOST)).toEqual([watch.productReference]);
