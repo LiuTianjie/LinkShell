@@ -8,7 +8,7 @@
 
 ## 1. 运行网关
 
-### 用 CLI（最简单）
+### 用 CLI 启动网关
 
 ```bash
 npm i -g linkshell-cli          # 需要 Node.js 22.13+
@@ -153,3 +153,7 @@ Host 的 `LINKSHELL_ICE_SERVERS` 设置 STUN 列表；`off` 禁用通用 DataCha
 ## 网页客户端
 
 同一个网关镜像在根路径提供新版网页，官方入口为 `https://gateway.itool.tech`。自托管无需 Supabase，打开自己的网关域名即可使用设备配对。账号入口由网关的公开 Supabase 配置决定。端口预览需要独立来源，可将另一个域名路由到同一容器并设置 `WEB_PREVIEW_ORIGIN=https://preview.example.net`；主网页与预览不能同源。
+
+## 独立 Mac App 连接自建网关
+
+独立 App 已内置 CLI。可在设置安装可选命令入口，再按本文运行 `linkshell host --gateway wss://你的网关 --daemon` 与 `linkshell pair`。自建网关不要求官方网关的 Pro 订阅。独立 App 的更新只更新本机配套运行环境，不修改远端网关容器或数据库；详见[桌面版说明](mac-desktop.md)。

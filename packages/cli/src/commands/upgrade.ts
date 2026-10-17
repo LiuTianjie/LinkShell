@@ -1,6 +1,8 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { join, sep } from "node:path";
+import { standaloneBundle } from "../utils/standalone.js";
+import { linkshellDir } from "../utils/daemon.js";
 import { runUpgradeWorker, type CliCommand } from "./upgrade-worker.js";
 
 function isBrewInstall(): boolean {
@@ -34,6 +36,13 @@ async function fetchLatestVersion(): Promise<string | null> {
 }
 
 export async function runUpgrade(current: string): Promise<void> {
+  const app = standaloneBundle();
+  if (app) {
+    execFileSync("/usr/bin/open", ["-n", "-a", app, "--args", "--dashboard", "--check-updates", "--home", linkshellDir()]);
+    process.stderr.write("  已打开 LinkShell 软件更新；App、内置 CLI 和 Host 将一起更新。\n");
+    return;
+  }
+
   process.stderr.write(`\n  Current version: ${current}\n  Checking for updates...\n\n`);
   const latest = await fetchLatestVersion();
   if (!latest) {

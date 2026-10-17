@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/mac",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "LinkShell.app: the Mac side of the screen — capture, encoding, WebRTC and input, under the app's own permissions.",
   "license": "MIT",
   "repository": {
@@ -25,7 +25,8 @@
     "build": "node scripts/build-app.mjs",
     "test": "swift test --scratch-path build/swiftpm",
     "check": "swift test --scratch-path build/swiftpm && node tools/input-check.mjs && node tools/stream-check.mjs --no-chrome && node tools/app-smoke.mjs && echo '[check] ok: LinkShell.app passed'",
-    "prepack": "LINKSHELL_REQUIRE_SIGNED=1 node scripts/build-app.mjs"
+    "prepack": "LINKSHELL_REQUIRE_SIGNED=1 node scripts/build-app.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs"
   },
   "publishConfig": {
     "access": "public"

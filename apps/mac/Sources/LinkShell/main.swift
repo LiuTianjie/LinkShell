@@ -14,9 +14,8 @@ import Foundation
 //                         stdout. As a child of the host the permission is the terminal's.
 //   --status              What this process is allowed to do, then exit.
 //   --setup               The window in which the user gives LinkShell its permissions (see
-//                         `Setup`), opened by the system like the first. Also what the app is
-//                         when it is opened with nothing: by hand, or by System Settings after
-//                         its "Quit & Reopen".
+//                         `Setup`), opened by the system like the first.
+//   --dashboard           Native status UI (also the default when opened by the system).
 //
 //   --dry-run             Events are reported (`posted`), not posted.
 //
@@ -43,8 +42,12 @@ if Launch.has("--status") {
   exit(0)
 }
 // Opened with nothing by the system (launchd is its parent), not started by a host as its child.
-if Launch.has("--setup") || (Launch.arguments.isEmpty && getppid() == 1) {
+if Launch.has("--setup") {
   Setup.run()
+}
+
+if Launch.has("--dashboard") || Launch.has("--dashboard-preview") || (Launch.arguments.isEmpty && getppid() == 1) {
+  MainActor.assumeIsolated { Desktop.run() }
 }
 
 if let path = Launch.value(after: "--connect") {

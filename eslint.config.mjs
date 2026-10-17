@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/dist/**",
       "packages/gateway/web-client/**",
       "**/build/**",
+      "artifacts/**",
       "tmp/**",
       "temp/**",
       ".claude/worktrees/**",

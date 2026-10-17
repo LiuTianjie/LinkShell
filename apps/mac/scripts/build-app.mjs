@@ -143,6 +143,13 @@ try {
   const library = join(embedded, "Versions/A/WebRTC");
   requireUniversal(library);
 
+  // Sparkle stays inert in the CLI-managed helper; only standalone bundles configure a feed.
+  const sparkleSource = join(artifacts, "mac/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework");
+  if (!existsSync(sparkleSource)) throw new Error(`Sparkle.framework is missing: ${sparkleSource}`);
+  const sparkle = join(staged, "Contents/Frameworks/Sparkle.framework");
+  run("/usr/bin/ditto", [sparkleSource, sparkle]);
+  cpSync(join(root, "THIRD_PARTY_NOTICES/Sparkle-LICENSE.txt"), join(staged, "Contents/Resources/Sparkle-LICENSE.txt"));
+
   // The app's face in System Settings: the same icon as the phone app.
   const icon = join(root, "../client/assets/icon.png");
   let hasIcon = false;
@@ -188,6 +195,11 @@ try {
     console.log("[build-app] NO Developer ID Application identity to sign with: signing ad hoc.");
     console.log("[build-app] This app runs here, but is not the released LinkShell to the system: its permissions are its own, and asked for again. Not for release.");
   } else console.log(`[build-app] signing as ${identity}`);
+  const sparkleRoot = join(staged, "Contents/Frameworks/Sparkle.framework");
+  for (const relative of ["Versions/B/XPCServices/Downloader.xpc", "Versions/B/XPCServices/Installer.xpc", "Versions/B/Updater.app", "Versions/B/Autoupdate"]) {
+    run("/usr/bin/codesign", [...sign, "--preserve-metadata=entitlements", join(sparkleRoot, relative)]);
+  }
+  run("/usr/bin/codesign", [...sign, sparkleRoot]);
   run("/usr/bin/codesign", [...sign, embedded]);
   run("/usr/bin/codesign", [...sign, "--identifier", BUNDLE_ID, staged]);
 

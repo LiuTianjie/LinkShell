@@ -350,3 +350,17 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 - 原生包在有签名环境的 Mac 上执行 `node scripts/release.mjs ios 2.3.7 --prepare-only` 和 `node scripts/release.mjs android 2.3.7 --prepare-only`。必须在独立干净检出里执行，因为 prebuild 会重新生成原生目录。iOS 导出 IPA，不上传 App Store Connect；Android 只生成 AAB / APK。
 - 不推送 `v*` tag：原有 tag 工作流包含 TestFlight 上传和公开 GitHub Release。
 - `python3 scripts/check-release-packages.py <tarball目录>` 核对版本依赖和 workspace 重写。完成正式发布并核验远端状态后，才能称为已上线。
+
+## 独立 macOS App（桌面界面 + 内置 CLI / Host）
+
+独立 App 不依赖用户安装 Node、npm 或 Homebrew；可选命令行入口指向 App 内置 CLI。App、CLI、Host 和 Node 必须作为同一签名包交付，不在用户机器上分别执行 npm 更新。只修改 CLI / Host 时，也要构建并发布新版独立 App，旧 App 才能收到这些改动。外部 npm/Homebrew 安装继续走原有升级渠道。
+
+1. 按上述包版本规则递增版本；独立 App 默认以 CLI 版本作为显示版本与 `CFBundleVersion`。重打同一显示版本时传递严格递增的 `--build`，不要覆盖已发布的同名归档。
+2. `pnpm build`、`pnpm typecheck`，执行 CLI / Host / Swift 相关测试。
+3. 分别运行 `LINKSHELL_NOTARY_PROFILE=<已配置名称> node apps/mac/scripts/build-standalone.mjs --arch arm64` 和 `--arch x64`。构建器检查 Node 下载 SHA-256、嵌套签名和架构，提交 App 和 DMG 公证并 staple。正式发布必须确认两份 `release.json` 的 `notarized` 为 true。
+4. 验证全新数据目录的登录入口、浏览器回调、启动服务、权限入口；验证旧版本通过 Sparkle 安装最终 DMG 后，App / Host 版本一致，机器身份与配对信息保留。Intel 的 Rosetta 运行检查不等于 Intel 真机屏幕验收。
+5. 使用 `apps/mac/scripts/appcast.mjs` 与 Keychain 中 `linkshell-desktop` 私钥，为两个架构生成独立 appcast。公钥、bundle id 和 Developer ID 保持不变。最终签名后不要再修改 DMG。
+6. 创建 `desktop-v<version>` GitHub release，先上传两个 DMG，再将对应 feed 放到 `docs/site/updates/mac/appcast-arm64.xml`、`appcast-x64.xml` 并部署 Pages。核对线上 feed 的 URL、长度、签名与 SHA-256；不要提前发布指向缺失资源的 feed。
+7. 新版 App 内验证线上“检查更新”；归档与公证通过后清理本轮临时安装和测试数据，保留发布包与校验记录。
+
+缺少公证凭据时只能交付明确标注的本地测试包，不能宣称已完成正式外部分发。App 内账号通过系统浏览器登录 iTool；账号已登录与网关已连接分别显示，官方网关仍要求 Pro。Codex / Claude 等代理本身需要用户安装和登录，App 不打包这些代理的账号凭据。

@@ -65,6 +65,18 @@ describe("linkshell login", () => {
     expect(cleared).toHaveBeenCalledWith(limit);
   });
 
+  it("rejects invalid credentials without replacing an existing login", async () => {
+    auth.saveAuth({ accessToken: "existing", refreshToken: "existing-refresh", userId: "existing-user", expiresAt: Date.now() + 3600000 });
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response("Unauthorized", { status: 401 })));
+    const login = startLogin();
+    const base = await login.callback;
+    expect((await realFetch(`${base}/token?access_token=bad&refresh_token=bad`, { method: "POST" })).status).toBe(401);
+    expect(auth.loadAuth()?.userId).toBe("existing-user");
+    accountService(undefined);
+    await realFetch(`${base}/token?access_token=good&refresh_token=good`, { method: "POST" });
+    expect(await login.result).toMatchObject({ success: true });
+  });
+
   it("takes an expired Pro plan, or none, for Free", async () => {
     accountService({ plan: "pro", plan_expires_at: new Date(Date.now() - 86_400_000).toISOString() });
     const login = startLogin();

@@ -12,7 +12,7 @@ const hostLaunchFile = join(LINKSHELL_DIR, "host-launch.json");
 export function saveHostLaunch(pid: number, tcpPort?: number): void {
   const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   if (tcpPort !== undefined) env.LINKSHELL_DEV_PORT = String(tcpPort);
-  writeFileSync(hostLaunchFile, `${JSON.stringify({ pid, env })}\n`, { mode: 0o600 });
+  writeFileSync(hostLaunchFile, `${JSON.stringify({ pid, env, executable: process.execPath, entry: process.argv[1], appBundle: process.env.LINKSHELL_APP_BUNDLE })}\n`, { mode: 0o600 });
 }
 
 export function readHostLaunch(pid: number): NodeJS.ProcessEnv {
@@ -24,6 +24,14 @@ export function readHostLaunch(pid: number): NodeJS.ProcessEnv {
   } catch {
     return {};
   }
+}
+
+/** Ownership is recorded by the host itself, and is valid only for that live PID. */
+export function readHostOwner(pid: number): string | undefined {
+  try {
+    const saved = JSON.parse(readFileSync(hostLaunchFile, "utf8")) as { pid?: number; appBundle?: string };
+    return saved.pid === pid && typeof saved.appBundle === "string" ? saved.appBundle : undefined;
+  } catch { return undefined; }
 }
 
 // "bridge" is the 1.x daemon: nothing starts one any more, but `linkshell stop` still ends one left running.
@@ -110,7 +118,7 @@ export function spawnDaemon(service: ServiceName, args: string[], env: NodeJS.Pr
       detached: true,
       stdio: ["ignore", out, err],
       // The launching terminal's environment is the most faithful one agents can get.
-      env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: "1" },
+      env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: env.LINKSHELL_APP_BUNDLE ? "0" : "1" },
     },
   );
 

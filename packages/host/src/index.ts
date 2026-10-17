@@ -9,3 +9,5 @@ export { resolveLoginShellEnv, withoutClaudeSession } from "./shell-env.js";
 export { AcpDriver, type AcpAgentSpec } from "./drivers/acp/driver.js";
 export { ClaudeDriver } from "./drivers/claude/driver.js";
 export { ACP_AGENTS, defaultDrivers } from "./drivers/registry.js";
+
+export { shippedApp } from "./input.js";

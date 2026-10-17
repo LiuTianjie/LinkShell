@@ -1,0 +1,7 @@
+{
+  "feedURL": "https://liutianjie.github.io/LinkShell/updates/mac/appcast-{arch}.xml",
+  "publicEDKey": "yK9G8e19PWpV1gIFHh1uZz3j0Yc/4A6Slxa/vsDkxsc=",
+  "keychainAccount": "linkshell-desktop",
+  "sparkleVersion": "2.10.0",
+  "nodeVersion": "22.21.0"
+}

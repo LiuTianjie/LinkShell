@@ -544,11 +544,13 @@
       <div class="wrap">
         <div class="text">
           <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
-          <p><span lang="zh">电脑需要 macOS 或 Linux，以及 Node.js 22.13 或更新版本。</span><span lang="en">Your computer needs macOS or Linux and Node.js 22.13 or newer.</span></p>
+          <p><span lang="zh">Mac 可直接下载安装 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac, download the standalone app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
 
           <div class="step">
             <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
-            <p><span lang="zh">安装 CLI，运行一次设置：它在后台启动 LinkShell、带你打开看屏幕需要的两个权限开关，并连上你的手机。</span><span lang="en">Install the CLI and run the setup once: it starts LinkShell in the background, takes you to the two permission switches the screen needs, and connects your phone.</span></p>
+            <p><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-x64.dmg">Mac · Intel</a></p>
+            <p><span lang="zh">macOS 13 及以上：拖入 Applications，打开后点击“登录 / 注册”，在设置里授予屏幕录制与辅助功能权限。App 已内置 CLI、Host 和 Node，并可整体自更新。</span><span lang="en">macOS 13 or later: drag into Applications, open and sign in, then grant Screen Recording and Accessibility in Settings. The app includes CLI, Host and Node, and updates them together.</span></p>
+            <p><span lang="zh">也可安装 CLI，运行一次设置：它在后台启动 LinkShell、带你打开看屏幕需要的两个权限开关，并连上你的手机。</span><span lang="en">Alternatively, install the CLI and run the setup once: it starts LinkShell in the background, takes you to the two permission switches the screen needs, and connects your phone.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell setup</code></pre>
             <p><span lang="zh">不用 npm 的话，也可以用 Homebrew 或安装脚本：</span><span lang="en">Without npm, install it with Homebrew or the install script:</span></p>
@@ -625,6 +627,7 @@
     <div class="wrap docs">
       <aside class="toc">
         <a href="#d-install"><span lang="zh">安装</span><span lang="en">Install</span></a>
+        <a href="#d-desktop"><span lang="zh">Mac 桌面版</span><span lang="en">Mac desktop</span></a>
         <a href="#d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></a>
         <a href="#d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></a>
         <a href="#d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></a>
@@ -638,16 +641,23 @@
       </aside>
       <article class="doc">
         <h1><span lang="zh">文档</span><span lang="en">Documentation</span></h1>
-        <p><span lang="zh">LinkShell 分两部分：电脑上的 CLI（托管 Agent 会话），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the CLI on your computer, which hosts the agent sessions, and the app on your phone. Here it is, in order.</span></p>
+        <p><span lang="zh">LinkShell 分两部分：电脑上的 Host（可用独立 Mac App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the Host on your computer, managed by the standalone Mac app or CLI, and the app on your phone. Here it is, in order.</span></p>
 
         <h2 id="d-install"><span lang="zh">安装</span><span lang="en">Install</span></h2>
-        <p><span lang="zh">电脑需要 macOS 或 Linux，Node.js 22.13 或更新版本（LinkShell 用 Node 自带的 SQLite 保存会话）。</span><span lang="en">You need macOS or Linux and Node.js 22.13 or newer (LinkShell stores sessions in Node's built-in SQLite).</span></p>
+        <p><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-x64.dmg">Mac · Intel</a></p>
+        <p><span lang="zh">独立 Mac App 需要 macOS 13 及以上，内置运行环境，无需另外安装 Node。打开 App 即可登录、管理服务与更新；下面是可选的命令行安装方式。</span><span lang="en">The standalone Mac app requires macOS 13 or later and includes its runtime; no separate Node installation is needed. Open it to sign in, manage the host and install updates. The CLI installation below is an alternative.</span></p>
+        <p><span lang="zh">CLI 方式需要 macOS 或 Linux、Node.js 22.13 或更新版本（独立 Mac App 已内置）。</span><span lang="en">The CLI requires macOS or Linux and Node.js 22.13 or newer (already bundled in the standalone Mac app).</span></p>
         <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
 <span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
 <span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
 <span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
         <p><span lang="zh">要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</span><span lang="en">Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</span></p>
+
+        <h2 id="d-desktop"><span lang="zh">Mac 桌面版与更新</span><span lang="en">Mac desktop app and updates</span></h2>
+        <p><span lang="zh">总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 Pro。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</span><span lang="en">Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires Pro. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</span></p>
+        <p><span lang="zh">App、CLI、Host 和 Node 整体更新。自动检查只检查版本，安装需确认，可能中断正在运行的任务；完成后恢复本 App 托管的 Host，保留机器身份、配对和历史。已有 npm / Homebrew 安装不会被覆盖。设置可选安装终端命令，该命令随 App 更新。</span><span lang="en">The app, CLI, Host and Node update together. Automatic checks only check versions; installation requires confirmation and may interrupt active work. The app restores its owned Host and preserves identity, pairings and history. Existing npm / Homebrew installations are not overwritten. Settings can install an optional terminal command that follows app updates.</span></p>
+        <p><span lang="zh">本机数据默认在 <code>~/.linkshell</code>，不在 App 内。完整说明见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">桌面版使用说明</a>。</span><span lang="en">Local data stays in <code>~/.linkshell</code>, outside the app. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">desktop guide</a>.</span></p>
 
         <h2 id="d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></h2>
         <pre><code><span class="pr">$ </span>linkshell host --daemon   <span class="cm"># <span lang="zh">后台运行</span><span lang="en">run in the background</span></span>
@@ -696,7 +706,7 @@
           <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；从首页底部进入已归档，也可以搜索查找。Codex 归档同步到原生记录，查看历史不会解除归档；Claude 和其他 Agent 的归档仅保存在 LinkShell。不再使用的电脑，在账号页的「我的电脑」里长按移除。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; open Archives from the bottom of Home or find it in search. Codex archives sync with its native records and remain readable without restoring them. Claude and other agents are archived only in LinkShell. Remove an unused computer by long-pressing it under My computers.</span></li>
           <li><span lang="zh"><b>会话恢复</b>：电脑端 CLI 0.10.19 会重新核对任务状态，避免已结束的任务一直显示运行中。原始记录缺失或读取失败时会显示原因，并保留已经缓存的消息；重新打开可重试。</span><span lang="en"><b>Session recovery</b>: CLI 0.10.19 rechecks task activity so finished tasks do not keep appearing as running. Missing or unreadable history shows an explanation while retaining cached messages; reopen the session to retry.</span></li>
           <li><span lang="zh"><b>Apple Watch</b>：2.3.33 加入独立腕表连接。在腕表「连接设置」登录邮箱/密码账号或输入电脑配对码，查看会话、处理简单审批并发送短消息；也可切换 iPhone 配套模式。独立连接在 App 前台运行，需要 Gateway 0.6.20 或更新版本。</span><span lang="en"><b>Apple Watch</b>: 2.3.33 adds independent watch connections. Sign in with an email/password account or enter a computer pairing code in Connection Settings to view sessions, handle simple approvals and send short messages. Optional iPhone companion mode remains available. Independent connections run in the foreground and require Gateway 0.6.20 or later.</span></li>
-          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上，安装包自动适配架构；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Supports Apple silicon and Intel Macs on macOS 13 or later; the universal app selects the native architecture automatically; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
+          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上，独立 App 请按芯片选择下载，CLI helper 自动适配架构；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Supports Apple silicon and Intel Macs on macOS 13 or later; choose the standalone download for your chip, while the CLI helper selects the native architecture automatically; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
         </ul>
 
         <h2 id="d-screen"><span lang="zh">远程桌面的画面与连接</span><span lang="en">Remote screen quality and connection</span></h2>

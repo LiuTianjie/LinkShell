@@ -42,14 +42,14 @@ export async function runLogin(): Promise<LoginResult | null> {
   const hash = window.location.hash.substring(1);
   if (hash) {
     fetch('/token?' + hash, { method: 'POST' })
-      .then(() => { document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
+      .then(response => { if (!response.ok) throw new Error('Login failed'); document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
       .catch(() => { document.body.innerHTML = '<h2>Login failed. Please try again.</h2>'; });
   } else {
     // Try query params (iTool may pass tokens as query params)
     const params = window.location.search.substring(1);
     if (params) {
       fetch('/token?' + params, { method: 'POST' })
-        .then(() => { document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
+        .then(response => { if (!response.ok) throw new Error('Login failed'); document.body.innerHTML = '<h2>Login successful! You can close this tab.</h2>'; })
         .catch(() => { document.body.innerHTML = '<h2>Login failed. Please try again.</h2>'; });
     } else {
       document.body.innerHTML = '<h2>No auth data received. Please try again.</h2>';
@@ -120,10 +120,16 @@ export async function runLogin(): Promise<LoginResult | null> {
           }
         } catch {}
 
+        if (!userId) {
+          res.writeHead(401);
+          res.end("无法验证账号，请重新登录。");
+          return;
+        }
+
         const tokens: AuthTokens = {
           accessToken,
           refreshToken,
-          expiresAt: Date.now() + expiresIn * 1000,
+          expiresAt: Date.now() + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600) * 1000,
           userId,
           email,
         };
@@ -155,6 +161,8 @@ export async function runLogin(): Promise<LoginResult | null> {
       res.writeHead(404);
       res.end("Not found");
     });
+
+    server.on("error", () => { clearTimeout(timeout); resolve(null); });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();

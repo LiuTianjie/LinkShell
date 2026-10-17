@@ -10,7 +10,7 @@ let package = Package(
   targets: [
     .executableTarget(
       name: "LinkShell",
-      dependencies: ["WebRTC"],
+      dependencies: ["WebRTC", "Sparkle"],
       path: "Sources/LinkShell",
       linkerSettings: [
         // Where the framework is inside the app: Contents/Frameworks.
@@ -19,8 +19,13 @@ let package = Package(
     ),
     // What can be proved with no screen and no network (`swift test`, part of `pnpm check`).
     .testTarget(name: "LinkShellTests", dependencies: ["LinkShell"], path: "Tests/LinkShellTests"),
-    // libwebrtc, prebuilt from the unmodified upstream source (M154, branch-heads/8037):
-    // a dynamic framework with arm64 and x86_64 slices, both kept in the universal Mac app.
+    // Signed app replacement and release signature verification.
+    .binaryTarget(
+      name: "Sparkle",
+      url: "https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip",
+      checksum: "17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959"
+    ),
+    // libwebrtc M154, branch-heads/8037; both CPU slices remain in the universal app.
     .binaryTarget(
       name: "WebRTC",
       url: "https://github.com/stasel/WebRTC/releases/download/154.0.0/WebRTC-M154.xcframework.zip",

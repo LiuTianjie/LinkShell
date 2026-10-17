@@ -62,7 +62,7 @@ App release builds: `pnpm prod:ios` / `pnpm prod:android` (`apps/client/scripts/
 - `packages/client-core` (`@linkshell/client-core`) — client state without UI: `host-link.ts` (RPC connection), `tunnel-socket.ts` (that connection through a gateway), `store.ts` (zustand), `timeline.ts` (event log → what is rendered), `streams.ts` (byte streams for previews and the screen), `pairing.ts`.
 - `apps/client` (`@linkshell/client`) — the app: Expo + React Native + Expo Router. Routes in `src/app/`, screens in `src/screens/`, `src/lib/` (`client.tsx`, `computers.ts`, `identity.ts`, `account.ts`, `direct.ts`), native modules in `modules/` (`link-terminal`, `link-socket`, `link-screen` for iOS WebRTC/Metal screen reception). Read `apps/client/AGENTS.md` before touching Expo APIs.
 - `apps/web` (`@linkshell/web`) — the browser workspace. Use shadcn/ui and the Linear-inspired design rules in `apps/web/AGENTS.md`; read them before changing web UI. Its transport and permissions remain those of the existing host and gateway.
-- `apps/mac` (`@linkshell/mac`) — LinkShell.app: captures the Mac's screen, sends it (WebRTC video, or encoded for the host), posts pointer and key events, and holds the two macOS permissions. Shipped to npm as one archive.
+- `apps/mac` (`@linkshell/mac`) — LinkShell.app: captures the Mac's screen, sends it (WebRTC video, or encoded for the host), posts pointer and key events, and holds the two macOS permissions. Shipped to npm as one helper archive, and as separate notarized arm64/x64 standalone DMGs with bundled Node/CLI/Host and Sparkle updates. The dashboard includes account login, service management and an optional CLI symlink; see `docs/mac-desktop.md`.
 - `docs/site` — the website and `install.sh` (GitHub Pages). After editing `index.html` run `python3 scripts/build-site-pages.py`.
 - `docs/v2/architecture.md` (design), `docs/v2/screen-realtime.md` (current screen architecture, diagrams, fallback and validation; older experiments in `screen-realtime-history.md`), `docs/deploy.md` (self-hosting), `docs/release-sop.md`.
 - `docs/v2/session-recovery.md` — current session status, native archive and history recovery rules, ACP version compatibility, and validation boundaries.
@@ -85,7 +85,7 @@ App release builds: `pnpm prod:ios` / `pnpm prod:android` (`apps/client/scripts/
 | `host.pid`, `host.log`, `gateway.pid`, `gateway.log` | background processes |
 | `relay.db` | pairings, when this computer runs `linkshell gateway` |
 | `worktrees/` | git worktrees made for sessions |
-| `LinkShell.app` | unpacked from `@linkshell/mac` on first use (macOS) |
+| `LinkShell.app` | unpacked from `@linkshell/mac` for CLI installs; standalone installs use their own signed bundle |
 
 Agents run as the user with the login shell's environment; LinkShell never handles their credentials.
 
@@ -128,6 +128,7 @@ When the user asks to release LinkShell, execute the full release workflow, incl
 - npm, always `pnpm publish` (it rewrites `workspace:*`), in dependency order: wire → mac → host → gateway → cli; skip what didn't change.
 - `@linkshell/mac` must be published from a Mac with the Developer ID Application certificate (`prepack` refuses to build unsigned).
 - Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only builds: the official gateway is deployed by bumping the image in `luma-gateway.yml`.
+- Standalone desktop: `desktop-vX.Y.Z` ships notarized architecture-specific DMGs, then publishes Sparkle feeds to Pages. Bundle CLI/Host changes in a new desktop release too; do not make users run npm updates inside the app. See `docs/release-sop.md`.
 - Tag `cli-vX.Y.Z` marks a CLI release (no CI). `./scripts/update-brew.sh` updates the Homebrew tap.
 - Mobile app (`vX.Y.Z`) → built and released locally on macOS (`./scripts/release-mobile.sh X.Y.Z --yes`, or `node scripts/release.mjs ios|android X.Y.Z` + `gh release create vX.Y.Z`): iOS to TestFlight, Android AAB + APK to a GitHub release. There is no GitHub Actions runner for mobile builds.
 - `docs/site/` deploys to GitHub Pages on push to main (`.github/workflows/pages.yml`).

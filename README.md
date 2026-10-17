@@ -56,7 +56,11 @@ Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-wat
 
 ## Get started
 
-Your computer needs macOS or Linux and **Node.js 22.13 or newer**.
+**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
+
+The CLI installation below is optional for Mac app users.
+
+The CLI requires macOS or Linux and **Node.js 22.13 or newer**; the standalone Mac app includes Node.
 
 ```bash
 npm i -g linkshell-cli
@@ -88,7 +92,7 @@ Watching and controlling the computer's screen from the phone needs two macOS pe
 linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
 ```
 
-On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, a signed app that comes with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs macOS 13 or later, on Apple silicon or Intel. The same installation includes both architectures; macOS selects the native one automatically. Intel real-hardware capture and performance validation is pending. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
+On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, the signed standalone app or the helper shipped with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs macOS 13 or later, on Apple silicon or Intel. The CLI-managed helper includes both architectures; standalone DMGs have separate Apple Silicon and Intel downloads. Intel real-hardware capture and performance validation is pending. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
 
 <details>
 <summary>Other ways to install</summary>
@@ -218,6 +222,7 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | --- | --- |
 | Set a computer up, once: the host, the screen's permissions, your phone | `linkshell setup` |
 | Start LinkShell in the background | `linkshell host --daemon` |
+| Open the native Mac status app | `linkshell app` |
 | See agents, sessions and the gateway | `linkshell host status` |
 | Stop it | `linkshell host stop` |
 | Pair a phone (own gateway) | `linkshell pair` |
@@ -229,7 +234,9 @@ On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss
 | Check the environment | `linkshell doctor` |
 | Upgrade | `linkshell upgrade` |
 
-From CLI 0.10.40, `linkshell upgrade` also restarts an outdated running host using the newly installed CLI. Login, pairings, computer identity and session history are retained, and clients reconnect automatically. Running agent turns and terminal processes stop during the restart; a stopped host stays stopped. Even if the CLI is already current, the command checks the running host. When upgrading from an older CLI, run `linkshell upgrade` once more after installation to update the host with this new behavior.
+Standalone app users update from the app’s Updates page; the optional command installed by the app opens the same updater. CLI, Host and Node update with the app, while account and pairing data stay outside its bundle. See the [desktop guide](docs/mac-desktop.md).
+
+For npm/Homebrew installations, from CLI 0.10.40, `linkshell upgrade` also restarts an outdated running host using the newly installed CLI. Login, pairings, computer identity and session history are retained, and clients reconnect automatically. Running agent turns and terminal processes stop during the restart; a stopped host stays stopped. Even if the CLI is already current, the command checks the running host. When upgrading from an older CLI, run `linkshell upgrade` once more after installation to update the host with this new behavior.
 
 The app's computer picker now lets you give each computer a name, saved on that phone, like the browser-local names in the web workspace. Clear the name to restore the host's name. iOS Live Activities support task browsing and separate cards for multiple computers. Approvals, questions, failures and completion can alert through the separate [ActivityKit push service](docs/v2/live-activity-push.md); opening an action reconnects to its exact computer and request. Home cards keep pending questions and approval controls compact.
 

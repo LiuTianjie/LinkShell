@@ -1,15 +1,40 @@
 # @linkshell/mac
 
-LinkShell.app: the Mac side of LinkShell's remote desktop. It captures a display, sends it to a
-viewer (as a WebRTC video track, or encoded for the host to pass on), and posts the viewer's
-pointer and key events. The LinkShell host (`@linkshell/host`) starts it and talks to it over a
-unix socket; nobody starts it by hand.
+LinkShell.app is the native macOS status app and screen helper. Its dark dashboard and menu-bar
+popover use the same logo and neutral/mint palette as the website. Open it with `linkshell app`
+or double-click the app. The host still opens separate `--connect` workers for screen capture;
+`--setup` retains the existing permission flow. Closing the dashboard leaves the host running.
 
-It has no place in the Dock (`LSUIElement`) and one window, shown only when asked for
-(`--setup`): the one in which the user gives it its two permissions. macOS 13 or later, on
-Apple silicon and Intel. The universal app and its WebRTC framework contain both arm64 and x86_64;
-macOS chooses the native architecture at launch. No separate installer or Rosetta is needed.
-Intel real-hardware capture, encoding and end-to-end performance validation is pending.
+## Desktop status app
+
+The dashboard provides overview, session summaries/details, paired devices, a bounded host-log
+viewer, account sign-in/sign-out, permissions, service start/stop/restart, and version checks.
+Standalone builds update the whole app through Sparkle; CLI-managed builds use the package manager. Stops, restarts and updates explain interruption before proceeding.
+Session approvals remain in the phone or original agent terminal in this first desktop version.
+
+`linkshell app` locates/unpacks the bundled app at the existing stable path and passes the exact
+CLI and Node executable plus `LINKSHELL_HOME`. Standalone Finder launches use the bundled Node
+and CLI; only CLI-managed helper builds fall back to the login shell's `linkshell`. A matching CLI is required: the UI reads `linkshell desktop` JSON snapshots every
+five seconds, with no TCP listener and no alternate database. Stopped, unreachable and unknown
+states are distinct; failed snapshots discard old session/device data. The list includes the latest
+200 sessions and indicates truncation. Activity is observed during this UI session, not a persisted
+audit log. Each data directory has one dashboard instance; screen and setup workers remain separate.
+
+Two distributions share the same UI, bundle ID and Developer ID. The standalone DMG includes Node,
+CLI and Host, supports stable/beta update channels, and uses Sparkle to replace the bundle and
+recover its owned Host. The npm/Homebrew helper retains the external package-manager update route.
+The update page distinguishes CLI, running Host and Mac UI versions. Neither route installs
+updates silently. See [standalone distribution](#standalone-desktop-distribution) below.
+
+For visual verification without reading local state or requesting permissions:
+
+```bash
+open -n -a apps/mac/build/LinkShell.app --args --dashboard-preview
+open -W -n -a apps/mac/build/LinkShell.app --args --dashboard-preview --dashboard-snapshot /tmp/dashboard.png
+```
+
+`--dashboard-preview` uses labeled sample data and disables service, update and permission actions.
+Snapshot output is a rendering check, not proof of live RPC, permissions or media performance.
 
 ## Current media path
 
@@ -112,8 +137,8 @@ language the user put first is Chinese, and English otherwise (`SetupText.swift`
 
 Nothing tells the host how it went: it asks its own app for `status`, as often as it likes.
 
-The app is also the setup window when the system opens it with no arguments at all — someone
-double-clicked it, or System Settings reopened it.
+Opening the app without arguments now opens the dashboard. System Settings may also reopen it
+this way; the dashboard links back to the explicit permission setup window.
 Started with `--setup` as some program's child it has the system open it
 anew and exits: a child would show, and ask for, its parent's permissions.
 
@@ -515,3 +540,37 @@ a bit is 1 above the midpoint; undo the Gray code; the latency is the reader's c
 mod 65536, and more than 30 s is a misreading. The viewer page reads the same strip.
 
 Results are kept with the design, not here: `docs/v2/screen-realtime.md` §9 in the repository.
+
+## Standalone desktop distribution
+
+The standalone app bundles its own architecture-specific Node runtime, CLI and Host. Apple silicon and Intel have separate small downloads and update feeds. Finder launches do not depend on npm, Homebrew or a shell PATH. The bundle id and Developer ID remain the same as the screen helper. A separate npm/Homebrew installation is never overwritten; the dashboard shows an external Host and requires the existing restart confirmation before switching ownership.
+
+Build on macOS after `pnpm build`:
+
+```sh
+node apps/mac/scripts/build-standalone.mjs --arch arm64
+node apps/mac/scripts/build-standalone.mjs --arch x64
+# To notarize both the app and DMG, set an existing notarytool Keychain profile:
+LINKSHELL_NOTARY_PROFILE=linkshell node apps/mac/scripts/build-standalone.mjs --arch arm64
+```
+
+Outputs under `artifacts/mac/<arch>/` are `LinkShell.app`, `LinkShell-<CLI-version>-<arch>.dmg`, and `release.json`. Sparkle downloads the same compact DMG. DMGs use LZMA compression supported by the macOS 13 minimum. Without a notarization profile the output is explicitly marked **not notarized**; it is a local development delivery, not a Gatekeeper-ready public release. Temporary dependency and DMG staging directories are removed even when the build fails. The Node downloads are pinned and SHA-256 checked. Each package includes only its CPU architecture. Unused Claude SDK native executables, other platforms' PTY prebuilds, source maps and type declarations are omitted. ClaudeDriver already selects the user's installed Claude executable; Codex, Claude and other coding agents still need their own installation and sign-in. No credentials are bundled. Intel hardware behavior still needs physical-device validation.
+
+The Settings page can install an optional `~/.local/bin/linkshell` symlink. It refuses to replace an existing command. Add that directory to your shell PATH if needed. The command resolves the app's bundled runtime, so it follows app updates. `linkshell upgrade` from this command opens the App updater; npm/Homebrew commands keep their existing update route.
+
+Sparkle verifies EdDSA signatures and atomically replaces the bundle. Automatic checks are information-only. Clicking install confirms that running tasks/connections may be interrupted, saves recovery metadata, and stops only a Host owned by this app path. Cancellation, failure, or the new app's launch restores the Host with the previous launch settings and verifies machine identity and paired devices. Recovery failures retain the marker and a visible error; Settings offers retry. User state stays in `~/.linkshell`, outside the updated bundle. Updating the app is not a backup or migration of the user's npm installation.
+
+Release configuration is `config/desktop-release.json`. The private EdDSA key belongs in the release machine's login Keychain, account `linkshell-desktop`; it must not be committed or regenerated for subsequent releases. Stable is the default; beta opts into Sparkle's `beta` channel as well as stable updates. Feed publication is separate from local packaging:
+
+```sh
+node apps/mac/scripts/appcast.mjs /path/to/Sparkle/bin/generate_appcast \
+  artifacts/mac/arm64/LinkShell-0.10.42-arm64.dmg \
+  https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.42/ \
+  artifacts/mac/arm64/appcast-arm64.xml
+```
+
+Upload the **exact signed DMG** to the indicated release URL before publishing the generated feed at `docs/site/updates/mac/appcast-arm64.xml` (and `appcast-x64.xml` for Intel). Use a strictly increasing `--build` for rebuilt app releases; changing only the display version does not make Sparkle offer an update. A beta feed item uses `<sparkle:channel>beta</sparkle:channel>`. Check installation from an older signed app and verify Host recovery before publishing. Never publish a feed pointing at a missing archive. Public release requires Developer ID signing, notarization/stapling, archive upload and feed deployment; a local test feed alone does not complete that release.
+
+The menu-bar icon is a dedicated 18-point monochrome shell mark (`DesktopStatusIcon.swift`), rendered as an NSImage template. It follows system contrast and selection automatically; service status is in its tooltip and popover instead of a permanent colored dot. The Dock/Finder app icon is unchanged.
+
+The Overview and Settings pages include account sign-in and sign-out. Sign-in opens the existing iTool browser flow and waits for its loopback callback; cancellation terminates that temporary process. Only a verified user response is saved, and the desktop snapshot contains account identity, never tokens. A successful sign-in applies the account to the Host gateway; the UI reports gateway connectivity separately and allows an explicit switch to the official gateway. Signing out clears this computer's account and refreshes its gateway without deleting local sessions.

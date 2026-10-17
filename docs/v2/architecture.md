@@ -5,6 +5,8 @@
 > 会话状态、原生归档、历史恢复和 ACP 1 / ACP 2 的当前兼容边界见[会话恢复说明](session-recovery.md)。本文的 LinkShell v2 与 Agent Client Protocol 的版本号是不同概念。
 > 决策：Expo 一套代码 / 协议直接断代 / 端到端加密
 
+> 2026-10-17：macOS 新增独立桌面 App，内置 Node / CLI / Host，以 Sparkle 整体更新；账号、配对与会话状态仍在用户数据目录，媒体与网关协议不变。当前交付方式见[桌面版说明](../mac-desktop.md)。
+
 ## 0. 为什么要重做
 
 v1 是 Agent 进程的**旁观者**：电脑上跑的 `claude`、`codex` 由用户自己启动，LinkShell 只能靠 `ps` 和读 `~/.claude`、`~/.codex` 下的 jsonl 去猜状态。结果是：

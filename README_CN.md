@@ -52,7 +52,11 @@ LinkShell 2.3.33 加入可独立连接的 watchOS App：登录已有邮箱/密�
 
 ## 开始使用
 
-电脑需要 macOS 或 Linux，以及 **Node.js 22.13 或更新版本**。
+**独立 Mac App（macOS 13+）：** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.43/LinkShell-0.10.43-x64.dmg)。拖入 Applications，打开后即可登录。内置 CLI、Host 和 Node，随 App 整体更新，无需安装 npm；编程 Agent 仍需自行安装和登录。
+
+下面的 CLI 安装方式供按需选择。
+
+CLI 方式需要 macOS 或 Linux，以及 **Node.js 22.13 或更新版本**；独立 Mac App 已内置 Node。
 
 ```bash
 npm i -g linkshell-cli
@@ -84,7 +88,7 @@ linkshell codex     # Codex：终端和手机同时在线
 linkshell screen      # macOS：弹出 LinkShell 窗口，带你到每个开关前，等你打开
 ```
 
-在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——一个随 CLI 一起安装的带签名的程序。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上。同一安装包包含两种架构，macOS 自动选择本机架构，无需手动选包；Intel 真机采集与性能仍待验证。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg` 并有 X11 显示环境。
+在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——独立 App 或随 CLI 安装的带签名 helper。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上。CLI 管理的 helper 包含两种架构；独立 App 分 Apple Silicon 和 Intel 两份下载；Intel 真机采集与性能仍待验证。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg` 并有 X11 显示环境。
 
 <details>
 <summary>其他安装方式</summary>
@@ -214,6 +218,7 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | --- | --- |
 | 首次设置：host、屏幕权限、连接手机，一次做完 | `linkshell setup` |
 | 后台启动 LinkShell | `linkshell host --daemon` |
+| 打开原生 Mac 状态应用 | `linkshell app` |
 | 查看 Agent、会话和网关 | `linkshell host status` |
 | 停止 | `linkshell host stop` |
 | 配对手机（自建网关） | `linkshell pair` |
@@ -225,7 +230,9 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | 检查环境 | `linkshell doctor` |
 | 升级 | `linkshell upgrade` |
 
-从 CLI 0.10.40 起，`linkshell upgrade` 会用新安装的 CLI 自动重启仍在运行的旧 Host，保留登录、配对、电脑身份和会话历史，客户端自动重连。重启会停止正在执行的 Agent 轮次和终端进程；原本没有运行的 Host 不会被启动。即使 CLI 已是最新版，命令仍会检查 Host。从更早的 CLI 升级时，安装完成后再执行一次 `linkshell upgrade`，即可用新逻辑更新 Host。
+独立 App 在“更新”页升级，App 可选安装的命令行入口也会打开同一个更新器。CLI、Host 和 Node 随 App 一起更新，账号和配对数据保存在 App 之外。详见[桌面版使用说明](docs/mac-desktop.md)。
+
+对于 npm/Homebrew 安装，从 CLI 0.10.40 起，`linkshell upgrade` 会用新安装的 CLI 自动重启仍在运行的旧 Host，保留登录、配对、电脑身份和会话历史，客户端自动重连。重启会停止正在执行的 Agent 轮次和终端进程；原本没有运行的 Host 不会被启动。即使 CLI 已是最新版，命令仍会检查 Host。从更早的 CLI 升级时，安装完成后再执行一次 `linkshell upgrade`，即可用新逻辑更新 Host。
 
 App 的设备列表支持给电脑改名，保存在当前手机上，与 Web 端保存在当前浏览器的行为一致；留空可恢复电脑原名。iOS 实时活动支持切换任务和多台电脑各自的卡片。审批、提问、失败和结束可通过独立的 [ActivityKit 推送服务](docs/v2/live-activity-push.md)提醒；点击操作会连接到对应电脑并核验具体请求。首页以紧凑卡片显示待回答的问题和审批操作。
 

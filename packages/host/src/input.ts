@@ -189,6 +189,8 @@ export function macAppSupported(): boolean {
 /** LinkShell.app, with `@linkshell/mac` installed beside the host. */
 export function shippedApp(): string | undefined {
   if (!macAppSupported() || process.env.LINKSHELL_INPUT_APP === "off") return undefined;
+  const bundled = process.env.LINKSHELL_APP_BUNDLE;
+  if (bundled && runnable(programOf(bundled)) && existsSync(join(bundled, "Contents/Resources/standalone.json"))) return bundled;
   found ??= { app: packagedApp() };
   return found.app;
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { standaloneBundle } from "./utils/standalone.js";
 import { Command, Option } from "commander";
 import { runDoctor } from "./commands/doctor.js";
 import { runSetup } from "./commands/setup.js";
@@ -10,6 +11,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const pkg = require("../../../package.json") as { version: string };
 
+const bundledApp = standaloneBundle();
+if (bundledApp) process.env.LINKSHELL_APP_BUNDLE = bundledApp;
+else delete process.env.LINKSHELL_APP_BUNDLE;
+
 const program = new Command();
 
 program
@@ -18,6 +23,14 @@ program
     "Your coding agents and terminals, on your phone. Start with `linkshell setup`.",
   )
   .version(pkg.version);
+
+program.command("app")
+  .description("Open the native Mac status app (included with the CLI)")
+  .action(async () => { const { openDesktop } = await import("./commands/desktop.js"); await openDesktop(); });
+
+program.command("desktop", { hidden: true })
+  .option("--action <action>", "snapshot, start, stop or restart", "snapshot")
+  .action(async (options) => { const { runDesktop } = await import("./commands/desktop.js"); await runDesktop(pkg.version, options.action); });
 
 // ── host ────────────────────────────────────────────────────────────
 

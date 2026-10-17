@@ -60,3 +60,6 @@ Thumbs.db
 /promo/
 
 /packages/gateway/web-client/
+
+# Standalone desktop deliverables
+/artifacts/
