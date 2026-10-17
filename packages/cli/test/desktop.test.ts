@@ -14,6 +14,21 @@ beforeEach(() => { vi.resetAllMocks(); process.exitCode = 0; });
 afterEach(() => { vi.restoreAllMocks(); process.exitCode = 0; });
 
 describe("native desktop snapshots", () => {
+  it("fetches filtered usage without starting or restarting services", async () => {
+    const call = vi.fn().mockResolvedValue({ totals: { totalTokens: 123 } });
+    vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "usage-30-claude");
+    expect(call).toHaveBeenCalledWith("usage.summary", { days: 30, agent: "claude" }, 120_000);
+    expect(JSON.parse(String(out.mock.calls[0][0]))).toEqual({ totals: { totalTokens: 123 } });
+    expect(ensureHostRunning).not.toHaveBeenCalled();
+  });
+  it("rejects invalid usage filters before making an RPC call", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "usage-999-all");
+    expect(withRunningHost).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
   it("includes account identity while keeping credentials out of the UI snapshot", async () => {
     vi.mocked(loadAuth).mockReturnValue({ userId: "u1", email: "me@example.com", accessToken: "secret-access", refreshToken: "secret-refresh", expiresAt: 1 });
     const snapshot = await desktopSnapshot("1.0.0");

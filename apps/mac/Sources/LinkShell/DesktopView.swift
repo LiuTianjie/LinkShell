@@ -1,12 +1,20 @@
 import AppKit
 import SwiftUI
 
-private enum DesktopStyle {
-  static let background = Color(red: 0.025, green: 0.028, blue: 0.035)
-  static let sidebar = Color(red: 0.043, green: 0.047, blue: 0.057)
-  static let secondary = Color(red: 0.66, green: 0.68, blue: 0.71)
-  static let mint = Color(red: 0.24, green: 0.88, blue: 0.75)
-  static let line = Color.white.opacity(0.10)
+enum DesktopStyle {
+  private static func adaptive(_ light: NSColor, _ dark: NSColor) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+      appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+    })
+  }
+  static let background = adaptive(NSColor(srgbRed: 0.98, green: 0.98, blue: 0.985, alpha: 1), NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 1))
+  static let sidebar = adaptive(NSColor(srgbRed: 0.945, green: 0.95, blue: 0.96, alpha: 1), NSColor(srgbRed: 0.043, green: 0.047, blue: 0.057, alpha: 1))
+  static let primary = adaptive(NSColor(srgbRed: 0.12, green: 0.13, blue: 0.16, alpha: 1), NSColor(srgbRed: 0.94, green: 0.945, blue: 0.953, alpha: 1))
+  static let secondary = adaptive(NSColor(srgbRed: 0.38, green: 0.40, blue: 0.44, alpha: 1), NSColor(srgbRed: 0.66, green: 0.68, blue: 0.71, alpha: 1))
+  static let mint = adaptive(NSColor(srgbRed: 0.04, green: 0.46, blue: 0.36, alpha: 1), NSColor(srgbRed: 0.24, green: 0.88, blue: 0.75, alpha: 1))
+  static let line = adaptive(.black.withAlphaComponent(0.10), .white.withAlphaComponent(0.10))
+  static let selection = adaptive(.black.withAlphaComponent(0.055), .white.withAlphaComponent(0.075))
+  static let onAccent = adaptive(.white, .black)
 }
 
 struct DesktopBrand: View {
@@ -30,7 +38,7 @@ struct DesktopStatus: View {
 struct DesktopView: View {
   @ObservedObject var model: DesktopModel
   @State private var confirm: String?
-  private let mainPages = [("总览", "house"), ("会话", "bubble.left"), ("设备", "laptopcomputer"), ("日志", "list.bullet.rectangle")]
+  private let mainPages = [("总览", "house"), ("会话", "bubble.left"), ("设备", "laptopcomputer"), ("用量统计", "chart.bar"), ("日志", "list.bullet.rectangle")]
   var body: some View {
     HStack(spacing: 0) {
       VStack(alignment: .leading, spacing: 8) {
@@ -75,6 +83,7 @@ struct DesktopView: View {
             switch model.selected {
             case "会话": sessions
             case "设备": devices
+            case "用量统计": DesktopUsageView(model: model)
             case "日志": logs
             case "更新": updates
             case "设置": settings
@@ -92,8 +101,8 @@ struct DesktopView: View {
         }
       }.padding(.horizontal, 36).padding(.top, 34).padding(.bottom, 24)
     }
-    .background(DesktopStyle.background).foregroundStyle(Color(red: 0.94, green: 0.945, blue: 0.953))
-    .preferredColorScheme(.dark).frame(minWidth: 880, minHeight: 620)
+    .background(DesktopStyle.background).foregroundStyle(DesktopStyle.primary)
+    .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: 620)
     .alert(confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
       Button("取消", role: .cancel) { confirm = nil }
       Button("继续", role: .destructive) {
@@ -109,13 +118,14 @@ struct DesktopView: View {
         Text("代理：\(agentName(session.agent))").foregroundStyle(DesktopStyle.secondary)
         if session.pendingPermissions > 0 { Text("有 \(session.pendingPermissions) 个请求等待确认，请在手机或原代理终端处理。") }
         HStack { Spacer(); Button("完成") { model.selectedSession = nil }.keyboardShortcut(.defaultAction) }
-      }.padding(32).frame(width: 480).background(DesktopStyle.background).preferredColorScheme(.dark)
+      }.padding(32).frame(width: 480).background(DesktopStyle.background).preferredColorScheme(model.colorScheme)
     }
   }
   private var subtitle: String {
     switch model.selected {
     case "会话": return "当前 Host 中的会话与待处理请求"
     case "设备": return "与这台 Mac 配对的设备"
+    case "用量统计": return "这台电脑的 Token 用量与模型分布"
     case "日志": return "Host 最近 64 KB 日志 · 每 5 秒刷新"
     case "更新": return "检查版本与管理现有安装"
     case "设置": return "本机权限与应用偏好"
@@ -134,8 +144,8 @@ struct DesktopView: View {
         Spacer()
         if title == "更新" && model.newVersion { Circle().fill(DesktopStyle.mint).frame(width: 6, height: 6) }
       }.padding(.horizontal, 14).frame(height: 42).contentShape(Rectangle())
-        .background(RoundedRectangle(cornerRadius: 6).fill(model.selected == title ? Color.white.opacity(0.075) : .clear))
-    }.buttonStyle(.plain).foregroundStyle(model.selected == title ? .white : DesktopStyle.secondary)
+        .background(RoundedRectangle(cornerRadius: 6).fill(model.selected == title ? DesktopStyle.selection : .clear))
+    }.buttonStyle(.plain).foregroundStyle(model.selected == title ? DesktopStyle.primary : DesktopStyle.secondary)
   }
   private func row(_ title: String, _ value: String, good: Bool = false, warning: Bool = false) -> some View {
     VStack(spacing: 0) {
@@ -257,7 +267,7 @@ struct DesktopView: View {
         } else if model.signedIn {
           Button("退出登录…") { confirm = "logout" }.disabled(model.busy)
         } else {
-          Button("登录 / 注册") { model.login() }.buttonStyle(.borderedProminent).tint(DesktopStyle.mint).foregroundStyle(.black).disabled(model.busy || model.preview)
+          Button("登录 / 注册") { model.login() }.buttonStyle(.borderedProminent).tint(DesktopStyle.mint).foregroundStyle(DesktopStyle.onAccent).disabled(model.busy || model.preview)
         }
       }
       if !model.accountMessage.isEmpty { Text(model.accountMessage).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled) }
@@ -279,7 +289,30 @@ struct DesktopView: View {
 
   private var settings: some View {
     VStack(alignment: .leading, spacing: 0) {
+      HStack {
+        Text("外观").font(.system(size: 14)); Spacer()
+        Picker("外观", selection: $model.appearance) {
+          Text("跟随系统").tag("system")
+          Text("浅色").tag("light")
+          Text("深色").tag("dark")
+        }.labelsHidden().pickerStyle(.segmented).frame(width: 260)
+      }.padding(.vertical, 20)
+      rule
       accountSection
+      if model.standalone {
+        Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+          .toggleStyle(.switch).padding(.top, 20).disabled(model.preview)
+        Text("登录 Mac 后自动打开 LinkShell。每次打开桌面版都会启动后台服务并连接已配置的网关，无需再点“启动服务”。")
+          .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.vertical, 12)
+        if model.loginApprovalRequired {
+          Text("等待系统允许，请在“登录项”中启用 LinkShell。").font(.system(size: 12)).foregroundStyle(.orange)
+          Button("打开系统登录项设置") { model.openLoginItems() }.padding(.vertical, 12).disabled(model.preview)
+        }
+        if !model.loginItemMessage.isEmpty {
+          Text(model.loginItemMessage).font(.system(size: 12)).foregroundStyle(.orange).textSelection(.enabled).padding(.bottom, 12)
+        }
+        rule
+      }
       row("屏幕录制", !model.permissionsKnown ? "未知" : model.recording ? "已授权" : "未授权", good: model.permissionsKnown && model.recording)
       row("辅助功能", !model.permissionsKnown ? "未知" : model.control ? "已授权" : "未授权", good: model.permissionsKnown && model.control)
       Button("打开权限设置") { model.permissions() }.padding(.vertical, 20).disabled(model.preview)
@@ -321,8 +354,9 @@ struct DesktopPopover: View {
       Divider().padding(.bottom, 10)
       link("arrow.up.forward.square", "打开 LinkShell", "总览")
       link("arrow.triangle.2.circlepath", "检查更新…", "更新")
+      link("chart.bar", "用量统计", "用量统计")
       link("gearshape", "设置…", "设置")
-    }.padding(22).frame(width: 300).background(DesktopStyle.sidebar).foregroundStyle(.white).preferredColorScheme(.dark)
+    }.padding(22).frame(width: 300).background(DesktopStyle.sidebar).foregroundStyle(DesktopStyle.primary).preferredColorScheme(model.colorScheme)
   }
   private func entry(_ icon: String, _ title: String, _ value: String) -> some View {
     HStack(spacing: 12) { Image(systemName: icon).frame(width: 20); Text(title); Spacer(); Text(value).foregroundStyle(DesktopStyle.secondary) }.font(.system(size: 13)).padding(.vertical, 12)

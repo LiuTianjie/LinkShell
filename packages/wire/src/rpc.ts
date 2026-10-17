@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { usageQuerySchema, usageReportSchema } from "./usage.js";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import { acpAgentSettingsSchema, acpFeaturesSchema, acpRemoteAgentSchema, acpProviderSchema } from "./acp.js";
 import { editorRequestSchema, editorResultSchema } from "./editor.js";
@@ -107,6 +108,7 @@ const acpMethods = {
 } as const;
 
 const coreMethods = {
+  "usage.summary": { params: usageQuerySchema, result: usageReportSchema },
   "liveActivities.subscribe": {
     params: liveActivitySubscriptionSchema,
     result: z.object({}),

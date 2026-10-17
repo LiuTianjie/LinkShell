@@ -1,3 +1,4 @@
+import { UsageStatistics } from "./usage.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
@@ -191,6 +192,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hub,
     terminals,
     machineInfo,
+    usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }),
     socketPath: paths.hostSocket,
     tcpPort: options.tcpPort,
     log,

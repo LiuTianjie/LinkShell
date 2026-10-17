@@ -1,3 +1,4 @@
+import { UsageStatistics } from "../usage.js";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { existsSync, rmSync } from "node:fs";
 import WebSocket, { WebSocketServer } from "ws";
@@ -57,6 +58,7 @@ export interface HostRpcServerOptions {
   tcpPort?: number;
   log: (message: string) => void;
   liveActivities?: LiveActivityRelay;
+  usage?: UsageStatistics;
 }
 
 type Handler = (params: never, context: ConnectionContext) => Promise<unknown> | unknown;
@@ -106,7 +108,9 @@ export class HostRpcServer {
     this.computerPreview = new ComputerPreviewServer(hub.previews);
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
+    const usage = options.usage ?? new UsageStatistics();
     this.handlers = {
+      "usage.summary": (params: P<"usage.summary">) => usage.summary(params),
       "liveActivities.subscribe": (params: P<"liveActivities.subscribe">) => {
         if (!options.liveActivities) throw RpcError.app("not_supported", "电脑端尚不支持实时活动推送，请更新 CLI");
         options.liveActivities.subscribe(params);

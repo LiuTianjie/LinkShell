@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import ServiceManagement
 
 struct DesktopSession: Decodable, Identifiable {
   let id: String
@@ -108,6 +109,7 @@ enum DesktopCommand {
   @Published var snapshot: DesktopSnapshot?
   @Published var problem: String?
   @Published var recoveryProblem: String?
+  private var startupProblem: String?
   @Published var busy = false
   @Published var checking = false
   @Published var signingIn = false
@@ -118,7 +120,20 @@ enum DesktopCommand {
   @Published var control = false
   @Published var permissionsKnown = false
   @Published var availableAppUpdate = false
+  @Published var appearance = UserDefaults.standard.string(forKey: "desktop.appearance") ?? "dark" {
+    didSet {
+      if !preview { UserDefaults.standard.set(appearance, forKey: "desktop.appearance") }
+      applyAppearance()
+    }
+  }
+  var colorScheme: ColorScheme? { appearance == "light" ? .light : appearance == "dark" ? .dark : nil }
+  func applyAppearance() {
+    NSApp.appearance = appearance == "light" ? NSAppearance(named: .aqua) : appearance == "dark" ? NSAppearance(named: .darkAqua) : nil
+  }
   @Published var commandMessage = ""
+  @Published var launchAtLogin = false
+  @Published var loginApprovalRequired = false
+  @Published var loginItemMessage = ""
   @Published var updateChannel = UserDefaults.standard.string(forKey: "desktop.updateChannel") ?? "stable" {
     didSet { UserDefaults.standard.set(updateChannel, forKey: "desktop.updateChannel"); availableAppUpdate = false; updateMessage = "通道已切换，检查更新后生效" }
   }
@@ -163,7 +178,10 @@ enum DesktopCommand {
 
 
   func start() {
+    applyAppearance()
     if preview {
+      if let chosen = Launch.value(after: "--dashboard-appearance"), ["light", "dark", "system"].contains(chosen) { appearance = chosen }
+      if let page = Launch.value(after: "--dashboard-page") { selected = page }
       let json = #"{"status":"running","cliVersion":"0.10.42","source":"npm","machine":{"hostname":"这台 Mac","hostVersion":"0.10.42"},"gateway":{"status":"online","devices":[{"id":"preview","name":"我的 iPhone","online":true}]},"sessions":[{"id":"one","agent":"codex","title":"登录流程","cwd":"/Projects/LinkShell","state":"running","pendingPermissions":0,"updatedAt":0},{"id":"two","agent":"claude","title":"发布检查","cwd":"/Projects/LinkShell","state":"waiting","pendingPermissions":1,"updatedAt":0},{"id":"three","agent":"codex","title":"项目文档","cwd":"/Projects/LinkShell","state":"idle","pendingPermissions":0,"updatedAt":0}]}"#
       snapshot = try? JSONDecoder().decode(DesktopSnapshot.self, from: Data(json.utf8))
       recording = true; control = true; permissionsKnown = true
@@ -171,9 +189,29 @@ enum DesktopCommand {
       return
     }
     if standalone {
+      refreshLoginItem()
       appUpdater.start()
       busy = true
-      Task { await appUpdater.recover() }
+      Task {
+        do {
+          snapshot = try await Task.detached {
+            try DesktopStartup.run { try DesktopCommand.run($0, timeout: 45) }
+          }.value
+          recoveryProblem = nil
+          event("桌面启动：后台服务\(snapshot?.status == "running" ? "已就绪" : "需要检查")")
+        } catch let error as DesktopStartup.Failure {
+          switch error {
+          case .recovery: recoveryProblem = error.localizedDescription
+          case .start: startupProblem = error.localizedDescription
+          }
+          problem = error.localizedDescription
+        } catch {
+          startupProblem = error.localizedDescription
+          problem = startupProblem
+        }
+        busy = false
+        refresh()
+      }
     } else { refresh() }
     timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refresh() }
@@ -181,6 +219,7 @@ enum DesktopCommand {
   }
 
   func refresh() {
+    refreshLoginItem()
     guard !preview, !polling, !busy else { return }
     polling = true
     Task {
@@ -189,7 +228,8 @@ enum DesktopCommand {
         let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
         if next.status != snapshot?.status { event(next.status == "running" ? "本机服务已连接" : "本机服务：\(next.status == "stopped" ? "已停止" : "无法连接")") }
         if let before = snapshot?.gateway?.status, before != next.gateway?.status { event("网关连接状态已变化") }
-        snapshot = next; problem = next.error ?? recoveryProblem
+        if next.status == "running", next.error == nil { startupProblem = nil }
+        snapshot = next; problem = next.error ?? recoveryProblem ?? startupProblem
         let allowed = await Task.detached { (Permissions.recording(), Permissions.trusted()) }.value
         recording = allowed.0; control = allowed.1; permissionsKnown = true
       } catch {
@@ -203,6 +243,25 @@ enum DesktopCommand {
   }
 
   func event(_ text: String) { activity.insert((Date(), text), at: 0); activity = Array(activity.prefix(20)) }
+
+  func refreshLoginItem() {
+    guard standalone, !preview else { return }
+    let status = SMAppService.mainApp.status
+    launchAtLogin = status == .enabled || status == .requiresApproval
+    loginApprovalRequired = status == .requiresApproval
+  }
+
+  func setLaunchAtLogin(_ enabled: Bool) {
+    guard standalone, !preview else { return }
+    do {
+      if enabled { try SMAppService.mainApp.register() }
+      else { try SMAppService.mainApp.unregister() }
+      loginItemMessage = ""
+    } catch { loginItemMessage = "无法修改开机启动：\(error.localizedDescription)" }
+    refreshLoginItem()
+  }
+
+  func openLoginItems() { SMAppService.openSystemSettingsLoginItems() }
 
   func action(_ action: String) {
     guard !preview, !busy else { return }

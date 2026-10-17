@@ -36,6 +36,14 @@ export async function desktopSnapshot(version: string) {
 export async function runDesktop(version: string, action: string): Promise<void> {
   silenceSqliteWarning();
   try {
+    if (action.startsWith("usage-")) {
+      const match = /^usage-(1|7|30)-(all|codex|claude)$/.exec(action);
+      if (!match) throw new Error("无效的用量筛选条件");
+      const result = await withRunningHost(client => client.call("usage.summary", { days: Number(match[1]) as 1 | 7 | 30, agent: match[2] as "all" | "codex" | "claude" }, 120_000));
+      if (!result) throw new Error("请先启动本机服务");
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return;
+    }
     if (action === "login") {
       const result = await runLogin();
       if (!result) throw new Error("登录未完成或已超时，请重试。");

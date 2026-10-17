@@ -481,6 +481,15 @@ export function ComputerScreen() {
           </View>
         </View>
 
+        {online ? <ListRow
+          leading={<Icon sf="chart.bar" md="bar_chart" size={20} color={colors.accent} />}
+          title="用量统计"
+          time=""
+          detail="Token、缓存与模型分布"
+          position="only"
+          onPress={() => router.push("/usage")}
+          accessibilityLabel="查看这台电脑的用量统计"
+        /> : null}
         {online ? <PreviewSection /> : null}
         </View>
 

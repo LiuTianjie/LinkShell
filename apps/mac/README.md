@@ -560,6 +560,8 @@ The Settings page can install an optional `~/.local/bin/linkshell` symlink. It r
 
 Sparkle verifies EdDSA signatures and atomically replaces the bundle. Automatic checks are information-only. Clicking install confirms that running tasks/connections may be interrupted, saves recovery metadata, and stops only a Host owned by this app path. Cancellation, failure, or the new app's launch restores the Host with the previous launch settings and verifies machine identity and paired devices. Recovery failures retain the marker and a visible error; Settings offers retry. User state stays in `~/.linkshell`, outside the updated bundle. Updating the app is not a backup or migration of the user's npm installation.
 
+Settings can register the standalone app as a macOS login item and select system, light or dark appearance (dark by default). Launching the standalone app recovers pending updates before starting a stopped Host; it never replaces an existing Host. The Usage Statistics page reads the same Codex/Claude log-derived token summary as the phone. See [the desktop guide](../../docs/mac-desktop.md) for scope and limitations.
+
 Release configuration is `config/desktop-release.json`. The private EdDSA key belongs in the release machine's login Keychain, account `linkshell-desktop`; it must not be committed or regenerated for subsequent releases. Stable is the default; beta opts into Sparkle's `beta` channel as well as stable updates. Feed publication is separate from local packaging:
 
 ```sh

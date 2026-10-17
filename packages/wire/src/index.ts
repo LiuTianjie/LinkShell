@@ -16,3 +16,4 @@ export * from "./acp.js";
 export * from "./editor.js";
 export * from "./live-activity.js";
 export * from "./watch.js";
+export * from "./usage.js";

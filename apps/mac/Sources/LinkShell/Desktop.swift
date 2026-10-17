@@ -39,8 +39,7 @@ import SwiftUI
     window.title = "LinkShell"
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
-    window.backgroundColor = NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 1)
-    window.appearance = NSAppearance(named: .darkAqua)
+    window.backgroundColor = .windowBackgroundColor
     window.contentView = root
     window.minSize = NSSize(width: 880, height: 650)
     window.isReleasedWhenClosed = false
