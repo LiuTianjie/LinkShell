@@ -114,6 +114,6 @@ APK="apps/client/build/release/LinkShell-${VERSION}.apk"
 if gh release view "$TAG" >/dev/null 2>&1; then
   gh release upload "$TAG" "$APK" "$AAB" --clobber
 else
-  gh release create "$TAG" "$APK" "$AAB" --title "LinkShell ${VERSION}" --notes "LinkShell ${VERSION}"
+  gh release create "$TAG" "$APK" "$AAB" --target "$(git rev-parse HEAD)" --title "LinkShell ${VERSION}" --notes "LinkShell ${VERSION}"
 fi
 echo "✓ Released $TAG (TestFlight + GitHub Release)"
