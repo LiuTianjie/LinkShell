@@ -141,6 +141,10 @@ HTTPS polling endpoint were verified. npm packages wire `0.2.14`, host `0.4.40`,
 gateway `0.6.20` and CLI `0.10.42` were published, downloaded and checked for
 correct dependency versions. Homebrew was updated, and the local Host was
 upgraded to CLI `0.10.42` with gateway reconnection and doctor checks passing.
+Android `2.3.33` APK and AAB were published in the
+[GitHub release](https://github.com/LiuTianjie/LinkShell/releases/tag/v2.3.33),
+with remote SHA-256 digests matching the local artifacts. The release tag points
+to the exact build commit `3b49ad5181e867690a9cf692ec87b14696427276`.
 The full release check passed build, typecheck, lint and 1,068 tests.
 
 For an iOS-only TestFlight build, run from the repository root:
