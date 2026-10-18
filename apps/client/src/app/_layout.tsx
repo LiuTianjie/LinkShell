@@ -176,7 +176,8 @@ export default function RootLayout() {
                     presentation: "formSheet",
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
-                    sheetAllowedDetents: [0.6, 0.92],
+                    sheetAllowedDetents: Platform.OS === "ios" && Platform.isPad ? [0.92] : [0.6, 0.92],
+                    sheetCornerRadius: 28,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}

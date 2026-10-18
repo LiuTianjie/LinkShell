@@ -332,9 +332,11 @@ function HomeWorkspace() {
   const foldLayout = useMemo(() => laptop ? { bottomReserved: bottom } : null, [laptop, bottom]);
   const motionGeometry = [geometry.revision, width, height, split, axis, folded, layout.before, layout.after, layout.gap, insets.top, insets.bottom, navigationTop, window.fontScale].join(":");
   const sidebarTop = Platform.OS === "ios" ? navigationTop : split ? insets.top : 0;
+  const padEmpty = Platform.OS === "ios" && Platform.isPad && split && !folded && !showDetail;
+  const activeSidebarWidth = padEmpty ? width : sidebarWidth;
   const sidebar: PaneFrame = axis === "column"
     ? { left: 0, top: sidebarTop, width, height: showSidebar ? Math.max(0, layout.before - sidebarTop) : 0 }
-    : { left: 0, top: sidebarTop, width: showSidebar ? split ? sidebarWidth : width : 0, height: Math.max(0, height - sidebarTop) };
+    : { left: 0, top: sidebarTop, width: showSidebar ? split ? activeSidebarWidth : width : 0, height: Math.max(0, height - sidebarTop) };
   const detailVisible = showDetail && (split || !showTools);
   const detailLeft = folded && axis === "row" && !showSidebar && !showTools ? layout.before + layout.gap : showSidebar && split && axis === "row" ? sidebarWidth + gap : 0;
   const toolWidth = Math.max(0, split ? layout.after - 12 : width);
@@ -369,7 +371,7 @@ function HomeWorkspace() {
       </> : null}
       <View onLayout={geometry.onLayout} style={{ flex: 1, overflow: "hidden" }}>
         <LayoutProbe onMetrics={geometry.onMetrics} revision={geometry.revision} />
-        <MountedMotionPane frame={sidebar} visible={showSidebar} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "row" ? sidebarWidth : width} style={{ zIndex: laptop ? 1 : 0 }}>
+        <MountedMotionPane frame={sidebar} visible={showSidebar} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "row" ? activeSidebarWidth : width} style={{ zIndex: laptop ? 1 : 0 }}>
           <HomeList onSelect={select} selectedId={showDetail ? selected?.id : undefined} compact={split} inlineControls={inlineControls} />
         </MountedMotionPane>
           <MountedMotionPane frame={detail} visible={detailVisible} action={motionAction} geometry={motionGeometry} style={{ borderRadius: split ? 28 : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
@@ -488,9 +490,17 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
             </View>
           );
         case "row":
-          return <SessionRow session={item.session} position={compact ? "only" : item.position} now={now} onPress={() => onSelect(item.session.id)} selected={selectedId === item.session.id} />;
+          return (
+            <View style={compact && item.position !== "last" && item.position !== "only" ? { paddingBottom: 8 } : undefined}>
+              <SessionRow session={item.session} position={compact ? "only" : item.position} now={now} onPress={() => onSelect(item.session.id)} selected={selectedId === item.session.id} />
+            </View>
+          );
         case "terminal":
-          return <TerminalRow terminal={item.terminal} position={item.position} now={now} />;
+          return (
+            <View style={compact && item.position !== "last" && item.position !== "only" ? { paddingBottom: 8 } : undefined}>
+              <TerminalRow terminal={item.terminal} position={compact ? "only" : item.position} now={now} />
+            </View>
+          );
       }
     },
     [now, compact, onSelect, selectedId],
@@ -509,6 +519,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
     }
   }, [liveActivityPayload.deepLink, onSelect]);
 
+  const padCenteredEmpty = Platform.OS === "ios" && Platform.isPad && compact && (!loaded || empty);
+
   return (
     <>
       <LegendList
@@ -525,6 +537,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         contentContainerStyle={{
           paddingHorizontal: compact ? 12 : 16,
           paddingBottom: 32 + tabInset,
+          ...(padCenteredEmpty ? { maxWidth: 480, width: "100%", alignSelf: "center" } : {}),
         }}
         style={{ flex: 1, backgroundColor: colors.background }}
         refreshing={refreshing}

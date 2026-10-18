@@ -390,7 +390,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <HeaderActions
         actions={[
           ...toolbarActions,
-          ...(changeCount > 0
+          ...(changeCount > 0 && !toolbarActions.some((action) => action.key === "changes")
             ? [
                 {
                   kind: "button" as const,
