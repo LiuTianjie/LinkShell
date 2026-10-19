@@ -68,7 +68,7 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
 
 ## Install on your computer
 
-**Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
+**Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
 
 **macOS or Linux: the CLI** (Node.js 22.13 or newer).
 

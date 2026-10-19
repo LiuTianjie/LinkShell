@@ -68,7 +68,7 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 
 ## 在电脑上安装
 
-**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
+**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
 
 **macOS 或 Linux：CLI**（Node.js 22.13 或更新版本）。
 
