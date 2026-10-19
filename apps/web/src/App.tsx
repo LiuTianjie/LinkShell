@@ -70,6 +70,7 @@ import { Terminals } from "./live/Terminal";
 import { Worktrees } from "./live/Panels";
 import { Screens, ScreenDetail } from "./live/Screens";
 import { screenView, screenComputerKey } from "./live/screen-route";
+import { ScreenSessionSlot } from "./live/screen-session-slot";
 import { Ports } from "./live/Ports";
 import { ConsoleShell } from "./components/ConsoleShell";
 import { readLocal, saveLocal } from "./live/storage";
@@ -160,6 +161,20 @@ function LiveApp() {
           </Button>
         </div>
       )}
+      <ScreenSessionSlot
+        key={state.accountUserId ?? "paired"}
+        activeKey={screenComputerKey(view)}
+        selectedKey={state.connection?.computer.key}
+        enabled={!state.locked}
+      >
+        {(computerKey, active) => (
+          <ScreenDetail
+            computerKey={computerKey}
+            active={active}
+            back={() => navigate("screen")}
+          />
+        )}
+      </ScreenSessionSlot>
       {state.locked ? (
         <div className="welcome-live">
           <h1>工作台已在另一个标签页打开</h1>
@@ -178,13 +193,7 @@ function LiveApp() {
             navigate(screenView(computer.key));
           }}
         />
-      ) : screenComputerKey(view) ? (
-        <ScreenDetail
-          key={view}
-          computerKey={screenComputerKey(view)!}
-          back={() => navigate("screen")}
-        />
-      ) : state.connection ? (
+      ) : screenComputerKey(view) ? null : state.connection ? (
         <Runtime value={state.connection}>
           <Workspace
             key={state.connection.computer.key}

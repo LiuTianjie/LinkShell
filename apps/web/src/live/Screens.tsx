@@ -263,11 +263,13 @@ function ConnectedScreen({
   primaryAction,
   open,
   detail = false,
+  active = true,
 }: {
   name: string;
   primaryAction?: boolean;
   open?: () => void;
   detail?: boolean;
+  active?: boolean;
 }) {
   const status = useClient((state) => state.status);
   const statusDetail = useClient((state) => state.statusDetail);
@@ -280,6 +282,7 @@ function ConnectedScreen({
         primaryAction={primaryAction}
         onOpen={open}
         autoStart={detail}
+        active={active}
       />
     );
   return (
@@ -334,9 +337,11 @@ function useScreenConnection(computer?: Computer) {
 export function ScreenDetail({
   computerKey,
   back,
+  active = true,
 }: {
   computerKey: string;
   back: () => void;
+  active?: boolean;
 }) {
   const computer = useStore(engine.state, (state) =>
     state.computers.find((item) => item.key === computerKey),
@@ -349,13 +354,13 @@ export function ScreenDetail({
     (state) => state.connection?.computer.key,
   );
   useEffect(() => {
-    if (!computer?.machine.online || selectedKey === computer.key) return;
+    if (!active || !computer?.machine.online || selectedKey === computer.key) return;
     try {
       engine.select(computer);
     } catch (reason) {
       engine.report(reason);
     }
-  }, [computer, selectedKey]);
+  }, [active, computer, selectedKey]);
   const name = computer ? computerName(computer, names) : "远程桌面";
   return (
     <div className="screen-detail-page">
@@ -410,7 +415,7 @@ export function ScreenDetail({
         </EmptyState>
       ) : connection ? (
         <Runtime value={connection}>
-          <ConnectedScreen name={name} detail />
+          <ConnectedScreen name={name} detail active={active} />
         </Runtime>
       ) : (
         <Skeleton className="h-96 w-full" />

@@ -13,6 +13,11 @@ final class ScreenControlsBridge: NSObject, WKScriptMessageHandler {
     self.receive = receive
   }
 
+  func detach() {
+    webView?.configuration.userContentController.removeScriptMessageHandler(forName: Self.name)
+    webView = nil
+  }
+
   func attach(in root: UIView) -> Bool {
     func find(_ view: UIView) -> WKWebView? {
       if let web = view as? WKWebView { return web }
@@ -21,7 +26,7 @@ final class ScreenControlsBridge: NSObject, WKScriptMessageHandler {
     }
     guard let next = find(root) else { return false }
     guard webView !== next else { return true }
-    webView?.configuration.userContentController.removeScriptMessageHandler(forName: Self.name)
+    detach()
     webView = next
     next.configuration.userContentController.removeScriptMessageHandler(forName: Self.name)
     next.configuration.userContentController.add(self, name: Self.name)
@@ -31,7 +36,7 @@ final class ScreenControlsBridge: NSObject, WKScriptMessageHandler {
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-    guard message.name == Self.name, message.frameInfo.isMainFrame,
+    guard message.name == Self.name, message.webView === webView, message.frameInfo.isMainFrame,
           let expectedURL, let source = message.frameInfo.request.url,
           source.scheme == "http", source.host == "127.0.0.1", source.port == expectedURL.port,
           let body = message.body as? [String: Any] else { return }
@@ -42,5 +47,11 @@ final class ScreenControlsBridge: NSObject, WKScriptMessageHandler {
     guard let data = try? JSONSerialization.data(withJSONObject: value),
           let json = String(data: data, encoding: .utf8) else { return }
     webView?.evaluateJavaScript("window.linkshellNative && window.linkshellNative.\(method)(\(json)); true;", completionHandler: nil)
+  }
+
+  func session(_ value: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: value),
+          let json = String(data: data, encoding: .utf8) else { return }
+    webView?.evaluateJavaScript("window.linkshellSession && window.linkshellSession(\(json)); true;", completionHandler: nil)
   }
 }

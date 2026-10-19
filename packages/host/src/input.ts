@@ -55,6 +55,8 @@ export interface HelperStatus {
   app: string;
   /** The app can send the screen as a video track (it carries the media engine). */
   video: boolean;
+  /** Capture and input can be paused or changed without replacing the video connection. */
+  videoReconfigure: boolean;
   preview: boolean;
 }
 
@@ -78,6 +80,8 @@ export interface StreamProfile {
 
 /** A stream under way. */
 export interface AppStream {
+  /** The first encoder generation is ready; these are its actual encoded dimensions. */
+  ready: Promise<{ width: number; height: number; fps: number }>;
   /** Another profile, without stopping: a new size starts a new generation, at a keyframe. */
   set(profile: StreamProfile): void;
   /** The next frame a keyframe. */
@@ -99,6 +103,33 @@ export interface VideoOffer {
   /** "hevc": offered first, H.264 after, for a receiver that decodes it. Older apps ignore it and send H.264. */
   codec?: "hevc";
 }
+
+export interface VideoConfiguration {
+  requestId: number;
+  screen: number;
+  maxWidth: number;
+  maxFps?: number;
+  paused: boolean;
+  inputGeneration?: number;
+}
+
+export interface VideoConfigured {
+  screen: number;
+  width: number;
+  height: number;
+  maxFps: number;
+  paused: boolean;
+  generation?: number;
+}
+
+const videoConfigured = z.object({
+  screen: z.number().int().nonnegative(),
+  width: z.number().int().min(2).max(3840),
+  height: z.number().int().min(2).max(16384),
+  maxFps: z.number().int().min(1).max(120),
+  paused: z.boolean(),
+  generation: z.number().int().nonnegative().safe().optional(),
+});
 
 /** What a viewer answers the app's offer with, and the candidates it finds. */
 export type VideoSignal =
@@ -213,6 +244,7 @@ function statusOf(message: Record<string, unknown>): HelperStatus {
     recording: message.recording === true,
     app: typeof message.app === "string" ? message.app : "",
     video: message.video === true,
+    videoReconfigure: message.videoReconfigure === true,
     preview: message.preview === true,
   };
 }
@@ -248,13 +280,14 @@ function displaysOf(list: unknown): AppDisplay[] {
 
 type Route = (message: Record<string, unknown>) => void;
 
-class HelperApp {
+export class HelperApp {
   private server?: Server;
   private socket?: Socket;
   private opening?: Promise<Socket>;
   private status?: HelperStatus;
   private readonly routes = new Map<string, Route>();
   private readonly watchers = new Set<(status: HelperStatus) => void>();
+  private readonly configuring = new Map<string, Map<number, { resolve(value: VideoConfigured): void; reject(error: Error): void }>>();
   private waiting: { resolve(status: HelperStatus): void; reject(error: Error): void }[] = [];
   private listing: ((displays: AppDisplay[]) => void)[] = [];
 
@@ -311,6 +344,7 @@ class HelperApp {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.status = undefined;
+      for (const id of this.configuring.keys()) this.cancelConfigurations(id);
       // The app went (quit, or crashed): each viewer hears it, and the next one to ask opens it again.
       for (const route of this.routes.values()) route({ t: "gone" });
       this.routes.clear();
@@ -335,6 +369,15 @@ class HelperApp {
         const displays = displaysOf(message.list);
         for (const waiter of this.listing.splice(0)) waiter(displays);
       } else if (typeof message.v === "string") {
+        const waiting = typeof message.requestId === "number" ? this.configuring.get(message.v)?.get(message.requestId) : undefined;
+        if (waiting && (message.t === "rtc.configured" || message.t === "rtc.configure.error")) {
+          if (message.t === "rtc.configure.error") waiting.reject(new Error("屏幕设置未能应用，请重试"));
+          else {
+            const result = videoConfigured.safeParse(message);
+            if (result.success) waiting.resolve(result.data);
+            else waiting.reject(new Error("电脑返回的屏幕设置无效，请重试"));
+          }
+        }
         this.routes.get(message.v)?.(message);
       }
     });
@@ -384,6 +427,12 @@ class HelperApp {
     const id = `stream-${randomBytes(6).toString("hex")}`;
     const path = join(tmpdir(), `linkshell-stream-${process.pid}-${randomBytes(4).toString("hex")}.sock`);
     let over = false;
+    let announced = false;
+    let readyResolve!: (size: { width: number; height: number; fps: number }) => void;
+    let readyReject!: (error: Error) => void;
+    const ready = new Promise<{ width: number; height: number; fps: number }>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+    // A viewer can close while stream.open itself is still being written.
+    void ready.catch(() => {});
     let pending: Buffer = Buffer.alloc(0);
     const server = createServer((socket) => {
       server.close();
@@ -409,12 +458,19 @@ class HelperApp {
     };
     const finish = () => {
       over = true;
+      if (!announced) readyReject(new Error("屏幕捕获未能启动"));
       this.routes.delete(id);
       server.close();
       rmSync(path, { force: true });
     };
     this.routes.set(id, (message) => {
-      if (over || (message.t !== "stream.ended" && message.t !== "gone")) return;
+      if (over) return;
+      if (message.t === "stream.started") {
+        const size = z.object({ width: z.number().int().positive(), height: z.number().int().positive(), fps: z.number().positive() }).safeParse(message);
+        if (size.success) { announced = true; readyResolve(size.data); }
+        return;
+      }
+      if (message.t !== "stream.ended" && message.t !== "gone") return;
       finish();
       on.exit(typeof message.error === "string" ? message.error : message.t === "gone" ? "LinkShell.app went" : undefined);
     });
@@ -425,8 +481,10 @@ class HelperApp {
         resolve();
       });
     });
-    await this.write({ t: "stream.open", v: id, screen, socket: path, gop: STREAM_GOP_SECONDS, ...profile });
+    try { await this.write({ t: "stream.open", v: id, screen, socket: path, gop: STREAM_GOP_SECONDS, ...profile }); }
+    catch (error) { finish(); throw error; }
     return {
+      ready,
       set: (next) => tellApp({ t: "stream.set", ...next }),
       key: () => tellApp({ t: "stream.key" }),
       end: () => {
@@ -475,7 +533,36 @@ class HelperApp {
     if (this.socket && !this.socket.destroyed && this.routes.has(id)) this.socket.write(`${JSON.stringify({ ...signal, v: id })}\n`);
   }
 
+  configureVideo(id: string, configuration: VideoConfiguration): Promise<VideoConfigured> {
+    if (!this.socket || this.socket.destroyed || !this.routes.has(id)) return Promise.reject(new Error("屏幕连接已断开"));
+    return new Promise((resolve, reject) => {
+      const requests = this.configuring.get(id) ?? new Map();
+      this.configuring.set(id, requests);
+      const finish = () => {
+        clearTimeout(timer);
+        requests.delete(configuration.requestId);
+        if (!requests.size) this.configuring.delete(id);
+      };
+      const timer = setTimeout(() => {
+        finish();
+        reject(new Error("应用屏幕设置超时，请重试"));
+      }, 15_000);
+      timer.unref();
+      requests.set(configuration.requestId, {
+        resolve: (value: VideoConfigured) => { finish(); resolve(value); },
+        reject: (error: Error) => { finish(); reject(error); },
+      });
+      try { this.socket!.write(`${JSON.stringify({ t: "rtc.configure", v: id, ...configuration })}\n`); }
+      catch (error) { finish(); reject(error); }
+    });
+  }
+
+  private cancelConfigurations(id: string): void {
+    for (const request of this.configuring.get(id)?.values() ?? []) request.reject(new Error("屏幕连接已断开"));
+  }
+
   endVideo(id: string): void {
+    this.cancelConfigurations(id);
     if (!this.routes.delete(id)) return;
     if (this.socket && !this.socket.destroyed) this.socket.write(`${JSON.stringify({ t: "rtc.close", v: id })}\n`);
   }
@@ -528,8 +615,6 @@ export function previewApp(log: (message: string) => void): HelperApp | undefine
   const app = shippedApp();
   return app ? new HelperApp(app, false, log) : undefined;
 }
-export type { HelperApp };
-
 // ── One viewer's control of one display ─────────────────────────────
 
 export class InputControl {
@@ -575,11 +660,14 @@ export class InputControl {
   private async joinApp(app: HelperApp, screen: number): Promise<void> {
     const id = randomBytes(6).toString("hex");
     let named = "";
-    const watcher = (status: HelperStatus) => this.listener.state({ available: true, trusted: status.trusted, app: named || status.app });
+    const watcher = (status: HelperStatus) => { if (!this.stopped) this.listener.state({ available: true, trusted: status.trusted, app: named || status.app }); };
     await app.join(
       id,
       screen,
       (message) => {
+        // Teardown still reports the button/modifier releases in dry runs. These are
+        // diagnostics only; late permissions and cursor events must stay suppressed.
+        if (this.stopped && message.t !== "posted") return;
         if (message.t === "ready") {
           named = typeof message.app === "string" ? message.app : "";
           this.listener.state({ available: true, trusted: message.trusted === true, app: named });
@@ -599,6 +687,7 @@ export class InputControl {
     const child = spawn(path, [String(screen), ...(dryRun ? ["--dry-run"] : [])], { stdio: ["pipe", "pipe", "ignore"] });
     this.child = child;
     child.on("error", (error) => {
+      if (this.stopped) return;
       this.log(`[screen] the input helper did not start: ${error.message}`);
       this.listener.state({ available: false, reason: "控制组件没能启动" });
     });
@@ -611,6 +700,7 @@ export class InputControl {
     createInterface({ input: child.stdout! }).on("line", (line) => {
       const message = parse(line);
       if (!message) return;
+      if (this.stopped && message.t !== "posted") return;
       if (message.t === "ready") {
         named = typeof message.app === "string" ? message.app : "";
         this.listener.state({ available: true, trusted: message.trusted === true, app: named });
@@ -626,6 +716,7 @@ export class InputControl {
 
   /** Passes on one event from the viewer; anything that is not one is dropped. */
   send(raw: unknown): void {
+    if (this.stopped) return;
     const parsed = inputEvent.safeParse(raw);
     if (!parsed.success) return;
     if (this.joined) {

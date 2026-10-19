@@ -138,6 +138,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **Precision at your fingertips.** Move slowly to place the pointer exactly, or swipe quickly across the desktop. Choose trackpad control or touch the spot you want to click. Right click, scroll and drag are all within reach.
 - **Desktop shortcuts, one tap away.** Copy, paste, switch apps, open Mission Control, take a screenshot or send a function key. Compose longer text on the phone and send it over, including text from your clipboard.
 - **A whole desk on a small screen.** Switch between your Mac's displays, turn the phone to landscape, go full screen and pinch to zoom. Move between the big picture and the detail you need.
+- **Keep the connection when you switch.** Changing displays or quality keeps the established screen connection. Visit another page in the app or web workspace and return within two minutes to resume; capture pauses while you are away. Backgrounding or a disconnect requires a new connection. [Connection reuse and compatibility](docs/v2/screen-realtime.md#21-切屏与短暂离开的连接复用).
 
 Full control requires macOS 13 or later; Linux supports viewing. Available resolution, refresh rate and responsiveness depend on both devices, the source display and the network.
 

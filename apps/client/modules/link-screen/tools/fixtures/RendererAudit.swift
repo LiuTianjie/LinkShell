@@ -25,6 +25,11 @@ final class RenderScene: UIResponder, UIWindowSceneDelegate {
   var counter = 0
   var rows: [[String: Any]] = []
   var began = 0.0
+  #if SCREEN_RENDER_PAUSE_CHECK
+  let producing = ScreenShared(true)
+  let phase = ScreenShared("live")
+  let pictures = ScreenShared<[String: Int]>([:])
+  #endif
 
   func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
     guard let scene = scene as? UIWindowScene else { return }
@@ -37,6 +42,12 @@ final class RenderScene: UIResponder, UIWindowSceneDelegate {
     screen.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     screen.showsPointer = false
     screen.onFailure = { [failures] message in failures.update { $0.append(message) } }
+    #if SCREEN_RENDER_PAUSE_CHECK
+    screen.onPicture = { [phase, pictures] _ in
+      let name = phase.read()
+      pictures.update { $0[name, default: 0] += 1 }
+    }
+    #endif
     root.view.addSubview(screen)
     self.window = window; self.screen = screen
     sink.update { $0 = screen }
@@ -62,8 +73,40 @@ final class RenderScene: UIResponder, UIWindowSceneDelegate {
       Thread.sleep(forTimeInterval: 0.6)
       blocked.update { $0 = false }
     }
+    #if SCREEN_RENDER_PAUSE_CHECK
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+      guard let self else { return }
+      producing.update { $0 = false }; phase.update { $0 = "paused" }
+      screen.pause()
+      // A presentation change would submit again if pause left its display link running.
+      screen.zoom = 1.1
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4.4) { [weak self] in
+      guard let self else { return }
+      phase.update { $0 = "cached-resume" }; screen.start(fps: 60)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4.7) { [weak self] in
+      guard let self else { return }
+      if pictures.read()["cached-resume", default: 0] == 0 {
+        failures.update { $0.append("Resuming did not redraw the retained picture without a new frame") }
+      }
+      phase.update { $0 = "stopped" }; screen.stop()
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4.9) { [weak self] in
+      guard let self else { return }
+      phase.update { $0 = "cleared-resume" }; screen.start(fps: 60)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.2) { [weak self] in
+      guard let self else { return }
+      if pictures.read()["cleared-resume", default: 0] != 0 {
+        failures.update { $0.append("Stopping retained a picture that was replayed by the next start") }
+      }
+      phase.update { $0 = "live" }; producing.update { $0 = true }
+    }
+    #else
     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.screen?.stop() }
     DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) { [weak self] in self?.screen?.start(fps: 60) }
+    #endif
     DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
       self?.screen?.zoom = 1.3; self?.screen?.pan = CGPoint(x: 12, y: 8)
       self?.screen?.setNeedsLayout()
@@ -82,6 +125,9 @@ final class RenderScene: UIResponder, UIWindowSceneDelegate {
   }
 
   func produce() {
+    #if SCREEN_RENDER_PAUSE_CHECK
+    guard producing.read() else { return }
+    #endif
     guard let pool else { return }
     var made: CVPixelBuffer?
     guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made) == kCVReturnSuccess, let made else { return }
@@ -106,6 +152,12 @@ final class RenderScene: UIResponder, UIWindowSceneDelegate {
     let elapsed = ProcessInfo.processInfo.systemUptime - began
     var row = metrics.snapshot(seconds: 0.1)
     row["second"] = elapsed; row["blocked"] = blocked.read()
+    #if SCREEN_RENDER_PAUSE_CHECK
+    row["phase"] = phase.read()
+    if elapsed > 4.15, row["phase"] as? String == "paused", (row["gpuSubmissions"] as? Int ?? 0) > 0 {
+      failures.update { $0.append("A paused renderer submitted another picture") }
+    }
+    #endif
     rows.append(row)
     if elapsed >= 7 {
       timer?.cancel(); sampling?.cancel()

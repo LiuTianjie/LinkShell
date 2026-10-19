@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import { ClientProvider } from "@/lib/client";
+import { ScreenSessionProvider } from "@/lib/screen-session";
 import { IOSAttentionSync } from "@/components/ios-attention-sync";
 import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
 import { colors, palette } from "@/theme/colors";
@@ -25,6 +26,7 @@ export default function RootLayout() {
       <KeyboardProvider>
         <ThemeProvider value={scheme === "dark" ? dark : light}>
           <ClientProvider>
+            <ScreenSessionProvider>
             {Platform.OS === "ios" ? <IOSAttentionSync /> : null}
             {Platform.OS === "ios" ? <LiveActivityActionNavigation /> : null}
             {/* Android's literal theme colors must reach memoized rows and native
@@ -184,6 +186,7 @@ export default function RootLayout() {
                 />
               </Stack>
             </Fragment>
+            </ScreenSessionProvider>
           </ClientProvider>
         </ThemeProvider>
       </KeyboardProvider>

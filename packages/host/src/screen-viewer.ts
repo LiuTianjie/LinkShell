@@ -426,6 +426,132 @@ function cleanShortcuts(list) {
   }
   return out;
 }
+
+/** A configuration belongs to this socket; only its latest acknowledgement may restore input. */
+function createScreenSession(initial, effects) {
+  let desired = { active: true, display: 0, width: "1920" }, hidden = false;
+  let capabilities = null, opened = false, closed = false, scheduled = false;
+  let requestId = 0, pending = null, sentKey = "", error = "", inputReady = true, generation;
+  const clean = (next) => {
+    const out = {};
+    if (!next || typeof next !== "object") return out;
+    if (typeof next.active === "boolean") out.active = next.active;
+    if (Number.isSafeInteger(next.display) && next.display >= 0) out.display = next.display;
+    if (next.width === "native") out.width = "native";
+    else if ((typeof next.width === "string" || typeof next.width === "number") && Number.isInteger(Number(next.width)) && Number(next.width) >= 640 && Number(next.width) <= 3840) out.width = String(Number(next.width));
+    if ([30, 60, 120].includes(next.maxFps)) out.maxFps = next.maxFps;
+    return out;
+  };
+  desired = Object.assign(desired, clean(initial));
+  const original = { ...desired };
+  const state = () => ({ display: desired.display, width: desired.width, ...(desired.maxFps ? { maxFps: desired.maxFps } : {}), paused: !desired.active || hidden });
+  const key = () => JSON.stringify(state());
+  const targetChanged = () => ["display", "width", "maxFps"].some((name) => desired[name] !== original[name]);
+  const changed = () => effects.changed?.({ ...desired, paused: state().paused, inputReady, error });
+  const suspend = () => { effects.release(); inputReady = false; };
+  const pump = () => {
+    scheduled = false;
+    if (closed || !opened || !capabilities) return;
+    const next = state(), nextKey = key();
+    if (capabilities.configure) {
+      if (nextKey === sentKey) return;
+      suspend();
+      sentKey = nextKey;
+      pending = { requestId: ++requestId, key: nextKey, ...next };
+      effects.send({ t: "screen.configure", requestId, ...next });
+    } else {
+      if (targetChanged() && !next.paused) {
+        if (nextKey !== sentKey) effects.reload({ display: desired.display, width: desired.width, maxFps: desired.maxFps });
+        inputReady = false;
+      } else inputReady = !next.paused;
+      sentKey = nextKey;
+    }
+    changed();
+  };
+  const schedule = () => {
+    if (!scheduled && !closed) { scheduled = true; effects.defer(pump); }
+  };
+  return {
+    desired: () => ({ ...desired }),
+    active: () => !closed && !state().paused,
+    canInput: () => !closed && !state().paused && inputReady,
+    generation: () => generation,
+    supported: () => capabilities?.configure === true,
+    known: () => capabilities !== null,
+    open() {
+      if (closed) return;
+      opened = true;
+      if (state().paused) { suspend(); effects.send({ t: "hidden" }); }
+      schedule();
+    },
+    update(next) {
+      if (closed) return;
+      const before = key();
+      desired = Object.assign({}, desired, clean(next));
+      if (key() === before && !error) return;
+      suspend();
+      // A pause can reach the native receiver before this microtask runs. Even a
+      // quick return to the same target needs a fresh apply and input generation.
+      pending = null;
+      sentKey = "";
+      error = "";
+      if (!capabilities?.configure && opened && state().paused !== JSON.parse(before).paused) effects.send({ t: state().paused ? "hidden" : "shown" });
+      changed();
+      schedule();
+    },
+    visibility(nextHidden) {
+      if (closed || hidden === nextHidden) return;
+      hidden = nextHidden;
+      suspend();
+      pending = null;
+      sentKey = "";
+      error = "";
+      if (!capabilities?.configure && opened) effects.send({ t: state().paused ? "hidden" : "shown" });
+      changed();
+      schedule();
+    },
+    receive(message) {
+      if (closed || !message || typeof message !== "object") return;
+      if (message.t === "capabilities") {
+        capabilities = { ...message, configure: message.version === 1 && message.configure === true, pause: message.version === 1 && message.pause === true };
+        sentKey = "";
+        pending = null;
+        if (capabilities.configure || state().paused || targetChanged()) suspend();
+        else inputReady = true;
+        effects.report(capabilities);
+        changed();
+        schedule();
+        return;
+      }
+      if (!pending || message.requestId !== pending.requestId || pending.key !== key()) return;
+      if (message.t !== "configured" && message.t !== "error") return;
+      if (message.t === "configured" && (message.display !== pending.display || message.paused !== pending.paused || !Number.isSafeInteger(message.generation) || message.generation < 0)) return;
+      inputReady = message.t === "configured" && !message.paused;
+      if (message.t === "configured") generation = message.generation;
+      error = message.t === "error" ? message.message || "屏幕配置失败，请重试" : "";
+      pending = null;
+      if (error) sentKey = "";
+      effects.report(message);
+      changed();
+    },
+    close() {
+      if (closed) return;
+      suspend();
+      closed = true;
+      pending = null;
+      changed();
+    },
+    reconnect() {
+      if (closed) return;
+      suspend();
+      capabilities = pending = null;
+      generation = undefined;
+      sentKey = "";
+      error = "";
+      changed();
+    },
+  };
+}
 `;
 
 const BODY = String.raw`
@@ -436,6 +562,11 @@ const sheet = $("sheet"), actions = $("actions"), maker = $("maker"), naming = $
 const query = new URLSearchParams(location.search);
 const app = window.ReactNativeWebView;
 const tellApp = (message) => { if (app) app.postMessage(JSON.stringify(message)); };
+const tellSession = (session) => {
+  const message = { type: "screenSession", session };
+  tellApp(message);
+  if (typeof window.__linkshellSession === "function") window.__linkshellSession(message);
+};
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const coarse = matchMedia("(pointer: coarse)").matches;
 const android = /Android/i.test(navigator.userAgent);
@@ -448,7 +579,7 @@ const HINTS = {
 };
 let stored = null;
 try { stored = localStorage.getItem("linkshell.screen.mode"); } catch {}
-let mode = MODES.includes(query.get("mode")) ? query.get("mode") : MODES.includes(stored) ? stored : "view";
+let mode = MODES.includes(query.get("mode")) ? query.get("mode") : MODES.includes(window.__linkshellChrome?.mode) ? window.__linkshellChrome.mode : MODES.includes(stored) ? stored : "view";
 
 // What the app around the page has done to the phone's screen. A page in a plain browser has none of it.
 // "clear" is the side of a phone lying down that has no camera in it.
@@ -470,7 +601,8 @@ const mods = new Set();
 
 // ---- The picture ----------------------------------------------------------
 
-const say = (text) => { note.textContent = text; note.classList.toggle("gone", !text); };
+let sessionError = "";
+const say = (text) => { text = sessionError || text; note.textContent = text; note.classList.toggle("gone", !text); };
 const round = (value, digits) => (value == null || !isFinite(value) ? null : +value.toFixed(digits === undefined ? 1 : digits));
 const hex = (n) => n.toString(16).padStart(2, "0");
 function sps(unit) {
@@ -505,12 +637,35 @@ const asked = new URLSearchParams(location.search);
 asked.delete("video");
 if (wantVideo) asked.set("video", "1");
 // How wide the video track may be (the socket's picture has its own ladder). The app says it in the address;
-// a plain browser remembers its own. A new choice loads the page again with it: the track is offered anew.
+// a plain browser remembers its own. A capable host applies a new choice to this same track.
 const WIDTHS = ["1280", "1920", "2560", "native"];
 let keptWidth = null;
 try { keptWidth = localStorage.getItem("linkshell.screen.width"); } catch {}
-const width = WIDTHS.includes(query.get("width")) ? query.get("width") : WIDTHS.includes(keptWidth) ? keptWidth : "1920";
+let width = WIDTHS.includes(query.get("width")) ? query.get("width") : WIDTHS.includes(keptWidth) ? keptWidth : "1920";
+const initialSession = typeof window.__linkshellSession === "object" && window.__linkshellSession ? window.__linkshellSession : {};
+const session = createScreenSession({ active: true, display: Number(query.get("display")) || 0, width, maxFps: Number(query.get("maxFps")) || undefined, ...initialSession }, {
+  send: (message) => send(message),
+  defer: (action) => Promise.resolve().then(action),
+  release: () => releaseInput(),
+  report: tellSession,
+  reload: (state) => reloadSession(state),
+  changed: (state) => {
+    width = state.width;
+    const previousError = sessionError;
+    sessionError = state.error;
+    if (sessionError) say(sessionError);
+    else if (state.paused) say("屏幕已暂停");
+    else if (!state.inputReady) say("正在调整屏幕…");
+    else if (previousError || note.textContent === "屏幕已暂停" || note.textContent === "正在调整屏幕…") say("");
+    if (state.inputReady && mode !== "view") askControl();
+    refreshWidths();
+    refresh();
+  },
+});
+width = session.desired().width;
 asked.set("width", width);
+asked.set("display", String(session.desired().display));
+if (session.desired().maxFps) asked.set("maxFps", String(session.desired().maxFps));
 // A page that is a srcdoc (the gateway's web client puts it in one) has no address of its own to load again:
 // it asks the page around it to, where that page says it can, and offers no choice where it can't.
 const framed = document.URL === "about:srcdoc";
@@ -521,10 +676,34 @@ const ws = nativePicture
   : new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
-ws.onopen = () => { if (mode !== "view") askControl(); if (document.hidden) send({ t: "hidden" }); };
+let capabilityTimer = 0, socketClosed = false;
+function waitForCapabilities() {
+  clearTimeout(capabilityTimer);
+  capabilityTimer = setTimeout(() => {
+    if (!session.known()) session.receive({ t: "capabilities", version: 1, configure: false, pause: false, retainMs: 0 });
+  }, 10000);
+}
+ws.onopen = () => { session.open(); waitForCapabilities(); if (mode !== "view") askControl(); };
 // Out of sight, a page answers late (its timers slow to one a second) and shows nothing: the host sends no
 // picture down the socket meanwhile, and starts again at a keyframe.
-document.addEventListener("visibilitychange", () => send({ t: document.hidden ? "hidden" : "shown" }));
+document.addEventListener("visibilitychange", () => session.visibility(document.hidden));
+window.linkshellSession = (state) => session.update(state);
+
+function reloadSession(state) {
+  if (nativePicture) return;
+  if (reloadVia) return reloadVia({ ...state, mode });
+  const next = new URLSearchParams(location.search);
+  for (const name of ["display", "width", "maxFps"]) if (state[name] !== undefined) next.set(name, String(state[name]));
+  next.set("mode", mode);
+  location.replace(location.pathname + "?" + next);
+}
+
+function refreshWidths() {
+  for (const tile of $("widths").querySelectorAll(".tile")) {
+    tile.classList.toggle("on", tile.dataset.width === width);
+    tile.setAttribute("aria-pressed", String(tile.dataset.width === width));
+  }
+}
 ws.onmessage = (event) => {
   if (typeof event.data === "string") return heard(JSON.parse(event.data));
   if (!("VideoDecoder" in window)) return;
@@ -565,14 +744,23 @@ ws.onmessage = (event) => {
   decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: seq, data: unit }));
 };
 ws.onclose = () => {
+  if (socketClosed) return;
+  socketClosed = true;
+  clearTimeout(capabilityTimer);
+  session.close();
   // A video track is this socket's: without the one there is no finding the other again, and no hands.
   drop();
   if (requestRelay()) return;
+  tellApp({ type: "screenClosed" });
   if (blocked || note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开");
   blocked = false;
 };
 
 function heard(message) {
+  if (message.session) {
+    if (message.session.t === "capabilities") clearTimeout(capabilityTimer);
+    return session.receive(message.session);
+  }
   if (message.error) return say(message.error);
   if (message.rtc) return signal(message.rtc);
   if (message.pong) return meter && meter.pong(message.pong);
@@ -641,7 +829,7 @@ function signal(message) {
   if (!mine) return;
   if (message.t === "offer") {
     tried = true;
-    patience = setTimeout(() => giveUp("not connected within " + patienceSeconds + " s of the offer"), patienceSeconds * 1000);
+    patience = setTimeout(() => connectionPatience(mine), patienceSeconds * 1000);
     if (failAfter) setTimeout(() => { if (rtc === mine) giveUp("asked to (failAfter)"); }, failAfter * 1000);
     // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it.
     mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: message.sdp })
@@ -708,16 +896,23 @@ function watch(mine) {
 }
 
 function away(mine, since) {
+  if (rtc !== mine) return;
   // A page that was put aside (another app, another tab) could not hear the path come back: once it is
   // looked at again it is given the time again.
   const now = performance.now();
-  if (document.hidden || now - since > 6000) mine.away = setTimeout(() => away(mine, now), 4000);
+  if (!session.active() || now - since > 6000) mine.away = setTimeout(() => away(mine, now), 4000);
   else giveUp("disconnected for more than 4 s");
+}
+
+function connectionPatience(mine) {
+  if (rtc !== mine) return;
+  if (!session.active()) patience = setTimeout(() => connectionPatience(mine), patienceSeconds * 1000);
+  else giveUp("not connected within " + patienceSeconds + " s of the offer");
 }
 
 function frameless() {
   // A page nobody is looking at is shown nothing, and one waiting for a tap has not begun: neither is the path's doing.
-  if (document.hidden || blocked) patience = setTimeout(frameless, 4000);
+  if (!session.active() || blocked) patience = setTimeout(frameless, 4000);
   else giveUp("connected, but no frame within 4 s");
 }
 
@@ -865,6 +1060,7 @@ async function presentTrack(track) {
     if (mine.stopped || !mine.latest) return;
     const frame = mine.latest;
     mine.latest = null;
+    if (!session.active()) { frame.close(); return; }
     try {
       // The canvas carries the frame's own pixels; the layout gives it its place on the page.
       if (gpu.width !== frame.displayWidth || gpu.height !== frame.displayHeight) {
@@ -920,6 +1116,7 @@ async function presentTrack(track) {
           if (value) value.close();
           break;
         }
+        if (!session.active()) { value.close(); continue; }
         if (mine.latest) {
           mine.latest.close();
           mine.dropped += 1;
@@ -1276,7 +1473,7 @@ function expandControls(open) {
 }
 function armControlsIdle() {
   clearTimeout(controls.timer);
-  if (!controlsMayCollapse() || controls.target === 0) return;
+  if (!session.active() || !controlsMayCollapse() || controls.target === 0) return;
   controls.timer = setTimeout(() => { if (controlsMayCollapse()) expandControls(false); }, 3000);
 }
 function layoutControls(safe, anchor) {
@@ -1316,7 +1513,7 @@ reducedMotion.addEventListener("change", () => {
 });
 orb.addEventListener("pointerdown", (event) => {
   event.preventDefault(); event.stopPropagation();
-  if (!controls.orb) return;
+  if (!session.active() || !controls.orb) return;
   try { orb.setPointerCapture(event.pointerId); } catch {}
   clearTimeout(controls.timer);
   controls.drag = { id: event.pointerId, x: event.clientX, y: event.clientY, origin: { ...controls.orb }, moved: false };
@@ -1548,12 +1745,12 @@ function panBy(dx, dy) {
 
 // ---- Sending --------------------------------------------------------------
 
-const controlling = () => mode !== "view" && control.available && control.trusted;
+const controlling = () => session.canInput() && mode !== "view" && control.available && control.trusted;
 
 function askControl() {
-  if (control.asked) return;
+  if (control.asked || !session.canInput()) return;
   control.asked = true;
-  send({ t: "control" });
+  send({ t: "control", ...(session.generation() !== undefined ? { screenGeneration: session.generation() } : {}) });
 }
 
 // Where an event travels: down the socket, in order, until a video's two channels to the app are open; then
@@ -1568,6 +1765,8 @@ function askControl() {
 // after something sent later.
 let wired = false, held = 0, sure = true, sent = 0, rest = 0, movedAt = -Infinity;
 const trail = [];
+const heldButtons = new Map();
+let inputEpoch = 0;
 
 function lanes() {
   if (nativePicture) { wired = true; return; }
@@ -1578,15 +1777,23 @@ function lanes() {
 }
 
 function post(message, lane) {
+  if (!session.canInput()) return;
+  if (session.generation() !== undefined) message.screenGeneration = session.generation();
+  transmitInput(message, lane);
+}
+
+function transmitInput(message, lane) {
   if (nativePicture) return nativePost({ kind: "input", message, replaceable: lane === "pointer" });
   if (!wired) return send(message);
   message.i = ++sent;
-  rtc.channels[lane].send(JSON.stringify(message));
+  const channel = rtc && rtc.channels[lane];
+  if (channel && channel.readyState === "open") channel.send(JSON.stringify(message));
 }
 
 let moveWaiting = false;
 /** Says where the pointer is: in order, when something is about to happen there. */
 function tell(placed) {
+  if (!session.canInput()) { moveWaiting = false; return; }
   lanes();
   moveWaiting = false;
   const now = performance.now(), lane = laneOf("move", placed, held > 0, false);
@@ -1603,6 +1810,7 @@ function tell(placed) {
 const flush = () => { if (moveWaiting) tell(false); };
 // A pointer position a frame: as often as the picture could show it.
 function moved() {
+  if (!session.canInput()) return;
   if (!moveWaiting) requestAnimationFrame(flush);
   moveWaiting = true;
   movedAt = performance.now();
@@ -1611,13 +1819,64 @@ function moved() {
 }
 // Everything else goes at once, after the position it happens at.
 function act(message) {
+  if (!session.canInput()) return;
   lanes();
   const placed = moveWaiting || !sure;
   if (placed) tell(true);
-  if (message.t === "down") held += 1;
+  if (message.t === "down") { heldButtons.set(message.b, { ...message }); held = heldButtons.size; }
   if (message.t === "scroll" && placed && gesture) gesture.tied = true;
   post(message, laneOf(message.t, placed, held > 0, !!gesture && !!gesture.tied));
-  if (message.t === "up") held = Math.max(0, held - 1);
+  if (message.t === "up") { heldButtons.delete(message.b); held = heldButtons.size; }
+}
+
+/** Input queued for the old display must never be replayed when the retained page is shown again. */
+function releaseInput() {
+  inputEpoch += 1;
+  control.asked = false;
+  lanes();
+  for (const button of heldButtons.values()) {
+    const released = { ...button, t: "up" };
+    if (session.generation() !== undefined) released.screenGeneration = session.generation();
+    transmitInput(released, "input");
+  }
+  heldButtons.clear();
+  held = 0;
+  sure = true;
+  moveWaiting = false;
+  clearTimeout(rest);
+  clearTimeout(fade);
+  clearTimeout(settling);
+  clearTimeout(toastTimer);
+  clearTimeout(disarming);
+  clearInterval(statusTimer);
+  clearTimeout(controls.timer);
+  if (gesture) clearTimeout(gesture.hold);
+  for (const id of touches.keys()) { try { stage.releasePointerCapture(id); } catch {} }
+  touches.clear();
+  gesture = lastTap = mouseHeld = null;
+  mouseClicks = { t: 0, n: 0, x: 0, y: 0, b: 0 };
+  movedAt = -Infinity;
+  trail.length = 0;
+  mods.clear();
+  composing = writing = false;
+  composed = "";
+  leftover = wanted = null;
+  askedAt = -Infinity;
+  keysOpen = false;
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  resetTyping();
+  shortcut.value = "";
+  disarm();
+  pointer.classList.remove("pressed", "on");
+  toast.classList.remove("on");
+  if (controls.drag) { try { orb.releasePointerCapture(controls.drag.id); } catch {} }
+  controls.drag = null;
+  for (const element of pressedControls) element.style.scale = "";
+  pressedControls.clear();
+  finishPresentation();
+  drawKeys();
+  clearTimeout(controls.timer);
+  clearTimeout(settling);
 }
 
 let fade = 0;
@@ -1693,7 +1952,7 @@ function endOne() {
 }
 
 stage.addEventListener("pointerdown", (event) => {
-  if (presentation.active) { event.preventDefault(); return; }
+  if (!session.active() || presentation.active) { event.preventDefault(); return; }
   if (!immersiveControls() || controls.target > 0) wake();
   // A touch that closes the menu, or the shortcuts, does nothing else.
   const closing = [closeMenu(), closeSheet()].some(Boolean);
@@ -1726,7 +1985,7 @@ stage.addEventListener("pointerdown", (event) => {
 });
 
 stage.addEventListener("pointermove", (event) => {
-  if (presentation.active) return;
+  if (!session.active() || presentation.active) return;
   if (event.pointerType === "mouse") return mouseMove(event);
   const touch = touches.get(event.pointerId);
   if (!touch || !gesture) return;
@@ -1858,7 +2117,7 @@ function mouseUp(event) {
 }
 stage.addEventListener("wheel", (event) => {
   event.preventDefault();
-  if (presentation.active) return;
+  if (!session.active() || presentation.active) return;
   if (controlling() && !event.ctrlKey) return act({ t: "scroll", dx: -event.deltaX, dy: -event.deltaY });
   zoomTo(zoom * Math.exp(-event.deltaY / 300), { x: event.clientX, y: event.clientY });
 }, { passive: false });
@@ -1996,6 +2255,7 @@ const keyboardShown = () => keyboardIsUp({
 
 /** Brings the phone's keyboard up for a field. Within a touch: a browser gives a keyboard to nothing else. */
 function ask(field, again) {
+  if (!session.canInput()) return;
   // A keyboard goes to the view the keys go to, and inside an app that is not always the page: the app
   // sees to it, and has the page ask once more (linkshellKeyboard) if no keyboard has come.
   if (!again) tellApp({ type: "keyboard" });
@@ -2061,7 +2321,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) sett
 
 /** A control that works on touch-up and never takes the focus (the keyboard stays as it is). */
 function tappable(element, action) {
-  element.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); wake(); pressFeedback(element, true); });
+  let epoch = -1;
+  element.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); if (!session.active()) return; epoch = inputEpoch; wake(); pressFeedback(element, true); });
   element.addEventListener("pointercancel", () => pressFeedback(element, false));
   element.addEventListener("pointerleave", () => pressFeedback(element, false));
   element.addEventListener("touchstart", (event) => event.preventDefault(), { passive: false });
@@ -2070,6 +2331,8 @@ function tappable(element, action) {
     event.preventDefault();
     event.stopPropagation();
     pressFeedback(element, false);
+    if (!session.active() || epoch !== inputEpoch) return;
+    epoch = -1;
     const box = element.getBoundingClientRect(), cx = box.left + box.width / 2, cy = box.top + box.height / 2;
     if (Math.abs(event.clientX - cx) <= element.offsetWidth / 2 && Math.abs(event.clientY - cy) <= element.offsetHeight / 2) action();
   });
@@ -2078,7 +2341,7 @@ function tappable(element, action) {
 /** The same inside something that scrolls: the touch is left to the browser, and counts if it stayed where it landed. */
 function pressable(element, action) {
   let from = null;
-  element.addEventListener("pointerdown", (event) => { event.stopPropagation(); wake(); pressFeedback(element, true); from = { id: event.pointerId, x: event.clientX, y: event.clientY }; });
+  element.addEventListener("pointerdown", (event) => { event.stopPropagation(); if (!session.active()) return; wake(); pressFeedback(element, true); from = { id: event.pointerId, x: event.clientX, y: event.clientY, epoch: inputEpoch }; });
   element.addEventListener("pointercancel", () => { from = null; pressFeedback(element, false); });
   element.addEventListener("pointerleave", () => pressFeedback(element, false));
   // The mouse's events a browser makes up after a touch would land on whatever the action has left under the
@@ -2090,7 +2353,7 @@ function pressable(element, action) {
     from = null;
     pressFeedback(element, false);
     event.stopPropagation();
-    if (was && was.id === event.pointerId && Math.hypot(event.clientX - was.x, event.clientY - was.y) < SLOP) action();
+    if (session.active() && was && was.epoch === inputEpoch && was.id === event.pointerId && Math.hypot(event.clientX - was.x, event.clientY - was.y) < SLOP) action();
   });
 }
 
@@ -2109,6 +2372,8 @@ function hint(text, ms) {
 
 /** Says why a controlling mode is not controlling, or how it works once it is. */
 function explain(was) {
+  if (!session.active()) return;
+  if (!session.canInput()) return hint("正在调整屏幕…", 0);
   if (!control.known) return hint("正在准备控制电脑…", 0);
   if (!control.available) return hint(control.reason || "这台电脑暂时不能被控制");
   if (!control.trusted) {
@@ -2243,7 +2508,7 @@ async function status() {
     layout();
   };
   // The choice is the track's: the socket's picture follows its own ladder.
-  const choosing = live && canChooseWidth;
+  const choosing = live && (canChooseWidth || session.supported());
   if ($("widths").classList.contains("gone") === choosing) {
     $("widths").classList.toggle("gone", !choosing);
     layout();
@@ -2300,12 +2565,7 @@ for (const tile of $("widths").querySelectorAll(".tile")) {
     if (chosen === width) return;
     try { localStorage.setItem("linkshell.screen.width", chosen); } catch {}
     tellApp({ type: "width", width: chosen });
-    if (nativePicture) return;
-    if (reloadVia) return reloadVia({ width: chosen, mode });
-    const next = new URLSearchParams(location.search);
-    next.set("width", chosen);
-    next.set("mode", mode);
-    location.replace(location.pathname + "?" + next);
+    window.linkshellSession({ width: chosen });
   });
 }
 pressable($("full"), () => {
@@ -2767,6 +3027,7 @@ if (!nativePicture && query.get("measure")) meter = (() => {
 resetTyping();
 refresh();
 wake();
+session.visibility(document.hidden);
 if (nativePicture) {
   window.linkshellNative = {
     picture: (size) => {
@@ -2782,6 +3043,8 @@ if (nativePicture) {
     stats: (stats) => { nativeStats = stats; },
     connecting: () => {
       nativeStats = null;
+      session.reconnect();
+      waitForCapabilities();
       Object.assign(control, { asked: false, known: false, trusted: false });
       say("正在连接电脑屏幕…");
       if (mode !== "view") askControl();

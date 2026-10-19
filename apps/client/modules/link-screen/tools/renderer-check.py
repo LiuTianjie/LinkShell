@@ -25,6 +25,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference")
     parser.add_argument("--connection", action="store_true", help="Check native timeout fallback with and without RTC config instead of renderer cadence")
+    parser.add_argument("--webrtc-framework", type=Path, help="Use an existing WebRTC.framework without generating a client iOS project")
     parser.add_argument("--json", type=Path)
     options = parser.parse_args()
     if options.connection and options.reference:
@@ -35,6 +36,11 @@ def main():
     frameworks = [path for pod in ("WebRTC-lib", "JitsiWebRTC")
                   for path in (module.parents[1] / f"ios/Pods/{pod}/WebRTC.xcframework").glob("ios-*-simulator")]
     framework = next((path for path in frameworks if path.is_dir()), None)
+    if options.webrtc_framework:
+        supplied = options.webrtc_framework.resolve()
+        if supplied.name != "WebRTC.framework" or not supplied.is_dir():
+            parser.error("--webrtc-framework must name an existing WebRTC.framework directory")
+        framework = supplied.parent
     if framework is None:
         raise RuntimeError("The client's simulator WebRTC pod is missing; install its native dependencies first.")
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
@@ -76,7 +82,8 @@ def main():
                      module / "tools/fixtures/RendererAudit.swift"]
             if options.connection:
                 files[-1:] = [source / "HEVCDecoder.swift", source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
-            run("xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-target", arch + "-apple-ios16.4-simulator",
+            checks = ["-D", "SCREEN_RENDER_PAUSE_CHECK"] if name == "worker" and not options.connection else []
+            run("xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", *checks, "-target", arch + "-apple-ios16.4-simulator",
                 "-sdk", sdk, "-F", str(framework), "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
                 *map(str, files), "-o", str(app / "RenderCheck"))
             shutil.copytree(framework / "WebRTC.framework", app / "Frameworks/WebRTC.framework", symlinks=True)

@@ -19,7 +19,8 @@ adaptation bound the actual frame rate. No playback-mode or frame-rate switch is
 required. If the native receiver cannot start or loses its connection, the app
 tries the standard WebRTC viewer, then the socket viewer through the encrypted
 RPC/relay channel. The last step bypasses the direct data channel for this screen
-only. A retry or a new screen visit starts with the native receiver again.
+only. A retry starts with the native receiver again. A short return to the screen
+reuses the mounted receiver when the host advertises session pause support.
 Android continues to use the standard viewer and its existing fallback.
 
 This module ships in the normal LinkShell app (`com.bd.linkshell`) through the
@@ -80,8 +81,16 @@ existing RPC connection for an explicitly configured development host.
   thread. UIKit publishes layout/cursor snapshots; frame rendering does not read
   UIView geometry or wait for main-thread work. Display-link changes and teardown
   are serialized on that worker, with generation checks for callbacks to the UI.
-- Closing the view or backgrounding tears down the socket, peer, track and display
-  link. Reconnection starts a new session and releases held pointer state.
+- Display, width and receiver-rate changes use `screen.configure` on the existing
+  signalling socket when the host advertises that capability. The page owns request
+  IDs; native input waits for the latest applied target and carries its generation.
+- The app may retain the mounted surface for up to two minutes after leaving the
+  route. `active=false` gates input immediately, pauses the display link while keeping
+  its last picture, and pauses host capture. A resume received before the native
+  visibility prop is queued until that prop becomes active. The peer, track and
+  DataChannels remain connected. Legacy hosts reconnect instead.
+- Backgrounding, final view disposal, forwarding loss and retention expiry tear
+  down the socket and peer. The temporary retention does not survive process death.
 
 `maximumDrawableCount=2` bounds the drawable pool; the separate semaphore limits application
 GPU submissions to one. Before taking the mailbox, presentation checks that the remaining
@@ -155,10 +164,15 @@ and checks GPU submissions, stop/restart and renderer replacement:
 python3 apps/client/modules/link-screen/tools/renderer-check.py --reference <earlier-commit>
 ```
 
-The receiver timeout regression uses the real native connection against loopback sockets
+The receiver regression uses the real native connection against loopback sockets
 that withhold RTC config or send config without an offer. Both must report failure after
 the 25-second timeout; the latter must also send diagnostics. Diagnostics have a separate
-one-second deadline so missing statistics cannot block fallback.
+one-second deadline so missing statistics cannot block fallback. A third socket probe
+applies display/width/FPS changes and pause/resume over one socket, including a page
+resume delivered before native visibility. It checks protocol and socket reuse, not
+an established media path. Core tests reject obsolete acknowledgements and input
+generations; the renderer check verifies a paused surface stays idle and redraws its
+retained picture on resume without a new frame.
 
 ```sh
 python3 apps/client/modules/link-screen/tools/renderer-check.py --connection

@@ -13,7 +13,9 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private let renderer: ScreenMetalView
   private let metrics: ScreenMetrics
   private let url: URL
-  private let maxFps: Int
+  private var maxFps: Int
+  private var session = ScreenSessionState()
+  private var pendingConfiguration: [String: Any]?
   private var socket: NWConnection?
   private var factory: RTCPeerConnectionFactory?
   private var peer: RTCPeerConnection?
@@ -23,6 +25,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private var closed = false
   private var trusted = false
   private var controlRequested = false
+  private var controlMessage: [String: Any] = ["t": "control"]
   private var ready = false
   private var eventNumber = 0
   private var timer: DispatchSourceTimer?
@@ -69,7 +72,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
         switch state {
         case .ready:
           self.ready = true
-          if self.controlRequested { self.signal(["t": "control"]) }
+          if self.controlRequested { self.signal(self.controlMessage) }
+          self.flushConfiguration()
           self.receive()
         case .failed: self.fail("屏幕连接失败")
         default: break
@@ -90,17 +94,52 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   func pictureArrived() { queue.async { self.receivedPicture = true } }
   func requestStats() { queue.async { self.report(requested: true) } }
 
-  func requestControl() {
+  func setActive(_ active: Bool) {
     queue.async {
-      guard !self.closed, !self.controlRequested else { return }
+      guard !self.closed, self.session.active != active else { return }
+      self.session.setActive(active)
+      if !active {
+        self.trusted = false
+        self.controlRequested = false
+        // This immediate native signal releases held input even before WebKit processes
+        // its matching full configuration. The page owns the resume and its request ID.
+        if self.session.supportsPause { self.signal(["t": "hidden"]) }
+      } else {
+        self.startedAt = CACurrentMediaTime()
+        self.flushConfiguration()
+      }
+    }
+  }
+
+  func configure(_ message: [String: Any], maxFps: Int) {
+    queue.async {
+      guard !self.closed, let configuration = self.session.configuration(message, maxFps: maxFps) else { return }
+      self.maxFps = configuration["maxFps"] as? Int ?? maxFps
+      self.pendingConfiguration = configuration
+      self.flushConfiguration()
+    }
+  }
+
+  private func flushConfiguration() {
+    guard ready, session.supportsConfiguration, let configuration = pendingConfiguration,
+          session.active || configuration["paused"] as? Bool == true else { return }
+    pendingConfiguration = nil
+    signal(configuration)
+  }
+
+  func requestControl(_ message: [String: Any] = ["t": "control"]) {
+    queue.async {
+      guard !self.closed, self.session.active, message["t"] as? String == "control" else { return }
+      if self.controlRequested && self.controlMessage["screenGeneration"] as? Int == message["screenGeneration"] as? Int { return }
       self.controlRequested = true
-      if self.ready { self.signal(["t": "control"]) }
+      self.controlMessage = message
+      if self.ready { self.signal(message) }
     }
   }
 
   func input(_ message: [String: Any], replaceable: Bool = false) {
     queue.async {
-      guard !self.closed, self.trusted || message["t"] as? String == "prompt" else { return }
+      guard !self.closed, self.session.acceptsInput(message), self.trusted || message["t"] as? String == "prompt" else { return }
       // A full reliable queue means the old input is no longer safe to act on. Closing the
       // peer also releases held keys on the host, instead of leaving a delayed mouse-up behind.
       let channel = self.channels[replaceable ? "pointer" : "input"]
@@ -198,6 +237,11 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
 
   private func message(_ message: [String: Any]) {
     if let error = message["error"] as? String { return fail(error) }
+    if let state = message["session"] as? [String: Any] {
+      session.receive(state)
+      flushConfiguration()
+      onMessage?(["session": state])
+    }
     if let state = message["control"] as? [String: Any] {
       trusted = state["available"] as? Bool == true && state["trusted"] as? Bool == true
       onMessage?(["control": state])
@@ -270,9 +314,9 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     let now = CACurrentMediaTime()
     // A phone on a cellular network can need well over ten seconds to find a path through
     // the gateway's signalling; the picture falls back to the relay only after this.
-    if !receivedPicture, now - startedAt > Self.patience { return diagnoseThenFail("视频直连超时", reason: "no picture within \(Int(Self.patience)) s") }
+    if session.active, !receivedPicture, now - startedAt > Self.patience { return diagnoseThenFail("视频直连超时", reason: "no picture within \(Int(Self.patience)) s") }
     if let disconnectedAt, now - disconnectedAt > 4 { return fail("视频直连已中断，请重新连接") }
-    guard metrics.enabled || requested, !statsPending, now - previousAt >= (requested ? 1 : 5), let peer else { return }
+    guard session.active, metrics.enabled || requested, !statsPending, now - previousAt >= (requested ? 1 : 5), let peer else { return }
     statsPending = true
     peer.statistics { [weak self, weak peer] report in
       self?.queue.async { [weak self, weak peer] in
