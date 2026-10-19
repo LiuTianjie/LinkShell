@@ -78,7 +78,7 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     if value { direct.start() } else { direct.stop() }
   }
 
-  public static let cacheKey = "LinkShellWatch.cachedSnapshot.v1"
+  public static let cacheKey = WatchSnapshot.cacheKey
   public static let defaultAppGroup = "group.com.bd.linkshell"
   private var lastWaitingCount = 0
   private var lastPhasesById: [String: String] = [:]
@@ -168,6 +168,7 @@ public final class WatchSessionStore: NSObject, ObservableObject {
       return
     }
     Self.defaults.set(json, forKey: Self.cacheKey)
+    Self.defaults.set(json, forKey: WatchSnapshot.widgetCacheKey)
     UserDefaults.standard.set(json, forKey: Self.cacheKey)
     if let fileURL = Self.sharedContainerSnapshotURL {
       try? json.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -273,7 +274,8 @@ public final class WatchSessionStore: NSObject, ObservableObject {
   #endif
 
   public func requestRefresh(silent: Bool = false) {
-    WatchHaptics.click()
+    // Silent refreshes follow reachability changes: tapping the wrist for them is noise.
+    if !silent { WatchHaptics.click() }
     if independent || !snapshot.computerKey.isEmpty {
       sendCommand(
         [
@@ -703,6 +705,38 @@ extension WatchSessionStore: WCSessionDelegate {
       guard !self.independent else { return }
       self.applySnapshotJSON(json)
     }
+  }
+
+  /// The phone sends one when the number waiting changes (`transferCurrentComplicationUserInfo`).
+  /// watchOS delivers it with background time even when this app isn't open, so the face can
+  /// stop showing a request already answered on the computer.
+  nonisolated public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+    guard let json = userInfo["snapshotJSON"] as? String else { return }
+    Task { @MainActor in self.applyBackgroundSnapshot(json) }
+  }
+
+  private func applyBackgroundSnapshot(_ json: String) {
+    if !independent {
+      applySnapshotJSON(json)
+      return
+    }
+    // Connected on its own, the app keeps its own picture; the face may still take the phone's,
+    // but only for the computer the watch is following.
+    guard let data = json.data(using: .utf8),
+          let incoming = try? JSONDecoder().decode(WatchSnapshot.self, from: data),
+          let current = Self.widgetSnapshot(),
+          current.computerName == incoming.computerName,
+          incoming.generatedAt > current.generatedAt else { return }
+    Self.defaults.set(json, forKey: WatchSnapshot.widgetCacheKey)
+    #if canImport(WidgetKit)
+    WidgetCenter.shared.reloadAllTimelines()
+    #endif
+  }
+
+  private static func widgetSnapshot() -> WatchSnapshot? {
+    guard let json = defaults.string(forKey: WatchSnapshot.widgetCacheKey) ?? defaults.string(forKey: cacheKey),
+          let data = json.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(WatchSnapshot.self, from: data)
   }
 }
 #endif

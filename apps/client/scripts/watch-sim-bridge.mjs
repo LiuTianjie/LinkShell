@@ -129,91 +129,6 @@ function summarizeDiffFromContent(contentList) {
   return null;
 }
 
-function defaultWatchConfigOptions(agent = "", currentModel, currentMode) {
-  const lower = String(agent).toLowerCase();
-  if (lower.includes("codex")) {
-    const mode = currentMode || "workspace-write";
-    const model = currentModel || "gpt-5.4";
-    return [
-      {
-        id: "mode",
-        name: "沙盒与权限",
-        category: "mode",
-        current: mode,
-        currentLabel: mode === "read-only" ? "只读沙盒" : mode === "full-access" ? "完全访问" : "工作区沙盒",
-        values: [
-          { value: "workspace-write", name: "工作区沙盒", description: "允许修改当前项目文件" },
-          { value: "read-only", name: "只读沙盒", description: "仅分析代码，写操作需确认" },
-          { value: "full-access", name: "完全访问", description: "无沙盒限制执行命令" },
-        ],
-      },
-      {
-        id: "model",
-        name: "模型",
-        category: "model",
-        current: model,
-        currentLabel: model,
-        values: [
-          { value: "gpt-5.4", name: "GPT-5.4" },
-          { value: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-          { value: "o4-mini", name: "o4-mini" },
-        ],
-      },
-    ];
-  }
-  if (lower.includes("claude")) {
-    const mode = currentMode || "default";
-    const model = currentModel || "claude-sonnet-4-6";
-    return [
-      {
-        id: "mode",
-        name: "权限模式",
-        category: "mode",
-        current: mode,
-        currentLabel:
-          mode === "acceptEdits"
-            ? "自动改文件"
-            : mode === "plan"
-              ? "仅规划 (Plan)"
-              : mode === "bypassPermissions"
-                ? "全自动 (Bypass)"
-                : "标准确认",
-        values: [
-          { value: "default", name: "标准确认", description: "敏感命令在手表确认" },
-          { value: "acceptEdits", name: "自动改文件", description: "自动允许修改文件" },
-          { value: "plan", name: "仅规划 (Plan)", description: "先出方案不改代码" },
-          { value: "bypassPermissions", name: "全自动 (Bypass)", description: "跳过权限弹窗" },
-        ],
-      },
-      {
-        id: "model",
-        name: "模型",
-        category: "model",
-        current: model,
-        currentLabel: model,
-        values: [
-          { value: "claude-sonnet-4-6", name: "Sonnet 4.6" },
-          { value: "claude-opus-4-6", name: "Opus 4.6" },
-          { value: "claude-haiku-4-5", name: "Haiku 4.5" },
-        ],
-      },
-    ];
-  }
-  return [
-    {
-      id: "mode",
-      name: "沙盒模式",
-      category: "mode",
-      current: currentMode || "default",
-      currentLabel: currentMode || "标准沙盒",
-      values: [
-        { value: "default", name: "标准沙盒" },
-        { value: "auto", name: "自动批准修改" },
-      ],
-    },
-  ];
-}
-
 function sliceWatchTimelineWithUserContext(items, maxItems = 14) {
   if (items.length <= maxItems) return items;
   const tail = items.slice(-maxItems);
@@ -736,8 +651,9 @@ function buildCurrentSnapshot() {
               })),
             };
           })
-        : defaultWatchConfigOptions(session.agent, session.model, undefined);
+        : [];
 
+    if (cfgList.length === 0) continue;
     configs[session.id] = cfgList;
     const modeOpt = cfgList.find((c) => c.category === "mode" || c.id === "mode" || c.id === "sandbox");
     if (modeOpt) modes[session.id] = modeOpt.currentLabel || modeOpt.current;
@@ -939,9 +855,10 @@ async function handleWatchCommand(rawCmd) {
       }
       case "set-config": {
         const session = sessionsById.get(sessionId);
-        const existingCfg =
-          sessionConfigsById.get(sessionId) ||
-          defaultWatchConfigOptions(session?.agent, session?.model, undefined);
+        const existingCfg = sessionConfigsById.get(sessionId) || [];
+        if (!existingCfg.some((opt) => opt.id === command.optionId)) {
+          return { ok: false, message: "配置选项已变化，请重新打开会话" };
+        }
         const updatedCfg = existingCfg.map((opt) => {
           if (opt.id !== command.optionId) return opt;
           const matchedVal = (opt.values || []).find((v) => v.value === command.value);

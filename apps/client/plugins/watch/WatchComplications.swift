@@ -21,24 +21,24 @@ extension WatchSnapshot {
     sessions: [
       WatchSession(
         id: "sample-1",
-        title: "Apple Watch 腕上交互与组件",
-        subtitle: "正在运行全量验证测试",
+        title: "整理发布说明",
+        subtitle: "正在运行测试",
         project: "claude-remote",
         cwd: "~/claude-remote",
         branch: "main",
-        agent: "antigravity",
-        model: "Gemini 4",
-        mode: "工作区沙盒",
+        agent: "claude",
+        model: nil,
+        mode: nil,
         subagents: WatchSubagentCount(total: 2, running: 1),
         configOptions: nil,
         phase: "running",
         updatedAt: Date().timeIntervalSince1970 * 1000,
         pinned: true,
         promptTitle: nil,
-        commandPreview: "pnpm --filter @linkshell/client test",
-        detailPreview: "已完成小组件扩展与聊天气泡改造",
-        goal: "打磨 Apple Watch 原生体验",
-        planProgress: WatchPlanProgress(completed: 3, total: 4, currentStep: "验证表盘与智能叠放"),
+        commandPreview: "pnpm test",
+        detailPreview: "已更新 3 个文件",
+        goal: nil,
+        planProgress: WatchPlanProgress(completed: 3, total: 4, currentStep: "运行测试"),
         actions: nil,
         hasMoreActions: false,
         items: nil,
@@ -67,257 +67,206 @@ public struct WatchComplicationProvider: TimelineProvider {
 
   public static func loadSnapshot() -> WatchSnapshot {
     let group = (Bundle.main.object(forInfoDictionaryKey: "LinkShellWatchAppGroup") as? String) ?? "group.com.bd.linkshell"
-    if let shared = UserDefaults(suiteName: group),
-       let json = shared.string(forKey: "LinkShellWatch.cachedSnapshot.v1"),
-       let data = json.data(using: .utf8),
-       let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data),
-       !decoded.computerKey.isEmpty || !decoded.sessions.isEmpty {
-      return decoded
-    }
-    if let fileURL = FileManager.default
-      .containerURL(forSecurityApplicationGroupIdentifier: group)?
-      .appendingPathComponent("linkshell-watch-snapshot.json"),
-       let json = try? String(contentsOf: fileURL, encoding: .utf8),
-       let data = json.data(using: .utf8),
-       let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data) {
-      return decoded
-    }
-    if let json = UserDefaults.standard.string(forKey: "LinkShellWatch.cachedSnapshot.v1"),
-       let data = json.data(using: .utf8),
-       let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data),
-       !decoded.computerKey.isEmpty || !decoded.sessions.isEmpty {
-      return decoded
-    }
+    let file = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
+      .appendingPathComponent("linkshell-watch-snapshot.json")
+    if let stored = WatchSnapshot.stored(in: UserDefaults(suiteName: group), file: file) { return stored }
     #if targetEnvironment(simulator)
     if let json = try? String(contentsOfFile: "/tmp/linkshell-watch-snapshot.json", encoding: .utf8),
        let data = json.data(using: .utf8),
-       let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data) {
+       let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data), !decoded.isUnsynced {
       return decoded
     }
     #endif
-    return .previewSample
+    return .empty
   }
 
+  // The placeholder is drawn redacted by the system, so sample text never reads as real state.
   public func placeholder(in context: Context) -> WatchComplicationEntry {
     WatchComplicationEntry(snapshot: .previewSample)
   }
 
   public func getSnapshot(in context: Context, completion: @escaping (WatchComplicationEntry) -> Void) {
-    completion(WatchComplicationEntry(snapshot: Self.loadSnapshot()))
+    // The face gallery may show the sample; a face the user wears shows only what was synced.
+    let stored = Self.loadSnapshot()
+    completion(WatchComplicationEntry(snapshot: context.isPreview && stored.isUnsynced ? .previewSample : stored))
   }
 
   public func getTimeline(in context: Context, completion: @escaping (Timeline<WatchComplicationEntry>) -> Void) {
-    let entry = WatchComplicationEntry(snapshot: Self.loadSnapshot())
-    let refresh = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
-    completion(Timeline(entries: [entry], policy: .after(refresh)))
+    let snapshot = Self.loadSnapshot()
+    var entries = [WatchComplicationEntry(snapshot: snapshot)]
+    // A second entry dims the counts once they are old, without waiting for the next sync.
+    if !snapshot.isUnsynced {
+      let stale = Date(timeIntervalSince1970: snapshot.generatedAt / 1000 + 601)
+      if stale > Date() { entries.append(WatchComplicationEntry(date: stale, snapshot: snapshot)) }
+    }
+    let refresh = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
+    completion(Timeline(entries: entries, policy: .after(refresh)))
   }
+}
+
+/// What a face shows, worked out once for every family.
+struct WatchFaceSummary {
+  let phase: String
+  let count: Int
+  let label: String
+  let unsynced: Bool
+  let stale: Bool
+
+  init(_ snapshot: WatchSnapshot, at date: Date) {
+    unsynced = snapshot.isUnsynced
+    stale = snapshot.isStale(at: date)
+    if snapshot.waitingCount > 0 {
+      phase = "waiting_for_approval"; count = snapshot.waitingCount; label = "\(snapshot.waitingCount) 待确认"
+    } else if snapshot.failedCount > 0 {
+      phase = "failed"; count = snapshot.failedCount; label = "\(snapshot.failedCount) 出错"
+    } else if snapshot.runningCount > 0 {
+      phase = "running"; count = snapshot.runningCount; label = "\(snapshot.runningCount) 运行中"
+    } else {
+      phase = "completed"; count = 0; label = snapshot.online ? "空闲" : "离线"
+    }
+  }
+
+  /// The tint for the state; none once it may no longer be true.
+  var color: Color { stale ? .secondary : WatchPhaseStyle.color(for: phase) }
 }
 
 public struct WatchComplicationCircularView: View {
   public let snapshot: WatchSnapshot
+  public let date: Date
 
-  public init(snapshot: WatchSnapshot) {
+  public init(snapshot: WatchSnapshot, date: Date = Date()) {
     self.snapshot = snapshot
+    self.date = date
   }
 
   public var body: some View {
-    let urgent = snapshot.waitingCount > 0
-    let failed = snapshot.failedCount > 0
-    let activeCount = urgent
-      ? snapshot.waitingCount
-      : failed
-        ? snapshot.failedCount
-        : snapshot.runningCount > 0
-          ? snapshot.runningCount
-          : snapshot.sessions.count
-    let phase = urgent ? "waiting_for_approval" : failed ? "failed" : snapshot.runningCount > 0 ? "running" : "completed"
-
+    let face = WatchFaceSummary(snapshot, at: date)
     ZStack {
       AccessoryWidgetBackground()
-      VStack(spacing: 1) {
-        Image(systemName: WatchPhaseStyle.symbol(for: phase))
-          .font(.system(size: 11, weight: .bold))
-          .foregroundColor(WatchPhaseStyle.color(for: phase))
-        Text("\(activeCount)")
-          .font(.system(size: 13, weight: .bold, design: .rounded))
-          .monospacedDigit()
+      if face.unsynced {
+        Image(systemName: "applewatch.slash").font(.title3).widgetAccentable()
+      } else {
+        VStack(spacing: 0) {
+          Image(systemName: WatchPhaseStyle.symbol(for: face.phase))
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(face.color)
+            .widgetAccentable()
+          Text(face.count > 0 ? "\(face.count)" : "–")
+            .font(.system(.title3, design: .rounded).weight(.bold))
+            .monospacedDigit()
+            .minimumScaleFactor(0.6)
+        }
       }
     }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(face.unsynced ? "LinkShell 尚未同步" : "LinkShell \(face.label)")
   }
 }
 
 public struct WatchComplicationRectangularView: View {
   public let snapshot: WatchSnapshot
+  public let date: Date
 
-  public init(snapshot: WatchSnapshot) {
+  public init(snapshot: WatchSnapshot, date: Date = Date()) {
     self.snapshot = snapshot
+    self.date = date
   }
 
   public var body: some View {
-    if let top = snapshot.sessions.first {
+    let face = WatchFaceSummary(snapshot, at: date)
+    if face.unsynced {
+      VStack(alignment: .leading, spacing: 1) {
+        Label("LinkShell", systemImage: "terminal.fill")
+          .font(.headline).widgetAccentable()
+        Text("打开腕表 App 连接电脑")
+          .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    } else if let top = snapshot.sessions.first {
       let agent = WatchAgent(id: top.agent)
-      VStack(alignment: .leading, spacing: 2.5) {
-        HStack(spacing: 4.5) {
-          WatchAgentBadge(agent: agent, size: 15)
-          Text("\(agent.name) · \(top.project)")
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundColor(.white)
-            .lineLimit(1)
+      VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 4) {
+          WatchAgentBadge(agent: agent, size: 14)
+          Text(face.label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(face.color)
+            .widgetAccentable()
           Spacer(minLength: 2)
-          HStack(spacing: 2.5) {
-            Circle()
-              .fill(WatchPhaseStyle.color(for: top.phase))
-              .frame(width: 4.5, height: 4.5)
-            Text(WatchPhaseStyle.label(for: top.phase))
-              .font(.system(size: 9.5, weight: .semibold))
-              .foregroundColor(WatchPhaseStyle.color(for: top.phase))
+          if face.stale {
+            Text(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative)
+              .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
           }
         }
         Text(top.title)
-          .font(.system(size: 12, weight: .bold, design: .rounded))
-          .foregroundColor(.white)
+          .font(.headline)
           .lineLimit(1)
+          .privacySensitive()
         Text(top.promptTitle ?? top.detailPreview ?? top.subtitle)
-          .font(.system(size: 10.5))
-          .foregroundColor(.secondary)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
           .lineLimit(1)
+          .privacySensitive()
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     } else {
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 4) {
-          Image(systemName: "terminal.fill")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(.green)
-          Text("LinkShell · \(snapshot.computerName)")
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .lineLimit(1)
-        }
-        Text(snapshot.statusLabel)
-          .font(.system(size: 11))
-          .foregroundColor(.secondary)
-          .lineLimit(2)
+      VStack(alignment: .leading, spacing: 1) {
+        Label(snapshot.computerName, systemImage: "desktopcomputer")
+          .font(.headline).lineLimit(1).widgetAccentable()
+        Text(snapshot.online ? "没有进行中的会话" : "电脑离线")
+          .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 }
 
 public struct WatchComplicationInlineView: View {
   public let snapshot: WatchSnapshot
+  public let date: Date
 
-  public init(snapshot: WatchSnapshot) {
+  public init(snapshot: WatchSnapshot, date: Date = Date()) {
     self.snapshot = snapshot
+    self.date = date
   }
 
   public var body: some View {
-    if snapshot.waitingCount > 0 {
-      Text("⚡ LinkShell · \(snapshot.waitingCount) 待确认")
-    } else if snapshot.runningCount > 0 {
-      Text("● LinkShell · \(snapshot.runningCount) 运行中")
+    let face = WatchFaceSummary(snapshot, at: date)
+    if face.unsynced {
+      Label("LinkShell 未连接", systemImage: "applewatch.slash")
     } else {
-      Text("LinkShell · \(snapshot.computerName)")
+      Label("LinkShell · \(face.label)", systemImage: WatchPhaseStyle.symbol(for: face.phase))
     }
   }
 }
 
 public struct WatchComplicationCornerView: View {
   public let snapshot: WatchSnapshot
+  public let date: Date
 
-  public init(snapshot: WatchSnapshot) {
+  public init(snapshot: WatchSnapshot, date: Date = Date()) {
     self.snapshot = snapshot
+    self.date = date
   }
 
   public var body: some View {
-    let urgent = snapshot.waitingCount > 0
-    let failed = snapshot.failedCount > 0
-    let activeCount = urgent
-      ? snapshot.waitingCount
-      : failed
-        ? snapshot.failedCount
-        : snapshot.runningCount > 0
-          ? snapshot.runningCount
-          : snapshot.sessions.count
-    let phase = urgent ? "waiting_for_approval" : failed ? "failed" : snapshot.runningCount > 0 ? "running" : "completed"
-
+    let face = WatchFaceSummary(snapshot, at: date)
     ZStack {
       AccessoryWidgetBackground()
-      VStack(spacing: 0) {
-        Image(systemName: WatchPhaseStyle.symbol(for: phase))
-          .font(.system(size: 11, weight: .bold))
-          .foregroundColor(WatchPhaseStyle.color(for: phase))
-        Text("\(activeCount)")
-          .font(.system(size: 11, weight: .bold, design: .rounded))
+      if face.unsynced {
+        Image(systemName: "applewatch.slash").font(.title3).widgetAccentable()
+      } else {
+        Text(face.count > 0 ? "\(face.count)" : "–")
+          .font(.system(.title3, design: .rounded).weight(.bold))
           .monospacedDigit()
+          .foregroundStyle(face.color)
+          .widgetAccentable()
       }
     }
     .widgetLabel {
-      Text(snapshot.statusLabel)
+      Text(face.unsynced ? "LinkShell 未连接" : "LinkShell · \(face.label)")
     }
-  }
-}
-
-public struct WatchSmartStackCardView: View {
-  public let snapshot: WatchSnapshot
-
-  public init(snapshot: WatchSnapshot) {
-    self.snapshot = snapshot
-  }
-
-  public var body: some View {
-    let top = snapshot.sessions.first
-    let agent = WatchAgent(id: top?.agent ?? "claude")
-
-    VStack(alignment: .leading, spacing: 3) {
-      HStack(spacing: 5) {
-        WatchAgentBadge(agent: agent, size: 16)
-        Text(top != nil ? "\(agent.name) · \(top!.project)" : "LinkShell · \(snapshot.computerName)")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundColor(.white)
-          .lineLimit(1)
-        Spacer(minLength: 2)
-        if snapshot.waitingCount > 0 {
-          Text("\(snapshot.waitingCount) 待确认")
-            .font(.system(size: 9.5, weight: .bold))
-            .foregroundColor(.orange)
-        } else if snapshot.runningCount > 0 {
-          Text("\(snapshot.runningCount) 运行中")
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundColor(.green)
-        } else {
-          Text("已就绪")
-            .font(.system(size: 9.5, weight: .medium))
-            .foregroundColor(.secondary)
-        }
-      }
-
-      if let top {
-        Text(top.title)
-          .font(.system(size: 12, weight: .bold))
-          .foregroundColor(.white)
-          .lineLimit(1)
-
-        if let cmd = top.commandPreview, !cmd.isEmpty {
-          Text("$ \(cmd)")
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundColor(top.needsAttention ? .orange : Color(white: 0.78))
-            .lineLimit(1)
-        } else {
-          Text(top.promptTitle ?? top.detailPreview ?? top.subtitle)
-            .font(.system(size: 10.5))
-            .foregroundColor(.secondary)
-            .lineLimit(1)
-        }
-      } else {
-        Text(snapshot.statusLabel)
-          .font(.system(size: 11.5, weight: .semibold))
-          .foregroundColor(.white)
-          .lineLimit(1)
-        Text("轻点进入腕上工作台")
-          .font(.system(size: 10))
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-      }
-    }
-    .containerBackground(.fill.tertiary, for: .widget)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(face.unsynced ? "LinkShell 尚未同步" : "LinkShell \(face.label)")
   }
 }
 
@@ -333,19 +282,21 @@ public struct WatchComplicationEntryView: View {
     Group {
       switch family {
       case .accessoryCircular:
-        WatchComplicationCircularView(snapshot: entry.snapshot)
+        WatchComplicationCircularView(snapshot: entry.snapshot, date: entry.date)
       case .accessoryCorner:
-        WatchComplicationCornerView(snapshot: entry.snapshot)
+        WatchComplicationCornerView(snapshot: entry.snapshot, date: entry.date)
       case .accessoryInline:
-        WatchComplicationInlineView(snapshot: entry.snapshot)
+        WatchComplicationInlineView(snapshot: entry.snapshot, date: entry.date)
       default:
-        WatchComplicationRectangularView(snapshot: entry.snapshot)
+        WatchComplicationRectangularView(snapshot: entry.snapshot, date: entry.date)
       }
     }
     .containerBackground(.fill.tertiary, for: .widget)
   }
 }
 
+// One widget: the Smart Stack picks up its rectangular family by itself. A second widget with
+// the same family only gave the face editor two near-identical entries.
 public struct LinkShellWatchComplicationWidget: Widget {
   public static let kind = "LinkShellWatchComplication"
 
@@ -355,24 +306,9 @@ public struct LinkShellWatchComplicationWidget: Widget {
     StaticConfiguration(kind: Self.kind, provider: WatchComplicationProvider()) { entry in
       WatchComplicationEntryView(entry: entry)
     }
-    .configurationDisplayName("LinkShell 腕上状态")
-    .description("在表盘实时查看电脑上的 Agent 审批请求与运行进度。")
+    .configurationDisplayName("LinkShell")
+    .description("查看电脑上待确认的请求和正在运行的会话。")
     .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline, .accessoryCorner])
-  }
-}
-
-public struct LinkShellWatchSmartStackWidget: Widget {
-  public static let kind = "LinkShellWatchSmartStack"
-
-  public init() {}
-
-  public var body: some WidgetConfiguration {
-    StaticConfiguration(kind: Self.kind, provider: WatchComplicationProvider()) { entry in
-      WatchSmartStackCardView(snapshot: entry.snapshot)
-    }
-    .configurationDisplayName("LinkShell 智能叠放")
-    .description("转动数码表冠在智能叠放中随时查看活跃 Agent 会话、命令与待办审批。")
-    .supportedFamilies([.accessoryRectangular])
   }
 }
 
@@ -383,7 +319,6 @@ public struct LinkShellWatchWidgetBundle: WidgetBundle {
 
   public var body: some Widget {
     LinkShellWatchComplicationWidget()
-    LinkShellWatchSmartStackWidget()
   }
 }
 #endif
