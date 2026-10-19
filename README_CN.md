@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>离开电脑，Agent 接着干。</strong><br />
-  在手机上看电脑里的编程 Agent 干活、随时插话、一键审批。
+  在手机上跟进、插话、审批电脑里正在跑的编程 Agent。
 </p>
 
 <p align="center">
@@ -19,159 +19,92 @@
   <a href="https://liutianjie.github.io/LinkShell/">官网</a> ·
   <a href="https://liutianjie.github.io/LinkShell/docs/">文档</a> ·
   <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> ·
-  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a> ·
+  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android</a> ·
+  <a href="#在电脑上安装">Mac</a> ·
   <a href="README.md">English</a>
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark" alt="Product Hunt 上的 LinkShell" width="250" height="54" /></a>
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片：50 秒，全部来自 App 实录" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看介绍片</a>（50 秒，App 实录）</sub>
 </p>
 
-<p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看 40 秒介绍片</a></sub>
-</p>
+Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它干活、批准它的请求、往正在进行的这一轮里插话，需要时直接打开电脑屏幕。回到电脑前，会话还在终端里。代码和 Agent 进程都不离开你的电脑，手机和电脑之间的数据全程端到端加密。
 
-Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它实时干活，随时发消息，一键审批它要的权限，回到电脑前再把会话交还给终端。代码和 Agent 进程都不离开你的电脑，连接全程端到端加密。**支持 iPhone Duo、普通 iPhone 与 Android。**
-
-## Apple Watch
-
-LinkShell 2.3.33 加入可独立连接的 watchOS App：登录已有邮箱/密码账号，或输入电脑上的配对码，即可查看会话、处理简单审批和发送短消息。仍可切换到 iPhone 配套模式。独立连接在 App 前台运行，需要 Gateway 0.6.20 或更新版本。详见[设置与验证范围](docs/v2/apple-watch.md)。
-
-## 为 iPhone Duo 适配
-
-**展开看全局，折叠继续做。** LinkShell 2.3.7 已适配 iPhone Duo，同时继续支持普通 iPhone。
-
-<p align="center"><img src="docs/site/assets/promo/iphone-duo-expanded-dark.png" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏" width="960" /></p>
-
-- **展开，用双栏工作。** 空间足够时，对话与「改动」或「预览」面板并排显示，不用反复离开会话。
-- **折叠，让操作留在可用区域。** 界面识别折叠区域，随姿态和方向调整布局，给输入框与控制区保留空间。
-- **换回普通 iPhone，继续同一套操作。** 根据窗口尺寸回到合适的单栏布局，保留正在进行的会话。
-
-<sub>上图为 iPhone Duo 模拟器中的 App 实际运行截图，使用夜间模式。[查看适配说明](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo)。</sub>
-
-## 开始使用
-
-**独立 Mac App（macOS 13+）：** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg)。拖入 Applications，打开后即可登录。内置 CLI、Host 和 Node，随 App 整体更新，无需安装 npm；编程 Agent 仍需自行安装和登录。
-
-Mac App 可设置登录系统时自动启动，并自动拉起后台服务。外观支持跟随系统、浅色和深色，默认保留深色。桌面和手机均可按全部已注册 Agent 筛选，用原有品牌图标展示 Token、每日趋势及模型明细。Codex / Claude 读取原生日志，其他 Agent 使用 LinkShell 接收到的用量上报；缺失数据显示为暂无数据，统计不代表账单或剩余额度。桌面总览和设备页可生成配对二维码及六位码；免账号配对使用自建网关。
-
-当前源码还包含完整桌面工作台：在这台 Mac 上连接本机或其他电脑，继续对话、处理审批、使用终端与远程桌面。常驻的「工作台 / 本机管理」入口区分客户端工作与原生服务管理。这需要配套新版 App 和 CLI 构建；实现及验证范围见[桌面说明](docs/mac-desktop.md)。
-
-下面的 CLI 安装方式供按需选择。
-
-CLI 方式需要 macOS 或 Linux，以及 **Node.js 22.13 或更新版本**；独立 Mac App 已内置 Node。
-
-```bash
-npm i -g linkshell-cli
-linkshell setup
-```
-
-`linkshell setup` 一次把该做的都做完：在后台启动 host，把屏幕准备好（Mac 上会弹出一个 LinkShell 窗口，带你到两个权限开关前，开一个勾一个），再连上你的手机。随时可以再运行；每一步也有各自的命令。
-
-然后用下面任一方式连接手机（[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)）：
-
-- **Pro：官方网关。** 运行 `linkshell login`，然后在 App 里登录同一个账号；App 也支持 GitHub 和 Google 登录。电脑会自动出现，不用扫码。
-- **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，配对一次：
-
-  ```bash
-  linkshell host --gateway wss://gw.example.com --daemon
-  linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
-  ```
-
-**直接在 LinkShell 兑换 Pro。** 普通账户登录后，可在手机 App 的账户页、Mac App 的账号区域或网页版「官方账号」页输入激活码；Apple Watch 独立模式下，在「连接设置 → 会员与激活码」兑换。兑换后会更新 Pro 状态与到期时间。[前往链动小铺购买激活码](https://pay.ldxp.cn/item/7lgv1s)；也可以用同一账号在 [iTool「设置 → 升级 Pro」](https://itool.tech/zh/settings)兑换，已有 Pro 的账户可在这里续期。
-
-可以直接在手机上新建会话；也可以在电脑终端里这样启动 Agent，随时交给手机：
-
-```bash
-linkshell claude    # Claude Code：手机上发消息即接管，终端里按任意键收回
-linkshell codex     # Codex：终端和手机同时在线
-```
-
-在手机上看和控制电脑屏幕需要 macOS 的两项权限，`linkshell setup` 会带你设置好；只想做这一步，或者以后想检查：
-
-```bash
-linkshell screen      # macOS：弹出 LinkShell 窗口，带你到每个开关前，等你打开
-```
-
-在 Mac 上不需要再装别的：画面和控制都由 **LinkShell** 完成——独立 App 或随 CLI 安装的带签名 helper。它的两项权限（录屏、辅助功能）是两个名为 LinkShell 的开关，打开一次即可：不管用哪个终端启动 host、怎么升级，都不用再授权。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上。CLI 管理的 helper 包含两种架构；独立 App 分 Apple Silicon 和 Intel 两份下载；Intel 真机采集与性能仍待验证。Linux 上可以看屏幕（不能控制），需要装有 `ffmpeg` 并有 X11 显示环境。
-
-<details>
-<summary>其他安装方式</summary>
-
-```bash
-brew install LiuTianjie/linkshell/linkshell
-curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
-```
-
-</details>
+支持 iPhone（含 iPhone Duo）、Apple Watch、Android 和浏览器；电脑端支持 macOS 与 Linux。
 
 ## 能做什么
 
 <table>
   <tr>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-follow.jpg" alt="手机上的会话：计划、工具调用和一条权限请求" width="100%" /><br />
+      <img src="docs/site/assets/promo/card-follow.jpg" alt="手机上的会话：计划、文件改动和一条权限请求" width="100%" /><br />
       <strong>看着它干活，点一下批准</strong><br />
-      回复逐字出现，计划、工具调用和 diff 实时更新。它需要权限或者要你做选择时，请求推到手机上，允许或拒绝点一下就行。
+      回复逐字出现，计划、工具调用和 diff 实时更新。权限请求和提问推到手机、锁屏和手表上。
     </td>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-queue.jpg" alt="输入框上方排队的消息" width="100%" /><br />
+      <img src="docs/site/assets/promo/card-queue.jpg" alt="Agent 忙的时候输入的一条消息，即将排队" width="100%" /><br />
       <strong>它正忙，你照样能插话</strong><br />
-      忙的时候发的消息先排队：调整顺序、取回重写，或者立即发送，直接插进当前这一轮。电脑上正在跑的那一轮，手机上也能停。会话在终端、桌面 App 里开的都行。
+      忙的时候发的消息先排队：可以调整顺序、取回重写，或者直接插进当前这一轮。手机上也能停下电脑上正在跑的那一轮。
     </td>
     <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-screen.jpg" alt="手机横屏显示电脑屏幕，触控板模式" width="100%" /><br />
+      <img src="docs/site/assets/promo/card-screen.jpg" alt="手机横屏显示电脑屏幕" width="100%" /><br />
       <strong>把 Mac 桌面装进口袋</strong><br />
-      打开桌面，放大看清细节，随时接手鼠标和键盘。检查网页、操作编辑器、处理弹窗，拿起手机就能继续。
+      打开真实桌面，放大看清细节，接手鼠标和键盘。画面最高 3840 像素宽，iOS 适配最高 120 Hz 显示。
     </td>
   </tr>
 </table>
 
-### 把 Mac 桌面装进口袋
+- **锁屏和 Apple Watch。** 实时活动在锁屏上显示进度和待确认的请求，卡片上直接有「拒绝 / 允许」（iOS 17 及以上）。手表 App 可以看会话、回简单的请求、发短消息，可独立连接，也可经 iPhone 连接。详见 [Apple Watch](docs/v2/apple-watch.md) 和[实时活动](docs/v2/live-activity.md)。
+- **在终端和手机之间接力。** 用 `linkshell claude` 或 `linkshell codex` 启动 Agent，会话可以在终端和手机之间来回交接。普通的 `claude` / `codex`，以及 Claude 和 Codex 桌面 App 里打开的会话，也能在手机上跟进。
+- **手机上用 Computer Use。** 让 Codex 操作 Mac 上的浏览器和桌面应用，在会话浮窗里实时看画面。详见 [Computer Use](docs/v2/computer-use.md)。
+- **提问、计划和目标。** 回答 Agent 的结构化提问；使用计划模式、`/goal`、斜杠命令和你的 skills。详见 [Agent 提问](docs/v2/agent-questions.md)和[命令与目标](docs/v2/commands-and-goals.md)。
+- **子 Agent、工作流和后台任务。** 按阶段跟进 Claude Workflow，打开每个子 Agent 的对话，查看回复结束后仍在运行的命令。详见[后台任务](docs/v2/background-tasks.md)。
+- **分叉和 worktree。** 从任意一条回复分叉出新会话换个思路，可以留在当前目录，也可以放进新的 git worktree。
+- **真终端和 localhost。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；dev server 的端口走同一条加密通道在手机上打开，不用暴露端口。
+- **文件、设置和连接。** 浏览项目文件，把照片和文件传给 Agent；修改模型、思考强度和权限模式；配置 MCP 服务和自定义 [ACP](docs/v2/acp-support.md) Agent。
+- **适应不同屏幕。** iPhone Duo 展开时对话与改动或预览并排，并随折叠和方向调整；iPad 使用分栏布局。
+- **搜索和整理。** 按标题、预览、路径、分支或 Agent 搜索会话；重命名、归档、删除，Codex 和 Claude 支持的部分同步到它们自己的记录。详见[会话恢复](docs/v2/session-recovery.md)。
 
-**电脑留在桌上，整个工作台随身带走。** Agent 改完代码，你就在手机上打开真实桌面，验收结果、接手操作，把需要亲自点一下的事也办完。
+## 在电脑上安装
 
-- **4K 级细节，高刷屏适配。** 原生画质最高可选 3840 像素宽，iOS 适配最高 120 Hz 显示。看代码、读小字、检查设计细节，都能随手放大。
-- **像触控板一样精细，像触屏一样直接。** 慢移精确定位，快移跨越桌面；也可以切到「点哪点哪」。右键、滚动、拖拽，常用操作都在指尖。
-- **桌面快捷键，一点就到。** 复制、粘贴、切换应用、调度中心、截图、F 键随手调用。长文字在手机上写好再发送，也能直接带上手机剪贴板里的文字。
-- **小屏也能掌控整个工作台。** 在 Mac 的多个显示器之间切换，横屏铺开、全屏查看、双指缩放；既能看全局，也能盯住需要处理的细节。
-- **切屏保留连接，回来接着看。** 切换显示器或清晰度沿用已建立的屏幕连接。在 App 或网页工作区内去其他页面，两分钟内返回可恢复观看，离开期间暂停采集；进入后台或断线后重新连接。[连接复用与兼容范围](docs/v2/screen-realtime.md#21-切屏与短暂离开的连接复用)。
+**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
 
-完整控制支持 macOS 13 及以上；Linux 支持观看。实际画质、刷新率和响应速度取决于两端设备、源显示器及网络条件。
+**macOS 或 Linux：CLI**（Node.js 22.13 或更新版本）。
 
-### 手机上也能用 Computer Use，实时预览
+```bash
+npm i -g linkshell-cli
+linkshell setup
+```
 
-在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话中实时预览。边看边聊，随时补充要求，不用回到电脑前。
+`linkshell setup` 在后台启动 host，带你完成看屏幕需要的两项 macOS 权限（会弹出 LinkShell 窗口，带你到每个开关前），再连上手机。随时可以再运行；每一步也有各自的命令。也可以用 Homebrew 或安装脚本：
 
-画面以浮窗显示，可以拖动、放大，或收成小图标。回合结束后保留最后画面，下次进入会话还能接着看；关闭后可从会话菜单选择「显示电脑画面」重新打开。
+```bash
+brew install LiuTianjie/linkshell/linkshell
+curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
+```
 
-目前支持 macOS 上的 Codex，需已配置兼容的 Computer Use 工具。[查看使用说明](https://liutianjie.github.io/LinkShell/docs/#d-computer-use)。
+Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境。支持 Intel Mac；Intel 真机上的采集性能尚未验证。
 
-<p align="center">
-  <img src="docs/site/assets/promo/computer-use.png" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗" width="340" />
-</p>
+要用的 Agent 需要照常在电脑上安装并登录（`claude`、`codex login`、`gemini`、`copilot login` 等）。LinkShell 以你的用户身份、用你登录 shell 的环境变量运行它们，不经手它们的账号和 API Key。
 
-### 还有这些
+## 连接手机
 
-- **回答它的提问。** Codex（包括 Desktop 异步提问）、Claude、Cursor 和 Grok 的结构化问题会推到手机上，会话显示「需要用户输入」，可在问题卡片中回答或跳过。Agent 支持时可填写自定义文字；Cursor 的扩展仅支持选择。详见[Agent 提问支持范围](docs/v2/agent-questions.md)。
-- **分叉和 worktree。** 想换个思路，就从那条回复分叉出一个新会话；可以留在当前目录，也可以放进新的 git worktree，不碰你手头的工作区。
-- **子 Agent、Claude Workflow 和长会话。** 按阶段查看工作流进度，点进每个 Agent 的对话和工具结果；后台工作流保留在输入框上方，随时能回去看。正文保留紧凑摘要，工作流内的 Agent 在流程详情查看，不再重复显示为正文卡片；连续已结束的 Agent 步骤会折叠。标题旁的按钮列出工作流和子 Agent。长会话先显示最近几轮；项目里的文件可以直接浏览和查看。
-- **命令与持续目标。** 输入 `/`、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令和 skills；未发送的草稿会保留。支持 Codex 和 Claude Code 的 `/goal`，也有独立目标页面；Codex 可以暂停、继续和设置 token 预算，Claude 可以设置或清除完成条件。具体操作取决于电脑端 Agent 提供的能力。
-- **后台任务。** 用 `/tasks` 或会话顶部的入口查看回复结束后仍在运行的命令、输出、耗时和退出码。Codex 可以单独停止一个后台任务；Claude 的 Bash / Monitor 目前支持查看，停止需在电脑端操作。任务与子 Agent、工作流分开显示，断线重连后仍可恢复。
-- **适应不同屏幕。** iPhone Duo 折叠布局与普通 iPhone 使用同一套界面，聊天、输入框和操作区随可用空间调整。
-- **真终端。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。普通 Shell 历史与 Claude Code 等接管鼠标滚轮的程序都保留触摸惯性滚动。
-- **在手机上打开 localhost。** dev server 的端口走同一条加密通道，热更新照常，可以全屏。不用暴露端口，也不用同一个 Wi-Fi。
-- **设置跟着会话走。** 模型、思考强度、权限模式、快速模式——Agent 提供什么就能改什么；电脑上正在跑的会话，手机上显示的是它真实的设置。
-- **Agent 连接与工具。** 在手机上配置 MCP 服务和附加工作目录，完成 Agent 登录与审批表单，或添加自定义 ACP 连接。支持编辑建议的 Agent 可以从文件编辑页提出修改，先预览再应用。稳定能力、实验扩展及验证范围见 [ACP 支持说明](docs/v2/acp-support.md)。
-- **找到之前的会话。** 首页可以按标题、最近一条消息的预览、项目路径、worktree 分支或 Agent 搜索，结果包含当前电脑的已归档会话和终端。
-- **会话管理。** Codex 的重命名、归档、删除同步到原生记录；Claude 的重命名和删除也同步，Claude 及其他 ACP 会话的归档仅保存在 LinkShell。Codex 已归档会话退出活动列表，查看历史不会解除归档。项目和会话上显示当前的 git 分支。不再使用的电脑，在「我的电脑」里长按即可移除。
-- **历史恢复。** Host 重启后重新核对活动状态，不沿用旧的“运行中”。原始记录缺失或读取失败时明确提示，并保留已缓存的消息。详见[会话恢复与 ACP 兼容说明](docs/v2/session-recovery.md)。
-- **手机里的素材，直接交给 Agent。** 把照片和文件传到电脑上的项目里，随时补充截图、参考图和任务资料。
+下载 App：[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)。然后任选一种：
+
+- **Pro：官方网关。** 在电脑上登录（`linkshell login` 或 Mac App），手机 App 登录同一个账号，电脑自动出现。
+- **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，每台手机扫码或输入 6 位码配对一次：
+
+  ```bash
+  linkshell host --gateway wss://gw.example.com --daemon
+  linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
+  ```
+
+全部功能免费；Pro 只多一个官方托管网关（¥9.9/月 或 ¥99/年）。在[链动小铺](https://pay.ldxp.cn/item/7lgv1s)购买激活码，然后在手机 App 的账户页、Mac App、网页工作区或 [iTool 设置](https://itool.tech/zh/settings)里兑换。LinkShell Pro 与 iTool Pro 是同一份会员。详见 [Pro 兑换](docs/v2/pro-redemption.md)。
+
+网关根地址还提供浏览器客户端，同样支持配对或账号登录。详见[网页客户端](apps/web/README.md)。
 
 ## 支持的 Agent
-
-LinkShell 使用电脑上已安装的 Agent，沿用它们现有的认证和服务商配置。Codex 可以使用 ChatGPT 登录、API Key 或自定义服务商（包括 CC Switch 管理的配置），LinkShell 不强制要求 Codex 登录，也不经手 Agent 的账号和 API Key。修改 shell 环境变量后，需要重启 Host 才能继承新值。
 
 | Agent | 方式 | 体验 |
 | --- | --- | --- |
@@ -180,9 +113,10 @@ LinkShell 使用电脑上已安装的 Agent，沿用它们现有的认证和服�
 | **Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok** | 远程会话 | 通过 [Agent Client Protocol](https://agentclientprotocol.com) 在手机上新建、继续会话：实时输出、审批、模式和模型 |
 | **任何命令行工具** | 终端 | 在电脑上开终端，手机上看和输入 |
 
-在 Claude 桌面 App 里打开的会话，手机上同样可以实时查看、接着做。但桌面 App 没法接收交回的会话：手机上做的内容要重启 App 后它才知道。想来回接力，用 `linkshell claude` 启动会话。
+Codex 可以用 ChatGPT 登录、API Key 或自定义服务商（包括 CC Switch 管理的配置）。在 Claude 桌面 App 里打开的会话，手机上也能跟进和继续，但桌面 App 要重启后才显示手机上做的内容；想来回接力，用 `linkshell claude` 启动。
 
-各 Agent 在手机上的支持情况：
+<details>
+<summary>各 Agent 在手机上的支持情况</summary>
 
 | | Codex | Claude Code | Gemini、Copilot 等 |
 | --- | --- | --- | --- |
@@ -190,17 +124,19 @@ LinkShell 使用电脑上已安装的 Agent，沿用它们现有的认证和服�
 | 分叉会话（整段或从某条回复） | 原生 | 原生 | 由 LinkShell 代做：把之前的对话以文字交给它 |
 | 在 git worktree 里开会话 | 支持 | 支持 | 支持 |
 | 斜杠命令 | `/compact`、`/review`、`/init` 和你的 skills | Claude 自己的命令和你的 skills | Agent 提供什么就有什么 |
-| 向你提问（选项、自由输入） | 支持，包括 Desktop 异步提问 | 支持 | Cursor 选项、Grok 提问、标准 ACP 表单 |
+| 向你提问 | 支持，包括 Desktop 异步提问 | 支持 | Cursor 选项、Grok 提问、标准 ACP 表单 |
 | 计划模式 | 手机上的一个开关 | 权限模式里的一项 | Agent 提供什么模式就有什么 |
-| 持续目标 | 设置、暂停、继续、清除、token 预算 | 设置、清除（需支持 `/goal`） | 暂未统一接入 |
-| 后台命令任务 | 状态、输出、单任务停止 | Bash / Monitor 的状态和输出 | 暂未统一接入 |
+| 持续目标 | 设置、暂停、继续、清除、token 预算 | 设置、清除（需支持 `/goal`） | 暂未接入 |
+| 后台命令任务 | 状态、输出、单任务停止 | Bash / Monitor 的状态和输出 | 暂未接入 |
+
+</details>
 
 ## 自建网关
 
-网关只转发加密数据并负责配对，占用资源很少。自建网关和官方网关是同一个程序，只是没有账号：不用登录，每台手机配对一次即可，扫码或输入 6 位配对码。任选一种：
+网关只转发加密数据并负责配对，看不到你的代码和对话。自建网关和官方网关是同一个程序，只是没有账号。
 
 ```bash
-# 在服务器上用 CLI
+# 用 CLI
 linkshell gateway --port 8787 --daemon
 
 # 或者 Docker
@@ -208,85 +144,72 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
   -v linkshell-gateway:/data nickname4th/linkshell-gateway
 ```
 
-它保存的全部数据就是一个 SQLite 文件（公钥，以及哪台手机和哪台电脑配对）：用 CLI 时是 `~/.linkshell/relay.db`，容器里是 `/data/relay.db`，上面挂载的卷就是为它准备的。这个文件还在，手机就不用重新配对。
-
-公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx），然后用 `wss://你的域名`。只在家里用的话，网关可以直接跑在这台电脑上：`linkshell host --gateway ws://局域网IP:8787`。更多见[部署指南](docs/deploy.md)。
+它只保存一个 SQLite 文件（公钥和配对关系）：用 CLI 时是 `~/.linkshell/relay.db`，容器里是 `/data/relay.db`。文件在，手机就不用重新配对。公网上请在前面加一层 HTTPS 反向代理，用 `wss://你的域名`；只在家里用的话，网关可以跑在同一台电脑上（`linkshell host --gateway ws://局域网IP:8787`）。详见[部署指南](docs/deploy.md)。
 
 ## 安全
 
-- **端到端加密。** 手机和电脑之间的数据全部加密，官方网关和自建网关都只能看到密文。手机和电脑之间的直连也是在这条加密通道上建立的，本身同样加密。
-- **配对即授权。** 配对的手机能做你在这台电脑终端里能做的事。只配对你信任的设备，配对码不要外传。
-- **Agent 用的是你的账号。** Agent 以你的用户身份运行，使用你登录 shell 的环境变量和它们自己的登录。Pro 订阅只包含网关服务。
-- **数据在本地。** 会话和历史保存在电脑上的 `~/.linkshell`，重启后配对依然有效。
+- **端到端加密。** 手机和电脑用各自长期身份签名的临时密钥协商，之后每一帧都用 XChaCha20-Poly1305 加密。网关只转发密文。屏幕和预览走的点对点直连，也是在这条加密通道里协商的。
+- **配对即授权。** 配对的手机能做你在这台电脑终端里能做的事。只配对信任的设备，配对码不要外传；不用的手机用 `linkshell devices remove <名称>` 移除。
+- **账号还是你自己的。** Agent 以你的用户身份运行，用它们自己的登录。Pro 只包含网关服务。
+- **数据在本地。** 会话、历史和密钥保存在电脑上的 `~/.linkshell`（可用 `LINKSHELL_HOME` 改位置）。
+
+架构细节：[设计说明](docs/v2/architecture.md)、[远程桌面](docs/v2/screen-realtime.md)。
 
 ## 命令
 
 | 做什么 | 命令 |
 | --- | --- |
-| 首次设置：host、屏幕权限、连接手机，一次做完 | `linkshell setup` |
-| 后台启动 LinkShell | `linkshell host --daemon` |
-| 打开原生 Mac 状态应用 | `linkshell app` |
-| 查看 Agent、会话和网关 | `linkshell host status` |
-| 停止 | `linkshell host stop` |
+| 设置电脑：host、屏幕权限、连接手机 | `linkshell setup` |
+| 后台启动 host / 查看状态 / 停止 | `linkshell host --daemon` / `linkshell host status` / `linkshell host stop` |
 | 配对手机（自建网关） | `linkshell pair` |
 | 查看、移除已配对的手机 | `linkshell devices` / `linkshell devices remove <名称>` |
 | 使用官方网关（Pro） | `linkshell login` / `linkshell logout` |
 | 可交给手机的 Claude Code / Codex | `linkshell claude` / `linkshell codex`（参数原样传递） |
+| 设置或检查屏幕 | `linkshell screen` / `linkshell screen --check` |
+| 打开 Mac 状态应用 | `linkshell app` |
 | 运行网关 | `linkshell gateway [--port 8787] [--daemon]` |
-| 设置看屏幕和控制屏幕 | `linkshell screen` |
 | 检查环境 | `linkshell doctor` |
-| 升级 | `linkshell upgrade` |
+| 升级（会重启运行中的 host，保留配对和历史） | `linkshell upgrade` |
 
-独立 App 在“更新”页升级，App 可选安装的命令行入口也会打开同一个更新器。CLI、Host 和 Node 随 App 一起更新，账号和配对数据保存在 App 之外。详见[桌面版使用说明](docs/mac-desktop.md)。
+独立 Mac App 在它的「更新」页自行升级。
 
-对于 npm/Homebrew 安装，从 CLI 0.10.40 起，`linkshell upgrade` 会用新安装的 CLI 自动重启仍在运行的旧 Host，保留登录、配对、电脑身份和会话历史，客户端自动重连。重启会停止正在执行的 Agent 轮次和终端进程；原本没有运行的 Host 不会被启动。即使 CLI 已是最新版，命令仍会检查 Host。从更早的 CLI 升级时，安装完成后再执行一次 `linkshell upgrade`，即可用新逻辑更新 Host。
-
-App 的设备列表支持给电脑改名，保存在当前手机上，与 Web 端保存在当前浏览器的行为一致；留空可恢复电脑原名。iOS 实时活动支持切换任务和多台电脑各自的卡片。审批、提问、失败和结束可通过独立的 [ActivityKit 推送服务](docs/v2/live-activity-push.md)提醒；点击操作会连接到对应电脑并核验具体请求。首页以紧凑卡片显示待回答的问题和审批操作。
-
-> **从 1.x 升级？** 2.0 的 App 和电脑端都换了，需要两边一起升级，再重新配对一次。`linkshell start` 和 1.x 的 App 已不再支持（CLI 0.10、网关 0.6 起移除）。
+> **从 1.x 升级？** 2.0 的 App 和电脑端都换了：两边一起升级，再重新配对一次。
 
 ## 开发
 
-pnpm workspace，Node.js 22.13 或更新版本（CI 使用 22）。
+pnpm workspace，Node.js 22.13 或更新版本。
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
 pnpm install
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test
+pnpm build && pnpm typecheck && pnpm test
 ```
 
-macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链。只构建 TypeScript 包时，运行 `pnpm -r --filter "./packages/*" build`；Linux CI 也使用这条命令，并在测试时排除 `@linkshell/mac`。
-
-| 目录 | 内容 |
-| --- | --- |
-| `packages/wire` | 会话模型、JSON-RPC 方法、端到端加密、中继客户端 |
-| `packages/host` | 电脑端守护进程：Agent 驱动（Codex app-server、Claude 接力、ACP）、终端、端口、屏幕 |
-| `packages/gateway` | 网关（官方与自建）：转发加密帧、负责配对的中继 |
-| `packages/cli` | `linkshell`：host、配对、Agent 启动器、网关、登录 |
-| `packages/client-core` | App 共用的客户端状态与时间线 |
-| `apps/client` | 手机 App：Expo / React Native，iOS 与 Android |
-| `apps/mac` | LinkShell.app（`@linkshell/mac`）：Mac 这一侧的屏幕——采集、WebRTC 视频、输入、系统权限 |
-| `apps/client/modules/link-screen` | iOS 原生屏幕接收：WebRTC 解码、最新帧缓存、Metal；复用 WebView 控件 |
-| `docs/site` | 官网与安装脚本（修改后运行 `python3 scripts/build-site-pages.py`；`scripts/site-promo-assets.sh` 负责剪出其中的影片和片段） |
-
-[远程桌面架构与链路图](docs/v2/screen-realtime.md) 说明 Mac/iOS 媒体管线、两套 WebRTC 连接、回退及验证边界。原生接收模块改动需要新 iOS 安装包，Metro 重载不能安装模块。最高 120 帧是能力请求，稳定 120 fps、稳定 4K/60 和真机弱网收益仍待验证，已记录的周期性短卡顿尚未定位。
-
-开发 App 时，在两个终端中分别从仓库根目录运行下面两条命令。给开发 host 单独的状态目录，避免与已安装的 host 共用会话和配置：
+macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链；`pnpm -r --filter "./packages/*" build` 只构建 TypeScript 包（Linux CI 跑的就是它）。开发 App 时，先用单独的状态目录启动开发 host，再启动 Metro：
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
 pnpm dev:app
 ```
 
+| 目录 | 内容 |
+| --- | --- |
+| `packages/wire` | 会话模型、JSON-RPC 方法、端到端加密、中继客户端 |
+| `packages/host` | 电脑端守护进程：Agent 驱动（Codex、Claude、ACP）、终端、端口、屏幕 |
+| `packages/gateway` | 中继：转发加密帧、配对、账号 |
+| `packages/cli` | `linkshell`：host、配对、Agent 启动器、网关、登录 |
+| `packages/client-core` | 各客户端共用的状态与时间线 |
+| `apps/client` | iPhone、Apple Watch 和 Android App（Expo / React Native） |
+| `apps/mac` | LinkShell.app：屏幕采集、视频、输入、系统权限、桌面工作台 |
+| `apps/web` | 网关提供的浏览器客户端 |
+| `docs/site` | 官网与安装脚本 |
+
 欢迎提交聚焦的问题反馈和 PR。请附上 CLI 版本、系统、Agent 和最小复现步骤，并去掉配对码和 token。发版流程见 [release SOP](docs/release-sop.md)。
 
 ## 支持项目
 
-由 [AI18N](https://ai18n.chat/) 赞助：提供兼容 OpenAI 与 Anthropic 接口的 AI API 网关。
+由 [AI18N](https://ai18n.chat/) 赞助：提供兼容 OpenAI 与 Anthropic 接口的 AI API 网关。LinkShell 也在 [Product Hunt](https://www.producthunt.com/products/linkshell) 上。
 
 <details>
 <summary>请作者喝杯咖啡</summary>
@@ -298,10 +221,6 @@ pnpm dev:app
 
 </details>
 
-[Product Hunt](https://www.producthunt.com/products/linkshell)
-
 ## 许可证
 
-[MIT](LICENSE)。
-
-网关根地址也提供网页客户端。自托管直接配对，无需 Supabase；官方网关支持账号登录。详见[网页客户端](apps/web/README.md)。远程桌面页支持搜索电脑和自定义名称，名称保存在当前浏览器。打开桌面直接进入独立详情页，可切换显示器、调整画质和全屏观看。
+[MIT](LICENSE)

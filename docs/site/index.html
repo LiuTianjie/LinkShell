@@ -215,8 +215,13 @@
     .phone img { display: block; width: 100%; height: auto; aspect-ratio: 540 / 1174; }
     .phone video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .phone.side { width: min(100%, 860px); border-radius: 44px; }
+    .pair { display: flex; align-items: flex-end; gap: 40px; margin-top: 36px; }
+    .pair .phone { margin: 0; }
+    .watch { margin: 0; width: min(100%, 230px); border: 7px solid #23262d; border-radius: 58px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--border-strong); }
+    .watch img { width: 100%; height: auto; aspect-ratio: 416 / 496; }
+    .note-small { margin-top: 18px; color: var(--text-sec); font-size: 15px; }
     .phone.side img { aspect-ratio: 1280 / 588; }
-    @media (max-width: 700px) { .phone { margin-inline: auto; } .phone.side { border-width: 6px; border-radius: 26px; } }
+    @media (max-width: 700px) { .phone { margin-inline: auto; } .phone.side { border-width: 6px; border-radius: 26px; } .pair { flex-direction: column; align-items: center; gap: 28px; } }
 
     .hero { padding-block: 64px 0; }
     .hero h1 { font-size: clamp(38px, 5.6vw, 60px); letter-spacing: -.04em; line-height: 1.1; }
@@ -225,8 +230,6 @@
     .hero .btns { margin-top: 28px; }
     .hero .cmd { margin-top: 14px; }
     .hero .media { margin-top: 44px; }
-    .duo-pill { display: inline-flex; align-items: center; gap: 10px; margin-top: 20px; padding: 7px 12px; color: var(--accent); border: 1px solid var(--border-strong); border-radius: 6px; font-size: 14px; }
-    .duo-pill::before { content: ""; width: 17px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; background: linear-gradient(90deg, transparent 47%, currentColor 47%, currentColor 53%, transparent 53%); }
     .duo-figure { margin: 32px 0 0; }
     .duo-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border-strong); border-radius: 24px; background: #000; }
     .duo-figure figcaption { margin-top: 12px; color: var(--text-sec); font-size: 13px; }
@@ -377,10 +380,9 @@
       <div class="wrap">
         <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
         <p class="lead">
-          <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑。你在手机上看它干活、点一下批准、随时插话，需要时直接看电脑屏幕。代码不离开你的电脑。</span>
-          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. On your phone you watch them work, approve with a tap, cut in any time, and look at the computer&#39;s screen when you need to. Your code never leaves your machine.</span>
+          <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑。你在手机、手表或锁屏上看它干活、点一下批准、随时插话，需要时直接操作电脑屏幕。代码不离开你的电脑，连接端到端加密。</span>
+          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone, your watch or the Lock Screen you follow their work, approve with a tap, cut in any time, and take over the computer&#39;s screen when you need to. Your code stays on your machine, and the connection is end-to-end encrypted.</span>
         </p>
-        <a class="duo-pill" href="#iphone-duo"><span lang="zh">已适配 iPhone Duo · 了解折叠体验</span><span lang="en">Now adapted for iPhone Duo · Explore the layout</span> ↗</a>
         <div class="btns">
           <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
@@ -390,58 +392,22 @@
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
             Android APK
           </a>
-          <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
+          <a class="btn btn-s" href="#install"><span lang="zh">Mac 与电脑端</span><span lang="en">Mac and computer setup</span></a>
         </div>
-        <div class="cmd"><i>$</i><code>npm i -g linkshell-cli</code><button class="copy" type="button" data-copy="npm i -g linkshell-cli" aria-label="Copy"></button></div>
 
         <figure class="media">
           <picture>
-            <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" width="720" height="1280" />
-            <img src="assets/promo/film.jpg" width="1600" height="900" alt="LinkShell 介绍片：手机上看 Agent 干活、批准它的请求、插话、看电脑屏幕" />
+            <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" data-en="assets/promo/film-en-vertical.jpg" width="720" height="1280" />
+            <img src="assets/promo/film.jpg" data-en="assets/promo/film-en.jpg" width="1600" height="900" alt="LinkShell 介绍片：手机上看 Agent 干活、批准请求、锁屏与手表审批、插话、操作电脑屏幕 / LinkShell film: follow an agent, approve from the phone, the Lock Screen and the watch, cut in, use the computer's screen" />
           </picture>
-          <video id="film" muted loop playsinline preload="none" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" aria-label="LinkShell"></video>
+          <video id="film" muted loop playsinline preload="none" data-start="5.1" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" data-wide-en="assets/promo/linkshell-en.mp4" data-tall-en="assets/promo/linkshell-en-vertical.mp4" aria-label="LinkShell"></video>
         </figure>
-        <noscript><p class="lead"><a href="assets/promo/linkshell-2.0.mp4">看介绍片</a></p></noscript>
+        <noscript><p class="lead"><a href="assets/promo/linkshell-2.0.mp4">看介绍片 / Watch the film</a></p></noscript>
       </div>
     </section>
 
     <section class="sec" id="features">
       <div class="wrap">
-        <article class="feature" id="iphone-duo">
-          <div class="text">
-            <h2><span lang="zh">iPhone Duo，<br />展开你的工作区。</span><span lang="en">iPhone Duo.<br />Room to do more.</span></h2>
-            <p><span lang="zh">LinkShell 2.3.7 为 iPhone Duo 适配了会话、输入和工具面板。展开时，把对话与改动或预览放在一起；折叠时，界面根据可用区域重新安排内容，继续当前会话。</span><span lang="en">LinkShell 2.3.7 adapts its conversation, composer and tool panels to iPhone Duo. Expanded, see chat beside changes or a preview. Folded, the interface respects the available screen regions while you continue the same session.</span></p>
-          </div>
-          <figure class="duo-figure">
-            <div class="duo-viewer" id="duo-viewer" data-state="idle">
-              <div class="duo-controls" role="group" aria-label="iPhone Duo">
-                <p class="duo-controls-title"><span lang="zh">换个角度看看</span><span lang="en">Take a closer look</span></p>
-                  <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled><span lang="zh">横屏</span><span lang="en">Wide</span></button>
-                  <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled><span lang="zh">竖屏</span><span lang="en">Tall</span></button>
-                  <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled><span lang="zh">闭合</span><span lang="en">Closed</span></button>
-                  <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled><span lang="zh">坐立</span><span lang="en">Seated</span></button>
-                  <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled><span lang="zh">站立</span><span lang="en">Standing</span></button>
-                <label class="duo-fold" for="duo-fold">
-                  <span class="duo-fold-head"><span lang="zh">折叠程度</span><span lang="en">Fold</span><output id="duo-angle">100%</output></span>
-                  <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
-                </label>
-              </div>
-              <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
-                <div class="duo-poster">
-                  <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏 / LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
-                  <button class="duo-start" type="button"><span lang="zh">打开 3D 预览</span><span lang="en">Explore in 3D</span></button>
-                </div>
-              </div>
-              <p class="duo-hint" id="duo-status" aria-live="polite"><span lang="zh">点选姿态，拖动模型自由旋转</span><span lang="en">Choose a pose. Drag to rotate.</span></p>
-            </div>
-            <figcaption><span lang="zh">屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</span><span lang="en">Screen content captured from the running app · iPhone Duo simulator.</span></figcaption>
-          </figure>
-          <ul class="duo-points">
-            <li><b><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></b><p><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></p></li>
-            <li><b><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></b><p><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></p></li>
-            <li><b><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></b><p><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></p></li>
-          </ul>
-        </article>
 
         <article class="feature">
           <div class="text">
@@ -452,6 +418,18 @@
             <img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="手机上的会话：Agent 读文件、改代码、列计划，然后请求运行测试的权限" />
             <video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video>
           </figure>
+        </article>
+
+        <article class="feature" id="glance">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span></h2>
+            <p><span lang="zh">iPhone 的实时活动在锁屏和灵动岛上显示 Agent 的进度；它要权限时，卡片上直接给出「拒绝 / 允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span></p>
+          </div>
+          <div class="pair">
+            <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的构建请求，带拒绝和允许按钮 / A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny / Allow" /></figure>
+            <figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="Apple Watch 上的 LinkShell：一条待确认的请求，带拒绝和允许按钮 / LinkShell on Apple Watch: a pending request with Deny and Allow" /></figure>
+          </div>
+          <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span></p>
         </article>
 
         <article class="feature">
@@ -492,6 +470,42 @@
           </ul>
         </article>
 
+        <article class="feature" id="iphone-duo">
+          <div class="text">
+            <h2><span lang="zh">iPhone Duo，<br />展开你的工作区。</span><span lang="en">iPhone Duo.<br />Room to do more.</span></h2>
+            <p><span lang="zh">展开时，对话和改动或预览并排放；折叠时，界面按可用区域重新安排，当前会话不中断。普通 iPhone 用单栏，操作一样。</span><span lang="en">Open it up and the conversation sits beside the changes or a preview. Fold it and the interface rearranges around the available screen, without leaving the session. A regular iPhone gets a single column with the same controls.</span></p>
+          </div>
+          <figure class="duo-figure">
+            <div class="duo-viewer" id="duo-viewer" data-state="idle">
+              <div class="duo-controls" role="group" aria-label="iPhone Duo">
+                <p class="duo-controls-title"><span lang="zh">换个角度看看</span><span lang="en">Take a closer look</span></p>
+                  <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled><span lang="zh">横屏</span><span lang="en">Wide</span></button>
+                  <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled><span lang="zh">竖屏</span><span lang="en">Tall</span></button>
+                  <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled><span lang="zh">闭合</span><span lang="en">Closed</span></button>
+                  <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled><span lang="zh">坐立</span><span lang="en">Seated</span></button>
+                  <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled><span lang="zh">站立</span><span lang="en">Standing</span></button>
+                <label class="duo-fold" for="duo-fold">
+                  <span class="duo-fold-head"><span lang="zh">折叠程度</span><span lang="en">Fold</span><output id="duo-angle">100%</output></span>
+                  <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
+                </label>
+              </div>
+              <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
+                <div class="duo-poster">
+                  <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏 / LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
+                  <button class="duo-start" type="button"><span lang="zh">打开 3D 预览</span><span lang="en">Explore in 3D</span></button>
+                </div>
+              </div>
+              <p class="duo-hint" id="duo-status" aria-live="polite"><span lang="zh">点选姿态，拖动模型自由旋转</span><span lang="en">Choose a pose. Drag to rotate.</span></p>
+            </div>
+            <figcaption><span lang="zh">屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</span><span lang="en">Screen content captured from the running app · iPhone Duo simulator.</span></figcaption>
+          </figure>
+          <ul class="duo-points">
+            <li><b><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></b><p><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></p></li>
+            <li><b><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></b><p><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></p></li>
+            <li><b><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></b><p><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></p></li>
+          </ul>
+        </article>
+
         <article class="feature">
           <div class="text">
             <h2><span lang="zh">还有这些</span><span lang="en">And the rest</span></h2>
@@ -506,6 +520,8 @@
               <dd><span lang="zh">按阶段跟进 Claude Workflow，打开每个 Agent 的对话和工具结果。后台工作流保留在输入框上方；标题旁可查看全部工作流和子 Agent。</span><span lang="en">Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</span></dd>
               <dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span></dt>
               <dd><span lang="zh">输入 <code>/</code> 列出 Agent 的命令和你的 skills。<code>/compact</code>、<code>/review</code> 对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</span></dd>
+              <dt><span lang="zh">Mac 上的完整工作台</span><span lang="en">A full workspace on the Mac</span></dt>
+              <dd><span lang="zh">Mac App 里也能继续对话、处理审批、开终端和远程桌面，连本机或别的电脑都行。还有按 Agent 统计的 Token 用量、开机自启和浅色 / 深色外观。</span><span lang="en">The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</span></dd>
               <dt><span lang="zh">文件和会话管理</span><span lang="en">Files and tidy sessions</span></dt>
               <dd><span lang="zh">浏览项目里的文件，把手机里的图片和文件传给 Agent。会话可以重命名、归档、删除，<code>claude --resume</code> 里也能看到新名字。</span><span lang="en">Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</span></dd>
             </dl>
@@ -549,8 +565,8 @@
           <div class="step">
             <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
             <p><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg">Mac · Intel</a></p>
-            <p><span lang="zh">macOS 13 及以上：拖入 Applications，打开后点击“登录 / 注册”，在设置里授予屏幕录制与辅助功能权限。App 已内置 CLI、Host 和 Node，并可整体自更新。支持登录系统时自动启动、浅色 / 深色外观，以及桌面与手机端按 Agent 筛选的 Token 用量统计。桌面还可显示设备配对二维码和配对码。</span><span lang="en">macOS 13 or later: drag into Applications, open and sign in, then grant Screen Recording and Accessibility in Settings. The app includes CLI, Host and Node, and updates them together. It supports launch at login, light / dark appearance, and token usage statistics by agent on Mac and phone. The desktop can also show a device-pairing QR code and code.</span></p>
-            <p><span lang="zh">也可安装 CLI，运行一次设置：它在后台启动 LinkShell、带你打开看屏幕需要的两个权限开关，并连上你的手机。</span><span lang="en">Alternatively, install the CLI and run the setup once: it starts LinkShell in the background, takes you to the two permission switches the screen needs, and connects your phone.</span></p>
+            <p><span lang="zh">macOS 13 及以上：拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能两个开关。App 自带 CLI、Host 和 Node，一起更新。</span><span lang="en">macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</span></p>
+            <p><span lang="zh">Linux，或者更想用命令行：装 CLI，运行一次设置。它在后台启动 LinkShell、带你打开屏幕需要的两个权限，再连上手机。</span><span lang="en">On Linux, or if you prefer the command line: install the CLI and run the setup once. It starts LinkShell in the background, takes you to the two permissions the screen needs, and connects your phone.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell setup</code></pre>
             <p><span lang="zh">不用 npm 的话，也可以用 Homebrew 或安装脚本：</span><span lang="en">Without npm, install it with Homebrew or the install script:</span></p>
@@ -851,6 +867,13 @@
       document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
       document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
       try { localStorage.setItem('linkshell-lang', lang); } catch { }
+      // Stills with an English cut show it to English visitors (the film follows in its loader).
+      document.querySelectorAll('[data-en]').forEach((el) => {
+        const attr = el.tagName === 'SOURCE' ? 'srcset' : 'src';
+        if (!el.dataset.zh) el.dataset.zh = el.getAttribute(attr);
+        el.setAttribute(attr, lang === 'en' ? el.dataset.en : el.dataset.zh);
+      });
+      if (window.reloadFilm) window.reloadFilm();
     }
     applyLanguage(document.documentElement.dataset.lang === 'en' ? 'en' : 'zh');
     document.getElementById('lang-toggle').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
@@ -901,17 +924,27 @@
       const videos = [...document.querySelectorAll('.media video, .phone video')];
       function load(video) {
         // (A phone's own recording has one shape for every screen.)
-        const src = (tall.matches && video.dataset.tall) || video.dataset.wide;
+        const en = currentLang === 'en';
+        const src = (tall.matches && ((en && video.dataset.tallEn) || video.dataset.tall)) || (en && video.dataset.wideEn) || video.dataset.wide;
         if (video.dataset.shown === src) return;
         // Both shapes share one timeline: carry on from the same moment. The film
         // starts after its hook, which repeats the headline above it.
         const at = video.dataset.shown ? video.currentTime : Number(video.dataset.start || 0);
         const narrow = tall.matches && video.parentElement.querySelector('source');
         video.dataset.shown = src;
-        video.poster = narrow ? narrow.getAttribute('srcset') : video.parentElement.querySelector('img').getAttribute('src'); // until its first frame is there
+        const still = narrow || video.parentElement.querySelector('img');
+        video.poster = (en && still.dataset.en) || (narrow ? narrow.getAttribute('srcset') : still.getAttribute('src')); // until its first frame is there
         video.src = src;
         if (at) video.addEventListener('loadedmetadata', () => { video.currentTime = at; }, { once: true });
       }
+      // A change of language swaps the film for the other cut, from the same moment.
+      window.reloadFilm = () => videos.forEach((video) => {
+        if (!video.dataset.shown || !video.dataset.wideEn) return;
+        const playing = !video.paused;
+        if (playing) video.dataset.away = '1';
+        load(video);
+        if (playing) video.play().catch(() => { });
+      });
       tall.addEventListener('change', () => videos.forEach((video) => {
         if (!video.dataset.shown) return;
         const playing = !video.paused;
