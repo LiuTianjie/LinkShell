@@ -8,6 +8,7 @@ export interface ProMembershipOptions {
   anonKey: string;
   accessToken: string;
   userId: string;
+  signal?: AbortSignal;
 }
 
 export const PRO_CODE_SHOP_URL = "https://pay.ldxp.cn/item/7lgv1s";
@@ -28,7 +29,8 @@ async function request(url: string, init: RequestInit): Promise<{ response: Resp
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { ...init, credentials: "omit", signal: controller.signal });
+    const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+    const response = await fetch(url, { ...init, credentials: "omit", signal });
     let body: unknown;
     try {
       body = await response.json();
@@ -49,6 +51,7 @@ export async function fetchProMembership(options: ProMembershipOptions): Promise
   const url = `${options.supabaseUrl.replace(/\/$/, "")}/rest/v1/profiles?select=plan,plan_expires_at&id=eq.${encodeURIComponent(options.userId)}&limit=1`;
   const { response, body } = await request(url, {
     headers: { apikey: options.anonKey, Authorization: `Bearer ${options.accessToken}` },
+    signal: options.signal,
   });
   if (response.status === 401 || response.status === 403) throw new Error(LOGIN_REQUIRED);
   if (!response.ok) throw new Error("暂时无法获取会员状态，请稍后重试");

@@ -33,6 +33,8 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { isDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { DesktopScreen } from "./DesktopScreen";
 import {
   autoScreenWidth,
   screenPreferences,
@@ -252,6 +254,7 @@ export function socketBootstrap(
 
 function readStored(key: string): string | undefined {
   try {
+    if (isDesktop) return readDesktopStorage<string | undefined>(`screen:${key}`, undefined);
     return localStorage.getItem(key) ?? undefined;
   } catch {
     return undefined;
@@ -260,6 +263,7 @@ function readStored(key: string): string | undefined {
 
 function writeStored(key: string, value: string): void {
   try {
+    if (isDesktop) { saveDesktopStorage(`screen:${key}`, value); return; }
     localStorage.setItem(key, value);
   } catch {
     // Not kept: the next visit starts at the page's own choice.
@@ -282,21 +286,27 @@ export function StatusDot({
   );
 }
 
-export function Screen({
-  title = "电脑屏幕",
-  embedded = false,
-  primaryAction = false,
-  onOpen,
-  autoStart = false,
-  active = true,
-}: {
+export interface ScreenProps {
   title?: string;
   embedded?: boolean;
   primaryAction?: boolean;
   onOpen?: () => void;
   autoStart?: boolean;
   active?: boolean;
-}) {
+}
+
+export function Screen(props: ScreenProps) {
+  return isDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} />;
+}
+
+function BrowserScreen({
+  title = "电脑屏幕",
+  embedded = false,
+  primaryAction = false,
+  onOpen,
+  autoStart = false,
+  active = true,
+}: ScreenProps) {
   const { link, streams } = useConnection();
   const job = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
@@ -369,7 +379,8 @@ export function Screen({
     if (!focused || !surface.current) return;
     const previous = document.activeElement;
     const hidden: { node: HTMLElement; inert: boolean }[] = [];
-    let node: HTMLElement | null = surface.current;
+    // The desktop Shell owns inert state so both layers cannot restore stale values.
+    let node: HTMLElement | null = isDesktop ? null : surface.current;
     // Keep the existing iframe alive while isolating the expanded workspace from keyboard navigation.
     while (node?.parentElement) {
       for (const sibling of node.parentElement.children) {

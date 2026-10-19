@@ -89,7 +89,7 @@ final class DesktopCommandControl: @unchecked Sendable {
 }
 
 enum DesktopCommand {
-  static func run(_ arguments: [String], timeout: Double = 20, control: DesktopCommandControl? = nil, input: Data? = nil) throws -> Data {
+  static func process(_ arguments: [String]) -> Process {
     let task = Process()
     var env = ProcessInfo.processInfo.environment
     env["LINKSHELL_HOME"] = DesktopRuntime.home
@@ -107,6 +107,11 @@ enum DesktopCommand {
       task.executableURL = URL(fileURLWithPath: "/bin/zsh")
       task.arguments = ["-lc", "exec linkshell \"$@\"", "linkshell-desktop"] + arguments
     }
+    return task
+  }
+
+  static func run(_ arguments: [String], timeout: Double = 20, control: DesktopCommandControl? = nil, input: Data? = nil) throws -> Data {
+    let task = process(arguments)
     let output = Pipe()
     task.standardOutput = output
     task.standardError = FileHandle.nullDevice
@@ -195,7 +200,6 @@ enum DesktopCommand {
   @Published var log = ""
   @Published var activity: [(Date, String)] = []
   @Published var selected = "总览"
-  @Published var selectedSession: DesktopSession?
   @Published var autoCheck = UserDefaults.standard.object(forKey: "desktop.autoCheck") as? Bool ?? true {
     didSet { UserDefaults.standard.set(autoCheck, forKey: "desktop.autoCheck") }
   }

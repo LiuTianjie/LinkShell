@@ -29,6 +29,7 @@ import {
   messageOf,
   useActions,
   useClient,
+  useSessionOnline,
   useConnection,
   useJob,
 } from "./common";
@@ -89,7 +90,7 @@ function AgentSettings({
   const { link } = useConnection();
   const actions = useActions();
   const dialogs = useDialogs();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const id = useId();
   const dirty = useRef(false);
   const job = useJob();
@@ -426,7 +427,7 @@ function Provider({
   job: ReturnType<typeof useJob>;
 }) {
   const { link } = useConnection();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const dialogs = useDialogs();
   const id = useId();
   const dirty = useRef(false);
@@ -640,7 +641,7 @@ export function AcpManager() {
   const id = useId();
   const job = useJob();
   const machine = useClient((state) => state.machine);
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const [agent, setAgent] = useState("");
   const [agents, setAgents] = useState<AcpRemoteAgent[]>();
   const [editing, setEditing] = useState<string>();

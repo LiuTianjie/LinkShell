@@ -39,7 +39,7 @@ import {
   ErrorNotice,
   useActions,
   useConnection,
-  useClient,
+  useSessionOnline,
   useJob,
 } from "./common";
 
@@ -606,7 +606,7 @@ export function Timeline({
   const actions = useActions();
   const { link } = useConnection();
   const job = useJob();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const tail = useRef<HTMLDivElement>(null);
   // Which folded step runs the reader has opened in place.
   const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
@@ -747,7 +747,7 @@ export function Timeline({
               {item.streaming && (
                 <div className="message-author" role="status">
                   <AgentMark agent={agent} />
-                  <span>正在回复…</span>
+                  <span>{online ? "正在回复…" : "等待会话恢复…"}</span>
                 </div>
               )}
               <RichText text={item.text} />

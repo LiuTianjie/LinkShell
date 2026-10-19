@@ -16,6 +16,7 @@ import {
   useClient,
   useConnection,
   useJob,
+  useSessionOnline,
 } from "./common";
 import { Diff, Blocks } from "./Timeline";
 import { Icon } from "../icons";
@@ -32,9 +33,10 @@ export function Permission({
   const actions = useActions();
   const { link } = useConnection();
   const online = useClient((state) => state.status === "online");
+  const available = useSessionOnline();
   const job = useJob();
   const [submitted, setSubmitted] = useState(false);
-  const disabled = !online || job.busy || submitted;
+  const disabled = !available || job.busy || submitted;
   const defaults = useMemo(
     () =>
       Object.fromEntries(
@@ -322,9 +324,9 @@ export function Permission({
           </Button>
         ))}
       </div>
-      {!online && (
+      {!available && (
         <p className="muted" role="status">
-          电脑离线，连接恢复后可继续处理。已填写的回答会保留。
+          {online ? "会话正在同步，完成后可继续处理。" : "电脑离线，连接恢复后可继续处理。"}已填写的回答会保留。
         </p>
       )}
       {submitted && (

@@ -60,6 +60,8 @@ Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-wat
 
 The Mac app can launch at login and starts its background service automatically. Settings offer system, light and dark appearance (dark by default). Usage Statistics on Mac and phone offer all registered agents, their existing brand icons, token totals, daily charts and model breakdowns. Codex/Claude use native logs; other agents use usage reported to LinkShell. Missing data is shown explicitly. Counts do not represent billing or remaining quota. The Mac overview and Devices page can generate a pairing QR code and six-digit code; pairing without an account uses a self-hosted gateway.
 
+The current source also includes a full desktop workspace: continue conversations, handle approvals, use terminals and open remote desktops on this Mac or another computer. Persistent Workspace / This Mac controls separate client work from native service management. It requires a matching new App and CLI build; see [the desktop guide](docs/mac-desktop.md) for implementation and validation scope.
+
 The CLI installation below is optional for Mac app users.
 
 The CLI requires macOS or Linux and **Node.js 22.13 or newer**; the standalone Mac app includes Node.

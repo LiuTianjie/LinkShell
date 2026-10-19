@@ -24,12 +24,27 @@ export interface LoginResult {
   accessToken: string;
 }
 
-export async function runLogin(): Promise<LoginResult | null> {
+export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<LoginResult | null> {
+  if (options.signal?.aborted) return null;
   process.stderr.write("\n  LinkShell Login\n\n");
 
   return new Promise<LoginResult | null>((resolve) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let completion: ReturnType<typeof setTimeout> | undefined;
+    let finished = false;
+    const finish = (result: LoginResult | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      clearTimeout(completion);
+      options.signal?.removeEventListener("abort", abort);
+      server.closeAllConnections();
+      server.close();
+      resolve(result);
+    };
+    const abort = () => finish(null);
     const server = http.createServer(async (req, res) => {
+      if (finished) { res.destroy(); return; }
       const url = new URL(req.url ?? "/", "http://localhost");
 
       if (url.pathname === "/callback") {
@@ -85,7 +100,7 @@ export async function runLogin(): Promise<LoginResult | null> {
               Authorization: `Bearer ${accessToken}`,
               apikey: SUPABASE_ANON_KEY,
             },
-            signal: AbortSignal.timeout(10_000),
+            signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
           });
           if (userRes.ok) {
             const user = (await userRes.json()) as {
@@ -95,11 +110,13 @@ export async function runLogin(): Promise<LoginResult | null> {
             userId = user.id;
             email = user.email ?? "";
 
-            const profile = await fetchProMembership({ userId, accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+            const profile = await fetchProMembership({ userId, accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, signal: options.signal });
             plan = profile.plan;
             membership = { plan: profile.plan, planExpiresAt: profile.expiresAt ?? null };
           }
         } catch {}
+
+        if (finished || options.signal?.aborted) { res.destroy(); return; }
 
         if (!userId) {
           res.writeHead(401);
@@ -127,9 +144,8 @@ export async function runLogin(): Promise<LoginResult | null> {
 
         // Left pending, the five-minute limit would keep the command alive long after the login.
         clearTimeout(timeout);
-        setTimeout(() => {
-          server.close();
-          resolve({
+        completion = setTimeout(() => {
+          finish({
             success: true,
             plan: plan as "pro" | "free",
             email,
@@ -144,15 +160,17 @@ export async function runLogin(): Promise<LoginResult | null> {
       res.end("Not found");
     });
 
-    server.on("error", () => { clearTimeout(timeout); resolve(null); });
+    server.on("error", () => finish(null));
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
+      if (finished) return;
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         process.stderr.write(
           "  \x1b[31m✗\x1b[0m Failed to start local server\n\n",
         );
-        resolve(null);
+        finish(null);
         return;
       }
 
@@ -177,8 +195,7 @@ export async function runLogin(): Promise<LoginResult | null> {
       // Timeout after 5 minutes
       timeout = setTimeout(() => {
         process.stderr.write("  Login timed out.\n\n");
-        server.close();
-        resolve(null);
+        finish(null);
       }, 5 * 60 * 1000);
     });
   });

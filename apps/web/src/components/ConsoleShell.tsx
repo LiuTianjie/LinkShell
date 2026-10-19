@@ -16,6 +16,8 @@ import {
   computerNames,
 } from "../live/computer-names";
 import { readLocal, saveLocal } from "../live/storage";
+import { isDesktop } from "../live/desktop";
+import { DesktopShell } from "./DesktopShell";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
 import { Button } from "./ui/button";
@@ -162,19 +164,25 @@ function Navigation({
   );
 }
 
-export function ConsoleShell({
-  view,
-  navigate,
-  connect,
-  selectComputer,
-  children,
-}: {
+export interface ConsoleShellProps {
   view: string;
   navigate: (view: string) => void;
   connect: () => void;
   selectComputer: (computer: Computer) => void;
   children: ReactNode;
-}) {
+}
+
+export function ConsoleShell(props: ConsoleShellProps) {
+  return isDesktop ? <DesktopShell {...props} /> : <WebConsoleShell {...props} />;
+}
+
+function WebConsoleShell({
+  view,
+  navigate,
+  connect,
+  selectComputer,
+  children,
+}: ConsoleShellProps) {
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
   const [theme, setTheme] = useState(() =>

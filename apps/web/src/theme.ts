@@ -50,3 +50,43 @@ export const themeStyles = `
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ${variables(1)} color-scheme: dark; } }
   :root[data-theme="dark"] { ${variables(1)} color-scheme: dark; }
 `;
+
+const nativeDesktopColors: Record<string, [string, string]> = {
+  "background": ["#fafafb", "#060709"],
+  "plain": ["#fafafb", "#060709"],
+  "card": ["#ffffff", "#111318"],
+  "cardRaised": ["#ffffff", "#1a1c22"],
+  "inset": ["#edf0f5", "#0d0f13"],
+  "sidebarBackground": ["#eef0f4", "#0b0c0f"],
+  "sidebarAccent": ["#dfe3ea", "#1d1e22"],
+  "label": ["#202636", "#f0f1f3"],
+  "secondaryLabel": ["#596276", "#a8adb5"],
+  "tertiaryLabel": ["#737c8d", "#8b909a"],
+  "quaternaryLabel": ["#b2b4be", "#555562"],
+  "separator": ["#28385212", "#dce5ff12"],
+  "separatorStrong": ["#28385228", "#dce5ff26"],
+  "fill": ["#70758d0c", "#cacaf20a"],
+  "fillStrong": ["#70758d18", "#cacaf214"],
+  "accent": ["#4a6cf7", "#607ff0"],
+  "accentHover": ["#3e5ee5", "#7390fc"],
+  "accentSoft": ["#4a6cf714", "#7d95ff1c"],
+  "link": ["#4966d9", "#a1b2ff"],
+  "userBubble": ["#eeeef4", "#181a20"],
+  "code": ["#f3f3f7", "#101216"],
+  "codeText": ["#323442", "#e3e3ee"],
+  "desktop-shadow": ["#24283e0b", "#05051026"],
+  "desktop-highlight": ["#ffffffb3", "#ffffff07"],
+  "desktop-selected-shadow": ["#20274809", "#00000016"],
+};
+
+export function applyDesktopTheme(theme: "light" | "dark"): void {
+  const root = document.documentElement;
+  const index = theme === "dark" ? 1 : 0;
+  root.dataset.theme = theme;
+  // Native appearance changes must update the same resolved tokens on every
+  // control and portal; a second CSS palette must not retain light values.
+  for (const [name, values] of Object.entries({ ...brandColors, ...desktopColors, ...nativeDesktopColors })) {
+    root.style.setProperty(`--${name}`, values[index]);
+  }
+  root.style.colorScheme = theme;
+}

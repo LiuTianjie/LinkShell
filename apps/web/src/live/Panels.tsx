@@ -33,6 +33,7 @@ import {
   Modal,
   useActions,
   useClient,
+  useSessionOnline,
   useConnection,
   useJob,
   useLoad,
@@ -101,7 +102,7 @@ export function Settings({
   view?: SessionView;
 }) {
   const actions = useActions();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const job = useJob();
   const acp = useClient(
     (state) =>
@@ -226,7 +227,7 @@ export function Goal({
   const dialogs = useDialogs();
   const { link } = useConnection();
   const actions = useActions();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const job = useJob();
   const codex = session.agent === "codex";
   const readOnly = codex && session.driver === "desktop";
@@ -408,7 +409,7 @@ export function Tasks({
 }) {
   const actions = useActions();
   const { store } = useConnection();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const records = useClient((state) => state.tasks[session.id]);
   const workflows = useClient((state) => state.workflows[session.id]);
   const job = useJob();
@@ -591,7 +592,7 @@ function TaskOutput({
 }) {
   const actions = useActions();
   const { store } = useConnection();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const running = useClient(
     (state) => state.tasks[sessionId]?.[taskId]?.state === "running",
   );
@@ -668,7 +669,7 @@ function SubagentConversation({
   onTerminal: (id: string) => void;
 }) {
   const { store } = useConnection();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const ready = useClient((state) => state.ready[session.id]);
   const sub = useClient(
     (state) => state.subagentViews[subagentKey(session.id, id)],
@@ -780,7 +781,7 @@ export function Worktrees() {
   const actions = useActions();
   const { store } = useConnection();
   const job = useJob();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const [removing, setRemoving] = useState<string>();
   const loaded = useLoad(() => actions.listWorktrees(), [store]);
   return (

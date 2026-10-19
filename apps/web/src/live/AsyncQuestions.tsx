@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Check, CircleHelp } from "lucide-react";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { ErrorNotice, useActions, useClient, useJob } from "./common";
+import { ErrorNotice, useActions, useSessionOnline, useJob } from "./common";
 
 function Question({
   question,
@@ -16,7 +16,7 @@ function Question({
   answered?: string;
 }) {
   const actions = useActions();
-  const online = useClient((state) => state.status === "online");
+  const online = useSessionOnline();
   const job = useJob();
   const inputId = useId();
   const [text, setText] = useState("");

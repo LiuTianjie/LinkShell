@@ -42,10 +42,12 @@
     "commander": "^13.1.0",
     "node-pty": "^1.1.0",
     "qrcode-terminal": "^0.12.0",
+    "ws": "^8.21.0",
     "@linkshell/host": "workspace:*",
     "@linkshell/wire": "workspace:*"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.14",
     "tsx": "^4.19.3",
     "vitest": "^3.2.1"
   },

@@ -1,24 +1,49 @@
 # @linkshell/mac
 
-LinkShell.app is the native macOS status app and screen helper. Its dark dashboard and menu-bar
-popover use the same logo and neutral/mint palette as the website. Open it with `linkshell app`
+LinkShell.app combines a desktop workspace, native Mac service management and the screen helper.
+Two adjacent **工作台 / 本机管理** buttons sit below the larger, unframed brand row at the top of the sidebar;
+⌘1 / ⌘2 also switch between the workspace and native Mac management. The title bar follows the
+window's appearance without a separate color strip. Open it with `linkshell app`
 or double-click the app. The host still opens separate `--connect` workers for screen capture;
 `--setup` retains the existing permission flow. Closing the dashboard leaves the host running.
 
 ## Desktop status app
 
-The dashboard provides overview, session summaries/details, paired devices, a bounded host-log
+Native Mac management provides overview, paired devices, a bounded host-log
 viewer, account sign-in/sign-out, permissions, service start/stop/restart, and version checks.
 Standalone builds update the whole app through Sparkle; CLI-managed builds use the package manager. Stops, restarts and updates explain interruption before proceeding.
-Session approvals remain in the phone or original agent terminal in this first desktop version.
+The workspace supports conversations, approvals, projects, terminals, files and remote desktops.
+It reuses the current client protocol with desktop-specific typography, navigation and surfaces.
+Conversations live in the workspace; native management has no separate session page. The workspace
+sidebar keeps the computer selector's card hierarchy, names and status without a decorative
+computer icon. Both areas use the native management palette, including its original near-black
+dark background.
+
+Desktop port previews support multiple tabs. Switching tabs keeps their existing previews;
+refresh and close apply to individual tabs. “铺满窗口” expands a preview inside the current App
+window and offers an explicit exit control. It also hides the native navigation overlay while
+preserving the preview's isolated origin.
 
 `linkshell app` locates/unpacks the bundled app at the existing stable path and passes the exact
 CLI and Node executable plus `LINKSHELL_HOME`. Standalone Finder launches use the bundled Node
 and CLI; only CLI-managed helper builds fall back to the login shell's `linkshell`. A matching CLI is required: the UI reads `linkshell desktop` JSON snapshots every
-five seconds, with no TCP listener and no alternate database. Stopped, unreachable and unknown
-states are distinct; failed snapshots discard old session/device data. The list includes the latest
-200 sessions and indicates truncation. Activity is observed during this UI session, not a persisted
+five seconds. Stopped, unreachable and unknown
+states are distinct; failed snapshots discard old live-status data. Activity is observed during this UI session, not a persisted
 audit log. Each data directory has one dashboard instance; screen and setup workers remain separate.
+
+The bundled workspace is served by an App-owned `desktop-workspace` CLI process on a random
+loopback port. Its API validates a launch capability, Host and Origin; the local Host proxy rejects
+native-agent `desktop.*` methods. Remote computers retain the existing encrypted gateway tunnel.
+Initial local Host discovery uses a short, bounded backoff while the Host opens its socket.
+`desktop-client.json` under `LINKSHELL_HOME` stores the separate client identity and preferences
+with mode `0600`, so origin changes do not lose pairings or drafts. Login uses the existing CLI
+account through the system browser; refresh tokens stay outside the page. Closing or hiding the
+workspace releases screen viewing. Before ordinary quit or workspace reconnect, the native app
+asks the page to flush queued storage writes and waits for its acknowledgement. Failed writes
+are retried; if saving fails or times out, the user can return to the workspace or explicitly
+continue. Exiting cancels pending account and login requests and stops the workspace child, not
+the Host.
+See [the implementation plan](../../docs/design/mac-desktop/workspace.md) for boundaries.
 
 Two distributions share the same UI, bundle ID and Developer ID. The standalone DMG includes Node,
 CLI and Host, supports stable/beta update channels, and uses Sparkle to replace the bundle and
@@ -49,8 +74,22 @@ The adapter now admits at most two raw frames to VideoToolbox at once. If both a
 it skips new raw input and retains any key-frame request for the next accepted frame. It never
 discards already-compressed reference frames to enforce this bound.
 
-The media peer is an iOS native receiver or a web player, independently of the Node host's
-werift bulk-data connection. iOS normally decodes H.264 through VideoToolbox into a latest-frame
+The media peer is a Mac native receiver, an iOS native receiver or a web player, independently
+of the Node host's werift bulk-data connection. The desktop workspace uses native WebRTC with a
+VideoToolbox decoder that requires hardware acceleration and verifies the session's actual
+`UsingHardwareAcceleratedVideoDecoder` property. IOSurface-backed pixel buffers are mapped through
+`CVMetalTextureCache` and rendered with Metal. AppKit handles mouse, keyboard and IME input through
+the screen DataChannels. Web content owns navigation, toolbars and the existing encrypted
+signaling path; decoded frames never enter WebKit or JavaScript. H.264 is the desktop default.
+The decoder also supports HEVC, but this does not establish HEVC negotiation in the desktop UI.
+There is no software decoder, browser-media or byte-stream fallback for the Mac receiver:
+unsupported hardware or a failed connection produces an explicit error and retry action.
+Leaving the screen, switching to native management or hiding the window destroys the screen
+connection and releases input; returning reconnects. This first desktop implementation does not
+use the ordinary Web/iOS 120-second pause-and-reuse lifecycle. Native hardware and loopback
+validation are still in progress.
+
+iOS normally decodes H.264 through VideoToolbox into a latest-frame
 mailbox, then maps the pixel buffer to Metal. Its transparent WebView still owns gestures,
 controls and the cursor. It requests a ceiling of 120 fps, bounded by both displays, power,
 thermal state and adaptation; standard receivers retain the 60/30 defaults. No video frames
@@ -62,10 +101,11 @@ HEVC is offered to capable native receivers only after the Mac's low-latency har
 passes an availability probe; other viewers keep H.264. Codec/extension support still depends
 on the actual negotiation.
 
-Failed media falls back to the host's H.264 byte stream. iOS first tries the standard WebView
-receiver and then bypasses the bulk direct channel for that screen, using RPC. Android/Web
-retain their existing stream path. Both Mac capture paths use ScreenCaptureKit/VideoToolbox;
-only the byte stream includes the cursor in the picture. There is no TURN service.
+For iOS, Android and ordinary Web viewers, failed media can fall back to the host's H.264 byte
+stream. iOS first tries the standard WebView receiver and then bypasses the bulk direct channel
+for that screen, using RPC. Android/Web retain their existing stream path. Both Mac capture
+paths use ScreenCaptureKit/VideoToolbox; only the byte stream includes the cursor in the
+picture. There is no TURN service.
 
 See the [current architecture and diagrams](../../docs/v2/screen-realtime.md),
 [iOS receiver](../client/modules/link-screen/README.md) and
