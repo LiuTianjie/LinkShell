@@ -12,6 +12,11 @@ import { IOSAttentionSync } from "@/components/ios-attention-sync";
 import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
 import { colors, palette } from "@/theme/colors";
 
+export const unstable_settings = {
+  // Keep a home screen beneath Live Activity deep links, including cold launches.
+  anchor: "(tabs)",
+};
+
 const light = { ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: palette.light.accent, background: "#f2f2f7" } };
 const dark = { ...DarkTheme, colors: { ...DarkTheme.colors, primary: palette.dark.accent, background: "#000000" } };
 
