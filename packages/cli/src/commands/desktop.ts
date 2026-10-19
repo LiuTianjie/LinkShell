@@ -2,12 +2,13 @@ import { loadAuth } from "../auth.js";
 import { runLogin } from "./login.js";
 import { runLogout } from "./logout.js";
 import { joinGatewayAfterLogin, readHostConfig, writeHostConfig, refreshGateway } from "./host.js";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
 import { standaloneBundle } from "../utils/standalone.js";
-import { prepareDesktopUpdate, recoverDesktopUpdate } from "./desktop-update.js";
-import { sep } from "node:path";
+import { prepareDesktopUpdate, recoverDesktopUpdate, stopDesktopUpdateHost } from "./desktop-update.js";
+import { sep, join } from "node:path";
 import { ensureHostRunning, silenceSqliteWarning, withRunningHost } from "./host.js";
 import { linkshellDir, readHostLaunch, readHostOwner, readPid, stopDaemonAndWait } from "../utils/daemon.js";
 import { cachedMembership, redeemDesktopPro, refreshMembership } from "../pro-membership.js";
@@ -33,7 +34,8 @@ export async function desktopSnapshot(version: string) {
       client.call("gateway.status", {}, 5000),
       client.call("sessions.list", { limit: 200 }, 5000),
     ]);
-    return { machine, gateway, sessions: sessions.sessions, hasMoreSessions: Boolean(sessions.nextBefore) };
+    const screen = process.platform === "win32" ? await client.call("screen.access", { ask: false }, 8000).catch(() => undefined) : undefined;
+    return { machine, gateway, sessions: sessions.sessions, hasMoreSessions: Boolean(sessions.nextBefore), ...(screen ? { screen } : {}) };
   });
   return result ? { ...base, status: "running", ...result } : { ...base, status: readPid("host") ? "unreachable" : "stopped" };
 }
@@ -80,14 +82,21 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
       return;
     }
     if (action === "account-refresh") await refreshMembership();
-    else if (action === "pair") {
+    else if (action === "pair" || action === "pair-qr") {
       const result = await withRunningHost(async client => {
         const gateway = await client.call("gateway.status", {});
         if (gateway.status !== "online") throw new Error("请先连接网关。官方网关需要登录 Pro 账号；自建网关可以免登录配对。");
         return client.call("pairing.start", {}, 20_000);
       });
       if (!result) throw new Error("请先启动本机服务");
-      process.stdout.write(`${JSON.stringify(result)}\n`);
+      if (action === "pair-qr") {
+        // Reuse the encoder already shipped for terminal pairing; the desktop draws the matrix.
+        const require = createRequire(import.meta.url);
+        const QRCode = require("qrcode-terminal/vendor/QRCode") as new (type: number, level: number) => { addData(text: string): void; make(): void; modules: boolean[][] };
+        const qr = new QRCode(-1, 0); // M error correction, matching the Mac pairing card.
+        qr.addData(result.link); qr.make();
+        process.stdout.write(`${JSON.stringify({ ...result, qr: qr.modules })}\n`);
+      } else process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
     if (action.startsWith("usage-")) {
@@ -115,6 +124,7 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
     }
     else if (action === "prepare-update") { await prepareDesktopUpdate(); }
     else if (action === "recover-update") { await recoverDesktopUpdate(version); }
+    else if (action === "stop-update-host") { await stopDesktopUpdateHost(); }
     else if (action === "start") await ensureHostRunning();
     else if (action === "stop" || action === "restart") {
       const pid = readPid("host");
@@ -130,6 +140,13 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
 }
 
 export async function openDesktop(): Promise<void> {
+  if (process.platform === "win32") {
+    const app = standaloneBundle();
+    if (!app) throw new Error("请安装 LinkShell Windows 桌面版，然后从开始菜单打开 LinkShell");
+    const child = spawn(join(app, "LinkShell.exe"), [], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return;
+  }
   if (process.platform !== "darwin") throw new Error("LinkShell.app is available on macOS only");
   silenceSqliteWarning();
   const { shippedApp } = await import("@linkshell/host");

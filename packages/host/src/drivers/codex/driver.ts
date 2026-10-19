@@ -9,7 +9,7 @@ import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
 import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
-import { CodexAppServer, CodexSharedServer, detectCodex, sharedServerSocket } from "./app-server.js";
+import { CodexAppServer, CodexSharedServer, findCodex, sharedServerSocket } from "./app-server.js";
 import {
   APPROVAL_METHODS,
   QUESTION_METHODS,
@@ -208,6 +208,7 @@ export class CodexDriver implements AgentDriver {
 
   private host?: DriverHost;
   private server?: CodexAppServer;
+  private command = "codex";
   private current: DriverStatus = { installed: false };
   private readonly threads = new Map<string, CodexThreadState>();
   private readonly attached = new Set<string>();
@@ -279,12 +280,13 @@ export class CodexDriver implements AgentDriver {
   async start(host: DriverHost): Promise<DriverStatus> {
     this.host = host;
     this.stopped = false;
-    const version = await detectCodex(this.options.command, this.options.env);
-    if (!version) {
+    const installation = await findCodex(this.options.command, this.options.env);
+    if (!installation) {
       this.current = { installed: false };
       return this.current;
     }
-    this.current = { installed: true, version };
+    this.command = installation.command;
+    this.current = { installed: true, version: installation.version };
     await this.boot();
     return this.current;
   }
@@ -296,7 +298,7 @@ export class CodexDriver implements AgentDriver {
     } catch {
       // Older app-servers may not expose account/read. The CLI is advisory too.
     }
-    return parseCodexLoginStatus(await runStatusCommand(this.options.command ?? "codex", ["login", "status"], this.options.env));
+    return parseCodexLoginStatus(await runStatusCommand(this.command, ["login", "status"], this.options.env));
   }
 
   async stop(): Promise<void> {
@@ -1443,6 +1445,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   async desktopLaunch(args: string[], nativeId?: string): Promise<LaunchSpec> {
+    if (process.platform === "win32") throw new Error("Windows 暂不支持 Codex TUI 的共享连接，请从手机或 Web 工作区创建和继续会话");
     // Multi-client: no lease to take, the TUI just joins the server the thread is in.
     let socketPath = this.options.socketPath;
     if (nativeId) {
@@ -1454,7 +1457,7 @@ export class CodexDriver implements AgentDriver {
     }
     const remote = ["--remote", `unix://${socketPath}`];
     return {
-      command: this.options.command ?? "codex",
+      command: this.command,
       args: nativeId ? [...remote, "resume", nativeId, ...args] : [...remote, ...args],
     };
   }
@@ -1464,7 +1467,7 @@ export class CodexDriver implements AgentDriver {
   private async boot(): Promise<void> {
     const server = new CodexAppServer({
       socketPath: this.options.socketPath,
-      command: this.options.command,
+      command: this.command,
       env: this.options.env,
       clientVersion: this.options.hostVersion,
       log: (message) => this.host?.log(message),

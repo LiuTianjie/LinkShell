@@ -49,6 +49,10 @@ function parseSs(output: string): Listener[] {
 }
 
 async function listeners(): Promise<Listener[]> {
+  if (process.platform === "win32") {
+    const { stdout } = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); ConvertTo-Json -InputObject @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $owner = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($owner) { @{ port=$_.LocalPort; pid=$_.OwningProcess; process=$owner.ProcessName } } }) -Compress"], { windowsHide: true, timeout: 10_000 }).catch(() => ({ stdout: "[]" }));
+    try { return JSON.parse(stdout) as Listener[]; } catch { return []; }
+  }
   if (process.platform === "darwin") {
     const { stdout } = await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"], { timeout: 5000, maxBuffer: 4_000_000 }).catch(
       (error: { stdout?: string }) => ({ stdout: error.stdout ?? "" }),
@@ -150,7 +154,7 @@ export async function listPorts(options: { exclude?: number[] } = {}): Promise<P
   const cwd = await workingDirectories([...new Set(all.flatMap((listener) => (listener.pid ? [listener.pid] : [])))]);
   const candidates = all
     .map((listener) => ({ ...listener, cwd: listener.pid ? cwd.get(listener.pid) : undefined }))
-    .filter((listener) => listener.cwd && listener.cwd !== "/")
+    .filter((listener) => process.platform === "win32" ? /^(node|python[\d.]*|dotnet|java|ruby|php|go|cargo|deno|bun|uvicorn)$/i.test(listener.process) : listener.cwd && listener.cwd !== "/")
     .slice(0, 40);
   const probed = await Promise.all(candidates.map(async (listener) => ({ ...listener, ...(await probeHttp(listener.port)) })));
   return probed

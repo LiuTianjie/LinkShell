@@ -14,6 +14,17 @@ type Marker = {
 };
 const markerPath = () => join(linkshellDir(), "desktop-update.json");
 
+/** A failed Windows update must release the new executable before moving the old bundle back. */
+export async function stopDesktopUpdateHost(): Promise<void> {
+  if (!existsSync(markerPath())) return;
+  const app = standaloneBundle();
+  const marker = JSON.parse(readFileSync(markerPath(), "utf8")) as Marker;
+  const pid = readPid("host");
+  if (app && marker.schema === 1 && marker.app === app && pid && readHostOwner(pid) === app) {
+    await stopDaemonAndWait("host", 30_000, pid);
+  }
+}
+
 /** Called only after the desktop's explicit install confirmation. External hosts are left alone. */
 export async function prepareDesktopUpdate(): Promise<void> {
   const app = standaloneBundle();

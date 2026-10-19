@@ -58,7 +58,7 @@ Mac App 可设置登录系统时自动启动，并自动拉起后台服务。外
 
 下面的 CLI 安装方式供按需选择。
 
-CLI 方式需要 macOS 或 Linux，以及 **Node.js 22.13 或更新版本**；独立 Mac App 已内置 Node。
+CLI 方式支持 macOS、Linux 和 Windows，需要 **Node.js 22.13 或更新版本**；独立桌面包内置 Node。Windows x64 桌面端已提供源码构建，包含托盘、服务管理及屏幕查看与控制实现。构建方法和验证边界见 [Windows 使用说明](docs/windows-desktop.md)；Windows 安装包尚未正式发布。
 
 ```bash
 npm i -g linkshell-cli
@@ -86,7 +86,7 @@ linkshell claude    # Claude Code：手机上发消息即接管，终端里按�
 linkshell codex     # Codex：终端和手机同时在线
 ```
 
-在手机上看和控制电脑屏幕需要 macOS 的两项权限，`linkshell setup` 会带你设置好；只想做这一步，或者以后想检查：
+在 Mac 上，通过手机看和控制电脑屏幕需要两项系统权限，`linkshell setup` 会带你设置好；只想做这一步，或者以后想检查：
 
 ```bash
 linkshell screen      # macOS：弹出 LinkShell 窗口，带你到每个开关前，等你打开
@@ -135,7 +135,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **桌面快捷键，一点就到。** 复制、粘贴、切换应用、调度中心、截图、F 键随手调用。长文字在手机上写好再发送，也能直接带上手机剪贴板里的文字。
 - **小屏也能掌控整个工作台。** 在 Mac 的多个显示器之间切换，横屏铺开、全屏查看、双指缩放；既能看全局，也能盯住需要处理的细节。
 
-完整控制支持 macOS 13 及以上；Linux 支持观看。实际画质、刷新率和响应速度取决于两端设备、源显示器及网络条件。
+完整控制支持 macOS 13 及以上。Windows 桌面端支持已解锁桌面的硬件 H.264 / WebRTC 视频直连、JPEG 回退和鼠标键盘控制。本机采集与浏览器接收已验证，手机真机及更多显卡仍待验收（见 [Windows 使用说明](docs/windows-desktop.md)）；Linux 支持观看。实际画质、刷新率和响应速度取决于两端设备、源显示器及网络条件。
 
 ### 手机上也能用 Computer Use，实时预览
 
@@ -256,7 +256,7 @@ pnpm lint
 pnpm test
 ```
 
-macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链。只构建 TypeScript 包时，运行 `pnpm -r --filter "./packages/*" build`；Linux CI 也使用这条命令，并在测试时排除 `@linkshell/mac`。
+macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链。Windows 上使用 .NET Framework 4.8 编译原生桌面端与屏幕组件。只构建 TypeScript 包时，运行 `pnpm -r --filter "./packages/*" build`；Linux CI 也使用这条命令，并在测试时排除 `@linkshell/mac`。
 
 | 目录 | 内容 |
 | --- | --- |

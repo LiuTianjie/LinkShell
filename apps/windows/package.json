@@ -1,0 +1,12 @@
+{
+  "name": "@linkshell/windows",
+  "version": "0.10.46",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:standalone": "node scripts/package.mjs",
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}

@@ -59,6 +59,7 @@ export interface HostRpcServerOptions {
   log: (message: string) => void;
   liveActivities?: LiveActivityRelay;
   usage?: UsageStatistics;
+  shutdown?: () => void;
 }
 
 type Handler = (params: never, context: ConnectionContext) => Promise<unknown> | unknown;
@@ -110,6 +111,12 @@ export class HostRpcServer {
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     const usage = options.usage ?? new UsageStatistics();
     this.handlers = {
+      "desktop.shutdown": (params: P<"desktop.shutdown">) => {
+        if (!options.shutdown || params.pid !== process.pid) throw RpcError.app("conflict", "后台服务已改变，请刷新状态后重试");
+        // Let the response reach the local CLI before closing its connection.
+        setTimeout(() => options.shutdown?.(), 50).unref();
+        return {};
+      },
       "usage.summary": (params: P<"usage.summary">) => usage.summary(params),
       "liveActivities.subscribe": (params: P<"liveActivities.subscribe">) => {
         if (!options.liveActivities) throw RpcError.app("not_supported", "电脑端尚不支持实时活动推送，请更新 CLI");
@@ -308,7 +315,7 @@ export class HostRpcServer {
   }
 
   async start(): Promise<void> {
-    if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
+    if (process.platform !== "win32" && existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     await this.listen((server) => server.listen(this.options.socketPath));
     if (this.options.tcpPort !== undefined) {
       // The unix socket is guarded by its directory's permissions; a TCP port is open to every
@@ -327,7 +334,7 @@ export class HostRpcServer {
     for (const socket of this.sockets) socket.terminate();
     await Promise.all(closed);
     await Promise.all(this.servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
-    rmSync(this.options.socketPath, { force: true });
+    if (process.platform !== "win32") rmSync(this.options.socketPath, { force: true });
   }
 
   /** The TCP port actually bound (useful when started with port 0). */

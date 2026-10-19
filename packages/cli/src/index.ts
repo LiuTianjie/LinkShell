@@ -106,7 +106,7 @@ hostCmd
   .description("Stop the background host")
   .action(async () => {
     const daemon = await import("./utils/daemon.js");
-    process.stderr.write(daemon.stopDaemon("host") ? "  LinkShell host stopped\n" : "  LinkShell host is not running\n");
+    process.stderr.write(await daemon.stopDaemonAndWait("host") ? "  LinkShell host stopped\n" : "  LinkShell host is not running\n");
   });
 
 program
@@ -264,8 +264,8 @@ program
   .command("stop")
   .description("Stop all running LinkShell processes")
   .action(async () => {
-    const { stopDaemon } = await import("./utils/daemon.js");
-    const hostStopped = stopDaemon("host");
+    const { stopDaemon, stopDaemonAndWait } = await import("./utils/daemon.js");
+    const hostStopped = await stopDaemonAndWait("host");
     // A bridge left running by a 1.x install: nothing else here can end it.
     const bridgeStopped = stopDaemon("bridge");
     const gatewayStopped = stopDaemon("gateway");

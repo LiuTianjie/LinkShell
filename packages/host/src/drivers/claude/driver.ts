@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import { AcpDriver, inOrder } from "../acp/driver.js";
@@ -73,15 +73,26 @@ function turnInProgress(path: string, stalledMs: number): boolean {
 
 /** Finds an executable on the given PATH (the adapter needs an absolute path). */
 export function resolveExecutable(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  if (isAbsolute(name)) return name;
-  for (const dir of (env.PATH ?? "").split(delimiter)) {
+  const path = env.PATH ?? (process.platform === "win32" ? Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] : undefined) ?? "";
+  const extensions = process.platform === "win32" && !extname(name) ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";") : [""];
+  for (const dir of isAbsolute(name) ? [dirname(name)] : path.split(delimiter)) {
     if (!dir) continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // keep looking
+    for (const extension of extensions) {
+      const candidate = (isAbsolute(name) ? name : join(dir, name)) + extension;
+      try {
+        accessSync(candidate, constants.X_OK);
+        if (!statSync(candidate).isFile()) continue;
+        // The SDK accepts native executables or JS, but cannot exec a Windows npm cmd shim.
+        if (process.platform === "win32" && /\.(cmd|bat)$/i.test(candidate)) {
+          for (const entry of [join(dirname(candidate), "node_modules/@anthropic-ai/claude-code/cli.js"), join(dirname(candidate), "../@anthropic-ai/claude-code/cli.js")]) {
+            if (existsSync(entry)) return entry;
+          }
+          continue;
+        }
+        return candidate;
+      } catch {
+        // keep looking
+      }
     }
   }
   return undefined;

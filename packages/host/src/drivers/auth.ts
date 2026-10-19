@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { probeAgent as execFileAsync } from "../process.js";
 import type { AgentAuth } from "@linkshell/wire";
 
-const execFileAsync = promisify(execFile);
 
 /** Runs an agent's own status command; never reads credential stores itself. */
 export async function runStatusCommand(

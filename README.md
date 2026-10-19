@@ -62,7 +62,7 @@ The Mac app can launch at login and starts its background service automatically.
 
 The CLI installation below is optional for Mac app users.
 
-The CLI requires macOS or Linux and **Node.js 22.13 or newer**; the standalone Mac app includes Node.
+The CLI requires **Node.js 22.13 or newer** on macOS, Linux or Windows; standalone desktop packages include Node. A Windows x64 desktop implementation is available to build from source, including tray, service management and screen/control support. See the [Windows guide](docs/windows-desktop.md) for build instructions and validation limits; Windows installers are not published yet.
 
 ```bash
 npm i -g linkshell-cli
@@ -90,7 +90,7 @@ linkshell claude    # Claude Code; send from the phone to take over, press any k
 linkshell codex     # Codex; the terminal and the phone are live at the same time
 ```
 
-Watching and controlling the computer's screen from the phone needs two macOS permissions. `linkshell setup` takes care of them; to do just that part, or to check it later:
+On a Mac, watching and controlling the computer's screen from the phone needs two permissions. `linkshell setup` takes care of them; to do just that part, or to check it later:
 
 ```bash
 linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
@@ -139,7 +139,7 @@ curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 - **Desktop shortcuts, one tap away.** Copy, paste, switch apps, open Mission Control, take a screenshot or send a function key. Compose longer text on the phone and send it over, including text from your clipboard.
 - **A whole desk on a small screen.** Switch between your Mac's displays, turn the phone to landscape, go full screen and pinch to zoom. Move between the big picture and the detail you need.
 
-Full control requires macOS 13 or later; Linux supports viewing. Available resolution, refresh rate and responsiveness depend on both devices, the source display and the network.
+Full control is available on macOS 13 or later. Windows desktop supports hardware H.264 over direct WebRTC, JPEG fallback and mouse/keyboard control on an unlocked desktop. Local capture and browser reception have been verified; physical-phone and additional-GPU validation remain pending (see the [Windows guide](docs/windows-desktop.md)). Linux supports viewing. Available resolution, refresh rate and responsiveness depend on both devices, the source display and the network.
 
 ### Computer Use, from your phone
 
@@ -260,7 +260,7 @@ pnpm lint
 pnpm test
 ```
 
-On macOS, the full build also builds LinkShell.app and needs Xcode's Swift toolchain. For TypeScript-only builds, use `pnpm -r --filter "./packages/*" build`; Linux CI uses this command and excludes `@linkshell/mac` from tests.
+On macOS, the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows, it builds the native desktop and screen helper with .NET Framework 4.8. For TypeScript-only builds, use `pnpm -r --filter "./packages/*" build`; Linux CI uses this command and excludes `@linkshell/mac` from tests.
 
 | Directory | What it is |
 | --- | --- |

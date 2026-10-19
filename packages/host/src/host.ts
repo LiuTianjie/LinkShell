@@ -16,6 +16,7 @@ import { removeLegacyCopilotHooks } from "./legacy.js";
 import { withoutClaudeSession } from "./shell-env.js";
 import { TerminalManager } from "./terminals.js";
 import { LiveActivityRelay } from "./live-activities.js";
+import { isNamedPipe, windowsPipe } from "./local-transport.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
@@ -35,7 +36,7 @@ export function defaultHome(): string {
 
 export function hostPaths(home = defaultHome()): HostPaths {
   let runDir = join(home, "run");
-  if (join(runDir, "codex.sock").length > MAX_SOCKET_PATH) {
+  if (process.platform !== "win32" && Buffer.byteLength(join(runDir, "codex.sock")) > MAX_SOCKET_PATH) {
     // Very long home directories: fall back to a short directory of this user's, one per home.
     const tag = createHash("sha256").update(home).digest("hex").slice(0, 8);
     runDir = join("/tmp", `linkshell-${process.getuid?.() ?? "user"}-${tag}`);
@@ -43,8 +44,8 @@ export function hostPaths(home = defaultHome()): HostPaths {
   return {
     home,
     runDir,
-    hostSocket: join(runDir, "host.sock"),
-    codexSocket: join(runDir, "codex.sock"),
+    hostSocket: process.platform === "win32" ? windowsPipe(home, "host") : join(runDir, "host.sock"),
+    codexSocket: process.platform === "win32" ? windowsPipe(home, "codex") : join(runDir, "codex.sock"),
     database: join(home, "state.db"),
   };
 }
@@ -82,6 +83,7 @@ export interface HostOptions {
   drivers?: (paths: HostPaths) => AgentDriver[];
   tcpPort?: number;
   log?: (message: string) => void;
+  shutdown?: () => void;
   /**
    * A v2 gateway to reach this machine through, from anywhere. A function is
    * asked again on `gateway.refresh`, so the choice can change while running.
@@ -107,7 +109,7 @@ export interface RunningHost {
 
 /** True when another host already answers on the socket. */
 export async function isHostRunning(socketPath: string): Promise<boolean> {
-  if (!existsSync(socketPath)) return false;
+  if (!isNamedPipe(socketPath) && !existsSync(socketPath)) return false;
   try {
     const client = await connectHost(socketPath);
     client.close();
@@ -194,6 +196,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     machineInfo,
     usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }, { agents: () => hub.agents(), events: () => store.usageEvents() }),
     socketPath: paths.hostSocket,
+    shutdown: options.shutdown,
     tcpPort: options.tcpPort,
     log,
     liveActivities,

@@ -434,6 +434,8 @@ const stage = $("stage"), picture = $("picture"), canvas = $("screen"), ctx = ca
 const note = $("note"), bar = $("bar"), controlShell = $("control-shell"), orb = $("orb"), menu = $("menu"), connection = $("connection"), toast = $("toast"), keys = $("keys"), typing = $("typing"), shortcut = $("shortcut");
 const sheet = $("sheet"), actions = $("actions"), maker = $("maker"), naming = $("makername"), composer = $("composer"), words = $("words");
 const query = new URLSearchParams(location.search);
+const windowsHost = document.body.dataset.platform === "win32";
+if (windowsHost) Object.assign(MOD_SIGNS, { ctrl: "Ctrl+", alt: "Alt+", shift: "Shift+", cmd: "Win+" });
 const app = window.ReactNativeWebView;
 const tellApp = (message) => { if (app) app.postMessage(JSON.stringify(message)); };
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -486,8 +488,48 @@ const wantVideo = !nativePicture && "RTCPeerConnection" in window && (!app || ch
 // The iOS app owns the final transport fallback, so it can bypass a failed direct data channel.
 const relayFallback = !nativePicture && !!app && (chrome.relayFallback === true || query.get("fallback") === "relay") && query.get("video") !== "0";
 const unseeable = () => say("这个系统版本的浏览器内核不支持视频解码，请升级系统后再试。");
-if (!nativePicture && !wantVideo && !("VideoDecoder" in window)) unseeable();
+if (!windowsHost && !nativePicture && !wantVideo && !("VideoDecoder" in window)) unseeable();
 let decoder, skipping = false, skipped = 0, arrived = 0, keyAsked = -Infinity;
+const jpegStats = { frames: 0, bytes: 0, decode: 0, at: performance.now(), beforeFrames: 0, beforeBytes: 0, beforeDecode: 0, fps: 0, bitrateMbps: 0, decodeMs: 0 };
+function jpegVitals() {
+  const now = performance.now(), elapsed = now - jpegStats.at;
+  if (elapsed >= 1000) {
+    const frames = jpegStats.frames - jpegStats.beforeFrames;
+    jpegStats.fps = round(frames * 1000 / elapsed);
+    jpegStats.bitrateMbps = round((jpegStats.bytes - jpegStats.beforeBytes) * 8 / (elapsed * 1000), 2);
+    jpegStats.decodeMs = frames ? round((jpegStats.decode - jpegStats.beforeDecode) / frames, 2) : 0;
+    jpegStats.at = now; jpegStats.beforeFrames = jpegStats.frames; jpegStats.beforeBytes = jpegStats.bytes; jpegStats.beforeDecode = jpegStats.decode;
+  }
+  return { width: content.w, height: content.h, codec: "JPEG", fps: jpegStats.fps, bitrateMbps: jpegStats.bitrateMbps, decodeMs: jpegStats.decodeMs, live: false };
+}
+let jpegPending = null, jpegDecoding = false, jpegGeneration = 0;
+async function drawJpeg() {
+  if (jpegDecoding) return;
+  jpegDecoding = true;
+  try {
+    while (jpegPending && ws.readyState === 1) {
+      const next = jpegPending;
+      jpegPending = null;
+      const generation = jpegGeneration;
+      const started = performance.now();
+      const bitmap = await createImageBitmap(new Blob([next.unit], { type: "image/jpeg" }));
+      try {
+        if (generation !== jpegGeneration || ws.readyState !== 1) continue;
+        if (live) show(false);
+        if (content.w !== bitmap.width || content.h !== bitmap.height) {
+          canvas.width = content.w = bitmap.width;
+          canvas.height = content.h = bitmap.height;
+          layout();
+        }
+        ctx.drawImage(bitmap, 0, 0);
+        jpegStats.frames++; jpegStats.decode += performance.now() - started;
+        shownUpTo(next.seq);
+        say("");
+      } finally { bitmap.close(); }
+    }
+  } catch (error) { say("屏幕画面解码失败：" + error.message); }
+  finally { jpegDecoding = false; }
+}
 // Only a keyframe gets a decoder that lost its place going again, and the host makes them when asked rather than by the clock.
 const askKey = () => { const now = performance.now(); if (now - keyAsked > 500) { keyAsked = now; send({ t: "keyframe" }); } };
 // The host is told which frame is on screen: that is how it knows when this end has fallen behind,
@@ -498,6 +540,7 @@ const lag = Number(query.get("lag")) || 0, lagUntil = performance.now() + (Numbe
 function shownUpTo(seq) {
   if (seq > lastShown) lastShown = seq;
   if (lag && performance.now() < lagUntil) { const late = lastShown; setTimeout(() => send({ t: "ack", n: late }), lag); return; }
+  if (windowsHost) return send({ t: "ack", n: lastShown });
   if (!telling) telling = setTimeout(() => { telling = 0; send({ t: "ack", n: lastShown }); }, 40);
 }
 let lighterAt = -Infinity, failures = 0;
@@ -527,13 +570,21 @@ ws.onopen = () => { if (mode !== "view") askControl(); if (document.hidden) send
 document.addEventListener("visibilitychange", () => send({ t: document.hidden ? "hidden" : "shown" }));
 ws.onmessage = (event) => {
   if (typeof event.data === "string") return heard(JSON.parse(event.data));
-  if (!("VideoDecoder" in window)) return;
+  if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 6) return;
   // A frame: whether it is a keyframe, its number, the picture.
   const head = new DataView(event.data);
   const key = head.getUint8(0) === 1;
   const seq = head.getUint32(1);
   const unit = new Uint8Array(event.data, 5);
   arrived = seq;
+  if (head.getUint8(0) === 2) {
+    jpegStats.bytes += event.data.byteLength;
+    // A latest-frame mailbox keeps decoding work bounded when the viewer is slow.
+    jpegPending = { seq, unit };
+    void drawJpeg();
+    return;
+  }
+  if (!("VideoDecoder" in window)) return unseeable();
   // A decoder that can't keep up skips to the next keyframe; what it skips has still arrived.
   if (decoder && !key && (skipping || decoder.decodeQueueSize > 8)) { skipping = true; skipped += 1; askKey(); return shownUpTo(seq); }
   skipping = false;
@@ -565,6 +616,8 @@ ws.onmessage = (event) => {
   decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: seq, data: unit }));
 };
 ws.onclose = () => {
+  jpegGeneration += 1;
+  jpegPending = null;
   // A video track is this socket's: without the one there is no finding the other again, and no hands.
   drop();
   if (requestRelay()) return;
@@ -577,6 +630,8 @@ function heard(message) {
   if (message.rtc) return signal(message.rtc);
   if (message.pong) return meter && meter.pong(message.pong);
   if (message.restart) {
+    jpegGeneration += 1;
+    jpegPending = null;
     // The host starts the stream again at another quality: a new decoder for it.
     try { if (decoder) decoder.close(); } catch {}
     decoder = undefined;
@@ -2226,7 +2281,7 @@ if (typeof window.__linkshellReport === "function") {
       previous = stats?.raw ?? null;
       window.__linkshellReport(stats
         ? { width: stats.width, height: stats.height, fps: stats.fps, codec: stats.codec, bitrateMbps: stats.bitrateMbps, presented: stats.presented, live: true }
-        : { width: content.w, height: content.h, live: false });
+        : windowsHost ? jpegVitals() : { width: content.w, height: content.h, live: false });
     } catch { /* A reconnect can close getStats while it is in flight. */ }
     finally { pending = false; }
   }, 2000);
@@ -2243,12 +2298,17 @@ async function status() {
     layout();
   };
   // The choice is the track's: the socket's picture follows its own ladder.
-  const choosing = live && canChooseWidth;
+  const choosing = (live || windowsHost) && canChooseWidth;
   if ($("widths").classList.contains("gone") === choosing) {
     $("widths").classList.toggle("gone", !choosing);
     layout();
   }
   const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
+  if (windowsHost && !live && content.w) {
+    const stats = jpegVitals();
+    put(way + "\n" + stats.fps + " 帧/秒 · " + stats.bitrateMbps + " Mbps");
+    return;
+  }
   if (nativePicture) {
     nativePost({ kind: "stats" });
     const detail = [content.w ? content.w + "×" + content.h : null,
@@ -2341,7 +2401,11 @@ $("composekey").innerHTML = ICON.compose;
 // Keys for the computer that a phone's keyboard has not got, one tap each, by what they are for: name, key,
 // modifiers, and how the sheet takes the tap. "again": it stays, for another (the rest close it: what comes
 // next is on the picture). "sure": asked twice, being a slip of the finger away from losing work.
-const QUICK = [
+const QUICK = windowsHost ? [
+  ["常用", [["复制", "c", "ctrl"], ["粘贴", "v", "ctrl"], ["剪切", "x", "ctrl"], ["全选", "a", "ctrl"], ["撤销", "z", "ctrl", "again"], ["重做", "y", "ctrl", "again"], ["保存", "s", "ctrl"], ["查找", "f", "ctrl"]]],
+  ["窗口与应用", [["切换应用", "tab", "alt", "again"], ["新标签", "t", "ctrl"], ["关闭标签", "w", "ctrl"], ["关闭窗口", "f4", "alt", "sure"], ["显示桌面", "d", "cmd"]]],
+  ["系统", [["切换输入法", "space", "cmd", "again"], ["截图工具", "s", "shift cmd"], ["任务管理器", "escape", "ctrl shift"], ["锁定屏幕", "l", "cmd", "sure"]]],
+] : [
   ["常用", [["复制", "c", "cmd"], ["粘贴", "v", "cmd"], ["剪切", "x", "cmd"], ["全选", "a", "cmd"], ["撤销", "z", "cmd", "again"], ["重做", "z", "shift cmd", "again"],
     ["保存", "s", "cmd"], ["查找", "f", "cmd"]]],
   ["窗口与应用", [["切换应用", "tab", "cmd", "again"], ["同应用窗口", "\x60", "cmd", "again"], ["新标签", "t", "cmd"], ["关闭窗口", "w", "cmd"], ["最小化", "m", "cmd"],
@@ -2457,7 +2521,7 @@ function drawMaker() {
 function showMaker(on) {
   if (on) {
     making.clear();
-    making.add("cmd");
+    making.add(windowsHost ? "ctrl" : "cmd");
     makerKey.value = "a";
     naming.value = "";
     drawMaker();
@@ -2804,13 +2868,13 @@ tellApp({ type: "ready", mode });
 
 const SCRIPT = `(() => {${VIEWER_LOGIC}${BODY}})();`;
 
-export function viewerPage(): string {
+export function viewerPage(platform: NodeJS.Platform = "darwin"): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>屏幕</title>
 <style>${STYLE}</style></head>
-<body>
+<body data-platform="${platform === "win32" ? "win32" : "darwin"}">
 <div id="stage"><div id="picture"><canvas id="screen"></canvas><canvas id="gpu" class="gone"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
 <div id="note">正在连接电脑屏幕…</div>
 <div id="toast" class="glass"></div>
@@ -2853,9 +2917,9 @@ export function viewerPage(): string {
     <div class="group"><span>添加快捷键</span><span id="makersign"></span></div>
     <div class="tiles" id="makermods">
       <div class="tile" data-mod="ctrl"><b>⌃</b><span>control</span></div>
-      <div class="tile" data-mod="alt"><b>⌥</b><span>option</span></div>
+      <div class="tile" data-mod="alt"><b>${platform === "win32" ? "Alt" : "⌥"}</b><span>${platform === "win32" ? "alt" : "option"}</span></div>
       <div class="tile" data-mod="shift"><b>⇧</b><span>shift</span></div>
-      <div class="tile" data-mod="cmd"><b>⌘</b><span>command</span></div>
+      <div class="tile" data-mod="cmd"><b>${platform === "win32" ? "Win" : "⌘"}</b><span>${platform === "win32" ? "windows" : "command"}</span></div>
     </div>
     <label class="field"><span>按键</span><select id="makerkey" aria-label="按键"></select></label>
     <label class="field"><span>名称</span><input id="makername" type="text" maxlength="16" placeholder="可不填" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="名称"></label>
@@ -2878,8 +2942,8 @@ export function viewerPage(): string {
   <div class="key word" data-key="escape">esc</div>
   <div class="key word" data-key="tab">tab</div>
   <div class="key" data-mod="ctrl">⌃</div>
-  <div class="key" data-mod="alt">⌥</div>
-  <div class="key" data-mod="cmd">⌘</div>
+  <div class="key" data-mod="alt">${platform === "win32" ? "Alt" : "⌥"}</div>
+  <div class="key" data-mod="cmd">${platform === "win32" ? "Win" : "⌘"}</div>
   <div class="key" data-mod="shift">⇧</div>
   <div class="key" data-key="left">←</div>
   <div class="key" data-key="down">↓</div>

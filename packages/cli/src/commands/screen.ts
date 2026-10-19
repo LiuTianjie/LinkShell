@@ -33,7 +33,7 @@ export async function screenAccess(ask = false): Promise<ScreenAccess | "old" | 
 
 export function screenReady(access: ScreenAccess): boolean {
   if (!access.supported || !access.ffmpeg) return false;
-  return process.platform !== "darwin" || (access.recording === true && access.control === true);
+  return process.platform === "linux" || (access.recording === true && access.control === true);
 }
 
 /** One line for `status`, `doctor` and the host's start: what works, and the command for the rest. */
@@ -41,6 +41,7 @@ export function describeScreen(access: ScreenAccess | "old" | undefined): string
   if (!access) return undefined;
   if (access === "old") return "restart the host to check (linkshell host stop && linkshell host --daemon)";
   if (!access.supported) return access.problem ?? "not available on this system";
+  if (process.platform === "win32") return screenReady(access) ? "can be watched and controlled (Windows desktop)" : access.problem ?? "install LinkShell for Windows and enable screen sharing";
   if (!access.ffmpeg) return process.platform === "darwin" ? MISSING_APP : "needs ffmpeg (install it with your package manager)";
   if (process.platform !== "darwin") return "can be watched (controlling it needs macOS)";
   if (access.recording === null || access.control === null) return `can't tell${access.problem ? `: ${access.problem}` : ""}`;
@@ -80,6 +81,10 @@ export async function setUpScreen(out: Print, interactive: boolean): Promise<boo
   if (!access.supported) {
     row(out, false, "Screen", access.problem ?? "not available on this system");
     return false;
+  }
+  if (process.platform === "win32") {
+    row(out, screenReady(access), "Windows screen", describeScreen(access) ?? "unavailable");
+    return screenReady(access);
   }
   if (process.platform !== "darwin") {
     row(out, access.ffmpeg, "ffmpeg", access.ffmpeg ? "found" : "not installed — install it with your package manager, then run this again");

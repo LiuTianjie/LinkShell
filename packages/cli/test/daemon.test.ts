@@ -46,7 +46,7 @@ describe("background processes", () => {
     }
   });
 
-  it("waits for actual shutdown even when the PID file is already gone", async () => {
+  it.skipIf(process.platform === "win32")("waits for actual shutdown even when the PID file is already gone", async () => {
     const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 250)); setInterval(() => {}, 1000); process.stdout.write('ready');"], { stdio: ["ignore", "pipe", "ignore"] });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     try {
@@ -63,7 +63,7 @@ describe("background processes", () => {
     }
   });
 
-  it("reports an unresponsive daemon without force-killing it", async () => {
+  it.skipIf(process.platform === "win32")("reports an unresponsive daemon without force-killing it", async () => {
     const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('ready');"], { stdio: ["ignore", "pipe", "ignore"] });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     try {

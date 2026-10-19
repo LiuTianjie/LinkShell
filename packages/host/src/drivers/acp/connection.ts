@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawnAgent as spawn, stopAgent } from "../../process.js";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
@@ -235,10 +236,6 @@ export class AcpConnection {
     void this.writer?.close().catch(() => {});
     const child = this.child; this.child = undefined;
     if (!child || child.exitCode !== null) return;
-    child.stdin?.end(); child.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 3000);
-      child.once("exit", () => { clearTimeout(timer); resolve(); });
-    });
+    await stopAgent(child);
   }
 }

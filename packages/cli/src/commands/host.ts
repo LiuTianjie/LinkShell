@@ -99,10 +99,14 @@ export async function runHostForeground(version: string): Promise<void> {
   // `linkshell login`, if any, lets that account's devices in without pairing.
   // Asked again on `gateway.refresh`, so login, logout and `--gateway` apply to a running host.
   const home = host.defaultHome();
+  let shutdownRequested = false;
+  let earlyShutdown = false;
+  let requestShutdown: (() => void) | undefined;
   const running = await host.startHost({
     version,
     env,
     log,
+    shutdown: () => { if (requestShutdown) requestShutdown(); else earlyShutdown = true; },
     gateway: {
       url: () => resolveGateway(home),
       // The account is LinkShell's, so its token goes to LinkShell's gateway and to no other: a
@@ -124,11 +128,15 @@ export async function runHostForeground(version: string): Promise<void> {
     );
   }
   const shutdown = async () => {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
     log("[host] shutting down");
     await running.stop();
     daemon.removePid("host");
     process.exit(0);
   };
+  requestShutdown = () => void shutdown();
+  if (earlyShutdown) requestShutdown();
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
   await new Promise(() => {});

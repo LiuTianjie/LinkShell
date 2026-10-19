@@ -30,7 +30,7 @@
     "url": "git+https://github.com/LiuTianjie/LinkShell.git"
   },
   "scripts": {
-    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-build.mjs && tsc -p tsconfig.json",
     "prepack": "pnpm run build",
     "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

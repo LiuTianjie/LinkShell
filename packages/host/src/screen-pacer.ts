@@ -58,7 +58,7 @@ export class Pacer {
   private settledAt = 0;
   private lastSent = 0;
 
-  constructor(now: number) {
+  constructor(now: number, private readonly options: { maxInFlight?: number; behindMs?: number; caughtUpMs?: number; probeMs?: number } = {}) {
     this.calmSince = now;
   }
 
@@ -75,7 +75,7 @@ export class Pacer {
   needsKey(now: number): boolean {
     if (this.behindSince === undefined) return false;
     const own = Number.isFinite(this.floor) ? Math.min(this.floor, FLOOR_MAX_MS) : 0;
-    return this.sentAt.size === 0 || this.lag(now) <= own + CAUGHT_UP_MS || now - this.lastSent >= PROBE_MS;
+    return this.sentAt.size === 0 || this.lag(now) <= own + (this.options.caughtUpMs ?? CAUGHT_UP_MS) || now - this.lastSent >= (this.options.probeMs ?? PROBE_MS);
   }
 
   /** How long ago the oldest frame not yet shown was sent. */
@@ -91,21 +91,24 @@ export class Pacer {
     if (paced) {
       const own = Number.isFinite(this.floor) ? Math.min(this.floor, FLOOR_MAX_MS) : 0;
       const lag = this.lag(now);
-      if (this.behindSince === undefined && lag > own + BEHIND_MS) {
+      if (this.behindSince === undefined && lag > own + (this.options.behindMs ?? BEHIND_MS)) {
         this.behindSince = now;
         this.troubles.push(now);
         this.calmSince = now;
       }
       if (this.behindSince !== undefined) {
         // Back in at a keyframe, once what was sent has been shown (or nearly).
-        const caughtUp = this.sentAt.size === 0 || lag <= own + CAUGHT_UP_MS;
-        if (!key || (!caughtUp && now - this.lastSent < PROBE_MS)) return undefined;
+        const caughtUp = this.sentAt.size === 0 || lag <= own + (this.options.caughtUpMs ?? CAUGHT_UP_MS);
+        if (!key || (!caughtUp && now - this.lastSent < (this.options.probeMs ?? PROBE_MS))) return undefined;
         if (caughtUp) {
           this.behindSince = undefined;
           this.calmSince = now;
         }
       }
     }
+    // Independent JPEGs need only a tiny window. Keep it bounded even when ACKs
+    // disappear; occasional probes recover a dropped ACK without flooding the relay.
+    if (this.options.maxInFlight && this.sentAt.size >= this.options.maxInFlight && now - this.lastSent < (this.options.probeMs ?? PROBE_MS)) return undefined;
     const seq = ++this.seq;
     this.sentAt.set(seq, now);
     this.lastSent = now;

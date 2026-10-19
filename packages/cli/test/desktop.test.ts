@@ -21,6 +21,19 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); process.exitCode = 0; });
 
 describe("native desktop snapshots", () => {
+  it("adds a bounded QR matrix for native pairing without changing the normal offer", async () => {
+    const offer = { code: "123456", link: "linkshell://pair?test", expiresAt: 1234, gateway: "wss://self.example" };
+    const call = vi.fn().mockResolvedValueOnce({ status: "online" }).mockResolvedValueOnce(offer);
+    vi.mocked(withRunningHost).mockImplementation(async use => use({ call } as never));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "pair-qr");
+    const result = JSON.parse(String(out.mock.calls[0][0]));
+    expect(result).toMatchObject(offer);
+    expect(result.qr.length).toBeGreaterThanOrEqual(21);
+    expect(result.qr.length).toBeLessThanOrEqual(177);
+    expect(result.qr.every((row: unknown[]) => row.length === result.qr.length && row.every(cell => typeof cell === "boolean"))).toBe(true);
+    expect(runLogin).not.toHaveBeenCalled();
+  });
   it("generates pairing without requiring account login", async () => {
     const offer = { code: "123456", link: "linkshell://pair?test", expiresAt: 1234, gateway: "wss://self.example" };
     const call = vi.fn().mockResolvedValueOnce({ status: "online" }).mockResolvedValueOnce(offer);
