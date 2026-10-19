@@ -276,6 +276,11 @@ struct DesktopView: View {
       }
       if !model.accountMessage.isEmpty { Text(model.accountMessage).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled) }
       if model.signedIn {
+        accountMembership
+        if !model.redemptionMessage.isEmpty {
+          Text(model.redemptionMessage).font(.system(size: 12))
+            .foregroundStyle(model.redemptionIsError ? Color.orange : DesktopStyle.mint).textSelection(.enabled)
+        }
         HStack {
           Text("网关：\(model.gatewayLabel)").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
           if model.snapshot?.gateway?.status != "online" {
@@ -289,6 +294,44 @@ struct DesktopView: View {
     }.padding(.vertical, 20)
     .overlay(alignment: .bottom) { rule }
     .padding(.bottom, 12)
+  }
+
+  private var accountMembership: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        switch model.membership {
+        case .pro(let expiresAt):
+          Image(systemName: "checkmark.seal.fill").foregroundStyle(DesktopStyle.mint)
+          Text("Pro 账户").fontWeight(.medium)
+          Text("有效期至 \(expiresAt.formatted(date: .abbreviated, time: .omitted))").foregroundStyle(DesktopStyle.secondary)
+        case .free:
+          Text("普通账户").foregroundStyle(DesktopStyle.secondary)
+        default:
+          Text(model.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用").foregroundStyle(DesktopStyle.secondary)
+        }
+        if model.checkingMembership { ProgressView().controlSize(.mini) }
+        else {
+          Button { model.refreshAccount() } label: { Image(systemName: "arrow.clockwise") }
+            .buttonStyle(.plain).foregroundStyle(DesktopStyle.secondary)
+            .disabled(model.busy || model.preview).help("刷新会员状态").accessibilityLabel("刷新会员状态")
+        }
+      }.font(.system(size: 12))
+      if model.membership == .free {
+        HStack(spacing: 8) {
+          TextField("输入激活码", text: $model.redemptionCode)
+            .textFieldStyle(.roundedBorder).disableAutocorrection(true).frame(maxWidth: 280)
+            .disabled(model.busy || model.preview).onSubmit { model.redeemPro() }
+            .accessibilityLabel("Pro 激活码")
+          Button(model.redeeming ? "正在兑换…" : "兑换 Pro") { model.redeemPro() }
+            .buttonStyle(.borderedProminent).tint(DesktopStyle.mint).foregroundStyle(DesktopStyle.onAccent)
+            .disabled(!model.canRedeem)
+        }
+        HStack(spacing: 3) {
+          Text("没有激活码？").foregroundStyle(DesktopStyle.secondary)
+          SwiftUI.Link("前往链动小铺", destination: URL(string: "https://pay.ldxp.cn/item/7lgv1s")!).foregroundStyle(DesktopStyle.secondary)
+        }.font(.system(size: 11))
+      }
+    }
   }
 
   private var settings: some View {
@@ -350,7 +393,6 @@ struct DesktopPopover: View {
       DesktopStatus(text: "服务\(model.serviceLabel)", tone: model.healthy ? DesktopStyle.mint : DesktopStyle.secondary).padding(.leading, 51).padding(.bottom, 20)
       Divider()
       entry("network", "网关", model.gatewayLabel)
-      entry("laptopcomputer", "设备", model.healthy ? "\(model.online) 台在线" : "未知")
       entry("bubble.left", "会话", model.healthy ? "\(model.running) 个运行中" : "未知")
       if model.pending > 0 {
         Divider()

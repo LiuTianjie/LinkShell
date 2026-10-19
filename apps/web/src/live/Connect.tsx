@@ -19,6 +19,7 @@ import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
 import { Icon } from "../icons";
 import { Scan } from "./Scan";
+import { AccountMembership } from "./AccountMembership";
 
 export function Connect({ close }: { close: () => void }) {
   const state = useStore(engine.state);
@@ -44,7 +45,55 @@ export function Connect({ close }: { close: () => void }) {
     setInvalid({});
     job.clear();
   }
-  const accountForm = (
+  const accountForm = state.account ? (
+    <FieldGroup className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0">
+      <Alert role="status">
+        <AlertTitle className="break-words">{state.account}</AlertTitle>
+        <AlertDescription>
+          在电脑运行 <code>linkshell login</code>
+          ，使用同一账号即可发现电脑。电脑接入官方网关需要 Pro 订阅。
+        </AlertDescription>
+      </Alert>
+      {state.accountUserId && (
+        <AccountMembership
+          key={state.accountUserId}
+          userId={state.accountUserId}
+          disabled={job.busy}
+        />
+      )}
+      <Button
+        type="button"
+        disabled={blocked}
+        onClick={() =>
+          void job.run(async () => {
+            await engine.connectAccount();
+            close();
+          })
+        }
+      >
+        {job.busy && (
+          <LoaderCircle data-icon="inline-start" className="animate-spin" />
+        )}
+        刷新账号电脑
+      </Button>
+      <Button
+        variant="outline"
+        type="button"
+        disabled={job.busy}
+        onClick={() =>
+          void job.run(async () => {
+            const result = await accountClient().auth.signOut({
+              scope: "local",
+            });
+            if (result.error) throw result.error;
+            engine.disconnect();
+          })
+        }
+      >
+        退出本浏览器账号
+      </Button>
+    </FieldGroup>
+  ) : (
     <form
       className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0"
       aria-busy={job.busy}
@@ -63,133 +112,80 @@ export function Connect({ close }: { close: () => void }) {
       }}
     >
       <FieldGroup>
-        {state.account ? (
-          <>
-            <Alert role="status">
-              <AlertTitle className="break-words">{state.account}</AlertTitle>
-              <AlertDescription>
-                在电脑运行 <code>linkshell login</code>
-                ，使用同一账号即可发现电脑。电脑接入官方网关需要 Pro 订阅。
-              </AlertDescription>
-            </Alert>
-            <Button
-              type="button"
-              disabled={blocked}
-              onClick={() =>
-                void job.run(async () => {
-                  await engine.connectAccount();
-                  close();
-                })
-              }
-            >
-              {job.busy && (
-                <LoaderCircle
-                  data-icon="inline-start"
-                  className="animate-spin"
-                />
-              )}
-              刷新账号电脑
-            </Button>
+        <Field data-disabled={blocked}>
+          <FieldLabel htmlFor={`${id}-email`}>邮箱</FieldLabel>
+          <Input
+            id={`${id}-email`}
+            type="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="你的 iTool 账号邮箱"
+            value={email}
+            disabled={blocked}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              job.clear();
+            }}
+            required
+          />
+        </Field>
+        <Field data-disabled={blocked}>
+          <FieldLabel htmlFor={`${id}-password`}>密码</FieldLabel>
+          <Input
+            id={`${id}-password`}
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            disabled={blocked}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              job.clear();
+            }}
+            required
+          />
+        </Field>
+        <Button disabled={blocked}>
+          {job.busy && (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          )}
+          {job.busy ? "正在连接…" : "登录并连接"}
+        </Button>
+        <div className="grid grid-cols-1 gap-2 min-[381px]:grid-cols-2">
+          {(["github", "google"] as const).map((provider) => (
             <Button
               variant="outline"
               type="button"
-              disabled={job.busy}
+              key={provider}
+              disabled={blocked}
               onClick={() =>
                 void job.run(async () => {
-                  const result = await accountClient().auth.signOut({
-                    scope: "local",
+                  // The callback reload must boot the official account connection.
+                  await engine.connectAccount();
+                  const result = await accountClient().auth.signInWithOAuth({
+                    provider,
+                    options: {
+                      redirectTo: location.origin + location.pathname,
+                    },
                   });
                   if (result.error) throw result.error;
-                  engine.disconnect();
                 })
               }
             >
-              退出本浏览器账号
+              {provider === "github" ? "GitHub 登录" : "Google 登录"}
             </Button>
-          </>
-        ) : (
-          <>
-            <Field data-disabled={blocked}>
-              <FieldLabel htmlFor={`${id}-email`}>邮箱</FieldLabel>
-              <Input
-                id={`${id}-email`}
-                type="email"
-                autoComplete="username"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder="你的 iTool 账号邮箱"
-                value={email}
-                disabled={blocked}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  job.clear();
-                }}
-                required
-              />
-            </Field>
-            <Field data-disabled={blocked}>
-              <FieldLabel htmlFor={`${id}-password`}>密码</FieldLabel>
-              <Input
-                id={`${id}-password`}
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                disabled={blocked}
-                onChange={(event) => {
-                  setPassword(event.target.value);
-                  job.clear();
-                }}
-                required
-              />
-            </Field>
-            <Button disabled={blocked}>
-              {job.busy && (
-                <LoaderCircle
-                  data-icon="inline-start"
-                  className="animate-spin"
-                />
-              )}
-              {job.busy ? "正在连接…" : "登录并连接"}
-            </Button>
-            <div className="grid grid-cols-1 gap-2 min-[381px]:grid-cols-2">
-              {(["github", "google"] as const).map((provider) => (
-                <Button
-                  variant="outline"
-                  type="button"
-                  key={provider}
-                  disabled={blocked}
-                  onClick={() =>
-                    void job.run(async () => {
-                      // The callback reload must boot the official account connection.
-                      await engine.connectAccount();
-                      const result = await accountClient().auth.signInWithOAuth(
-                        {
-                          provider,
-                          options: {
-                            redirectTo: location.origin + location.pathname,
-                          },
-                        },
-                      );
-                      if (result.error) throw result.error;
-                    })
-                  }
-                >
-                  {provider === "github" ? "GitHub 登录" : "Google 登录"}
-                </Button>
-              ))}
-            </div>
-            <p className="field-hint flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              登录状态会自动续期。
-              <a
-                href="https://itool.tech/zh/register"
-                target="_blank"
-                rel="noreferrer"
-              >
-                注册 iTool 账号 ↗
-              </a>
-            </p>
-          </>
-        )}
+          ))}
+        </div>
+        <p className="field-hint flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          登录状态会自动续期。
+          <a
+            href="https://itool.tech/zh/register"
+            target="_blank"
+            rel="noreferrer"
+          >
+            注册 iTool 账号 ↗
+          </a>
+        </p>
       </FieldGroup>
     </form>
   );

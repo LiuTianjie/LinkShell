@@ -47,6 +47,7 @@ interface EngineState {
   relayStatus: Record<string, string>;
   error?: string;
   account?: string;
+  accountUserId?: string;
   locked: boolean;
   ready: boolean;
 }
@@ -169,6 +170,7 @@ export class BrowserEngine {
     this.authUser = data.session?.user.id;
     this.state.setState({
       account: data.session?.user.email,
+      accountUserId: data.session?.user.id,
       source: "official",
       gateway: officialGateway,
     });
@@ -177,7 +179,10 @@ export class BrowserEngine {
       auth.onAuthStateChange((_event, session) => {
         const changed = this.authUser !== session?.user.id;
         this.authUser = session?.user.id;
-        this.state.setState({ account: session?.user.email });
+        this.state.setState({
+          account: session?.user.email,
+          accountUserId: session?.user.id,
+        });
         if (changed && this.releaseLock)
           setTimeout(() => {
             this.relays.get(officialGateway)?.reauthenticate();

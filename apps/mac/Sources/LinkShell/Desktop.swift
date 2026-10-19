@@ -81,7 +81,9 @@ import SwiftUI
     app.addItem(.separator())
     app.addItem(withTitle: "退出 LinkShell 界面", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     let editItem = NSMenuItem(); let edit = NSMenu(title: "编辑"); editItem.submenu = edit; main.addItem(editItem)
+    edit.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
     edit.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
     edit.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
     NSApp.mainMenu = main
   }

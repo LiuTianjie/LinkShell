@@ -63,4 +63,14 @@ describe("the account on this computer", () => {
     auth.clearAuth();
     expect(await auth.getValidToken()).toBeNull();
   });
+
+  it("does not restore an account that signed out during token refresh", async () => {
+    auth.saveAuth(tokens(Date.now() - 1));
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      auth.clearAuth();
+      return Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600, user: { id: "u1" } });
+    }));
+    expect(await auth.getValidToken()).toBeNull();
+    expect(auth.loadAuth()).toBeNull();
+  });
 });

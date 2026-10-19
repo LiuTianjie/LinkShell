@@ -22,6 +22,9 @@ struct DesktopDevice: Decodable, Identifiable {
   let name: String
   let online: Bool
 }
+enum DesktopMembership: Equatable {
+  case signedOut, unknown, free, pro(Date)
+}
 struct DesktopSnapshot: Decodable {
   struct Machine: Decodable { let hostname: String; let hostVersion: String }
   struct Gateway: Decodable {
@@ -31,8 +34,29 @@ struct DesktopSnapshot: Decodable {
     let devices: [DesktopDevice]
     let error: Problem?
   }
-  struct Account: Decodable { let state: String; let email: String?; let userId: String? }
+  struct Account: Decodable {
+    let state: String
+    let email: String?
+    let userId: String?
+    let plan: String?
+    let planExpiresAt: String?
+
+    func membership(at now: Date = Date()) -> DesktopMembership {
+      guard state == "signed-in" else { return .signedOut }
+      if plan == "free" { return .free }
+      guard plan == "pro", let planExpiresAt else { return .unknown }
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      let fractional = formatter.date(from: planExpiresAt)
+      formatter.formatOptions = [.withInternetDateTime]
+      guard let expiresAt = fractional ?? formatter.date(from: planExpiresAt) else { return .unknown }
+      return expiresAt > now ? .pro(expiresAt) : .free
+    }
+  }
+  struct Redemption: Decodable { let userId: String; let idempotent: Bool }
   let account: Account?
+  let redemption: Redemption?
+  let accountWarning: String?
   let status: String
   let cliVersion: String?
   let source: String?
@@ -65,7 +89,7 @@ final class DesktopCommandControl: @unchecked Sendable {
 }
 
 enum DesktopCommand {
-  static func run(_ arguments: [String], timeout: Double = 20, control: DesktopCommandControl? = nil) throws -> Data {
+  static func run(_ arguments: [String], timeout: Double = 20, control: DesktopCommandControl? = nil, input: Data? = nil) throws -> Data {
     let task = Process()
     var env = ProcessInfo.processInfo.environment
     env["LINKSHELL_HOME"] = DesktopRuntime.home
@@ -86,15 +110,25 @@ enum DesktopCommand {
     let output = Pipe()
     task.standardOutput = output
     task.standardError = FileHandle.nullDevice
-    task.standardInput = FileHandle.nullDevice
+    let inputPipe = input == nil ? nil : Pipe()
+    if let inputPipe { task.standardInput = inputPipe } else { task.standardInput = FileHandle.nullDevice }
     if let control { try control.start(task) } else { try task.run() }
     let deadline = DispatchWorkItem {
       if task.isRunning { task.terminate() }
     }
     DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
+    defer { deadline.cancel() }
+    if let input, let inputPipe {
+      do {
+        defer { try? inputPipe.fileHandleForWriting.close() }
+        try inputPipe.fileHandleForWriting.write(contentsOf: input)
+      } catch {
+        if task.isRunning { task.terminate() }
+        throw error
+      }
+    }
     let data = output.fileHandleForReading.readDataToEndOfFile()
     task.waitUntilExit()
-    deadline.cancel()
     guard task.terminationStatus == 0 else {
       if let snapshot = try? JSONDecoder().decode(DesktopSnapshot.self, from: data), let error = snapshot.error {
         throw NSError(domain: "LinkShell", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
@@ -106,14 +140,32 @@ enum DesktopCommand {
 }
 
 @MainActor final class DesktopModel: ObservableObject {
-  @Published var snapshot: DesktopSnapshot?
+  @Published var snapshot: DesktopSnapshot? {
+    didSet {
+      if oldValue?.account?.userId != snapshot?.account?.userId {
+        accountGeneration = UUID()
+        redemptionCode = ""; redemptionMessage = ""; redemptionIsError = false
+        accountMessage = ""; lastAccountRefresh = .distantPast
+      }
+    }
+  }
   @Published var problem: String?
   @Published var recoveryProblem: String?
   private var startupProblem: String?
-  @Published var busy = false
+  @Published var busy = false {
+    didSet { if busy && !oldValue { snapshotRevision &+= 1 } }
+  }
+  private var snapshotRevision = 0
   @Published var checking = false
   @Published var signingIn = false
   @Published var accountMessage = ""
+  @Published var redemptionCode = ""
+  @Published var redemptionMessage = ""
+  @Published var redemptionIsError = false
+  @Published var redeeming = false
+  @Published var checkingMembership = false
+  private var accountGeneration = UUID()
+  private var lastAccountRefresh = Date.distantPast
   private var loginControl: DesktopCommandControl?
   private var loginCancelled = false
   @Published var recording = false
@@ -153,7 +205,6 @@ enum DesktopCommand {
   let preview = Launch.has("--dashboard-preview")
   var sessions: [DesktopSession] { snapshot?.sessions ?? [] }
   var devices: [DesktopDevice] { snapshot?.gateway?.devices ?? [] }
-  var online: Int { devices.filter(\.online).count }
   var running: Int { sessions.filter { $0.state == "running" }.count }
   var pending: Int { sessions.reduce(0) { $0 + $1.pendingPermissions } }
   var healthy: Bool { snapshot?.status == "running" && problem == nil }
@@ -167,6 +218,8 @@ enum DesktopCommand {
   }
   var signedIn: Bool { snapshot?.account?.state == "signed-in" }
   var accountLabel: String { snapshot?.account?.email ?? snapshot?.account?.userId ?? "未登录" }
+  var membership: DesktopMembership { snapshot?.account?.membership() ?? .signedOut }
+  var canRedeem: Bool { membership == .free && !redemptionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !busy && !preview }
   var home: String { snapshot?.home ?? DesktopRuntime.home }
   var standalone: Bool { DesktopRuntime.bundled }
   var externalHost: Bool { standalone && healthy && snapshot?.hostOwner != Bundle.main.bundlePath }
@@ -183,7 +236,12 @@ enum DesktopCommand {
       if let chosen = Launch.value(after: "--dashboard-appearance"), ["light", "dark", "system"].contains(chosen) { appearance = chosen }
       if let page = Launch.value(after: "--dashboard-page") { selected = page }
       let json = #"{"status":"running","cliVersion":"0.10.42","source":"npm","machine":{"hostname":"这台 Mac","hostVersion":"0.10.42"},"gateway":{"status":"online","devices":[{"id":"preview","name":"我的 iPhone","online":true}]},"sessions":[{"id":"one","agent":"codex","title":"登录流程","cwd":"/Projects/LinkShell","state":"running","pendingPermissions":0,"updatedAt":0},{"id":"two","agent":"claude","title":"发布检查","cwd":"/Projects/LinkShell","state":"waiting","pendingPermissions":1,"updatedAt":0},{"id":"three","agent":"codex","title":"项目文档","cwd":"/Projects/LinkShell","state":"idle","pendingPermissions":0,"updatedAt":0}]}"#
-      snapshot = try? JSONDecoder().decode(DesktopSnapshot.self, from: Data(json.utf8))
+      var sample = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
+      if let plan = Launch.value(after: "--dashboard-account"), ["free", "pro", "unknown"].contains(plan) {
+        sample["account"] = ["state": "signed-in", "userId": "preview", "email": "preview@example.com", "plan": plan,
+                             "planExpiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(30 * 86400))]
+      }
+      if let data = try? JSONSerialization.data(withJSONObject: sample) { snapshot = try? JSONDecoder().decode(DesktopSnapshot.self, from: data) }
       recording = true; control = true; permissionsKnown = true
       activity = [(Date(), "手机已连接"), (Date().addingTimeInterval(-240), "本机服务已连接")]
       return
@@ -222,9 +280,16 @@ enum DesktopCommand {
     refreshLoginItem()
     guard !preview, !polling, !busy else { return }
     polling = true
+    let revision = snapshotRevision
     Task {
       do {
         let data = try await Task.detached { try DesktopCommand.run(["desktop"]) }.value
+        // An older poll must not overwrite the account returned by a mutation.
+        guard !busy, revision == snapshotRevision else {
+          polling = false
+          if !busy { refresh() }
+          return
+        }
         let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
         if next.status != snapshot?.status { event(next.status == "running" ? "本机服务已连接" : "本机服务：\(next.status == "stopped" ? "已停止" : "无法连接")") }
         if let before = snapshot?.gateway?.status, before != next.gateway?.status { event("网关连接状态已变化") }
@@ -233,10 +298,14 @@ enum DesktopCommand {
         let allowed = await Task.detached { (Permissions.recording(), Permissions.trusted()) }.value
         recording = allowed.0; control = allowed.1; permissionsKnown = true
       } catch {
-        snapshot = nil
-        problem = error.localizedDescription
+        if !busy, revision == snapshotRevision {
+          snapshot = nil
+          problem = error.localizedDescription
+        }
       }
       polling = false
+      if revision != snapshotRevision { if !busy { refresh() }; return }
+      if signedIn && Date().timeIntervalSince(lastAccountRefresh) > 300 { refreshAccount() }
       if autoCheck && Date().timeIntervalSince(lastUpdateCheck) > 21600 { checkUpdates() }
       if selected == "日志" { readLog() }
     }
@@ -337,6 +406,61 @@ enum DesktopCommand {
         accountMessage = action == "logout" ? "已退出当前电脑的账号。" : "已应用官方网关设置，请查看连接状态。"
       } catch { accountMessage = error.localizedDescription }
       busy = false; refresh()
+    }
+  }
+
+  func refreshAccount() {
+    guard signedIn, !preview, !busy else { return }
+    let generation = accountGeneration
+    let userId = snapshot?.account?.userId
+    lastAccountRefresh = Date()
+    busy = true; checkingMembership = true
+    Task {
+      defer { checkingMembership = false; busy = false; refresh() }
+      do {
+        let data = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "account-refresh"], timeout: 60) }.value
+        guard generation == accountGeneration else { return }
+        let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
+        snapshot = next
+        if next.account?.userId == userId { accountMessage = next.accountWarning ?? "" }
+      } catch {
+        if generation == accountGeneration { accountMessage = error.localizedDescription }
+      }
+    }
+  }
+
+  func redeemPro() {
+    guard canRedeem, let userId = snapshot?.account?.userId else { return }
+    let code = redemptionCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard code.utf8.count <= 512 else {
+      redemptionMessage = "激活码格式不正确，请检查后重试。"; redemptionIsError = true
+      return
+    }
+    guard let input = try? JSONSerialization.data(withJSONObject: ["code": code, "userId": userId]) else { return }
+    let generation = accountGeneration
+    busy = true; redeeming = true; redemptionMessage = ""; redemptionIsError = false
+    Task {
+      defer { redeeming = false; busy = false; refresh() }
+      do {
+        let data = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "redeem-pro"], timeout: 90, input: input) }.value
+        guard generation == accountGeneration else { return }
+        let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
+        snapshot = next
+        guard next.account?.userId == userId else { return }
+        guard let redemption = next.redemption, redemption.userId == userId,
+              case .pro = next.account?.membership() ?? .unknown else {
+          throw NSError(domain: "LinkShell", code: 1, userInfo: [NSLocalizedDescriptionKey: "尚未确认 Pro 有效期，请刷新会员状态后重试。"])
+        }
+        redemptionCode = ""
+        redemptionMessage = redemption.idempotent ? "该激活码已为当前账号兑换，Pro 会员状态已更新。" : "兑换成功，Pro 会员已开通。"
+        accountMessage = next.accountWarning ?? ""
+        lastAccountRefresh = Date()
+        event("Pro 会员状态已更新")
+      } catch {
+        if generation == accountGeneration {
+          redemptionMessage = error.localizedDescription; redemptionIsError = true
+        }
+      }
     }
   }
 

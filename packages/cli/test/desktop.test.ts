@@ -5,12 +5,19 @@ import { loadAuth } from "../src/auth.js";
 import { runLogin } from "../src/commands/login.js";
 import { joinGatewayAfterLogin } from "../src/commands/host.js";
 import { readPid, stopDaemonAndWait } from "../src/utils/daemon.js";
+import { cachedMembership, redeemDesktopPro, refreshMembership } from "../src/pro-membership.js";
+import { refreshGateway } from "../src/commands/host.js";
+import { Readable } from "node:stream";
 
 vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn() }));
+vi.mock("../src/pro-membership.js", () => ({ cachedMembership: vi.fn(), redeemDesktopPro: vi.fn(), refreshMembership: vi.fn() }));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
 vi.mock("../src/commands/host.js", () => ({ joinGatewayAfterLogin: vi.fn(), refreshGateway: vi.fn(), readHostConfig: vi.fn(), writeHostConfig: vi.fn(), ensureHostRunning: vi.fn(), withRunningHost: vi.fn(), silenceSqliteWarning: vi.fn() }));
 vi.mock("../src/utils/daemon.js", () => ({ linkshellDir: () => "/isolated", readPid: vi.fn(), readHostOwner: vi.fn(), readHostLaunch: () => ({}), stopDaemonAndWait: vi.fn() }));
-beforeEach(() => { vi.resetAllMocks(); process.exitCode = 0; });
+beforeEach(() => {
+  vi.resetAllMocks(); process.exitCode = 0;
+  vi.mocked(cachedMembership).mockReturnValue({ plan: "unknown", planExpiresAt: null });
+});
 afterEach(() => { vi.restoreAllMocks(); process.exitCode = 0; });
 
 describe("native desktop snapshots", () => {
@@ -58,8 +65,46 @@ describe("native desktop snapshots", () => {
   it("includes account identity while keeping credentials out of the UI snapshot", async () => {
     vi.mocked(loadAuth).mockReturnValue({ userId: "u1", email: "me@example.com", accessToken: "secret-access", refreshToken: "secret-refresh", expiresAt: 1 });
     const snapshot = await desktopSnapshot("1.0.0");
-    expect(snapshot.account).toEqual({ state: "signed-in", userId: "u1", email: "me@example.com" });
+    expect(snapshot.account).toEqual({ state: "signed-in", userId: "u1", email: "me@example.com", plan: "unknown", planExpiresAt: null });
     expect(JSON.stringify(snapshot)).not.toContain("secret-");
+    expect(refreshMembership).not.toHaveBeenCalled();
+  });
+  it("reads activation codes only from stdin and preserves success when the host refresh fails", async () => {
+    const planExpiresAt = "2027-01-01T00:00:00.000Z";
+    vi.mocked(loadAuth).mockReturnValue({ userId: "u1", accessToken: "secret-token", refreshToken: "refresh", expiresAt: 1 });
+    vi.mocked(redeemDesktopPro).mockResolvedValue({ redemption: { userId: "u1", idempotent: false, planExpiresAt }, accountWarning: undefined });
+    vi.mocked(refreshGateway).mockRejectedValue(new Error("offline"));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "redeem-pro", Readable.from([JSON.stringify({ code: "activation-secret", userId: "u1" })]));
+    expect(redeemDesktopPro).toHaveBeenCalledWith("activation-secret", "u1");
+    const result = JSON.parse(String(out.mock.calls[0]?.[0]));
+    expect(result.account).toMatchObject({ userId: "u1", plan: "pro", planExpiresAt });
+    expect(result.accountWarning).toContain("兑换已成功");
+    expect(result.redemption).toMatchObject({ idempotent: false, planExpiresAt });
+    expect(JSON.stringify(result)).not.toMatch(/activation-secret|secret-token/);
+    expect(process.exitCode).toBe(0);
+  });
+  it("keeps confirmed redemption available even if the host snapshot fails", async () => {
+    vi.mocked(loadAuth).mockReturnValue({ userId: "u1", accessToken: "secret-token", refreshToken: "refresh", expiresAt: 1 });
+    vi.mocked(redeemDesktopPro).mockResolvedValue({ redemption: { userId: "u1", idempotent: true, planExpiresAt: "2027-01-01T00:00:00Z" }, accountWarning: undefined });
+    vi.mocked(withRunningHost).mockRejectedValue(new Error("host unavailable"));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "redeem-pro", Readable.from(['{"code":"secret","userId":"u1"}']));
+    expect(JSON.parse(String(out.mock.calls[0]?.[0]))).toMatchObject({ status: "unknown", account: { plan: "pro" }, redemption: { idempotent: true }, accountWarning: expect.stringContaining("兑换已成功") });
+    expect(process.exitCode).toBe(0);
+  });
+  it("rejects malformed redemption input without echoing secrets or calling the API", async () => {
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "redeem-pro", Readable.from(['{"code":"activation-secret"}']));
+    expect(String(out.mock.calls[0]?.[0])).not.toContain("activation-secret");
+    expect(redeemDesktopPro).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+  it("refreshes membership only through the explicit account action", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "account-refresh");
+    expect(refreshMembership).toHaveBeenCalledTimes(1);
+    expect(ensureHostRunning).not.toHaveBeenCalled();
   });
   it("does not connect the gateway when login times out", async () => {
     vi.mocked(runLogin).mockResolvedValue(null);

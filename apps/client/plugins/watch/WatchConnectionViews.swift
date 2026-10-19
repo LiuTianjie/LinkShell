@@ -20,6 +20,9 @@ struct WatchConnectionView: View {
         Section("账号与配对") {
           if store.direct.signedIn {
             Text(store.direct.email ?? "已登录").font(.caption)
+            if let account = store.direct.account {
+              NavigationLink("会员与激活码") { WatchMembershipView(account: account) }
+            }
             Button("退出账号", role: .destructive) { confirmLogout = true }
           } else {
             NavigationLink("登录账号") { WatchLoginView(client: store.direct) }
@@ -35,6 +38,59 @@ struct WatchConnectionView: View {
         catch { store.showNotice(ok: false, text: error.localizedDescription) }
       }
     }
+  }
+}
+
+struct WatchMembershipView: View {
+  @ObservedObject var account: WatchAccount
+  @State private var code = ""
+
+  var body: some View {
+    List {
+      if account.session != nil {
+        Section("会员状态") {
+          switch account.membership {
+          case .unknown:
+            Text(account.membershipLoading ? "正在查询…" : "会员状态未确认").font(.caption)
+          case .free:
+            Label("普通账户", systemImage: "person.crop.circle")
+          case .pro(let expiry):
+            Label("Pro 会员", systemImage: "checkmark.seal.fill")
+            Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+          Button(account.membershipLoading ? "正在刷新…" : "刷新会员状态") {
+            Task { await account.refreshMembership() }
+          }.disabled(account.membershipLoading || account.redeeming)
+        }
+        if account.membership == .free {
+          Section("激活 Pro") {
+            TextField("输入激活码", text: $code)
+              .textInputAutocapitalization(.never).autocorrectionDisabled()
+              .disabled(account.redeeming || account.membershipLoading)
+            Button(account.redeeming ? "正在兑换…" : "兑换激活码") {
+              Task { if await account.redeemProCode(code) { code = "" } }
+            }.disabled(account.redeeming || account.membershipLoading || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Link("没有激活码？前往链动小铺", destination: URL(string: "https://pay.ldxp.cn/item/7lgv1s")!)
+              .font(.caption2).foregroundStyle(.secondary)
+          }
+        }
+        if let notice = account.redemptionNotice {
+          Text(notice).font(.caption).foregroundStyle(.green)
+        }
+        if let error = account.membershipError {
+          Text(error).font(.caption).foregroundStyle(.red)
+        }
+      } else {
+        Text("请先登录账号").font(.caption).foregroundStyle(.secondary)
+      }
+    }
+    .navigationTitle("Pro 会员")
+    .task(id: account.session?.userID) {
+      code = ""
+      await account.refreshMembership()
+    }
+    .onDisappear { code = "" }
   }
 }
 

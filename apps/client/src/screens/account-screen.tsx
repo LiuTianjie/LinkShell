@@ -8,6 +8,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { usePageInsets } from "@/components/adaptive-page";
 import Svg, { Path } from "react-native-svg";
 import { Icon, type IconProps } from "@/components/icon";
+import { AccountMembership } from "@/components/account-membership";
 import { SIGN_UP_URL, useAccount, type OAuthProvider } from "@/lib/account";
 import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
@@ -401,6 +402,7 @@ export function AccountScreen() {
       <View style={{ flexDirection: columns ? "row" : "column", alignItems: columns ? "flex-start" : "center", justifyContent: "center", gap: columns ? 32 : 28 }}>
         <View style={{ width: columnWidth, minWidth: 0, gap: 12 }}>
           {account ? <SignedIn /> : <SignInForm width={columnWidth} />}
+          {account ? <AccountMembership key={account.userId} userId={account.userId} /> : null}
           {!showManagement ? (
             <Pressable onPress={() => router.push("/pair")} accessibilityRole="button" style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
               <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>手动连接电脑</Text>

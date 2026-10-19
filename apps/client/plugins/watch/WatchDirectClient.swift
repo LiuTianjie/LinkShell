@@ -12,7 +12,7 @@ final class WatchDirectClient: ObservableObject {
   @Published var gatewayText = UserDefaults.standard.string(forKey: "LinkShellWatch.gateway") ?? "https://gateway.itool.tech"
   var onSnapshot: ((String) -> Void)?
   private(set) var machine: WatchMachine?
-  private var account: WatchAccount?
+  private(set) var account: WatchAccount?
   private var relay: WatchRelay?
   private var opening: WatchTunnelOpening?
   private var channel: WatchSecureChannel?

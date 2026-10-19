@@ -128,6 +128,9 @@ export const useAccount = create<AccountState>((set, get) => ({
     if (session.expiresAt - Date.now() > 120_000) return session.accessToken;
     refreshing ??= auth("token?grant_type=refresh_token", { refresh_token: session.refreshToken })
       .then((next) => {
+        // A refresh that outlived sign-out or another login must not restore its old account.
+        const current = get().session;
+        if (current?.userId !== session.userId || current.refreshToken !== session.refreshToken) return undefined;
         writeSecret(KEY, next);
         set({ session: next });
         return next;

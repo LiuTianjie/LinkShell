@@ -2,6 +2,8 @@ import * as http from "node:http";
 import { execSync } from "node:child_process";
 import { saveAuth, SUPABASE_URL, SUPABASE_ANON_KEY } from "../auth.js";
 import type { AuthTokens } from "../auth.js";
+import { cacheMembership, type DesktopMembership } from "../pro-membership.js";
+import { fetchProMembership } from "../../../client-core/src/pro-membership.js";
 
 const ITOOL_AUTH_URL = "https://itool.tech/en/auth/linkshell";
 
@@ -76,6 +78,7 @@ export async function runLogin(): Promise<LoginResult | null> {
         let userId = "";
         let email = "";
         let plan = "free";
+        let membership: DesktopMembership = { plan: "unknown", planExpiresAt: null };
         try {
           const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
             headers: {
@@ -92,31 +95,9 @@ export async function runLogin(): Promise<LoginResult | null> {
             userId = user.id;
             email = user.email ?? "";
 
-            // Check subscription from profiles table
-            const profileRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan,plan_expires_at&limit=1`,
-              {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  apikey: SUPABASE_ANON_KEY,
-                },
-                signal: AbortSignal.timeout(5_000),
-              },
-            );
-            if (profileRes.ok) {
-              const profiles = (await profileRes.json()) as {
-                plan: string;
-                plan_expires_at: string | null;
-              }[];
-              if (
-                profiles.length > 0 &&
-                profiles[0]!.plan === "pro" &&
-                profiles[0]!.plan_expires_at &&
-                new Date(profiles[0]!.plan_expires_at) > new Date()
-              ) {
-                plan = "pro";
-              }
-            }
+            const profile = await fetchProMembership({ userId, accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+            plan = profile.plan;
+            membership = { plan: profile.plan, planExpiresAt: profile.expiresAt ?? null };
           }
         } catch {}
 
@@ -134,6 +115,7 @@ export async function runLogin(): Promise<LoginResult | null> {
           email,
         };
         saveAuth(tokens);
+        try { cacheMembership(userId, membership); } catch { /* A cache write cannot invalidate a completed login. */ }
 
         res.writeHead(200);
         res.end("ok");

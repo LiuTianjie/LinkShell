@@ -91,6 +91,9 @@ export async function refreshAccessToken(): Promise<AuthTokens | null> {
         userId: body.user.id,
         email: body.user.email ?? auth.email,
       };
+      // A login or logout may finish while the refresh is in flight.
+      const current = loadAuth();
+      if (tokens.userId !== auth.userId || current?.userId !== auth.userId || current.refreshToken !== auth.refreshToken) return null;
       saveAuth(tokens);
       return tokens;
     } catch {

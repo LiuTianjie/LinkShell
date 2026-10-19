@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Combine
 
 // Secrets stay on this watch and never enter the shared widget defaults/container.
 enum WatchKeychain {
@@ -39,9 +40,20 @@ struct WatchAccountSession: Codable {
   let email: String?
 }
 
+enum WatchMembership: Equatable {
+  case unknown
+  case free
+  case pro(expiresAt: Date)
+}
+
 @MainActor
-final class WatchAccount {
-  private(set) var session: WatchAccountSession?
+final class WatchAccount: ObservableObject {
+  @Published private(set) var session: WatchAccountSession?
+  @Published private(set) var membership: WatchMembership = .unknown
+  @Published private(set) var membershipLoading = false
+  @Published private(set) var redeeming = false
+  @Published private(set) var membershipError: String?
+  @Published private(set) var redemptionNotice: String?
   private var refreshTask: Task<WatchAccountSession, Error>?
   private var generation = 0
   private let http: URLSession
@@ -74,6 +86,7 @@ final class WatchAccount {
 
   func signIn(email: String, password: String) async throws {
     generation += 1
+    resetMembership()
     let epoch = generation
     refreshTask?.cancel(); refreshTask = nil
     let next = try await grant("password", body: ["email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password])
@@ -95,10 +108,127 @@ final class WatchAccount {
   }
   func signOut() throws {
     generation += 1
+    resetMembership()
     refreshTask?.cancel(); refreshTask = nil
     if let userID = session?.userID { try writeSecret("identity.\(userID)", nil) }
     try writeSecret("account", nil)
     session = nil
+  }
+  private func resetMembership() {
+    membership = .unknown; membershipLoading = false; redeeming = false
+    membershipError = nil; redemptionNotice = nil
+  }
+  private func checkAccount(_ epoch: Int, _ userID: String) throws {
+    guard epoch == generation, session?.userID == userID, !Task.isCancelled else { throw CancellationError() }
+  }
+  func refreshMembership() async {
+    guard let userID = session?.userID, !membershipLoading, !redeeming else { return }
+    let epoch = generation
+    membershipLoading = true; membershipError = nil
+    defer { if generation == epoch { membershipLoading = false } }
+    do { membership = try await fetchMembership(epoch: epoch, userID: userID) }
+    catch {
+      guard generation == epoch, !Task.isCancelled, !(error is CancellationError) else { return }
+      membership = .unknown; membershipError = Self.message(error)
+    }
+  }
+  @discardableResult
+  func redeemProCode(_ rawCode: String) async -> Bool {
+    guard let userID = session?.userID, !redeeming, !membershipLoading, membership == .free else { return false }
+    let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !code.isEmpty else { membershipError = "请输入激活码"; return false }
+    let epoch = generation
+    redeeming = true; membershipError = nil; redemptionNotice = nil
+    defer { if generation == epoch { redeeming = false } }
+    do {
+      guard let token = try await token() else { throw WatchLinkError("登录已失效，请重新登录后再试") }
+      try checkAccount(epoch, userID)
+      var request = URLRequest(url: URL(string: "https://itool.tech/api/pro/redeem")!)
+      request.httpMethod = "POST"
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+      request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
+      let (data, response) = try await membershipRequest(request)
+      try checkAccount(epoch, userID)
+      guard (200..<300).contains(response.statusCode) else { throw WatchLinkError(Self.redemptionError(data, status: response.statusCode)) }
+      struct Result: Decodable {
+        let ok: Bool; let valid: Bool; let idempotent: Bool; let months: Double
+        let plan_expires_at: String; let server_time: String
+      }
+      guard let result = try? JSONDecoder().decode(Result.self, from: data), result.ok, result.valid,
+            result.months.isFinite, result.months >= 0,
+            let expiry = Self.date(result.plan_expires_at), let now = Self.date(result.server_time) else {
+        throw WatchLinkError("兑换结果尚未确认，请刷新会员状态后重试")
+      }
+      guard expiry > now else {
+        throw WatchLinkError(result.idempotent ? "此激活码已兑换且权益已到期，请使用新的激活码" : "兑换结果尚未确认，请刷新会员状态后重试")
+      }
+      membership = .pro(expiresAt: expiry)
+      redemptionNotice = result.idempotent ? "此激活码已兑换，Pro 权益已同步" : "兑换成功，已开通 Pro"
+      // A delayed profile read must not undo the server's confirmed redemption.
+      if let refreshed = try? await fetchMembership(epoch: epoch, userID: userID), case .pro = refreshed {
+        membership = refreshed
+      }
+      try checkAccount(epoch, userID)
+      return true
+    } catch {
+      guard generation == epoch, !Task.isCancelled, !(error is CancellationError) else { return false }
+      membershipError = Self.message(error)
+      return false
+    }
+  }
+  private func fetchMembership(epoch: Int, userID: String) async throws -> WatchMembership {
+    guard let token = try await token() else { throw WatchLinkError("登录已失效，请重新登录后再试") }
+    try checkAccount(epoch, userID)
+    let url = authURL.appendingPathComponent("rest/v1/profiles").appending(queryItems: [
+      URLQueryItem(name: "select", value: "plan,plan_expires_at"),
+      URLQueryItem(name: "id", value: "eq.\(userID)"), URLQueryItem(name: "limit", value: "1")
+    ])
+    var request = URLRequest(url: url)
+    request.setValue(anonKey, forHTTPHeaderField: "apikey")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    let (data, response) = try await membershipRequest(request)
+    try checkAccount(epoch, userID)
+    if response.statusCode == 401 || response.statusCode == 403 { throw WatchLinkError("登录已失效，请重新登录后再试") }
+    guard (200..<300).contains(response.statusCode) else { throw WatchLinkError("暂时无法获取会员状态，请稍后重试") }
+    struct Profile: Decodable { let plan: String; let plan_expires_at: String? }
+    guard let profiles = try? JSONDecoder().decode([Profile].self, from: data) else { throw WatchLinkError("会员状态返回异常，请稍后重试") }
+    guard let profile = profiles.first, profile.plan == "pro" else { return .free }
+    guard let rawExpiry = profile.plan_expires_at, let expiry = Self.date(rawExpiry) else { return .free }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+    let now = response.value(forHTTPHeaderField: "Date").flatMap(formatter.date(from:)) ?? Date()
+    return expiry > now ? .pro(expiresAt: expiry) : .free
+  }
+  private func membershipRequest(_ original: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    var request = original
+    request.timeoutInterval = 15; request.httpShouldHandleCookies = false
+    let (data, response) = try await http.data(for: request)
+    guard let response = response as? HTTPURLResponse else { throw WatchLinkError("账号服务没有响应") }
+    return (data, response)
+  }
+  private static func date(_ raw: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: raw) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: raw)
+  }
+  private static func message(_ error: Error) -> String {
+    guard let urlError = error as? URLError else { return error.localizedDescription }
+    return urlError.code == .timedOut ? "请求超时，请稍后重试" : "网络连接失败，请检查网络后重试"
+  }
+  private static func redemptionError(_ data: Data, status: Int) -> String {
+    let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    let code = body?["code"] as? String ?? (body?["error"] as? [String: Any])?["code"] as? String
+    let statusCodes = [400: "malformed_request", 401: "login_required", 403: "login_required", 413: "request_too_large", 422: "invalid_or_unavailable", 429: "rate_limited", 503: "temporarily_unavailable"]
+    let messages = [
+      "malformed_request": "激活码格式不正确，请检查后重试", "login_required": "登录已失效，请重新登录后再试",
+      "request_too_large": "激活码内容过长，请检查后重试", "invalid_or_unavailable": "激活码无效或已不可用，请检查后重试",
+      "rate_limited": "操作太频繁，请稍后重试", "temporarily_unavailable": "兑换服务暂时不可用，请稍后重试"
+    ]
+    return code.flatMap { messages[$0] } ?? statusCodes[status].flatMap { messages[$0] } ?? "兑换失败，请稍后重试"
   }
   private func save(_ next: WatchAccountSession) throws {
     try writeSecret("account", JSONEncoder().encode(next))
