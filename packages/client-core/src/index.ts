@@ -3,6 +3,7 @@ export * from "./steps.js";
 export * from "./user-message.js";
 export * from "./agent-messages.js";
 export * from "./host-link.js";
+export * from "./file-download.js";
 export * from "./store.js";
 export * from "./workflows.js";
 export * from "./tunnel-socket.js";

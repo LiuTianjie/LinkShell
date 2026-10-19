@@ -2,9 +2,39 @@ import { mkdirSync, mkdtempSync, readFileSync, truncateSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { listDirectory, makeDirectory, readFile, uploadFile } from "../src/fs.js";
+import { downloadFile, listDirectory, makeDirectory, readFile, uploadFile } from "../src/fs.js";
 
 describe("fs.list", () => {
+  it("downloads original binary bytes in chunks beyond the preview limit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-download-"));
+    const path = join(root, "movie.mp4");
+    const content = Buffer.from([0, 255, 0x80, 1, 2, 3, 4]);
+    writeFileSync(path, content);
+    const first = await downloadFile({ path, offset: 0, maxBytes: 3 });
+    const second = await downloadFile({ path, offset: first.nextOffset, maxBytes: 10, revision: first.revision });
+    expect(Buffer.concat([Buffer.from(first.data, "base64"), Buffer.from(second.data, "base64")])).toEqual(content);
+    expect(first.done).toBe(false);
+    expect(second).toMatchObject({ done: true, size: content.length, nextOffset: content.length, revision: first.revision });
+    truncateSync(path, 32 * 1024 * 1024);
+    await expect(readFile({ path, maxBytes: 100 })).rejects.toMatchObject({ appCode: "too_large" });
+    const tail = await downloadFile({ path, offset: 32 * 1024 * 1024 - 8, maxBytes: 100 });
+    expect(Buffer.from(tail.data, "base64")).toEqual(Buffer.alloc(8));
+    expect(tail.done).toBe(true);
+  });
+
+  it("handles empty downloads and rejects directories, missing files, and changed revisions", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-download-"));
+    const path = join(root, "empty.bin");
+    writeFileSync(path, "");
+    const empty = await downloadFile({ path, offset: 0, maxBytes: 10 });
+    expect(empty).toMatchObject({ size: 0, data: "", nextOffset: 0, done: true });
+    writeFileSync(path, "changed");
+    await expect(downloadFile({ path, offset: 0, maxBytes: 10, revision: empty.revision })).rejects.toThrow("文件已变化");
+    await expect(downloadFile({ path, offset: 100, maxBytes: 10 })).rejects.toThrow("下载位置");
+    await expect(downloadFile({ path: root, offset: 0, maxBytes: 10 })).rejects.toThrow();
+    await expect(downloadFile({ path: join(root, "missing"), offset: 0, maxBytes: 10 })).rejects.toThrow();
+  });
+
   it("lists subdirectories, projects first, hidden ones only on request", async () => {
     const root = mkdtempSync(join(tmpdir(), "lsh-fs-"));
     for (const name of ["zeta", "alpha", ".secret", "app"]) mkdirSync(join(root, name));
