@@ -87,9 +87,10 @@ describe.skipIf(!shippedApp())("LinkShell.app as a package delivers it", () => {
   afterAll(() => rmSync(work, { recursive: true, force: true }));
   // A package can't carry the app as it is (no links, no permission to run): it carries this archive of it.
   const archive = join(work, "LinkShell.app.tar.gz");
+  // Archiving the whole app takes seconds when the other suites keep the machine busy.
   beforeAll(() => {
     execFileSync("/usr/bin/tar", ["-czf", archive, "-C", join(shippedApp()!, ".."), "LinkShell.app"]);
-  });
+  }, 60_000);
 
   it("is unpacked once, whole: it runs, and its signature holds", () => {
     const at = join(work, "home/LinkShell.app");
