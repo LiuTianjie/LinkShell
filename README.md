@@ -81,6 +81,8 @@ Then connect your phone ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761
   linkshell pair    # scan the QR code in the app: Computers → Add computer
   ```
 
+**Activate Pro in LinkShell.** Signed-in Free accounts can redeem an activation code from the phone app's Account page, the Mac app's account section, or the web workspace's Official account tab. On Apple Watch, use Connection Settings → Membership & activation codes in independent mode. Pro status and expiry update after redemption. [Get a code on Liandong Xiaopu](https://pay.ldxp.cn/item/7lgv1s); [iTool Settings → Upgrade to Pro](https://itool.tech/en/settings) remains available with the same account, including for renewing an active Pro membership.
+
 Start sessions from the phone, or launch agents from your terminal so you can hand them over any time:
 
 ```bash

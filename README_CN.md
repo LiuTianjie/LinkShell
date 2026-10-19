@@ -77,6 +77,8 @@ linkshell setup
   linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
   ```
 
+**直接在 LinkShell 兑换 Pro。** 普通账户登录后，可在手机 App 的账户页、Mac App 的账号区域或网页版「官方账号」页输入激活码；Apple Watch 独立模式下，在「连接设置 → 会员与激活码」兑换。兑换后会更新 Pro 状态与到期时间。[前往链动小铺购买激活码](https://pay.ldxp.cn/item/7lgv1s)；也可以用同一账号在 [iTool「设置 → 升级 Pro」](https://itool.tech/zh/settings)兑换，已有 Pro 的账户可在这里续期。
+
 可以直接在手机上新建会话；也可以在电脑终端里这样启动 Agent，随时交给手机：
 
 ```bash

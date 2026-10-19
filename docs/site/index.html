@@ -802,12 +802,12 @@
         <div id="pricing-buy">
           <ol>
             <li><span lang="zh">在链动小铺买一张激活码，微信或支付宝付款。</span><span lang="en">Buy an activation code on Liandong Xiaopu, with WeChat Pay or Alipay.</span></li>
-            <li><span lang="zh">登录 iTool，在“设置 → 升级 Pro”里粘贴激活码兑换。用你登录 LinkShell 的那个账号。</span><span lang="en">Sign in to iTool and paste the code under Settings → Upgrade to Pro. Use the account you sign in to LinkShell with.</span></li>
+            <li><span lang="zh">用普通账户登录 LinkShell，在手机 App、Mac App 或网页版的账号区域输入激活码兑换；Apple Watch 独立模式下，在「连接设置 → 会员与激活码」兑换。成功后会更新 Pro 状态与到期时间。</span><span lang="en">Sign in to LinkShell with a Free account and redeem the code in the phone app, Mac app or web workspace's account controls. On Apple Watch, use Connection Settings → Membership &amp; activation codes in independent mode. Pro status and expiry update after redemption.</span></li>
           </ol>
           <a id="buy-link" href="https://pay.ldxp.cn/item/7lgv1s" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary"><span lang="zh">购买激活码 ↗</span><span lang="en">Buy a code ↗</span></a>
-          <a lang="zh" href="https://itool.tech/zh/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">已有激活码，去 iTool 兑换 ↗</a>
-          <a lang="en" href="https://itool.tech/en/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">Have a code? Redeem it on iTool ↗</a>
-          <p><span lang="zh">LinkShell Pro 就是 iTool Pro：同一个账号，同一份会员，iTool 里的 Pro 功能也一起开通。再买一张会在剩余时间上叠加。</span><span lang="en">LinkShell Pro is iTool Pro: one account, one membership, and iTool's Pro features come with it. Another code adds to the time you have left.</span></p>
+          <a lang="zh" href="https://itool.tech/zh/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">也可在 iTool 兑换或续期 ↗</a>
+          <a lang="en" href="https://itool.tech/en/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">Redeem or renew on iTool ↗</a>
+          <p><span lang="zh">LinkShell Pro 就是 iTool Pro：同一个账号，同一份会员，iTool 里的 Pro 功能也一起开通。已有 Pro 的账户可在 iTool「设置 → 升级 Pro」兑换续期，时长会在剩余时间上叠加。</span><span lang="en">LinkShell Pro is iTool Pro: one account, one membership, and iTool's Pro features come with it. To renew an active Pro membership, redeem another code under iTool Settings → Upgrade to Pro; its duration adds to the time you have left.</span></p>
         </div>
       </section>
 
@@ -820,7 +820,7 @@
         <h3><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></h3>
         <p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p>
         <h3><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></h3>
-        <p><span lang="zh">在链动小铺买激活码，支持微信和支付宝；买到后在 iTool 里兑换，会员立刻生效。</span><span lang="en">Buy an activation code on Liandong Xiaopu with WeChat Pay or Alipay, then redeem it on iTool; the membership starts at once.</span></p>
+        <p><span lang="zh">在链动小铺买激活码，支持微信和支付宝。普通账户可直接在 LinkShell 手机 App、Mac App、网页版或 Apple Watch 独立模式里兑换；也可在 iTool 用同一账号兑换。</span><span lang="en">Buy an activation code on Liandong Xiaopu with WeChat Pay or Alipay. Free accounts can redeem it directly in the LinkShell phone app, Mac app, web workspace or Apple Watch independent mode, or on iTool with the same account.</span></p>
       </section>
     </div>
   </main>
@@ -996,7 +996,7 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: the code is bought on Liandong Xiaopu and redeemed on iTool, whose membership this is -->
+  <!-- Pricing: Liandong Xiaopu codes activate the shared Pro membership in LinkShell or iTool. -->
   <script>
     const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
     const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
