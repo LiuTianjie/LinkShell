@@ -56,7 +56,7 @@ Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-wat
 
 ## Get started
 
-**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.45/LinkShell-0.10.45-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.45/LinkShell-0.10.45-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
+**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
 
 The Mac app can launch at login and starts its background service automatically. Settings offer system, light and dark appearance (dark by default). Usage Statistics on Mac and phone offer all registered agents, their existing brand icons, token totals, daily charts and model breakdowns. Codex/Claude use native logs; other agents use usage reported to LinkShell. Missing data is shown explicitly. Counts do not represent billing or remaining quota. The Mac overview and Devices page can generate a pairing QR code and six-digit code; pairing without an account uses a self-hosted gateway.
 
