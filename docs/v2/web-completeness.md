@@ -2,6 +2,8 @@
 
 更新时间：2026-10-19。范围为 `apps/web`、共享客户端状态和现有 Host RPC。
 
+2026-10-20 Windows 工作台适配：Windows WebView2 复用同一套桌面 Web UI，经命名管道访问本机 Host；主框架管理/外观桥与 macOS 分开选择。Windows 屏幕使用现有隔离 WebRTC viewer，离页或原生窗口隐藏时关闭连接，返回重连，普通 Web 的 120 秒保留行为不变。真实 WebView2 + 本机 Host 验证了 fixture Codex 历史、草稿保存、模式可见性、232/104 点布局、子框架桥隔离、保存失败确认，以及本机 H.264 视频接收和隐藏后重连。107 项 Web 测试通过，包含网关中的 Windows 平台标识。尚未验证生产 OAuth/兑换、其他远程电脑或弱网性能；Windows 接收器不等同于 macOS VideoToolbox / Metal 接收器。
+
 Web 采用 Linear 产品界面的视觉方向，使用现有 shadcn/ui（Radix）组件。验收必须覆盖所有页面、聊天列表、聊天详情和终端，包含明暗主题、窄屏、键盘操作、加载、空白、失败、重连等状态。页面存在或构建通过，不代表完整的生产验收。
 
 ## 功能覆盖

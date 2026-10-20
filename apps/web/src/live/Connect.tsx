@@ -348,13 +348,13 @@ export function Connect({ close }: { close: () => void }) {
   return (
     <Modal title="连接你的电脑" close={close}>
       <p className="muted modal-subtitle">
-        {isDesktop ? "从这台 Mac 继续对话、审批和控制远程电脑。" : "电脑保持运行，网页即可继续你的会话。"}
+        {isDesktop ? "从这台电脑继续对话、审批和控制远程电脑。" : "电脑保持运行，网页即可继续你的会话。"}
       </p>
       {isDesktop && (
         <Alert className="mb-4">
           <AlertTitle>本机工作台无需登录</AlertTitle>
           <AlertDescription>
-            <p>{state.localError ?? "本机服务已连接，可以直接管理这台 Mac 的会话。"}</p>
+            <p>{state.localError ?? "本机服务已连接，可以直接管理这台电脑的会话。"}</p>
             <div className="mt-2 flex gap-2">
               <Button type="button" variant="outline" size="sm" onClick={openDesktopManagement}>本机服务</Button>
               {state.localError && <Button type="button" variant="ghost" size="sm" disabled={job.busy} onClick={() => void job.run(() => engine.refreshLocal())}>重新检测</Button>}

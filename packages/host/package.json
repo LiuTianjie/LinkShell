@@ -16,6 +16,10 @@
       "types": "./dist/host/src/index.d.ts",
       "import": "./dist/host/src/index.js",
       "default": "./dist/host/src/index.js"
+    },
+    "./local-transport": {
+      "types": "./dist/host/src/local-transport.d.ts",
+      "import": "./dist/host/src/local-transport.js"
     }
   },
   "files": [

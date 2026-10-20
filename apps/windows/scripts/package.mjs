@@ -5,6 +5,7 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInstaller } from './installer.mjs';
 import { ensureMedia } from './media-runtime.mjs';
+import { webview2Files } from './webview2.mjs';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +27,7 @@ const run = (command, args, cwd = root) => {
 const pnpm = process.env.npm_execpath;
 if (!pnpm || !/pnpm\.(?:c?js)$/.test(pnpm)) throw new Error('Run through pnpm: pnpm --filter @linkshell/windows build:standalone');
 run(process.execPath, [join(app, 'scripts/build.mjs')]);
+run(process.execPath, [pnpm, '--filter', '@linkshell/web', 'build']);
 mkdirSync(runtime, { recursive: true });
 // Deploy the locked production graph. The portable copy replaces junctions with real files.
 const deployed = join(scratch, 'deployed');
@@ -97,6 +99,11 @@ if (!existsSync(nodeLicense)) {
 }
 cpSync(nodeLicense, join(runtime, 'NODE-LICENSE.txt'));
 for (const file of ['LinkShell.exe', 'LinkShell.Screen.exe']) cpSync(join(app, 'build', file), join(bundle, file));
+for (const file of webview2Files) cpSync(join(app, 'build', file), join(bundle, file));
+// Delete only the owned staged assets so an upgrade never carries stale web bundles.
+const workspaceAssets = join(bundle, 'workspace');
+rmSync(workspaceAssets, { recursive: true, force: true });
+cpSync(join(root, 'apps/web/dist'), workspaceAssets, { recursive: true });
 cpSync(await ensureMedia(), join(bundle, 'media'), { recursive: true });
 cpSync(join(root, 'LICENSE'), join(bundle, 'LICENSE'));
 writeFileSync(join(bundle, 'standalone.json'), JSON.stringify({ version, nodeVersion: process.versions.node, platform: 'win32', arch: 'x64' }, null, 2));

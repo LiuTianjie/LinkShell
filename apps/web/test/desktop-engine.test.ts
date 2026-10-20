@@ -167,7 +167,8 @@ describe("desktop client connections", () => {
     await expect(engine!.forget(local)).rejects.toThrow("本机无需配对");
   });
 
-  it("removes account computers on logout while preserving the local session", async () => {
+  it.each([["darwin", "macOS"], ["win32", "Windows"]])("registers %s correctly and removes account computers on logout while preserving the local session", async (platform, label) => {
+    window.__LINKSHELL_CONFIG__!.desktopPlatform = platform;
     const desktop = await start();
     const connection = engine!.state.getState().connection;
     window.dispatchEvent(new CustomEvent(desktop.DESKTOP_ACCOUNT_EVENT, { detail: { userId: "user-a", email: "person@example.com", accessToken: "short-token" } }));
@@ -177,7 +178,7 @@ describe("desktop client connections", () => {
     expect(engine!.state.getState().computers).toEqual([local]);
     expect(engine!.state.getState().connection).toBe(connection);
     expect(mocks.relays[0].options.name).toBe("LinkShell Desktop");
-    expect(mocks.relays[0].options.platform).toBe("macOS");
+    expect(mocks.relays[0].options.platform).toBe(label);
     expect(mocks.supabase).not.toHaveBeenCalled();
   });
 });

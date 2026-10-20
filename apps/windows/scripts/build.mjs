@@ -3,6 +3,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { ensureWebView2 } from './webview2.mjs';
 
 if (process.platform !== 'win32') {
   console.log('Windows desktop: build on Windows (skipped on this platform).');
@@ -36,6 +37,8 @@ if (!existsSync(csc)) throw new Error('The Windows desktop build requires .NET F
 const wpf = join(dirname(csc), 'WPF');
 const desktopReferences = ['PresentationFramework', 'PresentationCore', 'WindowsBase', 'System.Xaml'].map(name => `/r:${join(existsSync(join(wpf, name + '.dll')) ? wpf : dirname(csc), name + '.dll')}`);
 desktopReferences.push('/r:System.Net.Http.dll');
+desktopReferences.push(...await ensureWebView2());
+const workspaceSource = join(root, 'src/Workspace.cs');
 const desktopResources = [`/resource:${join(root, 'src/DesktopTheme.xaml')},DesktopTheme.xaml`, `/resource:${brand},brand.png`];
 const marksSource = readFileSync(join(root, '../client/src/theme/agent-marks.ts'), 'utf8');
 const marks = JSON.parse(marksSource.slice(marksSource.indexOf('{', marksSource.indexOf('export const'))).trim().replace(/;$/, ''));
@@ -49,7 +52,7 @@ for (const [agent, mark] of Object.entries(marks)) for (const theme of ['light',
   desktopResources.push(`/resource:${file},${name}`);
 }
 for (const [source, name, target] of [['Screen.cs', 'LinkShell.Screen.exe', 'exe'], ['Desktop.cs', 'LinkShell.exe', 'winexe']]) {
-  const result = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', `/target:${target}`, '/codepage:65001', ...(target === 'winexe' ? [...appearance, ...desktopReferences, ...desktopResources] : []), `/out:${join(output, name)}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', join(root, 'src', source), ...(target === 'winexe' ? [join(root, 'src/Dashboard.cs')] : [join(root, 'src/DesktopDuplication.cs'), join(root, 'src/VideoCapture.cs')])], { stdio: 'inherit', windowsHide: true });
+  const result = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', `/target:${target}`, '/codepage:65001', ...(target === 'winexe' ? [...appearance, ...desktopReferences, ...desktopResources] : []), `/out:${join(output, name)}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', join(root, 'src', source), ...(target === 'winexe' ? [join(root, 'src/Dashboard.cs'), workspaceSource] : [join(root, 'src/DesktopDuplication.cs'), join(root, 'src/VideoCapture.cs')])], { stdio: 'inherit', windowsHide: true });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
 }
@@ -67,7 +70,7 @@ if (process.argv.includes('--qa')) {
   if (probe.status !== 0) process.exit(probe.status || 1);
   writeFileSync(join(output, 'node-path.txt'), process.execPath);
   for (const [entry, name] of [['SmokeDesktop', 'LinkShell.QA.exe'], ['PreviewDesktop', 'LinkShell.Preview.exe']]) {
-    const result = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/main:LinkShell.Windows.${entry}`, '/codepage:65001', ...appearance, ...desktopReferences, ...desktopResources, ...['PreviewUsage.json', 'PreviewSnapshot.json', 'PreviewPair.json'].map(file => `/resource:${join(output, file)},${file}`), `/out:${join(output, name)}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', join(root, 'src/Desktop.cs'), join(root, 'src/Dashboard.cs'), join(root, 'src/SmokeDesktop.cs')], { stdio: 'inherit', windowsHide: true });
+    const result = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/main:LinkShell.Windows.${entry}`, '/codepage:65001', ...appearance, ...desktopReferences, ...desktopResources, ...['PreviewUsage.json', 'PreviewSnapshot.json', 'PreviewPair.json'].map(file => `/resource:${join(output, file)},${file}`), `/out:${join(output, name)}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', join(root, 'src/Desktop.cs'), join(root, 'src/Dashboard.cs'), workspaceSource, join(root, 'src/SmokeDesktop.cs')], { stdio: 'inherit', windowsHide: true });
     if (result.error) throw result.error;
     if (result.status !== 0) process.exit(result.status || 1);
   }

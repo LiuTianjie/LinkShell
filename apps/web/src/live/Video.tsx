@@ -33,7 +33,8 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { isDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { isDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { useDesktopVisibility } from "./desktop-visibility";
 import { DesktopScreen } from "./DesktopScreen";
 import {
   autoScreenWidth,
@@ -296,7 +297,8 @@ export interface ScreenProps {
 }
 
 export function Screen(props: ScreenProps) {
-  return isDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} />;
+  const visible = useDesktopVisibility();
+  return isDesktop && !isWindowsDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
 }
 
 function BrowserScreen({
@@ -354,7 +356,8 @@ function BrowserScreen({
     reply: (data: object) => void;
   } | undefined>(undefined);
   const pauseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const keepSession = started && (active || reusable === true);
+  // Desktop windows release media and pressed inputs while hidden, matching the native Mac receiver.
+  const keepSession = started && (active || (!isDesktop && reusable === true));
   function tellSession() {
     const current = session.current;
     if (!current) return;

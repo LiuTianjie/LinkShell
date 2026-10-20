@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { webview2Files } from './webview2.mjs';
 
 if (process.platform !== 'win32') throw new Error('Windows smoke must run on Windows');
 const bundle = resolve(process.argv[2] || 'build/LinkShell');
@@ -29,6 +30,16 @@ try {
   assert.equal(snapshot.status, 'running');
   assert.equal(snapshot.source, 'standalone');
   assert.equal(snapshot.machine.platform, 'win32');
+  for (const file of [...webview2Files, 'workspace/index.html']) assert.ok(existsSync(join(bundle, file)), `Missing workspace dependency: ${file}`);
+  const { startDesktopWorkspace } = await import(pathToFileURL(join(bundle, 'runtime/cli/dist/cli/src/commands/desktop-workspace.js')).href);
+  const workspace = await startDesktopWorkspace({ home, assets: join(bundle, 'workspace') });
+  try {
+    const url = new URL(workspace.url);
+    const token = new URLSearchParams(url.hash.slice(1)).get('desktop');
+    const bootstrap = await (await fetch(`${url.origin}/desktop/bootstrap`, { headers: { authorization: `Bearer ${token}` } })).json();
+    assert.equal(bootstrap.localComputer.machine.platform, 'win32');
+    assert.match(await (await fetch(`${url.origin}/config.js`)).text(), /"desktopPlatform":"win32"/);
+  } finally { await workspace.stop(); }
   const sdk = await import(pathToFileURL(require.resolve('@anthropic-ai/claude-agent-sdk')).href);
   assert.equal(typeof sdk.forkSession, 'function');
   const adapter = await import(pathToFileURL(require.resolve('@agentclientprotocol/claude-agent-acp/dist/acp-agent.js')).href);
@@ -43,7 +54,7 @@ try {
     pty.onData(data => { output += data; if (output.includes('PACKAGED_PTY_READY')) pty.write('done\r'); });
     pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
   });
-  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg shared runtime and standalone identity.`);
+  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, workspace assets/sidecar, WebView2 loader and standalone identity.`);
 } finally {
   let timer;
   try {
