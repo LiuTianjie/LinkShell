@@ -101,6 +101,11 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// The display is kept on, and was woken, for as long as this viewer watches it.
   private var awake: Awake?
   private var closed = false
+  private var configurations = ScreenConfigurationQueue()
+  private var appliedConfiguration: ScreenConfiguration?
+  private var inputGate = ScreenInputGate()
+  private var captureGeneration = 0
+  private var captureReady = false
 
   private var bytes = Rate()
   private var encodeTime = Rate()
@@ -144,6 +149,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard Permissions.recording() else { return fail(Permissions.notRecording) }
     guard let display = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
     self.display = display
+    appliedConfiguration = ScreenConfiguration(requestId: 0, screen: request.screen, maxWidth: request.maxWidth, maxFps: request.maxFps, paused: false)
     awake = Awake()
     size = display.pictureSize(maxWidth: request.maxWidth)
     if request.fps == nil {
@@ -155,7 +161,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     // The viewer's hands are on the display it is shown, wherever that display is moved to.
     control = Control(id: viewer, link: link, bounds: { CGDisplayBounds(display.id) }, everyPosition: { [weak self] x, y in self?.sendCursor(x, y) })
 
-    let factory = Engine.screenFactory(maximumFrameRate: frameRate)
+    // A retained connection may later move to a 120 Hz display or raise its receiver ceiling.
+    let factory = Engine.screenFactory(maximumFrameRate: Tuning.fpsRange.upperBound)
     peerFactory = factory
     virtualAddresses = Networks.virtualAddresses()
     let configuration = RTCConfiguration()
@@ -237,14 +244,18 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
       }
     }
 
-    capturer.onStop = { [weak self] reason in
-      DispatchQueue.main.async { self?.fail("the capture stopped: \(reason)") }
+    capturer.onStop = { [weak self, weak capturer] reason in
+      DispatchQueue.main.async {
+        guard let self, let capturer, self.capturer === capturer else { return }
+        self.fail("the capture stopped: \(reason)")
+      }
     }
     let rate = steps.map { "\($0.full) fps, \($0.reduced) while that is not carried" } ?? "\(frameRate) fps"
     capturer.start(display: display, width: size.width, height: size.height, fps: frameRate) { [weak self] error in
       DispatchQueue.main.async {
-        guard let self, !self.closed else { return }
+        guard let self, !self.closed, self.capturer === capturer, !self.configurations.busy else { return }
         if let error { return self.fail("the screen could not be captured: \(error)") }
+        self.captureReady = true
         self.link.log("capturing display \(display.id) (\(display.pixelWidth)×\(display.pixelHeight)) as \(self.size.width)×\(self.size.height) at \(rate)")
       }
     }
@@ -255,6 +266,9 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func close() {
     guard !closed else { return }
     closed = true
+    captureGeneration += 1
+    configurations.cancel()
+    inputGate.suspended = true
     awake = nil
     statsTimer?.cancel()
     cursorTimer?.cancel()
@@ -279,6 +293,148 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     capturer = nil
     loopback = nil
     peerFactory = nil
+  }
+
+  /// Replaces only the capture. The negotiated track, channels and ICE path remain in place.
+  func configure(_ message: [String: Any]) {
+    guard !closed else { return }
+    guard let configuration = ScreenConfiguration(message, defaultMaxFps: appliedConfiguration?.maxFps ?? request.maxFps),
+          Display.at(configuration.screen) != nil else {
+      link.emit(["t": "rtc.configure.error", "v": viewer, "requestId": message["requestId"] ?? NSNull(), "message": "屏幕配置无效，或所选显示器已断开"])
+      return
+    }
+    if !configurations.busy, captureReady, !inputGate.suspended, let appliedConfiguration,
+       configuration.sameCapture(as: appliedConfiguration), let target = Display.at(configuration.screen),
+       target.id == display.id, target.pictureSize(maxWidth: configuration.maxWidth) == size {
+      // Even an unchanged picture may have a new input generation.
+      control?.releaseAll()
+      inputGate.apply(configuration)
+      self.appliedConfiguration = configuration
+      configured(configuration)
+      return
+    }
+    configurations.enqueue(configuration)
+    inputGate.suspended = true
+    control?.releaseAll()
+    if configuration.paused { awake = nil }
+    // Cancel an in-flight start now; waiting for its callback could begin recording after pause.
+    if configurations.busy { capturer?.stop() }
+    applyNextConfiguration()
+  }
+
+  private func applyNextConfiguration() {
+    guard !closed, let work = configurations.begin() else { return }
+    captureGeneration += 1
+    captureReady = false
+    let previous = capturer
+    capturer = nil
+    previous?.onStop = nil
+    previous?.onPicture = nil
+    strip?.hide(); strip = nil
+    motion?.hide(); motion = nil
+    stripCheck = nil
+    let stopped: (String?) -> Void = { [weak self] error in
+      DispatchQueue.main.async {
+        guard let self, !self.closed else { return }
+        if let error {
+          self.capturer = previous
+          self.finishConfiguration(work, error: "屏幕捕获未能暂停：\(error)")
+          return
+        }
+        guard self.configurations.isCurrent(work) else {
+          self.configurations.finish(work)
+          self.applyNextConfiguration()
+          return
+        }
+        self.beginCapture(work)
+      }
+    }
+    if let previous { previous.stop(done: stopped) } else { stopped(nil) }
+  }
+
+  private func beginCapture(_ work: ScreenConfigurationQueue.Work) {
+    let configuration = work.configuration
+    guard let display = Display.at(configuration.screen), let source else {
+      return finishConfiguration(work, error: "所选显示器已断开")
+    }
+    self.display = display
+    size = display.pictureSize(maxWidth: configuration.maxWidth)
+    frameRate = request.fps ?? Tuning.fullRate(viewer: configuration.maxFps, display: display.screen?.maximumFramesPerSecond ?? 60)
+    steps = request.fps == nil && frameRate > 30 ? FrameRate(full: frameRate, reduced: frameRate > 60 ? 60 : 30, lowest: 30) : nil
+    frameRateReason = nil
+    eased = nil
+    bytes = Rate(); encodeTime = Rate(); quantizers = Rate(); encodedFrames = Rate()
+    sendDelay = Rate(); packetsSent = Rate()
+    setParameters()
+    // Control caches its bounds as well as its display lookup; recreate both together.
+    control = Control(id: viewer, link: link, bounds: { CGDisplayBounds(display.id) }, everyPosition: { [weak self] x, y in self?.sendCursor(x, y) })
+    shapesSent.removeAll()
+    shapeShown = nil
+    if configuration.paused {
+      awake = nil
+      finishConfiguration(work)
+      return
+    }
+    guard Permissions.recording() else { return finishConfiguration(work, error: "电脑还没有允许 LinkShell 录制屏幕") }
+    awake = Awake()
+    let capturer = ScreenCapturer(delegate: source)
+    self.capturer = capturer
+    let generation = captureGeneration
+    if options.clock, let screen = display.screen {
+      let strip = ClockStrip(screen: screen)
+      strip.show()
+      self.strip = strip
+      let check = StripCheck()
+      stripCheck = check
+      capturer.onPicture = { buffer, displayed in check.add(buffer, displayed: displayed) }
+    }
+    if options.motion, let screen = display.screen {
+      motion = MotionWindow(screen: screen)
+      motion?.show()
+    }
+    capturer.onStop = { [weak self, weak capturer] reason in
+      DispatchQueue.main.async {
+        guard let self, let capturer, !self.closed, self.captureGeneration == generation, self.capturer === capturer else { return }
+        if self.configurations.busy { self.finishConfiguration(work, error: "屏幕捕获已停止：\(reason)") }
+        else { self.fail("the capture stopped: \(reason)") }
+      }
+    }
+    capturer.start(display: display, width: size.width, height: size.height, fps: frameRate) { [weak self, weak capturer] error in
+      DispatchQueue.main.async {
+        guard let self, let capturer, !self.closed, self.captureGeneration == generation, self.capturer === capturer else { return }
+        self.finishConfiguration(work, error: error.map { "屏幕捕获失败：\($0)" })
+      }
+    }
+  }
+
+  private func finishConfiguration(_ work: ScreenConfigurationQueue.Work, error: String? = nil) {
+    if configurations.isCurrent(work) {
+      if let error {
+        awake = nil
+        link.emit(["t": "rtc.configure.error", "v": viewer, "requestId": work.configuration.requestId, "message": error])
+      } else {
+        appliedConfiguration = work.configuration
+        captureReady = !work.configuration.paused
+        inputGate.apply(work.configuration)
+        control?.reportAfresh()
+        reportShape()
+        configured(work.configuration)
+      }
+    }
+    configurations.finish(work)
+    applyNextConfiguration()
+  }
+
+  private func configured(_ configuration: ScreenConfiguration) {
+    var message: [String: Any] = ["t": "rtc.configured", "v": viewer, "requestId": configuration.requestId,
+                                  "screen": configuration.screen, "width": size.width, "height": size.height,
+                                  "maxFps": configuration.maxFps, "paused": configuration.paused]
+    if let generation = inputGate.generation { message["generation"] = generation }
+    if options.loopback {
+      let bounds = CGDisplayBounds(display.id)
+      message["controlBounds"] = ["x": bounds.minX, "y": bounds.minY, "width": bounds.width, "height": bounds.height]
+    }
+    link.emit(message)
   }
 
   // MARK: Signalling
@@ -520,6 +676,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// such a `move` dropped: one from `pointer` older than the newest event applied. Everything
   /// on `input` is done, in the order it was sent. Without numbers nothing is dropped.
   private func apply(_ event: InputEvent, replaceable: Bool) {
+    guard inputGate.accepts(event) else { return }
     if let number = event.number {
       if replaceable, event.kind == "move", number < newestEvent { return }
       newestEvent = max(newestEvent, number)
@@ -532,7 +689,10 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private func startTimers() {
     let cursorTimer = DispatchSource.makeTimerSource(queue: .main)
     cursorTimer.schedule(deadline: .now(), repeating: 1 / Tuning.cursorRate, leeway: .milliseconds(1))
-    cursorTimer.setEventHandler { [weak self] in self?.control?.report() }
+    cursorTimer.setEventHandler { [weak self] in
+      guard let self, !self.inputGate.suspended else { return }
+      self.control?.report()
+    }
     cursorTimer.resume()
     self.cursorTimer = cursorTimer
 
@@ -561,6 +721,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// What the pointer looks like, when that has changed: the picture the first time this viewer
   /// meets it, its id alone after that.
   private func reportShape() {
+    guard !inputGate.suspended else { return }
     guard let shape, shape.readyState == .open, let now = PointerShape.current(), now.id != shapeShown else { return }
     shapeShown = now.id
     var message: [String: Any] = ["t": "shape", "id": now.id]
@@ -593,12 +754,13 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   }
 
   private func reportStats() {
-    guard let connection, let capturer else { return }
+    guard !inputGate.suspended, let connection, let capturer else { return }
+    let generation = captureGeneration
     let captured = capturer.takeCounts()
     let strip = stripCheck?.take()
     connection.statistics { [weak self] report in
       DispatchQueue.main.async {
-        guard let self, !self.closed else { return }
+        guard let self, !self.closed, !self.inputGate.suspended, self.captureGeneration == generation else { return }
         let reader = StatsReader(report: report)
         let outbound = reader.first("outbound-rtp", kind: "video")
         let remote = reader.first("remote-inbound-rtp", kind: "video")

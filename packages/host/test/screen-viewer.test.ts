@@ -644,7 +644,7 @@ function viewerControls() {
     const setTimeout = (fn, delay) => { timers.set(++serial, { at: now + delay, fn }); return serial; }, clearTimeout = id => timers.delete(id);
     const reducedMotion = { matches: false, addEventListener: (_, fn) => reducedListeners.push(fn) };
     const document = { hidden: false, fullscreenElement: null, addEventListener: (_, fn) => documentListeners.push(fn) };
-    const app = true, chrome = { fullscreen: false, keyboard: false }, presentation = { active: false };
+    const app = true, chrome = { fullscreen: false, keyboard: false }, presentation = { active: false }, session = { active: () => !document.hidden };
     let keysOpen = false, sheetOpen = false, sheetTransition = null, composerOpen = false;
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     function element(id, width = 44, height = 44) {
@@ -1017,7 +1017,7 @@ function viewerPresenter({ gpuAvailable = true, processorAvailable = true, failD
     const say = (text) => { said = text; }, layout = () => { laidOut += 1; }, play = () => {};
     const clearTimeout = () => { patienceCleared += 1; };
     const send = (message) => { if (message.t === 'rtc.diagnosis') diagnoses.push(message.reason); };
-    const nativePicture = false, query = new URLSearchParams();
+    const nativePicture = false, query = new URLSearchParams(), session = { active: () => true };
     const refresh = () => {};
     const show = (track) => { live = track; video.classList.toggle('gone', !track || !!presenter); gpu.classList.toggle('gone', !presenter); };
     const device = {

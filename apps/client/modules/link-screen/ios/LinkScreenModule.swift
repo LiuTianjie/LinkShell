@@ -8,6 +8,7 @@ public class LinkScreenModule: Module {
       Events("onState")
       Prop("url") { (view: LinkScreenView, value: String) in view.setURL(value) }
       Prop("maxFps") { (view: LinkScreenView, value: Int) in view.setMaxFps(value) }
+      Prop("active", true) { (view: LinkScreenView, value: Bool) in view.setActive(value) }
     }
   }
 }
@@ -21,6 +22,9 @@ final class LinkScreenView: ExpoView {
   private var url = ""
   private var maxFps = 120
   private var active = true
+  private var applicationActive = true
+  private var supportsConfiguration = false
+  private var supportsPause = false
   private var controlsReady = false
   private var pictureRect: CGRect?
   private var attachment: DispatchWorkItem?
@@ -30,19 +34,20 @@ final class LinkScreenView: ExpoView {
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
+    applicationActive = UIApplication.shared.applicationState == .active
     clipsToBounds = true
     backgroundColor = .black
     let center = NotificationCenter.default
     observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      self?.active = false; self?.disconnect()
+      self?.applicationActive = false; self?.disconnect()
     })
     observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      self?.active = true; self?.connect()
+      self?.applicationActive = true; self?.connect()
     })
     for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
       observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         guard let self, let renderer = self.renderer, renderer.requestedFps != self.receiverRate else { return }
-        self.disconnect(); self.connect()
+        self.updateReceiverRate()
       })
     }
   }
@@ -50,12 +55,14 @@ final class LinkScreenView: ExpoView {
   deinit {
     attachment?.cancel()
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    controls.detach()
     connection?.stop()
   }
 
   func setURL(_ value: String) {
     guard url != value else { return }
     disconnect()
+    controls.detach()
     url = value
     controls.expectedURL = URL(string: value)
     controlsReady = false
@@ -66,14 +73,41 @@ final class LinkScreenView: ExpoView {
 
   func setMaxFps(_ value: Int) {
     guard [60, 120].contains(value), maxFps != value else { return }
-    disconnect(); maxFps = value; connect()
+    maxFps = value
+    updateReceiverRate()
+  }
+
+  func setActive(_ value: Bool) {
+    guard active != value else { return }
+    active = value
+    if !value {
+      guard supportsPause else { disconnect(); return }
+      connection?.setActive(false)
+      renderer?.pause()
+      controls.session(["active": false, "maxFps": receiverRate])
+    } else if let connection, applicationActive, window != nil {
+      connection.setActive(true)
+      renderer?.start(fps: receiverRate)
+      controls.session(["active": true, "maxFps": receiverRate])
+    } else {
+      disconnect()
+      connect()
+    }
+  }
+
+  private func updateReceiverRate() {
+    guard connection != nil, supportsConfiguration else { disconnect(); connect(); return }
+    if active && applicationActive { renderer?.start(fps: receiverRate) }
+    controls.session(["maxFps": receiverRate])
   }
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
       attachment?.cancel(); attachment = nil
-      disconnect()
+      controls.detach()
+      if !active && supportsPause && applicationActive { renderer?.pause() }
+      else { disconnect() }
     } else {
       attachmentStarted = CACurrentMediaTime()
       attachControls()
@@ -98,7 +132,7 @@ final class LinkScreenView: ExpoView {
     }
     guard attachment == nil else { return }
     if CACurrentMediaTime() - attachmentStarted > 5 {
-      onState(["state": "failed", "message": "屏幕控制界面未能加载"])
+      if active { onState(["state": "failed", "message": "屏幕控制界面未能加载"]) }
       return
     }
     let next = DispatchWorkItem { [weak self] in
@@ -116,7 +150,7 @@ final class LinkScreenView: ExpoView {
   }
 
   private func connect() {
-    guard active, window != nil, controlsReady, connection == nil, !url.isEmpty else { return }
+    guard active, applicationActive, window != nil, controlsReady, connection == nil, !url.isEmpty else { return }
     // Connection info can ask for lightweight WebRTC stats; normal playback still has
     // neither decoder instrumentation nor drawable presentation callbacks.
     let diagnostics = URLComponents(string: url)?.queryItems?.contains { $0.name == "diagnostics" && $0.value == "1" } == true
@@ -137,23 +171,27 @@ final class LinkScreenView: ExpoView {
       guard let self, let connection, self.connection === connection else { return }
       connection.pictureArrived()
       self.controls.call("picture", ["width": size.width, "height": size.height])
-      self.onState(["state": "ready", "width": size.width, "height": size.height, "maxFps": self.receiverRate])
+      if self.active { self.onState(["state": "ready", "width": size.width, "height": size.height, "maxFps": self.receiverRate]) }
     }
     renderer.onFailure = { [weak self, weak connection] message in
       guard let self, let connection, self.connection === connection else { return }
       self.disconnect()
-      self.onState(["state": "failed", "message": message])
+      if self.active { self.onState(["state": "failed", "message": message]) }
     }
     connection.onFailure = { [weak self, weak connection] message in
       DispatchQueue.main.async {
         guard let self, let connection, self.connection === connection else { return }
         self.disconnect()
-        self.onState(["state": "failed", "message": message])
+        if self.active { self.onState(["state": "failed", "message": message]) }
       }
     }
     connection.onMessage = { [weak self, weak connection] message in
       DispatchQueue.main.async {
         guard let self, let connection, self.connection === connection else { return }
+        if let session = message["session"] as? [String: Any], session["t"] as? String == "capabilities", session["version"] as? Int == 1 {
+          self.supportsConfiguration = session["configure"] as? Bool == true
+          self.supportsPause = self.supportsConfiguration && session["pause"] as? Bool == true
+        }
         self.controls.call("message", message)
       }
     }
@@ -167,10 +205,12 @@ final class LinkScreenView: ExpoView {
     onState(["state": "connecting", "maxFps": receiverRate])
     connection.start()
     controls.call("connecting", [:])
+    controls.session(["active": active, "maxFps": receiverRate])
   }
 
   private func disconnect() {
     connection?.stop(); connection = nil
+    supportsConfiguration = false; supportsPause = false
     renderer?.stop(); renderer?.removeFromSuperview(); renderer = nil
   }
 
@@ -188,15 +228,16 @@ final class LinkScreenView: ExpoView {
       pictureRect = CGRect(x: x, y: y, width: width, height: height)
       renderer?.externalContentRect = pictureRect
     case "input":
-      guard let input = message["message"] as? [String: Any],
+      guard active, applicationActive, let input = message["message"] as? [String: Any],
             let kind = input["t"] as? String,
             ["move", "scroll", "down", "up", "key", "text", "prompt"].contains(kind) else { return }
       connection?.input(input, replaceable: message["replaceable"] as? Bool == true && ["move", "scroll"].contains(kind))
     case "signal":
       guard let signal = message["message"] as? [String: Any] else { return }
       switch signal["t"] as? String {
-      case "control": connection?.requestControl()
-      case "prompt": connection?.input(["t": "prompt"])
+      case "screen.configure": connection?.configure(signal, maxFps: receiverRate)
+      case "control": if active && applicationActive { connection?.requestControl(signal) }
+      case "prompt": if active && applicationActive { connection?.input(signal) }
       default: break
       }
     case "stats": connection?.requestStats()

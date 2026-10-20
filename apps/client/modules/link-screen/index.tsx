@@ -12,6 +12,7 @@ export interface ScreenState {
 interface Props extends ViewProps {
   url: string;
   maxFps: 60 | 120;
+  active?: boolean;
   onState: (state: ScreenState) => void;
 }
 
@@ -22,6 +23,6 @@ interface NativeProps extends Omit<Props, "onState"> {
 export const nativeScreenAvailable = Platform.OS === "ios" && !!requireOptionalNativeModule("LinkScreen");
 const ScreenView = nativeScreenAvailable ? requireNativeView<NativeProps>("LinkScreen") : null;
 
-export function NativeScreen({ onState, ...props }: Props) {
-  return ScreenView ? <ScreenView {...props} onState={(event) => onState(event.nativeEvent)} /> : null;
+export function NativeScreen({ onState, active = true, ...props }: Props) {
+  return ScreenView ? <ScreenView {...props} active={active} onState={(event) => onState(event.nativeEvent)} /> : null;
 }

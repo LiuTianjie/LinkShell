@@ -194,6 +194,32 @@ describe("Apple Watch client synchronization & command execution", () => {
     });
   });
 
+  it("offers only the settings the agent reported, never guessed models or modes", () => {
+    const view = (config: NonNullable<Parameters<typeof buildClientWatchSnapshot>[0]["views"]>[string]["config"]) => ({
+      sessionId: "s-run", lastSeq: 0, startSeq: 0, items: [], index: {}, permissions: [], config, commands: [],
+      state: "running" as const, turnActive: true,
+    });
+    const reported = [{ id: "model", name: "模型", category: "model" as const, current: "m-2", values: [{ value: "m-1", name: "M1" }, { value: "m-2", name: "M2" }] }];
+    const snapshot = buildClientWatchSnapshot({
+      computerKey: "mac-1", computerName: "Studio Mac", online: true,
+      sessions: [runningSession, waitingSession], terminals: [],
+      // s-wait has no view at all, s-run an empty list: neither may get invented options.
+      views: { "s-run": view([]) },
+      computers: [],
+    });
+    for (const session of snapshot.sessions) {
+      expect(session.configOptions ?? []).toEqual([]);
+      expect(session.mode).toBeUndefined();
+    }
+    const withConfig = buildClientWatchSnapshot({
+      computerKey: "mac-1", computerName: "Studio Mac", online: true,
+      sessions: [runningSession], terminals: [], views: { "s-run": view(reported) }, computers: [],
+    });
+    expect(withConfig.sessions[0]?.configOptions).toEqual([
+      { id: "model", name: "模型", category: "model", current: "m-2", currentLabel: "M2", values: [{ value: "m-1", name: "M1" }, { value: "m-2", name: "M2" }] },
+    ]);
+  });
+
   it("executes permission, prompt, takeover, cancel, and computer switch commands with live validation", async () => {
     const actions = makeActions();
     const selectComputer = vi.fn();

@@ -57,7 +57,8 @@ let inflightRefresh: Promise<AuthTokens | null> | null = null;
  * Refresh the access token using the refresh token.
  * Returns updated tokens or null if refresh failed.
  */
-export async function refreshAccessToken(): Promise<AuthTokens | null> {
+export async function refreshAccessToken(options: { signal?: AbortSignal } = {}): Promise<AuthTokens | null> {
+  if (options.signal?.aborted) return null;
   if (inflightRefresh) return inflightRefresh;
   inflightRefresh = (async () => {
     const auth = loadAuth();
@@ -74,7 +75,7 @@ export async function refreshAccessToken(): Promise<AuthTokens | null> {
             apikey: SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({ refresh_token: auth.refreshToken }),
-          signal: AbortSignal.timeout(30_000),
+          signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
         },
       );
       if (!res.ok) return null;
@@ -93,7 +94,7 @@ export async function refreshAccessToken(): Promise<AuthTokens | null> {
       };
       // A login or logout may finish while the refresh is in flight.
       const current = loadAuth();
-      if (tokens.userId !== auth.userId || current?.userId !== auth.userId || current.refreshToken !== auth.refreshToken) return null;
+      if (options.signal?.aborted || tokens.userId !== auth.userId || current?.userId !== auth.userId || current.refreshToken !== auth.refreshToken) return null;
       saveAuth(tokens);
       return tokens;
     } catch {
@@ -108,13 +109,14 @@ export async function refreshAccessToken(): Promise<AuthTokens | null> {
 /**
  * Get a valid access token, refreshing if needed.
  */
-export async function getValidToken(): Promise<string | null> {
+export async function getValidToken(options: { signal?: AbortSignal } = {}): Promise<string | null> {
+  if (options.signal?.aborted) return null;
   const auth = loadAuth();
   if (!auth) return null;
 
   // If token expires in less than 120s, refresh
   if (auth.expiresAt - Date.now() < 120_000) {
-    const refreshed = await refreshAccessToken();
+    const refreshed = await refreshAccessToken(options);
     return refreshed?.accessToken ?? null;
   }
 

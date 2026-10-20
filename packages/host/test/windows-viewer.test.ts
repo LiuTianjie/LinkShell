@@ -6,13 +6,15 @@ function jpegViewer() {
   const source = page.slice(page.indexOf("const jpegStats"), page.indexOf("// Only a keyframe"));
   const decodes: ((value: unknown) => void)[] = [];
   const drawn = vi.fn(), ack = vi.fn(), error = vi.fn();
+  let active = true;
   const scope = {
     ws: { readyState: 1 }, content: { w: 0, h: 0 }, canvas: {}, live: false,
+    session: { active: () => active },
     ctx: { drawImage: drawn }, layout: vi.fn(), shownUpTo: ack, say: error,
     createImageBitmap: () => new Promise(resolve => decodes.push(resolve)),
   };
   const viewer = new Function("scope", `
-    const { ws, content, canvas, live, ctx, layout, shownUpTo, say, createImageBitmap } = scope;
+    const { ws, content, canvas, live, ctx, layout, shownUpTo, say, createImageBitmap, session } = scope;
     ${source}
     return {
       frame(seq) { jpegPending = { seq, unit: new Uint8Array([255, 216]) }; return drawJpeg(); },
@@ -21,7 +23,7 @@ function jpegViewer() {
     };
   `)(scope) as { frame(seq: number): Promise<void>; restart(): void; close(): void };
   const bitmap = () => ({ width: 640, height: 360, close: vi.fn() });
-  return { ...viewer, decodes, drawn, ack, error, bitmap };
+  return { ...viewer, decodes, drawn, ack, error, bitmap, pause: () => { active = false; } };
 }
 
 describe("Windows JPEG viewer", () => {
@@ -59,6 +61,17 @@ describe("Windows JPEG viewer", () => {
     await pending;
     expect(view.drawn).not.toHaveBeenCalled(); expect(view.ack).not.toHaveBeenCalled();
     expect(first.close).toHaveBeenCalledOnce(); expect(second.close).toHaveBeenCalledOnce();
+  });
+  it("closes an in-flight bitmap without painting or starting queued decodes after pause", async () => {
+    const view = jpegViewer();
+    const pending = view.frame(1);
+    void view.frame(2);
+    view.pause();
+    const bitmap = view.bitmap(); view.decodes[0]!(bitmap);
+    await pending;
+    expect(view.drawn).not.toHaveBeenCalled(); expect(view.ack).not.toHaveBeenCalled();
+    expect(view.decodes).toHaveLength(1);
+    expect(bitmap.close).toHaveBeenCalledOnce();
   });
   it("selects Windows shortcuts while preserving Mac shortcuts", () => {
     const page = viewerPage("win32");

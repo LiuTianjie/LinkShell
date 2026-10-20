@@ -61,7 +61,7 @@ function Button({
       data-size={size}
       className={cn(
         size === "plain"
-          ? "outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-muted [&_svg]:shrink-0"
+          ? "text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-muted [&_svg]:shrink-0"
           : buttonVariants({ variant, size }),
         className,
       )}

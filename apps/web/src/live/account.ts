@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchProMembership, redeemProCode } from "@linkshell/client-core";
+import { desktopAccount, isDesktop } from "./desktop";
 
 // The same public Supabase project as the CLI and mobile app.
 const SUPABASE_URL = "https://mkbeusztkzffnzjdwmqk.supabase.co";
@@ -14,6 +15,7 @@ function accountConfig() {
   };
 }
 export function accountClient() {
+  if (isDesktop) throw new Error("桌面端使用 LinkShell 的系统浏览器登录");
   const { supabaseUrl, anonKey } = accountConfig();
   return (client ??= createClient(supabaseUrl, anonKey, {
     auth: {
@@ -32,6 +34,11 @@ function assertAccount(userId: string | undefined, expectedUserId: string) {
 }
 
 export async function accountToken(expectedUserId?: string) {
+  if (isDesktop) {
+    const account = await desktopAccount();
+    if (expectedUserId !== undefined) assertAccount(account.userId, expectedUserId);
+    return account.accessToken;
+  }
   const auth = accountClient().auth;
   const { data, error } = await auth.getSession();
   if (error) throw error;
@@ -49,6 +56,12 @@ export async function accountToken(expectedUserId?: string) {
 }
 
 async function currentAccountSession(expectedUserId: string) {
+  if (isDesktop) {
+    const account = await desktopAccount();
+    assertAccount(account.userId, expectedUserId);
+    if (!account.accessToken) throw new Error("登录已失效，请重新登录");
+    return { access_token: account.accessToken };
+  }
   const { data, error } = await accountClient().auth.getSession();
   if (error) throw error;
   if (!data.session) throw new Error("登录已失效，请重新登录");

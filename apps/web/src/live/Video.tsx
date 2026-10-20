@@ -33,6 +33,8 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { isDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { DesktopScreen } from "./DesktopScreen";
 import {
   autoScreenWidth,
   screenPreferences,
@@ -213,22 +215,36 @@ export function socketBootstrap(
   // The page has no address of its own to load again with another width: this page does it.
   (
     window as unknown as {
-      __linkshellReload: (to: { width?: string; mode?: string }) => void;
+      __linkshellReload: (to: { width?: string; mode?: string; display?: number; maxFps?: number }) => void;
     }
   ).__linkshellReload = (to) =>
     parent.postMessage(
-      { channel, type: "reload", width: to.width, mode: to.mode },
+      { channel, type: "reload", width: to.width, mode: to.mode, display: to.display, maxFps: to.maxFps },
       "*",
     );
   (
     window as unknown as { __linkshellReport: (stats: unknown) => void }
   ).__linkshellReport = (stats) =>
     parent.postMessage({ channel, type: "screen-stats", stats }, "*");
+  (
+    window as unknown as { __linkshellSession: (message: { type: string; session: unknown }) => void }
+  ).__linkshellSession = (message) => {
+    if (message?.type === "screenSession")
+      parent.postMessage({ channel, type: "screenSession", session: message.session }, "*");
+  };
   window.addEventListener("message", (event) => {
-    if (event.source === parent && event.data?.channel === channel)
-      sockets
-        .get(event.data.id)
-        ?.receive(event.data.type, event.data.data, event.data.reason);
+    if (event.source !== parent || event.data?.channel !== channel) return;
+    if (event.data.type === "screen-session") {
+      const configure = (window as unknown as {
+        linkshellSession?: (state: unknown) => void;
+      }).linkshellSession;
+      if (configure) configure(event.data.state);
+      else parent.postMessage({ channel, type: "screen-session-unavailable" }, "*");
+      return;
+    }
+    sockets
+      .get(event.data.id)
+      ?.receive(event.data.type, event.data.data, event.data.reason);
   });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape")
@@ -238,6 +254,7 @@ export function socketBootstrap(
 
 function readStored(key: string): string | undefined {
   try {
+    if (isDesktop) return readDesktopStorage<string | undefined>(`screen:${key}`, undefined);
     return localStorage.getItem(key) ?? undefined;
   } catch {
     return undefined;
@@ -246,6 +263,7 @@ function readStored(key: string): string | undefined {
 
 function writeStored(key: string, value: string): void {
   try {
+    if (isDesktop) { saveDesktopStorage(`screen:${key}`, value); return; }
     localStorage.setItem(key, value);
   } catch {
     // Not kept: the next visit starts at the page's own choice.
@@ -268,19 +286,27 @@ export function StatusDot({
   );
 }
 
-export function Screen({
-  title = "电脑屏幕",
-  embedded = false,
-  primaryAction = false,
-  onOpen,
-  autoStart = false,
-}: {
+export interface ScreenProps {
   title?: string;
   embedded?: boolean;
   primaryAction?: boolean;
   onOpen?: () => void;
   autoStart?: boolean;
-}) {
+  active?: boolean;
+}
+
+export function Screen(props: ScreenProps) {
+  return isDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} />;
+}
+
+function BrowserScreen({
+  title = "电脑屏幕",
+  embedded = false,
+  primaryAction = false,
+  onOpen,
+  autoStart = false,
+  active = true,
+}: ScreenProps) {
   const { link, streams } = useConnection();
   const job = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
@@ -310,6 +336,7 @@ export function Screen({
   const [view, setView] = useState(() => screenPreferences(readStored));
   function configure(key: keyof ScreenPreferences, value: string) {
     writeStored(`linkshell.screen.${key}`, value);
+    if (key === "width") setFitted(value === "auto" ? autoScreenWidth({ width: stage.current?.clientWidth ?? 0, ratio: window.devicePixelRatio }) : undefined);
     setView((current) => ({ ...current, [key]: value }));
   }
   const [displays, setDisplays] = useState<{ index: number; name: string }[]>(
@@ -317,12 +344,43 @@ export function Screen({
   );
   const [html, setHtml] = useState<string>();
   const [error, setError] = useState<string>();
+  const [sessionError, setSessionError] = useState<string>();
+  const [reusable, setReusable] = useState<boolean>();
   const frame = useRef<HTMLIFrameElement>(null);
+  const desired = useRef({ active, display, view });
+  desired.current = { active, display, view };
+  const session = useRef<{
+    initial: { display: number; width: string; maxFps: string };
+    reply: (data: object) => void;
+  } | undefined>(undefined);
+  const pauseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const keepSession = started && (active || reusable === true);
+  function tellSession() {
+    const current = session.current;
+    if (!current) return;
+    const next = desired.current;
+    // Hidden stages have no width. Resuming the same "auto" selection keeps
+    // the established resolution; a new selection is measured explicitly.
+    const width = next.view.width === "auto"
+      ? fitted ?? current.initial.width
+      : next.view.width;
+    current.reply({
+      type: "screen-session",
+      state: { active: next.active, display: next.display, width, maxFps: Number(next.view.maxFps) },
+    });
+  }
+  useEffect(() => {
+    if (active) return;
+    setFocused(false);
+    if (document.fullscreenElement === surface.current)
+      void document.exitFullscreen().catch(() => {});
+  }, [active]);
   useEffect(() => {
     if (!focused || !surface.current) return;
     const previous = document.activeElement;
     const hidden: { node: HTMLElement; inert: boolean }[] = [];
-    let node: HTMLElement | null = surface.current;
+    // The desktop Shell owns inert state so both layers cannot restore stale values.
+    let node: HTMLElement | null = isDesktop ? null : surface.current;
     // Keep the existing iframe alive while isolating the expanded workspace from keyboard navigation.
     while (node?.parentElement) {
       for (const sibling of node.parentElement.children) {
@@ -370,8 +428,14 @@ export function Screen({
     }
   }
   useEffect(() => {
-    if (!started) return;
+    if (!keepSession || !desired.current.active) {
+      setHtml(undefined);
+      setReusable(undefined);
+      return;
+    }
     let alive = true;
+    let display = desired.current.display;
+    const view = desired.current.view;
     const sockets = new Map<
       string,
       Awaited<ReturnType<typeof openWebSocket>>
@@ -395,9 +459,12 @@ export function Screen({
         protocols?: string[];
         data?: string | ArrayBuffer;
         width?: unknown;
+        display?: unknown;
+        maxFps?: unknown;
         mode?: unknown;
         key?: unknown;
         value?: unknown;
+        session?: { t?: unknown; version?: unknown; configure?: unknown; pause?: unknown; paused?: unknown; message?: unknown };
         stats?: {
           width?: unknown;
           height?: unknown;
@@ -408,6 +475,24 @@ export function Screen({
           live?: unknown;
         };
       };
+      if (message.type === "screen-session-unavailable") {
+        setReusable(false);
+        return;
+      }
+      if (message.type === "screenSession" && message.session) {
+        const report = message.session;
+        if (report.t === "capabilities") {
+          setReusable(report.version === 1 && report.configure === true && report.pause === true);
+        } else if (report.t === "configured") {
+          setSessionError(undefined);
+          if (report.paused === true) clearTimeout(pauseTimer.current);
+        } else if (report.t === "error" && typeof report.message === "string") {
+          setSessionError(report.message.slice(0, 500));
+          // A failed pause cannot be kept behind another workspace page.
+          if (!desired.current.active) setReusable(false);
+        }
+        return;
+      }
       if (message.type === "leave-focus") {
         if (!document.fullscreenElement) setFocused(false);
         return;
@@ -422,8 +507,17 @@ export function Screen({
           ].includes(message.key) &&
           typeof message.value === "string" &&
           message.value.length <= 32768
-        )
+        ) {
           writeStored(message.key, message.value);
+          if (message.key === "linkshell.screen.width" && /^(1280|1920|2560|native)$/.test(message.value)) {
+            const width = message.value;
+            setFitted(undefined);
+            setView((current) => current.width === width ? current : { ...current, width });
+          } else if (message.key === "linkshell.screen.mode" && /^(view|trackpad|touch)$/.test(message.value)) {
+            const mode = message.value;
+            setView((current) => current.mode === mode ? current : { ...current, mode });
+          }
+        }
         return;
       }
       if (message.type === "screen-stats" && message.stats) {
@@ -457,12 +551,17 @@ export function Screen({
           /^(view|trackpad|touch)$/.test(message.mode)
             ? message.mode
             : undefined;
+        const display = typeof message.display === "number" && Number.isSafeInteger(message.display) && message.display >= 0 ? message.display : undefined;
+        const maxFps = [30, 60, 120].includes(Number(message.maxFps)) ? String(message.maxFps) : undefined;
         if (width) writeStored("linkshell.screen.width", width);
         if (mode) writeStored("linkshell.screen.mode", mode);
+        if (maxFps) writeStored("linkshell.screen.maxFps", maxFps);
+        if (display !== undefined) setDisplay(display);
         setView((current) => ({
           ...current,
           ...(width ? { width } : {}),
           ...(mode ? { mode } : {}),
+          ...(maxFps ? { maxFps } : {}),
         }));
         return;
       }
@@ -499,6 +598,12 @@ export function Screen({
               pending.delete(message.id);
               sockets.delete(message.id);
               reply({ id: message.id, type: "ws-close", reason });
+              if (!alive) return;
+              session.current = undefined;
+              clearTimeout(pauseTimer.current);
+              setReusable(false);
+              setHtml(undefined);
+              setError(reason || "屏幕连接已断开，请重新连接");
             },
           },
           message.protocols,
@@ -530,6 +635,8 @@ export function Screen({
     window.addEventListener("message", listen);
     setHtml(undefined);
     setError(undefined);
+    setSessionError(undefined);
+    setReusable(undefined);
     setStats(undefined);
     void link
       .call("screen.start", {})
@@ -541,8 +648,8 @@ export function Screen({
           viewer.displays.length &&
           !viewer.displays.some((entry) => entry.index === display)
         ) {
-          setDisplay(viewer.displays[0].index);
-          return;
+          display = viewer.displays[0].index;
+          setDisplay(display);
         }
         let codecs: { mimeType: string }[] = [];
         try {
@@ -566,6 +673,7 @@ export function Screen({
           { ...view, width },
           codecs,
         );
+        session.current = { initial: { display, width, maxFps: view.maxFps }, reply };
         const response = await httpRequest(streams, port, "/" + query);
         if (response.status !== 200)
           throw new Error(`屏幕页面返回 ${response.status}`);
@@ -593,12 +701,35 @@ export function Screen({
       });
     return () => {
       alive = false;
+      session.current = undefined;
+      clearTimeout(pauseTimer.current);
       window.removeEventListener("message", listen);
       for (const socket of sockets.values()) socket.close();
       sockets.clear();
       pending.clear();
     };
-  }, [started, display, retry, link, streams, view]);
+  }, [keepSession, retry, link, streams, view.codec]);
+  useEffect(() => {
+    if (!html || !session.current) return;
+    const current = session.current;
+    const width = view.width === "auto" ? fitted ?? current.initial.width : view.width;
+    if (reusable === false && (
+      current.initial.display !== display || current.initial.width !== width || current.initial.maxFps !== view.maxFps
+    )) {
+      setRetry((value) => value + 1);
+      return;
+    }
+    current.reply({
+      type: "screen-session",
+      state: { active, display, width, maxFps: Number(view.maxFps) },
+    });
+    clearTimeout(pauseTimer.current);
+    if (!active && reusable) {
+      // Fail closed if the host cannot confirm that capture actually paused.
+      pauseTimer.current = setTimeout(() => setReusable(false), 2000);
+    }
+    return () => clearTimeout(pauseTimer.current);
+  }, [active, display, view.width, view.maxFps, fitted, html, reusable]);
   const settings = (
     <div className="screen-settings">
       {displays.length > 1 && (
@@ -1017,9 +1148,11 @@ export function Screen({
             sandbox="allow-scripts allow-pointer-lock"
             allow="autoplay; fullscreen"
             srcDoc={html}
+            onLoad={tellSession}
           />
         )}
       </div>
+      {html && <ErrorNotice error={sessionError} />}
       {!compact && (
         <div className="screen-caption">
           <span className="screen-signal">

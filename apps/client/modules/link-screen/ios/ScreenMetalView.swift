@@ -72,6 +72,7 @@ final class ScreenMetalView: UIView, RTCVideoRenderer {
     requestedFps = min(fps, window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
     updatePresentation(); renderer.start(fps: requestedFps)
   }
+  func pause() { renderer.pause() }
   func stop() { renderer.stop() }
   func setSize(_ size: CGSize) { /* The frame and its dimensions must be consumed together. */ }
   func renderFrame(_ frame: RTCVideoFrame?) { if let frame { renderer.receive(frame) } }
@@ -117,7 +118,7 @@ private final class ScreenMetalRenderer {
   private var dirty = true
   private var reportedFrame = false
   private var reportedSize = CGSize.zero
-  private var reportedFailure = false
+  private var reportedFailureGeneration: UInt64?
   private var presentedRevision: UInt64?
   private var queue: MTLCommandQueue?
   private var yuvPipeline: MTLRenderPipelineState?
@@ -171,16 +172,21 @@ private final class ScreenMetalRenderer {
   }
 
   func start(fps: Int) {
-    lifecycle.update { $0.generation &+= 1; $0.active = true }
-    worker.perform { [self] in configureDisplayLink(fps: fps) }
+    let generation = lifecycle.update { state in
+      state.generation &+= 1; state.active = true
+      return state.generation
+    }
+    worker.perform { [self] in configureDisplayLink(fps: fps, generation: generation) }
   }
 
-  private func configureDisplayLink(fps: Int) {
+  private func configureDisplayLink(fps: Int, generation: UInt64) {
+    let life = lifecycle.read()
+    guard life.active, life.generation == generation else { return }
     stopDisplayLink()
-    guard lifecycle.read().active else { return }
     // Starting a new generation can invalidate a size callback still waiting on the UI
-    // thread. Report the first picture again even when its dimensions have not changed.
+    // thread. Redraw the retained picture without waiting for another decoded frame.
     reportedFrame = false
+    dirty = true
     applySize(presentation.read())
     let driver = ScreenDisplayDriver(renderer: self)
     self.driver = driver
@@ -200,11 +206,18 @@ private final class ScreenMetalRenderer {
     }
   }
 
+  func pause() {
+    lifecycle.update { $0.generation &+= 1; $0.active = false }
+    worker.perform { [self] in
+      stopDisplayLink(); _ = mailbox.take()
+    }
+  }
+
   func stop() {
     lifecycle.update { $0.generation &+= 1; $0.active = false }
     worker.perform { [self] in
       stopDisplayLink(); _ = mailbox.take(); current = nil
-      submittedTimestamp = nil; reportedFrame = false
+      submittedTimestamp = nil; reportedFrame = false; presentedRevision = nil; dirty = true
     }
   }
 
@@ -222,14 +235,20 @@ private final class ScreenMetalRenderer {
     }
   }
   func receive(_ frame: RTCVideoFrame) {
-    guard lifecycle.read().active else { return }
+    let life = lifecycle.read()
+    guard life.active else { return }
     guard let native = frame.buffer as? RTCCVPixelBuffer else {
-      worker.perform { [weak self] in self?.fail("当前视频格式无法使用原生屏幕渲染") }
+      worker.perform { [weak self] in self?.fail("当前视频格式无法使用原生屏幕渲染", generation: life.generation) }
       return
     }
     let timestamp = UInt32(bitPattern: frame.timeStamp)
-    metrics.received(timestamp)
-    mailbox.put(ScreenPicture(frame: frame, buffer: native.pixelBuffer, timestamp: timestamp))
+    // Publish under the lifecycle lock so stop/pause cannot clear the mailbox and then
+    // receive a frame whose earlier active check belonged to a previous generation.
+    lifecycle.update { current in
+      guard current == life else { return }
+      metrics.received(timestamp)
+      mailbox.put(ScreenPicture(frame: frame, buffer: native.pixelBuffer, timestamp: timestamp))
+    }
   }
 
   func takeReplacements() -> Int { mailbox.takeReplacements() }
@@ -265,11 +284,11 @@ private final class ScreenMetalRenderer {
       return texture
     }
     let planar = format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-    guard planar || format == kCVPixelFormatType_32BGRA else { return fail("原生屏幕收到不支持的像素格式") }
+    guard planar || format == kCVPixelFormatType_32BGRA else { return fail("原生屏幕收到不支持的像素格式", generation: life.generation) }
     guard let first = texture(0, planar ? .r8Unorm : .bgra8Unorm, planar: planar),
-          let pipeline = planar ? yuvPipeline : rgbaPipeline else { return fail("屏幕纹理创建失败") }
+          let pipeline = planar ? yuvPipeline : rgbaPipeline else { return fail("屏幕纹理创建失败", generation: life.generation) }
     let uv = planar ? texture(1, .rg8Unorm, planar: true) : nil
-    if planar, uv == nil { return fail("屏幕色彩纹理创建失败") }
+    if planar, uv == nil { return fail("屏幕色彩纹理创建失败", generation: life.generation) }
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = drawable.texture
     pass.colorAttachments[0].loadAction = .clear
@@ -296,26 +315,28 @@ private final class ScreenMetalRenderer {
       encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
     encoder.endEncoding()
+    guard lifecycle.read() == life else { return }
     // The simulator SDK has no drawable presentation feedback. Substituting GPU completion
     // would produce a plausible but false display-latency result.
     #if !targetEnvironment(simulator)
     if submittedTimestamp != picture.timestamp, metrics.samples(picture.timestamp) {
       let submitted = CACurrentMediaTime()
-      drawable.addPresentedHandler { [metrics] shown in
+      drawable.addPresentedHandler { [weak self, metrics] shown in
+        guard let self, self.lifecycle.read() == life else { return }
         metrics.shown(picture.timestamp, submitted: submitted, expected: deadline, actual: shown.presentedTime)
       }
     }
     #endif
     command.addCompletedHandler { [weak self, inFlight, heldTextures] buffer in
       _ = heldTextures; _ = picture
-      if let self, buffer.gpuEndTime > buffer.gpuStartTime {
+      if let self, self.lifecycle.read() == life, buffer.gpuEndTime > buffer.gpuStartTime {
         self.timingLock.lock()
         self.gpuSeconds = self.gpuSeconds * 0.8 + (buffer.gpuEndTime - buffer.gpuStartTime) * 0.2
         self.timingLock.unlock()
       }
       inFlight.signal()
       if buffer.status == .error {
-        self?.worker.perform { [weak self] in self?.fail("屏幕渲染失败，请重新连接") }
+        self?.worker.perform { [weak self] in self?.fail("屏幕渲染失败，请重新连接", generation: life.generation) }
       }
     }
     command.present(drawable)
@@ -341,10 +362,11 @@ private final class ScreenMetalRenderer {
     if surface.contentsScale != view.scale { surface.contentsScale = view.scale }
   }
 
-  private func fail(_ message: String) {
-    guard !reportedFailure else { return }
-    reportedFailure = true
+  private func fail(_ message: String, generation: UInt64? = nil) {
     let life = lifecycle.read()
+    guard life.active, generation == nil || generation == life.generation,
+          reportedFailureGeneration != life.generation else { return }
+    reportedFailureGeneration = life.generation
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
       let current = self.lifecycle.read()

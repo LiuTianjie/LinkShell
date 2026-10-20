@@ -38,6 +38,8 @@ final class WatchDirectClient: ObservableObject {
   private var attached: Set<String> = []
   private var sessionRevisions: [String: Int] = [:]
   private var terminalRevisions: [String: Int] = [:]
+  /// When each session's state was last confirmed by the host (a pushed summary or a full list).
+  private var lastSummaryAt: [String: Date] = [:]
   private var refreshNumber = 0
 
   init() {
@@ -302,7 +304,9 @@ final class WatchDirectClient: ObservableObject {
     let sessionID = params["sessionId"] as? String ?? ""
     switch message["method"] as? String {
     case "session.summary":
-      if let summary = params["session"] as? [String: Any], let id = summary["id"] as? String { sessions[id] = summary; sessionRevisions[id, default: 0] += 1 }
+      if let summary = params["session"] as? [String: Any], let id = summary["id"] as? String {
+        sessions[id] = summary; sessionRevisions[id, default: 0] += 1; lastSummaryAt[id] = Date()
+      }
     case "session.removed": sessionRevisions[sessionID, default: 0] += 1; sessions.removeValue(forKey: sessionID); histories.removeValue(forKey: sessionID)
     case "session.window": histories[sessionID] = WatchHistory(startSeq: params["startSeq"] as? Int ?? 0)
     case "session.event":
@@ -332,6 +336,8 @@ final class WatchDirectClient: ObservableObject {
     // Notifications arriving after a list request are newer than its snapshot.
     for (id, revision) in sessionRevisions where previousSessions[id] != revision { nextSessions[id] = sessions[id] }
     for (id, revision) in terminalRevisions where previousTerminals[id] != revision { nextTerminals[id] = terminals[id] }
+    let listed = Date()
+    for id in nextSessions.keys where previousSessions[id] == sessionRevisions[id] { lastSummaryAt[id] = listed }
     sessions = nextSessions; terminals = nextTerminals
     publish()
   }
@@ -430,8 +436,12 @@ final class WatchDirectClient: ObservableObject {
       }
       _ = try await call("terminals.close", ["terminalId": id]); try? await refresh(); return "已关闭终端"
     }
-    // Re-read before decisions so cached watch cards cannot authorize stale requests.
-    try await refresh()
+    // Re-read before decisions so cached watch cards cannot authorize stale requests. The host
+    // pushes every summary change, so a recent one is as fresh as a list call; only an old one
+    // costs the extra round trip.
+    if Date().timeIntervalSince(lastSummaryAt[sessionID] ?? .distantPast) > 5 || sessions[sessionID] == nil {
+      try await refresh()
+    }
     guard opening?.channel == expected, let session = sessions[sessionID], session["archived"] as? Bool != true else { throw WatchLinkError("会话状态已变化，请刷新后重试") }
     switch kind {
     case "action":
@@ -467,7 +477,7 @@ final class WatchDirectClient: ObservableObject {
         var params: [String: Any] = ["sessionId": sessionID, "clientMessageId": command["id"] as? String ?? UUID().uuidString, "content": [["type": "text", "text": text]]]
         if command["now"] as? Bool != true { params["whenBusy"] = "queue" }
         let result = try await call("sessions.prompt", params)
-        try? await refresh()
+        Task { [weak self] in try? await self?.refresh() }
         return result["delivery"] as? String == "queued" ? "已加入会话队列" : "已发送给 Agent"
       }
     case "set-config":
@@ -485,7 +495,8 @@ final class WatchDirectClient: ObservableObject {
       _ = try await call("sessions.release", ["sessionId": sessionID])
     default: throw WatchLinkError("不支持此操作")
     }
-    try? await refresh()
+    // The host already pushes the new state; this list only backs it up, so the reply doesn't wait.
+    Task { [weak self] in try? await self?.refresh() }
     return "操作已完成"
   }
 }

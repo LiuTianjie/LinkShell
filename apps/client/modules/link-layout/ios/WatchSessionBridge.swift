@@ -9,6 +9,11 @@ public enum WatchCommandQueue {
   private static let prefix = "LinkShellWatch.command."
   private static let snapshotKey = "LinkShellWatch.snapshot.v1"
   private static let lifetime: TimeInterval = 120
+  /// The watch gives up on a command after 15 s and tells the user it may not have happened.
+  /// A decision still queued after that must not run later — e.g. when the phone app next
+  /// comes to the foreground — behind the user's back. Reads may wait longer.
+  static let decisionLifetime: TimeInterval = 12
+  private static let readKinds: Set<String> = ["refresh", "open-session", "load-earlier", "open-terminal"]
   private static let lock = NSLock()
   private static var replyHandlers: [String: ([String: Any]) -> Void] = [:]
 
@@ -16,6 +21,9 @@ public enum WatchCommandQueue {
     let id: String
     let createdAt: TimeInterval
     let commandJSON: String
+    /// Absent in entries written by an older app: those keep the general lifetime.
+    var expiresIn: TimeInterval?
+    var lifetime: TimeInterval { expiresIn ?? WatchCommandQueue.lifetime }
   }
 
   public static var sharedDefaults: UserDefaults {
@@ -67,7 +75,8 @@ public enum WatchCommandQueue {
       defaults.removeObject(forKey: key)
       rejectReply(entry.id, message: "待处理操作过多，请刷新后重试")
     }
-    let entry = Entry(id: rawId, createdAt: now.timeIntervalSince1970, commandJSON: commandJSON)
+    let entry = Entry(id: rawId, createdAt: now.timeIntervalSince1970, commandJSON: commandJSON,
+                      expiresIn: readKinds.contains(kind) ? lifetime : decisionLifetime)
     guard let encoded = try? JSONEncoder().encode(entry) else {
       replyHandler?(["ok": false, "message": "无法记录手表指令"])
       return nil
@@ -95,7 +104,7 @@ public enum WatchCommandQueue {
     guard let data = defaults.data(forKey: key) else { return nil }
     defaults.removeObject(forKey: key)
     guard let entry = try? JSONDecoder().decode(Entry.self, from: data),
-          (0..<lifetime).contains(now.timeIntervalSince1970 - entry.createdAt),
+          (0..<entry.lifetime).contains(now.timeIntervalSince1970 - entry.createdAt),
           let cmdData = entry.commandJSON.data(using: .utf8),
           let dict = (try? JSONSerialization.jsonObject(with: cmdData)) as? [String: Any] else {
       if let reply = replyHandlers.removeValue(forKey: id) {
@@ -127,7 +136,7 @@ public enum WatchCommandQueue {
     defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) }.compactMap { key in
       guard let data = defaults.data(forKey: key),
             let entry = try? JSONDecoder().decode(Entry.self, from: data),
-            (0..<lifetime).contains(now.timeIntervalSince1970 - entry.createdAt) else {
+            (0..<entry.lifetime).contains(now.timeIntervalSince1970 - entry.createdAt) else {
         defaults.removeObject(forKey: key)
         rejectReply(String(key.dropFirst(prefix.count)), message: "操作已过期，请刷新后重试")
         return nil
@@ -184,6 +193,9 @@ public final class WatchSessionBridge: NSObject {
     }
     WatchCommandQueue.saveSnapshotJSON(json)
     #if canImport(WatchConnectivity)
+    pushComplicationIfNeeded(payload: payload, json: json)
+    #endif
+    #if canImport(WatchConnectivity)
     guard WCSession.isSupported() else { return true }
     let session = WCSession.default
     if session.activationState == .notActivated {
@@ -209,6 +221,32 @@ public final class WatchSessionBridge: NSObject {
     }
     #endif
     return true
+  }
+
+  #if canImport(WatchConnectivity)
+  /// The application context only reaches the watch when its app runs, so a face would keep a
+  /// request that was answered on the computer. A complication transfer wakes the watch in the
+  /// background; the system allows a limited number a day, so it is spent only when what the face
+  /// shows changes: the number waiting or failed, or the computer.
+  private var lastComplicationKey: String?
+
+  private func pushComplicationIfNeeded(payload: [String: Any], json: String) {
+    guard WCSession.isSupported() else { return }
+    let session = WCSession.default
+    guard session.activationState == .activated, session.isPaired, session.isComplicationEnabled else { return }
+    let key = Self.complicationKey(payload)
+    guard key != lastComplicationKey, session.remainingComplicationUserInfoTransfers > 0 else { return }
+    // Only the newest matters: an older transfer still queued would show a stale count first.
+    for transfer in session.outstandingUserInfoTransfers where transfer.isCurrentComplicationInfo { transfer.cancel() }
+    lastComplicationKey = key
+    session.transferCurrentComplicationUserInfo(["type": "snapshot", "snapshotJSON": json, "updatedAt": Date().timeIntervalSince1970])
+  }
+  #endif
+
+  /// What a watch face shows; a transfer is spent only when this changes.
+  static func complicationKey(_ payload: [String: Any]) -> String {
+    [payload["computerKey"] as? String ?? "", "\(payload["online"] as? Bool ?? false)",
+     "\(payload["waitingCount"] as? Int ?? 0)", "\(payload["failedCount"] as? Int ?? 0)"].joined(separator: "|")
   }
 
   private func handleIncomingPayload(_ message: [String: Any], replyHandler: (([String: Any]) -> Void)?) {

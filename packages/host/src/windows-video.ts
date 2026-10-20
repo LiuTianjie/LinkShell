@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useH264, useSdesMid, useAbsSendTime, type RTCDataChannel } from "werift";
-import { inputEvent, type VideoOffer, type VideoSignal } from "./input.js";
+import { inputEvent, type VideoOffer, type VideoSignal, type VideoConfiguration, type VideoConfigured } from "./input.js";
 import { H264AccessUnits, ScreenInputOrder, h264Nals, h264Payloads } from "./screen-h264.js";
 import { windowsHelper } from "./windows-screen.js";
 
@@ -12,6 +12,8 @@ export interface ScreenVideoSession {
   id: string;
   signal(message: VideoSignal): void;
   end(): void;
+  reconfigure?: boolean;
+  configure?(configuration: VideoConfiguration): Promise<VideoConfigured>;
   pause?(hidden: boolean): void;
   cursor?(x: number, y: number): boolean;
 }

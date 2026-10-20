@@ -7,8 +7,13 @@ enum DesktopStyle {
       appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
     })
   }
-  static let background = adaptive(NSColor(srgbRed: 0.98, green: 0.98, blue: 0.985, alpha: 1), NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 1))
-  static let sidebar = adaptive(NSColor(srgbRed: 0.945, green: 0.95, blue: 0.96, alpha: 1), NSColor(srgbRed: 0.043, green: 0.047, blue: 0.057, alpha: 1))
+  static let windowBackground = NSColor(name: nil) { appearance in
+    appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+      ? NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 1)
+      : NSColor(srgbRed: 0.98, green: 0.98, blue: 0.985, alpha: 1)
+  }
+  static let background = Color(nsColor: windowBackground)
+  static let sidebar = adaptive(NSColor(srgbRed: 0.9333, green: 0.9412, blue: 0.9569, alpha: 1), NSColor(srgbRed: 0.043, green: 0.047, blue: 0.057, alpha: 1))
   static let primary = adaptive(NSColor(srgbRed: 0.12, green: 0.13, blue: 0.16, alpha: 1), NSColor(srgbRed: 0.94, green: 0.945, blue: 0.953, alpha: 1))
   static let secondary = adaptive(NSColor(srgbRed: 0.38, green: 0.40, blue: 0.44, alpha: 1), NSColor(srgbRed: 0.66, green: 0.68, blue: 0.71, alpha: 1))
   static let mint = adaptive(NSColor(srgbRed: 0.04, green: 0.46, blue: 0.36, alpha: 1), NSColor(srgbRed: 0.24, green: 0.88, blue: 0.75, alpha: 1))
@@ -38,26 +43,39 @@ struct DesktopStatus: View {
 struct DesktopView: View {
   @ObservedObject var model: DesktopModel
   @State private var confirm: String?
-  private let mainPages = [("总览", "house"), ("会话", "bubble.left"), ("设备", "laptopcomputer"), ("用量统计", "chart.bar"), ("日志", "list.bullet.rectangle")]
+  private var embeddedWorkspace: Bool { !model.preview || Launch.has("--workspace-preview") }
+  private let mainPages = [("总览", "house"), ("设备", "laptopcomputer"), ("用量统计", "chart.bar"), ("日志", "list.bullet.rectangle")]
   var body: some View {
     HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 8) {
-        DesktopBrand().padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 30)
-        ForEach(mainPages, id: \.0) { page in navigation(page.0, page.1) }
-        Spacer()
+      VStack(alignment: .leading, spacing: embeddedWorkspace ? 4 : 8) {
+        if embeddedWorkspace { Color.clear.frame(height: 104) }
+        else { DesktopBrand().padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 30) }
+        if embeddedWorkspace {
+          ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 4) {
+              ForEach(mainPages, id: \.0) { page in navigation(page.0, page.1) }
+            }
+          }
+        } else {
+          ForEach(mainPages, id: \.0) { page in navigation(page.0, page.1) }
+          Spacer()
+        }
         rule.padding(.horizontal, 16).padding(.bottom, 12)
         navigation("更新", "arrow.down.circle")
         navigation("设置", "gearshape")
         if model.preview { Text("设计预览 · 示例数据").font(.system(size: 10)).foregroundStyle(DesktopStyle.secondary).padding(16) }
       }
-      .padding(10).padding(.bottom, 12).frame(width: 210).background(DesktopStyle.sidebar)
+      .padding(.horizontal, 10).padding(.top, embeddedWorkspace ? 0 : 10).padding(.bottom, 22)
+      .frame(width: embeddedWorkspace ? 232 : 210).background(DesktopStyle.sidebar)
       Rectangle().fill(DesktopStyle.line).frame(width: 1)
       VStack(alignment: .leading, spacing: 0) {
         if model.selected != "用量统计" {
         HStack(alignment: .top) {
-          VStack(alignment: .leading, spacing: 7) {
-            Text(model.selected == "总览" ? "这台 Mac" : model.selected).font(.system(size: 28, weight: .semibold))
-            Text(subtitle).font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
+          if !embeddedWorkspace {
+            VStack(alignment: .leading, spacing: 7) {
+              Text(model.selected == "总览" ? "这台 Mac" : model.selected).font(.system(size: 28, weight: .semibold))
+              Text(subtitle).font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
+            }
           }
           Spacer()
           if model.busy { ProgressView().controlSize(.small) }
@@ -66,11 +84,16 @@ struct DesktopView: View {
             Button("启动服务") { model.action("start") }.disabled(model.healthy)
             Button("重启服务…") { confirm = "restart" }.disabled(!model.healthy)
             Button("停止服务…") { confirm = "stop" }.disabled(!model.healthy)
-          } label: { Image(systemName: "ellipsis").frame(width: 24, height: 22) }
+          } label: {
+            HStack(spacing: 7) {
+              if embeddedWorkspace { Text("本机服务").font(.system(size: 12)) }
+              Image(systemName: "ellipsis").frame(width: 24, height: 22)
+            }
+          }
             .menuStyle(.borderlessButton).fixedSize().padding(7)
             .background(RoundedRectangle(cornerRadius: 7).strokeBorder(DesktopStyle.line))
             .disabled(model.busy || model.preview).accessibilityLabel("服务操作")
-        }.padding(.bottom, 30)
+        }.padding(.bottom, embeddedWorkspace ? 14 : 30)
         }
         if let problem = model.problem {
           HStack(alignment: .top, spacing: 10) {
@@ -83,7 +106,6 @@ struct DesktopView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 0) {
             switch model.selected {
-            case "会话": sessions
             case "设备": devices
             case "用量统计": DesktopUsageView(model: model)
             case "日志": logs
@@ -101,10 +123,10 @@ struct DesktopView: View {
             Button(model.newVersion ? "查看更新" : "检查更新") { model.selected = "更新"; model.checkUpdates() }.buttonStyle(.plain).font(.system(size: 12))
           }.padding(.top, 15)
         }
-      }.padding(.horizontal, 36).padding(.top, 34).padding(.bottom, 24)
+      }.padding(.horizontal, embeddedWorkspace ? 28 : 36).padding(.top, embeddedWorkspace ? 24 : 34).padding(.bottom, embeddedWorkspace ? 20 : 24)
     }
     .background(DesktopStyle.background).foregroundStyle(DesktopStyle.primary)
-    .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: 620)
+    .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: model.preview ? 620 : 540)
     .alert(confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
       Button("取消", role: .cancel) { confirm = nil }
       Button("继续", role: .destructive) {
@@ -112,20 +134,10 @@ struct DesktopView: View {
         confirm = nil
       }
     } message: { Text(confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 Pro，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
-    .sheet(item: $model.selectedSession) { session in
-      VStack(alignment: .leading, spacing: 20) {
-        Text(session.name).font(.title2.bold())
-        DesktopStatus(text: session.label, tone: sessionTone(session))
-        Text(session.cwd).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
-        Text("代理：\(agentName(session.agent))").foregroundStyle(DesktopStyle.secondary)
-        if session.pendingPermissions > 0 { Text("有 \(session.pendingPermissions) 个请求等待确认，请在手机或原代理终端处理。") }
-        HStack { Spacer(); Button("完成") { model.selectedSession = nil }.keyboardShortcut(.defaultAction) }
-      }.padding(32).frame(width: 480).background(DesktopStyle.background).preferredColorScheme(model.colorScheme)
-    }
   }
+
   private var subtitle: String {
     switch model.selected {
-    case "会话": return "当前 Host 中的会话与待处理请求"
     case "设备": return "与这台 Mac 配对的设备"
     case "用量统计": return "这台电脑的 Token 用量与模型分布"
     case "日志": return "Host 最近 64 KB 日志 · 每 5 秒刷新"
@@ -140,12 +152,12 @@ struct DesktopView: View {
       model.selected = title
       if title == "日志" { model.readLog() }
     } label: {
-      HStack(spacing: 13) {
-        Image(systemName: symbol).font(.system(size: 17)).frame(width: 22)
-        Text(title).font(.system(size: 14, weight: model.selected == title ? .medium : .regular))
+      HStack(spacing: embeddedWorkspace ? 10 : 13) {
+        Image(systemName: symbol).font(.system(size: embeddedWorkspace ? 16 : 17)).frame(width: 22)
+        Text(title).font(.system(size: embeddedWorkspace ? 13 : 14, weight: model.selected == title ? .medium : .regular))
         Spacer()
         if title == "更新" && model.newVersion { Circle().fill(DesktopStyle.mint).frame(width: 6, height: 6) }
-      }.padding(.horizontal, 14).frame(height: 42).contentShape(Rectangle())
+      }.padding(.horizontal, 14).frame(height: embeddedWorkspace ? 36 : 42).contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 6).fill(model.selected == title ? DesktopStyle.selection : .clear))
     }.buttonStyle(.plain).foregroundStyle(model.selected == title ? DesktopStyle.primary : DesktopStyle.secondary)
   }
@@ -174,45 +186,11 @@ struct DesktopView: View {
         }.buttonStyle(.plain).disabled(model.preview)
       }.padding(.vertical, 18)
       rule
-      HStack(spacing: 10) { Text("会话").font(.system(size: 19, weight: .semibold)); Text("\(model.sessions.count)").foregroundStyle(DesktopStyle.secondary); Spacer(); Button("查看全部") { model.selected = "会话" }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary) }.padding(.top, 32).padding(.bottom, 17)
-      sessionTable(Array(model.sessions.prefix(4)))
       Text("最近活动").font(.system(size: 19, weight: .semibold)).padding(.top, 30).padding(.bottom, 16)
       if model.activity.isEmpty { empty("尚无活动", "连接服务后，状态变化会显示在这里。") }
       ForEach(Array(model.activity.prefix(4).enumerated()), id: \.offset) { _, event in
         HStack(spacing: 20) { Text(event.0, style: .time).font(.system(size: 12, design: .monospaced)); Text(event.1).font(.system(size: 13)) }.foregroundStyle(DesktopStyle.secondary).padding(.bottom, 12)
       }
-    }
-  }
-  private func sessionTone(_ session: DesktopSession) -> Color {
-    if session.pendingPermissions > 0 || session.state == "waiting" { return .orange }
-    if session.state == "running" { return DesktopStyle.mint }
-    if session.state == "error" { return .red }
-    return DesktopStyle.secondary
-  }
-  private func agentName(_ agent: String) -> String { ["codex": "Codex", "claude": "Claude Code"][agent] ?? agent }
-  private func sessionTable(_ entries: [DesktopSession]) -> some View {
-    VStack(spacing: 0) {
-      if entries.isEmpty { empty(model.healthy ? "暂无会话" : "会话不可用", model.healthy ? "从终端使用 linkshell codex 或 linkshell claude 开始。" : "连接本机服务后查看会话。") }
-      else {
-        HStack { Text("项目").frame(maxWidth: .infinity, alignment: .leading); Text("代理").frame(width: 125, alignment: .leading); Text("状态").frame(width: 110, alignment: .leading) }.font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 12)
-        rule
-        ForEach(entries) { session in
-          Button { model.selectedSession = session } label: {
-            HStack {
-              Text(session.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-              Text(agentName(session.agent)).frame(width: 125, alignment: .leading)
-              DesktopStatus(text: session.label, tone: sessionTone(session)).frame(width: 110, alignment: .leading)
-            }.font(.system(size: 13)).padding(.vertical, 17).contentShape(Rectangle())
-          }.buttonStyle(.plain)
-          rule
-        }
-      }
-    }
-  }
-  private var sessions: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      sessionTable(model.sessions)
-      if model.snapshot?.hasMoreSessions == true { Text("显示最近 200 个会话。更多历史可在手机端查看。").font(.footnote).foregroundStyle(DesktopStyle.secondary) }
     }
   }
   private var devices: some View {
@@ -396,10 +374,10 @@ struct DesktopPopover: View {
       entry("bubble.left", "会话", model.healthy ? "\(model.running) 个运行中" : "未知")
       if model.pending > 0 {
         Divider()
-        Button { open("会话") } label: { DesktopStatus(text: "\(model.pending) 个请求等待确认", tone: .orange).padding(.vertical, 18) }.buttonStyle(.plain)
+        DesktopStatus(text: "\(model.pending) 个请求等待确认", tone: .orange).padding(.vertical, 18)
       }
       Divider().padding(.bottom, 10)
-      link("arrow.up.forward.square", "打开 LinkShell", "总览")
+      link("arrow.up.forward.square", "打开工作台", "工作台")
       link("arrow.triangle.2.circlepath", "检查更新…", "更新")
       link("chart.bar", "用量统计", "用量统计")
       link("gearshape", "设置…", "设置")

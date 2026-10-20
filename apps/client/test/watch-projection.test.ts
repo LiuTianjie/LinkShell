@@ -29,6 +29,24 @@ complex["permission"] = ["requestId": "r", "questions": [["id": "q", "kind": "ch
 precondition(WatchSnapshotBuilder.actions(complex, key: "key").isEmpty)
 complex["permission"] = ["requestId": "r", "url": ["url": "https://example.com"], "options": [["optionId": "allow"]]]
 precondition(WatchSnapshotBuilder.actions(complex, key: "key").isEmpty)
+// Settings come only from the agent: none reported, none offered.
+var bare = WatchHistory()
+bare.append(["seq": 1, "update": ["sessionUpdate": "agent_message_chunk", "content": ["type": "text", "text": "Hi"]]])
+let bareJSON = try WatchSnapshotBuilder.snapshot(gateway: URL(string: "https://example.com")!, machine: machine, machines: [machine], online: true, sessions: ["s": session], terminals: [:], histories: ["s": bare], outputs: [:], info: [:], projects: [])
+let bareSnapshot = try JSONDecoder().decode(WatchSnapshot.self, from: Data(bareJSON.utf8))
+precondition(bareSnapshot.sessions[0].configOptions?.isEmpty ?? true)
+// A watch face never shows sample counts: nothing stored means unsynced, never the preview.
+let suite = UserDefaults(suiteName: "ls-face-\(UUID().uuidString)")!
+precondition(WatchSnapshot.stored(in: suite, file: nil, standard: suite) == nil)
+precondition(WatchSnapshot.empty.isUnsynced && !WatchSnapshot.empty.isStale())
+// The newest of the app's and the phone's copy wins; an old one reads as stale.
+var older = snapshot; older.generatedAt = (Date().timeIntervalSince1970 - 3600) * 1000; older.waitingCount = 5
+var newer = snapshot; newer.generatedAt = Date().timeIntervalSince1970 * 1000; newer.waitingCount = 0
+suite.set(String(decoding: try JSONEncoder().encode(older), as: UTF8.self), forKey: WatchSnapshot.cacheKey)
+suite.set(String(decoding: try JSONEncoder().encode(newer), as: UTF8.self), forKey: WatchSnapshot.widgetCacheKey)
+let face = WatchSnapshot.stored(in: suite, file: nil, standard: suite)
+precondition(face?.waitingCount == 0 && face?.isStale() == false)
+precondition(older.isStale())
 print("projection passed")
 `);
     const binary = join(dir, "projection");

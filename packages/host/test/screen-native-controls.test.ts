@@ -19,10 +19,12 @@ describe("the existing viewer over a native picture", () => {
   });
 
   it("keeps input ordering decisions with the original gesture controller", () => {
-    const source = /function post\(message, lane\) \{[\s\S]*?\n\}/.exec(viewerPage())![0];
+    const page = viewerPage();
+    const source = ["post", "transmitInput"].map((name) => new RegExp(`function ${name}\\(message, lane\\) \\{[\\s\\S]*?\\n\\}`).exec(page)![0]).join("\n");
     const commands: unknown[] = [];
     const post = new Script(`${source}\npost`).runInNewContext({
       nativePicture: true,
+      session: { canInput: () => true, generation: () => undefined },
       nativePost: (message: unknown) => commands.push(message),
     }) as (message: unknown, lane: string) => void;
     post({ t: "move", x: 0.2, y: 0.4 }, "pointer");

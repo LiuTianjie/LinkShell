@@ -44,6 +44,9 @@ try {
   mkdirSync(out, { recursive: true });
   if (existsSync(app)) rmSync(app, { recursive: true });
   cpSync(join(mac, 'build/LinkShell.app'), app, { recursive: true, verbatimSymlinks: true });
+  for (const asset of ['index.html', 'preview/bridge.html', 'preview/worker.js']) {
+    if (!existsSync(join(app, 'Contents/Resources/Workspace', asset))) throw new Error('Desktop workspace is missing; rebuild @linkshell/mac before packaging');
+  }
   walk(app, (file, stat) => {
     if (stat.isSymbolicLink() || !isMachO(file)) return;
     const slices = capture('/usr/bin/lipo', ['-archs', file]).split(/\s+/);

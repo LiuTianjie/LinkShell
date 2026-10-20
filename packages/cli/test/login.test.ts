@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 /** Starts `linkshell login`; resolves the address of its callback server once it says where the browser should go. */
-function startLogin() {
+function startLogin(signal?: AbortSignal) {
   let said = "";
   let found!: (callback: string) => void;
   const callback = new Promise<string>((resolve) => (found = resolve));
@@ -30,7 +30,7 @@ function startLogin() {
     if (match) found(decodeURIComponent(match[1]!).replace(/\/callback$/, ""));
     return true;
   });
-  return { result: runLogin(), callback, said: () => said };
+  return { result: runLogin({ signal }), callback, said: () => said };
 }
 
 /** The account service: who the token belongs to, and their plan. */
@@ -45,6 +45,43 @@ function accountService(plan: { plan: string; plan_expires_at: string | null } |
 }
 
 describe("linkshell login", () => {
+  it("closes its callback listener and timeout when the owning desktop app exits", async () => {
+    const controller = new AbortController();
+    const login = startLogin(controller.signal);
+    const base = await login.callback;
+    expect((await realFetch(`${base}/callback`)).status).toBe(200);
+    controller.abort();
+    expect(await login.result).toBeNull();
+    await expect(realFetch(`${base}/callback`)).rejects.toThrow();
+  });
+
+  it("aborts account verification without replacing credentials after the owner cancels", async () => {
+    auth.saveAuth({ accessToken: "existing", refreshToken: "existing-refresh", userId: "existing-user", expiresAt: Date.now() + 3600000 });
+    let verificationSignal: AbortSignal | undefined;
+    let verifying!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => { verifying = resolve; });
+    vi.stubGlobal("fetch", (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("http://localhost:")) return realFetch(input, init);
+      if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "new-user", email: "new@example.com" }));
+      verificationSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        verificationSignal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+        verifying();
+      });
+    });
+    const controller = new AbortController();
+    const login = startLogin(controller.signal);
+    const base = await login.callback;
+    const callback = realFetch(`${base}/token?access_token=new-access&refresh_token=new-refresh`, { method: "POST" }).catch(() => undefined);
+    await verificationStarted;
+    controller.abort();
+    expect(await login.result).toBeNull();
+    await callback;
+    expect(verificationSignal?.aborted).toBe(true);
+    expect(auth.loadAuth()?.userId).toBe("existing-user");
+  });
+
   it("keeps the tokens the browser hands back, and says which plan the account has", async () => {
     accountService({ plan: "pro", plan_expires_at: new Date(Date.now() + 86_400_000).toISOString() });
     const started = vi.spyOn(globalThis, "setTimeout");

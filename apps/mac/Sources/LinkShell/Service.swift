@@ -6,7 +6,7 @@ import Foundation
 ///
 ///   → status | displays
 ///   → open {v, screen} | close {v} | an input event {v, …}        a viewer's hands (`Control`)
-///   → rtc.open {v, screen, iceServers, …} | rtc.answer | rtc.ice | rtc.close      (`ScreenSession`)
+///   → rtc.open {v, screen, iceServers, …} | rtc.configure | rtc.answer | rtc.ice | rtc.close (`ScreenSession`)
 ///   → stream.open {v, screen, socket, width, fps, bitrate, …} | stream.set | stream.key | stream.close   (`StreamSession`)
 ///   ← status, trusted, displays, ready, cursor, posted, rtc.*, stream.*, log
 ///
@@ -45,6 +45,7 @@ final class Service {
   private func status() -> [String: Any] {
     var status = Permissions.status()
     status["preview"] = true
+    status["videoReconfigure"] = true
     if options.clock { status["clock"] = ClockStrip.timing }
     return status
   }
@@ -96,6 +97,8 @@ final class Service {
       if let sdp = command["sdp"] as? String { watched(by: id)?.answer(sdp) }
     case "rtc.ice":
       watched(by: id)?.candidate(command)
+    case "rtc.configure":
+      watched(by: id)?.configure(command)
     case "rtc.close":
       watched(by: id)?.close()
       if session?.viewer == id { session = nil }

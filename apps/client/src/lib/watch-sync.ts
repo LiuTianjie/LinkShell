@@ -136,92 +136,6 @@ function extractImageBlocks(blocks: ContentBlock[] | undefined): {
   };
 }
 
-export function defaultWatchConfigOptions(agent: string, currentModel?: string, currentMode?: string): WatchConfigOption[] {
-  const lower = agent.toLowerCase();
-  if (lower.includes("codex")) {
-    const mode = currentMode || "workspace-write";
-    const model = currentModel || "gpt-5.4";
-    return [
-      {
-        id: "mode",
-        name: "沙盒与权限",
-        category: "mode",
-        current: mode,
-        currentLabel:
-          mode === "read-only" ? "只读沙盒" : mode === "full-access" ? "完全访问" : "工作区沙盒",
-        values: [
-          { value: "workspace-write", name: "工作区沙盒", description: "允许修改当前项目文件" },
-          { value: "read-only", name: "只读沙盒", description: "仅分析代码，写操作需确认" },
-          { value: "full-access", name: "完全访问", description: "无沙盒限制执行命令" },
-        ],
-      },
-      {
-        id: "model",
-        name: "模型",
-        category: "model",
-        current: model,
-        currentLabel: model,
-        values: [
-          { value: "gpt-5.4", name: "GPT-5.4" },
-          { value: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-          { value: "o4-mini", name: "o4-mini" },
-        ],
-      },
-    ];
-  }
-  if (lower.includes("claude")) {
-    const mode = currentMode || "default";
-    const model = currentModel || "claude-sonnet-4-6";
-    return [
-      {
-        id: "mode",
-        name: "权限模式",
-        category: "mode",
-        current: mode,
-        currentLabel:
-          mode === "acceptEdits"
-            ? "自动改文件"
-            : mode === "plan"
-              ? "仅规划 (Plan)"
-              : mode === "bypassPermissions"
-                ? "全自动 (Bypass)"
-                : "标准确认",
-        values: [
-          { value: "default", name: "标准确认", description: "敏感命令在手表确认" },
-          { value: "acceptEdits", name: "自动改文件", description: "自动允许修改文件" },
-          { value: "plan", name: "仅规划 (Plan)", description: "先出方案不改代码" },
-          { value: "bypassPermissions", name: "全自动 (Bypass)", description: "跳过权限弹窗" },
-        ],
-      },
-      {
-        id: "model",
-        name: "模型",
-        category: "model",
-        current: model,
-        currentLabel: model,
-        values: [
-          { value: "claude-sonnet-4-6", name: "Sonnet 4.6" },
-          { value: "claude-opus-4-6", name: "Opus 4.6" },
-          { value: "claude-haiku-4-5", name: "Haiku 4.5" },
-        ],
-      },
-    ];
-  }
-  return [
-    {
-      id: "mode",
-      name: "沙盒模式",
-      category: "mode",
-      current: currentMode || "default",
-      currentLabel: currentMode || "标准沙盒",
-      values: [
-        { value: "default", name: "标准沙盒" },
-        { value: "auto", name: "自动批准修改" },
-      ],
-    },
-  ];
-}
-
 export function cleanUserMessageText(raw: string): string {
   if (!raw) return "";
   let cleaned = raw.replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, "").trim();
@@ -561,12 +475,9 @@ export function buildClientWatchSnapshot(input: BuildClientWatchSnapshotInput): 
       configs[session.id] = mapped;
       const modeOpt = mapped.find((c) => c.category === "mode" || c.id === "mode" || c.id === "sandbox");
       if (modeOpt) modes[session.id] = modeOpt.currentLabel || modeOpt.current;
-    } else {
-      const fallback = defaultWatchConfigOptions(session.agent, session.model, view?.modeId);
-      configs[session.id] = fallback;
-      const modeOpt = fallback.find((c) => c.category === "mode" || c.id === "mode");
-      if (modeOpt) modes[session.id] = modeOpt.currentLabel || modeOpt.current;
     }
+    // Without the agent's own list the watch offers no settings: guessed models or modes would
+    // be refused by the host, or show a mode the session isn't in.
   }
 
   const agentTiers = Object.fromEntries((input.agents ?? []).map((agent) => [agent.id, agent.tier]));

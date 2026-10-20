@@ -1,5 +1,14 @@
 import Foundation
 
+/// An empty poll was cut short because frames are waiting to go out.
+struct WatchPollWoken: Error {}
+
+/// The gateway refused a poll's numbering (409), e.g. `request_out_of_order` or `poll_in_progress`.
+struct WatchPollRefused: LocalizedError {
+  let code: String
+  var errorDescription: String? { "网关连接失败（409 \(code)）" }
+}
+
 struct WatchMachine: Codable, Equatable, Identifiable {
   let id: String
   let signKey: String
@@ -26,6 +35,10 @@ final class WatchRelay {
   private(set) var ready = false
   private var loop: Task<Void, Never>?
   private var outbox: [String] = []
+  /// The poll in flight, and whether it carried nothing (so it can be cut short for new frames).
+  private var exchanging: Task<[String: Any], Error>?
+  private var exchangingEmpty = false
+  private var waking = false
   private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
   private var timeouts: [Int: Task<Void, Never>] = [:]
   private var nextID = 0
@@ -75,30 +88,59 @@ final class WatchRelay {
               !id.isEmpty, !token.isEmpty else { throw WatchLinkError("网关未返回连接凭证") }
         let endpoint = url.appendingPathComponent("v2/poll/\(id)")
         var ack = 0, requestNumber = 0
+        // An empty poll cut short for new frames: the gateway may or may not have seen it.
+        var cutShort: Int?
         while !Task.isCancelled && generation == epoch {
+          // A reply resumes the RPCs waiting on it; let them queue their next request (a chained
+          // call) so it goes out with this poll instead of behind one parked for up to `waitMs`.
+          await Task.yield()
+          guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
           requestNumber += 1
           let sending = outbox
           outbox.removeAll()
-          let body: [String: Any] = ["request": requestNumber, "ack": ack, "frames": sending, "waitMs": 1_000]
           var reply: [String: Any]?
-          for attempt in 0..<3 {
-            do { reply = try await post(endpoint, body: body, token: token); break }
-            catch {
+          var retries = 0, busyRetries = 0, reused = false
+          exchange: while true {
+            let body: [String: Any] = ["request": requestNumber, "ack": ack, "frames": sending, "waitMs": 1_000]
+            do {
+              reply = try await exchange(endpoint, body: body, token: token)
+              cutShort = nil
+              break exchange
+            } catch is WatchPollWoken {
+              // Nothing was in it, so nothing is lost or repeated: the next poll carries the new frames.
+              cutShort = requestNumber
+              break exchange
+            } catch let refused as WatchPollRefused where refused.code == "request_out_of_order" && cutShort == requestNumber - 1 {
+              // The poll cut short never reached the gateway: these frames take its number.
+              requestNumber -= 1
+              cutShort = nil; reused = true
+            } catch let refused as WatchPollRefused where refused.code == "request_conflict" && reused {
+              // It did arrive after all, just later, and holds that number: take the next one back.
+              requestNumber += 1
+              reused = false
+            } catch let refused as WatchPollRefused where refused.code == "poll_in_progress" && busyRetries < 40 {
+              // The gateway hasn't yet seen the poll cut short close; it frees within its wait.
+              busyRetries += 1
+              try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
               if Task.isCancelled || generation != epoch { throw CancellationError() }
               // Retry the exact numbered exchange; the gateway deduplicates it.
-              guard attempt < 2, (error as? URLError) != nil else { throw error }
-              try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
+              guard retries < 2, (error as? URLError) != nil else { throw error }
+              retries += 1
+              try await Task.sleep(nanoseconds: UInt64(retries) * 500_000_000)
             }
+            guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
           }
           guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
-          for entry in reply?["frames"] as? [[String: Any]] ?? [] {
+          guard let reply else { continue }
+          for entry in reply["frames"] as? [[String: Any]] ?? [] {
             guard let seq = entry["seq"] as? Int, let frame = entry["frame"] as? String else { throw WatchLinkError("网关数据格式无效") }
             if seq <= ack { continue }
             guard seq == ack + 1 else { throw WatchLinkError("连接数据缺失，请重连") }
             try receive(frame)
             ack = seq
           }
-          if let reason = reply?["closed"] as? String { throw WatchLinkError("连接已关闭（\(reason)）") }
+          if let reason = reply["closed"] as? String { throw WatchLinkError("连接已关闭（\(reason)）") }
         }
       } catch {
         if generation == epoch && !Task.isCancelled { fail(error) }
@@ -109,6 +151,7 @@ final class WatchRelay {
   func stop() {
     generation += 1
     loop?.cancel(); loop = nil
+    exchanging?.cancel(); exchanging = nil
     ready = false; outbox.removeAll()
     rejectPending(WatchLinkError("连接已断开，未确认操作请先刷新状态"))
   }
@@ -135,6 +178,25 @@ final class WatchRelay {
   private func enqueue(_ frame: [String: Any]) throws {
     guard outbox.count < 32 else { throw WatchLinkError("连接繁忙，请稍后重试") }
     outbox.append(String(decoding: try JSONSerialization.data(withJSONObject: frame), as: UTF8.self))
+    // A poll parked with nothing to send would hold this frame until it returns.
+    if exchangingEmpty, !waking, let exchanging {
+      waking = true
+      exchanging.cancel()
+    }
+  }
+
+  /// One poll, run apart from the loop so a new frame can cut short an empty one.
+  private func exchange(_ endpoint: URL, body: [String: Any], token: String) async throws -> [String: Any] {
+    let task = Task { try await self.post(endpoint, body: body, token: token) }
+    exchanging = task
+    exchangingEmpty = (body["frames"] as? [String])?.isEmpty ?? false
+    waking = false
+    defer { exchanging = nil; exchangingEmpty = false }
+    do { return try await task.value }
+    catch {
+      if waking { waking = false; throw WatchPollWoken() }
+      throw error
+    }
   }
   private func receive(_ text: String) throws {
     guard let frame = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], let type = frame["t"] as? String else { throw WatchLinkError("网关消息无效") }
@@ -188,6 +250,9 @@ final class WatchRelay {
     guard let response = response as? HTTPURLResponse else { throw WatchLinkError("网关没有响应") }
     if response.statusCode == 404 { throw WatchLinkError("网关尚不支持手表独立连接，请升级网关或使用 iPhone 模式") }
     if response.statusCode == 429 { throw WatchLinkError("连接过于频繁，请稍后重试") }
+    if response.statusCode == 409 {
+      throw WatchPollRefused(code: ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String ?? "")
+    }
     guard response.statusCode == 200 else { throw WatchLinkError("网关连接失败（\(response.statusCode)）") }
     guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw WatchLinkError("网关响应无效") }
     return object

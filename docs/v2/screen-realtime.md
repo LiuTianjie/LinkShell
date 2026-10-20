@@ -1,6 +1,6 @@
 # 远程桌面技术架构：Mac → iOS、WebRTC 与兼容回退
 
-> 现状核对：2026-10-11，按当前源码梳理。本文描述已实现的路径、配置和边界；不代表所有已安装版本均具备相同能力，也不把构建通过当作性能验收。
+> 现状核对：2026-10-19，按当前源码梳理。本文描述已实现的路径、配置和边界；不代表所有已安装版本均具备相同能力，也不把构建通过当作性能验收。
 >
 > 主路线：**ScreenCaptureKit → VideoToolbox 低延迟 H.264 → WebRTC 视频直连 → iOS 原生解码 → Metal 显示**。iOS 的透明 WebView 保留工具栏、手势和光标；失败依次回退网页 WebRTC 和强制 RPC 字节流。历史设计、回环数据与早期真机记录见 [历史存档](screen-realtime-history.md)。
 
@@ -51,9 +51,35 @@ Mac 视频直连成功后，画面不经过 Node Host 或 Gateway。直连使用
 3. 手机用 `forwardPort` 在自己的回环地址提供入口，经 `HostStreams` 转到 Host。新流可走通用 DataChannel 或 RPC。Web 客户端通过 `proxy.*` 读取同一页面，装入隔离 iframe，用限于该端口的 WebSocket 桥接转发。
 4. 原生 iOS 接收器或网页播放器请求 `/stream?video=1`。Host 通过 Unix Socket 向 Mac 发送 `rtc.open`；Mac 发 offer，接收端发 answer，双方交换 ICE 候选。
 5. 媒体连接建立后，视频走加密轨道；输入与光标走该连接旁的四条 DataChannel。观看服务 socket 继续负责信令、控制授权状态和生命周期。
-6. 关闭观看、切换显示器或断线时释放对应连接与输入状态。原生 iOS 退到后台会拆除媒体连接和显示调度，回到前台重新建立。屏幕由后来的观看者接手，不支持多人同时观看同一服务会话。
+6. 支持会话配置的 Host / Mac helper 在切换显示器、视频宽度或帧率上限时保留媒体连接，只调整采集。客户端离开屏幕页后暂停采集与输入，最多保留两分钟；期间返回复用同一接收器与连接。断线、后台、换电脑或换账号等情况会释放，详见下节。屏幕由后来的观看者接手，不支持多人同时观看同一服务会话。
 
 信令仍然依赖 Host 连接；已经打通视频并不意味着可以永久脱离 Host/Gateway 的会话管理。
+
+### 2.1 切屏与短暂离开的连接复用
+
+复用保留的是实际的 WebView / iframe、iOS 原生接收器、PeerConnection、视频轨道、DataChannel、信令 WebSocket 和端口转发，不只是缓存观看 URL。App 的 `ScreenSessionProvider` 在路由外持有观看层，Web 的 `ScreenSessionSlot` 在稳定的 DOM 位置持有 iframe。初始 URL 包含当时选择的显示器和清晰度，后续配置通过现有信令发送，不再因这些设置改变而替换页面或原生视图。通用字节流从中继升级为 direct，也不会单独触发健康媒体连接重建。
+
+| 操作或条件 | 当前行为 |
+|---|---|
+| 切换显示器、视频宽度、`maxFps` | 带内配置；Mac 串行停止/重建采集，保留 PC、source、track 和数据通道。重新出帧仍有短暂等待，但不重新协商穿透 |
+| 在 App / Web 工作区内离开屏幕页 | 隐藏并禁用观看层，暂停采集与重复帧定时器，释放按键/鼠标和保持唤醒的资源；iOS 同时暂停呈现 |
+| 两分钟内返回同一电脑的屏幕页 | 取消到期清理，在同一连接恢复采集；只有当前配置确认生效后才恢复输入 |
+| 暂停报错或两秒内没有暂停确认 | 客户端释放保留的观看层与转发，避免不可见页面继续采集 |
+| 离开达到 120 秒 | 客户端释放观看层与转发；Host 也独立限制暂停保留期，重复暂停请求不延长它 |
+| App 进入后台、Web 文档隐藏、Host / 屏幕 socket 断开、换电脑、换账号或退出登录 | 释放保留的会话；再次观看重新建立 |
+| 手动重试、切换 codec 或进入另一种播放回退路径 | 可以重新建立会话 |
+
+两分钟仅覆盖同一应用进程内的页面往返，不跨进程退出、系统杀后台或真正断网。保持原有 Web iframe 隔离、消息来源验证和 Host token 授权；socket 关闭仍立即清理，不能凭旧 token 复活连接。
+
+### 2.2 能力协商、配置确认与输入代次
+
+Host 在已经授权的 `/stream` socket 上发送 `{session:{t:"capabilities",…}}`：版本 1、`configure`、`pause` 和 `retainMs:120000`。视频路径只有在 Mac helper 报告 `videoReconfigure:true` 时才声明支持。客户端通过 `screen.configure` 发送完整目标状态：`requestId`、`display`、`width`、`maxFps` 和 `paused`；`maxFps` 可省略。宽度接受 640–3840 的整数或数字字符串，`native` 仍受 3840 上限约束。
+
+Host 验证、合并并串行应用配置。Mac 用 `rtc.configure` 调整采集与控制目标，完成后返回 `rtc.configured`；Host 才向客户端发送 `{session:{t:"configured",…}}`，包含实际宽高、帧率上限、暂停状态与 `generation`。快速连续切换以最新目标为准，过时异步回调不能重新启动采集或恢复输入。无效设置返回关联请求的错误，不要求拆掉仍健康的 PC。
+
+配置走 WebSocket，而鼠标、键盘可能走 DataChannel，两者没有共同的消息顺序。因此每次应用新配置都旋转输入代次；观看页等待当前请求确认后，在所有输入消息上带 `screenGeneration`。Mac 与 Host 兼容路径拒绝旧代次或缺少代次的输入，配置中和暂停时也拒绝输入，防止前一显示器上迟到的点击落到新显示器。旧客户端只有发送新的 `screen.configure` 后才启用这项检查。
+
+旧 Host / helper 没有对应能力时保留原有重连行为：切屏或改清晰度重新建立，离开页面即释放。兼容字节流可以保留 socket 与页面，但配置变化会重启其采集/解码；Linux 只有取得实际 X11 显示尺寸后才声明配置能力。`window.linkshellSession({active,display,width,maxFps})` 是共享观看页供外层 App / Web 使用的入口，确认和错误经既有消息桥返回。
 
 ## 3. Mac 发送端
 
@@ -62,7 +88,8 @@ Mac 视频直连成功后，画面不经过 Node Host 或 Gateway。直连使用
 `ScreenCapturer.swift` 使用 ScreenCaptureKit，输出 IOSurface 支撑的 `CVPixelBuffer`，格式为 8 位 NV12（Y + UV）、BT.709 视频范围，色彩空间为 sRGB。完整源帧和时间戳交给 libwebrtc；采集运行在独立的 `userInteractive` 队列。
 
 - 视频路径 `showsCursor=false`，指针单独传输；兼容路径的 `StreamCapture` 则把指针采进画面。
-- 更新帧率不重启采集。采集请求给目标帧率留 1.1 倍余量，后续管线限制实际输出。
+- 会话内自动帧率适配不重启采集。采集请求给目标帧率留 1.1 倍余量，后续管线限制实际输出。
+- 外部 `screen.configure` 可更换采集实例，但保留已协商的媒体连接。编码器工厂预留最高 120 fps 的能力，实际采集仍遵守当前请求与源显示器限制。
 - 静止画面停止产生新帧时，短期每 0.1 秒、随后每 0.5 秒重送最后画面，给关键帧和画质恢复留机会；这些重复帧不是新源内容。
 - `captureQueueDepth=5` 是采集可用表面的配置，不能直接解释成固定排队五帧。
 
@@ -154,7 +181,7 @@ Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负�
 | `cursor` | Mac → 接收端 | 无序、零重传；位置与事件序号 |
 | `shape` | Mac → 接收端 | 可靠、有序；光标图片、热点、缩放和缓存 ID |
 
-拖拽、按钮按住时的移动、与具体位置绑定的滚动等走可靠通道。Mac 的 `Control` 把显示器归一化坐标映射为系统坐标，用 CGEvent 注入鼠标与键盘。视频会话结束会释放持有的按钮和修饰键。
+拖拽、按钮按住时的移动、与具体位置绑定的滚动等走可靠通道。Mac 的 `Control` 把显示器归一化坐标映射为系统坐标，用 CGEvent 注入鼠标与键盘。切换显示器会重新建立控制坐标边界并清空光标形状缓存；配置、暂停或会话结束都会释放持有的按钮和修饰键。支持复用的会话同时检查输入代次，见 §2.2。
 
 本地光标可即时响应，远程窗口和文字变化仍需真实输入处理及返回视频。当前手势在 WebView、Mac 输入处理在主线程；没有实现完全独立于 UI 线程的输入系统。辅助功能未授权时只能观看。
 
@@ -167,7 +194,7 @@ Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负�
 | Android | WebView WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
 | Web | 隔离 iframe 内 WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
 
-iOS 最后一步用 `direct:false` 重新建立该屏幕转发并关闭视频轨道请求，不再依赖通用 DataChannel；其他流不受影响。经网关连接时这一步走加密中继，开发直连 Host 时则走其 RPC 连接。重试、重新进入屏幕或更换 Host 连接会重新选择起始路径；旧代次失败回调不会跳过下一条路径。原生首次无画面超时为 12 秒，持续断开超过 4 秒会失败。
+iOS 最后一步用 `direct:false` 重新建立该屏幕转发并关闭视频轨道请求，不再依赖通用 DataChannel；其他流不受影响。经网关连接时这一步走加密中继，开发直连 Host 时则走其 RPC 连接。两分钟内返回保留的会话会继续当前播放路径；手动重试或更换 Host 连接重新选择起始路径，过时失败回调不会跳过下一条路径。原生首次无画面等待为 25 秒，之后尝试记录 ICE 诊断并失败回退；持续断开超过 4 秒会失败。主动暂停期间不计算首次无画面的等待。
 
 Mac / Linux 的 H.264 字节流回退在 WebCodecs 不可用时会提示升级系统，不能承诺所有浏览器均可完成兼容回退。Windows 标准查看器直接使用 JPEG / Canvas，不要求 WebCodecs；iOS 原生接收尝试仍需先回退到 WebView。
 
@@ -189,7 +216,7 @@ Mac 兼容路径使用 `StreamCapture` / `StreamSession`，光标在画面里，
 | 3 | 1024 | 10 | 500 Kbps | 700 Kbps |
 | 4 | 854 | 8 | 260 Kbps | 380 Kbps |
 
-`q=low` 从档位 2 开始且不升到更高档；900 Kbps 是编码目标，不是含封装/加密/重传的网关线速硬上限。手机按网关路径附加该参数，当前 Web 入口未附加，不能把所有浏览器中继都说成固定从 12 fps 开始。视频宽度选择不改变这套兼容档位。
+`q=low` 从档位 2 开始且不升到更高档；900 Kbps 是编码目标，不是含封装/加密/重传的网关线速硬上限。手机按网关路径附加该参数，当前 Web 入口未附加，不能把所有浏览器中继都说成固定从 12 fps 开始。会话配置中的视频宽度和 `maxFps` 与当前兼容档位取较小值，只能收紧采集上限，不会把兼容路径抬升到视频轨道的清晰度或帧率。
 
 ## 8. 安全、部署与配置
 
@@ -217,6 +244,18 @@ Mac 兼容路径使用 `StreamCapture` / `StreamSession`，光标在画面里，
 - 2026-10-10 的原生构建、签名与安装启动检查属于交付验证；没有证明完整手势正确性、持续帧率和公网性能。
 - 已记录原生与网页/兼容路径约每秒或更短间隔出现短暂停顿，尚未定位或修复。一次原生诊断快照为 120 编码 fps、116 解码 fps、解码到呈现 p95 30.6 ms；这些平均吞吐和局部耗时不能证明显示节奏稳定。
 - 稳定 120 fps、稳定 4K/60、手机端 FlexFEC 恢复收益仍未通过验证。历史 Mac 回环保护包计数不能替代手机丢包恢复证据。
+
+### 2026-10-19：连接复用与暂停检查
+
+本轮功能检查覆盖切屏、改清晰度、暂停与恢复时是否保留连接，未把本机结果当作公网速度保证：
+
+| 检查环境 | 已观察到的结果 | 证据边界 |
+|---|---|---|
+| Mac 真实 ScreenCaptureKit 采集、原生 WebRTC 回环，两个显示器 | 全程只有一次 offer；切屏和改宽度后解码尺寸更新；暂停排空已编码帧后解码计数不再增长；拖拽释放、暂停和旧代次输入被拒绝；本机一次恢复观测约 752 ms | 使用干运行输入检查控制映射；恢复值含测试轮询等待，不是手机出光或公网端到端延迟 |
+| 真实浏览器、共享 viewer 与 React iframe 保留层；canvas 视频、模拟 Host 信令 | 解码约 28 fps；离开/返回、宽度 1920→1280、显示器 0→1 后 iframe、contentWindow 和接收 PC 身份相同；`screen.start`、HTTP、socket、offer、iframe load 均只有一次 | 证明浏览器会话持有与带内配置，未连接真实 Host / Mac 采集，不证明 NAT 穿透或真实桌面性能 |
+| iOS Core 单元测试与独立模拟器 renderer / connection 检查 | 13 项 Core 测试及呈现暂停/恢复检查通过；连接 fixture 在暂停/返回和配置后只建立一个 connection / socket | 模拟器与 fixture 不代替正常 App 的真机页面布局、输入、解码或 WAN 验收 |
+
+Mac 检查入口为 `apps/mac/tools/screen-reuse-check.mjs`。本轮仍需区分新源码与已安装版本；上述记录本身不表示组件已经发布。iOS / Android 真机完整页面往返、长时保留、公网与网络切换效果仍需验收。
 
 ### 2026-10-12：Chrome 的 H.264 profile 协商
 
@@ -329,12 +368,12 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 
 | 范围 | 入口 |
 |---|---|
-| Host 观看服务、信令、回退 | [screen.ts](../../packages/host/src/screen.ts)、[input.ts](../../packages/host/src/input.ts)、[screen-pacer.ts](../../packages/host/src/screen-pacer.ts) |
+| Host 观看服务、信令、回退 | [screen.ts](../../packages/host/src/screen.ts)、[screen-session.ts](../../packages/host/src/screen-session.ts)、[input.ts](../../packages/host/src/input.ts)、[screen-pacer.ts](../../packages/host/src/screen-pacer.ts) |
 | 通用数据直连与转发 | [direct.ts](../../packages/host/src/direct.ts)、[streams.ts](../../packages/client-core/src/streams.ts)、[preview.ts](../../apps/client/src/lib/preview.ts) |
 | Mac 协议、采集、编码、适配 | [Mac README](../../apps/mac/README.md)、[ScreenSession.swift](../../apps/mac/Sources/LinkShell/ScreenSession.swift)、[Tuning.swift](../../apps/mac/Sources/LinkShell/Tuning.swift) |
 | iOS 原生接收与 Metal | [模块 README](../../apps/client/modules/link-screen/README.md)、[ScreenConnection.swift](../../apps/client/modules/link-screen/ios/ScreenConnection.swift)、[ScreenMetalView.swift](../../apps/client/modules/link-screen/ios/ScreenMetalView.swift) |
-| 网页控件与手机回退 | [screen-viewer.ts](../../packages/host/src/screen-viewer.ts)、[screen-playback.ts](../../apps/client/src/lib/screen-playback.ts)、[screen-screen.tsx](../../apps/client/src/screens/screen-screen.tsx) |
-| Web iframe 观看入口 | [Video.tsx](../../apps/web/src/live/Video.tsx) |
+| 网页控件与手机会话/回退 | [screen-viewer.ts](../../packages/host/src/screen-viewer.ts)、[screen-session.tsx](../../apps/client/src/lib/screen-session.tsx)、[screen-playback.ts](../../apps/client/src/lib/screen-playback.ts)、[screen-screen.tsx](../../apps/client/src/screens/screen-screen.tsx) |
+| Web iframe 观看入口与保留层 | [Video.tsx](../../apps/web/src/live/Video.tsx)、[screen-session-slot.tsx](../../apps/web/src/live/screen-session-slot.tsx) |
 
 - [Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)：采集与 IOSurface 缓冲。
 - [Apple 低延迟 VideoToolbox](https://developer.apple.com/videos/play/wwdc2021/10158/)：硬件低延迟模式、码率适应与帧重排。

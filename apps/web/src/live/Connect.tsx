@@ -20,6 +20,7 @@ import { ErrorNotice, Modal, useJob } from "./common";
 import { Icon } from "../icons";
 import { Scan } from "./Scan";
 import { AccountMembership } from "./AccountMembership";
+import { desktopLogin, desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
 
 export function Connect({ close }: { close: () => void }) {
   const state = useStore(engine.state);
@@ -45,7 +46,45 @@ export function Connect({ close }: { close: () => void }) {
     setInvalid({});
     job.clear();
   }
-  const accountForm = state.account ? (
+  const accountForm = isDesktop ? (
+    <FieldGroup>
+      <Alert role="status">
+        <AlertTitle>{state.account ?? (state.accountUserId ? "已登录" : "连接其他电脑")}</AlertTitle>
+        <AlertDescription>
+          {state.accountUserId
+            ? "已使用 LinkShell 的同一账号。其他电脑登录此账号后，会自动显示在工作台。"
+            : "在系统浏览器中登录 iTool 账号，即可访问同一账号下的电脑。也可以使用配对码连接。"}
+        </AlertDescription>
+      </Alert>
+      {state.accountUserId ? (
+        <>
+          <AccountMembership key={state.accountUserId} userId={state.accountUserId} disabled={job.busy} />
+          <Button disabled={blocked} onClick={() => void job.run(async () => {
+            await engine.connectAccount();
+            close();
+          })}>
+            刷新账号电脑
+          </Button>
+          <Button variant="outline" disabled={job.busy} onClick={() => void job.run(desktopLogout)}>
+            退出 LinkShell 账号
+          </Button>
+          <p className="field-hint">账号与这台电脑的 LinkShell 服务共用。退出后，本机工作台和已配对的电脑仍可使用。</p>
+        </>
+      ) : (
+        <>
+          <Button disabled={blocked} onClick={() => void job.run(async () => {
+            await desktopLogin();
+            await engine.connectAccount();
+            close();
+          })}>
+            {job.busy && <LoaderCircle data-icon="inline-start" className="animate-spin" />}
+            {job.busy ? "请在浏览器中完成登录…" : "在浏览器中登录 / 注册"}
+          </Button>
+          <p className="field-hint">登录成功后自动返回工作台。电脑接入官方网关需要 Pro 订阅。</p>
+        </>
+      )}
+    </FieldGroup>
+  ) : state.account ? (
     <FieldGroup className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0">
       <Alert role="status">
         <AlertTitle className="break-words">{state.account}</AlertTitle>
@@ -251,7 +290,7 @@ export function Connect({ close }: { close: () => void }) {
           <FieldDescription id={`${id}-pairing-hint`}>
             {pairingLink
               ? "已读取配对链接，网关地址已自动填写。"
-              : "配对成功后，此浏览器会记住你的电脑。"}
+              : isDesktop ? "配对成功后，LinkShell 会记住你的电脑。" : "配对成功后，此浏览器会记住你的电脑。"}
           </FieldDescription>
           {invalid.pairing && (
             <FieldError id={`${id}-pairing-error`}>
@@ -301,7 +340,7 @@ export function Connect({ close }: { close: () => void }) {
           {job.busy ? "正在配对…" : "配对并连接"}
         </Button>
         <p className="field-hint">
-          清除网站数据后需要重新配对。自托管连接不会使用 iTool 登录凭证。
+          {isDesktop ? "配对保存在这台电脑的 LinkShell 中。" : "清除网站数据后需要重新配对。"}自托管连接不会使用 iTool 登录凭证。
         </p>
       </FieldGroup>
     </form>
@@ -309,8 +348,20 @@ export function Connect({ close }: { close: () => void }) {
   return (
     <Modal title="连接你的电脑" close={close}>
       <p className="muted modal-subtitle">
-        电脑保持运行，网页即可继续你的会话。
+        {isDesktop ? "从这台 Mac 继续对话、审批和控制远程电脑。" : "电脑保持运行，网页即可继续你的会话。"}
       </p>
+      {isDesktop && (
+        <Alert className="mb-4">
+          <AlertTitle>本机工作台无需登录</AlertTitle>
+          <AlertDescription>
+            <p>{state.localError ?? "本机服务已连接，可以直接管理这台 Mac 的会话。"}</p>
+            <div className="mt-2 flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={openDesktopManagement}>本机服务</Button>
+              {state.localError && <Button type="button" variant="ghost" size="sm" disabled={job.busy} onClick={() => void job.run(() => engine.refreshLocal())}>重新检测</Button>}
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
       {state.locked && (
         <Alert>
           <AlertTitle>连接正在另一个标签页中使用</AlertTitle>

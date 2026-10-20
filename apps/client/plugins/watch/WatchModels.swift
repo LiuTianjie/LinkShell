@@ -155,6 +155,30 @@ public struct WatchSnapshot: Codable, Hashable {
   public var sessions: [WatchSession]
   public var terminals: [WatchTerminal]
 
+  /// What the app shows, restored at launch.
+  public static let cacheKey = "LinkShellWatch.cachedSnapshot.v1"
+  /// What the watch face shows. Usually the same as `cacheKey`; while the watch connects on its
+  /// own, the phone may still bring this one up to date in the background (same computer only).
+  public static let widgetCacheKey = "LinkShellWatch.widgetSnapshot.v1"
+
+  /// Never synced: nothing has been heard from a computer yet.
+  public var isUnsynced: Bool { generatedAt <= 0 }
+
+  /// Older than this, a count on the watch face may no longer be true and is shown as such.
+  public func isStale(at now: Date = Date(), after limit: TimeInterval = 600) -> Bool {
+    !isUnsynced && now.timeIntervalSince1970 - generatedAt / 1000 > limit
+  }
+
+  /// The newest snapshot kept on this watch, or nil when it has never synced. A face must not
+  /// fall back to sample content: "1 待确认" on a watch that has never connected is a lie.
+  public static func stored(in shared: UserDefaults?, file: URL?, standard: UserDefaults = .standard) -> WatchSnapshot? {
+    let texts = [shared?.string(forKey: widgetCacheKey), shared?.string(forKey: cacheKey),
+                 file.flatMap { try? String(contentsOf: $0, encoding: .utf8) }, standard.string(forKey: cacheKey)]
+    return texts.compactMap { text in
+      text.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(WatchSnapshot.self, from: $0) }
+    }.filter { !$0.isUnsynced }.max { $0.generatedAt < $1.generatedAt }
+  }
+
   public static let empty = WatchSnapshot(
     version: 1,
     generatedAt: 0,
@@ -301,6 +325,19 @@ public struct WatchAgentBadge: View {
   }
 }
 
+/// The phone's colours in dark mode (`src/theme/brand-colors.json`), so a state reads the same
+/// on the wrist as in the app. `accentFill` is the light-mode accent: white text on it stays
+/// legible, which it does not on the paler dark-mode accent.
+public enum WatchPalette {
+  public static let accent = Color(red: 0x7d / 255, green: 0x95 / 255, blue: 0xff / 255)
+  public static let accentFill = Color(red: 0x4a / 255, green: 0x6c / 255, blue: 0xf7 / 255)
+  public static let waiting = Color(red: 1, green: 0x9f / 255, blue: 0x0a / 255)
+  public static let ok = Color(red: 0x30 / 255, green: 0xd1 / 255, blue: 0x58 / 255)
+  public static let danger = Color(red: 1, green: 0x45 / 255, blue: 0x3a / 255)
+  public static let diffAdd = Color(red: 0x7f / 255, green: 0xdd / 255, blue: 0xb4 / 255)
+  public static let diffDel = Color(red: 1, green: 0x9a / 255, blue: 0x9a / 255)
+}
+
 public enum WatchPhaseStyle {
   public static func label(for phase: String) -> String {
     switch phase {
@@ -329,11 +366,11 @@ public enum WatchPhaseStyle {
   public static func color(for phase: String) -> Color {
     switch phase {
     case "waiting_for_approval", "waiting_for_input":
-      return Color(red: 0.98, green: 0.65, blue: 0.10)
+      return WatchPalette.waiting
     case "failed":
-      return Color(red: 0.95, green: 0.30, blue: 0.30)
+      return WatchPalette.danger
     case "running", "starting":
-      return Color(red: 0.22, green: 0.84, blue: 0.42)
+      return WatchPalette.accent
     case "completed":
       return Color.white.opacity(0.72)
     default:

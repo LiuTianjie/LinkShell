@@ -1,0 +1,264 @@
+/* The bundled Mac workspace shares behavior with web, but keeps the mobile
+   app's quiet surfaces, generous controls and reading rhythm. These rules
+   intentionally sit outside Tailwind layers and only affect the native shell. */
+
+
+html[data-desktop] {
+  --radius-card: 18px;
+  --radius-row: 12px;
+  --radius-control: 9px;
+  --transition: 160ms cubic-bezier(0.2, 0, 0.2, 1);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+}
+
+html[data-desktop] body { overscroll-behavior: none; }
+html[data-desktop],
+html[data-desktop] * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--secondaryLabel) 20%, transparent) transparent; }
+html[data-desktop]:hover,
+html[data-desktop] *:hover,
+html[data-desktop] *:focus-within { scrollbar-color: color-mix(in srgb, var(--secondaryLabel) 36%, transparent) transparent; }
+/* WebKit uses a narrow transparent track instead of reserving a bright gutter. */
+@supports selector(::-webkit-scrollbar) {
+  html[data-desktop],
+  html[data-desktop] * { scrollbar-width: auto; scrollbar-color: auto; scrollbar-gutter: auto; }
+  html[data-desktop]::-webkit-scrollbar,
+  html[data-desktop] *::-webkit-scrollbar { width: 6px; height: 6px; }
+  html[data-desktop]::-webkit-scrollbar-track,
+  html[data-desktop] *::-webkit-scrollbar-track,
+  html[data-desktop]::-webkit-scrollbar-corner,
+  html[data-desktop] *::-webkit-scrollbar-corner { background: transparent; }
+  html[data-desktop]::-webkit-scrollbar-thumb,
+  html[data-desktop] *::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--secondaryLabel) 20%, transparent); background-clip: padding-box; }
+  html[data-desktop]:hover::-webkit-scrollbar-thumb,
+  html[data-desktop] *:hover::-webkit-scrollbar-thumb,
+  html[data-desktop] *:focus-within::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--secondaryLabel) 36%, transparent); }
+  html[data-desktop]::-webkit-scrollbar-thumb:hover,
+  html[data-desktop] *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--secondaryLabel) 52%, transparent); }
+}
+html[data-desktop] .desktop-root,
+html[data-desktop] .desktop-body { display: flex; min-width: 0; min-height: 0; height: 100dvh; overflow: hidden; }
+html[data-desktop] .desktop-root { background: var(--background); font-size: 13px; letter-spacing: -.012em; }
+html[data-desktop] .desktop-body { flex: 1; }
+html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 232px; height: 100%; padding-top: 104px; padding-bottom: 0; background: var(--sidebarBackground); border-right: 0; }
+html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: var(--sidebarBackground); }
+html[data-desktop] .desktop-sidebar-header { flex: none; padding: 8px 14px 18px; }
+html[data-desktop] .desktop-computer-picker { display: flex; justify-content: flex-start; gap: 10px; width: 100%; height: 62px; min-height: 62px; padding: 10px; border: 1px solid var(--separatorStrong); border-radius: 10px; background: var(--card); color: var(--label); text-align: left; box-shadow: none; transition: background var(--transition), border-color var(--transition); }
+html[data-desktop] .desktop-computer-picker:hover,
+html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: color-mix(in srgb, var(--cardRaised) 50%, var(--card)); border-color: color-mix(in srgb, var(--secondaryLabel) 28%, transparent); }
+html[data-desktop] .desktop-computer-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-copy > span { display: flex; align-items: center; gap: 4px; color: var(--secondaryLabel); font-size: 11px; font-weight: 400; }
+html[data-desktop] .desktop-connection-state { display: inline-flex; align-items: center; gap: 5px; color: var(--secondaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-computer-picker > svg { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-presence { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tertiaryLabel); }
+html[data-desktop] .desktop-presence[data-online] { background: var(--success); }
+html[data-desktop] .desktop-computer-menu { min-width: 238px; max-width: min(340px, calc(100vw - 32px)); }
+html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-menu small { color: var(--secondaryLabel); font-size: 10px; }
+html[data-desktop] .desktop-menu-empty { max-width: 230px; padding: 10px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-navigation { gap: 23px; padding: 0 14px 18px; }
+html[data-desktop] .desktop-navigation-group { gap: 7px; padding: 0; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-group-label"] { height: 20px; padding-inline: 11px; color: var(--secondaryLabel); font-size: 11px; font-weight: 600; letter-spacing: .015em; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu"] { gap: 3px; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { height: 38px; padding: 0 11px; gap: 11px; border-radius: 9px; color: var(--secondaryLabel); font-size: 14px; font-weight: 450; text-align: left; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] > svg { width: 18px; height: 18px; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"]:hover { background: var(--fillStrong); color: var(--label); }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] { background: var(--sidebarAccent); color: var(--label); font-weight: 600; box-shadow: none; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] > svg { color: var(--label); }
+html[data-desktop] .desktop-sidebar-footer { flex: none; gap: 0; padding: 14px; border-top: 1px solid var(--separatorStrong); }
+html[data-desktop] .desktop-account-row { display: flex; align-items: center; gap: 4px; }
+html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 34px; padding: 0 8px; gap: 9px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-account-row > [data-slot="button"] { height: 30px; width: 30px; border-radius: 8px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-appearance-menu { min-width: 172px; }
+
+/* Native titlebar owns the window title. This is only the workspace context. */
+html[data-desktop] .desktop-main { flex: 1; margin: 0; height: 100dvh; border: 0; border-left: 1px solid var(--separatorStrong); border-radius: 0; overflow: hidden; background: var(--plain); outline: none; container-type: inline-size; container-name: desktop-workspace; }
+html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused) { container-type: normal; }
+html[data-desktop] .desktop-main > .live-overview,
+html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overflow: auto; }
+html[data-desktop] .desktop-main .live-overview,
+html[data-desktop] .desktop-main .screens-page { padding: 22px max(24px, calc((100% - 1060px) / 2)) 28px; }
+html[data-desktop] .desktop-main .page-heading { justify-content: flex-end; min-height: 34px; margin-bottom: 16px; }
+html[data-desktop] .desktop-main .page-heading > div:has(> h1),
+html[data-desktop] .desktop-main .live-overview > section > div:first-child > div:has(> h1),
+html[data-desktop] .desktop-main .screens-page > div:first-child > div:has(> h1) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+html[data-desktop] .desktop-main .page-heading:not(:has(button, input, a, [role="combobox"])) { display: none; }
+html[data-desktop] .desktop-main .live-overview > section > div:first-child:has(h1),
+html[data-desktop] .desktop-main .screens-page > div:first-child:has(h1) { justify-content: flex-end; }
+html[data-desktop] .desktop-main .page-heading h1,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
+html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-size: 24px; line-height: 1.3; font-weight: 650; letter-spacing: -.045em; }
+html[data-desktop] .desktop-main .page-heading p,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
+html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 6px; font-size: 12px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="default"] { height: 34px; padding-inline: 14px; border-radius: 9px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 31px; height: 31px; border-radius: 9px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="plain"] { text-align: left; justify-content: flex-start; }
+html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
+html[data-desktop] .desktop-main [data-slot="select-trigger"] { height: 34px; border-radius: 8px; box-shadow: none; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer) { background: var(--card); border-color: var(--separatorStrong); }
+html[data-desktop] .desktop-main [data-slot="input-group"]:focus-within { border-color: var(--accent); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { min-height: 34px; gap: 3px; }
+html[data-desktop] .desktop-main [data-slot="tabs-trigger"] { padding-inline: 9px; font-size: 13px; }
+html[data-desktop] [data-slot="dropdown-menu-content"],
+html[data-desktop] [data-slot="select-content"] { padding: 5px; border-radius: 11px; }
+html[data-desktop] [data-slot="dropdown-menu-item"],
+html[data-desktop] [data-slot="dropdown-menu-radio-item"],
+html[data-desktop] [data-slot="select-item"] { min-height: 31px; padding-inline: 9px; gap: 8px; border-radius: 6px; font-size: 12px; }
+html[data-desktop] [data-slot="dialog-content"] { border-radius: 20px; padding: 25px; }
+
+/* Session summaries read as a diary, with a clear title and a quiet preview. */
+html[data-desktop] .desktop-main .session-overview { gap: 18px; }
+html[data-desktop] .desktop-main .session-overview > *,
+html[data-desktop] .desktop-main .session-overview-filters,
+html[data-desktop] .desktop-main [data-slot="tabs"],
+html[data-desktop] .desktop-main [data-slot="tabs-list"] { flex-shrink: 0; }
+html[data-desktop] .desktop-main .session-overview-heading { position: static; flex: none; min-height: 34px; margin: 0; padding: 0; background: transparent; border: 0; }
+html[data-desktop] .desktop-main .session-search { flex: 1; width: 100%; max-width: none; }
+html[data-desktop] .desktop-main .session-overview-tools { flex: none; margin-left: auto; }
+html[data-desktop] .desktop-main .session-overview-heading h1 { text-align: left; font-size: 20px; font-weight: 650; letter-spacing: -.025em; }
+html[data-desktop] .desktop-main .session-overview-heading > [data-slot="button"] { flex: none; }
+html[data-desktop] .desktop-main .session-group { overflow: visible; border: 0; border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .session-group > .list-section-title { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0; padding: 0 10px 6px; color: var(--secondaryLabel); font-size: 12px; font-weight: 600; line-height: 18px; }
+html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-size: 11px; font-weight: 400; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] { border: 0; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--warning); background: transparent; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title > span { color: var(--warning); background: transparent; }
+html[data-desktop] .desktop-main .session-group .list-row:last-child { border-bottom: 0; }
+html[data-desktop] .desktop-main .list-row { min-height: 64px; padding: 10px; border-top: 0; border-bottom: 1px solid var(--separator); border-radius: 0; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 24px minmax(120px, 1fr) 72px 62px; grid-template-rows: 21px 19px; column-gap: 12px; row-gap: 4px; align-content: center; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > * { margin-left: 0; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child { grid-row: 1 / 3; grid-column: 1; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; text-align: left; justify-content: flex-start; font-size: 14px; font-weight: 600; line-height: 21px; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row-detail { grid-row: 2; grid-column: 2; max-width: 100%; color: var(--secondaryLabel); font-size: 12px; line-height: 19px; }
+html[data-desktop] .desktop-main .list-row-meta { font-size: 11px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { grid-row: 2; grid-column: 3 / -1; max-width: 100%; text-align: right; }
+html[data-desktop] .desktop-main .list-row:has(> button:not(.list-row-title)) > .list-row-project { display: none; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: 100%; text-align: right; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-status { grid-row: 1; grid-column: 3; justify-self: end; }
+html[data-desktop] .desktop-main .list-row-status > span { font-size: 11px; line-height: 21px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child .agent-mark { width: 23px; height: 23px; border-radius: 7px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail):hover { background: var(--fill); }
+html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; color: var(--link); }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 24px; justify-self: end; padding-inline: 9px; font-size: 11px; background: var(--waitingSoft); border-color: transparent; color: var(--warning); }
+html[data-desktop] .desktop-main .list-row-more { border: 0; border-radius: 9px; }
+html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 24px minmax(180px, 1fr) minmax(70px, 110px) minmax(150px, 1.2fr); gap: 12px; min-height: 54px; }
+html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
+html[data-desktop] .desktop-main .computer-agent-label,
+html[data-desktop] .desktop-main .computer-agent-version,
+html[data-desktop] .desktop-main .computer-agent-auth { width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .computer-agent-label { font-size: 13px; line-height: 20px; }
+html[data-desktop] .desktop-main .list-section-title { padding: 6px 15px 8px; font-size: 12px; font-weight: 600; }
+html[data-desktop] .desktop-main [data-slot="badge"] { font-size: 11px; }
+html[data-desktop] .desktop-main .screen-row { min-height: 84px; padding: 16px 10px; margin: 0; border: 0; border-bottom: 1px solid var(--separator); border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--fill); }
+html[data-desktop] .desktop-main .screens-page > .border-t { border-top: 0; }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 39px; height: 39px; border-radius: 11px; background: var(--inset); }
+
+/* Chat typography is shared with the mobile app; tools keep a quieter rhythm. */
+html[data-desktop] .desktop-main .session-heading { min-height: 72px; padding: 12px 24px; gap: 16px; align-items: center; flex-wrap: nowrap; background: var(--plain); }
+html[data-desktop] .desktop-main .session-heading-context { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+html[data-desktop] .desktop-main .session-heading-copy { flex: 1; min-width: 0; }
+html[data-desktop] .desktop-main .session-back { flex: none; width: 28px; height: 28px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .session-title h1 { font-size: 18px; font-weight: 650; letter-spacing: -.02em; line-height: 1.4; text-align: left; }
+html[data-desktop] .desktop-main .session-subtitle { margin-top: 5px; font-size: 12px; }
+html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),
+html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; }
+html[data-desktop] .desktop-main .session-subtitle > span[title] { flex: 1; min-width: 0; }
+html[data-desktop] .desktop-main .session-actions { padding-top: 3px; }
+html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding: 31px max(27px, calc((100% - 770px) / 2)); }
+html[data-desktop] .desktop-main .conversation-history-top,
+html[data-desktop] .desktop-main .conversation-footer { padding-inline: max(27px, calc((100% - 770px) / 2)); }
+html[data-desktop] .desktop-main .markdown { font-size: 15px; line-height: 1.8; letter-spacing: -.005em; }
+html[data-desktop] .desktop-main .user-message { padding: 13px 18px; border-radius: 20px 20px 7px 20px; }
+html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.75; }
+html[data-desktop] .desktop-main .markdown h1 { font-size: 20px; }
+html[data-desktop] .desktop-main .markdown h2 { font-size: 17px; }
+html[data-desktop] .desktop-main .markdown h3 { font-size: 15px; }
+html[data-desktop] .desktop-main .tool-record > summary { min-height: 30px; padding: 5px 8px; font-size: 12px; }
+html[data-desktop] .desktop-main .tool-record,
+html[data-desktop] .desktop-main .plan-card,
+html[data-desktop] .desktop-main .notice-card,
+html[data-desktop] .desktop-main .diff-block { border-radius: 12px; }
+html[data-desktop] .desktop-main .tool-record[open] > summary { border-radius: 12px 12px 0 0; }
+html[data-desktop] .desktop-main .approval-card { padding: 19px; border: 1px solid color-mix(in srgb, var(--warning) 21%, var(--separator)); border-radius: 17px; box-shadow: 0 3px 12px var(--desktop-shadow); }
+html[data-desktop] .desktop-main .approval-icon { width: 35px; height: 35px; border-radius: 10px; }
+html[data-desktop] .desktop-main .composer-wrap { padding: 10px max(24px, calc((100% - 790px) / 2)) 18px; border-top: 0; background: var(--plain); }
+/* An empty message disables Send, not the editable composer around it. */
+html[data-desktop] .desktop-main .composer { height: auto; min-height: 104px; border: 1px solid var(--separatorStrong); border-radius: 15px; background: var(--card); opacity: 1; box-shadow: 0 2px 10px var(--desktop-shadow); }
+html[data-desktop] .desktop-main .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--separatorStrong)); box-shadow: 0 0 0 2px var(--accentSoft); }
+html[data-desktop] .desktop-main .composer textarea { min-height: 54px; padding: 12px 15px 6px; font-size: 14px; line-height: 1.7; }
+html[data-desktop] .desktop-main .composer-toolbar { padding: 3px 11px 10px; }
+html[data-desktop] .desktop-main .composer-caption { padding-top: 7px; color: var(--secondaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { border-radius: 50%; }
+html[data-desktop] .desktop-main .conversation-jump button { border-color: var(--separator); box-shadow: 0 4px 14px var(--desktop-shadow); }
+html[data-desktop] .desktop-main .welcome-live { max-width: 540px; gap: 18px; margin: auto; padding: 36px; }
+html[data-desktop] .desktop-main .welcome-live img { width: 70px; height: 70px; border-radius: 19px; }
+html[data-desktop] .desktop-main .welcome-live h1 { font-size: 27px; font-weight: 650; letter-spacing: -.045em; }
+
+/* Screen content owns its height and may enter the existing focus mode. */
+html[data-desktop] .desktop-main .screen-detail-page { gap: 14px; padding: 19px; overflow: auto; }
+html[data-desktop] .desktop-main .screen-detail-page > .screen-page { min-height: 0; border-color: var(--separatorStrong); border-radius: 14px; }
+html[data-desktop] .desktop-main .screen-detail-page > .screen-page.screen-focused,
+html[data-desktop] .desktop-main .screen-detail-page > .screen-page:fullscreen { border: 0; border-radius: 0; }
+html[data-desktop] .desktop-main .screen-toolbar { padding: 10px 12px; }
+html[data-desktop] .desktop-main .screen-display-mark { border-radius: 17px; }
+html[data-desktop] .desktop-main .screen-caption { min-height: 32px; font-size: 10px; }
+html[data-desktop] .desktop-main .screen-stage { min-height: 0; }
+html[data-desktop] .desktop-screen-settings { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 12px; border-bottom: 1px solid var(--separator); }
+html[data-desktop] .desktop-screen-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+html[data-desktop] .desktop-screen-settings > div > span { margin-right: 6px; color: var(--secondaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-native-screen .screen-stage { position: relative; }
+html[data-desktop] .desktop-main [data-slot="button"]:focus-visible,
+html[data-desktop] [data-slot="sidebar-menu-button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@container desktop-workspace (max-width: 880px) {
+  html[data-desktop] .desktop-main .session-actions { padding-top: 0; }
+  html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="sm"] { font-size: 12px; padding-inline: 8px; gap: 5px; }
+}
+@container desktop-workspace (max-width: 600px) {
+  html[data-desktop] .desktop-main .session-overview-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  html[data-desktop] .desktop-main .session-overview-tools { margin-left: 0; justify-content: flex-start; }
+  html[data-desktop] .desktop-main .computer-agent-row { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 4px 12px; }
+  html[data-desktop] .desktop-main .computer-agent-row > .agent-mark { grid-column: 1; grid-row: 1 / 3; }
+  html[data-desktop] .desktop-main .computer-agent-label { grid-column: 2; grid-row: 1; }
+  html[data-desktop] .desktop-main .computer-agent-version { grid-column: 3; grid-row: 1; max-width: 110px; }
+  html[data-desktop] .desktop-main .computer-agent-auth { grid-column: 2 / -1; grid-row: 2; }
+}
+@container desktop-workspace (max-width: 760px) {
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { display: none; }
+  html[data-desktop] .desktop-main .list-row-detail { grid-column: 2 / -1; }
+}
+
+@media (max-height: 760px) {
+  html[data-desktop] .desktop-navigation { gap: 17px; padding-bottom: 8px; }
+  html[data-desktop] .desktop-sidebar-footer { gap: 7px; padding-top: 8px; }
+}
+@media (max-height: 600px) {
+  html[data-desktop] .desktop-navigation { gap: 12px; }
+  html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { height: 35px; }
+  html[data-desktop] .desktop-sidebar-footer { padding-block: 8px; }
+  html[data-desktop] .desktop-main .session-heading { min-height: 67px; padding: 10px 20px; gap: 6px; }
+  html[data-desktop] .desktop-main .session-subtitle { margin-top: 4px; }
+  html[data-desktop] .desktop-main .composer-wrap { gap: 6px; padding-top: 7px; padding-bottom: 8px; }
+  html[data-desktop] .desktop-main .composer { min-height: 91px; }
+  html[data-desktop] .desktop-main .composer textarea { min-height: 48px; padding-top: 12px; padding-bottom: 6px; }
+  html[data-desktop] .desktop-main .composer-toolbar { padding-top: 0; padding-bottom: 7px; }
+  html[data-desktop] .desktop-main .composer-caption { padding-top: 4px; }
+  html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding-block: 20px; }
+}
+@media (max-width: 1080px) {
+  html[data-desktop] .desktop-main .live-overview,
+  html[data-desktop] .desktop-main .screens-page { padding-inline: 22px; }
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { column-gap: 8px; }
+}
+@media (max-width: 767px) {
+  html[data-desktop] .desktop-main { height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  html[data-desktop] .desktop-main .session-heading { padding-inline: 16px; }
+  html[data-desktop] .desktop-main .live-overview,
+  html[data-desktop] .desktop-main .screens-page { padding-inline: 16px; }
+  html[data-desktop] .desktop-main .list-row-detail { display: block; }
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 24px minmax(80px, 1fr) 70px 52px; column-gap: 7px; }
+  html[data-desktop] .desktop-main .composer-wrap { padding-inline: 15px; padding-bottom: 12px; }
+}

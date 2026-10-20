@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Empty,
   EmptyHeader,
@@ -53,6 +54,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowLeft,
   LoaderCircle,
   MessageSquare,
   Paperclip,
@@ -75,6 +77,8 @@ import {
   Badge,
   ErrorNotice,
   Modal,
+  SessionReady,
+  baseName,
   titleOf,
   useActions,
   useClient,
@@ -91,6 +95,7 @@ import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
+import { isDesktop } from "./desktop";
 
 type Panel =
   | "commands"
@@ -119,6 +124,7 @@ export function Session({
   const view = useClient((state) => state.views[session.id]);
   const ready = useClient((state) => state.ready[session.id]);
   const online = useClient((state) => state.status === "online");
+  const canInteract = online && !!ready;
   const loadingEarlier = useClient((state) => state.loadingEarlier[session.id]);
   const agent = useClient((state) =>
     state.machine?.agents.find((agent) => agent.id === session.agent),
@@ -180,6 +186,14 @@ export function Session({
     !!session.asyncQuestions?.length ||
     !!view?.turnActive ||
     !!notices?.length;
+  const hasContent = !!view && (view.items.length > 0 || footerActive);
+  const retrySession = () => {
+    if (!online) link.reconnectNow();
+    else {
+      actions.closeSession(session.id);
+      actions.openSession(session.id);
+    }
+  };
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [dismissedSuggestions, setDismissedSuggestions] = useState<string>();
@@ -261,6 +275,7 @@ export function Session({
     });
   }
   async function execute(text: string): Promise<boolean> {
+    if (!canInteract) return false;
     const parsed = parseCommand(text);
     const command =
       parsed && commands.find((item) => item.name === parsed.name);
@@ -346,6 +361,7 @@ export function Session({
     return true;
   }
   async function choose(command: Command) {
+    if (command.action && !canInteract) return;
     if (!(await setPanel(null))) return;
     if (command.action) {
       const executed = await job.run(() => execute(`/${command.name}`));
@@ -358,7 +374,7 @@ export function Session({
   async function send(now = false) {
     setSendingFile(undefined);
     const text = normalizeCommandText(draftRef.current).trim();
-    if (!online || (!text && !files.length && !blocks.length)) return;
+    if (!canInteract || (!text && !files.length && !blocks.length)) return;
     if (!files.length && !blocks.length && (await execute(text))) {
       if (draftRef.current === draft) setDraft("");
       return;
@@ -413,6 +429,9 @@ export function Session({
       (session.agent === "codex" &&
         !!parsed &&
         ["mcp", "apps", "status", "ps", "stop", "goal"].includes(parsed.name));
+    const current = store.getState();
+    if (current.status !== "online" || !current.ready[session.id])
+      throw new Error("会话连接正在恢复，输入和附件已保留，请同步完成后重试");
     const result = await actions.send(session.id, content, { now: immediate });
     if (result === "failed")
       throw new Error("发送失败，消息可在会话中重试；输入已保留");
@@ -424,6 +443,7 @@ export function Session({
     // Virtuoso's followOutput keeps us pinned to the newest message after send.
   }
   async function nativePanel(name: "mcp" | "apps") {
+    if (!canInteract) return;
     if (!(await setPanel(name))) return;
     void job.run(async () => {
       const result = await actions.send(
@@ -435,89 +455,197 @@ export function Session({
     });
   }
   return (
+    <SessionReady.Provider value={!!ready}>
     <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile }}>
       <div className="session-page live-session">
         <div className="session-heading">
-          <div>
-            <div className="session-title">
-              <h1 title={titleOf(session)}>{titleOf(session)}</h1>
-              <Badge state={session.state} />
-            </div>
-            <div className="session-subtitle">
-              <AgentMark agent={session.agent} size="md" />
-              <span>{session.agent}</span>
-              <span className="separator">/</span>
-              <span title={session.cwd}>{session.cwd}</span>
-              {session.worktree && (
-                <span className="branch-chip">{session.worktree.branch}</span>
-              )}
+          <div className={isDesktop ? "session-heading-context" : undefined}>
+            {isDesktop && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="session-back"
+                    aria-label={session.archived ? "返回已归档会话" : "返回对话列表"}
+                    onClick={() => navigate(session.archived ? "archive" : "home")}
+                  >
+                    <ArrowLeft />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{session.archived ? "返回已归档会话" : "返回对话列表"}</TooltipContent>
+              </Tooltip>
+            )}
+            <div className={isDesktop ? "session-heading-copy" : undefined}>
+              <div className="session-title">
+                <h1 title={titleOf(session)}>{titleOf(session)}</h1>
+                <Badge state={session.state} />
+              </div>
+              <div className="session-subtitle">
+                <AgentMark agent={session.agent} size="md" />
+                <span>{isDesktop ? agent?.label ?? session.agent : session.agent}</span>
+                <span className="separator">/</span>
+                {isDesktop ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0} className="session-directory" aria-label={`工作目录：${session.cwd}`}>
+                        {baseName(session.cwd) || session.cwd}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm break-all">{session.cwd}</TooltipContent>
+                  </Tooltip>
+                ) : <span title={session.cwd}>{session.cwd}</span>}
+                {session.worktree && (
+                  <span className="branch-chip">{session.worktree.branch}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="session-actions">
-            {/* Common panels live right on the bar — the web has the room, so
-                they don't hide inside a ••• menu. */}
-            <Button
-              variant="ghost"
-              size="sm"
-              data-active={panel === "changes" || undefined}
-              onClick={() => setPanel("changes")}
-            >
-              <Icon name="branch" />
-              变更
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              data-active={panel === "files" || undefined}
-              onClick={() => void changeFile()}
-            >
-              <Icon name="folder" />
-              文件
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              data-active={panel === "tasks" || undefined}
-              onClick={() => setPanel("tasks")}
-            >
-              <Icon name="server" />
-              任务
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              data-active={panel === "preview" || undefined}
-              onClick={() => setPanel("preview")}
-            >
-              <Icon name="computer" />
-              预览
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="会话命令"
-              title="会话命令"
-              onClick={() => setPanel("commands")}
-            >
-              <Icon name="terminal" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="会话设置"
-              title="模型与权限"
-              data-active={panel === "settings" || undefined}
-              onClick={() => setPanel("settings")}
-            >
-              <Icon name="settings" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="更多会话操作">
-                  •••
+            {isDesktop ? (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="查看变更"
+                      data-active={panel === "changes" || undefined}
+                      onClick={() => void setPanel("changes")}
+                    >
+                      <Icon name="branch" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>查看变更</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="浏览文件"
+                      data-active={panel === "files" || undefined}
+                      onClick={() => void changeFile()}
+                    >
+                      <Icon name="folder" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>浏览文件</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="打开预览"
+                      data-active={panel === "preview" || undefined}
+                      onClick={() => void setPanel("preview")}
+                    >
+                      <Icon name="computer" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>打开预览</TooltipContent>
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="查看变更"
+                  data-active={panel === "changes" || undefined}
+                  onClick={() => setPanel("changes")}
+                >
+                  <Icon name="branch" />
+                  变更
                 </Button>
-              </DropdownMenuTrigger>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="浏览文件"
+                  data-active={panel === "files" || undefined}
+                  onClick={() => void changeFile()}
+                >
+                  <Icon name="folder" />
+                  文件
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="查看任务"
+                  data-active={panel === "tasks" || undefined}
+                  onClick={() => setPanel("tasks")}
+                >
+                  <Icon name="server" />
+                  任务
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="打开预览"
+                  data-active={panel === "preview" || undefined}
+                  onClick={() => setPanel("preview")}
+                >
+                  <Icon name="computer" />
+                  预览
+                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="会话命令"
+                      onClick={() => setPanel("commands")}
+                    >
+                      <Icon name="terminal" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>会话命令</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="会话设置"
+                      data-active={panel === "settings" || undefined}
+                      onClick={() => setPanel("settings")}
+                    >
+                      <Icon name="settings" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>模型与权限</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label="更多会话操作">
+                      •••
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>更多会话操作</TooltipContent>
+              </Tooltip>
               <DropdownMenuContent align="end" className="w-56">
+                {isDesktop && (
+                  <>
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem onSelect={() => void setPanel("tasks")}>
+                        <Icon name="server" />任务
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void setPanel("commands")}>
+                        <Icon name="terminal" />会话命令
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void setPanel("settings")}>
+                        <Icon name="settings" />模型与权限
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuGroup>
                   {commands.some((command) => command.name === "goal") && (
                     <DropdownMenuItem onSelect={() => setPanel("goal")}>
@@ -525,12 +653,12 @@ export function Session({
                     </DropdownMenuItem>
                   )}
                   {commands.some((command) => command.name === "mcp") && (
-                    <DropdownMenuItem onSelect={() => nativePanel("mcp")}>
+                    <DropdownMenuItem disabled={!canInteract} onSelect={() => nativePanel("mcp")}>
                       MCP 服务
                     </DropdownMenuItem>
                   )}
                   {commands.some((command) => command.name === "apps") && (
-                    <DropdownMenuItem onSelect={() => nativePanel("apps")}>
+                    <DropdownMenuItem disabled={!canInteract} onSelect={() => nativePanel("apps")}>
                       应用与连接器
                     </DropdownMenuItem>
                   )}
@@ -540,15 +668,17 @@ export function Session({
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onSelect={() => setForkAt(null)}>
+                  <DropdownMenuItem disabled={!canInteract} onSelect={() => setForkAt(null)}>
                     分叉会话
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    disabled={!canInteract}
                     onSelect={() => void job.run(() => execute("/rename"))}
                   >
                     重命名
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    disabled={!canInteract}
                     onSelect={() =>
                       void job.run(() =>
                         actions.archive(session.id, !session.archived),
@@ -559,7 +689,7 @@ export function Session({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"
-                    disabled={session.state === "running"}
+                    disabled={!canInteract || session.state === "running"}
                     onSelect={() =>
                       void job.run(async () => {
                         let worktree: "keep" | "remove" | undefined;
@@ -624,7 +754,7 @@ export function Session({
             <Button
               variant="link"
               size="sm"
-              disabled={!online || job.busy}
+              disabled={!canInteract || job.busy}
               onClick={() =>
                 void job.run(() =>
                   session.driver === "remote"
@@ -641,20 +771,26 @@ export function Session({
           className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}
         >
           <div className="conversation-column">
-            {!ready && (
+            {!canInteract && hasContent && (
+              <div className="conversation-recovery" role="status">
+                <span>
+                  {online ? "正在同步最新消息，已载入的历史仍可阅读。" : "连接已断开，历史和草稿已保留。"}
+                </span>
+                <Button variant="link" size="sm" onClick={retrySession}>
+                  {online ? "重新加载" : "重新连接"}
+                </Button>
+              </div>
+            )}
+            {!ready && !hasContent && (
               <div className="conversation-loading" role="status">
-                <LoaderCircle className="conversation-loading-spinner" aria-hidden="true" />
-                <span className="conversation-loading-label">正在载入会话…</span>
+                {online && <LoaderCircle className="conversation-loading-spinner" aria-hidden="true" />}
+                <span className="conversation-loading-label">{online ? "正在载入会话…" : "等待电脑连接，草稿可继续编辑"}</span>
                 <Button
                   variant="link"
                   size="sm"
-                  disabled={!online}
-                  onClick={() => {
-                    actions.closeSession(session.id);
-                    actions.openSession(session.id);
-                  }}
+                  onClick={retrySession}
                 >
-                  重新加载
+                  {online ? "重新加载" : "重新连接"}
                 </Button>
               </div>
             )}
@@ -676,13 +812,13 @@ export function Session({
                   </EmptyHeader>
                 </Empty>
               )}
-            {ready && view && (view.items.length > 0 || footerActive) && (
+            {view && hasContent && (
               <Conversation
                 view={view}
                 sessionId={session.id}
                 agent={session.agent}
                 showAsyncQuestions={session.asyncQuestions === undefined}
-                online={online}
+                online={canInteract}
                 loadingEarlier={!!loadingEarlier}
                 loadEarlier={() => actions.loadEarlier(session.id)}
                 onFile={handleFile}
@@ -706,7 +842,7 @@ export function Session({
                     ))}
                     <AgentInteractions agent={session.agent} />
                     {view.turnActive &&
-                      online &&
+                      canInteract &&
                       !["idle", "error", "offline"].includes(
                         session.state,
                       ) && (
@@ -782,7 +918,7 @@ export function Session({
                       <Button
                         variant="ghost"
                         size="plain"
-                        disabled={job.busy || !online || item.pending}
+                        disabled={job.busy || !canInteract || item.pending}
                         onClick={() =>
                           void job.run(() =>
                             actions.sendQueuedNow(
@@ -797,7 +933,7 @@ export function Session({
                       <Button
                         variant="ghost"
                         size="plain"
-                        disabled={job.busy || !online || item.pending}
+                        disabled={job.busy || !canInteract || item.pending}
                         onClick={() =>
                           void job.run(async () => {
                             if (
@@ -840,7 +976,7 @@ export function Session({
                             .slice(0, index)
                             .some((entry) => !entry.pending) ||
                           job.busy ||
-                          !online ||
+                          !canInteract ||
                           item.pending
                         }
                         onClick={() =>
@@ -860,7 +996,7 @@ export function Session({
                       <Button
                         variant="ghost"
                         size="plain"
-                        disabled={job.busy || !online || item.pending}
+                        disabled={job.busy || !canInteract || item.pending}
                         onClick={() =>
                           void job.run(() =>
                             actions.unqueue(session.id, item.clientMessageId),
@@ -1115,7 +1251,7 @@ export function Session({
                               variant="ghost"
                               size="icon"
                               aria-label="停止当前回合"
-                              disabled={!online || job.busy}
+                              disabled={!canInteract || job.busy}
                               onClick={() =>
                                 void job.run(() => actions.cancel(session.id))
                               }
@@ -1127,7 +1263,7 @@ export function Session({
                           <Button
                             variant="link"
                             size="sm"
-                            disabled={!online || sendJob.busy || !draft.trim()}
+                            disabled={!canInteract || sendJob.busy || !draft.trim()}
                             onClick={() => void sendJob.run(() => send(true))}
                           >
                             插话
@@ -1141,7 +1277,7 @@ export function Session({
                             view?.turnActive ? "加入发送队列" : "发送消息"
                           }
                           disabled={
-                            !online ||
+                            !canInteract ||
                             sendJob.busy ||
                             (!draft.trim() && !files.length && !blocks.length)
                           }
@@ -1164,7 +1300,7 @@ export function Session({
                     ? "Enter 加入队列 · ⌘/Ctrl Enter 立即发送"
                     : "Enter 发送 · Shift Enter 换行 · / 命令"}
                 </span>
-                <span>{online ? "端到端加密" : "草稿已保留"}</span>
+                <span>{canInteract ? "端到端加密" : online ? "同步完成后可发送" : "草稿已保留"}</span>
               </div>
             </div>
           </div>
@@ -1231,7 +1367,7 @@ export function Session({
                     </p>
                     <Button
                       variant="outline"
-                      disabled={!online || job.busy}
+                      disabled={!canInteract || job.busy}
                       onClick={() => nativePanel(panel)}
                     >
                       刷新 /{panel}
@@ -1282,7 +1418,7 @@ export function Session({
             <ErrorNotice error={job.error} />
             <Button
               variant="default"
-              disabled={job.busy || !online}
+              disabled={job.busy || !canInteract}
               onClick={() =>
                 void job.run(async () => {
                   const created = await actions.forkSession(session.id, {
@@ -1309,6 +1445,7 @@ export function Session({
         )}
       </div>
     </TimelineNavigation.Provider>
+    </SessionReady.Provider>
   );
 }
 

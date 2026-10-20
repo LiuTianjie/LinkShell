@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Leave your desk. Your agents keep going.</strong><br />
-  Follow, steer and approve the coding agents running on your computer — from your phone.
+  Follow, steer and approve the coding agents running on your computer, from your phone.
 </p>
 
 <p align="center">
@@ -19,189 +19,126 @@
   <a href="https://liutianjie.github.io/LinkShell/">Website</a> ·
   <a href="https://liutianjie.github.io/LinkShell/docs/">Docs</a> ·
   <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> ·
-  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a> ·
+  <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android</a> ·
+  <a href="#install-on-your-computer">Mac</a> ·
   <a href="README_CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/linkshell?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-linkshell"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1120419&amp;theme=dark" alt="LinkShell on Product Hunt" width="250" height="54" /></a>
+  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-en.mp4"><img src="docs/site/assets/promo/poster-en.jpg" alt="LinkShell: a 50-second film recorded from the app" width="820" /></a><br />
+  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-en.mp4">Watch the film</a> (50 s, recorded from the app)</sub>
 </p>
 
-<p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell: a 40-second film" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">Watch the 40-second film</a></sub>
-</p>
+Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work, approve what they ask for, send a message into a running turn, and open the computer's screen when you need to. When you sit down again, the session is still in your terminal. Your code and the agent processes never leave your machine, and everything between phone and computer is end-to-end encrypted.
 
-Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work live, send a message any time, approve what they ask for, and hand the session back to your terminal when you sit down again. Your code and the agent processes never leave your machine, and the connection is end-to-end encrypted. **Supports iPhone Duo, standard iPhones and Android.**
+Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, against macOS, Linux or Windows.
 
-## Apple Watch
+## What it does
 
-LinkShell 2.3.33 adds an independently connected watchOS app: sign in with an
-existing email/password account or enter a computer's pairing code to view
-sessions, handle simple approvals and send short messages. iPhone companion mode
-remains available. Independent connections run while the app is active and need
-Gateway 0.6.20 or later. See [setup and validation boundaries](docs/v2/apple-watch.md).
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-follow.jpg" alt="A session on the phone: a plan, file edits and a permission request" width="100%" /><br />
+      <strong>Follow the work, approve with a tap</strong><br />
+      Replies stream in; plans, tool calls and diffs update live. Permission requests and questions come to the phone, the Lock Screen and the watch.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-queue.jpg" alt="A message typed while the agent is busy, about to be queued" width="100%" /><br />
+      <strong>Cut in while it is busy</strong><br />
+      Messages sent mid-turn wait in a queue. Reorder them, take one back, or steer one straight into the running turn. Stop a turn from the phone.
+    </td>
+    <td width="33%" valign="top">
+      <img src="docs/site/assets/promo/card-screen.jpg" alt="The phone in landscape showing the computer's screen" width="100%" /><br />
+      <strong>Your Mac, in your pocket</strong><br />
+      Open the real desktop, zoom in on the details and take the mouse and keyboard. Up to 3840 px wide, with iOS display support up to 120 Hz.
+    </td>
+  </tr>
+</table>
 
-## Made to adapt to iPhone Duo
+- **Lock Screen and Apple Watch.** A Live Activity shows progress and pending requests, with Deny / Allow on the card (iOS 17+). The watch app follows sessions, answers simple requests and sends short replies, on its own connection or through the iPhone. See [Apple Watch](docs/v2/apple-watch.md) and [Live Activities](docs/v2/live-activity.md).
+- **Hand sessions back and forth.** Start an agent with `linkshell claude` or `linkshell codex` and pass it between the terminal and the phone. Sessions opened in plain `claude` / `codex` or the Claude and Codex desktop apps can be followed too.
+- **Computer Use, from the phone.** Ask Codex to use the browser or desktop apps on your Mac and watch it live in a floating preview. See [Computer Use](docs/v2/computer-use.md).
+- **Questions, plans and goals.** Answer an agent's structured questions; use plan mode, `/goal`, slash commands and your skills. See [agent questions](docs/v2/agent-questions.md) and [commands and goals](docs/v2/commands-and-goals.md).
+- **Sub-agents, Workflows and background tasks.** Follow a Claude Workflow by phase, open each sub-agent's conversation, and check commands that outlive a reply. See [background tasks](docs/v2/background-tasks.md).
+- **Forks and worktrees.** Fork a session from any reply to try another direction, in the same directory or a new git worktree.
+- **A real terminal and localhost.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar, and your dev server's port on the phone over the same encrypted channel, with no open ports.
+- **Files, settings and connections.** Browse the project, send photos and files to the agent, change model, effort and permission mode, configure MCP servers and custom [ACP](docs/v2/acp-support.md) agents.
+- **Adaptive layouts.** iPhone Duo puts the conversation beside its changes or a preview, and adapts to folds and orientation; iPad uses a split view.
+- **Search and housekeeping.** Search sessions by title, preview, path, branch or agent; rename, archive and delete, synced to Codex and Claude's own records where they support it. See [session recovery](docs/v2/session-recovery.md).
 
-**Open up your workspace. Fold it and keep going.** LinkShell 2.3.7 supports iPhone Duo alongside standard iPhones.
+## Install on your computer
 
-<p align="center"><img src="docs/site/assets/promo/iphone-duo-expanded-dark.png" alt="LinkShell in dark mode on the iPhone Duo simulator: conversation and code changes side by side" width="960" /></p>
+**Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
 
-- **Expanded, work side by side.** With enough space, keep the conversation beside Changes or Preview without leaving the session.
-- **Folded, keep controls within reach.** The interface recognizes fold regions and adjusts to posture and orientation, reserving space for the composer and controls.
-- **A standard iPhone, the same workflow.** The layout returns to an appropriate single column as space changes, keeping the current session in place.
+**Windows: desktop preview** (Windows 10 1809+ / Windows 11 x64). Build an installer or portable ZIP from `apps/windows`; both bundle Node, CLI, Host, ConPTY and screen components. Direct H.264 video and JPEG fallback support viewing and control on the unlocked desktop. Packages are currently unsigned previews; see the [Windows guide](docs/windows-desktop.md) for installation and validation limits.
 
-<sub>Running app screenshot from the iPhone Duo simulator, in dark mode. [Read about adaptive layouts](https://liutianjie.github.io/LinkShell/docs/#d-iphone-duo).</sub>
-
-## Get started
-
-**Standalone Mac app (macOS 13+):** [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.46/LinkShell-0.10.46-x64.dmg). Drag into Applications, open and sign in. CLI, Host and Node are bundled and update together; no npm installation is needed. Coding agents still need their own installation and sign-in.
-
-The Mac app can launch at login and starts its background service automatically. Settings offer system, light and dark appearance (dark by default). Usage Statistics on Mac and phone offer all registered agents, their existing brand icons, token totals, daily charts and model breakdowns. Codex/Claude use native logs; other agents use usage reported to LinkShell. Missing data is shown explicitly. Counts do not represent billing or remaining quota. The Mac overview and Devices page can generate a pairing QR code and six-digit code; pairing without an account uses a self-hosted gateway.
-
-The CLI installation below is optional for Mac app users.
-
-The CLI requires **Node.js 22.13 or newer** on macOS, Linux or Windows; standalone desktop packages include Node. A Windows x64 desktop implementation is available to build from source, including tray, service management and screen/control support. See the [Windows guide](docs/windows-desktop.md) for build instructions and validation limits; Windows installers are not published yet.
+**macOS or Linux: the CLI** (Node.js 22.13 or newer).
 
 ```bash
 npm i -g linkshell-cli
 linkshell setup
 ```
 
-`linkshell setup` does everything once, in order: it starts the host in the background, gets the screen ready (on a Mac a LinkShell window takes you to the two permission switches and ticks them off), and connects your phone. Run it again any time; each part also has its own command.
-
-Then connect your phone ([iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)) one of two ways:
-
-- **Pro — the official gateway.** Run `linkshell login`, then sign in to the app with the same account. The app supports GitHub and Google sign-in too. Your computer shows up by itself; no QR codes.
-- **Free — your own gateway.** Run a gateway ([below](#run-your-own-gateway)), point the host at it and pair once:
-
-  ```bash
-  linkshell host --gateway wss://gw.example.com --daemon
-  linkshell pair    # scan the QR code in the app: Computers → Add computer
-  ```
-
-**Activate Pro in LinkShell.** Signed-in Free accounts can redeem an activation code from the phone app's Account page, the Mac app's account section, or the web workspace's Official account tab. On Apple Watch, use Connection Settings → Membership & activation codes in independent mode. Pro status and expiry update after redemption. [Get a code on Liandong Xiaopu](https://pay.ldxp.cn/item/7lgv1s); [iTool Settings → Upgrade to Pro](https://itool.tech/en/settings) remains available with the same account, including for renewing an active Pro membership.
-
-Start sessions from the phone, or launch agents from your terminal so you can hand them over any time:
-
-```bash
-linkshell claude    # Claude Code; send from the phone to take over, press any key here to take it back
-linkshell codex     # Codex; the terminal and the phone are live at the same time
-```
-
-On a Mac, watching and controlling the computer's screen from the phone needs two permissions. `linkshell setup` takes care of them; to do just that part, or to check it later:
-
-```bash
-linkshell screen      # macOS: a LinkShell window takes you to each switch and waits for it
-```
-
-On a Mac nothing else needs installing: the picture and the control are **LinkShell**'s, the signed standalone app or the helper shipped with the CLI. Its two permissions (Screen Recording, Accessibility) are switches named LinkShell that you turn on once; they hold whichever terminal starts the host and across upgrades. It needs macOS 13 or later, on Apple silicon or Intel. The CLI-managed helper includes both architectures; standalone DMGs have separate Apple Silicon and Intel downloads. Intel real-hardware capture and performance validation is pending. On Linux the screen can be watched (not controlled) and needs `ffmpeg` with an X11 display.
-
-<details>
-<summary>Other ways to install</summary>
+`linkshell setup` starts the host in the background, walks you through the two macOS permissions the screen needs (a LinkShell window takes you to each switch), and connects your phone. Run it again any time; each part also has its own command. Homebrew and an install script work too:
 
 ```bash
 brew install LiuTianjie/linkshell/linkshell
 curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh
 ```
 
-</details>
+On Linux the screen can be watched but not controlled, and needs `ffmpeg` with an X11 display. Intel Macs are supported; real-hardware capture performance on Intel is not yet validated.
 
-## What you can do
+The agents you use must be installed and signed in on the computer as usual (`claude`, `codex login`, `gemini`, `copilot login`, …). LinkShell runs them as you, with your login shell's environment, and never handles their accounts or API keys.
 
-<table>
-  <tr>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-follow.jpg" alt="A session on the phone with a plan, tool calls and an approval request" width="100%" /><br />
-      <strong>Watch it work, approve with a tap</strong><br />
-      Replies stream word by word; plans, tool calls and diffs update live. When it needs permission, or wants you to choose, the request comes to the phone: allow or deny in one tap.
-    </td>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-queue.jpg" alt="Queued messages above the composer" width="100%" /><br />
-      <strong>Cut in while it is busy</strong><br />
-      Messages sent mid-turn queue above the composer: reorder, take one back to rewrite, or send it now, straight into the running turn. Stop works on a turn running on the computer too. The session can have been opened in a terminal or in a desktop app.
-    </td>
-    <td width="33%" valign="top">
-      <img src="docs/site/assets/promo/card-screen.jpg" alt="The phone in landscape showing the computer's screen in trackpad mode" width="100%" /><br />
-      <strong>Your Mac, in your pocket</strong><br />
-      Open the desktop, zoom in on the details and take over the mouse and keyboard. Check a browser, work in your editor or handle a dialog, right from your phone.
-    </td>
-  </tr>
-</table>
+## Connect your phone
 
-### Your Mac, in your pocket
+Get the app: [iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest). Then either:
 
-**Bring the whole workspace with you.** An agent finishes a change; you open the actual desktop, check the result and take over wherever a human touch is needed.
+- **Pro: the official gateway.** Sign in on the computer (`linkshell login`, or in the Mac app) and in the phone app with the same account. The computer appears by itself.
+- **Free: your own gateway.** Run a gateway ([below](#run-your-own-gateway)), point the host at it and pair each phone once by QR code or six-digit code:
 
-- **4K detail. Ready for high refresh displays.** Native resolution mode offers a picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Zoom in to inspect code, small text and design details.
-- **Precision at your fingertips.** Move slowly to place the pointer exactly, or swipe quickly across the desktop. Choose trackpad control or touch the spot you want to click. Right click, scroll and drag are all within reach.
-- **Desktop shortcuts, one tap away.** Copy, paste, switch apps, open Mission Control, take a screenshot or send a function key. Compose longer text on the phone and send it over, including text from your clipboard.
-- **A whole desk on a small screen.** Switch between your Mac's displays, turn the phone to landscape, go full screen and pinch to zoom. Move between the big picture and the detail you need.
+  ```bash
+  linkshell host --gateway wss://gw.example.com --daemon
+  linkshell pair    # in the app: Computers → Add computer
+  ```
 
-Full control is available on macOS 13 or later. Windows desktop supports hardware H.264 over direct WebRTC, JPEG fallback and mouse/keyboard control on an unlocked desktop. Local capture and browser reception have been verified; physical-phone and additional-GPU validation remain pending (see the [Windows guide](docs/windows-desktop.md)). Linux supports viewing. Available resolution, refresh rate and responsiveness depend on both devices, the source display and the network.
+Every feature is free; Pro adds the hosted gateway (¥9.9 a month or ¥99 a year). Buy an activation code on [Liandong Xiaopu](https://pay.ldxp.cn/item/7lgv1s) and redeem it in the phone app's Account page, the Mac app, the web workspace, or [iTool Settings](https://itool.tech/en/settings). LinkShell Pro and iTool Pro are the same membership. See [Pro redemption](docs/v2/pro-redemption.md).
 
-### Computer Use, from your phone
-
-Ask Codex to use the browser or desktop apps on your computer, right from your phone, and preview what it is doing live in the conversation. Keep chatting and steering as you watch—no need to return to your desk.
-
-Drag the floating preview aside, tap to enlarge it, or collapse it to an icon. The last frame stays after the turn, and the preview returns when you reopen the session. If you close it, choose “Show computer preview” from the session menu to bring it back.
-
-Currently supports Codex on macOS with compatible Computer Use tools. See [setup and support](https://liutianjie.github.io/LinkShell/docs/#d-computer-use).
-
-<p align="center">
-  <img src="docs/site/assets/promo/computer-use.png" alt="Computer Use on the phone: a live preview floats above the Codex conversation" width="340" />
-</p>
-
-### More features
-
-- **Answer its questions.** Codex (including Desktop asynchronous questions), Claude, Cursor and Grok can send structured questions to your phone. Sessions show when input is needed; answer from the question card or skip. Free text is available when the agent supports it; Cursor's extension accepts choices only. See [agent question support](docs/v2/agent-questions.md).
-- **Forks and worktrees.** Fork a session from any reply to try another direction — in the same directory or in a new git worktree that leaves your working tree alone.
-- **Sub-agents, Claude Workflows and long sessions.** Follow a Workflow by phase, open each Agent's conversation and tool results, and return to a background run from the bar above the composer. The main conversation keeps a compact summary; Workflow agents stay in their run's details instead of repeating as conversation cards. Consecutive finished Agent steps fold together. The button beside the session title lists its Workflows and sub-agents. Long sessions open at their latest turns; project files are there to browse and read.
-- **Commands and persistent goals.** Type `/`, tap the command button beside the composer, or open Commands from the session menu to search commands and skills without losing an unsent draft. Codex and Claude Code support `/goal` and a dedicated goal screen. Codex can pause, resume and set a token budget; Claude can set or clear a completion condition. Available controls depend on the agent installed on your computer.
-- **Background tasks.** `/tasks` and the session header show commands that outlive a reply, including output, duration and exit code. Stop one Codex task independently; Claude Bash / Monitor tasks are viewable, with stopping handled on the computer. Tasks stay separate from sub-agents and Workflows and recover after reconnecting.
-- **Different screen sizes.** Adaptive layouts support iPhone Duo and standard iPhones, adjusting the conversation, composer and controls to the available space.
-- **A real terminal.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar; they keep running when you close the app. Touch scrolling retains momentum in both shell history and mouse-tracking applications such as Claude Code.
-- **localhost on your phone.** Your dev server's port over the same encrypted channel, with hot reload and a full-screen mode. No open ports, no shared Wi-Fi.
-- **Settings that travel.** Model, reasoning effort, permission mode, fast mode — whatever the agent offers; the phone shows what a session on the computer is really using.
-- **Agent connections and tools.** Configure MCP servers and additional working directories, complete an agent's login and approval forms, or add a custom ACP connection from the phone. Agents that support edit suggestions can propose changes from the file editor for you to preview and apply. See [ACP capabilities and validation](docs/v2/acp-support.md) for the supported and experimental features.
-- **Find a session.** Search the home page by title, latest message preview, project path, worktree branch or agent. Results include archived sessions and terminals on the selected computer.
-- **Tidy sessions.** Codex rename, archive and delete update its native records; Claude rename and delete do too, while Claude and other ACP archives stay in LinkShell. Archived Codex sessions leave the active list and remain readable without being restored. Projects and sessions show the current git branch. A computer you no longer use is removed with a long press under My computers.
-- **Recover session history.** Restarting the host rechecks activity instead of retaining stale running flags. Missing or unreadable history shows an explanation while preserving cached messages. See [session recovery and ACP compatibility](docs/v2/session-recovery.md).
-- **Files from your phone.** Send photos and files straight into the project on your computer, ready for your agent to use.
+The gateway also serves a browser client at its root URL, with the same pairing or account sign-in. See [the web client](apps/web/README.md).
 
 ## Agents
-
-LinkShell runs the agents installed on your computer with their existing authentication and provider configuration. Codex supports ChatGPT login, API keys and custom providers, including configuration managed by CC Switch; a Codex login is not required by LinkShell. It never handles agents' accounts or API keys. Restart the host after changing its shell environment so new values are inherited.
 
 | Agent | Mode | What you get |
 | --- | --- | --- |
 | **Codex** | Shared | `linkshell codex` and the phone are live at once; either side can send, interrupt and approve |
-| **Claude Code** | Handoff | Claude's own UI at your desk; a message from the phone takes over, any key on the computer takes it back |
+| **Claude Code** | Handoff | Claude's own UI at your desk; a message from the phone takes over, any key at the computer takes it back |
 | **Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok** | Remote | Start and continue sessions from the phone over the [Agent Client Protocol](https://agentclientprotocol.com): live output, approvals, modes and models |
 | **Any CLI** | Terminal | A terminal on the computer, viewed and typed into from the phone |
 
-A Claude session opened in the Claude desktop app can be followed live and continued from the phone too. The app can't be handed a session, though: it won't show what the phone did until it is restarted. For handing a session back and forth, start it with `linkshell claude`.
+Codex works with ChatGPT sign-in, an API key or a custom provider (including one managed by CC Switch). A Claude session opened in the Claude desktop app can be followed and continued from the phone, but the desktop app only shows what the phone did after a restart; use `linkshell claude` to hand a session back and forth.
 
-What each agent supports from the phone:
+<details>
+<summary>What each agent supports from the phone</summary>
 
-| | Codex | Claude Code | Gemini, Copilot and the others |
+| | Codex | Claude Code | Gemini, Copilot and others |
 | --- | --- | --- | --- |
-| A message into a running turn | joins the turn | joins the turn | stops the turn, then runs |
-| Fork a session, or from a reply | native | native | made by LinkShell: the conversation is handed over as text |
+| A message during a running turn | joins the turn | joins the turn | stops the turn, then runs |
+| Fork a session, or from a reply | native | native | by LinkShell: the conversation is passed as text |
 | Sessions in git worktrees | yes | yes | yes |
 | Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
-| Questions for you (choices, free text) | yes, including Desktop asynchronous questions | yes | Cursor choices, Grok questions, standard ACP forms |
+| Questions for you | yes, including Desktop asynchronous questions | yes | Cursor choices, Grok questions, standard ACP forms |
 | Plan mode | a setting on the phone | a permission mode | whatever modes the agent offers |
 | Persistent goals | set, pause, resume, clear, token budget | set and clear, when `/goal` is available | not integrated |
 | Background commands | status, output, stop one task | Bash / Monitor status and output | not integrated |
 
+</details>
+
 ## Run your own gateway
 
-A gateway only relays encrypted frames and brokers pairing, so it needs very little. Yours is the same program as the official one, without the accounts: instead of signing in, you pair each phone once, with a QR code or a six-digit code. Either:
+A gateway relays encrypted frames and brokers pairing; it never sees your code or conversations. A self-hosted one is the same program as the official gateway, without accounts.
 
 ```bash
-# on a server, with the CLI
+# with the CLI
 linkshell gateway --port 8787 --daemon
 
 # or with Docker
@@ -209,85 +146,72 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
   -v linkshell-gateway:/data nickname4th/linkshell-gateway
 ```
 
-All it keeps is one SQLite file (public keys, and which phone is paired with which computer): `~/.linkshell/relay.db` with the CLI, `/data/relay.db` in the container, which is what the volume is for. Keep the file and phones stay paired.
-
-On the internet, put an HTTPS reverse proxy in front (Caddy, Nginx) and use `wss://your-domain`. For use at home only, the gateway can run on the same computer: `linkshell host --gateway ws://<LAN-IP>:8787`. More in the [deployment guide](docs/deploy.md).
+Its only state is one SQLite file of public keys and pairings: `~/.linkshell/relay.db` with the CLI, `/data/relay.db` in the container. Keep it and phones stay paired. On the internet, put an HTTPS reverse proxy in front and use `wss://your-domain`; at home the gateway can run on the same computer (`linkshell host --gateway ws://<LAN-IP>:8787`). See the [deployment guide](docs/deploy.md).
 
 ## Security
 
-- **End-to-end encryption.** Phone and computer encrypt everything between them; the official gateway and yours only see ciphertext. A direct connection between the two is set up over that encrypted channel and encrypted itself.
-- **Pairing grants access.** A paired phone can do what you can do in a terminal on that computer. Pair only devices you trust, and keep pairing codes to yourself.
-- **Your agents, your accounts.** Agents run as your user, with your login shell's environment and their own sign-in. The Pro subscription only covers the gateway.
-- **Local state.** Sessions and history are kept in `~/.linkshell` on the computer; pairings survive restarts.
+- **End-to-end encryption.** Phone and computer agree on keys signed by their long-term identities; every frame after that is sealed with XChaCha20-Poly1305. Gateways relay ciphertext only. The direct peer-to-peer channel for the screen and previews is negotiated over that tunnel.
+- **Pairing grants access.** A paired phone can do what you can do in a terminal on that computer. Pair only devices you trust and keep pairing codes to yourself; remove a phone with `linkshell devices remove <name>`.
+- **Your accounts stay yours.** Agents run as your user with their own sign-in. Pro covers the gateway only.
+- **Local state.** Sessions, history and keys live in `~/.linkshell` on the computer (`LINKSHELL_HOME` moves it).
+
+Architecture details: [design](docs/v2/architecture.md) and [remote desktop](docs/v2/screen-realtime.md).
 
 ## Commands
 
 | Task | Command |
 | --- | --- |
-| Set a computer up, once: the host, the screen's permissions, your phone | `linkshell setup` |
-| Start LinkShell in the background | `linkshell host --daemon` |
-| Open the native Mac status app | `linkshell app` |
-| See agents, sessions and the gateway | `linkshell host status` |
-| Stop it | `linkshell host stop` |
+| Set up a computer: host, screen permissions, phone | `linkshell setup` |
+| Start the host in the background / see it / stop it | `linkshell host --daemon` / `linkshell host status` / `linkshell host stop` |
 | Pair a phone (own gateway) | `linkshell pair` |
-| See or remove paired phones | `linkshell devices` / `linkshell devices remove <name>` |
+| List or remove paired phones | `linkshell devices` / `linkshell devices remove <name>` |
 | Use the official gateway (Pro) | `linkshell login` / `linkshell logout` |
-| Claude Code / Codex, shareable | `linkshell claude` / `linkshell codex` (arguments pass through) |
+| Claude Code / Codex, shareable with the phone | `linkshell claude` / `linkshell codex` (arguments pass through) |
+| Set up or check the screen | `linkshell screen` / `linkshell screen --check` |
+| Open the Mac status app | `linkshell app` |
 | Run a gateway | `linkshell gateway [--port 8787] [--daemon]` |
-| Set up watching and controlling the screen | `linkshell screen` |
 | Check the environment | `linkshell doctor` |
-| Upgrade | `linkshell upgrade` |
+| Upgrade (restarts a running host, keeping pairings and history) | `linkshell upgrade` |
 
-Standalone app users update from the app’s Updates page; the optional command installed by the app opens the same updater. CLI, Host and Node update with the app, while account and pairing data stay outside its bundle. See the [desktop guide](docs/mac-desktop.md).
+The standalone Mac app updates itself from its Updates page.
 
-For npm/Homebrew installations, from CLI 0.10.40, `linkshell upgrade` also restarts an outdated running host using the newly installed CLI. Login, pairings, computer identity and session history are retained, and clients reconnect automatically. Running agent turns and terminal processes stop during the restart; a stopped host stays stopped. Even if the CLI is already current, the command checks the running host. When upgrading from an older CLI, run `linkshell upgrade` once more after installation to update the host with this new behavior.
-
-The app's computer picker now lets you give each computer a name, saved on that phone, like the browser-local names in the web workspace. Clear the name to restore the host's name. iOS Live Activities support task browsing and separate cards for multiple computers. Approvals, questions, failures and completion can alert through the separate [ActivityKit push service](docs/v2/live-activity-push.md); opening an action reconnects to its exact computer and request. Home cards keep pending questions and approval controls compact.
-
-> **Coming from 1.x?** 2.0 changed both the app and the computer side: upgrade both and pair again. `linkshell start` and the 1.x app are no longer supported (CLI 0.10 and gateway 0.6 removed them).
+> **Coming from 1.x?** 2.0 changed both the app and the computer side: upgrade both and pair again.
 
 ## Development
 
-A pnpm workspace; Node.js 22.13 or newer (CI uses 22).
+A pnpm workspace; Node.js 22.13 or newer.
 
 ```bash
 git clone https://github.com/LiuTianjie/LinkShell.git
 cd LinkShell
 pnpm install
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test
+pnpm build && pnpm typecheck && pnpm test
 ```
 
-On macOS, the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows, it builds the native desktop and screen helper with .NET Framework 4.8. For TypeScript-only builds, use `pnpm -r --filter "./packages/*" build`; Linux CI uses this command and excludes `@linkshell/mac` from tests.
-
-| Directory | What it is |
-| --- | --- |
-| `packages/wire` | Session model, JSON-RPC methods, end-to-end encryption, relay client |
-| `packages/host` | The host daemon: agent drivers (Codex app-server, Claude handoff, ACP), terminals, ports, screen |
-| `packages/gateway` | The gateway, official and self-hosted: the relay that routes encrypted frames and brokers pairing |
-| `packages/cli` | `linkshell`: host, pairing, agent launchers, gateway, login |
-| `packages/client-core` | Client state and timeline shared by the apps |
-| `apps/client` | The app: Expo / React Native for iOS and Android |
-| `apps/mac` | LinkShell.app (`@linkshell/mac`): the Mac side of the screen — capture, WebRTC video, input, permissions |
-| `apps/client/modules/link-screen` | iOS native screen receiver: WebRTC decode, latest-frame mailbox, Metal; existing WebView controls |
-| `docs/site` | Website and installer (`python3 scripts/build-site-pages.py` after editing; `scripts/site-promo-assets.sh` cuts its film and clips) |
-
-The [remote-desktop architecture and diagrams](docs/v2/screen-realtime.md) describe the Mac/iOS media path, both WebRTC connections, fallback and validation limits. Native receiver changes require a new iOS binary; Metro reloads cannot install them. A 120 fps ceiling is not sustained display performance: stable 120 fps, stable 4K/60 and real-device weak-network gains remain unproven, and the recorded periodic stutter is still unresolved.
-
-To work on the app, run these from the repository root in separate terminals. Give the development host its own state directory so it does not share sessions or configuration with your installed host:
+On macOS the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows it builds the desktop and screen helper with .NET Framework 4.8; `pnpm -r --filter "./packages/*" build` builds the TypeScript packages only (what Linux CI runs). To work on the app, run a development host with its own state directory, then Metro:
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
 pnpm dev:app
 ```
 
-Focused bug reports and pull requests are welcome. Include the CLI version, OS, agent and a minimal reproduction, and redact pairing codes and tokens. See the [release SOP](docs/release-sop.md) for publishing.
+| Directory | What it is |
+| --- | --- |
+| `packages/wire` | Session model, JSON-RPC methods, end-to-end encryption, relay client |
+| `packages/host` | The host daemon: agent drivers (Codex, Claude, ACP), terminals, ports, screen |
+| `packages/gateway` | The relay: routing encrypted frames, pairing, accounts |
+| `packages/cli` | `linkshell`: host, pairing, agent launchers, gateway, login |
+| `packages/client-core` | Client state and timeline shared by the apps |
+| `apps/client` | The iPhone, Apple Watch and Android app (Expo / React Native) |
+| `apps/mac` | LinkShell.app: screen capture, video, input, permissions, desktop workspace |
+| `apps/web` | The browser client served by the gateway |
+| `docs/site` | The website and the install script |
+
+Focused bug reports and pull requests are welcome. Include the CLI version, OS, agent and a minimal reproduction, and redact pairing codes and tokens. Releases follow the [release SOP](docs/release-sop.md).
 
 ## Support the project
 
-Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and Anthropic-compatible interfaces.
+Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and Anthropic-compatible interfaces. LinkShell is also on [Product Hunt](https://www.producthunt.com/products/linkshell).
 
 <details>
 <summary>Buy the author a coffee</summary>
@@ -299,10 +223,6 @@ Sponsored by [AI18N](https://ai18n.chat/), an AI API gateway with OpenAI- and An
 
 </details>
 
-[Product Hunt](https://www.producthunt.com/products/linkshell)
-
 ## License
 
-[MIT](LICENSE).
-
-The gateway also serves the browser client at its root URL. Self-hosted gateways use pairing without Supabase; the official gateway enables account access. See [Web client](apps/web/README.md). The Screens page offers a searchable computer list with editable names saved in the current browser. Opening a desktop goes directly to its own viewing page, with display, quality and fullscreen controls.
+[MIT](LICENSE)

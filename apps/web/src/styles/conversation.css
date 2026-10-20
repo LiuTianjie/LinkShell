@@ -1058,6 +1058,19 @@
   }
 
   /* ---- Empty / loading states ---- */
+  .conversation-recovery {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--separator);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    line-height: 1.5;
+  }
   /* Loading and empty states fill the column so the composer stays pinned to
      the bottom instead of floating up to meet the short content. */
   .conversation-loading {

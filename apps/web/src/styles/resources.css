@@ -427,6 +427,98 @@
     overflow: hidden;
     background: var(--plain);
   }
+.resource-preview.port-preview-focused {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--plain);
+  }
+.port-preview-tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    min-height: 41px;
+    padding: 5px 8px 0;
+    border-bottom: 1px solid var(--separator);
+    background: var(--inset);
+  }
+.port-preview-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+.port-preview-tab {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+    min-width: 118px;
+    max-width: 240px;
+    padding-right: 4px;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    color: var(--secondaryLabel);
+  }
+.port-preview-tab[data-active] {
+    border-color: var(--separator);
+    background: var(--plain);
+    color: var(--label);
+  }
+.port-preview-tab-trigger {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 7px 0 10px;
+    border-radius: 7px 0 0 0;
+    text-align: left;
+    white-space: nowrap;
+  }
+.port-preview-tab-trigger > svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+  }
+.port-preview-tab-trigger > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    font-weight: 500;
+  }
+.port-preview-tab-trigger > small {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--secondaryLabel);
+  }
+.port-preview-tab-close {
+    flex-shrink: 0;
+    color: var(--secondaryLabel);
+  }
+.port-preview-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+.port-preview-panel[hidden] {
+    display: none;
+  }
 .resource-preview-toolbar {
     display: flex;
     align-items: center;

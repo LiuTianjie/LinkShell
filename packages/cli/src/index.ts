@@ -32,6 +32,22 @@ program.command("desktop", { hidden: true })
   .option("--action <action>", "snapshot, start, stop or restart", "snapshot")
   .action(async (options) => { const { runDesktop } = await import("./commands/desktop.js"); await runDesktop(pkg.version, options.action); });
 
+program.command("desktop-workspace", { hidden: true })
+  .requiredOption("--assets <directory>", "Absolute path to the bundled workspace assets")
+  .action(async (options) => {
+    const { runDesktopWorkspace } = await import("./commands/desktop-workspace.js");
+    try {
+      await runDesktopWorkspace(options.assets);
+      // This owned command has flushed persistent writes and closed its servers. Legacy
+      // account/Host probes may still hold sockets; none should outlive the desktop UI.
+      process.exit(0);
+    }
+    catch {
+      process.stderr.write("桌面工作台无法启动，请检查安装资源与本地存储后重试。\n");
+      process.exitCode = 1;
+    }
+  });
+
 // ── host ────────────────────────────────────────────────────────────
 
 const hostCmd = program

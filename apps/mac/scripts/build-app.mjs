@@ -125,6 +125,15 @@ try {
   mkdirSync(join(staged, "Contents/MacOS"), { recursive: true });
   mkdirSync(join(staged, "Contents/Resources"), { recursive: true });
   mkdirSync(join(staged, "Contents/Frameworks"), { recursive: true });
+  // Ship the matching workspace inside the signed bundle, including offline startup assets.
+  // Building straight into staging cannot accidentally pick up an older web dist directory.
+  const web = resolve(root, "../web");
+  console.log("[build-app] building the desktop workspace");
+  run("pnpm", ["exec", "tsc", "--noEmit"], { cwd: web, stdio: "inherit" });
+  run("pnpm", ["exec", "vite", "build", "--outDir", join(staged, "Contents/Resources/Workspace")], { cwd: web, stdio: "inherit" });
+  for (const required of ["index.html", "preview/bridge.html", "preview/worker.js"]) {
+    if (!existsSync(join(staged, "Contents/Resources/Workspace", required))) throw new Error(`Missing desktop workspace asset: ${required}`);
+  }
   const executable = join(staged, "Contents/MacOS/LinkShell");
   cpSync(program, executable);
   // Remove build-only search paths from the packaged copy, leaving SwiftPM's output intact.
@@ -182,6 +191,8 @@ try {
   <key>LSMinimumSystemVersion</key><string>${MINIMUM_SYSTEM}</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
 </plist>
 `,

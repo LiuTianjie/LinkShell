@@ -8,6 +8,7 @@ struct InputEvent {
   let command: [String: Any]
   /// "i": the viewer's own count of its events, when it numbers them (see `ScreenSession`).
   let number: Int?
+  let screenGeneration: Int?
 
   private static let modifierNames: Set<String> = ["cmd", "shift", "alt", "ctrl"]
 
@@ -40,6 +41,7 @@ struct InputEvent {
     self.kind = kind
     self.command = command
     self.number = number(command["i"]).flatMap { $0 >= 0 && $0 == $0.rounded() && $0 < 9e15 ? Int($0) : nil }
+    screenGeneration = number(command["screenGeneration"]).flatMap { $0 >= 0 && $0 == $0.rounded() && $0 <= 9_007_199_254_740_991 ? Int($0) : nil }
   }
 
   /// A JSON number (always finite), and not `true` or `false`, which Foundation reads as numbers too.

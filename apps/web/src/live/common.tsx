@@ -32,6 +32,9 @@ import {
 import { CircleAlert } from "lucide-react";
 
 export const Runtime = createContext<Connection | null>(null);
+// A socket can be online before this conversation's backlog has been restored.
+// Summary-level approvals outside a conversation keep their existing connection gate.
+export const SessionReady = createContext(true);
 export function useConnection() {
   const value = useContext(Runtime);
   if (!value) throw new Error("尚未连接电脑");
@@ -44,6 +47,11 @@ export function useClient<T>(
 }
 export function useActions() {
   return useConnection().store.getState();
+}
+export function useSessionOnline() {
+  const ready = useContext(SessionReady);
+  const online = useClient((state) => state.status === "online");
+  return online && ready;
 }
 export const messageOf = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);

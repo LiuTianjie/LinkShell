@@ -6,12 +6,13 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
-import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal } from "./input.js";
+import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
 import { captureWindows, configureWindowsCapture, WindowsFrameSplitter, windowsDisplays, windowsHelper, windowsProfile } from "./windows-screen.js";
 import { WindowsVideoSession, windowsMedia, type ScreenVideoSession } from "./windows-video.js";
+import { fallbackProfile, fallbackSize, SCREEN_RETAIN_MS, screenConfiguration, type ScreenConfiguration } from "./screen-session.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
 // viewer page on a loopback port; the phone opens it through the same
@@ -69,23 +70,31 @@ interface CaptureEvents {
 interface Running {
   end(): void;
   gone: Promise<void>;
+  ready?: Promise<{ width: number; height: number; maxFps: number }>;
   /** Whose it is. */
   on: CaptureEvents;
   /** Another level without stopping, where the capture can do that. */
-  change?(level: number): void;
+  change?(level: number, profile?: StreamProfile): void;
   /** The next frame a keyframe, where the capture can do that. */
   key?(): void;
-  pause?(paused: boolean): void;
 }
 
 /** A display to capture, and its number to the app (`index` is what the viewer names it by). */
 interface Capturable extends Display {
   screen: number;
+  w?: number;
+  h?: number;
+}
+
+async function captureReleased(capture: Running): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([capture.gone, new Promise<void>((resolve) => { timer = setTimeout(resolve, 3000); timer.unref(); })]);
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 /** ffmpeg's capture of an X display (Linux), for one rung of the ladder (see `screen-pacer.ts`): 0 is the best picture. */
-export function captureArgs(level = 0): string[] {
-  const profile = rung(level);
+export function captureArgs(level = 0, profile = fallbackProfile(level)): string[] {
   const rate = (bits: number) => `${Math.round(bits / 1000)}k`;
   return [
     "-hide_banner",
@@ -259,6 +268,7 @@ export class ScreenShare {
   /** The viewer the app is sending the screen to as a video track. One at a time, like captures. */
   private video?: { id: string; taken(): void };
   private readonly controls = new Set<InputControl>();
+  private readonly viewers = new Map<WebSocket, () => void>();
 
   constructor(
     private readonly log: (message: string) => void,
@@ -278,16 +288,18 @@ export class ScreenShare {
   }
 
   private async listDisplays(): Promise<Capturable[]> {
-    if (process.platform === "win32") return (await windowsDisplays()).map(({ screen, name }) => ({ index: screen, screen, name }));
+    if (process.platform === "win32") return (await windowsDisplays()).map(({ screen, name, w, h }) => ({ index: screen, screen, name, w, h }));
     if (process.platform === "darwin") {
       const app = inputApp(this.log);
       if (!app) throw RpcError.app("not_supported", NO_APP);
       const displays = await app.displays();
-      return displays.map(({ screen, name }) => ({ index: screen, screen, name: name || `屏幕 ${screen + 1}` }));
+      return displays.map(({ screen, name, w, h }) => ({ index: screen, screen, name: name || `屏幕 ${screen + 1}`, w, h }));
     }
     if (process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
     if (!(await hasFfmpeg())) throw RpcError.app("not_supported", "查看屏幕需要电脑上装有 ffmpeg");
-    return [{ index: 0, name: "屏幕", screen: 0 }];
+    // x11grab captures the X display's root window, which may span several monitors.
+    const dimensions = await run("xdpyinfo", [], { timeout: 5000 }).then(({ stdout }) => /dimensions:\s+(\d+)x(\d+)\s+pixels/.exec(stdout), () => null);
+    return [{ index: 0, name: "屏幕", screen: 0, ...(dimensions ? { w: Number(dimensions[1]), h: Number(dimensions[2]) } : {}) }];
   }
 
   private listen(): Promise<number> {
@@ -372,7 +384,7 @@ export class ScreenShare {
   }
 
   /** Starts a capture where it may record. Undefined when it may not: the viewer has been told why. */
-  private async capture(screen: number, level: number, on: CaptureEvents, width?: number, maxFps?: number): Promise<Running | undefined> {
+  private async capture(screen: number, level: number, on: CaptureEvents, profile = fallbackProfile(level), wanted: () => boolean = () => true): Promise<Running | undefined> {
     let ended = false;
     let leave = () => {};
     const gone = new Promise<void>((resolve) => (leave = resolve));
@@ -383,6 +395,7 @@ export class ScreenShare {
         return undefined;
       }
       const status = await app.access();
+      if (!wanted()) return undefined;
       if (!status.recording) {
         // Someone may be at the computer: the app's window for its permissions comes up there.
         void app.ask().catch(() => {});
@@ -390,40 +403,44 @@ export class ScreenShare {
         return undefined;
       }
       let size: number | undefined;
-      const stream = await app.stream(screen, rung(level), {
+      const stream = await app.stream(screen, profile, {
         frame: (unit, key, generation) => {
-          if (ended) return;
+          if (ended || !wanted()) return;
           if (size !== undefined && generation !== size) on.resized?.();
           size = generation;
           on.frame(unit, key);
         },
         exit: (error) => {
           leave();
-          if (ended) return;
+          if (ended || !wanted()) return;
           if (error) this.log(`[screen] the app's capture ended: ${error}`);
           on.exit(!error ? undefined : /permission|not allowed|not authorized|denied|declined/i.test(error) ? notAllowed(status.app) : "屏幕捕获失败");
         },
       });
+      const ready = stream.ready.then(({ width, height, fps }) => ({ width, height, maxFps: fps }));
+      void ready.catch(() => {});
       return {
         on,
         gone,
+        ready,
         end: () => {
           ended = true;
           stream.end();
           leave();
         },
-        change: (next) => stream.set(rung(next)),
+        change: (next, requested) => stream.set(requested ?? rung(next)),
         key: () => stream.key(),
       };
     }
+    if (!wanted()) return undefined;
     const windows = process.platform === "win32";
-    const capture = windows ? captureWindows(screen, windowsProfile(level, width, maxFps)) : spawn("ffmpeg", captureArgs(level), { stdio: ["ignore", "pipe", "pipe"] });
+    const capture = windows ? captureWindows(screen, { ...profile, quality: windowsProfile(level).quality }) : spawn("ffmpeg", captureArgs(level, profile), { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
     const splitter = new AccessUnitSplitter();
     const jpeg = new WindowsFrameSplitter();
     let errors = "";
     capture.stdout!.on("data", (chunk: Buffer) => {
-      if (ended) return;
+      if (ended || !wanted()) return;
       try {
         if (windows) jpeg.push(chunk, frame => on.frame(frame, true));
         else splitter.push(chunk, on.frame);
@@ -435,7 +452,7 @@ export class ScreenShare {
     capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
     const finished = (code: number, said: string) => {
       leave();
-      if (ended) return;
+      if (ended || !wanted()) return;
       if (code) this.log(`[screen] capture exited ${code}: ${said.trim()}`);
       on.exit(code ? "屏幕捕获失败" : undefined);
     };
@@ -452,16 +469,16 @@ export class ScreenShare {
         endCapture(capture);
       },
       ...(windows ? {
-        change: (next: number) => configureWindowsCapture(capture, { t: "profile", ...windowsProfile(next, width, maxFps) }),
+        change: (next: number, requested?: StreamProfile) => configureWindowsCapture(capture, { t: "profile", ...(requested ?? profile), quality: windowsProfile(next).quality }),
         key: () => configureWindowsCapture(capture, { t: "keyframe" }),
-        pause: (paused: boolean) => configureWindowsCapture(capture, { t: "pause", value: paused ? 1 : 0 }),
       } : {}),
     };
   }
 
   /** Takes the screen for a new capture: whatever holds it is ended, and has left, before the new one starts. */
-  private take(screen: number, level: number, on: CaptureEvents, wanted: () => boolean, width?: number, maxFps?: number): Promise<Running | undefined> {
+  private take(screen: number, level: number, on: CaptureEvents, wanted: () => boolean, profile = fallbackProfile(level)): Promise<Running | undefined> {
     const mine = this.turn.then(async () => {
+      if (!wanted()) return undefined;
       this.video?.taken();
       const previous = this.holder;
       if (previous) {
@@ -469,10 +486,14 @@ export class ScreenShare {
         previous.end();
         // Another device's picture ends here; a viewer changing its own just carries on.
         if (previous.on !== on) previous.on.exit("屏幕画面被另一台设备接手了");
-        await Promise.race([previous.gone, new Promise((resolve) => setTimeout(resolve, 3000))]);
+        await captureReleased(previous);
       }
       if (!wanted()) return undefined;
-      const running = await this.capture(screen, level, on, width, maxFps);
+      const running = await this.capture(screen, level, on, profile, wanted);
+      if (!wanted()) {
+        running?.end();
+        return undefined;
+      }
       this.holder = running;
       return running;
     });
@@ -493,7 +514,7 @@ export class ScreenShare {
       const holder = this.holder;
       if (holder) {
         this.holder = undefined; holder.end(); holder.on.exit("屏幕画面被另一台设备接手了");
-        await Promise.race([holder.gone, new Promise(resolve => setTimeout(resolve, 3000))]);
+        await captureReleased(holder);
       }
       if (viewer.closed()) return "refused";
       const iceServers = this.iceServers().map(url => ({ urls: [url] }));
@@ -507,7 +528,15 @@ export class ScreenShare {
       } };
       this.video = mine;
       const cancelled = setInterval(() => { if (viewer.closed()) session.end(); }, 100);
-      try { await session.offer(); return session; }
+      try {
+        await session.offer();
+        if (viewer.closed() || this.video !== mine) {
+          session.end();
+          if (this.video === mine) this.video = undefined;
+          return "refused";
+        }
+        return session;
+      }
       catch (error) {
         session.end(); if (this.video === mine) this.video = undefined;
         this.log(`[screen] Windows video could not start: ${String(error)}`);
@@ -530,10 +559,12 @@ export class ScreenShare {
     this.video?.taken();
     const holder = this.holder;
     if (holder) {
-      this.holder = undefined;
       holder.end();
       holder.on.exit("屏幕画面被另一台设备接手了");
+      await captureReleased(holder);
+      if (this.holder === holder) this.holder = undefined;
     }
+    if (viewer.closed()) return "refused";
     const id = `video-${randomBytes(6).toString("hex")}`;
     const mine = {
       id,
@@ -569,50 +600,133 @@ export class ScreenShare {
         viewer.tell({ rtc: { ...rest, t: kind.slice(4) } });
       }
     });
-    return { id, signal: message => app.signal(id, message), end: () => app.endVideo(id) };
+    if (viewer.closed() || this.video !== mine) {
+      app.endVideo(id);
+      if (this.video === mine) this.video = undefined;
+      return "refused";
+    }
+    return { id, reconfigure: status.videoReconfigure === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
   }
 
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc"): void {
-    const shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
-    const tell = (message: object) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
+    // Paused viewers still own a session. A new authenticated viewer takes that ownership too.
+    for (const [previous, release] of this.viewers) {
+      if (previous.readyState === previous.OPEN) previous.send(JSON.stringify({ error: "屏幕画面被另一台设备接手了" }));
+      release();
+      previous.close();
+    }
+    let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
+    let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
+    let closed = false;
+    const live = () => !closed && ws.readyState === ws.OPEN;
+    const tell = (message: object) => { if (live()) ws.send(JSON.stringify(message)); };
+    let control: InputControl | undefined;
+    let controlRequested = false;
+    let inputEnabled = false;
+    let generationEnabled = false;
+    let inputGeneration = 0;
+    let appliedGeneration: number | undefined;
+    let revision = 0;
+    let lastRequestId = -1;
+    let desiredRequestId: number | undefined;
+    let helperRequestId = 0;
+    type Change = { configuration: ScreenConfiguration; revision: number; requestId?: number; generation?: number };
+    let pending: Change | undefined;
+    let configuring = false;
+    let initialized = false;
+    let canConfigure = false;
+    let pausedExpiry: ReturnType<typeof setTimeout> | undefined;
+    let running: Running | undefined;
+    let captureGeneration = 0;
     let video: ScreenVideoSession | undefined;
-    // The viewer's hands: started when it first asks to control, for the display it is watching.
-    const control = new InputControl(
-      {
-        state: (state) => tell({ control: state }),
-        cursor: (x, y) => { if (!video?.cursor?.(x, y)) tell({ cursor: { x, y } }); },
-        posted: (event) => this.log(`[screen] dry run: ${JSON.stringify(event)}`),
-      },
-      this.log,
-    );
-    this.controls.add(control);
-
-    // The picture: as good as the path carries without falling behind (see `screen-pacer.ts`).
+    let signals: Promise<void> = Promise.resolve();
     const windows = process.platform === "win32";
     const best = relayed ? windows ? 1 : RELAY_LEVEL : 0;
     const pacer = new Pacer(Date.now(), windows ? { maxInFlight: 2, behindMs: 120, caughtUpMs: 50, probeMs: 1500 } : {});
+    const profileFor = (next: number, configuration: ScreenConfiguration): StreamProfile => ({
+      ...fallbackProfile(next, configuration),
+      ...(windows ? windowsProfile(next, configuration.width, configuration.maxFps) : {}),
+    });
     let level = best;
-    let closed = false;
     let changing = false;
     let lighter = false;
     let askedForKey = 0;
-    // Nobody is looking at the viewer (its page is hidden): nothing is sent, and its slowness to answer means nothing.
-    let unwatched = false;
-    // Sending again starts at a keyframe.
-    let wantsKey = false;
-    let running: Running | undefined;
-    // Dropping, with only a keyframe missing to carry on: a capture that makes one when asked is asked.
+    let wantsKey = true;
+
+    const stopControl = () => {
+      inputEnabled = false;
+      if (!control) return;
+      control.stop();
+      this.controls.delete(control);
+      control = undefined;
+    };
+    const startControl = async (preparing = false) => {
+      if (!live() || (!inputEnabled && !preparing) || desired.paused || !controlRequested || control) return;
+      const at = revision;
+      const created = new InputControl({
+        // Readiness may arrive while the applied target is still being acknowledged; it is
+        // safe to report permissions then, while the independent input gate stays closed.
+        state: (state) => { if (control === created && revision === at) tell({ control: state }); },
+        cursor: (x, y) => { if (control === created && inputEnabled && !video?.cursor?.(x, y)) tell({ cursor: { x, y } }); },
+        posted: (event) => this.log(`[screen] dry run: ${JSON.stringify(event)}`),
+      }, this.log);
+      control = created;
+      this.controls.add(created);
+      await created.start(shown?.screen ?? 0);
+      if (!live() || control !== created || revision !== at || (!inputEnabled && !preparing)) {
+        created.stop();
+        this.controls.delete(created);
+      }
+    };
+    const stopRunning = () => {
+      captureGeneration += 1;
+      const stopped = running;
+      running = undefined;
+      stopped?.end();
+      // ffmpeg can hold the recorder until SIGKILL; the next capture must wait for it.
+      if (stopped && this.holder === stopped) void stopped.gone.then(() => { if (this.holder === stopped) this.holder = undefined; });
+    };
+    const endVideo = () => {
+      if (!video) return;
+      const ended = video;
+      video = undefined;
+      ended.end();
+      if (this.video?.id === ended.id) this.video = undefined;
+    };
+    const expirePaused = () => {
+      if (pausedExpiry) return;
+      pausedExpiry = setTimeout(() => {
+        pausedExpiry = undefined;
+        if (live()) { dispose(); ws.close(1000, "screen retention expired"); }
+      }, SCREEN_RETAIN_MS);
+      pausedExpiry.unref();
+    };
+    const resumed = () => {
+      if (pausedExpiry) clearTimeout(pausedExpiry);
+      pausedExpiry = undefined;
+    };
+    const capabilities = () => tell({ session: { t: "capabilities", version: 1, configure: canConfigure, pause: video ? !!(video.reconfigure || video.pause) : true, retainMs: SCREEN_RETAIN_MS } });
+    const failure = (error: unknown) => {
+      if (!live()) return;
+      this.log(`[screen] the capture did not start: ${String(error)}`);
+      tell({ error: "屏幕捕获失败" });
+      dispose();
+      ws.close();
+    };
     const askForKey = () => {
+      if (!live() || desired.paused || configuring) return;
       const now = Date.now();
       if (!running?.key || now - askedForKey < 500 || !pacer.needsKey(now)) return;
       askedForKey = now;
       running.key();
     };
-    // A still screen sends no frame to be reminded by.
-    const reminder = setInterval(askForKey, 500);
+    let reminder: ReturnType<typeof setInterval> | undefined;
+    const stopReminder = () => { if (reminder) clearInterval(reminder); reminder = undefined; };
+    const startReminder = () => { if (!reminder) reminder = setInterval(askForKey, 500); };
+    startReminder();
     const events: CaptureEvents = {
       frame: (unit, key) => {
-        if (ws.readyState !== ws.OPEN || unwatched) return;
+        if (!live() || desired.paused) return;
         if (windows && ws.bufferedAmount > 256 * 1024) return;
         if (wantsKey && !key) return;
         wantsKey = false;
@@ -620,179 +734,260 @@ export class ScreenShare {
         const seq = pacer.next(key, now);
         if (seq !== undefined) {
           const head = Buffer.allocUnsafe(5);
-          // 2 is an independently decodable JPEG; 0/1 retain the existing H.264 framing.
-          head[0] = process.platform === "win32" ? 2 : key ? 1 : 0;
+          head[0] = windows ? 2 : key ? 1 : 0;
           head.writeUInt32BE(seq >>> 0, 1);
           ws.send(Buffer.concat([head, unit]));
         } else askForKey();
-        const advice = changing ? undefined : pacer.advice(now, level > best, level < LADDER.length - 1);
-        if (advice) void change(level + (advice === "down" ? 1 : -1));
+        const advice = changing || configuring ? undefined : pacer.advice(now, level > best, level < LADDER.length - 1);
+        if (advice) void changeLevel(level + (advice === "down" ? 1 : -1));
       },
-      // The page starts its decoder afresh for the new size; what it had of the old one came before this, in order.
       resized: () => tell({ restart: true, level, lighter }),
-      exit: (message) => {
-        if (message) tell({ error: message });
-        ws.close();
-      },
+      exit: (message) => { if (message) tell({ error: message }); dispose(); ws.close(); },
     };
-    const begin = async () => {
-      const started = await this.take(shown?.screen ?? 0, level, events, () => !closed, width, maxFps);
-      if (closed) started?.end();
-      else { running = started; running?.pause?.(unwatched); }
+    const begin = async (at: number, target: Capturable | undefined, configuration: ScreenConfiguration) => {
+      const captureAt = ++captureGeneration;
+      const wanted = () => live() && revision === at && captureGeneration === captureAt && !desired.paused && !video;
+      const scoped: CaptureEvents = {
+        frame: (unit, key) => { if (wanted()) events.frame(unit, key); },
+        resized: () => { if (wanted()) events.resized?.(); },
+        exit: (message) => { if (wanted()) events.exit(message); },
+      };
+      const started = await this.take(target?.screen ?? 0, level, scoped, wanted, profileFor(level, configuration));
+      if (!wanted()) {
+        if (this.holder === started) this.holder = undefined;
+        started?.end();
+      }
+      else {
+        running = started;
+        if (started?.ready) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const size = await Promise.race([started.ready, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("屏幕捕获启动超时")), 15_000); timer.unref(); })]);
+            if (wanted()) return size;
+          } catch (error) { if (wanted()) throw error; }
+          finally { if (timer) clearTimeout(timer); }
+        }
+      }
+      return undefined;
     };
-    const failed = (error: Error) => {
-      this.log(`[screen] the capture did not start: ${error.message}`);
-      tell({ error: "屏幕捕获失败" });
-      ws.close();
-    };
-    const change = async (next: number) => {
+    const changeLevel = async (next: number) => {
+      if (!live() || desired.paused || configuring || changing) return;
       changing = true;
       lighter = next > level;
-      const to = windows ? windowsProfile(next, width, maxFps) : rung(next);
-      this.log(`[screen] picture ${lighter ? "lighter" : "better"}: ${to.width} wide, ${to.fps} a second`);
-      if (running?.change) {
-        // The capture carries on: the new level takes over at a keyframe, with nothing lost in between.
-        running.change(next);
-        level = next;
-        pacer.changed(Date.now());
-        changing = false;
-        return;
-      }
-      // Nothing more of the old stream goes out; the page starts its decoder afresh for the new one.
-      running?.end();
-      tell({ restart: true, level: next, lighter });
       level = next;
-      await begin().catch(failed);
-      pacer.restarted(Date.now());
+      if (running?.change) {
+        running.change(next, profileFor(next, desired));
+        pacer.changed(Date.now());
+      } else {
+        stopRunning();
+        tell({ restart: true, level, lighter });
+        await begin(revision, shown, desired).catch(failure);
+        pacer.restarted(Date.now());
+      }
       changing = false;
     };
-
-    // The picture as a video track; down this socket when that can't be had, or didn't get across.
-    let videoStarting = wantsVideo, videoFailed = false;
-    /** The viewer's answer and candidates, kept in the order they arrived (`resolvedCandidate`). */
-    let signals: Promise<void> = Promise.resolve();
-    const endVideo = () => {
-      if (!video) return;
-      video.end();
-      if (this.video?.id === video.id) this.video = undefined;
-      video = undefined;
-    };
-    const fallBack = () => {
-      if (videoStarting && !video) { videoFailed = true; return; }
-      if (!video) return;
-      endVideo();
-      if (closed) return;
-      tell({ rtc: { t: "off" } });
-      void begin().catch(failed);
-    };
-    if (wantsVideo) {
-      this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, {
-        closed: () => closed,
-        tell,
-        refuse: (message) => {
-          video = undefined;
-          tell({ error: message });
-          ws.close();
-        },
-        lost: fallBack,
-        input: message => { if (!closed) { void control.start(shown?.screen ?? 0); control.send(message); } },
-      })
-        .then((offered) => {
-          videoStarting = false;
-          if (offered === "refused") return;
-          if (closed) {
-            offered?.end();
-            return;
-          }
-          if (offered) {
-            video = offered;
-            if (videoFailed) fallBack();
-            else video.pause?.(unwatched);
-          }
-          else {
-            tell({ rtc: { t: "off" } });
-            return begin();
-          }
-        })
-        .catch(failed);
-    } else void begin().catch(failed);
-
-    ws.on("message", (data, binary) => {
-      if (binary) return;
-      let message: unknown;
+    const current = (change: Change) => live() && revision === change.revision;
+    const drain = async () => {
+      if (!initialized || configuring || !live()) return;
+      configuring = true;
       try {
-        message = JSON.parse(String(data));
-      } catch {
-        return;
+        while (pending && live()) {
+          const change = pending;
+          pending = undefined;
+          const configuration = change.configuration;
+          try {
+            if (!canConfigure && change.requestId !== undefined) throw new Error("电脑上的屏幕组件不支持保留连接，请重新连接");
+            // A monitor may have been unplugged since screen.start listed it.
+            const displays = await this.listDisplays();
+            if (!current(change)) continue;
+            this.displays = displays;
+            const target = displays.find((entry) => entry.index === configuration.display);
+            if (!target) throw new Error("所选屏幕已不可用，请选择其他屏幕");
+            let applied: VideoConfigured;
+            if (video) {
+              if (!video.reconfigure || !video.configure) {
+                // Windows can pause its existing track, but target changes still reconnect.
+                if (video.pause && change.requestId === undefined) {
+                  video.pause(configuration.paused);
+                  applied = { screen: target.screen, width: target.w ?? 0, height: target.h ?? 0, maxFps: configuration.maxFps ?? 60, paused: configuration.paused };
+                } else {
+                  if (configuration.paused) { dispose(); ws.close(); return; }
+                  throw new Error("电脑上的屏幕组件不支持保留连接，请重新连接");
+                }
+              } else applied = await video.configure({
+                requestId: ++helperRequestId, screen: target.screen, maxWidth: configuration.width,
+                ...(configuration.maxFps === undefined ? {} : { maxFps: configuration.maxFps }), paused: configuration.paused,
+                ...(change.generation === undefined ? {} : { inputGeneration: change.generation }),
+              });
+              if (applied.screen !== target.screen || applied.paused !== configuration.paused || (change.generation !== undefined && applied.generation !== change.generation)) {
+                throw new Error("电脑返回的屏幕设置无效，请重试");
+              }
+            } else {
+              const profile = profileFor(level, configuration);
+              let size = !target.w || !target.h ? { width: 0, height: 0 } : fallbackSize(target, profile);
+              let fps = profile.fps;
+              if ((!size.width || !size.height) && change.requestId !== undefined) throw new Error("无法读取当前屏幕尺寸，请重新连接");
+              stopRunning();
+              if (!configuration.paused) {
+                wantsKey = true;
+                pacer.restarted(Date.now());
+                tell({ restart: true, level, lighter: false });
+                const started = await begin(change.revision, target, configuration);
+                if (started) { size = started; fps = started.maxFps; }
+              }
+              applied = { screen: target.screen, ...size, maxFps: fps, paused: configuration.paused, generation: change.generation };
+            }
+            if (!current(change)) continue;
+            shown = target;
+            appliedGeneration = change.generation;
+            if (!configuration.paused) await startControl(true);
+            if (!current(change)) continue;
+            inputEnabled = !configuration.paused;
+            if (!configuration.paused) { resumed(); startReminder(); }
+            if (change.requestId !== undefined) tell({ session: {
+              t: "configured", requestId: change.requestId, display: target.index, width: applied.width, height: applied.height,
+              maxFps: applied.maxFps, paused: applied.paused,
+              ...(applied.generation === undefined ? {} : { generation: applied.generation }),
+            } });
+          } catch (error) {
+            if (!current(change)) continue;
+            stopControl();
+            if (!video) stopRunning();
+            this.log(`[screen] configuration failed: ${String(error)}`);
+            if (change.requestId !== undefined) tell({ session: { t: "error", requestId: change.requestId, message: "屏幕设置未能应用，请重试" } });
+            else if (configuration.paused) { dispose(); ws.close(); }
+          }
+        }
+      } finally { configuring = false; }
+    };
+    const configure = (configuration: ScreenConfiguration, requestId?: number) => {
+      desired = configuration;
+      if (requestId !== undefined) { generationEnabled = true; desiredRequestId = requestId; }
+      const at = ++revision;
+      pending = { configuration, revision: at, requestId, ...(generationEnabled ? { generation: ++inputGeneration } : {}) };
+      stopControl();
+      if (configuration.paused) { stopReminder(); stopRunning(); expirePaused(); }
+      void drain();
+    };
+    const startFallback = () => {
+      endVideo();
+      if (!live()) return;
+      tell({ rtc: { t: "off" } });
+      canConfigure = !!shown?.w && !!shown?.h;
+      initialized = true;
+      capabilities();
+      if (pending || desiredRequestId !== undefined || desired.paused) {
+        configure(desired, desiredRequestId);
+      } else {
+        const at = revision;
+        void begin(at, shown, desired).then(() => {
+          if (live() && revision === at && !desired.paused) { inputEnabled = true; void startControl(); }
+        }).catch(failure);
       }
+    };
+    const fallBack = () => { if (video) startFallback(); };
+
+    const dispose = () => {
+      if (closed) return;
+      closed = true;
+      revision += 1;
+      pending = undefined;
+      stopReminder();
+      resumed();
+      stopRunning();
+      endVideo();
+      stopControl();
+      this.viewers.delete(ws);
+    };
+    this.viewers.set(ws, dispose);
+    ws.on("close", dispose);
+    ws.on("message", (data, binary) => {
+      if (binary || !live()) return;
+      let message: unknown;
+      try { message = JSON.parse(String(data)); } catch { return; }
       const kind = (message as { t?: unknown } | null)?.t;
-      if (kind === "ack") pacer.ack(Number((message as { n?: unknown }).n), Date.now());
+      if (kind === "screen.configure") {
+        const parsed = screenConfiguration.safeParse(message);
+        if (!parsed.success || !this.displays.some((entry) => entry.index === parsed.data.display)) {
+          const requestId = (message as { requestId?: unknown }).requestId;
+          tell({ session: { t: "error", ...(typeof requestId === "number" && Number.isSafeInteger(requestId) && requestId >= 0 ? { requestId } : {}), message: "屏幕设置无效，请检查屏幕、分辨率和帧率" } });
+          return;
+        }
+        if (parsed.data.requestId <= lastRequestId) return;
+        if (initialized && !canConfigure) {
+          tell({ session: { t: "error", requestId: parsed.data.requestId, message: "电脑上的屏幕组件不支持保留连接，请重新连接" } });
+          return;
+        }
+        lastRequestId = parsed.data.requestId;
+        const { t: _type, requestId, ...configuration } = parsed.data;
+        configure(configuration, requestId);
+      } else if (kind === "hidden" || kind === "shown") {
+        const paused = kind === "hidden";
+        if (desired.paused !== paused) configure({ ...desired, paused });
+      } else if (kind === "ack") pacer.ack(Number((message as { n?: unknown }).n), Date.now());
       else if (kind === "rtc.answer" || kind === "rtc.ice") {
         const signal = videoSignal.safeParse(message);
         if (!signal.success) return;
-        // Resolving a name takes a moment, and the answer must still reach the app before the
-        // candidates that followed it: each signal waits for the one before.
-        signals = signals
-          .then(async () => {
-            const data = signal.data;
-            if (!video) return;
-            video.signal(data.t === "rtc.ice" ? { ...data, candidate: await resolvedCandidate(data.candidate) } : data);
-          })
-          // One signal that couldn't be passed on must not take the ones behind it with it.
-          .catch(() => {});
-      }
-      // The viewer's decoder lost its place (it skipped ahead, or failed): it can only carry on from a keyframe.
-      // (Named apart from the viewer's own events: whatever isn't one of these kinds is taken for a pointer or key event.)
-      else if (kind === "keyframe") {
+        signals = signals.then(async () => {
+          const target = video;
+          if (!target || !live()) return;
+          const data = signal.data;
+          const resolved = data.t === "rtc.ice" ? { ...data, candidate: await resolvedCandidate(data.candidate) } : data;
+          if (live() && video === target) target.signal(resolved);
+        }).catch(() => {});
+      } else if (kind === "keyframe") {
         const now = Date.now();
-        if (running?.key && now - askedForKey >= 500) {
-          askedForKey = now;
-          running.key();
-        }
-      } else if (kind === "hidden") { unwatched = true; running?.pause?.(true); video?.pause?.(true); }
-      else if (kind === "shown") {
-        if (!unwatched) return;
-        unwatched = false;
-        running?.pause?.(false);
-        video?.pause?.(false);
-        wantsKey = true;
-        // What was on its way when the page went out of sight is not waited for.
-        pacer.restarted(Date.now());
-        running?.key?.();
-      }
-      // Why a viewer gave its track up: what ICE gathered and tried, for this log only.
-      else if (kind === "rtc.diagnosis") {
+        if (!desired.paused && !configuring && running?.key && now - askedForKey >= 500) { askedForKey = now; running.key(); }
+      } else if (kind === "rtc.diagnosis") {
         const { reason, ice } = message as { reason?: unknown; ice?: unknown };
         this.log(`[screen] the video track was given up (${String(reason ?? "no reason").slice(0, 120)}): ${String(ice || "no ICE statistics").slice(0, 300)}`);
-      }
-      // No direct path between the two, or none in time: the viewer asks for the picture here instead.
-      else if (kind === "rtc.failed") {
-        this.log(`[screen] no video track for this viewer (${String((message as { reason?: unknown }).reason ?? "no reason given").slice(0, 200)}): the picture goes down the socket`);
-        fallBack();
-      }
-      // A viewer measuring (`?measure=1`): its clock against this computer's (it keeps the answer that came back
-      // quickest), then what it sees, once a second.
+      } else if (kind === "rtc.failed") fallBack();
       else if (kind === "ping") tell({ pong: { n: (message as { n?: unknown }).n, at: (message as { at?: unknown }).at, now: Date.now() } });
       else if (kind === "measure") this.log(`[screen] measured: ${screenMeasurementLog(message)}`);
-      else if (kind === "control") void control.start(shown?.screen ?? 0);
-      else control.send(message);
+      else if (kind === "control" && !desired.paused) {
+        // Requesting control only records intent. Input still needs the applied generation,
+        // and startup/configuration must finish before the helper can be joined.
+        controlRequested = true;
+        void startControl();
+      }
+      else if (!desired.paused && inputEnabled && (!generationEnabled || (message as { screenGeneration?: unknown } | null)?.screenGeneration === appliedGeneration)) {
+        control?.send(message);
+      }
     });
-    ws.on("close", () => {
-      closed = true;
-      clearInterval(reminder);
-      if (running && this.holder === running) this.holder = undefined;
-      running?.end();
-      endVideo();
-      control.stop();
-      this.controls.delete(control);
-    });
+
+    if (wantsVideo) {
+      let lostWhileOpening = false;
+      void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, {
+        closed: () => !live(), tell,
+        refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
+        lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
+        input: message => {
+          if (!live() || desired.paused || !inputEnabled) return;
+          controlRequested = true;
+          const at = revision;
+          void startControl().then(() => { if (live() && revision === at && inputEnabled && !desired.paused) control?.send(message); });
+        },
+      }).then((offered) => {
+        if (offered === "refused") return;
+        if (!live()) { offered?.end(); return; }
+        if (!offered) { startFallback(); return; }
+        video = offered;
+        if (lostWhileOpening) { startFallback(); return; }
+        initialized = true;
+        canConfigure = offered.reconfigure === true;
+        capabilities();
+        if (pending) void drain();
+        else { inputEnabled = true; void startControl(); }
+      }).catch(failure);
+    } else startFallback();
   }
 
   stop(): void {
+    for (const [viewer, release] of this.viewers) { release(); viewer.close(1000, "host stopped"); }
+    this.viewers.clear();
     // The host is going: there is no later to insist in.
     this.holder?.end();
     this.holder = undefined;
-    this.video?.taken();
     this.video = undefined;
     for (const capture of this.captures) endCapture(capture, true);
     this.captures.clear();

@@ -70,6 +70,7 @@ import { Terminals } from "./live/Terminal";
 import { Worktrees } from "./live/Panels";
 import { Screens, ScreenDetail } from "./live/Screens";
 import { screenView, screenComputerKey } from "./live/screen-route";
+import { ScreenSessionSlot } from "./live/screen-session-slot";
 import { Ports } from "./live/Ports";
 import { ConsoleShell } from "./components/ConsoleShell";
 import { readLocal, saveLocal } from "./live/storage";
@@ -77,11 +78,14 @@ import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { Projects } from "./live/Projects";
+import { isDesktop, openDesktopManagement } from "./live/desktop";
+import { useDesktopVisibility } from "./live/desktop-visibility";
 
 export function App() {
   return <LiveApp />;
 }
 function LiveApp() {
+  const workspaceVisible = useDesktopVisibility();
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
@@ -133,7 +137,7 @@ function LiveApp() {
   const openConnect = () => void guard(() => setConnect(true));
   return (
     <ConsoleShell
-      view={screenComputerKey(view) ? "screen" : view}
+      view={isDesktop ? view : screenComputerKey(view) ? "screen" : view}
       navigate={navigate}
       connect={openConnect}
       selectComputer={selectComputer}
@@ -160,6 +164,20 @@ function LiveApp() {
           </Button>
         </div>
       )}
+      <ScreenSessionSlot
+        key={state.accountUserId ?? "paired"}
+        activeKey={screenComputerKey(view)}
+        selectedKey={state.connection?.computer.key}
+        enabled={!state.locked && workspaceVisible}
+      >
+        {(computerKey, active) => (
+          <ScreenDetail
+            computerKey={computerKey}
+            active={active}
+            back={() => navigate("screen")}
+          />
+        )}
+      </ScreenSessionSlot>
       {state.locked ? (
         <div className="welcome-live">
           <h1>工作台已在另一个标签页打开</h1>
@@ -170,7 +188,7 @@ function LiveApp() {
             在此标签页继续
           </Button>
         </div>
-      ) : view === "screen" ? (
+      ) : view === "screen" ? workspaceVisible && (
         <Screens
           connect={() => setConnect(true)}
           open={(computer) => {
@@ -178,13 +196,7 @@ function LiveApp() {
             navigate(screenView(computer.key));
           }}
         />
-      ) : screenComputerKey(view) ? (
-        <ScreenDetail
-          key={view}
-          computerKey={screenComputerKey(view)!}
-          back={() => navigate("screen")}
-        />
-      ) : state.connection ? (
+      ) : screenComputerKey(view) ? null : state.connection ? (
         <Runtime value={state.connection}>
           <Workspace
             key={state.connection.computer.key}
@@ -199,9 +211,11 @@ function LiveApp() {
           <img src={appMark} alt="LinkShell" />
           <h1>连接你的电脑</h1>
           <p className="muted">
-            会话在电脑上运行，网页让你继续对话、审批和操作。
+            {isDesktop
+              ? "在这台 Mac 上，继续每一台电脑的工作。"
+              : "会话在电脑上运行，网页让你继续对话、审批和操作。"}
           </p>
-          <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>
+          {!isDesktop && <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>}
           <Button
             variant="default"
             disabled={!state.ready}
@@ -213,10 +227,17 @@ function LiveApp() {
                 : "登录或配对电脑"
               : "正在准备设备身份…"}
           </Button>
+          {isDesktop && (
+            <Button variant="ghost" onClick={() => openDesktopManagement()}>
+              管理这台 Mac
+            </Button>
+          )}
           <p className="muted">
             {deployment === "self-hosted"
               ? "运行 linkshell pair，输入此网关的配对码即可连接。"
-              : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
+              : isDesktop
+                ? "登录已有账号发现其他电脑，或使用配对码添加。"
+                : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
           </p>
           {state.computers.map((computer) => (
             <Button
@@ -350,6 +371,8 @@ function SessionTable({
               role="listitem"
               key={session.id}
               className="list-row"
+              data-session-state={session.state}
+              data-attention={sessionNeedsAttention(session) || undefined}
               onClick={(event) => {
                 if (
                   (event.target as HTMLElement).closest("button, a") ||
@@ -382,11 +405,13 @@ function SessionTable({
               >
                 {project}
               </span>
-              <StatusText
-                state={
-                  sessionNeedsAttention(session) ? "waiting" : session.state
-                }
-              />
+              <span className="list-row-status">
+                <StatusText
+                  state={
+                    sessionNeedsAttention(session) ? "waiting" : session.state
+                  }
+                />
+              </span>
               {session.permission && (
                 <Button
                   variant="outline"
@@ -495,10 +520,28 @@ function Home({
     setFilter("all");
   };
   const pending = allSessions.filter(sessionNeedsAttention).length;
+  const searchField = (
+    <InputGroup className="session-search w-full max-w-72">
+      <InputGroupAddon><Icon name="search" /></InputGroupAddon>
+      <InputGroupInput
+        aria-label="搜索会话"
+        placeholder="搜索会话、项目或 Agent"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {query && (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton aria-label="清除搜索" size="icon-xs" onClick={() => setQuery("")}>
+            <X />
+          </InputGroupButton>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
+  );
   return (
-    <section className="flex min-w-0 flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+    <section className="session-overview flex min-w-0 flex-col gap-4">
+      <div className="session-overview-heading flex items-center justify-between gap-4">
+        {isDesktop ? searchField : <div className="min-w-0">
           <h1 className="text-xl font-semibold">
             {archived ? "已归档会话" : "会话概览"}
           </h1>
@@ -510,7 +553,7 @@ function Home({
             <span aria-hidden>·</span>
             <span>{pending ? `${pending} 项需要你` : "暂无待处理事项"}</span>
           </p>
-        </div>
+        </div>}
         <Button
           variant="default"
           disabled={state.status !== "online"}
@@ -520,7 +563,7 @@ function Home({
           新建会话
         </Button>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3">
         <Tabs value={filter} onValueChange={setFilter}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
@@ -541,29 +584,8 @@ function Home({
             ))}
           </TabsList>
         </Tabs>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
-          <InputGroup className="w-full max-w-72">
-            <InputGroupAddon>
-              <Icon name="search" />
-            </InputGroupAddon>
-            <InputGroupInput
-              aria-label="搜索会话"
-              placeholder="搜索会话、项目或 Agent"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {query && (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton
-                  aria-label="清除搜索"
-                  size="icon-xs"
-                  onClick={() => setQuery("")}
-                >
-                  <X />
-                </InputGroupButton>
-              </InputGroupAddon>
-            )}
-          </InputGroup>
+        <div className="session-overview-tools flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
+          {!isDesktop && searchField}
           <Choice
             className="w-[130px]"
             label="会话排序"
@@ -634,7 +656,7 @@ function Home({
           (session) => sessionGroup(session) === group,
         );
         return shown.length ? (
-          <div key={group}>
+          <div className="session-group" data-session-group={group} key={group}>
             <h2 className="list-section-title">
               {group === "waiting"
                 ? "需要你"
@@ -672,7 +694,7 @@ function Home({
           description={
             query || filter !== "all"
               ? "换一个关键词，或调整上方筛选条件。"
-              : "会话保存在当前电脑，手机与网页共享同一份记录。"
+              : "会话保存在当前电脑，手机、桌面与网页共享同一份记录。"
           }
         >
           {query || filter !== "all" ? (
@@ -1006,7 +1028,7 @@ function Computers({
                 >
                   {current ? "当前电脑" : "切换"}
                 </Button>
-                <Button
+                {computer.key !== "desktop:local" && <Button
                   variant="ghost"
                   size="sm"
                   disabled={job.busy}
@@ -1020,7 +1042,7 @@ function Computers({
                   }}
                 >
                   移除
-                </Button>
+                </Button>}
               </div>
             </div>
           );
@@ -1033,13 +1055,13 @@ function Computers({
         )}
         {!machine && <LoadState loading />}
         {machine?.agents.map((agent) => (
-          <div className="list-row list-row-static" key={agent.id}>
+          <div className="list-row list-row-static computer-agent-row" key={agent.id}>
             <AgentMark agent={agent.id} />
-            <span className="w-32 shrink-0 font-medium">{agent.label}</span>
-            <span className="w-28 shrink-0 text-xs text-[var(--secondaryLabel)]">
+            <span className="computer-agent-label w-32 shrink-0 font-medium" title={agent.label}>{agent.label}</span>
+            <span className="computer-agent-version w-28 shrink-0 text-xs text-[var(--secondaryLabel)]" title={agent.version}>
               {agent.installed ? (agent.version ?? "已安装") : "未安装"}
             </span>
-            <span className="min-w-0 flex-1 truncate text-xs text-[var(--secondaryLabel)]">
+            <span className="computer-agent-auth min-w-0 flex-1 truncate text-xs text-[var(--secondaryLabel)]" title={agent.problem ?? agent.auth?.hint}>
               {agent.auth?.state === "ok"
                 ? agent.id === "codex"
                   ? "使用电脑认证配置"
