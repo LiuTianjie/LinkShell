@@ -190,24 +190,27 @@ struct DesktopView: View {
   }
   private func row(_ title: String, _ value: String, good: Bool = false, warning: Bool = false) -> some View {
     VStack(spacing: 0) {
-      HStack {
-        Text(title).font(.system(size: 13.5, weight: .medium))
+      HStack(spacing: 12) {
+        Text(title).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
         Spacer()
         DesktopStatus(text: value, tone: warning ? .orange : good ? DesktopStyle.mint : DesktopStyle.secondary)
-      }.padding(.vertical, 14)
+          .lineLimit(1)
+      }.frame(height: 46)
       rule
     }
   }
   private func valueRow(_ title: String, _ value: String, monospaced: Bool = false) -> some View {
     VStack(spacing: 0) {
-      HStack {
-        Text(title).font(.system(size: 13.5, weight: .medium))
+      HStack(spacing: 12) {
+        Text(title).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
         Spacer()
         Text(value)
           .font(.system(size: 13, design: monospaced ? .monospaced : .default))
           .foregroundStyle(DesktopStyle.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
           .textSelection(.enabled)
-      }.padding(.vertical, 14)
+      }.frame(height: 46)
       rule
     }
   }
@@ -216,45 +219,46 @@ struct DesktopView: View {
       accountSection
       if model.snapshot?.status == "stopped" {
         HStack {
-          Text("启动后台服务后，即可从手机连接这台 Mac。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+          Text("启动后台服务后，即可从手机连接这台 Mac。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
           Spacer()
           Button("启动服务") { model.action("start") }.disabled(model.busy || model.preview)
         }.padding(.bottom, 14)
       }
       if model.externalHost {
         HStack {
-          Text("当前服务由另一套 CLI 启动").font(.system(size: 12)).foregroundStyle(.orange)
+          Text("当前服务由另一套 CLI 启动").font(.system(size: 12)).foregroundStyle(.orange).lineLimit(1)
           Spacer()
           Button("切换到 App 内置服务…") { confirm = "restart" }.disabled(model.busy)
         }.padding(.bottom, 14)
       }
       row("本机服务", model.serviceLabel, good: model.healthy)
       row("网关连接", model.gatewayLabel, good: model.healthy && model.snapshot?.gateway?.status == "online")
-      HStack {
-        Text("屏幕与控制").font(.system(size: 13.5, weight: .medium)); Spacer()
+      HStack(spacing: 12) {
+        Text("屏幕与控制").font(.system(size: 13.5, weight: .medium)).lineLimit(1); Spacer()
         Button { model.permissions() } label: {
           DesktopStatus(text: !model.permissionsKnown ? "检查中" : model.recording && model.control ? "权限已就绪" : "需要授权", tone: !model.permissionsKnown ? DesktopStyle.secondary : model.recording && model.control ? DesktopStyle.mint : .orange)
+            .lineLimit(1)
         }.buttonStyle(.plain).disabled(model.preview)
-      }.padding(.vertical, 14)
+      }.frame(height: 46)
       rule
       HStack(spacing: 12) {
-        Text("已配对设备").font(.system(size: 13.5, weight: .medium))
+        Text("已配对设备").font(.system(size: 13.5, weight: .medium)).lineLimit(1)
         Spacer()
         DesktopStatus(
           text: model.devices.isEmpty ? "暂无设备" : "\(model.devices.count) 台设备 · \(model.devices.filter(\.online).count) 台在线",
           tone: model.devices.contains(where: \.online) ? DesktopStyle.mint : DesktopStyle.secondary
-        )
+        ).lineLimit(1)
         Button("配对或管理…") { model.selected = "设备" }
           .controlSize(.small)
-      }.padding(.vertical, 14)
+      }.frame(height: 46)
       rule
       Text("最近活动").font(.system(size: 15, weight: .semibold)).padding(.top, 22).padding(.bottom, 12)
       if model.activity.isEmpty { empty("尚无活动", "连接服务后，状态变化会显示在这里。") }
       ForEach(Array(model.activity.prefix(4).enumerated()), id: \.offset) { _, event in
         HStack(spacing: 16) {
-          Text(event.0, style: .time).font(.system(size: 12, design: .monospaced))
-          Text(event.1).font(.system(size: 13))
-        }.foregroundStyle(DesktopStyle.secondary).padding(.bottom, 10)
+          Text(event.0, style: .time).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+          Text(event.1).font(.system(size: 13)).lineLimit(1)
+        }.foregroundStyle(DesktopStyle.secondary).frame(height: 28)
       }
     }
   }
@@ -292,20 +296,26 @@ struct DesktopView: View {
       valueRow("运行中的 Host", model.snapshot?.machine?.hostVersion ?? "未连接", monospaced: true)
       valueRow("Mac 界面版本", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版", monospaced: true)
       if model.standalone {
-        HStack {
-          Text("更新通道").font(.system(size: 13.5, weight: .medium)); Spacer()
+        HStack(spacing: 12) {
+          Text("更新通道").font(.system(size: 13.5, weight: .medium)).lineLimit(1); Spacer()
           Picker("更新通道", selection: $model.updateChannel) { Text("稳定版").tag("stable"); Text("测试版").tag("beta") }.labelsHidden().pickerStyle(.segmented).frame(width: 200).disabled(model.busy || model.checking)
-        }.padding(.vertical, 14)
+        }.frame(height: 46)
         rule
       } else { valueRow("更新通道", "稳定版 · latest") }
-      Toggle("自动检查更新", isOn: $model.autoCheck).toggleStyle(.switch).padding(.vertical, 16).disabled(model.preview)
+      HStack(spacing: 12) {
+        Text("自动检查更新").font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+        Spacer()
+        Toggle("自动检查更新", isOn: $model.autoCheck).labelsHidden().toggleStyle(.switch).disabled(model.preview)
+      }.frame(height: 46)
       rule
       Text(model.updateMessage).font(.system(size: 13.5, weight: .medium)).padding(.top, 20).textSelection(.enabled)
-      Text(model.standalone ? "App、内置 CLI、Host 与运行时作为整体更新。安装前会暂停本 App 托管的服务，完成后自动恢复；其他安装不会被覆盖。" : "此安装通过 npm 或 Homebrew 更新。安装时可能重启后台服务，请先完成正在执行的任务。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineSpacing(4).padding(.top, 8)
+      Text(model.standalone ? "App、内置 CLI、Host 与运行时作为整体更新。下载期间服务保持连接；仅在确认安装并重启时短暂重启服务，完成后自动恢复。" : "此安装通过 npm 或 Homebrew 更新。安装时可能重启后台服务，请先完成正在执行的任务。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineSpacing(4).padding(.top, 8)
       HStack(spacing: 12) {
         Button(model.checking ? "正在检查…" : "检查更新") { model.checkUpdates() }.disabled(model.checking || model.preview)
         if model.newVersion {
-          Button(model.standalone ? "下载并更新 App…" : "安装更新…") { confirm = "upgrade" }
+          Button(model.standalone ? "下载并更新 App…" : "安装更新…") {
+            if model.standalone { model.upgrade() } else { confirm = "upgrade" }
+          }
             .buttonStyle(.borderedProminent).tint(DesktopStyle.accent).foregroundStyle(DesktopStyle.onAccent)
             .disabled(model.busy || model.checking || model.preview)
         }
@@ -396,20 +406,24 @@ struct DesktopView: View {
 
   private var settings: some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        Text("外观").font(.system(size: 13.5, weight: .medium)); Spacer()
+      HStack(spacing: 12) {
+        Text("外观").font(.system(size: 13.5, weight: .medium)).lineLimit(1); Spacer()
         Picker("外观", selection: $model.appearance) {
           Text("跟随系统").tag("system")
           Text("浅色").tag("light")
           Text("深色").tag("dark")
         }.labelsHidden().pickerStyle(.segmented).frame(width: 240)
-      }.padding(.vertical, 14)
+      }.frame(height: 46)
       rule
       if model.standalone {
-        Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-          .toggleStyle(.switch).padding(.top, 16).disabled(model.preview)
+        HStack(spacing: 12) {
+          Text("登录 Mac 时自动启动").font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+          Spacer()
+          Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+            .labelsHidden().toggleStyle(.switch).disabled(model.preview)
+        }.frame(height: 46)
         Text("登录 Mac 后自动打开 LinkShell。每次打开桌面版都会启动后台服务并连接已配置的网关，无需再点“启动服务”。")
-          .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.vertical, 10)
+          .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 12)
         if model.loginApprovalRequired {
           Text("等待系统允许，请在“登录项”中启用 LinkShell。").font(.system(size: 12)).foregroundStyle(.orange)
           Button("打开系统登录项设置") { model.openLoginItems() }.padding(.vertical, 10).disabled(model.preview)
@@ -421,11 +435,11 @@ struct DesktopView: View {
       }
       row("屏幕录制", !model.permissionsKnown ? "未知" : model.recording ? "已授权" : "未授权", good: model.permissionsKnown && model.recording)
       row("辅助功能", !model.permissionsKnown ? "未知" : model.control ? "已授权" : "未授权", good: model.permissionsKnown && model.control)
-      HStack {
-        Text("需要修改系统授权时，可打开权限向导或系统设置。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+      HStack(spacing: 12) {
+        Text("需要修改系统授权时，可打开权限向导或系统设置。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
         Spacer()
         Button("打开权限设置") { model.permissions() }.disabled(model.preview)
-      }.padding(.vertical, 14)
+      }.frame(height: 46)
       rule
       valueRow("数据目录", model.home, monospaced: true)
       Text("窗口关闭后，LinkShell 留在菜单栏。退出界面不会停止 Host 或代理任务。")

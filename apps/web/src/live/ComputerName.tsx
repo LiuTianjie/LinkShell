@@ -63,6 +63,7 @@ export function ComputerName({
         <Button
           variant="ghost"
           size={iconOnly ? "icon-sm" : "sm"}
+          className={iconOnly ? "size-5 shrink-0" : undefined}
           title="给电脑命名"
           aria-label={`给 ${computerName(computer, names)} 命名`}
         >

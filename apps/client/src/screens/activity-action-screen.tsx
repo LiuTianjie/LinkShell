@@ -1,12 +1,13 @@
-import { router, useIsFocused, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { router, useIsFocused, useLocalSearchParams, useNavigation } from "expo-router";
+import { CommonActions } from "expo-router/react-navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { consumeNativeLiveActivityAction, type LiveActivityAction } from "../../modules/link-layout";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { listComputers, useComputers } from "@/lib/computers";
 import { isLiveActivityActionCurrent } from "@/lib/live-activity-actions";
-import { activityEntries, activityRoute, type ActivityFilter, type ActivityRoute } from "@/lib/live-activity-navigation";
+import { activityEntries, activityRoute, activityDetailStack, type ActivityFilter, type ActivityRoute } from "@/lib/live-activity-navigation";
 import { useTerminals } from "@/lib/terminals";
 import { useNow } from "@/lib/use-now";
 import { Text } from "@/components/fixed-text";
@@ -14,17 +15,13 @@ import { SessionRow, positionOf } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
 import { colors } from "@/theme/colors";
 
-function detail(kind: "session" | "terminal", id: string) {
-  if (kind === "session") router.replace({ pathname: "/session/[id]", params: { id } });
-  else router.replace({ pathname: "/terminal/[id]", params: { id } });
-}
-
 export function ActivityActionScreen() {
   const params = activityRoute(useLocalSearchParams());
   return <ActivitySelection key={JSON.stringify(params)} {...params} />;
 }
 
 function ActivitySelection(params: ActivityRoute) {
+  const navigation = useNavigation("/");
   const [selection, setSelection] = useState<LiveActivityAction | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -41,6 +38,9 @@ function ActivitySelection(params: ActivityRoute) {
   const online = useClient((state) => state.status === "online");
   const ready = useClient((state) => Boolean(state.ready[sessionId]));
   const session = useClient((state) => state.sessions[sessionId]);
+  const detail = useCallback((kind: "session" | "terminal", id: string) => {
+    navigation.dispatch(CommonActions.reset(activityDetailStack(navigation.getState()?.routes ?? [], kind, id)));
+  }, [navigation]);
   const permissions = useClient((state) => state.views[sessionId]?.permissions);
   const actions = useActions();
   const connected = computer.key === computerKey;
@@ -105,7 +105,7 @@ function ActivitySelection(params: ActivityRoute) {
     // An uncertain response is never automatically replayed as another approval.
     void submit().catch(() => setError("未能确认操作结果，请打开任务详情查看；不会自动重复提交。"));
   }, [connected, focused, error, params.action, params.session, params.terminal, selection, online, ready,
-    computer.key, session, permissions, actions, sessionId]);
+    computer.key, session, permissions, actions, sessionId, detail]);
 
   if (list && connected && online && !error) return <ActivityTaskList initialFilter={params.filter} />;
 

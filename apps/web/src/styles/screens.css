@@ -11,6 +11,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px 24px;
+    min-height: 64px;
     min-width: 0;
     transition: background var(--transition);
   }
@@ -38,26 +39,34 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 12px;
     min-width: 0;
-    overflow-wrap: anywhere;
   }
 .screen-idle-status {
     justify-content: flex-start;
-    flex-wrap: nowrap;
     gap: 8px;
   }
 .screen-idle-status > div {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
+    max-width: 240px;
     font-size: 12px;
+    line-height: 18px;
     color: var(--secondaryLabel);
+  }
+.screen-idle-status strong,
+  .screen-idle-status span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 .screen-idle-status strong {
     font-size: 13px;
-    font-weight: 400;
+    line-height: 20px;
+    font-weight: 500;
     color: var(--label);
   }
 .screen-idle-actions {
@@ -65,6 +74,9 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+  }
+.screen-idle-actions > [data-slot="button"]:not([data-size="icon"]) {
+    min-width: 92px;
   }
 .screen-idle [role="alert"],
   .screen-start [role="alert"] {
@@ -102,6 +114,7 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: nowrap;
     gap: 12px;
   }
   .screen-is-idle .screen-idle-status {
@@ -332,9 +345,14 @@
     font-weight: 500;
   }
 
-@media (max-width: 1050px) {
+@media (max-width: 640px) {
 .screen-row {
       grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
+    }
+  .screen-row > .screen-idle,
+  .screen-row > .screen-page {
+      justify-self: stretch;
     }
 }
 @media (max-width: 720px) {

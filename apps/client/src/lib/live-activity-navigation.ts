@@ -38,3 +38,12 @@ export function activityEntries(sessions: SessionSummary[], terminals: TerminalI
   }
   return entries.sort((a, b) => b.at - a.at);
 }
+
+/** External task links leave one detail above home, never another task or the activity trampoline. */
+export function activityDetailStack(routes: readonly { name: string; key?: string; params?: object }[], kind: "session" | "terminal", id: string) {
+  const home = routes.find((route) => route.name === "(tabs)") ?? { name: "(tabs)" };
+  const name = kind === "session" ? "session/[id]/index" : "terminal/[id]";
+  const existing = routes.findLast((route) => route.name === name && (route.params as { id?: string } | undefined)?.id === id);
+  const detail = existing ? { ...existing, params: { id } } : { name, params: { id } };
+  return { index: 1, routes: [home, detail] };
+}

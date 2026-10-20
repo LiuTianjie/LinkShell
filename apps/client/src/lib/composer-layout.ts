@@ -16,3 +16,11 @@ export function composerCardsHeight(available: number, inputHeight: number, bott
 export function composerCardsKeyboardOffset(inputHeight: number) {
   return inputHeight + 8 + 8 + 12;
 }
+
+/** Use the pane's actual window position, including floating and undocked keyboards. */
+export function keyboardOverlap(pane: { x: number; y: number; width: number; height: number }, keyboard?: { screenX: number; screenY: number; width: number; height: number }) {
+  if (!keyboard || keyboard.height <= 0 || keyboard.width <= 0) return 0;
+  if (keyboard.screenX >= pane.x + pane.width || keyboard.screenX + keyboard.width <= pane.x) return 0;
+  if (keyboard.screenY + keyboard.height <= pane.y) return 0;
+  return Math.min(pane.height, Math.max(0, pane.y + pane.height - keyboard.screenY));
+}

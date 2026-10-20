@@ -96,7 +96,7 @@ html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-size:
 html[data-desktop] .desktop-main .page-heading p,
 html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
 html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 4px; font-size: 12px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="default"] { height: 34px; padding-inline: 14px; border-radius: 9px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 34px; padding-inline: 14px; border-radius: 9px; font-size: 13px; }
 html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 31px; height: 31px; border-radius: 9px; }
 html[data-desktop] .desktop-main [data-slot="button"][data-size="plain"] { text-align: left; justify-content: flex-start; }
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
@@ -130,24 +130,25 @@ html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] { 
 html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--warning); background: transparent; }
 html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title > span { color: var(--warning); background: transparent; }
 html[data-desktop] .desktop-main .session-group .list-row:last-child { border-bottom: 0; }
-html[data-desktop] .desktop-main .list-row { min-height: 64px; padding: 11px 12px; border-top: 0; border-bottom: 1px solid var(--separator); border-radius: 0; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 24px minmax(160px, 1fr) auto minmax(68px, auto); grid-template-rows: 22px 20px; column-gap: 14px; row-gap: 4px; align-content: center; }
+html[data-desktop] .desktop-main .list-row { height: 50px; min-height: 50px; padding: 0 12px; border-top: 0; border-bottom: 1px solid var(--separator); border-radius: 0; }
+html[data-desktop] .desktop-main .list-row-static:has(.truncate + .truncate) { height: 62px; min-height: 62px; padding: 0 12px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 24px minmax(160px, 1fr) auto minmax(68px, auto); grid-template-rows: 20px 20px; height: 62px; min-height: 62px; padding: 9px 12px; column-gap: 14px; row-gap: 4px; align-content: center; align-items: center; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > * { margin-left: 0; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child { grid-row: 1 / 3; grid-column: 1; align-self: center; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; text-align: left; justify-content: flex-start; font-size: 14px; font-weight: 600; line-height: 22px; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; text-align: left; justify-content: flex-start; font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-detail { grid-row: 2; grid-column: 2; max-width: 100%; color: var(--secondaryLabel); font-size: 12px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-row-meta { font-size: 11.5px; }
+html[data-desktop] .desktop-main .list-row-meta { font-size: 11.5px; line-height: 20px; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { grid-row: 2; grid-column: 3 / -1; max-width: 180px; justify-self: end; text-align: right; }
 html[data-desktop] .desktop-main .list-row:has(> button:not(.list-row-title)) > .list-row-project { grid-column: 3; max-width: 140px; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: auto; min-width: 56px; text-align: right; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-status { grid-row: 1; grid-column: 3; justify-self: end; white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-status > span { font-size: 11.5px; line-height: 22px; }
+html[data-desktop] .desktop-main .list-row-status > span { font-size: 11.5px; line-height: 20px; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child .agent-mark { width: 23px; height: 23px; border-radius: 7px; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail):hover { background: var(--fill); }
 html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; color: var(--link); }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 24px; justify-self: end; padding-inline: 10px; font-size: 11.5px; background: var(--waitingSoft); border-color: transparent; color: var(--warning); white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 20px; min-height: 20px; justify-self: end; padding-block: 0; padding-inline: 8px; font-size: 11px; line-height: 18px; background: var(--waitingSoft); border-color: transparent; color: var(--warning); white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-more { border: 0; border-radius: 9px; }
-html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 24px minmax(140px, 190px) minmax(90px, 130px) minmax(180px, 1fr); gap: 14px; min-height: 54px; align-items: center; }
+html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 24px minmax(140px, 190px) minmax(90px, 130px) minmax(180px, 1fr); gap: 14px; height: 50px; min-height: 50px; padding: 0 12px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
 html[data-desktop] .desktop-main .computer-agent-label,
 html[data-desktop] .desktop-main .computer-agent-version,
@@ -155,10 +156,10 @@ html[data-desktop] .desktop-main .computer-agent-auth { width: auto; min-width: 
 html[data-desktop] .desktop-main .computer-agent-label { font-size: 13px; line-height: 20px; }
 html[data-desktop] .desktop-main .list-section-title { padding: 6px 15px 8px; font-size: 12px; font-weight: 600; }
 html[data-desktop] .desktop-main [data-slot="badge"] { font-size: 11px; }
-html[data-desktop] .desktop-main .screen-row { min-height: 84px; padding: 16px 10px; margin: 0; border: 0; border-bottom: 1px solid var(--separator); border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .screen-row { height: 68px; min-height: 68px; padding: 0 12px; margin: 0; border: 0; border-bottom: 1px solid var(--separator); border-radius: 0; background: transparent; }
 html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--fill); }
 html[data-desktop] .desktop-main .screens-page > .border-t { border-top: 0; }
-html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 39px; height: 39px; border-radius: 11px; background: var(--inset); }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--inset); }
 
 /* Chat typography is shared with the mobile app; tools keep a quieter rhythm. */
 html[data-desktop] .desktop-main .session-heading { min-height: 72px; padding: 12px 24px; gap: 16px; align-items: center; flex-wrap: nowrap; background: var(--plain); }

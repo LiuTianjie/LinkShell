@@ -177,11 +177,22 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
     setStatus((current) => ({ ...current, controlError: undefined }));
   }
   const checkPermissions = () => void job.run(async () => { await link.call("screen.access", { ask: true }); access.reload(); });
-  if (compact) return <section className="screen-page screen-is-idle" aria-label={`${title}观看区域`}>
-    <div className="screen-idle-status"><Monitor size={20} /><div><strong>{access.value?.supported ? "远程桌面" : "屏幕共享"}</strong><span>{access.value?.recording === false ? "需要屏幕录制权限" : "原生画面 · 硬件解码"}</span></div></div>
-    <LoadState {...access} /><ErrorNotice error={job.error} />
-    <Button variant={primaryAction ? "default" : "outline"} disabled={!access.value?.supported || job.busy} onClick={() => access.value?.recording === false ? checkPermissions() : onOpen ? onOpen() : setStarted(true)}>{access.value?.recording === false ? "检查权限" : "打开桌面"}</Button>
-  </section>;
+  if (compact) {
+    const ready = Boolean(access.value?.supported && access.value.recording !== false);
+    const problem = job.error ?? access.error;
+    return <section className="screen-page screen-is-idle" aria-label={`${title}观看区域`}>
+      <div className="screen-idle-status" role="status">
+        <span className="screen-dot" data-on={ready || undefined} aria-hidden="true" />
+        <div>
+          <strong>{problem ? "检查失败" : access.loading && !access.value ? "正在检查屏幕…" : !access.value?.supported ? "屏幕共享" : access.value.recording === false ? "等待授权" : "远程桌面"}</strong>
+          <span title={problem}>{problem ?? (access.value?.recording === false ? "需要屏幕录制权限" : "原生画面 · 硬件解码")}</span>
+        </div>
+      </div>
+      <div className="screen-idle-actions">
+        <Button variant={primaryAction ? "default" : "outline"} disabled={(!access.value?.supported && !problem) || job.busy} onClick={() => problem ? access.reload() : access.value?.recording === false ? checkPermissions() : onOpen ? onOpen() : setStarted(true)}>{problem ? "重新检查" : access.value?.recording === false ? "检查权限" : "打开桌面"}</Button>
+      </div>
+    </section>;
+  }
   return <section className={cn("screen-page desktop-native-screen", embedded && "screen-embedded", started && "screen-is-started", focused && "screen-focused")} aria-label={`${title}观看区域`} role={focused ? "dialog" : undefined} aria-modal={focused || undefined}>
     <div className="screen-toolbar">
       <strong className="screen-view-title"><Monitor size={17} /><span>{title}</span></strong>

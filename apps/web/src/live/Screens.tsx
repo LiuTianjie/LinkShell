@@ -193,15 +193,22 @@ function ScreenCard({
           <Icon name="computer" size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13px] font-medium" title={name}>
+          <div className="flex h-5 min-w-0 items-center gap-1.5">
+            <span className="truncate text-[13px] leading-5 font-medium" title={name}>
               {name}
             </span>
-            {selected && <Badge variant="secondary">当前</Badge>}
+            {selected && (
+              <Badge
+                variant="secondary"
+                className="h-[18px] shrink-0 px-1.5 py-0 text-[11px] leading-none"
+              >
+                当前
+              </Badge>
+            )}
             <ComputerName computer={computer} iconOnly />
           </div>
           <div
-            className="truncate text-xs text-muted-foreground tabular-nums"
+            className="mt-0.5 truncate text-xs leading-[18px] text-muted-foreground tabular-nums"
             title={`${computer.machine.name} · ${computer.machine.id}`}
           >
             {names[computer.key] && (
@@ -220,25 +227,25 @@ function ScreenCard({
         </Runtime>
       ) : (
         <div className="screen-idle" role="status">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="screen-idle-status">
             <StatusDot on={false} />
-            <div className="flex min-w-0 flex-col">
-              <span className="text-[13px]">
+            <div>
+              <strong>
                 {error
                   ? "暂时无法连接"
                   : computer.machine.online
                     ? "正在连接电脑…"
                     : "电脑离线"}
+              </strong>
+              <span title={error}>
+                {error ??
+                  (computer.machine.online
+                    ? "正在建立加密连接"
+                    : "电脑开机并运行 LinkShell 后即可连接")}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {computer.machine.online
-                  ? "正在建立加密连接"
-                  : "电脑开机并运行 LinkShell 后即可连接"}
-              </span>
-              <ErrorNotice error={error} />
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="screen-idle-actions">
             {error && (
               <Button variant="outline" onClick={retry}>
                 <RefreshCw data-icon="inline-start" />
@@ -287,28 +294,30 @@ function ConnectedScreen({
     );
   return (
     <div className="screen-idle" role="status">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="screen-idle-status">
         {status === "connecting" || status === "reconnecting" ? (
-          <LoaderCircle className="shrink-0 animate-spin" size={14} />
+          <LoaderCircle className="shrink-0 animate-spin text-muted-foreground" size={14} />
         ) : (
           <StatusDot on={false} />
         )}
-        <div className="flex min-w-0 flex-col">
-          <span className="text-[13px]">
+        <div>
+          <strong>
             {status === "stopped"
               ? "连接已断开"
               : status === "reconnecting"
                 ? "正在恢复连接…"
                 : "正在连接电脑…"}
-          </span>
-          <span className="text-xs text-muted-foreground">
+          </strong>
+          <span>
             {statusDetail ?? "正在建立加密连接"}
           </span>
         </div>
       </div>
-      <Button variant="outline" onClick={() => link.reconnectNow()}>
-        重新连接
-      </Button>
+      <div className="screen-idle-actions">
+        <Button variant="outline" onClick={() => link.reconnectNow()}>
+          重新连接
+        </Button>
+      </div>
     </div>
   );
 }

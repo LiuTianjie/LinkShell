@@ -974,62 +974,57 @@ export function Terminals({
                 </TabsTrigger>
               ))}
             </TabsList>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="新建另一个终端"
-              disabled={!online}
-              onClick={openCreate}
-            >
-              <Plus />
-            </Button>
-          </div>
-          <div className="terminal-directory">
-            <FolderOpen aria-hidden="true" size={14} />
-            <span title={current?.cwd}>{current?.cwd ?? "正在载入终端…"}</span>
             {stopped && (
               <Badge variant={current.interrupted ? "warning" : current.exitCode ? "destructive" : "secondary"}>
                 {current.interrupted ? "已中断" : `已退出 ${current.exitCode}`}
               </Badge>
             )}
-            <div>
-              {stopped && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={job.busy || !online}
-                  title={
-                    current.command
-                      ? `在同一目录执行：${current.command}`
-                      : "在同一目录打开新的 Shell"
-                  }
-                  onClick={() =>
-                    void job.run(async () => {
-                      const next = await link.call("terminals.create", {
-                        cwd: current.cwd,
-                        command: current.command,
-                      });
-                      pendingSelection.current = next.terminal.id;
-                      onSelect(next.terminal.id);
-                      load.reload();
-                    })
-                  }
-                >
-                  <RotateCw data-icon="inline-start" />
-                  重新运行
-                </Button>
-              )}
+            {stopped && (
               <Button
                 variant="ghost"
-                size="icon-sm"
-                aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
-                title={stopped ? "删除当前终端记录" : "关闭当前终端"}
-                disabled={!current || job.busy || !online}
-                onClick={() => void closeCurrent()}
+                size="sm"
+                disabled={job.busy || !online}
+                title={
+                  current.command
+                    ? `在同一目录执行：${current.command}`
+                    : "在同一目录打开新的 Shell"
+                }
+                onClick={() =>
+                  void job.run(async () => {
+                    const next = await link.call("terminals.create", {
+                      cwd: current.cwd,
+                      command: current.command,
+                    });
+                    pendingSelection.current = next.terminal.id;
+                    onSelect(next.terminal.id);
+                    load.reload();
+                  })
+                }
               >
-                <X />
+                <RotateCw data-icon="inline-start" />
+                重新运行
               </Button>
-            </div>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="新建另一个终端"
+              title="新建另一个终端"
+              disabled={!online}
+              onClick={openCreate}
+            >
+              <Plus />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
+              title={stopped ? "删除当前终端记录" : "关闭当前终端"}
+              disabled={!current || job.busy || !online}
+              onClick={() => void closeCurrent()}
+            >
+              <X />
+            </Button>
           </div>
           {mounted.map((id) => (
             <TabsContent

@@ -8,7 +8,7 @@ import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-acti
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { KeyboardStickyView } from "react-native-keyboard-controller";
+import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { AgentTile } from "@/components/agent-tile";
@@ -40,6 +40,7 @@ import { sessionTimelineItems } from "@/lib/workflows";
 import { SessionWorkspace, useSessionWorkspace } from "@/components/session-workspace";
 import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
 import { useSessionFoldLayout } from "@/lib/session-fold-layout";
+import { useIPadKeyboard } from "@/lib/use-ipad-keyboard";
 import { ContentHeight } from "@/lib/content-height";
 import { useHasComposerDraft } from "@/lib/use-composer-draft";
 import { useSessionCommands } from "@/lib/use-session-commands";
@@ -148,10 +149,13 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const { computer } = useConnection();
   const insets = usePageInsets();
   const focused = useIsFocused();
+  const ipadKeyboard = useIPadKeyboard(focused);
+  const keyboardHeight = useKeyboardState((state) => state.height);
   // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
   const reservedBottom = folded?.bottomReserved ?? consumedBottomInset;
-  const bottomInset = Math.max(0, insets.bottom - reservedBottom);
-  const keyboardOffset = reservedBottom + bottomInset;
+  const bottomInset = ipadKeyboard.enabled && ipadKeyboard.overlap > 0 ? 0 : Math.max(0, insets.bottom - reservedBottom);
+  // iPad resizes the viewport once; the list and composer must not lift again.
+  const keyboardOffset = ipadKeyboard.enabled ? keyboardHeight : reservedBottom + bottomInset;
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();
@@ -364,6 +368,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
     );
 
   return (
+    <View ref={ipadKeyboard.ref} onLayout={ipadKeyboard.measure} style={{ flex: 1, paddingBottom: ipadKeyboard.overlap }}>
     <ContentHeight value={contentHeight}>
     <View onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
       {!navigation ? null : <>
@@ -534,6 +539,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
 
 
       <KeyboardStickyView
+        enabled={!ipadKeyboard.enabled}
         offset={{ closed: 0, opened: keyboardOffset }}
         pointerEvents="box-none"
         style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}
@@ -595,5 +601,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       </KeyboardStickyView>
     </View>
     </ContentHeight>
+    </View>
   );
 }

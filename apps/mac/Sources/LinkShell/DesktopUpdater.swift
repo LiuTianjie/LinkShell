@@ -7,6 +7,7 @@ import Sparkle
   private var controller: SPUStandardUpdaterController?
   private var installRequested = false
   private var installing = false
+  private var prepared = false
 
   init(model: DesktopModel) { self.model = model; super.init() }
 
@@ -16,7 +17,7 @@ import Sparkle
     self.controller = controller
     do {
       try controller.updater.start()
-      // Our timer performs information-only checks. Installation always goes through prepare-update.
+      // Our timer performs information-only checks. Host stop happens only right before relaunch.
       controller.updater.automaticallyChecksForUpdates = false
       controller.updater.automaticallyDownloadsUpdates = false
       controller.updater.sendsSystemProfile = false
@@ -32,26 +33,16 @@ import Sparkle
 
   func install() {
     guard let controller, controller.updater.canCheckForUpdates, !installRequested else { return }
-    installRequested = true; installing = false
-    model?.busy = true; model?.updateMessage = "正在准备更新…"
-    Task {
-      do {
-        _ = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45) }.value
-        controller.checkForUpdates(nil)
-      } catch {
-        installRequested = false
-        model?.busy = false
-        model?.updateMessage = "更新已暂停：\(error.localizedDescription)"
-        await recover()
-      }
-    }
+    installRequested = true; installing = false; prepared = false
+    model?.updateMessage = "正在打开更新窗口…"
+    controller.checkForUpdates(nil)
   }
 
   func recover() async {
     guard DesktopRuntime.bundled else { return }
     do {
       _ = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "recover-update"], timeout: 45) }.value
-    model?.recoveryProblem = nil
+      model?.recoveryProblem = nil
     } catch { model?.recoveryProblem = "服务恢复需要处理：\(error.localizedDescription)" }
     model?.busy = false
     model?.refresh()
@@ -68,16 +59,41 @@ import Sparkle
     model?.availableAppUpdate = false
     model?.updateMessage = "当前已是此通道的最新版本"
   }
+  func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+    model?.updateMessage = "正在下载 LinkShell \(item.displayVersionString)（后台服务保持连接）…"
+  }
+  func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+    model?.updateMessage = "下载完成，点击“Install and Relaunch”即可安装并重启"
+  }
   func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
     installing = true
     model?.updateMessage = "正在安装，LinkShell 将重新打开…"
   }
+  func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+    installing = true
+    prepared = true
+    model?.busy = true
+    model?.updateMessage = "正在安装，LinkShell 将重新打开…"
+    Task {
+      _ = try? await Task.detached { try DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45) }.value
+      installHandler()
+    }
+    return true
+  }
+  func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+    guard !prepared else { return }
+    prepared = true
+    _ = try? DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45)
+  }
   func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
     model?.checking = false
+    installRequested = false
     if let error, (error as NSError).code != 1001 { model?.updateMessage = "更新未完成：\(error.localizedDescription)" }
-    if installRequested && !installing {
-      installRequested = false
+    if prepared && !installing {
+      prepared = false
       Task { await recover() }
+    } else if !installing {
+      model?.busy = false
     }
   }
 }

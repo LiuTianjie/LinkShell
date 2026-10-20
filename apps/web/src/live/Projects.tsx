@@ -165,7 +165,7 @@ export function Projects({
                       key={session.id}
                       variant="ghost"
                       size="plain"
-                      className="list-row h-10 min-h-10 w-full justify-start rounded-none text-left font-normal"
+                      className="list-row w-full justify-start rounded-none text-left font-normal"
                       onClick={() => navigate(session.id)}
                     >
                       <AgentMark agent={session.agent} />
@@ -180,13 +180,15 @@ export function Projects({
                           session.preview ??
                           "打开会话继续工作"}
                       </span>
-                      <StatusText
-                        state={
-                          sessionNeedsAttention(session)
-                            ? "waiting"
-                            : session.state
-                        }
-                      />
+                      <span className="list-row-status">
+                        <StatusText
+                          state={
+                            sessionNeedsAttention(session)
+                              ? "waiting"
+                              : session.state
+                          }
+                        />
+                      </span>
                       <time
                         className="list-row-meta w-14 text-right"
                         dateTime={new Date(session.updatedAt).toISOString()}

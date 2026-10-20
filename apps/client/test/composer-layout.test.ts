@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composerCardsHeight, composerCardsKeyboardOffset, composerViewport } from "../src/lib/composer-layout";
+import { keyboardOverlap, composerCardsHeight, composerCardsKeyboardOffset, composerViewport } from "../src/lib/composer-layout";
 
 describe("bounded sticky composer", () => {
   it("reserves the keyboard exactly once, including the sticky bottom offset", () => {
@@ -85,5 +85,23 @@ describe("bounded sticky composer", () => {
     const focusedInputBottom = keyboardTop - composerCardsKeyboardOffset(62);
     expect(focusedInputBottom).toBe(cardsBottom - 12);
     expect(focusedInputBottom).toBeLessThan(cardsBottom);
+  });
+});
+
+describe("iPad keyboard intersection", () => {
+  it("keeps the input above docked and undocked keyboards using the pane bottom", () => {
+    const pane = { x: 350, y: 100, width: 650, height: 888 };
+    expect(keyboardOverlap(pane, { screenX: 0, screenY: 700, width: 1024, height: 324 })).toBe(288);
+    expect(keyboardOverlap(pane, { screenX: 500, screenY: 500, width: 320, height: 250 })).toBe(488);
+  });
+  it("does not move a pane outside the keyboard and resets after dismissal", () => {
+    const pane = { x: 350, y: 100, width: 650, height: 600 };
+    expect(keyboardOverlap(pane, { screenX: 0, screenY: 500, width: 300, height: 250 })).toBe(0);
+    expect(keyboardOverlap(pane, { screenX: 0, screenY: 800, width: 1024, height: 300 })).toBe(0);
+    expect(keyboardOverlap(pane, undefined)).toBe(0);
+  });
+  it("recalculates when the window shrinks rather than subtracting keyboard height twice", () => {
+    const keyboard = { screenX: 0, screenY: 700, width: 1024, height: 324 };
+    expect(keyboardOverlap({ x: 350, y: 100, width: 650, height: 600 }, keyboard)).toBe(0);
   });
 });

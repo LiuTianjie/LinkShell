@@ -211,32 +211,33 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  /* Actions reveal on hover and take NO vertical space when hidden, so a
-     finished message doesn't leave a dead band beneath it. */
+  /* Actions keep a fixed single-line slot so hovering never shifts message
+     heights or causes Virtuoso rows to bounce. */
   .message-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: flex-end;
-    gap: 2px;
-    max-height: 0;
-    margin-top: 0;
-    opacity: 0;
-    overflow: hidden;
-    transition:
-      opacity var(--transition),
-      max-height var(--transition),
-      margin-top var(--transition);
+    gap: 4px;
+    height: 24px;
+    min-height: 24px;
+    margin-top: 6px;
+    opacity: 0.72;
+    white-space: nowrap;
+    transition: opacity var(--transition);
   }
-  .user-message:hover + .message-actions,
+  .message-actions [data-slot="button"] {
+    height: 22px;
+    min-height: 22px;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+  .user-message:hover .message-actions,
   .message-actions:hover,
   .message-actions:focus-within,
   .assistant-message:hover .message-actions,
   .assistant-message:focus-within .message-actions {
-    max-height: 32px;
-    margin-top: 4px;
     opacity: 1;
-    overflow: visible;
   }
   .assistant-message .message-actions {
     justify-content: flex-start;

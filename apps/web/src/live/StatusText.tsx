@@ -20,7 +20,7 @@ export function StatusText({
   label?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-[var(--secondaryLabel)]">
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-[var(--secondaryLabel)]">
       <span
         className="size-1.5 shrink-0 rounded-full"
         style={{ background: tone(state) }}

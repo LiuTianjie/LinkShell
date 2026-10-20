@@ -148,7 +148,7 @@ struct DesktopUsageView: View {
             Text("Agent").frame(width: 120, alignment: .leading)
             Text("模型").frame(maxWidth: .infinity, alignment: .leading)
             column("记录（条）"); column("输入"); column("输出"); column("缓存读取"); column("总 Token")
-          }.font(.system(size: 11.5, weight: .medium)).foregroundStyle(DesktopStyle.secondary).padding(.vertical, 6.5)
+          }.font(.system(size: 11.5, weight: .medium)).foregroundStyle(DesktopStyle.secondary).frame(height: 32)
           ForEach(report.models) { entry in
             Rectangle().fill(DesktopStyle.line.opacity(0.6)).frame(height: 1)
             HStack(spacing: 12) {
@@ -159,7 +159,7 @@ struct DesktopUsageView: View {
               }.frame(width: 120, alignment: .leading)
               Text(entry.model).lineLimit(1).help(entry.model).frame(maxWidth: .infinity, alignment: .leading)
               column(number(entry.records)); column(compact(entry.inputTokens ?? 0)); column(compact(entry.outputTokens ?? 0)); column(compact(entry.cacheReadTokens ?? 0)); column(compact(entry.totalTokens))
-            }.font(.system(size: 12)).monospacedDigit().padding(.vertical, 7)
+            }.font(.system(size: 12)).monospacedDigit().frame(height: 36)
           }
           if report.models.isEmpty { Text("所选范围暂无模型用量").font(.footnote).foregroundStyle(DesktopStyle.secondary).padding(.vertical, 16) }
         }

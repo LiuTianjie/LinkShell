@@ -790,36 +790,39 @@ function BrowserScreen({
   if (compact) {
     const access = loaded.value;
     const needsPermission = access?.recording === false;
+    const problem = job.error ?? loaded.error;
     return (
       <section
         className="screen-page screen-is-idle"
         aria-label={`${title}观看区域`}
       >
         <div className="screen-idle-status" role="status">
-          <LoadState {...loaded} />
-          {access && (
-            <>
-              <StatusDot on={access.supported && !needsPermission} />
-              <div>
-                <strong>
-                  {!access.supported
+          <StatusDot on={Boolean(access?.supported && !needsPermission && !problem)} />
+          <div>
+            <strong>
+              {problem
+                ? "检查失败"
+                : !access
+                  ? "正在检查屏幕…"
+                  : !access.supported
                     ? "暂不支持共享"
                     : needsPermission
                       ? "等待授权"
                       : "在线"}
-                </strong>
-                <span>
-                  {!access.supported
+            </strong>
+            <span title={problem}>
+              {problem ??
+                (!access
+                  ? "正在读取屏幕与权限状态"
+                  : !access.supported
                     ? "此系统无法共享屏幕"
                     : needsPermission
                       ? "需要屏幕录制权限"
                       : access.control
                         ? "可观看与控制"
-                        : "仅观看桌面"}
-                </span>
-              </div>
-            </>
-          )}
+                        : "仅观看桌面")}
+            </span>
+          </div>
         </div>
         <div className="screen-idle-actions">
           <Popover>
@@ -921,7 +924,6 @@ function BrowserScreen({
             </Button>
           )}
         </div>
-        <ErrorNotice error={job.error} />
       </section>
     );
   }

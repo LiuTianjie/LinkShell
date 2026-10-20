@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
-import { activityEntries, activityRoute } from "../src/lib/live-activity-navigation";
+import { activityEntries, activityRoute, activityDetailStack } from "../src/lib/live-activity-navigation";
 
 const session: SessionSummary = { id: "s-1", nativeId: "n-1", agent: "codex", cwd: "/test", state: "running", archived: false, createdAt: 1, updatedAt: 2, lastSeq: 1, pendingPermissions: 0 };
 const terminal: TerminalInfo = { id: "t-1", title: "pnpm", command: "pnpm test", cwd: "/test", cols: 80, rows: 24, createdAt: 1, activeAt: 3 };
@@ -17,5 +17,24 @@ describe("Live Activity collection navigation", () => {
     expect(activityEntries(sessions, [], "attention")).toEqual([{ kind: "session", session: questions, at: questions.updatedAt }]);
     expect(activityEntries(sessions, [{ ...terminal, exitCode: 0 }], "completed")).toHaveLength(2);
     expect(activityEntries([], [{ ...terminal, interrupted: true }], "completed")).toEqual([]);
+  });
+});
+
+describe("iPhone Live Activity detail stack", () => {
+  const home = { name: "(tabs)", key: "home", state: { index: 0, routes: [{ name: "(home)" }] } };
+  it("reuses the selected conversation and removes the activity and intervening pages", () => {
+    const target = { name: "session/[id]/index", key: "target", params: { id: "s-1", panel: "changes" } };
+    const result = activityDetailStack([home, target, { name: "usage" }, { name: "activity" }], "session", "s-1");
+    expect(result).toEqual({ index: 1, routes: [home, { ...target, params: { id: "s-1" } }] });
+    expect(result.routes[0]).toBe(home);
+  });
+  it("does not leave a different conversation behind the target", () => {
+    const result = activityDetailStack([home, { name: "session/[id]/index", params: { id: "old" } }, { name: "activity" }], "session", "new");
+    expect(result.routes).toEqual([home, { name: "session/[id]/index", params: { id: "new" } }]);
+  });
+  it("gives cold launches a home destination and keeps repeated opens at two routes", () => {
+    const first = activityDetailStack([{ name: "activity" }], "session", "s-1");
+    expect(first.routes).toEqual([{ name: "(tabs)" }, { name: "session/[id]/index", params: { id: "s-1" } }]);
+    expect(activityDetailStack([...first.routes, { name: "activity" }], "session", "s-1")).toEqual(first);
   });
 });
