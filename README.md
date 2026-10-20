@@ -31,7 +31,7 @@
 
 Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work, approve what they ask for, send a message into a running turn, and open the computer's screen when you need to. When you sit down again, the session is still in your terminal. Your code and the agent processes never leave your machine, and everything between phone and computer is end-to-end encrypted.
 
-Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, against macOS or Linux.
+Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, against macOS, Linux or Windows.
 
 ## What it does
 
@@ -69,6 +69,8 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
 ## Install on your computer
 
 **Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
+
+**Windows: desktop preview** (Windows 10 1809+ / Windows 11 x64). Build an installer or portable ZIP from `apps/windows`; both bundle Node, CLI, Host, ConPTY and screen components. Direct H.264 video and JPEG fallback support viewing and control on the unlocked desktop. Packages are currently unsigned previews; see the [Windows guide](docs/windows-desktop.md) for installation and validation limits.
 
 **macOS or Linux: the CLI** (Node.js 22.13 or newer).
 
@@ -186,7 +188,7 @@ pnpm install
 pnpm build && pnpm typecheck && pnpm test
 ```
 
-On macOS the full build also builds LinkShell.app and needs Xcode's Swift toolchain; `pnpm -r --filter "./packages/*" build` builds the TypeScript packages only (what Linux CI runs). To work on the app, run a development host with its own state directory, then Metro:
+On macOS the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows it builds the desktop and screen helper with .NET Framework 4.8; `pnpm -r --filter "./packages/*" build` builds the TypeScript packages only (what Linux CI runs). To work on the app, run a development host with its own state directory, then Metro:
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878

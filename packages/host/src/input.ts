@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { z } from "zod";
+import { windowsHelper } from "./windows-screen.js";
 
 // LinkShell.app, the Mac side of the screen (apps/mac): it captures and sends
 // the picture, and posts the viewer's pointer and key events to the system.
@@ -634,6 +635,12 @@ export class InputControl {
   async start(screen: number): Promise<void> {
     if (this.started || this.stopped) return;
     this.started = true;
+    if (process.platform === "win32") {
+      const helper = windowsHelper();
+      if (!helper) this.listener.state({ available: false, reason: "请安装 Windows 桌面版的屏幕控制组件" });
+      else this.spawn(helper, screen, this.options.dryRun ?? dryRunByDefault());
+      return;
+    }
     if (process.platform !== "darwin") {
       this.listener.state({ available: false, reason: "暂时只能控制 macOS 电脑" });
       return;
@@ -684,7 +691,7 @@ export class InputControl {
   }
 
   private spawn(path: string, screen: number, dryRun: boolean): void {
-    const child = spawn(path, [String(screen), ...(dryRun ? ["--dry-run"] : [])], { stdio: ["pipe", "pipe", "ignore"] });
+    const child = spawn(path, [String(screen), ...(dryRun ? ["--dry-run"] : [])], { windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
     this.child = child;
     child.on("error", (error) => {
       if (this.stopped) return;
@@ -693,6 +700,10 @@ export class InputControl {
     });
     child.on("exit", () => {
       if (this.child === child) this.child = undefined;
+      if (!this.stopped) {
+        this.started = false;
+        this.listener.state({ available: false, reason: "屏幕控制组件已退出，请重新选择控制方式" });
+      }
     });
     // The viewer going away mid-write is not an error worth a crash.
     child.stdin!.on("error", () => {});

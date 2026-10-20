@@ -1,0 +1,33 @@
+name: Windows desktop
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm --filter @linkshell/host exec vitest run test/codex-installation.test.ts test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/screen-session.test.ts test/screen-viewer-session.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts test/screen.test.ts test/screen-platform.test.ts test/screen-native-controls.test.ts test/screen-metrics.test.ts
+      - run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
+      - run: pnpm --filter @linkshell/windows test
+      - run: pnpm --filter @linkshell/windows build:standalone
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinkShell-Windows-x64-unsigned
+          path: |
+            artifacts/LinkShell-Setup-*-windows-x64.exe
+            artifacts/LinkShell-*-windows-x64.zip
+            artifacts/*.sha256

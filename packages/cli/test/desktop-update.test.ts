@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareDesktopUpdate, recoverDesktopUpdate } from "../src/commands/desktop-update.js";
+import { prepareDesktopUpdate, recoverDesktopUpdate, stopDesktopUpdateHost } from "../src/commands/desktop-update.js";
 import { ensureHostRunning, withRunningHost } from "../src/commands/host.js";
 import { readPid, readHostOwner, stopDaemonAndWait } from "../src/utils/daemon.js";
 import { standaloneBundle } from "../src/utils/standalone.js";
@@ -21,6 +21,14 @@ beforeEach(() => {
 afterEach(() => rmSync(state.home, { recursive: true, force: true }));
 const marker = () => join(state.home, "desktop-update.json");
 describe("standalone update recovery", () => {
+  it("quiesces its failed update before rollback, retaining the recovery marker", async () => {
+    await prepareDesktopUpdate(); vi.mocked(stopDaemonAndWait).mockClear();
+    await stopDesktopUpdateHost();
+    expect(stopDaemonAndWait).toHaveBeenCalledWith("host", 30_000, 42);
+    expect(existsSync(marker())).toBe(true);
+    vi.mocked(stopDaemonAndWait).mockClear(); vi.mocked(readHostOwner).mockReturnValue("/Other.app");
+    await stopDesktopUpdateHost(); expect(stopDaemonAndWait).not.toHaveBeenCalled();
+  });
   it("never stops or restarts a host owned by another installation", async () => {
     vi.mocked(readHostOwner).mockReturnValue(undefined);
     await prepareDesktopUpdate(); await recoverDesktopUpdate("2.0.0");

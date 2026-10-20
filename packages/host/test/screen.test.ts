@@ -12,7 +12,8 @@ describe("ending a capture", () => {
     await new Promise((resolve) => stubborn.stdout!.once("data", resolve));
     const exited = new Promise<NodeJS.Signals | null>((resolve) => stubborn.once("exit", (_code, signal) => resolve(signal)));
     endCapture(stubborn);
-    expect(await exited).toBe("SIGKILL");
+    // Windows terminates immediately; it cannot install a POSIX SIGTERM handler.
+    expect(await exited).toBe(process.platform === "win32" ? "SIGTERM" : "SIGKILL");
     // Ending it again, or one that left by itself, is nothing.
     endCapture(stubborn);
     const polite = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

@@ -38,6 +38,10 @@ async function fetchLatestVersion(): Promise<string | null> {
 export async function runUpgrade(current: string): Promise<void> {
   const app = standaloneBundle();
   if (app) {
+    if (process.platform === "win32") {
+      process.stderr.write("  Windows 桌面版请通过新版安装包一起更新 App、CLI 和 Host：\n  https://github.com/LiuTianjie/LinkShell/releases\n");
+      return;
+    }
     execFileSync("/usr/bin/open", ["-n", "-a", app, "--args", "--dashboard", "--check-updates", "--home", linkshellDir()]);
     process.stderr.write("  已打开 LinkShell 软件更新；App、内置 CLI 和 Host 将一起更新。\n");
     return;

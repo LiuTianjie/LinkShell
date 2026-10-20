@@ -6,10 +6,12 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
-import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type HelperApp, type StreamProfile, type VideoConfigured } from "./input.js";
+import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
+import { captureWindows, configureWindowsCapture, WindowsFrameSplitter, windowsDisplays, windowsHelper, windowsProfile } from "./windows-screen.js";
+import { WindowsVideoSession, windowsMedia, type ScreenVideoSession } from "./windows-video.js";
 import { fallbackProfile, fallbackSize, SCREEN_RETAIN_MS, screenConfiguration, type ScreenConfiguration } from "./screen-session.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
@@ -286,6 +288,7 @@ export class ScreenShare {
   }
 
   private async listDisplays(): Promise<Capturable[]> {
+    if (process.platform === "win32") return (await windowsDisplays()).map(({ screen, name, w, h }) => ({ index: screen, screen, name, w, h }));
     if (process.platform === "darwin") {
       const app = inputApp(this.log);
       if (!app) throw RpcError.app("not_supported", NO_APP);
@@ -313,7 +316,7 @@ export class ScreenShare {
         response.writeHead(302, { location: `${url.pathname}${url.search}`, "cache-control": "no-store" }).end();
         return;
       }
-      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(viewerPage());
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(viewerPage(process.platform));
     });
     const sockets = new WebSocketServer({ noServer: true });
     server.on("upgrade", (request, socket, head) => {
@@ -352,6 +355,15 @@ export class ScreenShare {
    * (`ffmpeg`: whether what captures is there — ffmpeg itself on Linux.)
    */
   async access(ask: boolean): Promise<ScreenAccess> {
+    if (process.platform === "win32") {
+      const found = Boolean(windowsHelper());
+      try {
+        const displays = await windowsDisplays();
+        return { supported: true, ffmpeg: true, recording: displays.length > 0, control: true, app: "LinkShell" };
+      } catch (error) {
+        return { supported: true, ffmpeg: found, recording: false, control: false, problem: (error as Error).message };
+      }
+    }
     const supported = macAppSupported() || process.platform === "linux";
     if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "controlling the screen needs macOS" };
     const app = inputApp(this.log);
@@ -421,12 +433,21 @@ export class ScreenShare {
       };
     }
     if (!wanted()) return undefined;
-    const capture = spawn("ffmpeg", captureArgs(level, profile), { stdio: ["ignore", "pipe", "pipe"] });
+    const windows = process.platform === "win32";
+    const capture = windows ? captureWindows(screen, { ...profile, quality: windowsProfile(level).quality }) : spawn("ffmpeg", captureArgs(level, profile), { stdio: ["ignore", "pipe", "pipe"] });
     this.captures.add(capture);
     const splitter = new AccessUnitSplitter();
+    const jpeg = new WindowsFrameSplitter();
     let errors = "";
     capture.stdout!.on("data", (chunk: Buffer) => {
-      if (!ended && wanted()) splitter.push(chunk, on.frame);
+      if (ended || !wanted()) return;
+      try {
+        if (windows) jpeg.push(chunk, frame => on.frame(frame, true));
+        else splitter.push(chunk, on.frame);
+      } catch (error) {
+        errors = (error as Error).message;
+        endCapture(capture, true);
+      }
     });
     capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
     const finished = (code: number, said: string) => {
@@ -447,6 +468,10 @@ export class ScreenShare {
         ended = true;
         endCapture(capture);
       },
+      ...(windows ? {
+        change: (next: number, requested?: StreamProfile) => configureWindowsCapture(capture, { t: "profile", ...(requested ?? profile), quality: windowsProfile(next).quality }),
+        key: () => configureWindowsCapture(capture, { t: "keyframe" }),
+      } : {}),
     };
   }
 
@@ -480,7 +505,44 @@ export class ScreenShare {
    * Has the app offer the screen to this viewer as a video track. False when it can't (no app, an
    * app without the media engine): the picture then goes down the socket.
    */
-  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void }): Promise<{ app: HelperApp; id: string; reconfigure: boolean } | "refused" | undefined> {
+  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void; input(message: unknown): void }): Promise<ScreenVideoSession | "refused" | undefined> {
+    if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" && windowsMedia()) {
+      // The native guard checks the selected desktop and the local opt-out throughout capture.
+      await windowsDisplays();
+      if (viewer.closed()) return "refused";
+      this.video?.taken();
+      const holder = this.holder;
+      if (holder) {
+        this.holder = undefined; holder.end(); holder.on.exit("屏幕画面被另一台设备接手了");
+        await captureReleased(holder);
+      }
+      if (viewer.closed()) return "refused";
+      const iceServers = this.iceServers().map(url => ({ urls: [url] }));
+      viewer.tell({ rtc: { t: "config", iceServers } });
+      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps }, {
+        tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log,
+      });
+      const mine = { id: session.id, taken: () => {
+        if (this.video === mine) this.video = undefined;
+        session.end(); viewer.refuse("屏幕画面被另一台设备接手了");
+      } };
+      this.video = mine;
+      const cancelled = setInterval(() => { if (viewer.closed()) session.end(); }, 100);
+      try {
+        await session.offer();
+        if (viewer.closed() || this.video !== mine) {
+          session.end();
+          if (this.video === mine) this.video = undefined;
+          return "refused";
+        }
+        return session;
+      }
+      catch (error) {
+        session.end(); if (this.video === mine) this.video = undefined;
+        this.log(`[screen] Windows video could not start: ${String(error)}`);
+        return undefined;
+      } finally { clearInterval(cancelled); }
+    }
     // LINKSHELL_SCREEN_VIDEO=off: every viewer gets the picture down the socket (to compare the two, or should the track ever misbehave).
     const app = process.platform === "darwin" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" ? inputApp(this.log) : undefined;
     if (!app) return undefined;
@@ -543,7 +605,7 @@ export class ScreenShare {
       if (this.video === mine) this.video = undefined;
       return "refused";
     }
-    return { app, id, reconfigure: status.videoReconfigure === true };
+    return { id, reconfigure: status.videoReconfigure === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
   }
 
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc"): void {
@@ -576,10 +638,15 @@ export class ScreenShare {
     let pausedExpiry: ReturnType<typeof setTimeout> | undefined;
     let running: Running | undefined;
     let captureGeneration = 0;
-    let video: { app: HelperApp; id: string; reconfigure: boolean } | undefined;
+    let video: ScreenVideoSession | undefined;
     let signals: Promise<void> = Promise.resolve();
-    const best = relayed ? RELAY_LEVEL : 0;
-    const pacer = new Pacer(Date.now());
+    const windows = process.platform === "win32";
+    const best = relayed ? windows ? 1 : RELAY_LEVEL : 0;
+    const pacer = new Pacer(Date.now(), windows ? { maxInFlight: 2, behindMs: 120, caughtUpMs: 50, probeMs: 1500 } : {});
+    const profileFor = (next: number, configuration: ScreenConfiguration): StreamProfile => ({
+      ...fallbackProfile(next, configuration),
+      ...(windows ? windowsProfile(next, configuration.width, configuration.maxFps) : {}),
+    });
     let level = best;
     let changing = false;
     let lighter = false;
@@ -600,7 +667,7 @@ export class ScreenShare {
         // Readiness may arrive while the applied target is still being acknowledged; it is
         // safe to report permissions then, while the independent input gate stays closed.
         state: (state) => { if (control === created && revision === at) tell({ control: state }); },
-        cursor: (x, y) => { if (control === created && inputEnabled) tell({ cursor: { x, y } }); },
+        cursor: (x, y) => { if (control === created && inputEnabled && !video?.cursor?.(x, y)) tell({ cursor: { x, y } }); },
         posted: (event) => this.log(`[screen] dry run: ${JSON.stringify(event)}`),
       }, this.log);
       control = created;
@@ -623,7 +690,7 @@ export class ScreenShare {
       if (!video) return;
       const ended = video;
       video = undefined;
-      ended.app.endVideo(ended.id);
+      ended.end();
       if (this.video?.id === ended.id) this.video = undefined;
     };
     const expirePaused = () => {
@@ -638,7 +705,7 @@ export class ScreenShare {
       if (pausedExpiry) clearTimeout(pausedExpiry);
       pausedExpiry = undefined;
     };
-    const capabilities = () => tell({ session: { t: "capabilities", version: 1, configure: canConfigure, pause: video ? video.reconfigure : true, retainMs: SCREEN_RETAIN_MS } });
+    const capabilities = () => tell({ session: { t: "capabilities", version: 1, configure: canConfigure, pause: video ? !!(video.reconfigure || video.pause) : true, retainMs: SCREEN_RETAIN_MS } });
     const failure = (error: unknown) => {
       if (!live()) return;
       this.log(`[screen] the capture did not start: ${String(error)}`);
@@ -660,13 +727,14 @@ export class ScreenShare {
     const events: CaptureEvents = {
       frame: (unit, key) => {
         if (!live() || desired.paused) return;
+        if (windows && ws.bufferedAmount > 256 * 1024) return;
         if (wantsKey && !key) return;
         wantsKey = false;
         const now = Date.now();
         const seq = pacer.next(key, now);
         if (seq !== undefined) {
           const head = Buffer.allocUnsafe(5);
-          head[0] = key ? 1 : 0;
+          head[0] = windows ? 2 : key ? 1 : 0;
           head.writeUInt32BE(seq >>> 0, 1);
           ws.send(Buffer.concat([head, unit]));
         } else askForKey();
@@ -684,7 +752,7 @@ export class ScreenShare {
         resized: () => { if (wanted()) events.resized?.(); },
         exit: (message) => { if (wanted()) events.exit(message); },
       };
-      const started = await this.take(target?.screen ?? 0, level, scoped, wanted, fallbackProfile(level, configuration));
+      const started = await this.take(target?.screen ?? 0, level, scoped, wanted, profileFor(level, configuration));
       if (!wanted()) {
         if (this.holder === started) this.holder = undefined;
         started?.end();
@@ -708,7 +776,7 @@ export class ScreenShare {
       lighter = next > level;
       level = next;
       if (running?.change) {
-        running.change(next, fallbackProfile(next, desired));
+        running.change(next, profileFor(next, desired));
         pacer.changed(Date.now());
       } else {
         stopRunning();
@@ -737,12 +805,16 @@ export class ScreenShare {
             if (!target) throw new Error("所选屏幕已不可用，请选择其他屏幕");
             let applied: VideoConfigured;
             if (video) {
-              if (!video.reconfigure) {
-                // An old helper cannot stop capture without closing its peer connection.
-                if (configuration.paused) { dispose(); ws.close(); return; }
-                throw new Error("电脑上的屏幕组件不支持保留连接，请重新连接");
-              }
-              applied = await video.app.configureVideo(video.id, {
+              if (!video.reconfigure || !video.configure) {
+                // Windows can pause its existing track, but target changes still reconnect.
+                if (video.pause && change.requestId === undefined) {
+                  video.pause(configuration.paused);
+                  applied = { screen: target.screen, width: target.w ?? 0, height: target.h ?? 0, maxFps: configuration.maxFps ?? 60, paused: configuration.paused };
+                } else {
+                  if (configuration.paused) { dispose(); ws.close(); return; }
+                  throw new Error("电脑上的屏幕组件不支持保留连接，请重新连接");
+                }
+              } else applied = await video.configure({
                 requestId: ++helperRequestId, screen: target.screen, maxWidth: configuration.width,
                 ...(configuration.maxFps === undefined ? {} : { maxFps: configuration.maxFps }), paused: configuration.paused,
                 ...(change.generation === undefined ? {} : { inputGeneration: change.generation }),
@@ -751,7 +823,7 @@ export class ScreenShare {
                 throw new Error("电脑返回的屏幕设置无效，请重试");
               }
             } else {
-              const profile = fallbackProfile(level, configuration);
+              const profile = profileFor(level, configuration);
               let size = !target.w || !target.h ? { width: 0, height: 0 } : fallbackSize(target, profile);
               let fps = profile.fps;
               if ((!size.width || !size.height) && change.requestId !== undefined) throw new Error("无法读取当前屏幕尺寸，请重新连接");
@@ -861,7 +933,7 @@ export class ScreenShare {
           if (!target || !live()) return;
           const data = signal.data;
           const resolved = data.t === "rtc.ice" ? { ...data, candidate: await resolvedCandidate(data.candidate) } : data;
-          if (live() && video === target) target.app.signal(target.id, resolved);
+          if (live() && video === target) target.signal(resolved);
         }).catch(() => {});
       } else if (kind === "keyframe") {
         const now = Date.now();
@@ -889,14 +961,20 @@ export class ScreenShare {
         closed: () => !live(), tell,
         refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
         lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
+        input: message => {
+          if (!live() || desired.paused || !inputEnabled) return;
+          controlRequested = true;
+          const at = revision;
+          void startControl().then(() => { if (live() && revision === at && inputEnabled && !desired.paused) control?.send(message); });
+        },
       }).then((offered) => {
         if (offered === "refused") return;
-        if (!live()) { if (offered) offered.app.endVideo(offered.id); return; }
+        if (!live()) { offered?.end(); return; }
         if (!offered) { startFallback(); return; }
         video = offered;
         if (lostWhileOpening) { startFallback(); return; }
         initialized = true;
-        canConfigure = offered.reconfigure;
+        canConfigure = offered.reconfigure === true;
         capabilities();
         if (pending) void drain();
         else { inputEnabled = true; void startControl(); }

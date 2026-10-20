@@ -31,7 +31,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist *.tsbuildinfo && tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-build.mjs && tsc -p tsconfig.json",
     "prepack": "pnpm run build && pnpm run build:web",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/main.ts",

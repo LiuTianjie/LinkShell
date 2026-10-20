@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { probeAgent } from "../../process.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
@@ -50,7 +49,6 @@ import {
   type SourcedConfigOption,
 } from "./mapper.js";
 
-const execFileAsync = promisify(execFile);
 
 export interface AcpAgentSpec {
   id: string;
@@ -637,7 +635,7 @@ export class AcpDriver implements AgentDriver {
     if (this.spec.transport === "stdio") return "";
     const probe = this.spec.version ?? { command: this.spec.command, args: ["--version"] };
     try {
-      const { stdout, stderr } = await execFileAsync(probe.command, probe.args, { env: this.env, timeout: 15_000 });
+      const { stdout, stderr } = await probeAgent(probe.command, probe.args, { env: this.env, timeout: 15_000 });
       const text = `${stdout}\n${stderr}`.trim();
       // "GitHub Copilot CLI 1.0.22." → "1.0.22"
       return text.match(/\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?/)?.[0]?.replace(/[.-]+$/, "") ?? "";

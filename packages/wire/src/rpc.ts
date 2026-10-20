@@ -108,6 +108,7 @@ const acpMethods = {
 } as const;
 
 const coreMethods = {
+  "desktop.shutdown": { params: z.object({ pid: z.number().int().positive() }), result: empty },
   "usage.summary": { params: usageQuerySchema, result: usageReportSchema },
   "liveActivities.subscribe": {
     params: liveActivitySubscriptionSchema,

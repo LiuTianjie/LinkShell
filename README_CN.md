@@ -31,7 +31,7 @@
 
 Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它干活、批准它的请求、往正在进行的这一轮里插话，需要时直接打开电脑屏幕。回到电脑前，会话还在终端里。代码和 Agent 进程都不离开你的电脑，手机和电脑之间的数据全程端到端加密。
 
-支持 iPhone（含 iPhone Duo）、Apple Watch、Android 和浏览器；电脑端支持 macOS 与 Linux。
+支持 iPhone（含 iPhone Duo）、Apple Watch、Android 和浏览器；电脑端支持 macOS、Linux 与 Windows。
 
 ## 能做什么
 
@@ -69,6 +69,8 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 ## 在电脑上安装
 
 **Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
+
+**Windows：桌面预览版**（Windows 10 1809+ / Windows 11 x64）。从 `apps/windows` 构建安装器或便携 ZIP，内置 Node、CLI、Host、ConPTY 与屏幕组件，支持 H.264 视频直连、JPEG 回退和解锁桌面的鼠标键盘控制。当前安装包为未签名预览产物，安装与验证范围见 [Windows 桌面说明](docs/windows-desktop.md)。
 
 **macOS 或 Linux：CLI**（Node.js 22.13 或更新版本）。
 
@@ -186,7 +188,7 @@ pnpm install
 pnpm build && pnpm typecheck && pnpm test
 ```
 
-macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链；`pnpm -r --filter "./packages/*" build` 只构建 TypeScript 包（Linux CI 跑的就是它）。开发 App 时，先用单独的状态目录启动开发 host，再启动 Metro：
+macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链；Windows 上使用 .NET Framework 4.8 编译桌面端与屏幕组件；`pnpm -r --filter "./packages/*" build` 只构建 TypeScript 包（Linux CI 跑的就是它）。开发 App 时，先用单独的状态目录启动开发 host，再启动 Metro：
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878

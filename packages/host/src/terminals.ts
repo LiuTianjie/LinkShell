@@ -202,7 +202,7 @@ class Terminal {
     this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
     if (this.running) {
       try {
-        this.pty.kill("SIGHUP");
+        this.pty.kill(process.platform === "win32" ? undefined : "SIGHUP");
       } catch {
         // Already gone.
       }
@@ -331,7 +331,7 @@ export class TerminalManager {
     const cwd = options.cwd ?? homedir();
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `no such directory: ${cwd}`);
     const base = this.env ?? process.env;
-    const shell = options.launch?.command ?? (base.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/zsh"));
+    const shell = options.launch?.command ?? (process.platform === "win32" ? "powershell.exe" : base.SHELL || "/bin/zsh");
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value;
     Object.assign(env, { TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "LinkShell" });
@@ -346,12 +346,15 @@ export class TerminalManager {
     // setting wins.
     env.CLAUDE_CODE_DECSTBM ??= "1";
     Object.assign(env, options.launch?.env);
-    const pty = spawn(shell, options.launch?.args ?? (process.platform === "win32" ? [] : ["-l"]), {
+    const pty = spawn(shell, options.launch?.args ?? (process.platform === "win32" ? ["-NoLogo", "-NoProfile"] : ["-l"]), {
       name: "xterm-256color",
       cols: options.cols,
       rows: options.rows,
       cwd,
       env,
+      // The bundled ConPTY has deterministic teardown; the OS variant forks an
+      // AttachConsole probe that fails for hidden hosts and leaves shells alive.
+      ...(process.platform === "win32" ? { useConptyDll: true } : {}),
     });
     const command = options.command?.trim() || undefined;
     const terminal = new Terminal(pty, cwd, shell, options.cols, options.rows, command, (t) => {

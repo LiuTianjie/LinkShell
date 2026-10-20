@@ -16,7 +16,8 @@ const tokens = (expiresAt: number) => ({ accessToken: "access-1", refreshToken: 
 describe("the account on this computer", () => {
   it("is kept in a file only its owner can read", () => {
     auth.saveAuth(tokens(Date.now() + 3_600_000));
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows inherits NTFS ACLs instead of enforcing POSIX mode bits.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(auth.loadAuth()).toMatchObject({ userId: "u1", email: "me@example.com" });
     expect(auth.isLoggedIn()).toBe(true);
   });
@@ -27,7 +28,7 @@ describe("the account on this computer", () => {
     expect(auth.loadAuth()).toBeNull();
     expect(auth.isLoggedIn()).toBe(false);
     expect(readFileSync(file, "utf8")).not.toContain("access-1");
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("hands out a token that is still good without asking anyone", async () => {

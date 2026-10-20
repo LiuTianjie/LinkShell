@@ -18,8 +18,8 @@ class Events {
 }
 
 /** Run the complete shipped script; only browser facilities are replaced, never viewer functions. */
-function viewer({ framed = false, native = false, relayFallback = false }: { framed?: boolean; native?: boolean; relayFallback?: boolean } = {}) {
-  const page = viewerPage();
+function viewer({ framed = false, native = false, relayFallback = false, platform = "darwin" }: { framed?: boolean; native?: boolean; relayFallback?: boolean; platform?: NodeJS.Platform } = {}) {
+  const page = viewerPage(platform);
   let now = 0, serial = 0;
   const timers = new Map<number, { at: number; action: () => void; interval?: number }>();
   const frames = new Map<number, (time: number) => void>();
@@ -103,7 +103,9 @@ function viewer({ framed = false, native = false, relayFallback = false }: { fra
   const root = new Element("html"), body = new Element("body");
   root.append(body);
   const stack = [body];
-  const bodyMarkup = page.slice(page.indexOf("<body>") + 6, page.indexOf('<script type="application/json"'));
+  const bodyTag = /<body\b([^>]*)>/.exec(page)!;
+  for (const attr of bodyTag[1]!.matchAll(/([\w-]+)="([^"]*)"/g)) body.setAttribute(attr[1]!, attr[2]!);
+  const bodyMarkup = page.slice(bodyTag.index + bodyTag[0].length, page.indexOf('<script type="application/json"'));
   for (const token of bodyMarkup.matchAll(/<\/?([a-z][\w-]*)([^>]*)>|([^<]+)/gi)) {
     if (token[3]) { stack.at(-1)!.textContent += token[3]; continue; }
     if (token[0].startsWith("</")) { stack.pop(); continue; }
@@ -122,6 +124,7 @@ function viewer({ framed = false, native = false, relayFallback = false }: { fra
     fullscreenElement: null,
     fullscreenEnabled: false,
     documentElement: root,
+    body,
     getElementById: (id: string) => {
       const found = elements.get(id);
       if (!found) throw new Error("Missing viewer element: " + id);
@@ -246,6 +249,13 @@ function viewer({ framed = false, native = false, relayFallback = false }: { fra
 }
 
 describe("the running viewer screen session", () => {
+  it("allows Windows JPEG fallback in a browser without VideoDecoder", async () => {
+    const ui = viewer({ platform: "win32" }); await ui.ready();
+    ui.receive({ rtc: { t: "off" } });
+    expect(ui.elements.get("note")!.textContent).not.toContain("不支持视频解码");
+    expect(ui.pcs[0]!.closeCount).toBe(1);
+  });
+
   it("changes capture configuration and returns from pause on the same socket, PC and channels", async () => {
     const ui = viewer();
     await ui.ready();

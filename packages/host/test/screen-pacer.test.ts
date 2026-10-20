@@ -24,6 +24,30 @@ function play(pacer: Pacer, options: { from: number; to: number; fps: number; de
 }
 
 describe("keeping a viewer close to live", () => {
+  it("bounds independent JPEGs to two outstanding frames and continues only after presentation", () => {
+    const pacer = new Pacer(0, { maxInFlight: 2, behindMs: 120, caughtUpMs: 50, probeMs: 1500 });
+    expect(pacer.next(true, 0)).toBe(1);
+    expect(pacer.next(true, 33)).toBe(2);
+    expect(pacer.next(true, 66)).toBeUndefined();
+    pacer.ack(1, 70);
+    expect(pacer.next(true, 71)).toBe(3);
+    expect(pacer.next(true, 104)).toBeUndefined();
+    pacer.ack(3, 130);
+    expect(pacer.next(true, 132)).toBe(4);
+  });
+  it("never turns off the JPEG bound when a viewer loses acknowledgements", () => {
+    const pacer = new Pacer(0, { maxInFlight: 2, behindMs: 120, caughtUpMs: 50, probeMs: 1500 });
+    const sent: number[] = [];
+    let latest = 0;
+    for (let at = 0; at < 10_000; at += 33) {
+      const seq = pacer.next(true, at);
+      if (seq !== undefined) { sent.push(at); latest = seq; }
+    }
+    expect(sent.length).toBeLessThan(10);
+    expect(sent.filter(at => at > 5000).length).toBeGreaterThan(0);
+    pacer.ack(latest, 10_000);
+    expect(pacer.next(true, 10_010)).toBe(latest + 1);
+  });
   it("sends every frame while the viewer keeps up", () => {
     const pacer = new Pacer(0);
     const { sent, dropped } = play(pacer, { from: 0, to: 10_000, fps: 20, delay: () => 120 });

@@ -1,4 +1,4 @@
-import WebSocket from "ws";
+import { localWebSocket } from "../local-transport.js";
 import {
   RpcPeer,
   type MethodName,
@@ -17,8 +17,7 @@ export interface HostClient {
 
 /** Connects to a host over its unix socket (`path`) or a `ws://` URL. */
 export async function connectHost(target: string): Promise<HostClient> {
-  const url = target.startsWith("ws://") || target.startsWith("wss://") ? target : `ws+unix://${target}:/`;
-  const socket = new WebSocket(url, { perMessageDeflate: false });
+  const socket = localWebSocket(target);
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
     socket.once("error", reject);

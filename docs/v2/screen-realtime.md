@@ -6,6 +6,8 @@
 
 ## 1. 组件与完整链路
 
+Windows 桌面端优先使用 DXGI Desktop Duplication → D3D11 GPU 缩放 → 硬件 H.264 → WebRTC 视频轨道，复用 Mac 的协商与四条输入/光标 DataChannel 协议。编码由安装包附带的 FFmpeg LGPL 共享运行库调用 AMF/NVENC/QSV 或硬件 Media Foundation 完成，Node Host 的 werift 发送 DTLS-SRTP；初始上限 1080p60，没有 HEVC、120 fps 或 FlexFEC。直连/编码失败时回到 JPEG → 加密字节通道 → Canvas，保留 GDI 兼容采集和 SendInput。需已解锁的交互桌面；实现差异、实测帧率与验收边界见 [Windows 桌面说明](../windows-desktop.md)。
+
 远程桌面有两条独立的 WebRTC 连接，不能把通用流的 `direct` 状态等同于视频轨道已经直连：
 
 | 连接 | 两端 | 承载内容 | 协商入口 |
@@ -194,13 +196,13 @@ Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负�
 
 iOS 最后一步用 `direct:false` 重新建立该屏幕转发并关闭视频轨道请求，不再依赖通用 DataChannel；其他流不受影响。经网关连接时这一步走加密中继，开发直连 Host 时则走其 RPC 连接。两分钟内返回保留的会话会继续当前播放路径；手动重试或更换 Host 连接重新选择起始路径，过时失败回调不会跳过下一条路径。原生首次无画面等待为 25 秒，之后尝试记录 ICE 诊断并失败回退；持续断开超过 4 秒会失败。主动暂停期间不计算首次无画面的等待。
 
-WebCodecs 不可用时会提示升级系统，不能承诺所有浏览器均可完成兼容回退。
+Mac / Linux 的 H.264 字节流回退在 WebCodecs 不可用时会提示升级系统，不能承诺所有浏览器均可完成兼容回退。Windows 标准查看器直接使用 JPEG / Canvas，不要求 WebCodecs；iOS 原生接收尝试仍需先回退到 WebView。
 
 | 主机 | 采集与编码 | 控制 |
 |---|---|---|
 | Apple silicon / Intel Mac，macOS 13+ | 主路径与回退均由 LinkShell.app 完成，无需 ffmpeg | 录屏权限 + 辅助功能权限 |
 | Linux | ffmpeg `x11grab` + libx264，仅兼容路径，需要 X11/DISPLAY | 只看，无输入控制 |
-| Windows | 当前屏幕功能不支持 | 不支持 |
+| Windows 10 1809+ / Windows 11 x64 | DXGI / GPU 缩放 → 硬件 H.264 → WebRTC，目标最高 1080p60；失败回退到 JPEG / Canvas | 独立 DataChannel → SendInput，需已解锁的普通用户桌面；不支持 UAC 安全桌面及高权限窗口 |
 
 Mac 安装包采用 Universal Binary：主程序与 WebRTC 同时包含 `arm64` 和 `x86_64`，npm 接受 `arm64` / `x64`，macOS 自动选择本机架构。Intel 与 Apple silicon 使用相同的视频直连及中转回退路径；低延迟编码不可用时回退标准 H.264 编码器，不因此强制中转。Intel 的采集、硬件编码、输入控制与端到端性能仍需真机验收；x86_64 编译和 Rosetta 测试不替代这一步。
 

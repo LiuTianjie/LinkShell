@@ -26,7 +26,8 @@ describe("desktop Pro membership", () => {
     cacheMembership("u1", { plan: "pro", planExpiresAt });
     expect(cachedMembership("u1")).toEqual({ plan: "pro", planExpiresAt });
     expect(cachedMembership("u2")).toEqual({ plan: "unknown", planExpiresAt: null });
-    expect(statSync(join(home, "account-pro.json")).mode & 0o777).toBe(0o600);
+    // Windows inherits NTFS ACLs instead of enforcing POSIX mode bits.
+    if (process.platform !== "win32") expect(statSync(join(home, "account-pro.json")).mode & 0o777).toBe(0o600);
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse(planExpiresAt) + 1);
     expect(cachedMembership("u1").plan).toBe("free");

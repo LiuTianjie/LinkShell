@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 
 const helper = vi.hoisted(() => ({ installed: true }));
 vi.mock("node:fs", async (original) => ({
@@ -32,7 +33,7 @@ describe("the universal Mac screen helper", () => {
   it.each(["arm64", "x64"])("finds the same installed app on %s", async (arch) => {
     machine("darwin", arch);
     const { shippedApp } = await import("../src/input.js");
-    expect(shippedApp()).toBe("/test/@linkshell/mac/build/LinkShell.app");
+    expect(shippedApp()).toBe(join("/test/@linkshell/mac", "build/LinkShell.app"));
   });
 
   it.each(["arm64", "x64"])("reports a missing package, not an unsupported Mac, on %s", async (arch) => {

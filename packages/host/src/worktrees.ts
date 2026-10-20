@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, join, relative, normalize } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type GitInfo } from "@linkshell/wire";
 
@@ -19,7 +19,7 @@ async function git(cwd: string, args: string[], timeout = 60_000): Promise<strin
 /** What git says about a directory; undefined when it isn't in a repository (or git is missing). */
 export async function gitInfo(path: string): Promise<GitInfo | undefined> {
   try {
-    const root = await git(path, ["rev-parse", "--show-toplevel"]);
+    const root = normalize(await git(path, ["rev-parse", "--show-toplevel"]));
     const branch = await git(path, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "");
     const head = await git(path, ["rev-parse", "--short", "HEAD"]).catch(() => "");
     const status = await git(path, ["status", "--porcelain"]);

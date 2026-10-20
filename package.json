@@ -20,10 +20,10 @@
     }
   },
   "scripts": {
-    "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r --if-present --workspace-concurrency=1 test",
+    "postinstall": "node scripts/postinstall.mjs",
+    "build": "node scripts/workspace.mjs build",
+    "typecheck": "node scripts/workspace.mjs typecheck",
+    "test": "node scripts/workspace.mjs test",
     "prod:ios": "pnpm --filter @linkshell/client prod:ios",
     "prod:android": "pnpm --filter @linkshell/client prod:android",
     "dev:gateway": "pnpm --filter @linkshell/gateway dev",

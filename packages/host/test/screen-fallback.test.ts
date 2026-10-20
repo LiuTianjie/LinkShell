@@ -14,6 +14,7 @@ function receiver({ nativeApp = true, supportsRTC = true, video = "1" } = {}) {
   const peer = class { constructor() { throw new Error("receiver unavailable"); } };
   const handlers = new Script(`${settings}\n${source}\n({ signal, giveUp, fallBack });`).runInNewContext({
     nativePicture: false,
+    windowsHost: false,
     app: nativeApp ? {} : undefined,
     window: supportsRTC ? { RTCPeerConnection: peer, VideoDecoder: {} } : { VideoDecoder: {} },
     RTCPeerConnection: peer,

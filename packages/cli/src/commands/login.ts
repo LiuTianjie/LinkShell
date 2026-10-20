@@ -1,5 +1,5 @@
 import * as http from "node:http";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { saveAuth, SUPABASE_URL, SUPABASE_ANON_KEY } from "../auth.js";
 import type { AuthTokens } from "../auth.js";
 import { cacheMembership, type DesktopMembership } from "../pro-membership.js";
@@ -183,13 +183,8 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
       process.stderr.write(`  ${authUrl}\n\n`);
 
       try {
-        const cmd =
-          process.platform === "darwin"
-            ? "open"
-            : process.platform === "win32"
-              ? "start"
-              : "xdg-open";
-        execSync(`${cmd} "${authUrl}"`, { stdio: "ignore" });
+        if (process.platform === "win32") execFileSync("rundll32.exe", ["url.dll,FileProtocolHandler", authUrl], { windowsHide: true, stdio: "ignore" });
+        else execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [authUrl], { stdio: "ignore" });
       } catch {}
 
       // Timeout after 5 minutes

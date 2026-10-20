@@ -116,6 +116,7 @@ export function spawnDaemon(service: ServiceName, args: string[], env: NodeJS.Pr
     [...process.execArgv, entryScript, ...args],
     {
       detached: true,
+      windowsHide: true,
       stdio: ["ignore", out, err],
       // The launching terminal's environment is the most faithful one agents can get.
       env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: env.LINKSHELL_APP_BUNDLE ? "0" : "1" },
@@ -145,10 +146,17 @@ export function stopDaemon(service: ServiceName): boolean {
 export async function stopDaemonAndWait(service: ServiceName, timeoutMs = 30_000, expectedPid?: number): Promise<boolean> {
   const pid = expectedPid ?? readPid(service);
   if (!pid) return false;
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  if (process.platform === "win32" && service === "host") {
+    const { connectHost, hostPaths } = await import("@linkshell/host");
+    const client = await connectHost(hostPaths(LINKSHELL_DIR).hostSocket);
+    try { await client.call("desktop.shutdown", { pid }, 5000); }
+    finally { client.close(); }
+  } else {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
   }
   const deadline = Date.now() + timeoutMs;
   for (;;) {
