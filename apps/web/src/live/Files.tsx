@@ -45,6 +45,7 @@ import {
   useLoad,
 } from "./common";
 import { FileEditor } from "./Editor";
+import { FileDownload } from "./FileDownload";
 import {
   appendFileChunk,
   formatFileSize,
@@ -178,6 +179,7 @@ export function FileView({
         {path}
       </p>
       <LoadState {...loaded} />
+      <FileDownload key={path} path={path} />
       {loaded.error && (
         <Button variant="outline" size="sm" onClick={loaded.reload}>
           重新读取
@@ -322,7 +324,7 @@ export function FileView({
           ) : (
             <EmptyState
               title="此文件暂不支持预览"
-              description="可以查看文本和图片；此文件的内容需要在电脑上用对应应用打开。"
+              description="可以下载到本地，再用支持此格式的应用打开。"
             />
           )}
           <p className="resource-caption resource-reader-footer">

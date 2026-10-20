@@ -458,6 +458,23 @@ const coreMethods = {
       nextOffset: z.number().int().optional(),
     }),
   },
+  /** Original file bytes, in bounded chunks, independently of preview limits. */
+  "fs.download": {
+    params: z.object({
+      path: z.string().min(1),
+      offset: z.number().int().nonnegative().default(0),
+      maxBytes: z.number().int().min(1).max(1_048_576).default(262_144),
+      /** Subsequent chunks must still belong to the same file revision. */
+      revision: z.string().optional(),
+    }),
+    result: z.object({
+      size: z.number().int().nonnegative(),
+      revision: z.string(),
+      data: z.string(),
+      nextOffset: z.number().int().nonnegative(),
+      done: z.boolean(),
+    }),
+  },
   /**
    * Saves a file from the device into `dir`. A name that's taken gets a
    * numbered suffix ("photo 2.jpg") rather than overwriting.
