@@ -18,7 +18,7 @@ import {
 } from "@linkshell/wire";
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
-import { listDirectory, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
+import { downloadFile, listDirectory, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
 import { DirectPeer } from "../direct.js";
@@ -253,6 +253,7 @@ export class HostRpcServer {
       "fs.list": (params: P<"fs.list">) => listDirectory(params),
       "fs.search": (params: P<"fs.search">) => searchDirectories(params),
       "fs.read": (params: P<"fs.read">) => readFile(params),
+      "fs.download": (params: P<"fs.download">) => downloadFile(params),
       "fs.upload": (params: P<"fs.upload">) => uploadFile(params),
       "fs.mkdir": (params: P<"fs.mkdir">) => makeDirectory(params),
       "terminals.list": () => ({ terminals: terminals.list() }),

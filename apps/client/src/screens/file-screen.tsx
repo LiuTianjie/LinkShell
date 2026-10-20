@@ -8,6 +8,7 @@ import { Text } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { AppMenu } from "@/components/app-menu";
 import { AcpFileEditor } from "@/components/acp-file-editor";
+import { FileSaveActions } from "@/components/file-save-actions";
 import { Icon } from "@/components/icon";
 import { ContentWidth, useContentWidth } from "@/lib/content-width";
 import { HeaderActions, useHeaderTitleWidth, type HeaderMenuItem } from "@/components/header-actions";
@@ -303,10 +304,11 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
         ]}
       />
       </>}
+      {!editing && (file || error?.tooLarge) ? <FileSaveActions key={path} path={path} /> : null}
       {editing ? <AcpFileEditor path={path} onClose={() => { setEditing(false); void link.call("fs.read", { path, maxBytes: PART }).then(setFile).catch(() => {}); }} /> : error ? (
         <ScrollableState>
           {error.tooLarge ? (
-            <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以在电脑上打开它。" />
+            <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以保存到本地后打开。" />
           ) : (
             <EmptyState icon={{ sf: "doc.questionmark", md: "draft" }} title="打不开这个文件" message={error.message} />
           )}
@@ -317,7 +319,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
         <Image source={{ uri: `data:${file.mimeType};base64,${file.data}` }} style={{ flex: 1, margin: 16 }} contentFit="contain" />
       ) : file.kind === "binary" ? (
         <ScrollableState>
-          <EmptyState icon={{ sf: "doc", md: "description" }} title="这是二进制文件，无法预览" message={fileSize(file.size)} />
+          <EmptyState icon={{ sf: "doc", md: "description" }} title="此文件暂不支持预览" message={`${fileSize(file.size)} · 可以保存到本地后打开。`} />
         </ScrollableState>
       ) : markdown ? (
         <LinkBase value={directory}>

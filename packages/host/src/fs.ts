@@ -144,7 +144,7 @@ const IMAGE_TYPES: Record<string, string> = {
   heic: "image/heic",
 };
 
-/** Beyond these a phone has no use for the file, and reading it would only load the computer and the relay. */
+/** Preview limits keep the viewer bounded; original downloads use a separate chunked reader. */
 const MAX_TEXT_FILE = 20 * 1024 * 1024;
 const MAX_IMAGE_FILE = 10 * 1024 * 1024;
 
@@ -178,7 +178,7 @@ export async function readFile(input: { path: string; offset?: number; maxBytes:
   const image = IMAGE_TYPES[extension];
   const base = { path, size: info.size, modifiedAt: info.mtimeMs };
   if (info.size > (image ? MAX_IMAGE_FILE : MAX_TEXT_FILE)) {
-    throw RpcError.app("too_large", `${image ? "图片" : "文件"}太大（${megabytes(info.size)}），不在手机上打开`);
+    throw RpcError.app("too_large", `${image ? "图片" : "文件"}太大（${megabytes(info.size)}），暂不支持预览`);
   }
   const offset = image ? 0 : Math.min(input.offset ?? 0, info.size);
   const length = image ? info.size : Math.min(info.size - offset, input.maxBytes);
@@ -199,6 +199,30 @@ export async function readFile(input: { path: string; offset?: number; maxBytes:
   const more = offset + buffer.length < info.size;
   if (more) buffer = buffer.subarray(0, buffer.length - incompleteTail(buffer));
   return { ...base, kind: "text" as const, text: buffer.toString("utf8"), truncated: more, nextOffset: more ? offset + buffer.length : undefined };
+}
+
+/** Open and stat the same descriptor so replacement or edits cannot mix download chunks. */
+export async function downloadFile(input: { path: string; offset: number; maxBytes: number; revision?: string }) {
+  const handle = await open(expand(input.path), "r").catch(() => {
+    throw RpcError.app("not_found", "无法读取这个文件，请确认文件仍然存在且有读取权限。");
+  });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw RpcError.app("invalid_params", "只能下载文件。");
+    const revisionOf = (s: typeof info) => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
+    const revision = revisionOf(info);
+    if (input.revision !== undefined && input.revision !== revision) throw RpcError.app("invalid_params", "文件已变化，请重新下载。");
+    if (input.offset > info.size) throw RpcError.app("invalid_params", "下载位置已失效，请重新下载。");
+    const buffer = Buffer.alloc(Math.min(input.maxBytes, 1_048_576, info.size - input.offset));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, input.offset);
+    if (revisionOf(await handle.stat()) !== revision || (bytesRead === 0 && input.offset < info.size)) {
+      throw RpcError.app("invalid_params", "文件已变化，请重新下载。");
+    }
+    const nextOffset = input.offset + bytesRead;
+    return { size: info.size, revision, data: buffer.subarray(0, bytesRead).toString("base64"), nextOffset, done: nextOffset === info.size };
+  } finally {
+    await handle.close();
+  }
 }
 
 /** A single path component: no separators, no `.`/`..`, nothing a shell or filesystem would choke on. */

@@ -84,6 +84,15 @@
       ],
       "expo-sqlite",
       [
+        "expo-media-library",
+        {
+          "photosPermission": "LinkShell 需要访问照片，才能处理你选择的图片和视频。",
+          "savePhotosPermission": "LinkShell 需要将你选择的图片和视频保存到相册。",
+          "granularPermissions": [],
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "LinkShell 需要访问你的照片，才能把图片发给 Agent。",
