@@ -21,9 +21,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { engine, type Computer, type Connection } from "../live/engine";
+import { AgentMark, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
 import { DESKTOP_LOCAL, setDesktopAppearance, setDesktopContentFocus } from "../live/desktop";
 import { screenComputerKey } from "../live/screen-route";
+import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
 import { readLocal, saveLocal } from "../live/storage";
 import { applyDesktopTheme } from "../theme";
 import type { ConsoleShellProps } from "./ConsoleShell";
@@ -169,6 +171,61 @@ function ComputerPicker({
   );
 }
 
+function SessionCountBadge({ connection }: { connection: Connection }) {
+  const sessions = useStore(connection.store, (state) => state.sessions);
+  const all = Object.values(sessions).filter((session) => !session.archived);
+  const waiting = all.filter(sessionNeedsAttention).length;
+  const running = all.filter((session) => sessionGroup(session) === "running").length;
+  if (waiting > 0) return <span className="desktop-nav-badge" data-tone="waiting" title={`${waiting} 项需要你`}>{waiting}</span>;
+  if (running > 0) return <span className="desktop-nav-badge" data-tone="running" title={`${running} 个进行中`}>{running}</span>;
+  return null;
+}
+
+function ActiveSessionsGroup({
+  connection,
+  view,
+  navigate,
+  onSelect,
+}: {
+  connection: Connection;
+  view: string;
+  navigate: (view: string) => void;
+  onSelect: () => void;
+}) {
+  const sessions = useStore(connection.store, (state) => state.sessions);
+  const active = Object.values(sessions)
+    .filter((session) => !session.archived && (sessionNeedsAttention(session) || sessionGroup(session) === "running"))
+    .sort((a, b) => Number(sessionNeedsAttention(b)) - Number(sessionNeedsAttention(a)) || b.updatedAt - a.updatedAt)
+    .slice(0, 4);
+  if (!active.length) return null;
+  return (
+    <SidebarGroup className="desktop-navigation-group desktop-active-sessions">
+      <SidebarGroupLabel>进行中会话</SidebarGroupLabel>
+      <SidebarMenu>
+        {active.map((session) => {
+          const waiting = sessionNeedsAttention(session);
+          const selected = view === session.id;
+          return (
+            <SidebarMenuItem key={session.id}>
+              <SidebarMenuButton
+                size="navigation"
+                isActive={selected}
+                aria-current={selected ? "page" : undefined}
+                title={`${titleOf(session)} · ${waiting ? "需要你" : "进行中"}`}
+                onClick={() => { navigate(session.id); onSelect(); }}
+              >
+                <AgentMark agent={session.agent} size="sm" />
+                <span className="desktop-nav-session-title">{titleOf(session)}</span>
+                <span className="desktop-nav-session-dot" data-state={waiting ? "waiting" : "running"} />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          );
+        })}
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+}
+
 function DesktopNavigation({
   view,
   navigate,
@@ -191,25 +248,50 @@ function DesktopNavigation({
         <ComputerPicker connect={connect} selectComputer={selectComputer} />
       </SidebarHeader>
       <SidebarContent className="desktop-navigation">
-        {[{ title: "工作空间", items: workspaceItems }, { title: "开发工具", items: toolItems }].map((group) => (
-          <SidebarGroup key={group.title} className="desktop-navigation-group">
-            <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
-            <SidebarMenu>
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton
-                    size="navigation"
-                    isActive={activeView === item.id}
-                    aria-current={activeView === item.id ? "page" : undefined}
-                    onClick={() => { navigate(item.id); setOpenMobile(false); }}
-                  >
-                    <item.icon strokeWidth={1.65} /><span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-        ))}
+        <SidebarGroup className="desktop-navigation-group">
+          <SidebarGroupLabel>工作空间</SidebarGroupLabel>
+          <SidebarMenu>
+            {workspaceItems.map((item) => (
+              <SidebarMenuItem key={item.id}>
+                <SidebarMenuButton
+                  size="navigation"
+                  isActive={activeView === item.id && (item.id !== "home" || view === "home")}
+                  aria-current={activeView === item.id && (item.id !== "home" || view === "home") ? "page" : undefined}
+                  onClick={() => { navigate(item.id); setOpenMobile(false); }}
+                >
+                  <item.icon strokeWidth={1.65} />
+                  <span>{item.title}</span>
+                  {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+        {state.connection && (
+          <ActiveSessionsGroup
+            connection={state.connection}
+            view={view}
+            navigate={navigate}
+            onSelect={() => setOpenMobile(false)}
+          />
+        )}
+        <SidebarGroup className="desktop-navigation-group">
+          <SidebarGroupLabel>开发工具</SidebarGroupLabel>
+          <SidebarMenu>
+            {toolItems.map((item) => (
+              <SidebarMenuItem key={item.id}>
+                <SidebarMenuButton
+                  size="navigation"
+                  isActive={activeView === item.id}
+                  aria-current={activeView === item.id ? "page" : undefined}
+                  onClick={() => { navigate(item.id); setOpenMobile(false); }}
+                >
+                  <item.icon strokeWidth={1.65} /><span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="desktop-sidebar-footer">
         <div className="desktop-account-row">

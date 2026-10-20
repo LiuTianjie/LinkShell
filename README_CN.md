@@ -68,7 +68,7 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 
 ## 在电脑上安装
 
-**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.47/LinkShell-0.10.47-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
+**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.49/LinkShell-0.10.49-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.49/LinkShell-0.10.49-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
 
 **Windows：桌面预览版**（Windows 10 1809+ / Windows 11 x64）。从 `apps/windows` 构建安装器或便携 ZIP，内置 Node、CLI、Host、ConPTY 与屏幕组件，支持 H.264 视频直连、JPEG 回退和解锁桌面的鼠标键盘控制。当前安装包为未签名预览产物，安装与验证范围见 [Windows 桌面说明](docs/windows-desktop.md)。
 

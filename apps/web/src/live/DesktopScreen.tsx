@@ -98,8 +98,14 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
     const rect = () => {
       const bounds = stage.current?.getBoundingClientRect();
       if (!bounds) return { x: 0, y: 0, width: 0, height: 0 };
-      // Native video must not cover DOM menus or dialogs opened elsewhere in the workspace.
-      const blocked = document.querySelector('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"], [data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="tooltip-content"]');
+      // Native video must not cover modal overlays or DOM menus that intersect the video stage.
+      const modal = document.querySelector('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]');
+      const popups = document.querySelectorAll('[data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"]');
+      const overlaps = Array.from(popups).some((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && box.right > bounds.left && box.left < bounds.right && box.bottom > bounds.top && box.top < bounds.bottom;
+      });
+      const blocked = Boolean(modal) || overlaps;
       return { x: bounds.x, y: bounds.y, width: blocked ? 0 : bounds.width, height: blocked ? 0 : bounds.height };
     };
     let previousRect = "";

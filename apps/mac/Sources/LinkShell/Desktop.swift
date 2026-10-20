@@ -44,8 +44,7 @@ import SwiftUI
       appearanceSubscription = model.$appearance.sink { [weak workspace = self.workspace] value in workspace?.setAppearance(value) }
     }
     let root = NSHostingView(rootView: DesktopRootView(model: model, workspace: workspace))
-    let classicPreview = model.preview && !Launch.has("--workspace-preview")
-    let windowStyle: NSWindow.StyleMask = classicPreview ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView] : [.titled, .closable, .miniaturizable, .resizable]
+    let windowStyle: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
     window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: model.preview && Launch.has("--dashboard-tall") ? 1000 : 760), styleMask: windowStyle, backing: .buffered, defer: false)
     window.title = "LinkShell"
     window.titleVisibility = .hidden
