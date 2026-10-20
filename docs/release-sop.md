@@ -364,3 +364,13 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 7. 新版 App 内验证线上“检查更新”；归档与公证通过后清理本轮临时安装和测试数据，保留发布包与校验记录。
 
 缺少公证凭据时只能交付明确标注的本地测试包，不能宣称已完成正式外部分发。App 内账号通过系统浏览器登录 iTool；账号已登录与网关已连接分别显示，官方网关仍要求 Pro。Codex / Claude 等代理本身需要用户安装和登录，App 不打包这些代理的账号凭据。
+
+## Windows 桌面端（未签名安装器与便携包）
+
+Windows 当前按未签名方式发布，无需等待 Authenticode 证书。发布说明必须明确未签名及可能出现的“未知发布者”或 SmartScreen 提示；macOS 的 Developer ID 签名、公证和 Sparkle 签名要求保持不变。
+
+1. `apps/windows/package.json` 与 CLI 版本保持一致，避免安装器显示版本与内置运行环境不一致。
+2. 对已推送的发布 tag 运行 `gh workflow run windows.yml --ref cli-vX.Y.Z`，确认该次运行的提交与发布提交一致，全部 CI 步骤通过。
+3. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json` 和内置 CLI 的版本。
+4. 将这四个文件上传到 `desktop-vX.Y.Z` Release，保留已有 Mac DMG，桌面 Release 仍使用 `--latest=false`，带 APK 的移动版继续作为 latest。
+5. 核对远端文件大小和摘要、实际下载可用性后，清理本轮下载、解压及构建临时目录，保留最终制品与校验记录。原生 ARM64、自动安装更新、手机真机与公网屏幕性能不属于 CI 构建证明。

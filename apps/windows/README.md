@@ -11,7 +11,7 @@ corepack pnpm --filter @linkshell/windows test
 corepack pnpm --filter @linkshell/windows build:standalone
 ```
 
-The standalone installer and portable ZIP include Node, CLI, Host, ConPTY, and the screen helper. Agents are installed and authenticated separately. Packages are development artifacts until Authenticode signing and release validation; Windows ARM64 and automatic updates are not included yet.
+The standalone installer and portable ZIP include Node, CLI, Host, ConPTY, and the screen helper. Agents are installed and authenticated separately. Windows releases currently ship without Authenticode signatures; download notes must identify them as unsigned and mention possible unknown-publisher or SmartScreen prompts. Release builds still require CI and package checksum verification. Windows ARM64 and automatic updates are not included yet.
 
 Codex discovery first checks the CLI on PATH, then the Windows desktop app's versioned `codex.exe` under `%LOCALAPPDATA%\OpenAI\Codex\bin`. Installing the Codex desktop app is sufficient for conversation discovery; a separate global CLI installation is not required. An explicitly configured command still takes precedence. The existing `CODEX_HOME` setting controls conversation storage.
 

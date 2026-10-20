@@ -17,7 +17,7 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，提供原生窗口
 
 - Windows 10 1809 或更新版本、Windows 11，x64；需要 .NET Framework 4.8。ARM64 尚未提供原生安装包。
 - 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`，生成 `artifacts/LinkShell-Setup-<版本>-windows-x64.exe` 与 ZIP 便携包。此实现尚未发布到下载站。
-- 安装器仅安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`，创建开始菜单入口，不需要管理员权限。本地开发安装包未进行 Authenticode 签名；发布前应签名并验证。
+- 安装器仅安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`，创建开始菜单入口，不需要管理员权限。当前 Windows 发布包不进行 Authenticode 签名，可能显示“未知发布者”或 SmartScreen 提示；请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
 - 数据保存在 `%USERPROFILE%\.linkshell`，或 `LINKSHELL_HOME` 指定的位置。安装、更新和关闭界面不删除账号、配对与会话历史。
