@@ -35,9 +35,13 @@ export async function saveRemoteFile(link: Pick<HostLink, "call">, path: string,
       });
     } else if (selected) {
       // A failed or cancelled download never leaves a partial document in the selected folder.
-      const target = new File(selected, file.name);
-      if (target.exists) throw new Error("所选文件夹中已存在同名文件，请选择其他保存位置。");
-      await file.copy(target);
+      // SAF tree URIs must be passed as directories; appending a filename does not create a document URI.
+      await file.copy(selected, { overwrite: false }).catch((error: unknown) => {
+        if (error && typeof error === "object" && "code" in error && error.code === "ERR_DESTINATION_ALREADY_EXISTS") {
+          throw new Error("所选文件夹中已存在同名文件，请选择其他保存位置。");
+        }
+        throw error;
+      });
     } else {
       await Sharing.shareAsync(file.uri, { dialogTitle: "保存到文件" });
       return "shared";
