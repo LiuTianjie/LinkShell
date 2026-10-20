@@ -4,6 +4,8 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+# Install and package builds share the workspace's cross-platform scripts.
+COPY scripts/ scripts/
 # pnpm checks every patched dependency in the lockfile against its patch file.
 COPY patches/ patches/
 COPY packages/wire/package.json packages/wire/
