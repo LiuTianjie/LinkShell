@@ -468,6 +468,7 @@ export function Composer(props: ComposerProps) {
               elapsedSeconds={voice.elapsedSeconds}
               levels={voice.levels}
               canceling={voice.canceling}
+              processing={voice.processing}
               hasText={hasContent}
               onCancel={() => void voice.cancel()}
               onFinish={() => void voice.stop(false)}

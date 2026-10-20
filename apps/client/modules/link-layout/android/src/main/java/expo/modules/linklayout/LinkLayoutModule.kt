@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.OrientationEventListener
 import android.view.Surface
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -15,6 +16,7 @@ import java.lang.ref.WeakReference
 import kotlin.math.abs
 
 class LinkLayoutModule : Module() {
+  private var speech: SpeechInput? = null
   private var listener: OrientationEventListener? = null
   private var requestedActivity: WeakReference<Activity>? = null
   private var previousOrientation: Int? = null
@@ -23,10 +25,20 @@ class LinkLayoutModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("LinkLayout")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError")
+    AsyncFunction("startSpeech") { localeId: String? ->
+      val input = speech ?: SpeechInput(appContext.reactContext ?: throw Exceptions.ReactContextLost()) { event, body -> sendEvent(event, body) }.also { speech = it }
+      input.start(localeId)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("stopSpeech") { promise: Promise ->
+      val input = speech
+      if (input == null) promise.resolve(mapOf("text" to "")) else input.stop(promise)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("cancelSpeech") { speech?.cancel() }.runOnQueue(Queues.MAIN)
     AsyncFunction("requestLandscape") { requestLandscape() }.runOnQueue(Queues.MAIN)
     AsyncFunction("clearOrientationRequest") { restoreOrientation() }.runOnQueue(Queues.MAIN)
-    OnActivityEntersBackground { onMain { clearRequest() } }
-    OnDestroy { onMain { clearRequest() } }
+    OnActivityEntersBackground { onMain { clearRequest(); speech?.cancel() } }
+    OnDestroy { onMain { clearRequest(); speech?.cancel(); speech = null } }
   }
 
   private fun onMain(action: () -> Unit) {

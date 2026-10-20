@@ -59,11 +59,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
   // ── Cell metrics ──
   private var fontSizeDp = FONT_SIZE_DP
-  private val textPaint = newTextPaint(Typeface.MONOSPACE)
-  private val boldPaint = newTextPaint(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD))
-  private val italicPaint = newTextPaint(Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC))
-  private val boldItalicPaint =
-    newTextPaint(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD_ITALIC))
+  // OEM monospace substitutions and synthetic weights produce inconsistent cell shapes.
+  private val textPaint = newTextPaint(terminalTypeface("Regular"))
+  private val boldPaint = newTextPaint(terminalTypeface("Bold"))
+  private val italicPaint = newTextPaint(terminalTypeface("Italic"))
+  private val boldItalicPaint = newTextPaint(terminalTypeface("BoldItalic"))
 
   // Nerd Font private-use glyphs (powerline, devicons, …) are absent from the
   // system fallback chain; route those cells to the bundled symbols-only font.
@@ -315,7 +315,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     contentDescription = "Terminal"
   }
 
-  private fun newTextPaint(typeface: Typeface) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+  private fun terminalTypeface(style: String) =
+    Typeface.createFromAsset(context.assets, "fonts/JetBrainsMonoNL-$style.ttf")
+
+  private fun newTextPaint(typeface: Typeface) = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
     this.typeface = typeface
     textSize = fontSizeDp * resources.displayMetrics.density
   }
@@ -1132,10 +1135,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   }
   override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
     outAttrs.contentMimeTypes = arrayOf("image/*")
-    // Visible-password + no-suggestions keeps IMEs in send-as-you-type mode
-    // (no autocorrect batching) while still allowing CJK composition.
+    // Password variations disable dictation in many IMEs. Disable suggestions
+    // separately so normal text, CJK composition and keyboard voice remain available.
     outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-      InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
       InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
     outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
       EditorInfo.IME_FLAG_NO_FULLSCREEN or
@@ -1191,7 +1193,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   }
 
   private inner class TerminalInputConnection :
-    BaseInputConnection(this@GhosttyTerminalView, false) {
+    BaseInputConnection(this@GhosttyTerminalView, true) {
     override fun commitContent(info: android.view.inputmethod.InputContentInfo, flags: Int, opts: android.os.Bundle?): Boolean {
       if (android.os.Build.VERSION.SDK_INT < 25) return false
       if (flags and InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION != 0) info.requestPermission()
@@ -1203,7 +1205,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
       return super.setComposingText(text, newCursorPosition)
     }
     override fun finishComposingText(): Boolean {
+      // Full editors retain IME composition locally; commit it once when an
+      // IME finishes dictation/composition without a separate commitText call.
+      if (composition.isNotEmpty()) sendText(composition)
       composition = ""; invalidate()
+      super.commitText("", 1)
       return super.finishComposingText()
     }
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
@@ -1214,11 +1220,23 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     // IMEs can use either deletion API; BaseInputConnection only edits its
     // local composing buffer, whereas committed terminal text lives remotely.
-    override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean =
-      deleteSurroundingText(beforeLength, afterLength)
+    override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+      if (beforeLength < 0 || afterLength < 0) return false
+      if (composition.isEmpty()) return deleteSurroundingText(beforeLength, afterLength)
+      val result = super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
+      composition = editable?.toString().orEmpty()
+      invalidate()
+      return result
+    }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
       if (beforeLength < 0 || afterLength < 0) return false
+      if (composition.isNotEmpty()) {
+        val result = super.deleteSurroundingText(beforeLength, afterLength)
+        composition = editable?.toString().orEmpty()
+        invalidate()
+        return result
+      }
       repeat(beforeLength) {
         sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
         sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))

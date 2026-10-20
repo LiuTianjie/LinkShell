@@ -15,6 +15,7 @@ export interface VoiceInputBarProps {
   elapsedSeconds: number;
   levels: number[];
   canceling?: boolean;
+  processing?: boolean;
   hasText: boolean;
   onCancel: () => void;
   onFinish: () => void;
@@ -37,6 +38,7 @@ export function VoiceInputBar({
   elapsedSeconds,
   levels,
   canceling = false,
+  processing = false,
   hasText,
   onCancel,
   onFinish,
@@ -131,7 +133,9 @@ export function VoiceInputBar({
             {formatDuration(elapsedSeconds)}
           </Text>
 
-          {canceling ? (
+          {processing ? (
+            <Text accessibilityLiveRegion="polite" style={[type.caption, { flex: 1, color: colors.secondaryLabel, textAlign: "center" }]}>正在处理语音…</Text>
+          ) : canceling ? (
             <Text numberOfLines={1} style={[type.caption, { flex: 1, color: colors.danger, fontWeight: "600", textAlign: "center" }]}>
               松开手指取消录音
             </Text>
@@ -168,11 +172,13 @@ export function VoiceInputBar({
 
         <Pressable
           onPress={onFinish}
+          disabled={processing}
           accessibilityRole="button"
           accessibilityLabel="完成语音转写"
           hitSlop={6}
           style={({ pressed }) => ({
             minHeight: 38,
+            opacity: processing ? 0.5 : 1,
             paddingHorizontal: 12,
             borderRadius: 19,
             backgroundColor: pressed ? colors.fillStrong : colors.fill,
@@ -186,7 +192,7 @@ export function VoiceInputBar({
         {onSendNow ? (
           <Pressable
             onPress={onSendNow}
-            disabled={!hasText}
+            disabled={!hasText || processing}
             accessibilityRole="button"
             accessibilityLabel="结束录音并发送"
             hitSlop={6}

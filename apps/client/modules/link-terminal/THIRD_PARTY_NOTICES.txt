@@ -11,6 +11,10 @@ checksum are pinned in vendor-manifest.json. License: ios/vendor/LICENSE-macterm
 Android JNI, input, selection and row decoding were adapted from:
 https://github.com/arcboxlabs/expo-libghostty (MIT, ArcBox Inc.).
 Licenses are retained in ios/vendor/LICENSE-*.txt. The app supplies its existing LinkShellSymbols font.
+Android terminal text uses JetBrains Mono NL 2.304 (SIL Open Font License 1.1),
+with real regular, bold, italic and bold-italic faces. Source:
+https://github.com/JetBrains/JetBrainsMono/tree/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/fonts/ttf
+Fonts and license: android/src/main/assets/fonts/.
 The Unicode placeholder diacritic table is specified by the Kitty graphics
 protocol and derived from Unicode 6.0 character data.
 

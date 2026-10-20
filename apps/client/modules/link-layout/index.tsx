@@ -56,7 +56,7 @@ interface NativeLayoutModuleType {
   requestLandscape?: () => Promise<void>;
   clearOrientationRequest?: () => Promise<void>;
   startSpeech?: (localeId?: string | null) => Promise<{ ok: boolean; reason?: string }>;
-  stopSpeech?: () => Promise<void>;
+  stopSpeech?: () => Promise<{ text: string } | void>;
   cancelSpeech?: () => Promise<void>;
   setShortcutItems?: (items: ShortcutItemInput[]) => Promise<void>;
   isLiveActivityAvailable?: () => Promise<boolean>;
@@ -94,7 +94,7 @@ export function startNativeSpeech(localeId?: string): Promise<{ ok: boolean; rea
   return nativeLayout.startSpeech(localeId ?? null);
 }
 
-export function stopNativeSpeech(): Promise<void> {
+export function stopNativeSpeech(): Promise<{ text: string } | void> {
   return nativeLayout?.stopSpeech?.() ?? Promise.resolve();
 }
 

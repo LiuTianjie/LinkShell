@@ -2,10 +2,10 @@ import { useTerminalFontSize, setTerminalFontSize, TERMINAL_FONT_MIN, TERMINAL_F
 import * as Clipboard from "expo-clipboard";
 import { File } from "expo-file-system";
 import { restoreTerminalRecording, restoreTerminalState } from "@/lib/terminal-replay";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, useColorScheme, View } from "react-native";
-import { Text } from "@/components/fixed-text";
+import { Text, TextInput } from "@/components/fixed-text";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -359,6 +359,11 @@ export function TerminalScreen() {
     },
     onError: (msg) => Alert.alert("语音输入", msg),
   });
+  const cancelTerminalVoice = terminalVoice.cancel;
+  useFocusEffect(useCallback(() => {
+    if (!id) return;
+    return () => { void cancelTerminalVoice(); };
+  }, [cancelTerminalVoice, id]));
 
   const state = info ? terminalState(info) : undefined;
   const ended = state?.ended ?? false;
@@ -638,22 +643,34 @@ export function TerminalScreen() {
                       elapsedSeconds={terminalVoice.elapsedSeconds}
                       levels={terminalVoice.levels}
                       canceling={terminalVoice.canceling}
+                      processing={terminalVoice.processing}
                       hasText={voiceDraft.trim().length > 0}
                       onCancel={() => {
                         void terminalVoice.cancel();
-                        setVoiceDraft("");
                       }}
-                      onFinish={() => {
-                        void terminalVoice.stop(false).then(() => {
-                          if (voiceDraft.trim() && !attaching.current) {
-                            void pasteSafeChunked(voiceDraft.trim()).catch(() => {});
-                            setVoiceDraft("");
-                          }
-                        });
-                      }}
+                      onFinish={() => void terminalVoice.stop(false)}
                       onSendNow={() => void terminalVoice.stop(true)}
                       onInjectPhrase={(phrase) => setVoiceDraft(phrase)}
                     />
+                  </View>
+                ) : null}
+                {!terminalVoice.recording && voiceDraft ? (
+                  <View style={{ padding: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }}>
+                    <TextInput
+                      accessibilityLabel="语音识别草稿"
+                      value={voiceDraft}
+                      onChangeText={setVoiceDraft}
+                      multiline
+                      autoCorrect={false}
+                      style={[type.callout, { color: colors.label, maxHeight: 100, minHeight: 44 }]}
+                    />
+                    <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+                      <Button title="清除" variant="tonal" size="small" onPress={() => setVoiceDraft("")} />
+                      <Button title="插入终端" variant="primary" size="small" onPress={() => {
+                        if (attaching.current) return;
+                        void pasteSafeChunked(voiceDraft.trim()).then(() => setVoiceDraft("")).catch(() => {});
+                      }} />
+                    </View>
                   </View>
                 ) : null}
                 {snippetsOpen ? (
@@ -675,7 +692,6 @@ export function TerminalScreen() {
                   snippetsOpen={snippetsOpen}
                   onToggleSnippets={toggleTerminalSnippetsOpen}
                   onVoice={() => {
-                    setVoiceDraft("");
                     void terminalVoice.start();
                   }}
                   onToggleCtrl={() => {
