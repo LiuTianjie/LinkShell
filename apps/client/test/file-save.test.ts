@@ -9,30 +9,44 @@ vi.mock("react-native", () => ({ Platform: { get OS() { return h.os; } } }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "unique" }));
 vi.mock("expo-media-library", () => ({ Asset: { create: h.asset }, requestPermissionsAsync: h.permission }));
 vi.mock("expo-sharing", () => ({ shareAsync: h.share, isAvailableAsync: h.available }));
-vi.mock("expo-file-system", () => ({
-  Paths: { cache: "file:///cache" },
-  Directory: class {
+vi.mock("expo-file-system", () => {
+  class Directory {
     static pickDirectoryAsync = h.pick;
     uri: string; exists = true;
-    constructor(base: string, name: string) { this.uri = `${base}/${name}`; }
+    constructor(base: string, name?: string) { this.uri = name ? `${base}/${name}` : base; }
     create = h.create; delete = h.remove;
-  },
-  File: class {
+  }
+  class File {
     uri: string; name: string;
     constructor(parent: { uri: string }, name: string) { this.uri = `${parent.uri}/${name}`; this.name = name; }
-    get exists() { return this.uri.startsWith("content:") && h.targetExists; }
-    create = h.create; copy = h.copy;
+    // A child suffix does not turn a SAF tree URI into a document URI.
+    get exists() { return !this.uri.startsWith("content:"); }
+    create = h.create;
+    async copy(destination: File | Directory, options?: { overwrite?: boolean }) {
+      if (destination instanceof File && destination.uri.startsWith("content:")) {
+        throw Object.assign(new Error("A folder with the same name already exists in the file location"), { code: "ERR_INVALID_TYPE_FILE" });
+      }
+      return h.copy(destination, options);
+    }
     open() { return { writeBytes: h.write, close: h.close }; }
-  },
-}));
+  }
+  return { Paths: { cache: "file:///cache" }, Directory, File };
+});
 const { saveRemoteFile } = await import("../src/lib/file-save");
+const { Directory } = await import("expo-file-system");
 const call = vi.fn();
 const link = { call } as unknown as Pick<HostLink, "call">;
+const pickedUri = "content://com.android.externalstorage.documents/tree/primary%3ADownload";
 beforeEach(() => {
   vi.resetAllMocks(); h.os = "ios"; h.targetExists = false;
   h.permission.mockResolvedValue({ granted: true }); h.available.mockResolvedValue(true);
   h.asset.mockResolvedValue({ id: "saved" });
-  h.pick.mockResolvedValue({ uri: "content://folder" });
+  h.pick.mockResolvedValue(new Directory(pickedUri));
+  h.copy.mockImplementation((_destination, options) => {
+    if (h.targetExists && !options?.overwrite) {
+      throw Object.assign(new Error("Destination already exists"), { code: "ERR_DESTINATION_ALREADY_EXISTS" });
+    }
+  });
   call.mockResolvedValue({ size: 3, revision: "one", data: "AP+A", nextOffset: 3, done: true });
 });
 it("asks only for write access, saves exact media bytes, closes the file, then removes cache", async () => {
@@ -64,15 +78,16 @@ it("cleans partial downloads and never exports them", async () => {
   expect(h.close).toHaveBeenCalledOnce(); expect(h.remove).toHaveBeenCalledOnce();
   expect(h.asset).not.toHaveBeenCalled(); expect(h.share).not.toHaveBeenCalled();
 });
-it("copies to the chosen Android folder and waits before deleting the source", async () => {
+it("copies into the Android SAF directory and waits before deleting the source", async () => {
   h.os = "android";
   let finish: () => void = () => {};
   h.copy.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
   const saving = saveRemoteFile(link, "C:\\work\\a.mp4", "files", {});
+  void saving.catch(() => {});
   await vi.waitFor(() => expect(h.copy).toHaveBeenCalledOnce());
   expect(h.remove).not.toHaveBeenCalled();
   finish(); await expect(saving).resolves.toBe("saved");
-  expect(h.copy).toHaveBeenCalledWith(expect.objectContaining({ uri: "content://folder/a.mp4" }));
+  expect(h.copy).toHaveBeenCalledWith(expect.objectContaining({ uri: pickedUri }), { overwrite: false });
   expect(h.remove).toHaveBeenCalledOnce(); expect(h.share).not.toHaveBeenCalled();
 });
 it("cancels the Android picker without starting a download", async () => {
@@ -83,5 +98,13 @@ it("cancels the Android picker without starting a download", async () => {
 it("preserves an existing Android file", async () => {
   h.os = "android"; h.targetExists = true;
   await expect(saveRemoteFile(link, "/a.png", "files", {})).rejects.toThrow("同名文件");
-  expect(h.copy).not.toHaveBeenCalled(); expect(h.remove).toHaveBeenCalledOnce();
+  expect(h.copy).toHaveBeenCalledWith(expect.objectContaining({ uri: pickedUri }), { overwrite: false });
+  expect(h.remove).toHaveBeenCalledOnce();
+});
+it("preserves other Android export errors and removes the downloaded cache", async () => {
+  h.os = "android";
+  const failure = Object.assign(new Error("Storage full"), { code: "ERR_UNABLE_TO_COPY" });
+  h.copy.mockRejectedValue(failure);
+  await expect(saveRemoteFile(link, "/a.png", "files", {})).rejects.toBe(failure);
+  expect(h.remove).toHaveBeenCalledOnce();
 });
