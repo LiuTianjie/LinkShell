@@ -73,7 +73,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
     append(...children: Element[]) { this.children.push(...children); }
     appendChild(child: Element) { this.append(child); return child; }
     querySelectorAll(selector: string): Element[] {
-      const matches = (child: Element) => selector.startsWith(".") ? child.classList.contains(selector.slice(1)) : child.tagName === selector;
+      const matches = (child: Element) => selector.startsWith("#") ? child.id === selector.slice(1) : selector.startsWith(".") ? child.classList.contains(selector.slice(1)) : child.tagName === selector;
       return this.children.flatMap((child) => [...(matches(child) ? [child] : []), ...child.querySelectorAll(selector)]);
     }
     querySelector(selector: string) { return this.querySelectorAll(selector)[0] ?? null; }
@@ -242,6 +242,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
         pcs[0]!.ontrack?.({ receiver: {}, track: {}, streams: [{ id: "original-stream" }] });
         video.videoWidth = 1920; video.videoHeight = 1080;
         video.emit("resize");
+        video.emit("playing");
         await settle();
       } else sandbox.linkshellNative.picture({ width: 1920, height: 1080 });
     },
@@ -249,10 +250,50 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
 }
 
 describe("the running viewer screen session", () => {
+  it.each([false, true])("keeps initial loading until media arrives, after configuration acknowledgement (native=%s)", async (native) => {
+    const ui = viewer({ native });
+    if (!native) ui.sockets[0]!.open();
+    ui.capabilities(); await ui.settle();
+    ui.ack(ui.configure().at(-1)!);
+    expect(ui.elements.get("note")!.dataset.state).toBe("receiving");
+    expect(ui.elements.get("note")!.classList.contains("gone")).toBe(false);
+  });
+
+  it("keeps a retained paused screen out of loading, even when the video reports a late frame", async () => {
+    const ui = viewer(); await ui.ready();
+    ui.session({ active: false }); await ui.settle();
+    ui.ack(ui.configure().at(-1)!);
+    ui.elements.get("video")!.emit("timeupdate");
+    await ui.advance(15000);
+    expect(ui.elements.get("note")!.dataset.state).toBe("paused");
+    expect(ui.elements.get("screen-loading-retry")!.classList.contains("gone")).toBe(true);
+    ui.session({ active: true }); await ui.settle(); ui.ack(ui.configure().at(-1)!);
+    expect(ui.elements.get("note")!.classList.contains("gone")).toBe(true);
+  });
+
+  it("shows a disconnection error while waiting for configuration instead of continuing to load", async () => {
+    const ui = viewer();
+    ui.sockets[0]!.open();
+    ui.capabilities(); await ui.settle();
+    expect(ui.elements.get("note")!.dataset.state).toBe("adjusting");
+    ui.sockets[0]!.close();
+    await ui.advance(15000);
+    expect(ui.elements.get("note")!.dataset.state).toBe("error");
+    expect(ui.elements.get("screen-loading-detail")!.textContent).toContain("屏幕连接已断开");
+    expect(ui.elements.get("screen-loading-retry")!.classList.contains("gone")).toBe(false);
+  });
+
+  it("asks the embedding client to retry a screen without changing its preferences", async () => {
+    const ui = viewer({ framed: true });
+    await ui.advance(12000);
+    ui.elements.get("screen-loading-retry")!.emit("click");
+    expect(ui.reloads).toEqual([{}]);
+  });
+
   it("allows Windows JPEG fallback in a browser without VideoDecoder", async () => {
     const ui = viewer({ platform: "win32" }); await ui.ready();
     ui.receive({ rtc: { t: "off" } });
-    expect(ui.elements.get("note")!.textContent).not.toContain("不支持视频解码");
+    expect(ui.elements.get("screen-loading-detail")!.textContent).not.toContain("不支持视频解码");
     expect(ui.pcs[0]!.closeCount).toBe(1);
   });
 
@@ -361,7 +402,7 @@ describe("the running viewer screen session", () => {
     ui.ack(last, -1); ui.key();
     ui.ack(last, 12, { display: 1 }); ui.key();
     expect(ui.input()).toHaveLength(before);
-    expect(ui.elements.get("note")!.textContent).not.toContain("旧错误");
+    expect(ui.elements.get("screen-loading-detail")!.textContent).not.toContain("旧错误");
     ui.ack(last, 12); ui.key();
     expect(ui.input().at(-1)).toMatchObject({ t: "key", k: "return", screenGeneration: 12 });
     expect(ui.messages().filter((message) => message.t === "control").at(-1)).toMatchObject({ screenGeneration: 12 });
@@ -376,15 +417,17 @@ describe("the running viewer screen session", () => {
     const before = ui.input().length;
     ui.key();
     ui.elements.get("video")!.emit("resize");
+    ui.elements.get("video")!.emit("playing");
+    ui.pcs[0]!.connect();
     expect(ui.input()).toHaveLength(before);
-    expect(ui.elements.get("note")!.textContent).toBe("显示器暂时不可用");
+    expect(ui.elements.get("screen-loading-detail")!.textContent).toBe("显示器暂时不可用");
     expect(ui.pcs[0]!.closeCount).toBe(0);
     ui.session({ width: "2560" }); await ui.settle();
     const retry = ui.configure().at(-1)!;
     expect(retry.requestId).toBeGreaterThan(failed.requestId);
     ui.ack(retry, 30); ui.key();
     expect(ui.input().at(-1)).toMatchObject({ screenGeneration: 30 });
-    expect(ui.elements.get("note")!.textContent).toBe("");
+    expect(ui.elements.get("note")!.classList.contains("gone")).toBe(true);
   });
 
   it("lays out the actual decoded size on the retained video after changing display", async () => {

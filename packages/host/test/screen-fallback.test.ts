@@ -26,6 +26,8 @@ function receiver({ nativeApp = true, supportsRTC = true, video = "1" } = {}) {
     addEventListener() {},
     clearTimeout() {},
     say() {},
+    loading: { set() {}, phase: "connecting" },
+    showProgress() {},
     hint() {},
     unseeable() {},
   }) as { signal(message: { t: string }): void; giveUp(reason: string): void; fallBack(): void };

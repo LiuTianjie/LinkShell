@@ -9,6 +9,7 @@ import {
 import { Choice } from "../components/Choice";
 import { useEffect, useRef, useState } from "react";
 import { ComputerPreviewSubscription } from "@linkshell/client-core";
+import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import {
   ErrorNotice,
   LoadState,
@@ -25,7 +26,6 @@ import {
   Maximize,
   Minimize,
   Monitor,
-  LoaderCircle,
   Play,
   RotateCw,
   Square,
@@ -232,6 +232,10 @@ export function socketBootstrap(
     if (message?.type === "screenSession")
       parent.postMessage({ channel, type: "screenSession", session: message.session }, "*");
   };
+  (
+    window as unknown as { __linkshellScreenState: (phase: string) => void }
+  ).__linkshellScreenState = (phase) =>
+    parent.postMessage({ channel, type: "screen-state", phase }, "*");
   window.addEventListener("message", (event) => {
     if (event.source !== parent || event.data?.channel !== channel) return;
     if (event.data.type === "screen-session") {
@@ -323,6 +327,8 @@ function BrowserScreen({
   // renegotiate the picture under the hands using it.
   const [fitted, setFitted] = useState<string>();
   const [slow, setSlow] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [viewerState, setViewerState] = useState<string>();
   const [stats, setStats] = useState<{
     width?: number;
     height?: number;
@@ -400,9 +406,9 @@ function BrowserScreen({
   useEffect(() => {
     setSlow(false);
     if (!started || html || error) return;
-    const timer = window.setTimeout(() => setSlow(true), 10000);
+    const timer = window.setTimeout(() => setSlow(true), 12000);
     return () => window.clearTimeout(timer);
-  }, [started, html, error, retry]);
+  }, [started, html, error, retry, link, streams, display, view]);
   useEffect(() => {
     const changed = () =>
       setFullscreen(document.fullscreenElement === surface.current);
@@ -462,6 +468,7 @@ function BrowserScreen({
         display?: unknown;
         maxFps?: unknown;
         mode?: unknown;
+        phase?: unknown;
         key?: unknown;
         value?: unknown;
         session?: { t?: unknown; version?: unknown; configure?: unknown; pause?: unknown; paused?: unknown; message?: unknown };
@@ -495,6 +502,10 @@ function BrowserScreen({
       }
       if (message.type === "leave-focus") {
         if (!document.fullscreenElement) setFocused(false);
+        return;
+      }
+      if (message.type === "screen-state") {
+        if (typeof message.phase === "string" && ["connecting", "receiving", "recovering", "adjusting", "paused", "blocked", "error", "ready"].includes(message.phase)) setViewerState(message.phase);
         return;
       }
       if (message.type === "screen-storage") {
@@ -541,6 +552,10 @@ function BrowserScreen({
         return;
       }
       if (message.type === "reload") {
+        if (message.width === undefined && message.mode === undefined && message.display === undefined && message.maxFps === undefined) {
+          setRetry((value) => value + 1);
+          return;
+        }
         const width =
           typeof message.width === "string" &&
           /^(\d{3,4}|native)$/.test(message.width)
@@ -638,10 +653,13 @@ function BrowserScreen({
     setSessionError(undefined);
     setReusable(undefined);
     setStats(undefined);
+    setPreparing(false);
+    setViewerState(undefined);
     void link
       .call("screen.start", {})
       .then(async (viewer) => {
         if (!alive) return;
+        setPreparing(true);
         port = viewer.port;
         setDisplays(viewer.displays);
         if (
@@ -730,6 +748,7 @@ function BrowserScreen({
     }
     return () => clearTimeout(pauseTimer.current);
   }, [active, display, view.width, view.maxFps, fitted, html, reusable]);
+  const screenLive = started && !!html && !error && !sessionError && !!stats?.width && (!viewerState || viewerState === "ready");
   const settings = (
     <div className="screen-settings">
       {displays.length > 1 && (
@@ -1000,6 +1019,7 @@ function BrowserScreen({
                       setHtml(undefined);
                       setStats(undefined);
                       setError(undefined);
+                      setViewerState(undefined);
                     }}
                   >
                     <Square />
@@ -1105,41 +1125,7 @@ function BrowserScreen({
           </div>
         )}
         {started && !html && (
-          <div className="screen-start" role="status">
-            {error ? (
-              <Monitor size={40} strokeWidth={1} />
-            ) : (
-              <LoaderCircle size={32} className="animate-spin" />
-            )}
-            <h3>{error ? "暂时无法打开画面" : "正在连接屏幕"}</h3>
-            {error ? (
-              <>
-                <ErrorNotice error={error} />
-                <Button
-                  variant="outline"
-                  onClick={() => setRetry((value) => value + 1)}
-                >
-                  重试
-                </Button>
-              </>
-            ) : (
-              <>
-                <p>
-                  {slow
-                    ? "连接耗时较长，请确认电脑在线且已允许屏幕录制。"
-                    : "正在建立屏幕连接，画面准备好后会自动显示。"}
-                </p>
-                {slow && (
-                  <Button
-                    variant="outline"
-                    onClick={() => setRetry((value) => value + 1)}
-                  >
-                    重新连接
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
+          <ScreenConnectionLoading preparing={preparing} slow={slow} error={error} retry={() => setRetry((value) => value + 1)} />
         )}
         {html && (
           <iframe
@@ -1156,20 +1142,28 @@ function BrowserScreen({
       {!compact && (
         <div className="screen-caption">
           <span className="screen-signal">
-            <StatusDot on={!!stats?.width} />
-            {stats?.width
-              ? stats.live
-                ? stats.presented
+            <StatusDot on={screenLive} />
+            {screenLive
+              ? stats?.live
+                ? stats?.presented
                   ? "视频直连 · 自绘"
                   : "视频直连"
                 : "兼容画面"
-              : error && started
+              : (error || sessionError || viewerState === "error") && started
                 ? "连接失败，可重试"
-                : started
-                  ? "正在接收画面"
-                  : "尚未开始观看"}
+                : viewerState === "blocked"
+                  ? "轻点屏幕开始观看"
+                  : viewerState === "recovering"
+                    ? "正在恢复画面"
+                    : viewerState === "adjusting"
+                      ? "正在调整屏幕"
+                    : viewerState === "paused"
+                      ? "屏幕已暂停"
+                    : started
+                      ? preparing ? "正在接收画面" : "正在连接电脑"
+                      : "尚未开始观看"}
           </span>
-          {stats?.width ? (
+          {screenLive && stats ? (
             <span className="screen-metrics">
               {stats.width} × {stats.height}
               {stats.fps !== undefined &&

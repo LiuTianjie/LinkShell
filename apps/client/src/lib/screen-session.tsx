@@ -4,6 +4,7 @@ import Animated from "react-native-reanimated";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { HostLink } from "@linkshell/client-core";
 import { NativeScreenPane } from "@/components/native-screen-pane";
+import { ScreenConnectionLoading } from "@/components/screen-connection-loading";
 import { nativeScreenAvailable } from "../../modules/link-screen";
 import { useAccount } from "./account";
 import { useClient, useConnection, useStreamPath } from "./client";
@@ -47,6 +48,8 @@ interface Viewer {
 
 interface ScreenSessionContextValue {
   viewer: Viewer | null;
+  preparing: boolean;
+  generation: number;
   failure: string | null;
   display: number | null;
   mode: ScreenMode;
@@ -77,6 +80,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const snapshot = lease.getSnapshot();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [failure, setFailure] = useState<string | null>(null);
+  const [preparingGeneration, setPreparingGeneration] = useState<number | null>(null);
+  const [readyGeneration, setReadyGeneration] = useState<number | null>(null);
   const [display, setDisplay] = useState<number | null>(null);
   const [width, setWidth] = useState(loadScreenWidth);
   const [mode, setMode] = useState(loadScreenMode);
@@ -177,6 +182,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       const via = playback === "relay" || path !== "direct" ? "relay" : "direct";
       void link.call("screen.start", {}, 20_000).then(async ({ port, token, displays }) => {
         if (!lease.isCurrent(generation)) return;
+        setPreparingGeneration(generation);
         const forward = await forwardPort(streams, port, { direct: playback !== "relay" });
         const targetDisplay = displays.some((entry) => entry.index === desired.current.display) ? desired.current.display! : displays[0]?.index ?? 0;
         const target = { active: true, display: targetDisplay, width: desired.current.width, maxFps: 120 };
@@ -235,6 +241,10 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     let message: ScreenPageMessage;
     try { message = JSON.parse(event.nativeEvent.data) as ScreenPageMessage; } catch { return; }
     if (!message || typeof message !== "object") return;
+    if (message.type === "screenRetry") {
+      if (lease.getSnapshot().active && AppState.currentState === "active") retry();
+      return;
+    }
     if (message.type === "screenClosed") {
       const wasActive = lease.close(current.generation);
       if (wasActive === null) return;
@@ -270,12 +280,17 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         saveScreenMode(message.mode);
       }
       if (message.type === "ready") {
+        setReadyGeneration(current.generation);
         sendChrome();
         sendSession(lease.getSnapshot().active && AppState.currentState === "active");
       }
     }
     if (owner.current && lease.getSnapshot().active && AppState.currentState === "active") route.current?.onMessage(message, current.generation);
-  }, [lease, pauseWatchdog, unavailable, enableLegacy, reset, sendChrome, sendSession]);
+  }, [lease, pauseWatchdog, unavailable, enableLegacy, reset, retry, sendChrome, sendSession]);
+
+  const onLoading = useCallback((current: Viewer) => {
+    if (lease.getSnapshot().resource === current) setReadyGeneration(null);
+  }, [lease]);
 
   const onLoaded = useCallback((current: Viewer) => {
     if (lease.getSnapshot().resource !== current) return;
@@ -290,7 +305,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const viewport = presentation?.viewport;
   const clipTop = Math.min(viewport?.height ?? 0, Math.max(0, presentation?.clipTop ?? 0));
   const visible = active && viewport !== null && viewport !== undefined && !failure;
-  const value = useMemo<ScreenSessionContextValue>(() => ({ viewer, failure, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry }), [viewer, failure, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry]);
+  const preparing = preparingGeneration === snapshot.generation;
+  const value = useMemo<ScreenSessionContextValue>(() => ({ viewer, failure, preparing, generation: snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry }), [viewer, failure, preparing, snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry]);
 
   return <ScreenSessionContext value={value}>
     <View ref={root} collapsable={false} onLayout={measureRoot} style={{ flex: 1 }}>
@@ -302,24 +318,29 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         style={{ position: "absolute", left: (viewport?.x ?? 0) - origin.x, top: (viewport?.y ?? 0) - origin.y + clipTop, width: viewport?.width ?? 1, height: Math.max(1, (viewport?.height ?? 1) - clipTop), overflow: "hidden", opacity: visible ? 1 : 0 }}
       >
         <Animated.View style={[{ position: "absolute", left: 0, top: -clipTop, width: viewport?.width ?? 1, height: viewport?.height ?? 1, backgroundColor: "#000000" }, presentation?.keyboardLift]}>
-          <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} web={web} onMessage={onMessage} onUnavailable={unavailable} onLoaded={onLoaded} />
+          <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} web={web} onMessage={onMessage} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} />
+          {visible && readyGeneration !== viewer.generation ? <View style={{ position: "absolute", inset: 0, backgroundColor: "#08090e" }}>
+            <ScreenConnectionLoading key={viewer.generation} preparing onRetry={retry} top={clipTop} bottom={0} />
+          </View> : null}
         </Animated.View>
       </View> : null}
     </View>
   </ScreenSessionContext>;
 }
 
-function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable, onLoaded }: {
+function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable, onLoaded, onLoading }: {
   viewer: Viewer;
   active: boolean;
   web: React.RefObject<WebView | null>;
   onMessage(viewer: Viewer, event: WebViewMessageEvent): void;
   onUnavailable(viewer: Viewer, description?: string): void;
   onLoaded(viewer: Viewer): void;
+  onLoading(viewer: Viewer): void;
 }) {
   const page = <WebView
     ref={web}
     source={viewer.source}
+    onLoadStart={() => onLoading(viewer)}
     originWhitelist={["http://127.0.0.1*"]}
     onMessage={(event) => onMessage(viewer, event)}
     onLoadEnd={() => onLoaded(viewer)}

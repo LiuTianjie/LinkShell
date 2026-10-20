@@ -5,7 +5,7 @@ import { Stack, useFocusEffect, useIsFocused } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Platform, ScrollView, View } from "react-native";
+import { BackHandler, Platform, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
@@ -16,6 +16,7 @@ import { useLayoutGeometry } from "@/lib/use-layout-geometry";
 import { safeContentInsets } from "@/lib/adaptive-insets";
 import { Button } from "@/components/button";
 import { HeaderActions } from "@/components/header-actions";
+import { ScreenConnectionLoading } from "@/components/screen-connection-loading";
 import { Icon } from "@/components/icon";
 import { useConnection } from "@/lib/client";
 import { useScreenSession, type ScreenPageMessage, type ScreenPresentation, type ScreenViewport } from "@/lib/screen-session";
@@ -33,7 +34,7 @@ import { type } from "@/theme/type";
  */
 export function ScreenScreen() {
   const { computer } = useConnection();
-  const { viewer, failure, display, mode, playback, attach, detach, present: publishPresentation, inject, focus, selectDisplay, retry } = useScreenSession();
+  const { viewer, failure, preparing, generation, display, mode, playback, attach, detach, present: publishPresentation, inject, focus, selectDisplay, retry } = useScreenSession();
   const owner = useRef({}).current;
   const focusGeneration = useRef(0);
   const anchor = useRef<View>(null);
@@ -92,6 +93,7 @@ export function ScreenScreen() {
         mode,
         // Hide the separate rotation control when connected to an older host.
         canRotate: false,
+        canRetryScreen: true,
         fontScale: window.fontScale,
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: !relayOnly,
@@ -215,7 +217,7 @@ export function ScreenScreen() {
           <Button title="重试" variant="tonal" size="small" onPress={retry} />
         </ScrollView>
       ) : !viewer ? (
-        <ActivityIndicator style={{ marginTop: 64 }} color="rgba(255,255,255,0.6)" />
+        <ScreenConnectionLoading key={generation} preparing={preparing} onRetry={retry} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} />
       ) : null}
     </View>
   );
