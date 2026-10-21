@@ -2,6 +2,8 @@
 
 Windows 桌面端复用现有 Host / Gateway / 手机协议，提供与 macOS 0.10.49 相同的工作台，以及原生本机管理和系统托盘。内置 Node、CLI、Host、工作台资源与屏幕组件；Agent 仍由用户自行安装并登录。
 
+安装包沿用 macOS 的运行时精简规则：保留 Claude SDK 和 ACP 适配器，排除不会使用的内置 Claude 程序，继续调用用户已安装的 Claude。打包同时清理 ARM64 终端文件、调试符号、类型声明、source map 和 node-pty 构建源码，并覆盖复用暂存目录的情况；x64 终端运行库、可执行 JS、许可证与可替换的 FFmpeg DLL 保留。包内 smoke 验证外部 Agent 调用与真实 ConPTY 进程。
+
 ## 桌面体验
 
 默认打开“工作台”，与“本机管理”共享 232 点侧栏和 104 点品牌区。工作台由 WebView2 加载随安装包附带的同一套 Web UI，管理页使用原生 WPF；均支持深色、浅色与跟随系统。Ctrl+1 / Ctrl+2 切换模式，控制远程屏幕时按键交给远程电脑。主题保存在数据目录的 `desktop-preferences.json`，不修改 Windows 的系统外观。

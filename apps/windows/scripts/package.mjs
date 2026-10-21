@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { buildInstaller } from './installer.mjs';
 import { ensureMedia } from './media-runtime.mjs';
 import { webview2Files } from './webview2.mjs';
+import { isRuntimeDependency, isRuntimePath, pruneRuntime } from './prune-runtime.mjs';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,6 +34,7 @@ mkdirSync(runtime, { recursive: true });
 const deployed = join(scratch, 'deployed');
 if (!reuse) run(process.execPath, [pnpm, '--filter', 'linkshell-cli', '--prod', 'deploy', '--legacy', deployed]);
 function portable(source, target, ancestors = new Set(), packageRoot = false) {
+  if (!isRuntimePath(relative(cli, target))) return;
   const real = realpathSync(source);
   if (ancestors.has(real)) return; // pnpm's package self-reference is not needed at runtime.
   const stat = lstatSync(real);
@@ -61,7 +63,7 @@ function packageCopy(source, target, stack = new Set()) {
   portable(real, target, new Set(), true);
   const pkg = JSON.parse(readFileSync(join(real, 'package.json')));
   for (const name of Object.keys({ ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies })) {
-    if (name === '@linkshell/mac') continue;
+    if (!isRuntimeDependency(name)) continue;
     let directory = real, found;
     for (;;) {
       const candidate = join(directory, 'node_modules', name);
@@ -88,6 +90,8 @@ for (const name of ['cli', 'host', 'gateway', 'wire']) {
   const target = name === 'cli' ? cli : join(cli, 'node_modules/@linkshell', name);
   cpSync(join(root, 'packages', name, 'dist'), join(target, 'dist'), { recursive: true });
 }
+// Also clean reused staging directories created before these exclusions existed.
+pruneRuntime(cli);
 cpSync(process.execPath, join(runtime, 'node.exe'));
 const nodeLicense = join(artifacts, `node-${process.versions.node}-LICENSE.txt`);
 if (!existsSync(nodeLicense)) {
