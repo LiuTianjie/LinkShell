@@ -140,6 +140,44 @@ class GhosttyIntegrationTest {
     assertTrue(GhosttyVt.nativeSnapshot(handle, buffer) > 0)
   } }
 
+  @Test fun dictationUsesANormalTextEditorAndCommitsCompositionOnlyOnce() = onMain {
+    val view = GhosttyTerminalView(ApplicationProvider.getApplicationContext())
+    val output = mutableListOf<String>()
+    view.onInputBytes = { output += it.decodeToString() }
+    try {
+      val info = EditorInfo()
+      val input = view.onCreateInputConnection(info)
+      assertEquals(android.text.InputType.TYPE_CLASS_TEXT, info.inputType and android.text.InputType.TYPE_MASK_CLASS)
+      assertEquals(0, info.inputType and android.text.InputType.TYPE_MASK_VARIATION)
+      input.setComposingText("帮我检查", 1)
+      input.setComposingText("帮我检查代码", 1)
+      assertTrue(output.isEmpty())
+      input.finishComposingText()
+      input.finishComposingText()
+      assertEquals(listOf("帮我检查代码"), output)
+      output.clear()
+      input.setComposingText("git", 1)
+      input.commitText("git status", 1)
+      input.finishComposingText()
+      assertEquals(listOf("git status"), output)
+    } finally { view.destroy() }
+  }
+
+  @Test fun bundledTerminalFacesHaveConsistentMonospacedAdvances() = onMain {
+    val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+    var advance = 0f
+    for (style in listOf("Regular", "Bold", "Italic", "BoldItalic")) {
+      val face = android.graphics.Typeface.createFromAsset(context.assets, "fonts/JetBrainsMonoNL-$style.ttf")
+      val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.SUBPIXEL_TEXT_FLAG).apply {
+        typeface = face; textSize = 32f
+      }
+      if (advance == 0f) advance = paint.measureText("M")
+      assertEquals(advance, paint.measureText("M"), 0.01f)
+      for (char in "ilMW08@{}"){ assertEquals(advance, paint.measureText(char.toString()), 0.01f) }
+      assertTrue(paint.hasGlyph("→"))
+    }
+  }
+
   @Test fun imeDeletionSupportsCodePointsAndForwardDelete() = onMain {
     val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     val view = GhosttyTerminalView(context)

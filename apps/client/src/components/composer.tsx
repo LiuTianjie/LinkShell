@@ -214,6 +214,11 @@ export function Composer(props: ComposerProps) {
     onSendAfterStop: (finalText) => void sendWithText(finalText),
     onError: (message) => showFlash(message),
   });
+  const cancelVoice = voice.cancel;
+  useEffect(() => {
+    // Stack navigation can leave this composer mounted behind another screen.
+    if (!focused) void cancelVoice();
+  }, [cancelVoice, focused]);
 
   // A queued message comes back to be edited: its text ahead of what's being typed, its pictures beside the others.
   const editQueued = async (clientMessageId: string) => {
@@ -468,6 +473,7 @@ export function Composer(props: ComposerProps) {
               elapsedSeconds={voice.elapsedSeconds}
               levels={voice.levels}
               canceling={voice.canceling}
+              processing={voice.processing}
               hasText={hasContent}
               onCancel={() => void voice.cancel()}
               onFinish={() => void voice.stop(false)}
