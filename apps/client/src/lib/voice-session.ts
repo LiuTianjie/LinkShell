@@ -134,4 +134,11 @@ export class VoiceSession {
     if (restore) this.events.text(this.prefix, "");
     await this.transport.cancel().catch(() => {});
   }
+
+  async appStateChanged(state: string) {
+    // iOS permission prompts temporarily make the app inactive while start awaits
+    // authorization. Entering the background still cancels that pending start.
+    if (state === "active" || state === "inactive" && this.phase === "starting") return;
+    await this.cancel(false);
+  }
 }

@@ -80,7 +80,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): VoiceInputControll
   useEffect(() => {
     mounted.current = true;
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") void session.cancel(false);
+      void session.appStateChanged(state);
     });
     return () => {
       mounted.current = false;

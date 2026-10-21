@@ -87,6 +87,65 @@ describe("native voice input sessions", () => {
     expect(ui.transport.cancel).toHaveBeenCalledTimes(2);
   });
 
+  it("survives the inactive transition from a first-time permission prompt", async () => {
+    const ui = fixture(); const permission = deferred<{ ok: boolean }>(); let current!: () => boolean;
+    ui.transport.start = (isCurrent) => { current = isCurrent; return permission.promise; };
+    const started = ui.session.start("");
+    await ui.session.appStateChanged("inactive");
+    expect(current()).toBe(true);
+    expect(ui.session.phase).toBe("starting");
+    await ui.session.appStateChanged("active");
+    permission.resolve({ ok: true });
+    expect(await started).toBe(true);
+    expect(ui.session.phase).toBe("recording");
+    expect(ui.transport.cancel).not.toHaveBeenCalled();
+  });
+
+  it("still cancels when a pending permission request enters the background", async () => {
+    const ui = fixture(); const permission = deferred<{ ok: boolean }>(); let current!: () => boolean;
+    ui.transport.start = (isCurrent) => { current = isCurrent; return permission.promise; };
+    const started = ui.session.start("原有草稿");
+    await ui.session.appStateChanged("inactive");
+    await ui.session.appStateChanged("background");
+    expect(current()).toBe(false);
+    permission.resolve({ ok: true });
+    expect(await started).toBe(false);
+    expect(ui.session.phase).toBe("idle");
+    expect(ui.events.send).not.toHaveBeenCalled();
+  });
+
+  it("preserves a draft and prevents a pending send when recording becomes inactive", async () => {
+    const ui = fixture(); const final = deferred<{ text: string }>(); ui.transport.stop = () => final.promise;
+    await ui.session.start(""); ui.result("保留文字");
+    const stopped = ui.session.stop(true);
+    await ui.session.appStateChanged("inactive");
+    ui.result("迟到文字", true); final.resolve({ text: "迟到文字" });
+    expect(await stopped).toBeNull();
+    expect(ui.session.phase).toBe("idle");
+    expect(ui.events.text).toHaveBeenLastCalledWith("保留文字", "保留文字");
+    expect(ui.events.send).not.toHaveBeenCalled();
+  });
+
+  it("detaches a blurred composer before another screen uses the shared native recognizer", async () => {
+    const listeners = new Set<Parameters<SpeechTransport["subscribe"]>[0]>();
+    const first = fixture(); const second = fixture();
+    for (const ui of [first, second]) {
+      ui.transport.subscribe = (events) => {
+        listeners.add(events);
+        return () => { listeners.delete(events); };
+      };
+    }
+    await first.session.start("原有草稿");
+    for (const listener of listeners) listener.onResult({ text: "首个界面的语音", isFinal: false });
+    await first.session.cancel();
+    expect(listeners.size).toBe(0);
+    await second.session.start("");
+    for (const listener of listeners) listener.onResult({ text: "新界面的语音", isFinal: true });
+    expect(first.events.text).toHaveBeenLastCalledWith("原有草稿", "");
+    expect(second.events.text).toHaveBeenLastCalledWith("新界面的语音", "新界面的语音");
+    expect(first.events.send).not.toHaveBeenCalled();
+  });
+
   it("keeps recognized text on error/background cleanup, without sending or restoring old text", async () => {
     const ui = fixture(); await ui.session.start(""); ui.result("保留文字");
     ui.error("网络断开");

@@ -16,6 +16,7 @@ public class LinkLayoutModule: Module {
   private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
   private var recognitionTask: SFSpeechRecognitionTask?
   private var speechRecognizer: SFSpeechRecognizer?
+  private var speechGeneration = 0
   private var lastLevelSentAt: TimeInterval = 0
   private var simulatorWaveTimer: Timer?
   private var activeActivityId: String?
@@ -223,6 +224,7 @@ public class LinkLayoutModule: Module {
 
   private func beginAudioAndRecognition(localeId: String?, promise: Promise) {
     stopNativeSpeech(cancel: true)
+    let generation = speechGeneration
 
     let session = AVAudioSession.sharedInstance()
     do {
@@ -261,16 +263,18 @@ public class LinkLayoutModule: Module {
 
     if let recognizer, recognizer.isAvailable {
       self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-        guard let self else { return }
-        if let result {
-          let text = result.bestTranscription.formattedString
-          self.sendEvent("onSpeechResult", [
-            "text": text,
-            "isFinal": result.isFinal
-          ])
-        }
-        if let error {
-          self.sendEvent("onSpeechError", ["message": error.localizedDescription])
+        DispatchQueue.main.async {
+          guard let self, self.speechGeneration == generation else { return }
+          if let result {
+            let text = result.bestTranscription.formattedString
+            self.sendEvent("onSpeechResult", [
+              "text": text,
+              "isFinal": result.isFinal
+            ])
+          }
+          if let error {
+            self.sendEvent("onSpeechError", ["message": error.localizedDescription])
+          }
         }
       }
     }
@@ -316,6 +320,9 @@ public class LinkLayoutModule: Module {
   }
 
   private func stopNativeSpeech(cancel: Bool) {
+    // finish/cancel may still deliver callbacks after JS starts another session.
+    // Retire their identity before asking the old task to stop.
+    speechGeneration &+= 1
     simulatorWaveTimer?.invalidate()
     simulatorWaveTimer = nil
 
