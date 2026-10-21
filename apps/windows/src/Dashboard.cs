@@ -27,6 +27,10 @@ namespace LinkShell.Windows {
     internal sealed class Dashboard : Window {
         readonly bool hidden, preview;
         readonly Grid root = new Grid();
+        readonly Grid shell = new Grid();
+        Workspace workspace;
+        bool management, exiting;
+        DateTime lastAccountRefresh = DateTime.MinValue;
         readonly StackPanel content = new StackPanel();
         readonly ScrollViewer scroll = new ScrollViewer();
         readonly StackPanel navigation = new StackPanel();
@@ -45,7 +49,7 @@ namespace LinkShell.Windows {
         string agent = "all", snapshotJson = "";
         int days = 7, usageGeneration;
         bool busy, polling, signingIn, pairing, paired, usageLoading, checking, quitting, dark = true;
-        Process login;
+        Process login, accountAction;
         Window trayPanel;
         Button serviceMenuButton;
         Popup servicePopup;
@@ -73,7 +77,10 @@ namespace LinkShell.Windows {
             tray = new Forms.NotifyIcon { Text = "LinkShell", Visible = !preview, Icon = System.Drawing.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location) };
             tray.MouseUp += (s, e) => Dispatcher.Invoke(new Action(ToggleTray));
             Closing += (s, e) => { if (!quitting) { e.Cancel = true; Hide(); } };
-            Closed += (s, e) => { timer.Stop(); seconds.Stop(); CancelLogin(); tray.Dispose(); SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged; };
+            Closed += (s, e) => { timer.Stop(); seconds.Stop(); CancelLogin(); if (workspace != null) workspace.Dispose(); tray.Dispose(); SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged; };
+            IsVisibleChanged += async (s, e) => await SyncWorkspace();
+            StateChanged += async (s, e) => await SyncWorkspace();
+            PreviewKeyDown += (s, e) => { if (management && Keyboard.Modifiers == ModifierKeys.Control && (e.Key == Key.D1 || e.Key == Key.D2)) { ShowMode(e.Key == Key.D2); e.Handled = true; } };
             SourceInitialized += (s, e) => SetTitlebar();
             SystemEvents.UserPreferenceChanged += SystemPreferenceChanged;
             timer.Tick += async (s, e) => { if (!preview && !busy) await RefreshStatus(); };
@@ -89,6 +96,8 @@ namespace LinkShell.Windows {
                     if (Desktop.Text(snapshot, "status") == "stopped") { await Run("start"); await RefreshStatus(); }
                 } catch (Exception error) { notice = "后台服务启动失败：" + error.Message; }
                 finally { busy = false; Render(); timer.Start(); seconds.Start(); }
+                await workspace.Start();
+                await SyncWorkspace();
             };
         }
 
@@ -111,6 +120,7 @@ namespace LinkShell.Windows {
                 : new[] { "#FAFAFB", "#F1F2F5", "#1F2129", "#616670", "#0A755C", "#FFFFFF", "#E0E1E5", "#EDEEF0", "#946019" };
             for (int i = 0; i < keys.Length; i++) ColorResource(keys[i], colors[i]);
             SetTitlebar();
+            if (workspace != null) { var update = SyncWorkspace(); }
             if (trayPanel != null) trayPanel.Close();
         }
         void SetTitlebar() { var hwnd = new WindowInteropHelper(this).Handle; if (hwnd != IntPtr.Zero) { int value = dark ? 1 : 0; try { DwmSetWindowAttribute(hwnd, 20, ref value, 4); } catch (DllNotFoundException) {} } }
@@ -174,20 +184,24 @@ namespace LinkShell.Windows {
         static string Compact(double value) { return value >= 1e9 ? (value / 1e9).ToString("0.#") + "B" : value >= 1e6 ? (value / 1e6).ToString("0.#") + "M" : value >= 1e3 ? (value / 1e3).ToString("0.#") + "K" : value.ToString("N0"); }
 
         void BuildShell() {
-            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) }); root.ColumnDefinitions.Add(new ColumnDefinition());
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) }); root.ColumnDefinitions.Add(new ColumnDefinition());
             var sidebar = new Grid { Margin = new Thickness(0) }; sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); sidebar.RowDefinitions.Add(new RowDefinition()); sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             sidebar.SetResourceReference(Panel.BackgroundProperty, "Sidebar");
-            var brand = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(26, 32, 10, 34) };
-            brand.Children.Add(new Image { Source = Asset("brand.png"), Width = 37, Height = 37, Margin = new Thickness(0, 0, 12, 0) }); brand.Children.Add(Text("LinkShell", 20, "Primary", true)); sidebar.Children.Add(brand);
+            var brand = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+            brand.Children.Add(new Image { Source = Asset("brand.png"), Width = 30, Height = 30, Margin = new Thickness(0, 0, 10, 0) }); brand.Children.Add(Text("LinkShell", 17, "Primary", true));
+            var modes = new UniformGrid { Columns = 2, Height = 34 };
+            var work = Button("工作台", () => ShowMode(false), false, true); work.ToolTip = "Ctrl+1"; modes.Children.Add(work);
+            var manage = Button("本机管理", () => ShowMode(true)); manage.ToolTip = "Ctrl+2"; manage.Padding = new Thickness(0); manage.FontWeight = FontWeights.SemiBold; modes.Children.Add(manage);
+            sidebar.Children.Add(new Border { Height = 104, Padding = new Thickness(14, 14, 14, 12), Child = Stack(brand, modes) });
             navigation.Margin = new Thickness(10, 0, 10, 0); Grid.SetRow(navigation, 1); sidebar.Children.Add(navigation);
-            string[] names = { "总览", "会话", "设备", "用量统计", "日志", "更新", "设置" };
-            string[] icons = { "\uE80F", "\uE8BD", "\uE772", "\uE9D2", "\uE9D9", "\uE896", "\uE713" };
+            string[] names = { "总览", "设备", "用量统计", "日志", "更新", "设置" };
+            string[] icons = { "\uE80F", "\uE772", "\uE9D2", "\uE9D9", "\uE896", "\uE713" };
             var lower = new StackPanel { Margin = new Thickness(10, 0, 10, 20) }; lower.Children.Add(Rule(0, 12)); Grid.SetRow(lower, 2); sidebar.Children.Add(lower);
             for (int i = 0; i < names.Length; i++) {
                 string page = names[i]; var button = Button(page, () => Navigate(page));
                 var row = new StackPanel { Orientation = Orientation.Horizontal }; var icon = Glyph(icons[i], 17); icon.Width = 22; icon.Margin = new Thickness(0, 0, 13, 0); row.Children.Add(icon); row.Children.Add(Text(page, 14));
                 button.Content = row; button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Height = 42; button.Padding = new Thickness(14, 0, 10, 0); button.Margin = new Thickness(0, 0, 0, 5); button.BorderThickness = new Thickness(1); button.BorderBrush = Brushes.Transparent;
-                navButtons[page] = button; if (i < 5) navigation.Children.Add(button); else lower.Children.Add(button);
+                navButtons[page] = button; if (i < 4) navigation.Children.Add(button); else lower.Children.Add(button);
             }
             if (preview) { lower.Children.Add(Button("预览托盘", ToggleTray, false, true)); lower.Children.Add(Text("设计预览 · 示例数据", 10, "Secondary")); }
             root.Children.Add(sidebar);
@@ -202,9 +216,19 @@ namespace LinkShell.Windows {
             var foot = Stack(Rule(18, 14), Split(footer, Button("检查更新", () => { Navigate("更新"); CheckUpdates(); }, false, true))); Grid.SetRow(foot, 3); main.Children.Add(foot);
             overlay.Background = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0)); overlay.Visibility = Visibility.Collapsed; Grid.SetColumnSpan(overlay, 2); Panel.SetZIndex(overlay, 10); root.Children.Add(overlay);
             overlay.PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { CloseDialog(); e.Handled = true; } };
-            Content = root;
+            workspace = new Workspace(() => ShowMode(true), SaveAppearance);
+            shell.Children.Add(workspace); shell.Children.Add(root); Content = shell;
+            ShowMode(preview);
         }
+        void ShowMode(bool value) {
+            management = value; root.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+            workspace.Visibility = value ? Visibility.Hidden : Visibility.Visible;
+            var update = SyncWorkspace();
+        }
+        Task SyncWorkspace() { return workspace == null ? Task.FromResult(0) : workspace.SetState(!management && IsVisible && WindowState != WindowState.Minimized, appearance); }
         void Navigate(string page) {
+            if (page == "会话" || page == "工作台") { ShowMode(false); return; }
+            ShowMode(true);
             selected = page; scroll.ScrollToTop(); Render();
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(scroll.ScrollToTop));
             if (page == "用量统计" && report == null && !usageLoading) LoadUsage();
@@ -262,6 +286,13 @@ namespace LinkShell.Windows {
             var row = Split(Stack(heading, description), loginButton); row.Margin = new Thickness(0, 5, 0, 12); parent.Children.Add(row);
             if (!String.IsNullOrEmpty(loginMessage)) { var message = Text(loginMessage, 12, "Secondary"); message.Margin = new Thickness(0, 0, 0, 10); parent.Children.Add(message); }
             if (SignedIn) {
+                var member = Desktop.Get(snapshot, "account"); string plan = Desktop.Text(member, "plan");
+                string membership = plan == "pro" ? "Pro 会员" : plan == "free" ? "免费账号" : "会员状态待刷新";
+                DateTime expiry;
+                if (plan == "pro" && DateTime.TryParse(Desktop.Text(member, "planExpiresAt"), out expiry)) membership += " · 有效期至 " + expiry.ToLocalTime().ToString("yyyy-MM-dd");
+                var refresh = Button("刷新会员", RefreshAccount, false, true); refresh.IsEnabled = !busy && !preview;
+                parent.Children.Add(Split(Text(membership, 12, plan == "pro" ? "Accent" : "Secondary"), refresh));
+                var redeem = Button("兑换 Pro 激活码…", Redeem, false, true); redeem.IsEnabled = !busy && !preview; parent.Children.Add(redeem);
                 var connect = Button("连接官方网关…", () => ConfirmAction("connect-gateway"), false, true); connect.IsEnabled = !preview && !busy; connect.Visibility = GatewayLabel == "已连接" ? Visibility.Collapsed : Visibility.Visible;
                 parent.Children.Add(Split(Text("网关：" + GatewayLabel, 12, "Secondary"), connect));
             } else parent.Children.Add(Text("官方网关需要 Pro；自建网关仍可通过配对使用。", 11, "Secondary"));
@@ -468,19 +499,22 @@ namespace LinkShell.Windows {
             finally { if (generation == usageGeneration) { usageLoading = false; Render(); } }
         }
 
-        async Task<Dictionary<string, object>> Run(string action, bool loggingIn = false) {
+        async Task<Dictionary<string, object>> Run(string action, bool loggingIn = false, string input = null) {
             using (var child = Desktop.Cli(action)) {
                 if (loggingIn) login = child;
+                if (action == "account-refresh" || action == "redeem-pro") accountAction = child;
                 try {
                     var output = child.StandardOutput.ReadToEndAsync(); var errors = child.StandardError.ReadToEndAsync();
-                    bool exited = await Task.Run(() => child.WaitForExit(loggingIn ? 330000 : action.StartsWith("usage-", StringComparison.Ordinal) ? 150000 : 45000));
+                    if (input != null) await child.StandardInput.WriteAsync(input);
+                    child.StandardInput.Close();
+                    bool exited = await Task.Run(() => child.WaitForExit(loggingIn ? 330000 : action.StartsWith("usage-", StringComparison.Ordinal) ? 150000 : action == "redeem-pro" ? 90000 : 60000));
                     if (!exited) { child.Kill(); throw new TimeoutException("操作超时，请查看服务日志后重试。"); }
                     var text = await output; var stderr = await errors;
                     var last = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
                     var result = last == null ? null : Desktop.Json.Deserialize<Dictionary<string, object>>(last);
                     if (child.ExitCode != 0 || result == null || Desktop.Get(result, "error") != null) throw new InvalidOperationException(result != null ? Desktop.Text(result, "error") : stderr.Length > 0 ? stderr : "操作已取消");
                     return result;
-                } finally { if (loggingIn) login = null; }
+                } finally { if (loggingIn) login = null; if (accountAction == child) accountAction = null; }
             }
         }
         async Task RefreshStatus() {
@@ -495,6 +529,33 @@ namespace LinkShell.Windows {
                 if ((json != snapshotJson || recovered || selected == "日志") && !(selected == "日志" && content.IsKeyboardFocusWithin)) { snapshotJson = json; Render(); }
             } catch (Exception error) { snapshot = null; snapshotJson = ""; statusError = "无法读取本机状态：" + error.Message; Render(); }
             finally { polling = false; }
+            if (SignedIn && !busy && DateTime.UtcNow - lastAccountRefresh > TimeSpan.FromMinutes(5)) RefreshAccount();
+        }
+        async void RefreshAccount() {
+            if (busy || preview || !SignedIn) return;
+            busy = true; lastAccountRefresh = DateTime.UtcNow; Render();
+            try { snapshot = await Run("account-refresh"); loginMessage = Desktop.Text(snapshot, "accountWarning"); }
+            catch (Exception error) { loginMessage = error.Message; }
+            finally { busy = false; Render(); }
+        }
+        void Redeem() {
+            if (busy || preview || !SignedIn) return;
+            string userId = Desktop.Text(Desktop.Get(snapshot, "account"), "userId");
+            var code = new PasswordBox { MaxLength = 512, Padding = new Thickness(10), Margin = new Thickness(0, 12, 0, 0) };
+            ShowDialog("兑换 Pro 激活码", Stack(Text("激活码将兑换到当前账号。", 13, "Secondary"), code), "兑换", async () => {
+                string value = code.Password.Trim(); code.Clear();
+                if (value.Length == 0) { notice = "请输入激活码"; Render(); return; }
+                busy = true; Render();
+                try {
+                    var next = await Run("redeem-pro", false, Desktop.Json.Serialize(new { code = value, userId = userId })); value = null;
+                    snapshot = next;
+                    if (Desktop.Text(Desktop.Get(next, "redemption"), "userId") != userId) throw new InvalidOperationException("尚未确认兑换结果，请刷新会员状态。");
+                    loginMessage = "兑换成功，Pro 会员状态已更新。" + Desktop.Text(next, "accountWarning");
+                    lastAccountRefresh = DateTime.UtcNow;
+                } catch (Exception error) { loginMessage = error.Message; }
+                finally { busy = false; Render(); }
+            });
+            code.Focus();
         }
         void AddActivity(string message) { activity.Insert(0, Tuple.Create(DateTime.Now, message)); if (activity.Count > 20) activity.RemoveAt(activity.Count - 1); }
         async Task Perform(string action) {
@@ -551,7 +612,7 @@ namespace LinkShell.Windows {
             var panel = Stack(logo); var status = (FrameworkElement)Status("服务" + ServiceLabel, Healthy ? "Accent" : "Secondary"); status.Margin = new Thickness(48, 10, 0, 20); panel.Children.Add(status); panel.Children.Add(Rule());
             Row(panel, "网关", Text(GatewayLabel, 13, "Secondary")); Row(panel, "设备", Text(Healthy ? Devices.Count(d => Yes(d, "online")) + " 台在线" : "未知", 13, "Secondary")); Row(panel, "会话", Text(Healthy ? Sessions.Count(s => Desktop.Text(s, "state") == "running") + " 个运行中" : "未知", 13, "Secondary"));
             int pending = (int)Sessions.Sum(s => Number(s, "pendingPermissions")); if (pending > 0) panel.Children.Add(Button(pending + " 个请求等待确认", () => ShowPage("会话"), false, true));
-            foreach (var page in new[] { "总览", "用量统计", "更新", "设置" }) { string target = page; var link = Button(page == "总览" ? "打开 LinkShell" : page, () => ShowPage(target), false, true); link.HorizontalContentAlignment = HorizontalAlignment.Left; link.Margin = new Thickness(0, 4, 0, 0); panel.Children.Add(link); }
+            foreach (var page in new[] { "工作台", "总览", "用量统计", "更新", "设置" }) { string target = page; var link = Button(page == "工作台" ? "打开 LinkShell" : page, () => ShowPage(target), false, true); link.HorizontalContentAlignment = HorizontalAlignment.Left; link.Margin = new Thickness(0, 4, 0, 0); panel.Children.Add(link); }
             panel.Children.Add(Rule(10, 8)); var exit = Button("退出界面", Quit, false, true); exit.HorizontalContentAlignment = HorizontalAlignment.Left; panel.Children.Add(exit);
             var border = Card(panel, 22); border.Background = Brush("Sidebar"); border.BorderBrush = Brush("Line"); border.BorderThickness = new Thickness(1); trayPanel.Content = border;
             trayPanel.Loaded += (s, e) => { if (trayPanel != null) { var area = SystemParameters.WorkArea; trayPanel.Left = area.Right - trayPanel.ActualWidth - 12; trayPanel.Top = area.Bottom - trayPanel.ActualHeight - 12; } };
@@ -559,8 +620,16 @@ namespace LinkShell.Windows {
             trayPanel.Deactivated += (s, e) => { if (trayPanel != null) trayPanel.Close(); }; trayPanel.Closed += (s, e) => trayPanel = null; trayPanel.Show(); trayPanel.Activate();
         }
         void ShowPage(string page) { if (trayPanel != null) trayPanel.Close(); Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); Navigate(page); }
-        public void Restore() { ShowPage(selected); }
-        void Quit() { quitting = true; if (trayPanel != null) trayPanel.Close(); Close(); Application.Current.Shutdown(); }
+        public void Restore() { ShowPage(management ? selected : "工作台"); }
+        async void Quit() {
+            if (exiting) return; exiting = true;
+            try {
+                if (!await workspace.CanDiscard("退出")) return;
+                quitting = true; CancelLogin(); if (trayPanel != null) trayPanel.Close();
+                if (accountAction != null) { try { if (!accountAction.HasExited) accountAction.Kill(); } catch (InvalidOperationException) {} }
+                await workspace.SetState(false, appearance); await workspace.Stop(); Close(); Application.Current.Shutdown();
+            } finally { exiting = false; }
+        }
         static void Open(string value) { Process.Start(new ProcessStartInfo(value) { UseShellExecute = true }); }
         void LoadPreview() {
             using (var stream = Resource("PreviewSnapshot.json")) using (var reader = new StreamReader(stream)) snapshot = Desktop.Json.Deserialize<Dictionary<string, object>>(reader.ReadToEnd());

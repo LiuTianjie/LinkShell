@@ -19,6 +19,7 @@ namespace LinkShell.Windows {
             Environment.SetEnvironmentVariable("LINKSHELL_GATEWAY", "off");
             Environment.SetEnvironmentVariable("LINKSHELL_DESKTOP_NODE", File.ReadAllText(Path.Combine(build, "node-path.txt")).Trim());
             Environment.SetEnvironmentVariable("LINKSHELL_DESKTOP_CLI", Path.Combine(root, "packages", "cli", "dist", "cli", "src", "index.js"));
+            Environment.SetEnvironmentVariable("LINKSHELL_DESKTOP_WEB", Path.Combine(root, "apps", "web", "dist"));
             File.WriteAllText(Path.Combine(build, preview ? "preview-home.txt" : "qa-home.txt"), home);
             new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }.Run(new Dashboard(false, preview));
         }

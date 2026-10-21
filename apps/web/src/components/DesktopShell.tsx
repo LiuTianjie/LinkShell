@@ -23,7 +23,7 @@ import {
 import { engine, type Computer, type Connection } from "../live/engine";
 import { AgentMark, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import { DESKTOP_LOCAL, setDesktopAppearance, setDesktopContentFocus } from "../live/desktop";
+import { DESKTOP_LOCAL, isWindowsDesktop, openDesktopManagement, setDesktopAppearance, setDesktopContentFocus } from "../live/desktop";
 import { screenComputerKey } from "../live/screen-route";
 import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
 import { readLocal, saveLocal } from "../live/storage";
@@ -244,6 +244,13 @@ function DesktopNavigation({
     : navigationItems.some((item) => item.id === view) ? view : "home";
   return (
     <Sidebar className="desktop-sidebar" collapsible="none">
+      {isWindowsDesktop && <div className="windows-desktop-header">
+        <div className="windows-desktop-brand"><img src="/favicon.png" alt="" /><strong>LinkShell</strong></div>
+        <div className="windows-desktop-modes" aria-label="桌面模式">
+          <Button variant="secondary" aria-current="page" title="Ctrl+1">工作台</Button>
+          <Button variant="ghost" onClick={openDesktopManagement} title="Ctrl+2">本机管理</Button>
+        </div>
+      </div>}
       <SidebarHeader className="desktop-sidebar-header">
         <ComputerPicker connect={connect} selectComputer={selectComputer} />
       </SidebarHeader>
@@ -329,6 +336,16 @@ function DesktopNavigation({
 export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   const [appearance, setAppearance] = useDesktopAppearance();
   const screenKey = screenComputerKey(props.view);
+  useEffect(() => {
+    if (!isWindowsDesktop) return;
+    const switchMode = (event: KeyboardEvent) => {
+      // While controlling a computer its keys belong to that computer.
+      if (document.querySelector(".screen-focused, .port-preview-focused") || document.fullscreenElement) return;
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "2") { event.preventDefault(); openDesktopManagement(); }
+    };
+    window.addEventListener("keydown", switchMode);
+    return () => window.removeEventListener("keydown", switchMode);
+  }, []);
   useEffect(() => {
     let last = false;
     let frame = 0;

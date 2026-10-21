@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 import type { Socket } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
+import { localWebSocket } from "@linkshell/host/local-transport";
 import { isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
 import { getValidToken, loadAuth } from "../auth.js";
 import { runLogin } from "./login.js";
@@ -85,7 +86,7 @@ async function loadAssets(directory: string): Promise<Map<string, Buffer>> {
 async function localComputer(target: string, upstreams: Set<WebSocket>): Promise<LocalComputer | undefined> {
   // Query the existing socket directly: discovering this computer never starts a host.
   return new Promise((resolve) => {
-    const client = new WebSocket(`ws+unix://${target}:/`, { perMessageDeflate: false, handshakeTimeout: 1_500, maxPayload: MAX_PROXY_BYTES });
+    const client = localWebSocket(target, 1_500, { maxPayload: MAX_PROXY_BYTES });
     upstreams.add(client);
     const finish = (computer?: LocalComputer) => {
       clearTimeout(timeout);
@@ -107,7 +108,7 @@ async function localComputer(target: string, upstreams: Set<WebSocket>): Promise
           key: "desktop:local", gateway: "desktop:local",
           machine: {
             id: info.machineId, name: info.hostname.replace(/\.local$/, ""), platform: info.platform,
-            // Local transport uses a protected Unix socket, not a relay identity or tunnel.
+            // Local transport uses the host's Unix socket or Windows named pipe.
             signKey: "", boxKey: "", online: true, via: "paired",
           },
         });
@@ -127,9 +128,7 @@ async function account(signal: AbortSignal) {
 }
 
 function proxyHost(client: WebSocket, target: string, upstreams: Set<WebSocket>): void {
-  const host = new WebSocket(`ws+unix://${target}:/`, {
-    perMessageDeflate: false, handshakeTimeout: 3_000, maxPayload: MAX_PROXY_BYTES,
-  });
+  const host = localWebSocket(target, 3_000, { maxPayload: MAX_PROXY_BYTES });
   upstreams.add(host);
   let pending: string[] = [];
   let pendingBytes = 0;
@@ -271,7 +270,7 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
     }
     if (!["GET", "HEAD"].includes(request.method ?? "")) throw new HttpError(405, "不支持此请求方法");
     const assetPath = path === "/" ? "/index.html" : path;
-    const content = path === "/config.js" ? Buffer.from(`window.__LINKSHELL_CONFIG__ = ${JSON.stringify({ desktop: true, deployment: "official", previewOrigin })};\n`) : assets.get(assetPath);
+    const content = path === "/config.js" ? Buffer.from(`window.__LINKSHELL_CONFIG__ = ${JSON.stringify({ desktop: true, desktopPlatform: process.platform, deployment: "official", previewOrigin })};\n`) : assets.get(assetPath);
     if (!content) throw new HttpError(404, "未找到资源");
     response.writeHead(200, {
       "content-type": MIME[extname(assetPath)] ?? "application/octet-stream", "content-length": content.byteLength,

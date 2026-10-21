@@ -30,7 +30,7 @@ import { browserDirect } from "./direct";
 import { ComputerConnections } from "./computer-connections";
 import {
   DESKTOP_ACCOUNT_EVENT, DESKTOP_ERROR_EVENT, DESKTOP_LOCAL, DESKTOP_VISIBILITY_EVENT,
-  desktopAccount, desktopHostSocket, desktopLocalComputer, desktopRequest, isDesktop,
+  desktopAccount, desktopHostSocket, desktopLocalComputer, desktopRequest, isDesktop, isWindowsDesktop,
   retryDesktopStorage, type DesktopAccount,
 } from "./desktop";
 
@@ -339,7 +339,7 @@ export class BrowserEngine {
       identity: this.identity,
       role: "device",
       name: isDesktop ? "LinkShell Desktop" : "LinkShell Web",
-      platform: isDesktop ? "macOS" : "web",
+      platform: isWindowsDesktop ? "Windows" : isDesktop ? "macOS" : "web",
       token: useAccount
         ? async () => {
             try {

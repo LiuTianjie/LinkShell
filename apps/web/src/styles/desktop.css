@@ -1,4 +1,4 @@
-/* The bundled Mac workspace shares behavior with web, but keeps the mobile
+/* The bundled desktop workspace shares behavior with web, but keeps the mobile
    app's quiet surfaces, generous controls and reading rhythm. These rules
    intentionally sit outside Tailwind layers and only affect the native shell. */
 
@@ -42,6 +42,13 @@ html[data-desktop] .desktop-body { flex: 1; }
 html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 232px; height: 100%; padding-top: 104px; padding-bottom: 0; background: var(--sidebarBackground); border-right: 1px solid var(--separatorStrong); }
 html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: var(--sidebarBackground); }
 html[data-desktop] .desktop-sidebar-header { flex: none; padding: 8px 14px 14px; }
+/* Windows keeps the header in the page so WebRTC needs no WPF composition/capture pass. */
+html[data-desktop] .windows-desktop-header { position: absolute; top: 0; left: 0; width: 232px; height: 104px; padding: 14px 14px 12px; background: var(--sidebarBackground); }
+html[data-desktop] .windows-desktop-brand { display: flex; align-items: center; gap: 10px; height: 30px; margin-bottom: 14px; font-size: 17px; }
+html[data-desktop] .windows-desktop-brand img { width: 30px; height: 30px; border-radius: 7px; }
+html[data-desktop] .windows-desktop-modes { display: grid; grid-template-columns: 1fr 1fr; height: 34px; gap: 2px; }
+html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 34px; font-size: 12px; border-radius: 6px; padding: 0; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .windows-desktop-header { display: none; }
 html[data-desktop] .desktop-computer-picker { display: flex; justify-content: flex-start; gap: 10px; width: 100%; height: 58px; min-height: 58px; padding: 9px 11px; border: 1px solid var(--separatorStrong); border-radius: 10px; background: var(--card); color: var(--label); text-align: left; box-shadow: none; transition: background var(--transition), border-color var(--transition); }
 html[data-desktop] .desktop-computer-picker:hover,
 html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: color-mix(in srgb, var(--cardRaised) 50%, var(--card)); border-color: color-mix(in srgb, var(--secondaryLabel) 28%, transparent); }

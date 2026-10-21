@@ -1,6 +1,6 @@
 # LinkShell for Windows
 
-Native Windows desktop and screen helper, backed by the existing LinkShell CLI and host. Targets Windows 10 1809+ / Windows 11 x64 with .NET Framework 4.8.
+Windows desktop workspace and native management/screen helper, backed by the existing LinkShell CLI and host. Targets Windows 10 1809+ / Windows 11 x64 with .NET Framework 4.8 and Microsoft Edge WebView2 Evergreen Runtime.
 
 From the repository root:
 
@@ -8,14 +8,21 @@ From the repository root:
 corepack pnpm build
 corepack pnpm typecheck
 corepack pnpm --filter @linkshell/windows test
+node apps/windows/scripts/workspace-qa.mjs --native
 corepack pnpm --filter @linkshell/windows build:standalone
 ```
 
 The standalone installer and portable ZIP include Node, CLI, Host, ConPTY, and the screen helper. Agents are installed and authenticated separately. Windows releases currently ship without Authenticode signatures; download notes must identify them as unsigned and mention possible unknown-publisher or SmartScreen prompts. Release builds still require CI and package checksum verification. Windows ARM64 and automatic updates are not included yet.
 
+Packaging follows macOS's runtime pruning: it retains the Claude SDK and ACP adapter, but excludes their unused native Claude executables because the Host passes the user's installed Claude to ACP. It also removes ARM64 terminal files, debug symbols, type declarations, source maps and node-pty build sources, including from reused staging directories. The x64 terminal runtime, executable JS, licenses and replaceable FFmpeg DLLs remain bundled. The package smoke check covers the external-agent route and a real ConPTY process.
+
 Codex discovery first checks the CLI on PATH, then the Windows desktop app's versioned `codex.exe` under `%LOCALAPPDATA%\OpenAI\Codex\bin`. Installing the Codex desktop app is sufficient for conversation discovery; a separate global CLI installation is not required. An explicitly configured command still takes precedence. The existing `CODEX_HOME` setting controls conversation storage.
 
-`src/Desktop.cs` owns process startup and the CLI bridge. `src/Dashboard.cs` and `src/DesktopTheme.xaml` provide a native WPF dashboard and tray panel, matching the Mac desktop's navigation, typography, adaptive colors and mint accent. The UI includes QR pairing, session details, usage charts, logs, update discovery and persistent appearance preferences. `src/Screen.cs` captures JPEG frames and posts validated input for the host over owned stdio pipes. `src/Installer.cs` installs for the current user and coordinates host update recovery. No additional public server or relay protocol is introduced.
+`src/Workspace.cs` owns WebView2 and the bundled `desktop-workspace` CLI sidecar. The same web workspace as macOS handles local/remote conversations, approvals, terminals, files, worktrees and port-preview tabs. Local access uses named pipes without an account or gateway. The main-frame native bridge is origin-checked; preview/screen iframes receive no native authority. InPrivate browser storage is ephemeral; identity, pairings and drafts persist through the sidecar. Quit/reconnect waits for pending writes and asks before discarding a failed save. The Host stays running after the UI exits.
+
+`src/Dashboard.cs` provides native management/tray UI. Both modes use the Mac workspace's 232px sidebar, 104px brand area and light/dark/system appearances. Ctrl+1/2 switches modes. Account management includes Pro refresh and redemption via stdin. WebRTC reception uses Chromium's video/GPU pipeline and existing direct input channels; leaving the screen or hiding/minimizing the app destroys the connection. This is not the Mac VideoToolbox/Metal receiver and does not guarantee hardware decode or 120fps. The screen helper and installer retain the existing capture, input, progress and rollback behavior.
+
+The package includes checksum-pinned WebView2 SDK DLLs/license and freshly built workspace assets. Evergreen Runtime is supplied by Windows/Microsoft; missing-runtime errors offer an install/repair link while native management remains available. `workspace-qa.mjs` tests native origin/download policy; `--native` additionally runs an isolated Host and real WebView2 with a labeled Codex fixture, testing history, draft persistence, visibility and bridge/save acknowledgements. It does not exercise production OAuth or real redemption.
 
 `node apps/windows/scripts/build.mjs --qa` builds an isolated live-host launcher (`LinkShell.QA.exe`), a labeled design preview (`LinkShell.Preview.exe`), and a harmless input fixture (`LinkShell.InputQA.exe`). These executables and preview fixtures are excluded from the standalone package. Agent marks reuse the mobile assets and the Mac light/dark treatments.
 

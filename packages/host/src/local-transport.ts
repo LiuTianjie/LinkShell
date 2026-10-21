@@ -12,12 +12,18 @@ export function windowsPipe(home: string, name: string): string {
   return `\\\\.\\pipe\\linkshell-${tag}-${name}`;
 }
 
-export function localWebSocket(target: string, timeout = 10_000): WebSocket {
-  const options = { perMessageDeflate: false, handshakeTimeout: timeout };
+export function localWebSocket(target: string, timeout = 10_000, limits: { maxPayload?: number } = {}): WebSocket {
+  const options = { perMessageDeflate: false, handshakeTimeout: timeout, ...limits };
   // URL parsers treat Windows backslashes and drive letters as URL syntax. Connect directly.
-  if (isNamedPipe(target)) return new WebSocket("ws://localhost/", {
+  const socket = isNamedPipe(target) ? new WebSocket("ws://localhost/", {
     ...options,
     createConnection: () => connect(target),
-  });
-  return new WebSocket(/^wss?:\/\//.test(target) ? target : `ws+unix://${target}:/`, options);
+  }) : new WebSocket(/^wss?:\/\//.test(target) ? target : `ws+unix://${target}:/`, options);
+  // Node's HTTP request timeout does not reliably fire on Windows pipe handshakes.
+  const deadline = setTimeout(() => socket.terminate(), timeout);
+  deadline.unref();
+  socket.once("open", () => clearTimeout(deadline));
+  socket.once("close", () => clearTimeout(deadline));
+  socket.once("error", () => clearTimeout(deadline));
+  return socket;
 }

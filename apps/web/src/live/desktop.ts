@@ -3,6 +3,7 @@ import type { Computer } from "./engine";
 
 export const isDesktop =
   typeof window !== "undefined" && window.__LINKSHELL_CONFIG__?.desktop === true;
+export const isWindowsDesktop = isDesktop && window.__LINKSHELL_CONFIG__?.desktopPlatform === "win32";
 export const DESKTOP_LOCAL = "desktop:local";
 export const DESKTOP_VISIBILITY_EVENT = "linkshell-desktop-visibility";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
@@ -173,6 +174,12 @@ export function desktopHostSocket(): WebSocket {
 }
 
 function nativeCommand(message: { action: "manage" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean }): boolean {
+  if (isWindowsDesktop) {
+    const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
+    if (!webview) return false;
+    webview.postMessage(message);
+    return true;
+  }
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
   }).webkit?.messageHandlers?.linkshellDesktop;

@@ -5,6 +5,8 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInstaller } from './installer.mjs';
 import { ensureMedia } from './media-runtime.mjs';
+import { webview2Files } from './webview2.mjs';
+import { isRuntimeDependency, isRuntimePath, pruneRuntime } from './prune-runtime.mjs';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,11 +28,13 @@ const run = (command, args, cwd = root) => {
 const pnpm = process.env.npm_execpath;
 if (!pnpm || !/pnpm\.(?:c?js)$/.test(pnpm)) throw new Error('Run through pnpm: pnpm --filter @linkshell/windows build:standalone');
 run(process.execPath, [join(app, 'scripts/build.mjs')]);
+run(process.execPath, [pnpm, '--filter', '@linkshell/web', 'build']);
 mkdirSync(runtime, { recursive: true });
 // Deploy the locked production graph. The portable copy replaces junctions with real files.
 const deployed = join(scratch, 'deployed');
 if (!reuse) run(process.execPath, [pnpm, '--filter', 'linkshell-cli', '--prod', 'deploy', '--legacy', deployed]);
 function portable(source, target, ancestors = new Set(), packageRoot = false) {
+  if (!isRuntimePath(relative(cli, target))) return;
   const real = realpathSync(source);
   if (ancestors.has(real)) return; // pnpm's package self-reference is not needed at runtime.
   const stat = lstatSync(real);
@@ -59,7 +63,7 @@ function packageCopy(source, target, stack = new Set()) {
   portable(real, target, new Set(), true);
   const pkg = JSON.parse(readFileSync(join(real, 'package.json')));
   for (const name of Object.keys({ ...pkg.peerDependencies, ...pkg.dependencies, ...pkg.optionalDependencies })) {
-    if (name === '@linkshell/mac') continue;
+    if (!isRuntimeDependency(name)) continue;
     let directory = real, found;
     for (;;) {
       const candidate = join(directory, 'node_modules', name);
@@ -86,6 +90,8 @@ for (const name of ['cli', 'host', 'gateway', 'wire']) {
   const target = name === 'cli' ? cli : join(cli, 'node_modules/@linkshell', name);
   cpSync(join(root, 'packages', name, 'dist'), join(target, 'dist'), { recursive: true });
 }
+// Also clean reused staging directories created before these exclusions existed.
+pruneRuntime(cli);
 cpSync(process.execPath, join(runtime, 'node.exe'));
 const nodeLicense = join(artifacts, `node-${process.versions.node}-LICENSE.txt`);
 if (!existsSync(nodeLicense)) {
@@ -97,6 +103,11 @@ if (!existsSync(nodeLicense)) {
 }
 cpSync(nodeLicense, join(runtime, 'NODE-LICENSE.txt'));
 for (const file of ['LinkShell.exe', 'LinkShell.Screen.exe']) cpSync(join(app, 'build', file), join(bundle, file));
+for (const file of webview2Files) cpSync(join(app, 'build', file), join(bundle, file));
+// Delete only the owned staged assets so an upgrade never carries stale web bundles.
+const workspaceAssets = join(bundle, 'workspace');
+rmSync(workspaceAssets, { recursive: true, force: true });
+cpSync(join(root, 'apps/web/dist'), workspaceAssets, { recursive: true });
 cpSync(await ensureMedia(), join(bundle, 'media'), { recursive: true });
 cpSync(join(root, 'LICENSE'), join(bundle, 'LICENSE'));
 writeFileSync(join(bundle, 'standalone.json'), JSON.stringify({ version, nodeVersion: process.versions.node, platform: 'win32', arch: 'x64' }, null, 2));

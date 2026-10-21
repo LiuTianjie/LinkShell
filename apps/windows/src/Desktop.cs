@@ -52,11 +52,14 @@ namespace LinkShell.Windows {
             return result.Append('\\', slashes * 2).Append('"').ToString();
         }
         public static Process Cli(string action) {
+            return Command("desktop", "--action", action);
+        }
+        public static Process Command(params string[] arguments) {
             string node = Environment.GetEnvironmentVariable("LINKSHELL_DESKTOP_NODE") ?? Path.Combine(Root, "runtime", "node.exe");
             string cli = Environment.GetEnvironmentVariable("LINKSHELL_DESKTOP_CLI") ?? Path.Combine(Root, "runtime", "cli", "dist", "cli", "src", "index.js");
             if (!File.Exists(node) || !File.Exists(cli)) throw new FileNotFoundException("内置运行环境缺失，请重新安装 LinkShell。开发环境请设置 LINKSHELL_DESKTOP_NODE 和 LINKSHELL_DESKTOP_CLI。");
-            var start = new ProcessStartInfo(node, Quote(cli) + " desktop --action " + Quote(action)) {
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            var start = new ProcessStartInfo(node, Quote(cli) + " " + String.Join(" ", arguments.Select(Quote))) {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8, WorkingDirectory = Home
             };
             start.EnvironmentVariables["LINKSHELL_HOME"] = Home;

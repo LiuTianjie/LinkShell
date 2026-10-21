@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { webview2Files } from './webview2.mjs';
 
 if (process.platform !== 'win32') throw new Error('Windows smoke must run on Windows');
 const bundle = resolve(process.argv[2] || 'build/LinkShell');
@@ -29,10 +30,30 @@ try {
   assert.equal(snapshot.status, 'running');
   assert.equal(snapshot.source, 'standalone');
   assert.equal(snapshot.machine.platform, 'win32');
-  const sdk = await import(pathToFileURL(require.resolve('@anthropic-ai/claude-agent-sdk')).href);
+  for (const file of [...webview2Files, 'workspace/index.html']) assert.ok(existsSync(join(bundle, file)), `Missing workspace dependency: ${file}`);
+  const { startDesktopWorkspace } = await import(pathToFileURL(join(bundle, 'runtime/cli/dist/cli/src/commands/desktop-workspace.js')).href);
+  const workspace = await startDesktopWorkspace({ home, assets: join(bundle, 'workspace') });
+  try {
+    const url = new URL(workspace.url);
+    const token = new URLSearchParams(url.hash.slice(1)).get('desktop');
+    const bootstrap = await (await fetch(`${url.origin}/desktop/bootstrap`, { headers: { authorization: `Bearer ${token}` } })).json();
+    assert.equal(bootstrap.localComputer.machine.platform, 'win32');
+    assert.match(await (await fetch(`${url.origin}/config.js`)).text(), /"desktopPlatform":"win32"/);
+  } finally { await workspace.stop(); }
+  const hostRequire = createRequire(require.resolve('@linkshell/host'));
+  const sdk = await import(pathToFileURL(hostRequire.resolve('@anthropic-ai/claude-agent-sdk')).href);
   assert.equal(typeof sdk.forkSession, 'function');
-  const adapter = await import(pathToFileURL(require.resolve('@agentclientprotocol/claude-agent-acp/dist/acp-agent.js')).href);
-  assert.ok((await adapter.claudeCliPath()).endsWith('claude.exe'));
+  assert.equal(typeof sdk.renameSession, 'function');
+  const adapterPath = hostRequire.resolve('@agentclientprotocol/claude-agent-acp/dist/index.js');
+  for (const owner of [hostRequire, createRequire(adapterPath)]) {
+    const sdkRequire = createRequire(owner.resolve('@anthropic-ai/claude-agent-sdk'));
+    assert.throws(() => sdkRequire.resolve('@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe'), { code: 'MODULE_NOT_FOUND' });
+  }
+  // Exercise ACP's external-executable route without needing a signed-in agent in CI.
+  const external = await run(node, [adapterPath, '--cli', '-e', "console.log('PACKAGED_EXTERNAL_AGENT')"], {
+    env: { ...env, CLAUDE_CODE_EXECUTABLE: node, CLAUDE_CONFIG_DIR: join(home, 'claude') }, windowsHide: true, timeout: 30_000,
+  });
+  assert.equal(external.stdout.trim(), 'PACKAGED_EXTERNAL_AGENT');
   const sharp = require('sharp');
   const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'indigo' } }).png().toBuffer();
   assert.equal(png[0], 137);
@@ -43,7 +64,7 @@ try {
     pty.onData(data => { output += data; if (output.includes('PACKAGED_PTY_READY')) pty.write('done\r'); });
     pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
   });
-  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg shared runtime and standalone identity.`);
+  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, Claude SDK/external executable, workspace assets/sidecar, WebView2 loader and standalone identity.`);
 } finally {
   let timer;
   try {

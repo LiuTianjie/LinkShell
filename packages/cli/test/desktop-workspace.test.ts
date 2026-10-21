@@ -5,6 +5,9 @@ import { spawn } from "node:child_process";
 import { createServer as createSocketServer, type Socket } from "node:net";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostPaths, windowsPipe } from "@linkshell/host";
 import { once } from "node:events";
 import WebSocket, { WebSocketServer } from "ws";
 import { startDesktopWorkspace, type DesktopWorkspace } from "../src/commands/desktop-workspace.js";
@@ -26,10 +29,10 @@ const cleanups: (() => Promise<unknown>)[] = [];
 
 beforeEach(async () => {
   vi.resetAllMocks();
-  directory = await mkdtemp("/tmp/linkshell-workspace-");
+  directory = await mkdtemp(join(tmpdir(), "linkshell-workspace-"));
   assets = join(directory, "assets");
   home = join(directory, "home");
-  hostSocket = join(directory, "host.sock");
+  hostSocket = process.platform === "win32" ? windowsPipe(home, "workspace-test") : join(directory, "host.sock");
   await mkdir(join(assets, "preview"), { recursive: true });
   await mkdir(join(assets, "assets"), { recursive: true });
   await writeFile(join(assets, "index.html"), "<!doctype html><title>Workspace</title>");
@@ -105,6 +108,7 @@ describe("native desktop workspace service", () => {
     const config = await fetch(`${server.origin}/config.js`);
     const text = await config.text();
     expect(text).toContain('"desktop":true');
+    expect(text).toContain(`"desktopPlatform":"${process.platform}"`);
     expect(text).toContain('"deployment":"official"');
     expect(text).toContain(server.origin.replace("127.0.0.1", "localhost"));
     expect(text).not.toContain(server.token);
@@ -138,7 +142,7 @@ describe("native desktop workspace service", () => {
     const initial = await (await fetch(`${server.origin}/desktop/bootstrap`, { headers: server.headers })).json();
     expect(initial).toMatchObject({ storage: {}, identity: { signSecret: expect.any(String), boxSecret: expect.any(String) } });
     expect(initial).not.toHaveProperty("localComputer");
-    expect((await stat(join(home, "desktop-client.json"))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(join(home, "desktop-client.json"))).mode & 0o777).toBe(0o600);
     const save = async (key: string, value: unknown) => fetch(`${server.origin}/desktop/storage`, {
       method: "PUT", headers: { ...server.headers, "content-type": "application/json" }, body: JSON.stringify({ key, value }),
     });
@@ -174,7 +178,7 @@ describe("native desktop workspace service", () => {
     expect(await readFile(join(home, "desktop-client.json"), "utf8")).toBe("damaged pairing file");
   });
 
-  it("serves only regular bundled files, never a symlink or a filesystem path", async () => {
+  it.skipIf(process.platform === "win32")("serves only regular bundled files, never a symlink or a filesystem path", async () => {
     await writeFile(join(directory, "private.txt"), "private-host-secret");
     await symlink(join(directory, "private.txt"), join(assets, "private.txt"));
     const server = await workspace();
@@ -266,7 +270,7 @@ describe("native desktop workspace service", () => {
     expect(String(reason)).toContain("本机服务未运行");
   });
 
-  it("bounds unresponsive Unix handshakes and aborts discovery sockets when the workspace closes", async () => {
+  it("bounds unresponsive local handshakes and aborts discovery sockets when the workspace closes", async () => {
     const hanging = createSocketServer();
     const sockets = new Set<Socket>();
     hanging.on("connection", (socket) => {
@@ -303,13 +307,13 @@ describe("desktop workspace process ownership", () => {
     let received!: () => void;
     const requested = new Promise<void>((resolve) => { received = resolve; });
     hanging.on("connection", (socket) => { sockets.add(socket); socket.resume(); received(); });
-    await new Promise<void>((resolve) => hanging.listen(join(home, "run", "host.sock"), resolve));
+    await new Promise<void>((resolve) => hanging.listen(hostPaths(home).hostSocket, resolve));
     cleanups.push(async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => hanging.close(() => resolve()));
     });
-    const loader = createRequire(import.meta.url).resolve("tsx");
-    const entry = new URL("../src/index.ts", import.meta.url).pathname;
+    const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+    const entry = fileURLToPath(new URL("../src/index.ts", import.meta.url));
     const child = spawn(process.execPath, ["--import", loader, entry, "desktop-workspace", "--assets", assets], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: "/usr/bin:/bin", LINKSHELL_HOME: home },
     });
@@ -336,7 +340,7 @@ describe("desktop workspace process ownership", () => {
     await exited;
     await logoutRequest;
     expect(JSON.parse(await readFile(join(home, "desktop-client.json"), "utf8")).storage.draft).toBe("kept before logout");
-  }, 10_000);
+  }, process.platform === "win32" ? 30_000 : 10_000);
 
   it("exits during a stalled account refresh without losing saved desktop state or requiring a global CLI", async () => {
     let received!: () => void;
@@ -351,7 +355,7 @@ describe("desktop workspace process ownership", () => {
     if (!address || typeof address === "string") throw new Error("missing test listener");
     await mkdir(home, { recursive: true });
     await writeFile(join(home, "auth.json"), JSON.stringify({ accessToken: "dummy-access", refreshToken: "dummy-refresh", expiresAt: 0, userId: "dummy-user" }));
-    const loader = createRequire(import.meta.url).resolve("tsx");
+    const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
     const entry = new URL("../src/commands/desktop-workspace.ts", import.meta.url).href;
     const script = `const originalFetch = globalThis.fetch; globalThis.fetch = (input, init) => originalFetch(String(input).startsWith('https://mkbeusztkzffnzjdwmqk.supabase.co/') ? 'http://127.0.0.1:${address.port}/never' : input, init); const { runDesktopWorkspace } = await import(${JSON.stringify(entry)}); await runDesktopWorkspace(${JSON.stringify(assets)});`;
     const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "--eval", script], {
@@ -384,11 +388,11 @@ describe("desktop workspace process ownership", () => {
     const state = JSON.parse(await readFile(join(home, "desktop-client.json"), "utf8"));
     expect(state.storage.draft).toBe("kept on exit");
     expect(JSON.parse(await readFile(join(home, "auth.json"), "utf8")).refreshToken).toBe("dummy-refresh");
-  }, 10_000);
+  }, process.platform === "win32" ? 30_000 : 10_000);
 
-  it.each(["stdin EOF", "SIGTERM"])("exits and releases its listener after %s", async (ending) => {
-    const loader = createRequire(import.meta.url).resolve("tsx");
-    const entry = new URL("../src/index.ts", import.meta.url).pathname;
+  it.each(process.platform === "win32" ? ["stdin EOF"] : ["stdin EOF", "SIGTERM"])("exits and releases its listener after %s", async (ending) => {
+    const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+    const entry = fileURLToPath(new URL("../src/index.ts", import.meta.url));
     const child = spawn(process.execPath, ["--import", loader, entry, "desktop-workspace", "--assets", assets], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, LINKSHELL_HOME: home },
     });
@@ -413,5 +417,5 @@ describe("desktop workspace process ownership", () => {
     expect(code).toBe(0);
     expect(stdout.trim().split("\n")).toHaveLength(1);
     await expect(fetch(new URL(ready.url).origin)).rejects.toThrow();
-  }, 15_000);
+  }, process.platform === "win32" ? 30_000 : 15_000);
 });

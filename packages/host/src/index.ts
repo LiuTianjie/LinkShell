@@ -1,5 +1,6 @@
 export { defaultHome, startHost, hostPaths, isHostRunning, type HostOptions, type HostPaths, type RunningHost } from "./host.js";
 export { connectHost, type HostClient } from "./rpc/client.js";
+export { localWebSocket, windowsPipe } from "./local-transport.js";
 export { SessionHub, type Subscriber } from "./hub.js";
 export { HostStore } from "./store.js";
 export { CodexDriver } from "./drivers/codex/driver.js";
