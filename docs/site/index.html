@@ -57,7 +57,7 @@
         {
           "@type": "SoftwareApplication",
           "name": "LinkShell",
-          "operatingSystem": "iOS, Android, macOS, Linux",
+          "operatingSystem": "iOS, Android, macOS, Windows, Linux",
           "applicationCategory": "DeveloperApplication",
           "description": "Follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini, Copilot) from your phone, with remote desktop control, a terminal and local web previews. End-to-end encrypted.",
           "url": "https://liutianjie.github.io/LinkShell/",
@@ -560,12 +560,14 @@
       <div class="wrap">
         <div class="text">
           <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
-          <p><span lang="zh">Mac 可直接下载安装 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac, download the standalone app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
+          <p><span lang="zh">Mac 和 Windows 可直接下载桌面 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, download the desktop app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
 
           <div class="step">
             <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
-            <p><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.50/LinkShell-0.10.50-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.50/LinkShell-0.10.50-x64.dmg">Mac · Intel</a></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-x64.dmg">Mac · Intel</a></p>
             <p><span lang="zh">macOS 13 及以上：拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能两个开关。App 自带 CLI、Host 和 Node，一起更新。</span><span lang="en">macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</span></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-Setup-0.10.51-windows-x64.exe">Windows · <span lang="zh">安装器</span><span lang="en">Installer</span></a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-windows-x64.zip">Windows · ZIP</a></p>
+            <p><span lang="zh">Windows 10 1809+ / Windows 11 x64：内置 CLI、Host 和 Node，与 Mac 共用会话、终端、文件和端口预览工作台。工作台需要 Microsoft Edge WebView2 Evergreen Runtime。安装包未签名，可能出现「未知发布者」或 SmartScreen 提示。</span><span lang="en">Windows 10 1809+ / Windows 11 x64: includes CLI, Host and Node, with the same workspace as Mac for conversations, terminals, files and port previews. The workspace requires Microsoft Edge WebView2 Evergreen Runtime. Packages are unsigned and may show unknown-publisher or SmartScreen prompts.</span></p>
             <p><span lang="zh">Linux，或者更想用命令行：装 CLI，运行一次设置。它在后台启动 LinkShell、带你打开屏幕需要的两个权限，再连上手机。</span><span lang="en">On Linux, or if you prefer the command line: install the CLI and run the setup once. It starts LinkShell in the background, takes you to the two permissions the screen needs, and connects your phone.</span></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell setup</code></pre>
@@ -657,11 +659,13 @@
       </aside>
       <article class="doc">
         <h1><span lang="zh">文档</span><span lang="en">Documentation</span></h1>
-        <p><span lang="zh">LinkShell 分两部分：电脑上的 Host（可用独立 Mac App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the Host on your computer, managed by the standalone Mac app or CLI, and the app on your phone. Here it is, in order.</span></p>
+        <p><span lang="zh">LinkShell 分两部分：电脑上的 Host（可用 Mac、Windows 桌面 App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the Host on your computer, managed by the Mac or Windows desktop app or CLI, and the app on your phone. Here it is, in order.</span></p>
 
         <h2 id="d-install"><span lang="zh">安装</span><span lang="en">Install</span></h2>
-        <p><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.50/LinkShell-0.10.50-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.50/LinkShell-0.10.50-x64.dmg">Mac · Intel</a></p>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-x64.dmg">Mac · Intel</a></p>
         <p><span lang="zh">独立 Mac App 需要 macOS 13 及以上，内置运行环境，无需另外安装 Node。打开 App 即可登录、管理服务与更新；下面是可选的命令行安装方式。</span><span lang="en">The standalone Mac app requires macOS 13 or later and includes its runtime; no separate Node installation is needed. Open it to sign in, manage the host and install updates. The CLI installation below is an alternative.</span></p>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-Setup-0.10.51-windows-x64.exe">Windows · <span lang="zh">安装器</span><span lang="en">Installer</span></a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-windows-x64.zip">Windows · ZIP</a></p>
+        <p><span lang="zh">Windows 桌面版需要 Windows 10 1809+ / Windows 11 x64，内置 CLI、Host 和 Node；共享工作台需要 Microsoft Edge WebView2 Evergreen Runtime。安装器和便携 ZIP 均未签名，可能出现「未知发布者」或 SmartScreen 提示。</span><span lang="en">The Windows desktop app requires Windows 10 1809+ / Windows 11 x64 and bundles CLI, Host and Node. Its shared workspace requires Microsoft Edge WebView2 Evergreen Runtime. The installer and portable ZIP are unsigned and may show unknown-publisher or SmartScreen prompts.</span></p>
         <p><span lang="zh">CLI 方式需要 macOS 或 Linux、Node.js 22.13 或更新版本（独立 Mac App 已内置）。</span><span lang="en">The CLI requires macOS or Linux and Node.js 22.13 or newer (already bundled in the standalone Mac app).</span></p>
         <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
