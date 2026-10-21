@@ -1054,7 +1054,7 @@ function play() {
     // A new stream replacing the one being started rejects the first call too; that is not a refusal.
     if (error.name === "AbortError" || !rtc) return;
     blocked = true;
-    loading.set("blocked", "浏览器需要你的确认，轻点屏幕即可开始观看。");
+    if (!sessionError && !sessionPhase) loading.set("blocked", "浏览器需要你的确认，轻点屏幕即可开始观看。");
   });
 }
 // What a browser takes as someone's say-so to start a video.

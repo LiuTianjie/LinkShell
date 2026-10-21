@@ -214,6 +214,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
     capabilities: () => receive({ session: { t: "capabilities", version: 1, configure: true, pause: true, retainMs: 120000 } }),
     ack: (request: Message, generation = request.requestId, extra: Message = {}) => receive({ session: { ...request, t: "configured", width: Number(request.width) || 3840, height: 1080, generation, ...extra } }),
     key() { elements.get("typing")!.emit("keydown", { key: "Enter" }); },
+    tap() { globals.emit("pointerup"); },
     pointer(name: string, values: Message = {}) { elements.get("stage")!.emit(name, values); },
     async advance(ms: number) {
       const end = now + ms;
@@ -269,6 +270,41 @@ describe("the running viewer screen session", () => {
     expect(ui.elements.get("screen-loading-retry")!.classList.contains("gone")).toBe(true);
     ui.session({ active: true }); await ui.settle(); ui.ack(ui.configure().at(-1)!);
     expect(ui.elements.get("note")!.classList.contains("gone")).toBe(true);
+  });
+
+  it.each(["error", "paused", "blocked"])("preserves %s feedback when an autoplay rejection arrives late", async (state) => {
+    const ui = viewer();
+    const video = ui.elements.get("video")!;
+    let rejectPlay!: (error: Error) => void;
+    video.play = () => new Promise<void>((_resolve, reject) => { rejectPlay = reject; });
+    ui.sockets[0]!.open();
+    ui.capabilities(); await ui.settle();
+    ui.ack(ui.configure().at(-1)!);
+    ui.receive({ rtc: { t: "config", iceServers: [] } });
+    ui.pcs[0]!.ontrack?.({ receiver: {}, track: {}, streams: [{}] });
+    if (state === "error") {
+      ui.session({ display: 1 }); await ui.settle();
+      const request = ui.configure().at(-1)!;
+      ui.receive({ session: { t: "error", requestId: request.requestId, message: "显示器暂时不可用" } });
+    } else if (state === "paused") {
+      ui.session({ active: false }); await ui.settle();
+      ui.ack(ui.configure().at(-1)!);
+    }
+    rejectPlay(Object.assign(new Error("Autoplay requires user interaction"), { name: "NotAllowedError" }));
+    await ui.settle();
+    expect(ui.elements.get("note")!.dataset.state).toBe(state);
+    expect(ui.elements.get("screen-loading-retry")!.classList.contains("gone")).toBe(state !== "error");
+    if (state === "error") {
+      expect(ui.elements.get("screen-loading-detail")!.textContent).toBe("显示器暂时不可用");
+    } else if (state === "blocked") {
+      expect(ui.elements.get("screen-loading-detail")!.textContent).toContain("轻点屏幕");
+      video.play = () => Promise.resolve();
+      ui.tap(); await ui.settle();
+      expect(ui.elements.get("note")!.dataset.state).toBe("receiving");
+      video.videoWidth = 1920; video.videoHeight = 1080;
+      video.emit("playing");
+      expect(ui.elements.get("note")!.classList.contains("gone")).toBe(true);
+    }
   });
 
   it("shows a disconnection error while waiting for configuration instead of continuing to load", async () => {
