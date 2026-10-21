@@ -18,7 +18,7 @@
 
 `@linkshell/client-core` 和 `apps/client` 是私有包，不发 npm。`@linkshell/protocol`、`@linkshell/gateway-v2` 是已经删除的 1.x / 过渡包，不再发布。
 
-**只有 `apps/web` 改动时，发布 gateway → cli。** Web 静态资源由 Gateway 的 npm 包和 Docker 镜像内置，Gateway 的 `prepack` 会构建并打包 `web-client/`；CLI 依赖 Gateway 的确切版本。同步根 CLI 版本、Homebrew、Gateway Docker tag 与官方网关部署，不触发移动端或 Mac helper 发版。上线后核对 `/healthz` 和首页引用的新 Web 资源；构建成功不等于线上页面已更新。
+**只有 `apps/web` 改动时，发布 mac → host → gateway → cli，并更新独立桌面 App。** Web 静态资源由 Gateway 的 npm 包和 Docker 镜像内置，Gateway 的 `prepack` 会构建并打包 `web-client/`；Mac helper 的构建也会把工作区打包到签名 App 的 `Contents/Resources/Workspace`。Host 固定依赖 Mac helper，CLI 固定依赖 Host 和 Gateway，因此这些包需要一起递增版本。同步根 CLI 和 Windows 版本、Homebrew、Gateway Docker tag 与官方网关部署，按下文流程交付 macOS 和 Windows 桌面包；没有移动端改动时不触发移动端发版。上线后核对 `/healthz`、首页引用的新 Web 资源和桌面包内的工作区资源；构建成功不等于线上页面或已安装的桌面 App 已更新。
 
 三种 tag，各管各的：
 
