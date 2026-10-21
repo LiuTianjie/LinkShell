@@ -226,6 +226,32 @@
     justify-content: center;
     gap: 8px;
   }
+.screen-connecting { gap: 24px; }
+.screen-connecting h3 { font-size: 18px; letter-spacing: -.3px; }
+.screen-connecting p { max-width: 340px; margin: 10px 0 0; overflow-wrap: anywhere; }
+.screen-connecting-art { position: relative; width: 104px; height: 84px; flex: none; color: var(--accent); }
+.screen-connecting-art::before { content: ''; position: absolute; inset: -32px; border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--accent) 14%, transparent), transparent 68%);
+  animation: screen-connection-breathe 2.8s ease-in-out infinite; }
+.screen-connecting-monitor { position: absolute; inset: 6px 4px 17px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 10px; background: color-mix(in srgb, var(--accent) 5%, transparent); overflow: hidden; }
+.screen-connecting-monitor::before { content: ''; position: absolute; top: 12px; left: 12px; width: 23px; height: 4px; border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: 0 11px 0 color-mix(in srgb, var(--accent) 12%, transparent), 0 22px 0 color-mix(in srgb, var(--accent) 12%, transparent); }
+.screen-connecting-monitor::after { content: ''; position: absolute; inset-block: 0; left: -45%; width: 45%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 16%, transparent), transparent); animation: screen-connection-scan 2.4s ease-in-out infinite; }
+.screen-connecting-stand { position: absolute; bottom: 8px; left: 50%; width: 26px; height: 10px; transform: translateX(-50%);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.screen-connecting-stand::before { content: ''; position: absolute; left: 50%; height: 9px; border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.screen-connecting-steps { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--secondaryLabel); }
+.screen-connecting-steps [data-active="true"] { color: var(--accent); }
+.screen-connecting-steps i { width: 24px; height: 1px; background: var(--separator); }
+.screen-connecting[data-failed="true"] .screen-connecting-art::before,
+.screen-connecting[data-failed="true"] .screen-connecting-monitor::after { animation: none; opacity: .3; }
+@keyframes screen-connection-scan { to { transform: translateX(340%); } }
+@keyframes screen-connection-breathe { 50% { opacity: .4; transform: scale(.92); } }
+@media (prefers-reduced-motion: reduce) {
+  .screen-connecting-art::before, .screen-connecting-monitor::after { animation: none; }
+}
 .screen-caption {
     display: flex;
     align-items: center;

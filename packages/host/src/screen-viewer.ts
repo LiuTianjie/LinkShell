@@ -18,6 +18,8 @@
 // data channels beside it; the page draws the pointer, which that picture does not have in it.
 // Otherwise it is H.264 down the page's socket, decoded here onto a canvas, as it always was.
 
+import { SCREEN_LOADING_HTML, SCREEN_LOADING_SCRIPT, SCREEN_LOADING_STYLE } from "./screen-loading.js";
+
 const icon = (body: string) =>
   `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
@@ -56,8 +58,6 @@ const STYLE = String.raw`
   #pointer.pressed { background: rgba(255,255,255,0.4); }
   #pointer.own { border: 0; border-radius: 0; box-shadow: none; background: transparent center / 100% 100% no-repeat; }
   #stage.own { cursor: none; }
-  #note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 32px;
-    color: rgba(255,255,255,0.72); text-align: center; pointer-events: none; }
   .glass { background: rgba(38,38,42,0.74); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
     border: 0.5px solid rgba(255,255,255,0.16); box-shadow: 0 8px 28px rgba(0,0,0,0.38); }
   #control-shell { position: absolute; pointer-events: none; z-index: 1; will-change: width, height, transform, border-radius, opacity; }
@@ -603,8 +603,22 @@ const mods = new Set();
 
 // ---- The picture ----------------------------------------------------------
 
-let sessionError = "";
-const say = (text) => { text = sessionError || text; note.textContent = text; note.classList.toggle("gone", !text); };
+let sessionError = "", sessionPhase = "", hasPicture = false;
+const loading = createScreenLoading(note, () => {
+  if (app && chrome.canRetryScreen) tellApp({ type: "screenRetry" });
+  else if (typeof window.__linkshellReload === "function") window.__linkshellReload({});
+  else location.reload();
+}, (phase) => window.__linkshellScreenState?.(phase));
+addEventListener("pagehide", () => loading.dispose(), { once: true });
+const say = (text) => {
+  if (!text) hasPicture = true;
+  if (sessionError) loading.set("error", sessionError);
+  else if (text) loading.set("error", text);
+  else if (sessionPhase) loading.set(sessionPhase);
+  else loading.set("ready");
+};
+// Transport updates must not hide a configuration failure or a paused retained session.
+const showProgress = (phase) => { if (!sessionError && !sessionPhase) loading.set(phase); };
 const round = (value, digits) => (value == null || !isFinite(value) ? null : +value.toFixed(digits === undefined ? 1 : digits));
 const hex = (n) => n.toString(16).padStart(2, "0");
 function sps(unit) {
@@ -700,11 +714,13 @@ const session = createScreenSession({ active: true, display: Number(query.get("d
   changed: (state) => {
     width = state.width;
     const previousError = sessionError;
+    const previousPhase = sessionPhase;
     sessionError = state.error;
+    sessionPhase = state.paused ? "paused" : !state.inputReady ? "adjusting" : "";
     if (sessionError) say(sessionError);
-    else if (state.paused) say("屏幕已暂停");
-    else if (!state.inputReady) say("正在调整屏幕…");
-    else if (previousError || note.textContent === "屏幕已暂停" || note.textContent === "正在调整屏幕…") say("");
+    else if (sessionPhase) loading.set(sessionPhase);
+    // Configuration acknowledgement enables input; only received media proves the first picture exists.
+    else if (previousError || previousPhase) loading.set(hasPicture ? "ready" : "receiving");
     if (state.inputReady && mode !== "view") askControl();
     refreshWidths();
     refresh();
@@ -731,7 +747,7 @@ function waitForCapabilities() {
     if (!session.known()) session.receive({ t: "capabilities", version: 1, configure: false, pause: false, retainMs: 0 });
   }, 10000);
 }
-ws.onopen = () => { session.open(); waitForCapabilities(); if (mode !== "view") askControl(); };
+ws.onopen = () => { if (loading.phase === "connecting") showProgress("receiving"); session.open(); waitForCapabilities(); if (mode !== "view") askControl(); };
 // Out of sight, a page answers late (its timers slow to one a second) and shows nothing: the host sends no
 // picture down the socket meanwhile, and starts again at a keyframe.
 document.addEventListener("visibilitychange", () => session.visibility(document.hidden));
@@ -809,7 +825,7 @@ ws.onclose = () => {
   drop();
   if (requestRelay()) return;
   tellApp({ type: "screenClosed" });
-  if (blocked || note.classList.contains("gone") || note.textContent.startsWith("正在")) say("屏幕连接已断开");
+  if (loading.phase !== "error") say("屏幕连接已断开，请确认电脑在线后重新连接。");
   blocked = false;
 };
 
@@ -942,15 +958,17 @@ function watch(mine) {
   const state = mine.pc.connectionState || mine.pc.iceConnectionState;
   if (state === "failed" || mine.pc.iceConnectionState === "failed") return giveUp(mine.up ? "the connection failed" : "no path between the two (ICE failed)");
   if (state === "disconnected") {
+    showProgress("recovering");
     // A path that drops for a moment comes back by itself; one gone for longer is given up.
     if (mine.up && !mine.away) mine.away = setTimeout(() => away(mine, performance.now()), 4000);
   } else if (state === "connected" || state === "completed") {
+    if (loading.phase !== "ready") showProgress("receiving");
     clearTimeout(mine.away);
     mine.away = 0;
     if (mine.up) return;
     mine.up = true;
     clearTimeout(patience);
-    if (!live) patience = setTimeout(frameless, 4000);
+    if (loading.phase !== "ready") patience = setTimeout(frameless, 4000);
   }
 }
 
@@ -979,6 +997,7 @@ function frameless() {
 function giveUp(reason) {
   if (gaveUp) return;
   gaveUp = true;
+  showProgress("recovering");
   const pc = rtc && rtc.pc;
   const told = (detail) => {
     drop();
@@ -995,7 +1014,7 @@ function requestRelay() {
   if (!relayRequested) {
     relayRequested = true;
     tellApp({ type: "screenFallback" });
-    say("正在连接电脑屏幕…");
+    showProgress("recovering");
   }
   return true;
 }
@@ -1016,7 +1035,7 @@ function fallBack() {
   gaveUp = true;
   drop();
   if (requestRelay()) return;
-  if (blocked) say("正在连接电脑屏幕…");
+  showProgress("recovering");
   blocked = false;
   if (!windowsHost && !("VideoDecoder" in window)) return unseeable();
   if (tried) hint(live ? "直连断开了：已改用兼容方式传画面，延迟会高一些" : "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", 5000);
@@ -1030,12 +1049,12 @@ function play() {
   started.then(() => {
     if (!blocked) return;
     blocked = false;
-    say(live ? "" : "正在连接电脑屏幕…");
+    showProgress("receiving");
   }, (error) => {
     // A new stream replacing the one being started rejects the first call too; that is not a refusal.
     if (error.name === "AbortError" || !rtc) return;
     blocked = true;
-    say("轻点屏幕，开始显示画面");
+    if (!sessionError && !sessionPhase) loading.set("blocked", "浏览器需要你的确认，轻点屏幕即可开始观看。");
   });
 }
 // What a browser takes as someone's say-so to start a video.
@@ -1047,19 +1066,34 @@ function sized() {
   // While this page presents the frames itself, the size that counts is the frame's own: the
   // <video> is kept running as the fallback but is not what is on screen.
   if (presenter) {
-    clearTimeout(patience);
+    if (presenter.shown) clearTimeout(patience);
     if (!live) show(true);
     return;
   }
   content.w = video.videoWidth;
   content.h = video.videoHeight;
-  if (!blocked) say("");
   if (live) return layout();
-  clearTimeout(patience);
   show(true);
 }
 video.addEventListener("resize", sized);
 video.addEventListener("loadedmetadata", sized);
+// Metadata and a connected socket do not mean a frame is visible yet.
+function videoShown() {
+  if (!rtc || blocked || video.readyState < 2 || presenter) return;
+  clearTimeout(patience);
+  sized();
+  say("");
+}
+if ("requestVideoFrameCallback" in video) {
+  const nextFrame = () => {
+    if (loading.phase !== "ready") videoShown();
+    video.requestVideoFrameCallback(nextFrame);
+  };
+  video.requestVideoFrameCallback(nextFrame);
+} else {
+  video.addEventListener("playing", videoShown);
+  video.addEventListener("timeupdate", videoShown);
+}
 
 // ---- Presenting the track's frames this page's own way --------------------
 
@@ -1135,6 +1169,7 @@ async function presentTrack(track) {
       draws.end();
       device.queue.submit([pass.finish()]);
       mine.shown += 1;
+      say("");
       if (mine.w !== frame.displayWidth || mine.h !== frame.displayHeight) {
         mine.w = frame.displayWidth;
         mine.h = frame.displayHeight;
@@ -1144,7 +1179,6 @@ async function presentTrack(track) {
         // the <video> beside it was allowed to start playing.
         clearTimeout(patience);
         blocked = false;
-        say("");
         if (!live) show(true);
         else layout();
       }
@@ -3114,7 +3148,7 @@ if (nativePicture) {
       session.reconnect();
       waitForCapabilities();
       Object.assign(control, { asked: false, known: false, trusted: false });
-      say("正在连接电脑屏幕…");
+      showProgress("connecting");
       if (mode !== "view") askControl();
     },
   };
@@ -3133,17 +3167,17 @@ if (nativePicture) {
 tellApp({ type: "ready", mode });
 `;
 
-const SCRIPT = `(() => {${VIEWER_LOGIC}${BODY}})();`;
+const SCRIPT = `(() => {${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
 
 export function viewerPage(platform: NodeJS.Platform = "darwin"): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>屏幕</title>
-<style>${STYLE}</style></head>
+<style>${STYLE}${SCREEN_LOADING_STYLE}</style></head>
 <body data-platform="${platform === "win32" ? "win32" : "darwin"}">
 <div id="stage"><div id="picture"><canvas id="screen"></canvas><canvas id="gpu" class="gone"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
-<div id="note">正在连接电脑屏幕…</div>
+${SCREEN_LOADING_HTML}
 <div id="toast" class="glass"></div>
 <div id="menu" class="glass gone">
   <div class="choice" role="button" aria-label="只看，不操作电脑" data-mode="view"><i></i><div><b>只看</b><span>不操作电脑</span></div></div>
