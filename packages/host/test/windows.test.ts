@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
+import xtermHeadless from "@xterm/headless";
 import { windowsPipe } from "../src/local-transport.js";
 import { WindowsFrameSplitter, windowsProfile } from "../src/windows-screen.js";
 import { startHost, isHostRunning } from "../src/host.js";
@@ -40,8 +42,12 @@ describe.skipIf(process.platform !== "win32")("Windows host integration", () => 
   const cleanup: (() => unknown)[] = [];
   afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); });
   function temporary() {
-    const home = mkdtempSync(join(tmpdir(), "linkshell-中文 空格-"));
-    cleanup.push(() => rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+    const scratch = resolve(tmpdir()), home = mkdtempSync(join(scratch, "linkshell-中文 空格-"));
+    cleanup.push(async () => {
+      expect(resolve(home).startsWith(scratch + sep + "linkshell-中文 空格-")).toBe(true);
+      // Let ConPTY finish releasing handles while retrying directory removal.
+      await rm(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    });
     return home;
   }
   it("resolves native Claude and npm JS entry points with case-insensitive Windows PATH", () => {
@@ -77,11 +83,19 @@ describe.skipIf(process.platform !== "win32")("Windows host integration", () => 
     // Non-interactive input avoids loading the developer's PSReadLine/profile in a regression test.
     const script = "[Console]::WriteLine('READY'); while (($line = [Console]::ReadLine()) -ne $null) { if ($line -eq 'exit') { break }; [Console]::WriteLine('WINDOWS_' + $line) }";
     const terminal = terminals.create({ cwd: home, cols: 80, rows: 24, launch: { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")] } });
+    // ConPTY on newer Windows waits for the receiver's terminal-capability reply.
+    const receiver = new xtermHeadless.Terminal({ cols: 80, rows: 24 });
+    cleanup.push(() => receiver.dispose());
+    receiver.onData(data => terminals.input(terminal.id, data));
     let output = "";
-    terminals.attach(terminal.id, (_seq, data) => { output += data; });
+    const attached = terminals.attach(terminal.id, (_seq, data) => { output += data; receiver.write(data); });
+    output += attached.replay;
+    receiver.write(attached.replay);
+    await expect.poll(() => output, { timeout: 10_000 }).toContain("READY");
     terminals.input(terminal.id, "PTY_OK\r\n");
     await expect.poll(() => output, { timeout: 10_000 }).toContain("WINDOWS_PTY_OK");
     terminals.resize(terminal.id, 100, 30);
+    receiver.resize(100, 30);
     terminals.input(terminal.id, "exit\r\n");
     await expect.poll(() => terminals.list().find(t => t.id === terminal.id)?.exitCode, { timeout: 10_000 }).toBe(0);
     terminals.close(terminal.id);

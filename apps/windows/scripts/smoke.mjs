@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -14,7 +15,7 @@ const cli = join(bundle, 'runtime/cli/dist/cli/src/index.js');
 const node = join(bundle, 'runtime/node.exe');
 const manifest = JSON.parse(readFileSync(join(bundle, 'standalone.json')));
 const require = createRequire(cli);
-const home = mkdtempSync(join(tmpdir(), 'linkshell-bundle-test-'));
+const scratch = resolve(tmpdir()), home = mkdtempSync(join(scratch, 'linkshell-bundle-test-'));
 const run = promisify(execFile);
 const env = { ...process.env, LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LINKSHELL_WINDOWS_HELPER: join(bundle, 'LinkShell.Screen.exe'), LINKSHELL_APP_BUNDLE: bundle };
 let host;
@@ -58,19 +59,25 @@ try {
   const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'indigo' } }).png().toBuffer();
   assert.equal(png[0], 137);
   const pty = require('node-pty').spawn(node, ['-e', "console.log('PACKAGED_PTY_READY');process.stdin.on('data',()=>process.exit(0))"], { cwd: home, env, cols: 80, rows: 24, useConptyDll: true });
-  await new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => { pty.kill(); reject(new Error('Packaged ConPTY timed out')); }, 10_000);
-    pty.onData(data => { output += data; if (output.includes('PACKAGED_PTY_READY')) pty.write('done\r'); });
-    pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
-  });
+  // Answer ConPTY's capability queries as a connected terminal receiver would.
+  const receiver = new (hostRequire('@xterm/headless').Terminal)({ cols: 80, rows: 24 });
+  try {
+    receiver.onData(data => pty.write(data));
+    await new Promise((resolve, reject) => {
+      let output = '', sent = false;
+      const timer = setTimeout(() => { pty.kill(); reject(new Error('Packaged ConPTY timed out')); }, 10_000);
+      pty.onData(data => { output += data; receiver.write(data); if (!sent && output.includes('PACKAGED_PTY_READY')) { sent = true; pty.write('done\r'); } });
+      pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
+    });
+  } finally { receiver.dispose(); }
   console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, Claude SDK/external executable, workspace assets/sidecar, WebView2 loader and standalone identity.`);
 } finally {
   let timer;
   try {
     await Promise.race([host?.stop(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Packaged host shutdown timed out')), 10_000); })]);
   } finally { clearTimeout(timer); }
-  rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  assert.ok(resolve(home).startsWith(scratch + sep + 'linkshell-bundle-test-'));
+  await rm(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }
 // The SDK may retain module-level timers. Host and ConPTY teardown above is explicitly awaited.
 process.exit(0);
