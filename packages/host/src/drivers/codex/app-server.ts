@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import WebSocket from "ws";
 import { ABANDON, RpcPeer, type RpcId } from "@linkshell/wire";
-import { windowsDesktopCodexCandidates } from "./installation.js";
+import { macAppCodexCandidates, windowsDesktopCodexCandidates } from "./installation.js";
 
 
 // Notifications LinkShell never renders; opting out keeps the socket quiet.
@@ -96,7 +96,8 @@ export async function detectCodex(command = "codex", env?: NodeJS.ProcessEnv): P
 
 /** Keep the detected command for every subsequent call, including restarts and auth. */
 export async function findCodex(command?: string, env: NodeJS.ProcessEnv = process.env): Promise<{ command: string; version: string } | undefined> {
-  const candidates = command !== undefined ? [command] : ["codex", ...(process.platform === "win32" ? windowsDesktopCodexCandidates(env) : [])];
+  const bundled = process.platform === "win32" ? windowsDesktopCodexCandidates(env) : process.platform === "darwin" ? macAppCodexCandidates(env.HOME) : [];
+  const candidates = command !== undefined ? [command] : ["codex", ...bundled];
   for (const candidate of candidates) {
     const version = await detectCodex(candidate, env);
     if (version) return { command: candidate, version };

@@ -60,6 +60,16 @@ describe("the account on this computer", () => {
     expect(auth.loadAuth()).toMatchObject({ refreshToken: "refresh-1" });
   });
 
+  it("takes the tokens another process refreshed meanwhile instead of giving up", async () => {
+    auth.saveAuth(tokens(Date.now() + 30_000));
+    // The desktop app refreshed first: the old refresh token is spent, and refused.
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      auth.saveAuth({ ...tokens(Date.now() + 3_600_000), accessToken: "access-elsewhere", refreshToken: "refresh-elsewhere" });
+      return new Response("already used", { status: 400 });
+    }));
+    expect(await auth.getValidToken()).toBe("access-elsewhere");
+  });
+
   it("has no token when nobody is logged in", async () => {
     auth.clearAuth();
     expect(await auth.getValidToken()).toBeNull();

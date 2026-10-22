@@ -108,6 +108,8 @@ export class AcpConnection {
   initializeResult: AcpInitializeResult = {};
   constructor(private readonly options: AcpConnectionOptions) {}
   get capabilities(): AcpAgentCapabilities { return this.initializeResult.agentCapabilities ?? {}; }
+  /** The agent's last stderr lines: its own account of a request that hung or failed. */
+  get recentStderr(): string { return this.stderrTail.trim().split("\n").slice(-6).join(" | "); }
   get alive(): boolean { return !!this.peer && !this.closed && !this.peer.isClosed; }
   get protocolVersion(): 1 | 2 { return this.initializeResult.protocolVersion === 2 ? 2 : 1; }
 

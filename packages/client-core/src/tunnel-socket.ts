@@ -70,7 +70,9 @@ export class TunnelSocket implements SocketLike {
         this.fail(reason === "offline" ? "电脑不在线" : reason === "not_allowed" ? "没有权限连接这台电脑" : reason, reason);
       }),
       relay.onStatus((status) => {
-        if (status === "offline" || status === "stopped") this.fail("与网关的连接断开了");
+        // A new gateway connection is a new device session there: the computer has already
+        // dropped this channel, and frames sent on it would vanish while it looked open.
+        if (status === "offline" || status === "stopped" || (status === "connecting" && this.readyState === OPEN)) this.fail("与网关的连接断开了");
       }),
     );
     // Wait for the gateway, then say hello.

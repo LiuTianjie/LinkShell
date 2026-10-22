@@ -1196,12 +1196,17 @@ export class AcpDriver implements AgentDriver {
       if (sessionId) this.mcp.bind(serverIds, sessionId);
       return result;
     };
+    const started = Date.now();
     try {
       const result = await connection.request<T>(method, params, timeoutMs);
       if (opensSession) this.signedOut = undefined;
       return bindServers(result);
     } catch (error) {
       if (!opensSession) throw error;
+      // Opening a session is where an agent that can't start (no network, no proxy, a stuck
+      // MCP server) shows; its stderr says which, and the phone only ever sees a timeout.
+      const stderr = connection.recentStderr;
+      this.host?.log(`[${this.id}] ${method} failed after ${Math.round((Date.now() - started) / 1000)} s: ${error instanceof Error ? error.message : String(error)}${stderr ? ` — agent: ${stderr}` : ""}`);
       const authRequired = error instanceof RpcError && error.code === -32000 && !error.appCode;
       const methodId = this.spec.cachedAuthMethod;
       if (!authRequired || !methodId || !connection.initializeResult.authMethods?.some((entry) => entry.id === methodId)) {

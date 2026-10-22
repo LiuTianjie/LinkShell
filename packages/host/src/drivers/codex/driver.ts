@@ -286,6 +286,8 @@ export class CodexDriver implements AgentDriver {
       return this.current;
     }
     this.command = installation.command;
+    // Not the user's own `codex` on PATH: an app's bundled copy, which may be another version.
+    if (installation.command !== (this.options.command ?? "codex")) host.log(`[codex] using ${installation.command} (v${installation.version})`);
     this.current = { installed: true, version: installation.version };
     await this.boot();
     return this.current;

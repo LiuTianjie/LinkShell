@@ -71,6 +71,9 @@ function turnInProgress(path: string, stalledMs: number): boolean {
   return false;
 }
 
+/** Taking a session over answers within this, under the device's 60 s, so it hears why. */
+const TAKEOVER_BUDGET_MS = 55_000;
+
 /** Finds an executable on the given PATH (the adapter needs an absolute path). */
 export function resolveExecutable(name: string, env: NodeJS.ProcessEnv): string | undefined {
   const path = env.PATH ?? (process.platform === "win32" ? Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] : undefined) ?? "";
@@ -705,6 +708,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Makes this host the session's only writer, taking it from the desktop if needed. */
   private async ensureRemote(nativeId: string): Promise<void> {
+    const deadline = Date.now() + TAKEOVER_BUDGET_MS;
     await this.reconcileDesktopWriter(nativeId);
     const state = this.sessions.get(nativeId);
     if (this.modes.get(nativeId) === "remote" && state?.loaded) return;
@@ -734,7 +738,14 @@ export class ClaudeDriver extends AcpDriver {
     }
     const target = this.stateFor(nativeId, cwd);
     if (!target.loaded) {
-      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.sessionMeta() });
+      // Leaves a little of the budget for the settings below.
+      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.sessionMeta() }, Math.max(5000, deadline - Date.now() - 8000))
+        .catch((error: unknown) => {
+          if (error instanceof RpcError && error.appCode === "timeout") {
+            throw RpcError.app("timeout", "电脑上的 Claude 没能及时打开这个会话：它可能连不上网络或代理、或某个 MCP 服务启动卡住。详情见电脑上的 ~/.linkshell/host.log");
+          }
+          throw error;
+        });
       target.config = toConfigOptions(response);
       target.loaded = true;
     }
@@ -743,10 +754,17 @@ export class ClaudeDriver extends AcpDriver {
     const observed = this.observed.get(nativeId) ?? {};
     const kept = Object.fromEntries(target.config.flatMap((option) => [[option.id, observedValue(option, observed)]]).filter(([, value]) => value !== undefined));
     const pending = this.pendingConfig(nativeId);
+    // Each change can take seconds (Claude may ask its service); all of them must still fit,
+    // with the resume, in the device's 60 s. One that doesn't is left as it was, and said so.
     for (const [optionId, value] of Object.entries({ ...kept, ...pending } as Record<string, string>)) {
       const option = target.config.find((entry) => entry.id === optionId);
       if (option && option.current !== value && option.values.some((entry) => entry.value === value)) {
-        await super.setConfig(nativeId, optionId, value).catch((error: unknown) => this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`));
+        const left = deadline - Date.now();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${Math.round(Math.max(0, left) / 1000)} s`)), Math.max(0, left)); });
+        await Promise.race([super.setConfig(nativeId, optionId, value), late])
+          .catch((error: unknown) => this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`))
+          .finally(() => clearTimeout(timer));
       }
     }
     if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");

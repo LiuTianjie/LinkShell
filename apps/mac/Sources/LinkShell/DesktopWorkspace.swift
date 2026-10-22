@@ -51,6 +51,9 @@ import WebKit
     configuration.websiteDataStore = .nonPersistent()
     configuration.mediaTypesRequiringUserActionForPlayback = []
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    // Hidden or behind other windows, WebKit throttles the page's timers: connection
+    // heartbeats then come late, and a dead link to another computer looks alive past a request's limit.
+    if #available(macOS 14.0, *) { configuration.preferences.inactiveSchedulingPolicy = .none }
     configuration.userContentController.add(DesktopWorkspaceMessageProxy(self), name: "linkshellDesktop")
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = self

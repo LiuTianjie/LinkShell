@@ -23,3 +23,17 @@ export function windowsDesktopCodexCandidates(env: NodeJS.ProcessEnv): string[] 
     return [];
   }
 }
+
+/** The Mac apps ship their own CLI; a host started from Finder may have no `codex` on PATH. */
+export function macAppCodexCandidates(home = homedir()): string[] {
+  return ["/Applications", join(home, "Applications")].flatMap(apps => [
+    join(apps, "Codex.app/Contents/Resources/codex"),
+    join(apps, "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+  ]).filter(command => {
+    try {
+      return statSync(command).isFile();
+    } catch {
+      return false;
+    }
+  });
+}

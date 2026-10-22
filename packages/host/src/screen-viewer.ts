@@ -20,6 +20,9 @@
 
 import { SCREEN_LOADING_HTML, SCREEN_LOADING_SCRIPT, SCREEN_LOADING_STYLE } from "./screen-loading.js";
 
+/** Final for a viewer: falling back to another path would only take the screen back. The app matches it too. */
+export const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
+
 const icon = (body: string) =>
   `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
@@ -446,7 +449,9 @@ function createScreenSession(initial, effects) {
   const original = { ...desired };
   const state = () => ({ display: desired.display, width: desired.width, ...(desired.maxFps ? { maxFps: desired.maxFps } : {}), paused: !desired.active || hidden });
   const key = () => JSON.stringify(state());
-  const targetChanged = () => ["display", "width", "maxFps"].some((name) => desired[name] !== original[name]);
+  // A lower frame-rate ceiling (a 60 Hz phone, Low Power) needs no new connection from an app that can't
+  // reconfigure: the receiver just shows fewer frames. Reloading for it left the native picture "adjusting".
+  const targetChanged = () => ["display", "width"].some((name) => desired[name] !== original[name]);
   const changed = () => effects.changed?.({ ...desired, paused: state().paused, inputReady, error });
   const suspend = () => { effects.release(); inputReady = false; };
   const pump = () => {
@@ -740,7 +745,7 @@ const ws = nativePicture
   : new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
-let capabilityTimer = 0, socketClosed = false;
+let capabilityTimer = 0, socketClosed = false, taken = false;
 function waitForCapabilities() {
   clearTimeout(capabilityTimer);
   capabilityTimer = setTimeout(() => {
@@ -823,8 +828,8 @@ ws.onclose = () => {
   session.close();
   // A video track is this socket's: without the one there is no finding the other again, and no hands.
   drop();
-  if (requestRelay()) return;
-  tellApp({ type: "screenClosed" });
+  if (!taken && requestRelay()) return;
+  tellApp({ type: "screenClosed", ...(taken ? { reason: "taken" } : {}) });
   if (loading.phase !== "error") say("屏幕连接已断开，请确认电脑在线后重新连接。");
   blocked = false;
 };
@@ -834,7 +839,10 @@ function heard(message) {
     if (message.session.t === "capabilities") clearTimeout(capabilityTimer);
     return session.receive(message.session);
   }
-  if (message.error) return say(message.error);
+  if (message.error) {
+    if (message.error === SCREEN_TAKEN) taken = true;
+    return say(message.error);
+  }
   if (message.rtc) return signal(message.rtc);
   if (message.pong) return meter && meter.pong(message.pong);
   if (message.restart) {
@@ -3167,7 +3175,7 @@ if (nativePicture) {
 tellApp({ type: "ready", mode });
 `;
 
-const SCRIPT = `(() => {${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
+const SCRIPT = `(() => {const SCREEN_TAKEN = ${JSON.stringify(SCREEN_TAKEN)};${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
 
 export function viewerPage(platform: NodeJS.Platform = "darwin"): string {
   return `<!doctype html>

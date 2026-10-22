@@ -237,6 +237,20 @@ describe("gateway v2 end to end", () => {
     expect((await mine.relay.request("machines.list", {})).machines).toEqual([]);
   });
 
+  it("reconnects a phone's tunnel after its gateway connection is renewed, instead of sending into a closed channel", async () => {
+    const { url, local } = await world();
+    const phone = device(url, "iPhone");
+    await phone.relay.waitOnline(5000);
+    const { machine } = await pairByQr(local, phone.relay, phone.identity);
+    const link = connect(phone.relay, phone.identity, machine);
+    await link.call("machine.info", {});
+    // A login, a network change: the gateway sees a new device session and the computer drops the old channel.
+    phone.relay.reauthenticate();
+    await until(() => phone.relay.status === "online");
+    const info = await link.call("machine.info", {}, 4000);
+    expect(info.machineId).toBeTruthy();
+  });
+
   it("keeps healthy connections across heartbeats", async () => {
     const { url, local } = await world({ heartbeatMs: 60 });
     const phone = device(url, "iPhone");

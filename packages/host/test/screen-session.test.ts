@@ -383,6 +383,15 @@ describe("an authenticated screen socket's retained session", () => {
     expect(helper.endVideo).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves a watching viewer alone when a newcomer fails before taking the screen", async () => {
+    const { socket, helper, connect } = await receiver();
+    helper.access.mockResolvedValueOnce({ trusted: true, recording: false, app: "LinkShell", video: true, videoReconfigure: true, preview: false });
+    const refused = await connect();
+    expect(refused.messages.some((message) => (message as { error?: string }).error)).toBe(true);
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(helper.endVideo).not.toHaveBeenCalled();
+  });
+
   it("keeps a replacement viewer alive after the paused viewer's pending reply and expiry", async () => {
     const { socket, helper, connect } = await receiver();
     socket.receive(configure(1, { paused: true }));

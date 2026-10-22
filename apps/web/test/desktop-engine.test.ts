@@ -181,4 +181,18 @@ describe("desktop client connections", () => {
     expect(mocks.relays[0].options.platform).toBe(label);
     expect(mocks.supabase).not.toHaveBeenCalled();
   });
+
+  it("keeps the gateway connection when only the account's token is refreshed", async () => {
+    const desktop = await start();
+    const account = (accessToken: string) => window.dispatchEvent(new CustomEvent(desktop.DESKTOP_ACCOUNT_EVENT, { detail: { userId: "user-a", email: "person@example.com", accessToken } }));
+    account("token-1");
+    await vi.waitFor(() => expect(mocks.relays).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const signIns = mocks.relays[0].reauthenticate.mock.calls.length;
+    // The hourly refresh: reconnecting here would drop every open tunnel.
+    account("token-2");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.relays).toHaveLength(1);
+    expect(mocks.relays[0].reauthenticate.mock.calls.length).toBe(signIns);
+  });
 });

@@ -78,7 +78,7 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
           signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
         },
       );
-      if (!res.ok) return null;
+      if (!res.ok) return rotatedElsewhere(auth);
       const body = (await res.json()) as {
         access_token: string;
         refresh_token: string;
@@ -94,16 +94,27 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
       };
       // A login or logout may finish while the refresh is in flight.
       const current = loadAuth();
-      if (options.signal?.aborted || tokens.userId !== auth.userId || current?.userId !== auth.userId || current.refreshToken !== auth.refreshToken) return null;
+      if (options.signal?.aborted || tokens.userId !== auth.userId || current?.userId !== auth.userId) return null;
+      if (current.refreshToken !== auth.refreshToken) return rotatedElsewhere(auth);
       saveAuth(tokens);
       return tokens;
     } catch {
-      return null;
+      return rotatedElsewhere(auth);
     }
   })().finally(() => {
     inflightRefresh = null;
   });
   return inflightRefresh;
+}
+
+/**
+ * The desktop app, the host and the workspace each refresh the same account; whichever loses
+ * the race finds the winner's tokens on disk rather than giving up on a signed-in account.
+ */
+function rotatedElsewhere(previous: AuthTokens): AuthTokens | null {
+  const current = loadAuth();
+  return current && current.userId === previous.userId && current.refreshToken !== previous.refreshToken &&
+    current.expiresAt - Date.now() >= 60_000 ? current : null;
 }
 
 /**

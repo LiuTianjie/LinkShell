@@ -8,7 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError } from "@linkshell/wire";
 import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
-import { viewerPage } from "./screen-viewer.js";
+import { SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
 import { captureWindows, configureWindowsCapture, WindowsFrameSplitter, windowsDisplays, windowsHelper, windowsProfile } from "./windows-screen.js";
 import { WindowsVideoSession, windowsMedia, type ScreenVideoSession } from "./windows-video.js";
@@ -252,10 +252,14 @@ export async function resolvedCandidate(sdp: string, resolve: (name: string) => 
 
 const mdns = async (name: string) => (await lookup(name, { family: 4 })).address;
 
+const RECENT_TOKENS = 4;
+
 /** The loopback viewer server; started on first use, one capture per watching device. */
 export class ScreenShare {
   private server?: Server;
-  private token = "";
+  /** Two starts at once (the phone and a desktop, a retry) must share one bind, not read an unbound address. */
+  private listening?: Promise<number>;
+  private tokens: string[] = [];
   private displays: Capturable[] = [];
   private readonly captures = new Set<ChildProcess>();
   /**
@@ -281,10 +285,12 @@ export class ScreenShare {
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
     const displays = (this.displays = await this.listDisplays());
     if (!displays.length) throw RpcError.app("not_supported", "没有找到可以捕获的屏幕");
-    // A fresh token per start: an old viewer URL stops working.
-    this.token = randomBytes(24).toString("base64url");
+    // A fresh token per start; only the last few keep working, so devices starting
+    // at the same time (the phone and a desktop) don't lock each other out.
+    const token = randomBytes(24).toString("base64url");
+    this.tokens = [token, ...this.tokens].slice(0, RECENT_TOKENS);
     const port = await this.listen();
-    return { port, token: this.token, displays: displays.map(({ index, name }) => ({ index, name })) };
+    return { port, token, displays: displays.map(({ index, name }) => ({ index, name })) };
   }
 
   private async listDisplays(): Promise<Capturable[]> {
@@ -303,7 +309,16 @@ export class ScreenShare {
   }
 
   private listen(): Promise<number> {
-    if (this.server) return Promise.resolve((this.server.address() as AddressInfo).port);
+    this.listening ??= this.bind().catch((error: unknown) => {
+      this.server?.close();
+      this.server = undefined;
+      this.listening = undefined;
+      throw error;
+    });
+    return this.listening;
+  }
+
+  private bind(): Promise<number> {
     const server = createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (!this.authorized(url)) {
@@ -345,8 +360,10 @@ export class ScreenShare {
 
   private authorized(url: URL): boolean {
     const given = Buffer.from(url.searchParams.get("token") ?? "");
-    const expected = Buffer.from(this.token);
-    return this.token.length > 0 && given.length === expected.length && timingSafeEqual(given, expected);
+    return this.tokens.some((token) => {
+      const expected = Buffer.from(token);
+      return given.length === expected.length && timingSafeEqual(given, expected);
+    });
   }
 
   /**
@@ -485,7 +502,7 @@ export class ScreenShare {
         this.holder = undefined;
         previous.end();
         // Another device's picture ends here; a viewer changing its own just carries on.
-        if (previous.on !== on) previous.on.exit("屏幕画面被另一台设备接手了");
+        if (previous.on !== on) previous.on.exit(SCREEN_TAKEN);
         await captureReleased(previous);
       }
       if (!wanted()) return undefined;
@@ -505,15 +522,16 @@ export class ScreenShare {
    * Has the app offer the screen to this viewer as a video track. False when it can't (no app, an
    * app without the media engine): the picture then goes down the socket.
    */
-  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; tell(message: object): void; refuse(message: string): void; lost(): void; input(message: unknown): void }): Promise<ScreenVideoSession | "refused" | undefined> {
+  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; claim(): void; tell(message: object): void; refuse(message: string): void; lost(): void; input(message: unknown): void }): Promise<ScreenVideoSession | "refused" | undefined> {
     if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" && windowsMedia()) {
       // The native guard checks the selected desktop and the local opt-out throughout capture.
       await windowsDisplays();
       if (viewer.closed()) return "refused";
+      viewer.claim();
       this.video?.taken();
       const holder = this.holder;
       if (holder) {
-        this.holder = undefined; holder.end(); holder.on.exit("屏幕画面被另一台设备接手了");
+        this.holder = undefined; holder.end(); holder.on.exit(SCREEN_TAKEN);
         await captureReleased(holder);
       }
       if (viewer.closed()) return "refused";
@@ -524,7 +542,7 @@ export class ScreenShare {
       });
       const mine = { id: session.id, taken: () => {
         if (this.video === mine) this.video = undefined;
-        session.end(); viewer.refuse("屏幕画面被另一台设备接手了");
+        session.end(); viewer.refuse(SCREEN_TAKEN);
       } };
       this.video = mine;
       const cancelled = setInterval(() => { if (viewer.closed()) session.end(); }, 100);
@@ -556,11 +574,12 @@ export class ScreenShare {
     }
     if (viewer.closed()) return "refused";
     // The latest viewer has the screen, whichever way the one before was getting it.
+    viewer.claim();
     this.video?.taken();
     const holder = this.holder;
     if (holder) {
       holder.end();
-      holder.on.exit("屏幕画面被另一台设备接手了");
+      holder.on.exit(SCREEN_TAKEN);
       await captureReleased(holder);
       if (this.holder === holder) this.holder = undefined;
     }
@@ -571,7 +590,7 @@ export class ScreenShare {
       taken: () => {
         if (this.video === mine) this.video = undefined;
         app.endVideo(id);
-        viewer.refuse("屏幕画面被另一台设备接手了");
+        viewer.refuse(SCREEN_TAKEN);
       },
     };
     this.video = mine;
@@ -609,12 +628,6 @@ export class ScreenShare {
   }
 
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc"): void {
-    // Paused viewers still own a session. A new authenticated viewer takes that ownership too.
-    for (const [previous, release] of this.viewers) {
-      if (previous.readyState === previous.OPEN) previous.send(JSON.stringify({ error: "屏幕画面被另一台设备接手了" }));
-      release();
-      previous.close();
-    }
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
     let closed = false;
@@ -869,9 +882,20 @@ export class ScreenShare {
       if (configuration.paused) { stopReminder(); stopRunning(); expirePaused(); }
       void drain();
     };
+    // Paused viewers still own a session; the latest viewer takes it over, but only once it is
+    // about to take the capture or the video: one that fails before that mustn't end a healthy one.
+    const claim = () => {
+      for (const [previous, release] of this.viewers) {
+        if (previous === ws) continue;
+        if (previous.readyState === previous.OPEN) previous.send(JSON.stringify({ error: SCREEN_TAKEN }));
+        release();
+        previous.close();
+      }
+    };
     const startFallback = () => {
       endVideo();
       if (!live()) return;
+      claim();
       tell({ rtc: { t: "off" } });
       canConfigure = !!shown?.w && !!shown?.h;
       initialized = true;
@@ -958,7 +982,7 @@ export class ScreenShare {
     if (wantsVideo) {
       let lostWhileOpening = false;
       void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, {
-        closed: () => !live(), tell,
+        closed: () => !live(), claim, tell,
         refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
         lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
         input: message => {
@@ -996,5 +1020,6 @@ export class ScreenShare {
     closeInputApp();
     this.server?.close();
     this.server = undefined;
+    this.listening = undefined;
   }
 }

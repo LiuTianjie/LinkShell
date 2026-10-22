@@ -259,10 +259,14 @@ export class BrowserEngine {
     // Account changes may arrive while RelayClient awaits its token provider. Let that
     // authentication finish before replacing its socket, so an old nonce cannot escape
     // onto the new connection. Coalesce boot/login notifications into one reconnect.
+    // Only a different account needs a new gateway connection. A refreshed token for the same
+    // one (hourly) is fetched on the next connect anyway; reconnecting for it would drop every
+    // open tunnel while they still look online.
+    if (!changed && this.relays.has(officialGateway)) return;
     this.desktopAuthTimer = setTimeout(() => {
       this.desktopAuthTimer = undefined;
       if (!this.releaseLock || generation !== this.generation || account.userId !== this.authUser) return;
-      this.relays.get(officialGateway)?.reauthenticate();
+      if (changed) this.relays.get(officialGateway)?.reauthenticate();
       if (account.userId) this.relay(officialGateway);
     }, 0);
   }

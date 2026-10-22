@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -11,28 +14,61 @@ const execFileAsync = promisify(execFile);
  * additions, API keys and proxy settings from the user's shell profile, and
  * agents would fail auth. Falls back to the current environment.
  */
-export async function resolveLoginShellEnv(timeoutMs = 10_000): Promise<NodeJS.ProcessEnv> {
+export async function resolveLoginShellEnv(timeoutMs = 20_000, log?: (message: string) => void): Promise<NodeJS.ProcessEnv> {
   if (process.platform === "win32") return process.env;
   const shell = process.env.SHELL || "/bin/zsh";
-  const marker = `__LINKSHELL_ENV_${randomUUID()}__`;
-  try {
-    const { stdout } = await execFileAsync(shell, ["-ilc", `printf '%s' '${marker}'; command env -0`], {
-      timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, LINKSHELL_RESOLVING_SHELL_ENV: "1" },
-    });
-    const start = stdout.indexOf(marker);
-    if (start < 0) return process.env;
-    const resolved: NodeJS.ProcessEnv = {};
-    for (const entry of stdout.slice(start + marker.length).split("\0")) {
-      const index = entry.indexOf("=");
-      if (index > 0) resolved[entry.slice(0, index)] = entry.slice(index + 1);
+  const problems: string[] = [];
+  // Interactive first: most people set PATH and proxies in .zshrc. A profile that
+  // breaks without a terminal still usually works as a plain login shell.
+  for (const flags of ["-ilc", "-lc"]) {
+    try {
+      const resolved = await shellEnv(shell, flags, timeoutMs);
+      if (resolved) return withCommonPaths({ ...process.env, ...resolved });
+      problems.push(`${flags}: no environment in its output`);
+    } catch (error) {
+      const killed = (error as { killed?: boolean }).killed;
+      problems.push(`${flags}: ${killed ? `no answer in ${timeoutMs / 1000} s` : (error as Error).message.split("\n")[0]}`);
     }
-    delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
-    return { ...process.env, ...resolved };
-  } catch {
-    return process.env;
   }
+  // Without it, a host started by the desktop app has Finder's PATH (/usr/bin:/bin…):
+  // agents installed with Homebrew or npm are missed, and the ones found lack proxy settings.
+  log?.(`[host] couldn't read the login shell's environment (${shell} ${problems.join("; ")}): agents get only the common install directories on PATH`);
+  return withCommonPaths(process.env);
+}
+
+async function shellEnv(shell: string, flags: string, timeoutMs: number): Promise<NodeJS.ProcessEnv | undefined> {
+  const marker = `__LINKSHELL_ENV_${randomUUID()}__`;
+  const child = execFileAsync(shell, [flags, `printf '%s' '${marker}'; command env -0`], {
+    timeout: timeoutMs,
+    maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, LINKSHELL_RESOLVING_SHELL_ENV: "1" },
+  });
+  // An open stdin lets a profile's prompt (compinit's "insecure directories", a
+  // `read`) wait for an answer until the timeout; end-of-input answers it.
+  child.child.stdin?.end();
+  const { stdout } = await child;
+  const start = stdout.indexOf(marker);
+  if (start < 0) return undefined;
+  const resolved: NodeJS.ProcessEnv = {};
+  for (const entry of stdout.slice(start + marker.length).split("\0")) {
+    const index = entry.indexOf("=");
+    if (index > 0) resolved[entry.slice(0, index)] = entry.slice(index + 1);
+  }
+  delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
+  return resolved.PATH ? resolved : undefined;
+}
+
+/** Where agents' CLIs are usually installed; appended, so the user's own order still wins. */
+export function withCommonPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const home = env.HOME || homedir();
+  const present = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  const common = [
+    "/opt/homebrew/bin", "/usr/local/bin",
+    join(home, ".local/bin"), join(home, ".npm-global/bin"), join(home, ".bun/bin"),
+    join(home, ".volta/bin"), join(home, "Library/pnpm"), join(home, ".cargo/bin"),
+    "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+  ].filter((dir) => !present.includes(dir) && existsSync(dir));
+  return common.length ? { ...env, PATH: [...present, ...common].join(delimiter) } : env;
 }
 
 // What a running Claude Code session puts in its children's environment: who

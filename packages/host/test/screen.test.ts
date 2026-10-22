@@ -61,7 +61,7 @@ describe.skipIf(!shippedApp())("screen viewer server", () => {
   afterEach(() => screen?.stop());
   afterAll(() => closeInputApp());
 
-  it("serves the viewer only with the current token", async () => {
+  it("serves the viewer only with a recent token", async () => {
     screen = new ScreenShare(() => {});
     const first = await screen.start();
     expect(first.displays.length).toBeGreaterThan(0);
@@ -71,10 +71,19 @@ describe.skipIf(!shippedApp())("screen viewer server", () => {
     const page = await fetch(`${base}?token=${first.token}`);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("VideoDecoder");
-    // A new start rotates the token: the old link stops working.
+    // Another device starting meanwhile doesn't lock this one out; enough later starts do.
     const second = await screen.start();
     expect(second.port).toBe(first.port);
+    expect((await fetch(`${base}?token=${first.token}`)).status).toBe(200);
+    for (let i = 0; i < 4; i += 1) await screen.start();
     expect((await fetch(`${base}?token=${first.token}`)).status).toBe(403);
+  });
+
+  it("gives starts at the same time the same bound port", async () => {
+    screen = new ScreenShare(() => {});
+    const [a, b, c] = await Promise.all([screen.start(), screen.start(), screen.start()]);
+    expect(a.port).toBeGreaterThan(0);
+    expect(new Set([a.port, b.port, c.port]).size).toBe(1);
   });
 });
 

@@ -6,11 +6,11 @@ export function NativeScreenPane({ url, active = true, onState, onUnavailable, c
   url: string;
   active?: boolean;
   onState?: (state: ScreenState) => void;
-  onUnavailable: () => void;
+  onUnavailable: (message?: string) => void;
   children: ReactNode;
 }) {
   return <NativeScreen url={url} active={active} maxFps={120} onState={(state) => {
     onState?.(state);
-    if (active && state.state === "failed") onUnavailable();
+    if (active && state.state === "failed") onUnavailable(state.message);
   }} style={{ flex: 1 }}>{children}</NativeScreen>;
 }

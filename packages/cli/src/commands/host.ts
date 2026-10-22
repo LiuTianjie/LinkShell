@@ -92,7 +92,7 @@ export async function runHostForeground(version: string): Promise<void> {
   );
   // Started from a terminal (by `linkshell`): use that environment as is.
   // Otherwise (launchd, a bare process) recover the login shell's.
-  const env = process.env.LINKSHELL_ENV_FROM_TERMINAL === "1" ? process.env : await host.resolveLoginShellEnv();
+  const env = process.env.LINKSHELL_ENV_FROM_TERMINAL === "1" ? process.env : await host.resolveLoginShellEnv(undefined, log);
   const adapter = process.env.LINKSHELL_CLAUDE_ADAPTER;
   const devPort = process.env.LINKSHELL_DEV_PORT ? Number(process.env.LINKSHELL_DEV_PORT) : undefined;
   // Where devices reach this machine from outside the LAN. The account from

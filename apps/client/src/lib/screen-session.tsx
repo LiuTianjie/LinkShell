@@ -22,6 +22,7 @@ export interface ScreenPageMessage {
   kind?: string;
   list?: unknown;
   width?: unknown;
+  reason?: string;
   session?: { t?: string; configure?: boolean; pause?: boolean; paused?: boolean; version?: number };
 }
 
@@ -62,6 +63,9 @@ interface ScreenSessionContextValue {
   selectDisplay(display: number): void;
   retry(): void;
 }
+
+/** The host's words when another device takes the screen (screen-viewer.ts SCREEN_TAKEN). */
+const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
 
 const ScreenSessionContext = createContext<ScreenSessionContextValue | null>(null);
 const initialPlayback = (): ScreenPlaybackMode => nativeScreenAvailable ? "native" : "standard";
@@ -222,7 +226,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
 
   const unavailable = useCallback((failed: Viewer, description?: string) => {
     if (lease.getSnapshot().resource !== failed) return;
-    if (failed.playback === "relay" || Platform.OS !== "ios") setFailure(description || "屏幕显示已中断，请重新连接");
+    // Another device has the screen now: trying the next path would only take it back from them.
+    if (failed.playback === "relay" || Platform.OS !== "ios" || description === SCREEN_TAKEN) setFailure(description || "屏幕显示已中断，请重新连接");
     else setPlayback(failed.playback === "native" ? "standard" : "relay");
     reset();
   }, [lease, reset]);
@@ -250,7 +255,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       if (wasActive === null) return;
       pauseWatchdog.clear();
       configurable.current = null;
-      setFailure(wasActive ? "屏幕连接已断开，请重新连接" : null);
+      setFailure(wasActive ? (message.reason === "taken" ? SCREEN_TAKEN : "屏幕连接已断开，请重新连接") : null);
       return;
     }
     if (message.type === "screenSession" && !lease.getSnapshot().active) {
@@ -345,6 +350,8 @@ function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable
     onMessage={(event) => onMessage(viewer, event)}
     onLoadEnd={() => onLoaded(viewer)}
     onError={({ nativeEvent }) => onUnavailable(viewer, nativeEvent.description || "屏幕页面加载失败，请重试")}
+    // A stale token answers 403: without this the page stays blank behind the loading cover.
+    onHttpError={({ nativeEvent }) => onUnavailable(viewer, nativeEvent.statusCode === 403 ? "屏幕连接已过期，请重新连接" : "屏幕页面加载失败，请重试")}
     onContentProcessDidTerminate={() => onUnavailable(viewer)}
     injectedJavaScriptBeforeContentLoaded={viewer.bootstrap}
     bounces={false}
@@ -361,7 +368,7 @@ function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable
     style={{ flex: 1, backgroundColor: viewer.playback === "native" ? "transparent" : "#000000" }}
     containerStyle={{ backgroundColor: viewer.playback === "native" ? "transparent" : "#000000" }}
   />;
-  return viewer.playback === "native" ? <NativeScreenPane url={viewer.source.uri} active={active} onUnavailable={() => onUnavailable(viewer)}>{page}</NativeScreenPane> : page;
+  return viewer.playback === "native" ? <NativeScreenPane url={viewer.source.uri} active={active} onUnavailable={(message) => onUnavailable(viewer, message)}>{page}</NativeScreenPane> : page;
 }
 
 export function useScreenSession() {
