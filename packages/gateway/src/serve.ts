@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { RELAY_PATH } from "@linkshell/wire";
-import { PollRelay, POLL_PATH } from "./poll.js";
+import { PollRelay, POLL_PATH, type PollLimits } from "./poll.js";
 import { webHandler, type WebOptions } from "./web.js";
 import type { VerifyToken } from "./accounts.js";
 import { clientIp, isLoopback, normalizeIp, RateLimiter, trustedProxySet } from "./rate-limit.js";
@@ -26,11 +26,14 @@ export interface StartGatewayOptions {
   trustedProxies?: readonly string[];
   /** Connections one address may open per window (default 20 a minute). */
   wsConnectLimit?: { max: number; windowMs: number };
+  /** The watch's HTTPS transport; the defaults suit production, tests shrink them. */
+  pollLimits?: Partial<PollLimits>;
 }
 
 export interface RunningGateway {
   port: number;
   relay: Gateway;
+  poll: PollRelay;
   close(): Promise<void>;
 }
 
@@ -64,7 +67,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     options.log?.(`a connection from ${peer} carries X-Forwarded-For, which is ignored: if ${peer} is your reverse proxy, add it to TRUSTED_PROXIES so each user gets their own connection limit`);
   };
 
-  const poll = new PollRelay(relay);
+  const poll = new PollRelay(relay, options.pollLimits);
   const serveWeb = webHandler(options.web);
   const server = createServer((request, response) => {
     if (request.method === "GET" && pathOf(request) === "/healthz") {
@@ -124,6 +127,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
   return {
     port: typeof address === "object" && address ? address.port : options.port,
     relay,
+    poll,
     close: async () => {
       connectLimiter.destroy();
       poll.close();

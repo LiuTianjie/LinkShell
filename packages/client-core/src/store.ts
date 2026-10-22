@@ -108,7 +108,8 @@ export interface ClientActions {
    * (`summary.queue`) and goes out when the turn ends; `now` sends it at once
    * instead, the agent's own way (into the running turn where it can be).
    */
-  send(sessionId: string, content: ContentBlock[], options?: { now?: boolean }): Promise<MethodResult<"sessions.prompt">["delivery"] | "failed">;
+  /** `clientMessageId`: the caller's own idempotency key (a retried watch command reuses its id), else a new one. */
+  send(sessionId: string, content: ContentBlock[], options?: { now?: boolean; clientMessageId?: string }): Promise<MethodResult<"sessions.prompt">["delivery"] | "failed">;
   retry(clientMessageId: string): Promise<void>;
   discard(clientMessageId: string): void;
   respond(sessionId: string, requestId: string, optionId: string): Promise<void>;
@@ -461,7 +462,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async send(sessionId, content, sendOptions) {
-        const clientMessageId = newId();
+        const clientMessageId = sendOptions?.clientMessageId || newId();
         const session = get().sessions[sessionId];
         // A turn is running (or messages already wait): this one is headed for the
         // queue, so that is where it shows from the start, not as a sent message first.

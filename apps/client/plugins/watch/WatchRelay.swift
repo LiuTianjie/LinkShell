@@ -9,6 +9,40 @@ struct WatchPollRefused: LocalizedError {
   var errorDescription: String? { "网关连接失败（409 \(code)）" }
 }
 
+/// The gateway is up but can't serve right now (a restart behind the proxy, its session limit,
+/// backpressure): worth waiting out, unlike an auth or protocol refusal.
+struct WatchGatewayUnavailable: LocalizedError {
+  let status: Int
+  let code: String
+  var errorDescription: String? { "网关暂时不可用（\(status)）" }
+}
+
+/// Rides out transient failures for a while, backing off, before the relay is given up. A watch's
+/// network drops whenever the wrist goes down or it hands over between Wi-Fi, iPhone and LTE.
+struct WatchRetry {
+  static let window: TimeInterval = 18
+  private var since: Date?
+  private var count = 0
+
+  /// The pause before trying again, or nil when the error is fatal or has lasted too long.
+  mutating func delay(after error: Error, now: Date = Date()) -> UInt64? {
+    guard Self.transient(error) else { return nil }
+    let start = since ?? now
+    since = start
+    guard now.timeIntervalSince(start) < Self.window else { return nil }
+    count += 1
+    return UInt64(min(4, 0.25 * pow(2, Double(count))) * 1_000_000_000)
+  }
+
+  static func transient(_ error: Error) -> Bool {
+    if error is WatchGatewayUnavailable { return true }
+    guard let error = error as? URLError else { return false }
+    let codes: [URLError.Code] = [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+      .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed, .dataNotAllowed, .internationalRoamingOff]
+    return codes.contains(error.code)
+  }
+}
+
 struct WatchMachine: Codable, Equatable, Identifiable {
   let id: String
   let signKey: String
@@ -39,11 +73,15 @@ final class WatchRelay {
   private var exchanging: Task<[String: Any], Error>?
   private var exchangingEmpty = false
   private var waking = false
+  /// Frames taken from the outbox are in an exchange that hasn't been answered yet.
+  private var carrying = false
+  private var stopped = false
   private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
   private var timeouts: [Int: Task<Void, Never>] = [:]
   private var nextID = 0
   private var generation = 0
   private let http: URLSession
+  private let ownsSession: Bool
   private let identity: WatchIdentity
   private let url: URL
   private let accountToken: String?
@@ -54,6 +92,7 @@ final class WatchRelay {
     config.timeoutIntervalForRequest = 30
     config.timeoutIntervalForResource = 35
     config.urlCache = nil
+    ownsSession = http == nil
     self.http = http ?? URLSession(configuration: config, delegate: WatchHTTPDelegate(), delegateQueue: nil)
   }
 
@@ -77,13 +116,22 @@ final class WatchRelay {
   }
 
   func start() {
-    guard loop == nil else { return }
+    guard loop == nil, !stopped else { return }
     generation += 1
     let epoch = generation
     loop = Task { [weak self] in
       guard let self else { return }
       do {
-        let opened = try await post(url.appendingPathComponent("v2/poll"), body: [:], token: nil)
+        var opening = WatchRetry()
+        var opened: [String: Any] = [:]
+        while true {
+          do { opened = try await post(url.appendingPathComponent("v2/poll"), body: [:], token: nil); break }
+          catch {
+            if Task.isCancelled || generation != epoch { throw CancellationError() }
+            guard let delay = opening.delay(after: error) else { throw error }
+            try await Task.sleep(nanoseconds: delay)
+          }
+        }
         guard let id = opened["id"] as? String, let token = opened["token"] as? String,
               !id.isEmpty, !token.isEmpty else { throw WatchLinkError("网关未返回连接凭证") }
         let endpoint = url.appendingPathComponent("v2/poll/\(id)")
@@ -98,8 +146,11 @@ final class WatchRelay {
           requestNumber += 1
           let sending = outbox
           outbox.removeAll()
+          carrying = !sending.isEmpty
+          defer { carrying = false }
           var reply: [String: Any]?
-          var retries = 0, busyRetries = 0, reused = false
+          var retry = WatchRetry()
+          var busyRetries = 0, reused = false
           exchange: while true {
             let body: [String: Any] = ["request": requestNumber, "ack": ack, "frames": sending, "waitMs": 1_000]
             do {
@@ -125,9 +176,8 @@ final class WatchRelay {
             } catch {
               if Task.isCancelled || generation != epoch { throw CancellationError() }
               // Retry the exact numbered exchange; the gateway deduplicates it.
-              guard retries < 2, (error as? URLError) != nil else { throw error }
-              retries += 1
-              try await Task.sleep(nanoseconds: UInt64(retries) * 500_000_000)
+              guard let delay = retry.delay(after: error) else { throw error }
+              try await Task.sleep(nanoseconds: delay)
             }
             guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
           }
@@ -148,12 +198,26 @@ final class WatchRelay {
     }
   }
 
+  /// Ends this relay for good; a new connection is a new relay.
   func stop() {
     generation += 1
     loop?.cancel(); loop = nil
     exchanging?.cancel(); exchanging = nil
     ready = false; outbox.removeAll()
     rejectPending(WatchLinkError("连接已断开，未确认操作请先刷新状态"))
+    // A session holds its delegate until invalidated: without this every relay would leak one.
+    if ownsSession && !stopped { http.invalidateAndCancel() }
+    stopped = true
+  }
+  /// Delivers what is already queued (a tunnel's close) before stopping, best effort: the host
+  /// would otherwise keep a dead tunnel and stream to it until the gateway expires this transport.
+  func finish(within seconds: TimeInterval = 1.5) async {
+    onReady = nil; onEvent = nil; onFrame = nil; onClosed = nil
+    let deadline = Date().addingTimeInterval(seconds)
+    while ready, loop != nil, !outbox.isEmpty || carrying, Date() < deadline {
+      try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    stop()
   }
   func request(_ method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
     guard ready else { throw WatchLinkError("网关尚未连接") }
@@ -249,10 +313,12 @@ final class WatchRelay {
     let (data, response) = try await http.data(for: request)
     guard let response = response as? HTTPURLResponse else { throw WatchLinkError("网关没有响应") }
     if response.statusCode == 404 { throw WatchLinkError("网关尚不支持手表独立连接，请升级网关或使用 iPhone 模式") }
-    if response.statusCode == 429 { throw WatchLinkError("连接过于频繁，请稍后重试") }
-    if response.statusCode == 409 {
-      throw WatchPollRefused(code: ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String ?? "")
+    let code = response.statusCode == 200 ? "" : ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String ?? ""
+    if [502, 503, 504].contains(response.statusCode) || (response.statusCode == 429 && code == "backpressure") {
+      throw WatchGatewayUnavailable(status: response.statusCode, code: code)
     }
+    if response.statusCode == 429 { throw WatchLinkError("连接过于频繁，请稍后重试") }
+    if response.statusCode == 409 { throw WatchPollRefused(code: code) }
     guard response.statusCode == 200 else { throw WatchLinkError("网关连接失败（\(response.statusCode)）") }
     guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw WatchLinkError("网关响应无效") }
     return object

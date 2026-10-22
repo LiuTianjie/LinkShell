@@ -37,6 +37,17 @@ interface Pairing {
   expiresAt: number;
 }
 
+/**
+ * Channels one device may hold here. Its apps keep one per computer, opened again on every
+ * reconnect; the old one is normally closed by the device or by its gateway connection being
+ * replaced, but neither is guaranteed (a watch that lost its link can't say goodbye). Each
+ * leftover keeps its subscriptions and terminal attaches streaming to the device until then.
+ */
+const MAX_TUNNELS_PER_DEVICE = 4;
+/** Answering frames for channels this computer doesn't have: at most this many per device per window. */
+const UNKNOWN_CHANNEL_REPLIES = 8;
+const UNKNOWN_CHANNEL_WINDOW_MS = 10_000;
+
 interface Tunnel {
   channel: SecureChannel;
   deviceId: string;
@@ -89,6 +100,8 @@ export class GatewayLink {
   private readonly tunnels = new Map<string, Tunnel>();
   private readonly online = new Set<string>();
   private readonly name: string;
+  /** Channels told `close` because they are unknown here, per device, in the current window. */
+  private readonly unknownReplies = new Map<string, { since: number; channels: Set<string> }>();
 
   constructor(private readonly options: GatewayLinkOptions) {
     this.identity = loadIdentity(options.home);
@@ -230,6 +243,11 @@ export class GatewayLink {
         }
         const previous = this.tunnels.get(key);
         if (previous) this.closeTunnel(previous, "reopened");
+        const held = [...this.tunnels.values()].filter((tunnel) => tunnel.deviceId === from.id);
+        // Oldest first (insertion order): a leftover from an earlier connection, not the one in use.
+        for (const stale of held.slice(0, Math.max(0, held.length - MAX_TUNNELS_PER_DEVICE + 1))) {
+          this.closeTunnel(stale, "superseded by a newer channel", true);
+        }
         const tunnel: Tunnel = { channel: answer.channel, deviceId: from.id, ch: frame.ch, closed: false };
         this.tunnels.set(key, tunnel);
         this.relay.send(from.id, answer.welcome);
@@ -246,7 +264,10 @@ export class GatewayLink {
       }
       case "data": {
         const tunnel = this.tunnels.get(key);
-        if (!tunnel) return;
+        if (!tunnel) {
+          this.closeUnknown(from, via, frame.ch);
+          return;
+        }
         let text: string;
         try {
           text = tunnel.channel.open(frame.box);
@@ -278,6 +299,24 @@ export class GatewayLink {
     if (paired) return paired.signKey === from.signKey && paired.boxKey === from.boxKey ? paired : undefined;
     if (via === "account" && this.relay.account) return from;
     return undefined;
+  }
+
+  /**
+   * A device is using a channel this computer doesn't have: it was dropped here (this computer's
+   * gateway connection was replaced, the host restarted) without the device hearing of it. Saying
+   * so lets it open a new one at once, instead of waiting out each request's timeout.
+   */
+  private closeUnknown(from: PublicIdentity, via: "paired" | "account", ch: string): void {
+    // Only a device that could have had a channel here; anyone else just gets silence.
+    if (!this.authorize(from, via)) return;
+    const now = Date.now();
+    for (const [id, window] of this.unknownReplies) if (now - window.since > UNKNOWN_CHANNEL_WINDOW_MS) this.unknownReplies.delete(id);
+    let window = this.unknownReplies.get(from.id);
+    if (!window) this.unknownReplies.set(from.id, (window = { since: now, channels: new Set() }));
+    // Once per channel and a few channels per window: a flood of frames gets a trickle of replies.
+    if (window.channels.has(ch) || window.channels.size >= UNKNOWN_CHANNEL_REPLIES) return;
+    window.channels.add(ch);
+    this.relay.send(from.id, { k: "close", ch, reason: "unknown channel" });
   }
 
   private closeTunnel(tunnel: Tunnel, reason: string, notify = false): void {

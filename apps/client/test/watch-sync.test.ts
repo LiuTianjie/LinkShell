@@ -43,6 +43,7 @@ vi.mock("../src/lib/client", () => ({
 }));
 
 vi.mock("../modules/link-layout", () => ({
+  WatchCommandRejected: class WatchCommandRejected extends Error {},
   syncNativeWatchSnapshot: harness.syncWatch,
   pendingNativeWatchCommandId: harness.pendingId,
   consumeNativeWatchCommand: harness.consumeCmd,
@@ -58,11 +59,15 @@ vi.mock("../modules/link-layout", () => ({
 
 const {
   buildClientWatchSnapshot,
+  createWatchSnapshotScheduler,
   executeWatchCommand,
   extractWatchTimelineItems,
   stripTerminalAnsi,
   useIOSWatchSync,
+  waitForLinkOnline,
 } = await import("../src/lib/watch-sync");
+const { WatchCommandRejected } = await import("../modules/link-layout");
+const { holdTerminal } = await import("../src/lib/terminal-attach");
 
 const permission: PendingPermissionSummary = {
   requestId: "req-42",
@@ -261,7 +266,7 @@ describe("Apple Watch client synchronization & command execution", () => {
       ctx,
     );
     expect(resPrompt.ok).toBe(true);
-    expect(actions.send).toHaveBeenCalledWith("s-run", [{ type: "text", text: "继续推进" }], { now: undefined });
+    expect(actions.send).toHaveBeenCalledWith("s-run", [{ type: "text", text: "继续推进" }], { now: undefined, clientMessageId: "c2" });
 
     const blockedPrompt = await executeWatchCommand(
       { id: "c3", kind: "prompt", computerKey: "mac-1", sessionId: "s-desk", text: "继续" },
@@ -339,24 +344,29 @@ describe("Apple Watch client synchronization & command execution", () => {
         selectComputer: vi.fn(),
         actions,
       },
+      true,
+      undefined,
+      true,
     );
 
     const cleanups = harness.effects
       .map((effect) => effect())
       .filter((cleanup): cleanup is () => void => typeof cleanup === "function");
 
-    for (let i = 0; i < 12; i += 1) {
-      await Promise.resolve();
-    }
+    // Each reply waits briefly for the state the command produced before it goes out.
+    await vi.advanceTimersByTimeAsync(1_200);
 
     expect(harness.syncWatch).toHaveBeenCalledTimes(1);
     expect(actions.send).toHaveBeenCalledTimes(2);
-    expect(actions.send).toHaveBeenNthCalledWith(1, "s-run", [{ type: "text", text: "第一步：运行测试" }], { now: undefined });
-    expect(actions.send).toHaveBeenNthCalledWith(2, "s-run", [{ type: "text", text: "第二步：汇报结果" }], { now: undefined });
+    expect(actions.send).toHaveBeenNthCalledWith(1, "s-run", [{ type: "text", text: "第一步：运行测试" }], { now: undefined, clientMessageId: "cmd-queued-1" });
+    expect(actions.send).toHaveBeenNthCalledWith(2, "s-run", [{ type: "text", text: "第二步：汇报结果" }], { now: undefined, clientMessageId: "cmd-queued-2" });
     expect(harness.completeCmd).toHaveBeenNthCalledWith(1, "cmd-queued-1", true, "已发送给 Agent");
     expect(harness.completeCmd).toHaveBeenNthCalledWith(2, "cmd-queued-2", true, "已发送给 Agent");
 
-    vi.advanceTimersByTime(30_000);
+    // The heartbeat doesn't resend unchanged content, until the watch would call it stale.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(harness.syncWatch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
     expect(harness.syncWatch).toHaveBeenCalledTimes(2);
 
     cleanups.forEach((cleanup) => cleanup());
@@ -591,6 +601,206 @@ describe("Apple Watch client synchronization & command execution", () => {
     expect(pagedSnap.sessions[0]?.items).toHaveLength(16);
     expect(pagedSnap.sessions[0]?.hasEarlier).toBe(true);
   });
+
+  it("answers invalid and expired commands instead of leaving the watch waiting", async () => {
+    harness.pendingId.mockResolvedValueOnce("cmd-long").mockResolvedValueOnce("cmd-gone").mockResolvedValue(null);
+    harness.consumeCmd.mockImplementation((id: string) =>
+      id === "cmd-long" ? Promise.reject(new WatchCommandRejected("内容过长，请缩短后重试")) : Promise.resolve(null),
+    );
+    useIOSWatchSync(
+      { computerKey: "mac-1", computerName: "Mac", sessions: [], terminals: [], online: true },
+      {
+        computerKey: "mac-1",
+        online: true,
+        sessions: {},
+        computers: [],
+        selectComputer: vi.fn(),
+        actions: makeActions(),
+      },
+    );
+    harness.effects.forEach((effect) => effect());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.completeCmd).toHaveBeenCalledWith("cmd-long", false, "内容过长，请缩短后重试");
+    expect(harness.completeCmd).toHaveBeenCalledWith("cmd-gone", false, "操作已过期，请在手表上重试");
+  });
+
+  it("debounces snapshots, caps the wait while output streams, and skips unchanged content", async () => {
+    const send = vi.fn(() => Promise.resolve(true));
+    const scheduler = createWatchSnapshotScheduler(send);
+    let text = "a";
+    const build = () =>
+      buildClientWatchSnapshot({
+        computerKey: "mac-1",
+        computerName: "Mac",
+        sessions: [{ ...runningSession, preview: text }],
+        terminals: [],
+        online: true,
+        now: Date.now(),
+      });
+
+    // The first snapshot after install goes at once.
+    scheduler.schedule(build);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // A delta every 100 ms: the trailing debounce alone would never fire.
+    for (let i = 0; i < 20; i += 1) {
+      text = `streaming ${i}`;
+      scheduler.schedule(build);
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(send.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(send.mock.calls.length).toBeLessThanOrEqual(3);
+
+    await vi.advanceTimersByTimeAsync(400);
+    const settled = send.mock.calls.length;
+    // Rebuilt with a new timestamp only: nothing to send.
+    scheduler.schedule(build);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await scheduler.flush()).toBe(false);
+    expect(send).toHaveBeenCalledTimes(settled);
+    scheduler.dispose();
+  });
+
+  it("reconnects for a watch command that finds the computer offline", async () => {
+    const actions = makeActions();
+    const base = {
+      computerKey: "mac-1",
+      online: false,
+      sessions: { "s-run": runningSession },
+      computers: [],
+      selectComputer: vi.fn(),
+      actions,
+    };
+    const back = vi.fn(() => Promise.resolve(true));
+    expect(await executeWatchCommand({ id: "r", kind: "refresh" }, { ...base, ensureOnline: back })).toEqual({
+      ok: true,
+      message: "已同步最新状态",
+    });
+    expect(back).toHaveBeenCalledOnce();
+    expect(actions.refresh).toHaveBeenCalledOnce();
+
+    const stillDown = await executeWatchCommand(
+      { id: "r2", kind: "refresh" },
+      { ...base, ensureOnline: () => Promise.resolve(false) },
+    );
+    expect(stillDown.ok).toBe(false);
+    expect(stillDown.message).toContain("连不上电脑");
+
+    const focusSession = vi.fn();
+    await executeWatchCommand(
+      { id: "o", kind: "open-session", computerKey: "mac-1", sessionId: "s-run" },
+      { ...base, online: true, focusSession },
+    );
+    expect(focusSession).toHaveBeenCalledWith("s-run");
+    expect(actions.openSession).not.toHaveBeenCalled();
+
+    let listener: ((status: string) => void) | undefined;
+    const link = { status: "reconnecting" as const, onStatus: (l: (status: string) => void) => ((listener = l), () => {}) };
+    const waiting = waitForLinkOnline(link as never, 5_000);
+    listener?.("online");
+    expect(await waiting).toBe(true);
+    const timedOut = waitForLinkOnline(link as never, 5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await timedOut).toBe(false);
+  });
+
+  it("follows sessions through the refcounted subscription, not by opening them directly", () => {
+    const actions = makeActions();
+    const releases = new Map<string, ReturnType<typeof vi.fn>>();
+    const subscribeSession = vi.fn((id: string) => {
+      const release = vi.fn();
+      releases.set(id, release);
+      return release;
+    });
+    const many = Array.from({ length: 6 }, (_, i) => ({ ...runningSession, id: `s-${i}`, updatedAt: 100 - i }));
+    useIOSWatchSync(
+      { computerKey: "mac-1", computerName: "Mac", sessions: many, terminals: [], online: true },
+      {
+        computerKey: "mac-1",
+        online: true,
+        sessions: Object.fromEntries(many.map((s) => [s.id, s])),
+        computers: [],
+        selectComputer: vi.fn(),
+        actions,
+        subscribeSession,
+      },
+      true,
+      undefined,
+      true,
+    );
+    const cleanups = harness.effects
+      .map((effect) => effect())
+      .filter((cleanup): cleanup is () => void => typeof cleanup === "function");
+    expect(subscribeSession.mock.calls.map(([id]) => id)).toEqual(["s-0", "s-1", "s-2", "s-3"]);
+    expect(actions.openSession).not.toHaveBeenCalled();
+    cleanups.forEach((cleanup) => cleanup());
+    for (const id of ["s-0", "s-1", "s-2", "s-3"]) expect(releases.get(id)).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a terminal attached while the watch still follows it", () => {
+    const call = vi.fn(() => Promise.resolve({}));
+    const link = { status: "online", call };
+    const releaseScreen = holdTerminal(link as never, "t-1");
+    const releaseWatch = holdTerminal(link as never, "t-1");
+    releaseScreen();
+    expect(call).not.toHaveBeenCalled();
+    releaseWatch();
+    releaseWatch();
+    expect(call).toHaveBeenCalledOnce();
+    expect(call).toHaveBeenCalledWith("terminals.detach", { terminalId: "t-1" });
+
+    const offline = { status: "reconnecting", call: vi.fn(() => Promise.resolve({})) };
+    holdTerminal(offline as never, "t-2")();
+    expect(offline.call).not.toHaveBeenCalled();
+  });
+
+  it("keeps line breaks and code blocks in conversation items", () => {
+    const answer = "修改如下：\n\n```ts\nconst a = 1;\n```\n\n- 第一点\n- 第二点";
+    const items = extractWatchTimelineItems({
+      sessionId: "s-run",
+      lastSeq: 2,
+      startSeq: 0,
+      items: [
+        { kind: "user", id: "u-1", ts: 1, blocks: [{ type: "text", text: `第一行\n第二行${"很长".repeat(400)}` }] },
+        { kind: "agent", id: "a-1", ts: 2, text: answer, streaming: false },
+      ],
+      index: { "u-1": 0, "a-1": 1 },
+      permissions: [],
+      config: [],
+      commands: [],
+      state: "idle",
+      turnActive: false,
+    });
+    expect(items[0]!.text.startsWith("第一行\n第二行")).toBe(true);
+    // No longer cut to 360 characters here; the snapshot's byte budget decides.
+    expect(items[0]!.text.length).toBeGreaterThan(800);
+    expect(items[1]!.text).toBe(answer);
+  });
+
+  it("answers a late retry with the earlier result instead of sending the prompt twice", async () => {
+    const actions = makeActions();
+    const prompt: WatchCommand = { id: "cmd-retry-1", kind: "prompt", computerKey: "mac-1", sessionId: "s-run", text: "继续" };
+    harness.consumeCmd.mockImplementation(() => Promise.resolve(prompt));
+    useIOSWatchSync(
+      { computerKey: "mac-1", computerName: "Mac", sessions: [runningSession], terminals: [], online: true },
+      {
+        computerKey: "mac-1",
+        online: true,
+        sessions: { "s-run": runningSession },
+        computers: [],
+        selectComputer: vi.fn(),
+        actions,
+      },
+    );
+    harness.effects.forEach((effect) => effect());
+    harness.onWatchCmd?.({ id: "cmd-retry-1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The reply was lost; the watch sends the same command again.
+    harness.onWatchCmd?.({ id: "cmd-retry-1" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(actions.send).toHaveBeenCalledOnce();
+    expect(actions.send).toHaveBeenCalledWith("s-run", [{ type: "text", text: "继续" }], { now: undefined, clientMessageId: "cmd-retry-1" });
+    expect(harness.completeCmd).toHaveBeenCalledTimes(2);
+    expect(harness.completeCmd).toHaveBeenNthCalledWith(2, "cmd-retry-1", true, "已发送给 Agent");
+  });
 });
-
-

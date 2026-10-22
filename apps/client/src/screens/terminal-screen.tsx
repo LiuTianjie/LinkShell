@@ -32,6 +32,7 @@ import {
 import { toggleTerminalSnippetsOpen, useTerminalSnippetsOpen } from "@/lib/terminal-snippets";
 import { useVoiceInput } from "@/lib/voice-input";
 import { branchOf, useGitInfo } from "@/lib/worktree";
+import { holdTerminal } from "@/lib/terminal-attach";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { pickFile, pickPhoto, shellQuote, upload, type Picked } from "@/lib/upload";
 import { colors } from "@/theme/colors";
@@ -109,6 +110,8 @@ export function TerminalScreen() {
     attaching.current = true;
     recentOutputRef.current = "";
     lastFrameRef.current = undefined;
+    // The watch may follow this terminal too: leaving the screen must not end its stream.
+    const releaseTerminal = holdTerminal(link, id);
     setRestoring(true);
     setRestoreError(null);
 
@@ -224,7 +227,7 @@ export function TerminalScreen() {
       generation++;
       offOutput();
       offOnline();
-      void link.call("terminals.detach", { terminalId: id }).catch(() => {});
+      releaseTerminal();
     };
   }, [appendRecentOutput, id, link, retry]);
 

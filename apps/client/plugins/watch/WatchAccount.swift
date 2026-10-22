@@ -40,6 +40,12 @@ struct WatchAccountSession: Codable {
   let email: String?
 }
 
+/// The account service refused the refresh token. Only this means the login is gone: a network
+/// failure or an outage leaves the session as it is, to be refreshed on a later try.
+struct WatchAuthExpired: LocalizedError {
+  var errorDescription: String? { "登录已过期，请重新登录" }
+}
+
 enum WatchMembership: Equatable {
   case unknown
   case free
@@ -246,7 +252,8 @@ final class WatchAccount: ObservableObject {
     guard response.statusCode == 200 else {
       if response.statusCode == 429 { throw WatchLinkError("登录尝试过于频繁，请稍后重试") }
       if response.statusCode >= 500 { throw WatchLinkError("账号服务暂时不可用，请稍后重试") }
-      throw WatchLinkError(grant == "password" ? "邮箱或密码不正确，或邮箱尚未验证" : "登录已过期，请重新登录")
+      if grant != "password" { throw WatchAuthExpired() }
+      throw WatchLinkError("邮箱或密码不正确，或邮箱尚未验证")
     }
     struct Token: Decodable {
       let access_token: String; let refresh_token: String; let expires_in: Double

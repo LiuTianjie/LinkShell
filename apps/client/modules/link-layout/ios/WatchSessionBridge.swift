@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 #if canImport(WatchConnectivity)
 import WatchConnectivity
 #endif
@@ -110,6 +113,7 @@ public enum WatchCommandQueue {
       if let reply = replyHandlers.removeValue(forKey: id) {
         reply(["ok": false, "message": "操作已过期，请在手表上重试"])
       }
+      endBackgroundWork(id, after: 0)
       return nil
     }
     return dict
@@ -124,10 +128,46 @@ public enum WatchCommandQueue {
       response["message"] = message
     }
     handler?(response)
+    endBackgroundWork(id, after: backgroundGrace)
+  }
+
+  #if canImport(UIKit)
+  /// A watch message wakes the phone app in the background, and the system may suspend it
+  /// again as soon as the delegate returns: halfway through the RPC, with the reply never
+  /// sent. Each command keeps the app running until it is answered, or for `backgroundLimit`.
+  @MainActor private static var backgroundTasks: [String: UIBackgroundTaskIdentifier] = [:]
+  #endif
+  /// The snapshot a command produced goes out just before its reply; give it time to leave.
+  static let backgroundGrace: TimeInterval = 2
+  static let backgroundLimit: TimeInterval = 25
+
+  static func beginBackgroundWork(_ id: String) {
+    #if canImport(UIKit)
+    Task { @MainActor in
+      guard backgroundTasks[id] == nil else { return }
+      let task = UIApplication.shared.beginBackgroundTask(withName: "LinkShell watch command") {
+        WatchCommandQueue.endBackgroundWork(id, after: 0)
+      }
+      guard task != .invalid else { return }
+      backgroundTasks[id] = task
+    }
+    endBackgroundWork(id, after: backgroundLimit)
+    #endif
+  }
+
+  static func endBackgroundWork(_ id: String, after delay: TimeInterval) {
+    #if canImport(UIKit)
+    Task { @MainActor in
+      if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+      guard let task = backgroundTasks.removeValue(forKey: id) else { return }
+      UIApplication.shared.endBackgroundTask(task)
+    }
+    #endif
   }
 
   // Dispatch outside the queue lock: WatchConnectivity callbacks must not reenter it.
   private static func rejectReply(_ id: String, message: String) {
+    endBackgroundWork(id, after: 0)
     guard let reply = replyHandlers.removeValue(forKey: id) else { return }
     DispatchQueue.main.async { reply(["ok": false, "message": message]) }
   }
@@ -186,8 +226,9 @@ public final class WatchSessionBridge: NSObject {
   }
 
   public func syncSnapshot(payload: [String: Any]) -> Bool {
+    // Unescaped slashes: paths and links fill the snapshot, and the phone sized it without the escapes.
     guard JSONSerialization.isValidJSONObject(payload),
-          let data = try? JSONSerialization.data(withJSONObject: payload),
+          let data = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes]),
           let json = String(data: data, encoding: .utf8) else {
       return false
     }
@@ -227,32 +268,50 @@ public final class WatchSessionBridge: NSObject {
   /// The application context only reaches the watch when its app runs, so a face would keep a
   /// request that was answered on the computer. A complication transfer wakes the watch in the
   /// background; the system allows a limited number a day, so it is spent only when what the face
-  /// shows changes: the number waiting or failed, or the computer.
-  private var lastComplicationKey: String?
+  /// shows changes: the number waiting or failed, or the computer. The last key is kept across
+  /// launches, so relaunching the app doesn't spend one on an unchanged face.
+  private static let complicationKeyDefault = "LinkShellWatch.complicationKey"
+  /// The link drops and comes back with network changes and app wakes; the face follows the
+  /// computer's online state only once it has held this long.
+  private static let onlineSettle: TimeInterval = 300
+  private var lastComplicationKey: String? = UserDefaults.standard.string(forKey: WatchSessionBridge.complicationKeyDefault)
+  private var observedOnline: Bool?
+  private var observedOnlineSince = Date()
 
   private func pushComplicationIfNeeded(payload: [String: Any], json: String) {
     guard WCSession.isSupported() else { return }
+    let now = Date()
+    let online = payload["online"] as? Bool ?? false
+    if online != observedOnline {
+      observedOnline = online
+      observedOnlineSince = now
+    }
     let session = WCSession.default
     guard session.activationState == .activated, session.isPaired, session.isComplicationEnabled else { return }
-    let key = Self.complicationKey(payload)
+    let shownOnline = now.timeIntervalSince(observedOnlineSince) >= Self.onlineSettle
+      ? online
+      : lastComplicationKey.map { $0.hasSuffix("|true") } ?? online
+    let key = Self.complicationKey(payload, online: shownOnline)
     guard key != lastComplicationKey, session.remainingComplicationUserInfoTransfers > 0 else { return }
     // Only the newest matters: an older transfer still queued would show a stale count first.
     for transfer in session.outstandingUserInfoTransfers where transfer.isCurrentComplicationInfo { transfer.cancel() }
     lastComplicationKey = key
-    session.transferCurrentComplicationUserInfo(["type": "snapshot", "snapshotJSON": json, "updatedAt": Date().timeIntervalSince1970])
+    UserDefaults.standard.set(key, forKey: Self.complicationKeyDefault)
+    session.transferCurrentComplicationUserInfo(["type": "snapshot", "snapshotJSON": json, "updatedAt": now.timeIntervalSince1970])
   }
   #endif
 
-  /// What a watch face shows; a transfer is spent only when this changes.
-  static func complicationKey(_ payload: [String: Any]) -> String {
-    [payload["computerKey"] as? String ?? "", "\(payload["online"] as? Bool ?? false)",
-     "\(payload["waitingCount"] as? Int ?? 0)", "\(payload["failedCount"] as? Int ?? 0)"].joined(separator: "|")
+  /// What a watch face shows; a transfer is spent only when this changes. Online is last.
+  static func complicationKey(_ payload: [String: Any], online: Bool) -> String {
+    [payload["computerKey"] as? String ?? "", "\(payload["waitingCount"] as? Int ?? 0)",
+     "\(payload["failedCount"] as? Int ?? 0)", "\(online)"].joined(separator: "|")
   }
 
   private func handleIncomingPayload(_ message: [String: Any], replyHandler: (([String: Any]) -> Void)?) {
     if let type = message["type"] as? String, type == "requestSnapshot" || type == "ping" {
       let refreshJSON = #"{"id":"watch-refresh-\#(Int(Date().timeIntervalSince1970 * 1000))","kind":"refresh"}"#
       if let id = WatchCommandQueue.enqueue(commandJSON: refreshJSON) {
+        WatchCommandQueue.beginBackgroundWork(id)
         NotificationCenter.default.post(name: WatchCommandQueue.notification, object: nil, userInfo: ["id": id])
       }
       if let snapshotJSON = WatchCommandQueue.latestSnapshotJSON() {
@@ -268,6 +327,7 @@ public final class WatchSessionBridge: NSObject {
       return
     }
     if let id = WatchCommandQueue.enqueue(commandJSON: commandJSON, replyHandler: replyHandler) {
+      WatchCommandQueue.beginBackgroundWork(id)
       NotificationCenter.default.post(name: WatchCommandQueue.notification, object: nil, userInfo: ["id": id])
     }
   }

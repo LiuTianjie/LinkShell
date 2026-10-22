@@ -68,22 +68,52 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     independent = value
     UserDefaults.standard.set(value, forKey: "LinkShellWatch.independent")
     snapshot = .empty
-    lastPhasesById = [:]; lastRequestIds = []; lastWaitingCount = 0
-    if let data = try? JSONEncoder().encode(WatchSnapshot.empty), let json = String(data: data, encoding: .utf8) { applySnapshotJSON(json) }
+    resetHapticBaseline()
+    if let data = try? JSONEncoder().encode(WatchSnapshot.empty), let json = String(data: data, encoding: .utf8) { applySnapshotJSON(json, force: true) }
     if value { direct.start() } else { requestRefresh(silent: true) }
   }
 
+  /// `true` for active and inactive alike: lowering the wrist, the Always On dim, a notification
+  /// or Control Center only make the app inactive, and it comes straight back.
   public func setForeground(_ value: Bool) {
     guard independent else { return }
-    if value { direct.start() } else { direct.stop() }
+    backgroundStop?.cancel(); backgroundStop = nil
+    if value { direct.resume(); return }
+    let stop = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 3_000_000_000)
+      guard !Task.isCancelled, let self else { return }
+      await self.direct.pause()
+    }
+    backgroundStop = stop
+    Self.holdBackgroundTime(until: stop)
+  }
+
+  /// Asks watchOS for the seconds it takes to close the tunnel properly, instead of suspending
+  /// the app with the host still streaming to it.
+  private static func holdBackgroundTime(until task: Task<Void, Never>) {
+    #if os(watchOS)
+    let done = DispatchSemaphore(value: 0)
+    Task { await task.value; done.signal() }
+    ProcessInfo.processInfo.performExpiringActivity(withReason: "关闭电脑连接") { expired in
+      if expired { done.signal() } else { _ = done.wait(timeout: .now() + 6) }
+    }
+    #endif
   }
 
   public static let cacheKey = WatchSnapshot.cacheKey
   public static let defaultAppGroup = "group.com.bd.linkshell"
-  private var lastWaitingCount = 0
+  // Haptics compare with the last snapshot in which the computer was reachable: an offline one
+  // in between (paused, reconnecting) neither announces nor resets anything.
+  private var baselineKey: String?
+  private var lastUnanswerable = 0
   private var lastPhasesById: [String: String] = [:]
-  private var lastRequestIds: Set<String> = []
+  private var announcedRequestIds: Set<String> = []
   private var lastGeneratedAt: Double = 0
+  private var lastPersistedAt: Double = 0
+  private var backgroundStop: Task<Void, Never>?
+  /// A prompt whose result never arrived. Sending the same text again reuses its id, which the
+  /// host deduplicates, so a retry can't deliver it twice.
+  private var unsettledPrompt: (id: String, sessionId: String, text: String, at: Date)?
   private var noticeTask: Task<Void, Never>?
   private var commandTimeoutTask: Task<Void, Never>?
   private var simPollTask: Task<Void, Never>?
@@ -156,33 +186,63 @@ public final class WatchSessionStore: NSObject, ObservableObject {
       return
     }
     snapshot = decoded
-    lastWaitingCount = decoded.waitingCount
     lastGeneratedAt = decoded.generatedAt
-    lastPhasesById = Dictionary(uniqueKeysWithValues: decoded.sessions.map { ($0.id, $0.phase) })
-    lastRequestIds = Set(decoded.sessions.flatMap { ($0.actions ?? []).map(\.requestId) })
+    if decoded.online { setHapticBaseline(decoded) }
   }
 
-  public func applySnapshotJSON(_ json: String) {
+  private func resetHapticBaseline() {
+    baselineKey = nil; lastUnanswerable = 0; lastPhasesById = [:]; announcedRequestIds = []
+  }
+  private func setHapticBaseline(_ value: WatchSnapshot) {
+    if baselineKey != value.computerKey { announcedRequestIds = [] }
+    baselineKey = value.computerKey
+    lastUnanswerable = Self.waitingWithoutActions(value)
+    lastPhasesById = Dictionary(value.sessions.map { ($0.id, $0.phase) }, uniquingKeysWith: { _, new in new })
+    let current = Self.requestIds(value)
+    // Remembered beyond the current list, so a request that disappears and comes back is not news.
+    announcedRequestIds = announcedRequestIds.count > 200 ? current : announcedRequestIds.union(current)
+  }
+  private static func requestIds(_ value: WatchSnapshot) -> Set<String> {
+    Set(value.sessions.flatMap { ($0.actions ?? []).map(\.requestId) })
+  }
+  /// Requests the watch can't answer carry no request id; their count stands in for one.
+  private static func waitingWithoutActions(_ value: WatchSnapshot) -> Int {
+    value.sessions.filter { $0.phase.hasPrefix("waiting") && ($0.actions ?? []).isEmpty }.count
+  }
+
+  /// `force` stores it even when it looks like nothing changed (switching modes clears the caches).
+  public func applySnapshotJSON(_ json: String, force: Bool = false) {
     guard let data = json.data(using: .utf8),
           let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data) else {
       return
     }
-    Self.defaults.set(json, forKey: Self.cacheKey)
-    Self.defaults.set(json, forKey: WatchSnapshot.widgetCacheKey)
-    UserDefaults.standard.set(json, forKey: Self.cacheKey)
-    if let fileURL = Self.sharedContainerSnapshotURL {
-      try? json.write(to: fileURL, atomically: true, encoding: .utf8)
+    // Nothing new to show: skip the stores, but let the face's age move on now and then.
+    var unchanged = decoded
+    unchanged.generatedAt = snapshot.generatedAt
+    if !force && unchanged == snapshot && decoded.generatedAt - lastPersistedAt < 60_000 { return }
+    // Paused or reconnecting to the same computer, the face keeps the last real picture (its counts
+    // fade with age) rather than "离线 / –". Another computer, or none, replaces it.
+    let persist = force || !independent || decoded.online || decoded.computerKey != snapshot.computerKey || snapshot.isUnsynced
+    if persist {
+      lastPersistedAt = decoded.generatedAt
+      Self.defaults.set(json, forKey: Self.cacheKey)
+      Self.defaults.set(json, forKey: WatchSnapshot.widgetCacheKey)
+      UserDefaults.standard.set(json, forKey: Self.cacheKey)
+      if let fileURL = Self.sharedContainerSnapshotURL {
+        try? json.write(to: fileURL, atomically: true, encoding: .utf8)
+      }
+      #if targetEnvironment(simulator)
+      try? json.write(to: URL(fileURLWithPath: "/tmp/linkshell-watch-snapshot.json"), atomically: true, encoding: .utf8)
+      #endif
     }
-    #if targetEnvironment(simulator)
-    try? json.write(to: URL(fileURLWithPath: "/tmp/linkshell-watch-snapshot.json"), atomically: true, encoding: .utf8)
-    #endif
 
-    // Proactive haptic feedback on state transitions
-    let incomingReqIds = Set(decoded.sessions.flatMap { ($0.actions ?? []).map(\.requestId) })
-    let hasNewApproval = !incomingReqIds.subtracting(lastRequestIds).isEmpty
-    if decoded.waitingCount > lastWaitingCount || (hasNewApproval && !lastPhasesById.isEmpty) {
+    // Proactive haptic feedback on state transitions, only for what is new since the computer was
+    // last reachable: requests never announced before, and turns that ended in between.
+    let comparable = decoded.online && baselineKey == decoded.computerKey
+    let incomingReqIds = Self.requestIds(decoded)
+    if comparable && (!incomingReqIds.subtracting(announcedRequestIds).isEmpty || Self.waitingWithoutActions(decoded) > lastUnanswerable) {
       WatchHaptics.attention()
-    } else if !lastPhasesById.isEmpty {
+    } else if comparable {
       var didFail = false
       var didComplete = false
       for s in decoded.sessions {
@@ -201,17 +261,15 @@ public final class WatchSessionStore: NSObject, ObservableObject {
       }
     }
 
-    let structureChanged =
-      decoded.waitingCount != lastWaitingCount ||
+    let structureChanged = persist && (
+      decoded.waitingCount != snapshot.waitingCount ||
       decoded.runningCount != snapshot.runningCount ||
       decoded.failedCount != snapshot.failedCount ||
       decoded.sessions.first?.id != snapshot.sessions.first?.id ||
-      decoded.sessions.first?.phase != snapshot.sessions.first?.phase
+      decoded.sessions.first?.phase != snapshot.sessions.first?.phase)
 
-    lastWaitingCount = decoded.waitingCount
     lastGeneratedAt = decoded.generatedAt
-    lastPhasesById = Dictionary(uniqueKeysWithValues: decoded.sessions.map { ($0.id, $0.phase) })
-    lastRequestIds = incomingReqIds
+    if decoded.online { setHapticBaseline(decoded) }
 
     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
       snapshot = decoded
@@ -468,9 +526,13 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !snapshot.computerKey.isEmpty else { return }
     WatchHaptics.click()
+    var id = "watch-prompt-\(UUID().uuidString)"
+    if let previous = unsettledPrompt, previous.sessionId == sessionId, previous.text == trimmed,
+       Date().timeIntervalSince(previous.at) < 600 { id = previous.id }
+    unsettledPrompt = (id, sessionId, trimmed, Date())
     sendCommand(
       [
-        "id": "watch-prompt-\(UUID().uuidString)",
+        "id": id,
         "kind": "prompt",
         "computerKey": snapshot.computerKey,
         "sessionId": sessionId,
@@ -554,6 +616,7 @@ public final class WatchSessionStore: NSObject, ObservableObject {
   }
 
   private func finishCommand(id: String, ok: Bool, message: String, silent: Bool) {
+    if ok, unsettledPrompt?.id == id { unsettledPrompt = nil }
     if !silent {
       guard pendingCommandId == id else { return }
       commandTimeoutTask?.cancel()
@@ -575,10 +638,14 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     if !silent {
       pendingCommandId = id
       commandTimeoutTask?.cancel()
+      let awaitsRPC = independent
       commandTimeoutTask = Task { @MainActor [weak self] in
         try? await Task.sleep(nanoseconds: 15_000_000_000)
-        guard !Task.isCancelled else { return }
-        self?.finishCommand(id: id, ok: false, message: "尚未收到结果，请同步状态后再操作", silent: false)
+        guard !Task.isCancelled, let self else { return }
+        // The RPC itself is still alive (until the host answers, it times out, or the tunnel
+        // closes); letting a retry start now could make the host carry the command out twice.
+        if awaitsRPC { if self.pendingCommandId == id { self.showNotice(ok: false, text: "电脑尚未回应，正在等待结果") }; return }
+        self.finishCommand(id: id, ok: false, message: "尚未收到结果，请同步状态后再操作", silent: false)
       }
     }
 

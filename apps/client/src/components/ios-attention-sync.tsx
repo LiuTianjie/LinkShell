@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useActions, useClient, useConnection } from "@/lib/client";
-import { listComputers, useComputers } from "@/lib/computers";
+import { useActions, useClient, useConnection, useSessionSubscriber } from "@/lib/client";
+import { listComputers, reconnectRelays, useComputers } from "@/lib/computers";
 import { useIOSAttentionSync } from "@/lib/session-attention";
 import { useTerminals } from "@/lib/terminals";
 import { useLiveActivityPush } from "@/lib/live-activity-push";
@@ -20,6 +20,7 @@ function ComputerAttentionSync() {
   const signedIn = useAccount((state) => Boolean(state.session));
   const { computer, link } = useConnection();
   const actions = useActions();
+  const subscribeSession = useSessionSubscriber();
   const sessionsById = useClient((state) => state.sessions);
   const sessions = useMemo(() => Object.values(sessionsById), [sessionsById]);
   const loaded = useClient((state) => state.sessionsLoaded);
@@ -84,6 +85,8 @@ function ComputerAttentionSync() {
       computers: watchComputers,
       selectComputer: (key) => useComputers.getState().select(key),
       actions,
+      subscribeSession,
+      reconnect: reconnectRelays,
       createTerminal: async ({ cwd, command }) => {
         const res = await link.call("terminals.create", {
           ...(cwd ? { cwd } : {}),
@@ -92,9 +95,6 @@ function ComputerAttentionSync() {
           rows: 24,
         });
         return res.terminal;
-      },
-      openTerminal: async (terminalId) => {
-        await link.call("terminals.attach", { terminalId });
       },
       terminalInput: async (terminalId, data) => {
         await link.call("terminals.input", { terminalId, data });

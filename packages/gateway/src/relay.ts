@@ -55,6 +55,8 @@ export interface GatewaySocket {
   ping(): void;
   pause(): void;
   resume(): void;
+  /** Its peer authenticated: a transport may hold connections that haven't to a tighter limit. */
+  authenticated?(): void;
 }
 
 interface Peer {
@@ -225,10 +227,14 @@ export class Gateway {
           return;
         }
         clearTimeout(timer);
+        socket.authenticated?.();
         send({ t: "ready", userId: peer.record.userId, email: peer.email });
         this.announce(peer.record, true);
         return;
       }
+      // Replaced by a newer connection with this identity: what still arrives on this one is from a
+      // connection that is over, and must not reach channels opened on the new one.
+      if (this.peers.get(peer.record.id)?.socket !== socket) return;
       switch (frame.t) {
         case "ping":
           send({ t: "pong" });
@@ -304,6 +310,11 @@ export class Gateway {
     this.peers.set(record.id, peer);
     // One live connection per identity: the newest wins.
     previous?.socket.close(4000, "replaced by a newer connection");
+    // The old connection's close won't announce anything, since this one is registered by then. A
+    // device's channels live and die with its gateway connection, so its machines must still drop
+    // them, and now: before this connection is ready and can open new ones. (Devices don't drop
+    // channels on presence; a machine that reconnects answers their next frame with `close`.)
+    if (previous && role === "device") this.announce(record, false);
     this.log(`${role} ${record.id.slice(0, 8)} "${record.name}" online${userId ? " (account)" : ""}`);
     return peer;
   }

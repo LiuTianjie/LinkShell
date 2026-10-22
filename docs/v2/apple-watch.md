@@ -38,10 +38,14 @@ same mobile product, not a separate App Store product.
   Poll transports have bounded request bodies, buffers, sessions and idle time,
   and share the existing connection rate limiter. `/v2/connect`, the challenge
   string and SQLite pairing schema are unchanged.
-- Connections run while the app is active, stop when it leaves the foreground,
-  and reconnect on return or connection failure. This does not provide a
-  persistent background connection or immediate background approval alerts.
-  Complications show the latest cached snapshot under watchOS refresh budgets.
+- Connections keep running while the app is inactive (wrist down, Always On,
+  overlays) and stop only after 3 s in the background, sending a tunnel `close`
+  first. Reconnecting to the same computer keeps the loaded history and
+  re-subscribes from the last seq held. Transient network or 5xx failures are
+  retried for about 18 s; tunnel failures re-open only the tunnel, and the third
+  in a row rebuilds the relay. This does not provide a persistent background
+  connection or immediate background approval alerts. Complications keep the
+  last real snapshot while paused, under watchOS refresh budgets.
 - Switching to iPhone mode uses the existing WatchConnectivity bridge. Switching
   modes clears the displayed computer and cached snapshot. An interrupted action
   never silently falls back to the other transport.

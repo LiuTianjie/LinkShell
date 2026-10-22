@@ -2,9 +2,16 @@ import type { ClientActions, HostLink, PromptProgress, SessionView, TimelineItem
 import {
   buildWatchSnapshot,
   cleanToolTitle,
+  cutWatchBytes,
   isWatchCommandCurrent,
   plainPreview,
+  sortWatchTerminals,
   tidyCommand,
+  WATCH_FOCUSED_ITEMS,
+  WATCH_MAX_ITEMS,
+  WATCH_TERMINAL_LIMIT,
+  watchPlainText,
+  watchTimelineText,
   type AgentInfo,
   type ContentBlock,
   type ProjectSummary,
@@ -28,9 +35,11 @@ import {
   subscribeNativeWatchCommands,
   subscribeNativeWatchStatus,
   syncNativeWatchSnapshot,
+  WatchCommandRejected,
   type NativeWatchStatus,
 } from "../../modules/link-layout";
 import { mergeLiveViewsIntoSessions, usePinnedSessionIds } from "./session-attention";
+import { holdTerminal } from "./terminal-attach";
 
 /* eslint-disable no-control-regex -- Terminal output contains ANSI escapes and backspace control bytes. */
 export function stripTerminalAnsi(raw: string): string {
@@ -136,6 +145,14 @@ function extractImageBlocks(blocks: ContentBlock[] | undefined): {
   };
 }
 
+/**
+ * Whole messages, line breaks and code included; the snapshot's byte budget decides how
+ * much of each reaches the watch (several KB for the open conversation, a line for others).
+ */
+function messageText(raw: string): string {
+  return cutWatchBytes(watchTimelineText(raw), 8_000);
+}
+
 export function cleanUserMessageText(raw: string): string {
   if (!raw) return "";
   let cleaned = raw.replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, "").trim();
@@ -202,19 +219,19 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
         id: item.id,
         kind: img.count > 0 && !text ? "image" : "user",
         title: img.count > 0 ? `你 · 附图(${img.count})` : "你",
-        text: (text || `发送了 ${img.count} 张图片`).slice(0, 360),
+        text: messageText(text) || `发送了 ${img.count} 张图片`,
         ...(img.base64 ? { imageBase64: img.base64, imageMimeType: img.mimeType } : {}),
         status: item.failed ? "failed" : item.pending ? "running" : "completed",
       });
     } else if (item.kind === "agent") {
-      const text = (plainPreview(item.text) || item.text).trim();
+      const text = messageText(item.text);
       const img = extractImageBlocks(item.attachments);
       if (text || img.count > 0) {
         result.push({
           id: item.id,
           kind: img.count > 0 && !text ? "image" : "assistant",
           title: img.count > 0 ? `Agent · 附图(${img.count})` : "Agent",
-          text: (text || `生成了 ${img.count} 张图片`).slice(0, 420),
+          text: text || `生成了 ${img.count} 张图片`,
           ...(img.base64 ? { imageBase64: img.base64, imageMimeType: img.mimeType } : {}),
           status: item.streaming ? "running" : "completed",
         });
@@ -234,13 +251,14 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
         }
       }
     } else if (item.kind === "thought") {
-      const text = plainPreview(item.text).trim();
+      // Thoughts show as plain Text on the watch; answers are rendered as markdown.
+      const text = cutWatchBytes(watchPlainText(item.text), 2_000);
       if (!text) continue;
       result.push({
         id: item.id,
         kind: "thought",
         title: "思考",
-        text: text.slice(0, 240),
+        text,
         status: item.streaming ? "running" : "completed",
       });
     } else if (item.kind === "tool") {
@@ -274,7 +292,7 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
           kind: "subagent",
           title: subName ? `子代理 · ${subName}` : `子代理 · ${subType}`,
           text: taskText.slice(0, 240),
-          ...(subOutput ? { detail: subOutput.slice(-240) } : {}),
+          ...(subOutput ? { detail: subOutput.slice(-800) } : {}),
           subagentType: subType.slice(0, 48),
           ...(subName ? { subagentName: subName.slice(0, 48) } : {}),
           ...(subModel ? { subagentModel: subModel.slice(0, 64) } : {}),
@@ -323,7 +341,7 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
                   ? "读取文件"
                   : "工具调用",
         text: cmdText.slice(0, 200),
-        ...(out ? { detail: out.slice(-220) } : {}),
+        ...(out ? { detail: out.slice(-1_200) } : {}),
         ...(toolImages.base64
           ? { imageBase64: toolImages.base64, imageMimeType: toolImages.mimeType }
           : {}),
@@ -396,6 +414,8 @@ export interface BuildClientWatchSnapshotInput {
   homeDir?: string;
   terminalOutputs?: Record<string, string>;
   itemLimits?: Record<string, number>;
+  /** The session the watch last opened. */
+  focusedSessionId?: string;
   now?: number;
 }
 
@@ -443,7 +463,10 @@ export function buildClientWatchSnapshot(input: BuildClientWatchSnapshotInput): 
   const hasEarlier: Record<string, boolean> = {};
   for (const [id, view] of Object.entries(input.views ?? {})) {
     const allItems = extractAllWatchTimelineItems(view);
-    const limit = input.itemLimits?.[id] ?? 14;
+    const limit =
+      id === input.focusedSessionId
+        ? Math.min(WATCH_MAX_ITEMS, Math.max(WATCH_FOCUSED_ITEMS, input.itemLimits?.[id] ?? 0))
+        : (input.itemLimits?.[id] ?? 14);
     const sliced = limit > 14 ? allItems.slice(-limit) : sliceWatchTimelineWithUserContext(allItems, limit);
     if (sliced.length > 0) {
       timelines[id] = sliced;
@@ -509,9 +532,10 @@ export function buildClientWatchSnapshot(input: BuildClientWatchSnapshotInput): 
     modes,
     configs,
     terminalOutputs: input.terminalOutputs,
-    availableAgents: availableAgents.length > 0 ? availableAgents : undefined,
+    availableAgents,
     workspaces,
     agentTiers,
+    focusedSessionId: input.focusedSessionId,
     now: input.now,
   });
 }
@@ -539,12 +563,23 @@ export type WatchActionContext = {
     setConfig?: ClientActions["setConfig"];
     loadEarlier?: ClientActions["loadEarlier"];
   };
+  /** The connection's refcounted subscribe; without it sessions are opened and never closed. */
+  subscribeSession?: (sessionId: string) => () => void;
+  /** Makes a session the watch's open one: subscribed, and given the largest share of the snapshot. */
+  focusSession?: (sessionId: string) => void;
+  /** Reconnects when offline; resolves whether the computer came back within the wait. */
+  ensureOnline?: (timeoutMs: number) => Promise<boolean>;
+  /** Reconnects the gateways too (the host link rides on one). */
+  reconnect?: () => void;
   onExpandTimeline?: (sessionId: string) => number;
   createTerminal?: (input: { cwd?: string; command?: string }) => Promise<TerminalInfo>;
   openTerminal?: (terminalId: string) => Promise<void>;
   terminalInput?: (terminalId: string, data: string) => Promise<void>;
   closeTerminal?: (terminalId: string) => Promise<void>;
 };
+
+/** Short enough to answer inside the watch's 15 s command timeout. */
+const WATCH_RECONNECT_WAIT_MS = 5_000;
 
 export async function executeWatchCommand(
   command: WatchCommand,
@@ -558,12 +593,18 @@ export async function executeWatchCommand(
       return { ok: true, message: `已切换到 ${target.name}` };
     }
 
+    // A watch command is often what wakes the phone, and the link's own retry timer
+    // doesn't run while the app is suspended: reconnect now instead of waiting for it.
+    let online = ctx.online;
+    if (!online && ctx.ensureOnline) online = await ctx.ensureOnline(WATCH_RECONNECT_WAIT_MS);
+
     if (command.kind === "refresh") {
-      if (ctx.online) await ctx.actions.refresh();
-      return { ok: true, message: ctx.online ? "已同步最新状态" : "正在重连电脑" };
+      if (!online) return { ok: false, message: "暂时连不上电脑，请确认电脑在线后重试" };
+      await ctx.actions.refresh();
+      return { ok: true, message: "已同步最新状态" };
     }
 
-    if (!ctx.online) {
+    if (!online) {
       return { ok: false, message: "电脑当前不在线，请稍后重试" };
     }
 
@@ -571,7 +612,8 @@ export async function executeWatchCommand(
       if (!isWatchCommandCurrent(command, ctx.computerKey, ctx.sessions[command.sessionId])) {
         return { ok: false, message: "无法打开该会话" };
       }
-      ctx.actions.openSession?.(command.sessionId);
+      if (ctx.focusSession) ctx.focusSession(command.sessionId);
+      else ctx.actions.openSession?.(command.sessionId);
       return { ok: true, message: "已加载会话详情" };
     }
 
@@ -579,6 +621,7 @@ export async function executeWatchCommand(
       if (!isWatchCommandCurrent(command, ctx.computerKey, ctx.sessions[command.sessionId])) {
         return { ok: false, message: "无法加载更早消息" };
       }
+      ctx.focusSession?.(command.sessionId);
       const nextLimit = ctx.onExpandTimeline ? ctx.onExpandTimeline(command.sessionId) : 28;
       const view = ctx.views?.[command.sessionId];
       const currentCount = view ? extractAllWatchTimelineItems(view).length : 0;
@@ -601,7 +644,8 @@ export async function executeWatchCommand(
         cwd: command.cwd,
         ...(promptText ? { prompt: [{ type: "text", text: promptText }] } : {}),
       });
-      ctx.actions.openSession?.(created.id);
+      if (ctx.focusSession) ctx.focusSession(created.id);
+      else ctx.actions.openSession?.(created.id);
       return { ok: true, message: `已启动 ${command.agent} 会话` };
     }
 
@@ -657,6 +701,8 @@ export async function executeWatchCommand(
     if (!isWatchCommandCurrent(command, ctx.computerKey, session, permissions)) {
       return { ok: false, message: "任务状态或选项已变化，请刷新后重试" };
     }
+    // Approvals also come from the overview; everything else is sent from the session's own page.
+    if (command.kind !== "action") ctx.focusSession?.(sessionId);
 
     switch (command.kind) {
       case "action": {
@@ -687,7 +733,8 @@ export async function executeWatchCommand(
         const delivery = await ctx.actions.send(
           session!.id,
           [{ type: "text", text: command.text.trim() }],
-          { now: command.now },
+          // The command's id is stable across the watch's retries: the host delivers it once.
+          { now: command.now, clientMessageId: command.id },
         );
         if (delivery === "failed") return { ok: false, message: "发送失败，请稍后重试" };
         return {
@@ -767,11 +814,154 @@ export function useWatchStatus(): {
   return { status, refreshStatus };
 }
 
+/** Content identity of a snapshot: the same state rebuilt later differs only in generatedAt. */
+export function watchSnapshotKey(snapshot: WatchSnapshot): string {
+  const { generatedAt: _generatedAt, ...content } = snapshot;
+  return JSON.stringify(content);
+}
+
+export interface WatchSnapshotScheduler {
+  /** Takes the latest builder; sends after a quiet spell, or at once if nothing was sent yet. */
+  schedule(build: () => WatchSnapshot): void;
+  /** Sends now when the content changed (or the last send is getting old). */
+  flush(): Promise<boolean>;
+  /** Waits for the next schedule (React committing what a command changed), then flushes. */
+  flushAfterUpdate(timeoutMs: number): Promise<boolean>;
+  dispose(): void;
+}
+
+/**
+ * Streaming agent output changes the views many times a second; each snapshot is a
+ * full bounded rebuild and a WatchConnectivity transfer. Trailing debounce with a
+ * maximum wait, and nothing sent when only the timestamp would change.
+ */
+export function createWatchSnapshotScheduler(
+  send: (snapshot: WatchSnapshot) => Promise<unknown>,
+  options: { delayMs?: number; maxWaitMs?: number; refreshMs?: number } = {},
+): WatchSnapshotScheduler {
+  const delayMs = options.delayMs ?? 400;
+  const maxWaitMs = options.maxWaitMs ?? 1_500;
+  // The watch calls a snapshot stale after 10 minutes; an unchanged one is resent well before.
+  const refreshMs = options.refreshMs ?? 4 * 60_000;
+  let build: (() => WatchSnapshot) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let firstPendingAt: number | undefined;
+  let lastKey: string | undefined;
+  let lastSentAt = 0;
+  const waiters = new Set<() => void>();
+
+  const flush = async (): Promise<boolean> => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    firstPendingAt = undefined;
+    if (!build) return false;
+    const snapshot = build();
+    const key = watchSnapshotKey(snapshot);
+    if (key === lastKey && Date.now() - lastSentAt < refreshMs) return false;
+    lastKey = key;
+    lastSentAt = Date.now();
+    try {
+      await send(snapshot);
+      return true;
+    } catch {
+      // Let the next change (or heartbeat) try again rather than deduping against a failed send.
+      if (lastKey === key) lastKey = undefined;
+      return false;
+    }
+  };
+
+  return {
+    schedule(next) {
+      build = next;
+      for (const wake of [...waiters]) wake();
+      if (lastKey === undefined) {
+        void flush();
+        return;
+      }
+      const now = Date.now();
+      firstPendingAt ??= now;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void flush(), Math.max(0, Math.min(delayMs, firstPendingAt + maxWaitMs - now)));
+    },
+    flush,
+    flushAfterUpdate(timeoutMs) {
+      if (!build) return Promise.resolve(false);
+      return new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(wait);
+          waiters.delete(done);
+          resolve();
+        };
+        const wait = setTimeout(done, timeoutMs);
+        waiters.add(done);
+      }).then(flush);
+    },
+    dispose() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      for (const wake of [...waiters]) wake();
+      build = undefined;
+    },
+  };
+}
+
+/** Resolves true once the link is online, false after `timeoutMs` or when it stops. */
+export function waitForLinkOnline(link: Pick<HostLink, "status" | "onStatus">, timeoutMs: number): Promise<boolean> {
+  if (link.status === "online") return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let off = () => {};
+    const timer = setTimeout(() => {
+      off();
+      resolve(false);
+    }, timeoutMs);
+    off = link.onStatus((status) => {
+      if (status !== "online" && status !== "stopped") return;
+      clearTimeout(timer);
+      off();
+      resolve(status === "online");
+    });
+  });
+}
+
+/**
+ * Results of commands already answered. The watch retries with the same id when a reply
+ * is lost; a late retry gets the earlier answer instead of running the command again.
+ * Module-wide, so it also survives a remount on computer switch.
+ */
+const completedWatchCommands = new Map<string, { ok: boolean; message: string; at: number }>();
+const COMPLETED_TTL_MS = 10 * 60_000;
+const COMPLETED_MAX = 200;
+
+function completedWatchCommand(id: string): { ok: boolean; message: string } | undefined {
+  const entry = completedWatchCommands.get(id);
+  if (!entry) return undefined;
+  if (Date.now() - entry.at > COMPLETED_TTL_MS) {
+    completedWatchCommands.delete(id);
+    return undefined;
+  }
+  return entry;
+}
+
+function rememberWatchCommand(id: string, result: { ok: boolean; message: string }): void {
+  completedWatchCommands.delete(id);
+  completedWatchCommands.set(id, { ...result, at: Date.now() });
+  // Insertion order is age order: drop the oldest past the bound.
+  for (const key of completedWatchCommands.keys()) {
+    if (completedWatchCommands.size <= COMPLETED_MAX) break;
+    completedWatchCommands.delete(key);
+  }
+}
+
+/** Sessions kept subscribed for the watch besides the one it has open (each one streams). */
+const WATCH_AUTO_OPEN = 4;
+
 export function useIOSWatchSync(
-  input: Omit<BuildClientWatchSnapshotInput, "pinnedSessionIds">,
+  input: Omit<BuildClientWatchSnapshotInput, "pinnedSessionIds" | "focusedSessionId">,
   ctx: WatchActionContext,
   enabled = true,
   link?: HostLink,
+  /** Overrides the native status (tests, the simulator bridge). */
+  watchInstalledOverride?: boolean,
 ) {
   const {
     computerKey,
@@ -789,91 +979,155 @@ export function useIOSWatchSync(
   } = input;
   const pinned = usePinnedSessionIds();
   const { status: watchStatus } = useWatchStatus();
-  const watchInstalled = watchStatus.paired && watchStatus.installed;
+  const watchInstalled = watchInstalledOverride ?? (watchStatus.paired && watchStatus.installed);
+  const active = Platform.OS === "ios" && enabled && watchInstalled;
   const terminalGenerationRef = useRef(0);
   const [terminalOutputs, setTerminalOutputs] = useState<Record<string, string>>({});
   const [itemLimits, setItemLimits] = useState<Record<string, number>>({});
+  const [focusedSessionId, setFocusedSessionId] = useState<string | undefined>(undefined);
+  const focusedSessionRef = useRef<string | undefined>(undefined);
+  const focusedTerminalRef = useRef<string | undefined>(undefined);
   const itemLimitsRef = useRef<Record<string, number>>({});
   const rawTerminalBuffersRef = useRef<Record<string, string>>({});
-  const attachedTerminalsRef = useRef<Set<string>>(new Set());
-  const openedSessionsRef = useRef<Set<string>>(new Set());
+  const heldTerminalsRef = useRef<Map<string, () => void>>(new Map());
+  const heldSessionsRef = useRef<Map<string, () => void>>(new Map());
+  const schedulerRef = useRef<WatchSnapshotScheduler | null>(null);
+  schedulerRef.current ??= createWatchSnapshotScheduler(syncNativeWatchSnapshot);
+  const scheduler = schedulerRef.current;
+
+  const attachForWatch = async (terminalId: string) => {
+    if (!link) return;
+    const generation = terminalGenerationRef.current;
+    const res = await link.call("terminals.attach", { terminalId });
+    if (generation !== terminalGenerationRef.current || !heldTerminalsRef.current.has(terminalId)) return;
+    rawTerminalBuffersRef.current[terminalId] = (res.replay ?? "").slice(-8192);
+    const cleaned = stripTerminalAnsi(rawTerminalBuffersRef.current[terminalId]!);
+    setTerminalOutputs((prev) => (prev[terminalId] === cleaned ? prev : { ...prev, [terminalId]: cleaned }));
+  };
+
   const ctxRef = useRef(ctx);
   ctxRef.current = {
     ...ctx,
+    focusSession: (sessionId: string) => {
+      if (focusedSessionRef.current === sessionId) return;
+      focusedSessionRef.current = sessionId;
+      setFocusedSessionId(sessionId);
+    },
+    ensureOnline: async (timeoutMs: number) => {
+      if (!link) return ctx.online;
+      if (link.status === "online") return true;
+      if (link.status !== "connecting") {
+        ctx.reconnect?.();
+        link.reconnectNow();
+      }
+      return waitForLinkOnline(link, timeoutMs);
+    },
+    // The attach's replay is the terminal's current screen: it is what the watch opened it for.
+    openTerminal: link
+      ? async (terminalId: string) => {
+          focusedTerminalRef.current = terminalId;
+          if (!heldTerminalsRef.current.has(terminalId)) {
+            heldTerminalsRef.current.set(terminalId, holdTerminal(link, terminalId));
+          }
+          await attachForWatch(terminalId);
+        }
+      : ctx.openTerminal,
     onExpandTimeline: (sessionId: string) => {
-      const next = Math.min(50, (itemLimitsRef.current[sessionId] ?? 14) + 15);
+      const base = itemLimitsRef.current[sessionId] ?? (sessionId === focusedSessionRef.current ? WATCH_FOCUSED_ITEMS : 14);
+      const next = Math.min(WATCH_MAX_ITEMS, base + 15);
       itemLimitsRef.current = { ...itemLimitsRef.current, [sessionId]: next };
       setItemLimits(itemLimitsRef.current);
       return next;
     },
   };
 
+  // Terminal output for the terminals the watch shows; a new connection has no listeners
+  // on the host, so they are attached again whenever the link comes back.
   useEffect(() => {
-    openedSessionsRef.current.clear();
-    attachedTerminalsRef.current.clear();
-    rawTerminalBuffersRef.current = {};
-    setTerminalOutputs({});
-    terminalGenerationRef.current += 1;
-    if (Platform.OS !== "ios" || !online || !enabled || !watchInstalled || !link) return;
+    if (!active || !link) return;
     const offOutput = link.on("terminal.output", ({ terminalId, data }) => {
-      if (!data || !attachedTerminalsRef.current.has(terminalId)) return;
+      if (!data || !heldTerminalsRef.current.has(terminalId)) return;
       const nextRaw = ((rawTerminalBuffersRef.current[terminalId] ?? "") + data).slice(-8192);
       rawTerminalBuffersRef.current[terminalId] = nextRaw;
       const cleaned = stripTerminalAnsi(nextRaw);
       setTerminalOutputs((prev) => (prev[terminalId] === cleaned ? prev : { ...prev, [terminalId]: cleaned }));
     });
+    const offOnline = link.onOnline(() => {
+      for (const id of heldTerminalsRef.current.keys()) void attachForWatch(id).catch(() => {});
+    });
     return () => {
       terminalGenerationRef.current += 1;
       offOutput();
+      offOnline();
     };
-  }, [online, enabled, watchInstalled, link]);
+    // attachForWatch only reads refs and the link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, link]);
 
-  // Automatically open top recent sessions so their timelines are available on Apple Watch
+  // Exactly the terminals the snapshot carries, held so the terminal screen's detach on
+  // leaving doesn't end their stream (and released, detaching them, when they drop out).
   useEffect(() => {
-    if (Platform.OS !== "ios" || !online || !enabled || !watchInstalled || !ctx.actions.openSession) return;
-    const live = sessions
-      .filter((s) => !s.archived)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 6);
-    for (const s of live) {
-      if (!views?.[s.id] && !openedSessionsRef.current.has(s.id)) {
-        openedSessionsRef.current.add(s.id);
-        ctx.actions.openSession(s.id);
-      }
+    const held = heldTerminalsRef.current;
+    const wanted = new Set<string>();
+    if (active && link) {
+      for (const terminal of sortWatchTerminals(terminals).slice(0, WATCH_TERMINAL_LIMIT)) wanted.add(terminal.id);
+      const focused = focusedTerminalRef.current;
+      if (focused && terminals.some((t) => t.id === focused)) wanted.add(focused);
     }
-  }, [online, enabled, watchInstalled, sessions, views, ctx.actions]);
-
-  // Attach to active terminals and keep clean output previews for Apple Watch
-  useEffect(() => {
-    if (Platform.OS !== "ios" || !online || !enabled || !watchInstalled || !link) return;
-    const generation = terminalGenerationRef.current;
-    const topTerminals = [...terminals]
-      .sort((a, b) => b.activeAt - a.activeAt)
-      .slice(0, 4);
-
-    for (const term of topTerminals) {
-      if (attachedTerminalsRef.current.has(term.id)) continue;
-      attachedTerminalsRef.current.add(term.id);
-      void link
-        .call("terminals.attach", { terminalId: term.id })
-        .then((res) => {
-          if (generation !== terminalGenerationRef.current || !res.replay) return;
-          rawTerminalBuffersRef.current[term.id] = res.replay.slice(-8192);
-          const cleaned = stripTerminalAnsi(rawTerminalBuffersRef.current[term.id]!);
-          if (cleaned) {
-            setTerminalOutputs((prev) => (prev[term.id] === cleaned ? prev : { ...prev, [term.id]: cleaned }));
-          }
-        })
-        .catch(() => {
-          if (generation === terminalGenerationRef.current) attachedTerminalsRef.current.delete(term.id);
-        });
+    for (const [id, release] of held) {
+      if (wanted.has(id)) continue;
+      release();
+      held.delete(id);
+      delete rawTerminalBuffersRef.current[id];
     }
-  }, [online, enabled, watchInstalled, terminals, link]);
+    for (const id of wanted) {
+      if (held.has(id) || !link) continue;
+      held.set(id, holdTerminal(link, id));
+      if (link.status === "online") void attachForWatch(id).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, link, terminals]);
+
+  // Timelines come from subscribed sessions: the few most recent, and the one the watch
+  // has open. Through the refcount, so a phone screen closing the same session doesn't
+  // close it under the watch.
+  useEffect(() => {
+    const held = heldSessionsRef.current;
+    const wanted = new Set<string>();
+    if (active) {
+      const live = sessions.filter((s) => !s.archived).sort((a, b) => b.updatedAt - a.updatedAt);
+      for (const s of live.slice(0, WATCH_AUTO_OPEN)) wanted.add(s.id);
+      if (focusedSessionId && live.some((s) => s.id === focusedSessionId)) wanted.add(focusedSessionId);
+    }
+    for (const [id, release] of held) {
+      if (wanted.has(id)) continue;
+      release();
+      held.delete(id);
+    }
+    const subscribe =
+      ctx.subscribeSession ??
+      ((id: string) => {
+        ctx.actions.openSession(id);
+        return () => {};
+      });
+    for (const id of wanted) if (!held.has(id)) held.set(id, subscribe(id));
+  }, [active, sessions, focusedSessionId, ctx.subscribeSession, ctx.actions]);
+
+  useEffect(
+    () => () => {
+      for (const release of heldSessionsRef.current.values()) release();
+      heldSessionsRef.current.clear();
+      for (const release of heldTerminalsRef.current.values()) release();
+      heldTerminalsRef.current.clear();
+      schedulerRef.current?.dispose();
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (Platform.OS !== "ios" || !enabled) return;
-    const sync = () => {
-      const snapshot = buildClientWatchSnapshot({
+    if (!active) return;
+    scheduler.schedule(() =>
+      buildClientWatchSnapshot({
         computerKey,
         computerName,
         sessions,
@@ -887,25 +1141,14 @@ export function useIOSWatchSync(
         homeDir,
         terminalOutputs,
         itemLimits,
+        focusedSessionId,
         now,
         pinnedSessionIds: pinned,
-      });
-      void syncNativeWatchSnapshot(snapshot);
-    };
-    sync();
-    const heartbeat = setInterval(() => {
-      if (online) sync();
-    }, 30_000);
-    const sub = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "inactive" || nextState === "background" || nextState === "active") {
-        sync();
-      }
-    });
-    return () => {
-      clearInterval(heartbeat);
-      sub.remove();
-    };
+      }),
+    );
   }, [
+    active,
+    scheduler,
     computerKey,
     computerName,
     sessions,
@@ -919,26 +1162,61 @@ export function useIOSWatchSync(
     homeDir,
     terminalOutputs,
     itemLimits,
+    focusedSessionId,
     now,
     pinned,
-    enabled,
   ]);
+
+  useEffect(() => {
+    if (!active) return;
+    const heartbeat = setInterval(() => {
+      if (online) void scheduler.flush();
+    }, 30_000);
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "inactive" || nextState === "background" || nextState === "active") {
+        void scheduler.flush();
+      }
+    });
+    return () => {
+      clearInterval(heartbeat);
+      sub.remove();
+    };
+  }, [active, online, scheduler]);
 
   useEffect(() => {
     if (Platform.OS !== "ios") return;
     let disposed = false;
-    const handled = new Set<string>();
+    const inFlight = new Set<string>();
 
     const handleCommand = async ({ id }: { id: string }) => {
-      if (disposed || !id || handled.has(id)) return;
-      handled.add(id);
+      if (disposed || !id || inFlight.has(id)) return;
+      const earlier = completedWatchCommand(id);
+      if (earlier) {
+        // A retry of something already done: take it off the queue and answer as before.
+        await consumeNativeWatchCommand(id).catch(() => null);
+        await completeNativeWatchCommand(id, earlier.ok, earlier.message);
+        return;
+      }
+      inFlight.add(id);
       try {
         const command = await consumeNativeWatchCommand(id);
-        if (!command) return;
+        if (!command) {
+          // Gone or expired on the native side; a reply that was already sent is not repeated.
+          await completeNativeWatchCommand(id, false, "操作已过期，请在手表上重试");
+          return;
+        }
         const result = await executeWatchCommand(command, ctxRef.current);
+        rememberWatchCommand(id, result);
+        // Woken in the background, the phone may be suspended once the reply is out:
+        // send the state the command produced first.
+        await schedulerRef.current?.flushAfterUpdate(500);
         await completeNativeWatchCommand(id, result.ok, result.message);
-      } catch {
-        await completeNativeWatchCommand(id, false, "处理手表指令时出错");
+      } catch (error) {
+        const message = error instanceof WatchCommandRejected ? error.message : "处理手表指令时出错";
+        if (error instanceof WatchCommandRejected) rememberWatchCommand(id, { ok: false, message });
+        await completeNativeWatchCommand(id, false, message);
+      } finally {
+        inFlight.delete(id);
       }
     };
 
@@ -947,9 +1225,12 @@ export function useIOSWatchSync(
       if (draining || disposed) return;
       draining = true;
       try {
+        const seen = new Set<string>();
         while (!disposed) {
           const id = await pendingNativeWatchCommandId();
-          if (!id || handled.has(id)) break;
+          // A retry waiting behind its own running original is picked up once that finishes.
+          if (!id || inFlight.has(id) || seen.has(id)) break;
+          seen.add(id);
           await handleCommand({ id });
         }
       } catch {

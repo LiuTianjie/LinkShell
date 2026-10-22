@@ -116,6 +116,20 @@ describe("client core against a real host", () => {
     call.mockRestore();
   });
 
+  it("sends a caller's clientMessageId, so a retried send is delivered once", async () => {
+    const { link, store } = await setup();
+    const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });
+    await waitFor(() => store.getState().ready[session.id]);
+    const call = vi.spyOn(link, "call");
+    await store.getState().send(session.id, [{ type: "text", text: "from the watch" }], { clientMessageId: "watch-cmd-1" });
+    await store.getState().send(session.id, [{ type: "text", text: "own id" }]);
+    const ids = call.mock.calls.filter(([method]) => method === "sessions.prompt").map(([, params]) => (params as { clientMessageId: string }).clientMessageId);
+    expect(ids[0]).toBe("watch-cmd-1");
+    expect(ids[1]).toBeTruthy();
+    expect(ids[1]).not.toBe("watch-cmd-1");
+    call.mockRestore();
+  });
+
   it("reloads task snapshots after a disconnect even when the launching conversation is not loaded", async () => {
     const { host, store } = await setup();
     const session = await store.getState().createSession({ agent: "fake", cwd: "/w" });

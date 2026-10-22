@@ -212,30 +212,57 @@ export async function getNativeWatchStatus(): Promise<NativeWatchStatus> {
   return DEFAULT_WATCH_STATUS;
 }
 
-let watchWork: Promise<unknown> = Promise.resolve();
-function serializeWatchWork<T>(work: () => Promise<T>): Promise<T> {
-  const result = watchWork.then(work);
-  watchWork = result.catch(() => {});
-  return result;
+async function pushWatchSnapshot(bounded: WatchSnapshot): Promise<boolean> {
+  const nativeOk = await (nativeLayout?.syncWatchSnapshot?.(bounded) ?? Promise.resolve(false));
+  if (SIM_WATCH_BRIDGE_URL) {
+    try {
+      await fetch(`${SIM_WATCH_BRIDGE_URL}/snapshot`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(bounded),
+      });
+      return true;
+    } catch {
+      // Ignore when simulator bridge is not running
+    }
+  }
+  return nativeOk;
+}
+
+// One transfer in flight; snapshots arriving meanwhile replace each other, since only the
+// newest is worth sending. Every caller learns how the send that covered it went.
+let watchNext: { snapshot: WatchSnapshot; waiters: ((ok: boolean) => void)[] } | null = null;
+let watchDraining = false;
+
+async function drainWatchSnapshots(): Promise<void> {
+  watchDraining = true;
+  try {
+    while (watchNext) {
+      const job = watchNext;
+      watchNext = null;
+      let ok = false;
+      try {
+        ok = await pushWatchSnapshot(job.snapshot);
+      } catch {
+        ok = false;
+      }
+      for (const resolve of job.waiters) resolve(ok);
+    }
+  } finally {
+    watchDraining = false;
+  }
 }
 
 export function syncNativeWatchSnapshot(snapshot: WatchSnapshot): Promise<boolean> {
   const bounded = watchSnapshotContent(snapshot);
-  return serializeWatchWork(async () => {
-    const nativeOk = await (nativeLayout?.syncWatchSnapshot?.(bounded) ?? Promise.resolve(false));
-    if (SIM_WATCH_BRIDGE_URL) {
-      try {
-        await fetch(`${SIM_WATCH_BRIDGE_URL}/snapshot`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(bounded),
-        });
-        return true;
-      } catch {
-        // Ignore when simulator bridge is not running
-      }
+  return new Promise((resolve) => {
+    if (watchNext) {
+      watchNext.snapshot = bounded;
+      watchNext.waiters.push(resolve);
+    } else {
+      watchNext = { snapshot: bounded, waiters: [resolve] };
     }
-    return nativeOk;
+    if (!watchDraining) void drainWatchSnapshots();
   });
 }
 
@@ -256,6 +283,10 @@ export async function pendingNativeWatchCommandId(): Promise<string | null> {
   return null;
 }
 
+/** A command that arrived but isn't valid; its message is the reply the watch shows. */
+export class WatchCommandRejected extends Error {}
+
+/** Null when the command is gone or expired (the native queue has replied); throws WatchCommandRejected when invalid. */
 export async function consumeNativeWatchCommand(id: string): Promise<WatchCommand | null> {
   let raw = await (nativeLayout?.consumeWatchCommand?.(id) ?? Promise.resolve(null));
   if (!raw && SIM_WATCH_BRIDGE_URL) {
@@ -275,7 +306,12 @@ export async function consumeNativeWatchCommand(id: string): Promise<WatchComman
   }
   if (!raw) return null;
   const parsed = watchCommandSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  if (parsed.success) return parsed.data;
+  throw new WatchCommandRejected(
+    parsed.error.issues.some((issue) => issue.code === "too_big")
+      ? "内容过长，请缩短后重试"
+      : "手表指令无法识别，请更新 iPhone 和手表上的 LinkShell",
+  );
 }
 
 export async function completeNativeWatchCommand(id: string, ok: boolean, message?: string): Promise<void> {

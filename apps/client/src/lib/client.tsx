@@ -200,6 +200,11 @@ export function useActions(): ClientActions {
   }, [store]);
 }
 
+/** The refcounted subscribe, for holders that aren't one screen (the watch follows several sessions). */
+export function useSessionSubscriber(): (sessionId: string) => () => void {
+  return useConnectionContext().connection.subscribeSession;
+}
+
 /** Detail routes also work when opened directly, without stealing the parent screen's subscription. */
 export function useSessionSubscription(sessionId: string, enabled = true) {
   const { subscribeSession } = useConnectionContext().connection;

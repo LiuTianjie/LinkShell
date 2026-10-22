@@ -190,7 +190,8 @@ public struct WatchSnapshot: Codable, Hashable {
     runningCount: 0,
     failedCount: 0,
     completedCount: 0,
-    availableAgents: ["claude", "codex", "gemini", "cursor", "opencode"],
+    // Only agents a computer reports: an invented list would offer agents it doesn't have.
+    availableAgents: [],
     workspaces: [],
     computers: [],
     sessions: [],

@@ -77,8 +77,9 @@ export const watchTimelineItemSchema = z.object({
     "error",
   ]),
   title: z.string().max(120).optional(),
-  text: z.string().max(600),
-  detail: z.string().max(500).optional(),
+  // The session the watch has open carries several KB per item (see watchSnapshotContent).
+  text: z.string().max(8000),
+  detail: z.string().max(4000).optional(),
   status: z.enum(["running", "completed", "failed", "waiting"]).optional(),
   filePath: z.string().max(200).optional(),
   diffAdded: z.number().int().min(0).optional(),
@@ -156,6 +157,8 @@ export const watchSnapshotSchema = z.object({
   computerKey: z.string().max(512),
   computerName: z.string().max(80),
   online: z.boolean(),
+  /** The session the watch last opened: it keeps the largest share of the byte budget. */
+  focusedSessionId: z.string().min(1).max(128).optional(),
   statusLabel: z.string().max(80),
   waitingCount: z.number().int().min(0),
   runningCount: z.number().int().min(0),
@@ -169,6 +172,18 @@ export const watchSnapshotSchema = z.object({
 });
 export type WatchSnapshot = z.infer<typeof watchSnapshotSchema>;
 
+export const WATCH_PROMPT_MAX = 8000;
+/**
+ * WCSession's applicationContext and sendMessage carry about 65 KB; the rest is
+ * headroom for the envelope and for Swift's re-serialization of the JSON.
+ */
+export const WATCH_SNAPSHOT_BYTE_LIMIT = 56_000;
+/** Snapshot sessions and terminals; the phone attaches exactly the terminals it sends. */
+export const WATCH_SESSION_LIMIT = 10;
+export const WATCH_TERMINAL_LIMIT = 6;
+export const WATCH_FOCUSED_ITEMS = 40;
+export const WATCH_MAX_ITEMS = 60;
+
 export const watchCommandSchema = z.discriminatedUnion("kind", [
   z.object({
     id: z.string().min(1).max(128),
@@ -180,7 +195,8 @@ export const watchCommandSchema = z.discriminatedUnion("kind", [
     kind: z.literal("prompt"),
     computerKey: z.string().min(1).max(512),
     sessionId: z.string().min(1).max(128),
-    text: z.string().min(1).max(2000),
+    // Dictation runs long; the host's sessions.prompt has no limit of its own.
+    text: z.string().min(1).max(WATCH_PROMPT_MAX),
     now: z.boolean().optional(),
   }),
   z.object({
@@ -227,7 +243,7 @@ export const watchCommandSchema = z.discriminatedUnion("kind", [
     computerKey: z.string().min(1).max(512),
     agent: z.string().min(1).max(48),
     cwd: z.string().min(1).max(240),
-    prompt: z.string().max(2000).optional(),
+    prompt: z.string().max(WATCH_PROMPT_MAX).optional(),
   }),
   z.object({
     id: z.string().min(1).max(128),
@@ -247,7 +263,7 @@ export const watchCommandSchema = z.discriminatedUnion("kind", [
     kind: z.literal("terminal-input"),
     computerKey: z.string().min(1).max(512),
     terminalId: z.string().min(1).max(128),
-    data: z.string().min(1).max(2000),
+    data: z.string().min(1).max(WATCH_PROMPT_MAX),
   }),
   z.object({
     id: z.string().min(1).max(128),
@@ -284,6 +300,105 @@ export const DEFAULT_WATCH_QUICK_PROMPTS: readonly WatchQuickPrompt[] = [
 
 function cut(value: string | undefined, max: number): string {
   return [...(value ?? "")].slice(0, max).join("");
+}
+
+function utf8Length(value: string): number {
+  let bytes = 0;
+  for (const ch of value) {
+    const code = ch.codePointAt(0)!;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+/**
+ * Cuts to a UTF-8 byte budget: the WatchConnectivity limit is in bytes, and CJK text
+ * takes three a character, so a character count would let it overflow threefold.
+ */
+export function cutWatchBytes(value: string | undefined, maxBytes: number): string {
+  const text = value ?? "";
+  // Every character is at most 4 bytes, so short strings need no counting.
+  if (text.length * 4 <= maxBytes || utf8Length(text) <= maxBytes) return text;
+  const budget = Math.max(0, maxBytes - 3);
+  let used = 0;
+  let end = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (used + size > budget) break;
+    used += size;
+    end += ch.length;
+  }
+  return `${text.slice(0, end).trimEnd()}…`;
+}
+
+/**
+ * Message text for the watch's conversation view. Unlike plainPreview (one line, for
+ * lists and Live Activities) it keeps line breaks and markdown: the watch renders
+ * answers as markdown, code blocks included. Only whitespace noise is tidied.
+ */
+export function watchTimelineText(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, "  ")
+    .replace(/[ \u00a0]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Line-kept text for rows the watch shows as plain Text (thoughts): inline markup
+ * outside code (emphasis, headings, links) is unwrapped; code lines stay as they are.
+ */
+export function watchPlainText(text: string): string {
+  let inFence = false;
+  return watchTimelineText(text)
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        return line.trim();
+      }
+      if (inFence) return line;
+      return line
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/^(\s{0,3})#{1,6}\s+/, "$1")
+        .replace(/^(\s*)[-*+]\s+/, "$1• ")
+        .replace(/(\*\*|__|~~)(\S(?:.*?\S)?)\1/g, "$2")
+        .replace(/`([^`\n]+)`/g, "$1");
+    })
+    .join("\n");
+}
+
+/**
+ * Like cutWatchBytes, but keeps the end too: a long answer's conclusion is at the bottom.
+ * Three quarters of the budget go to the beginning, the rest to the end.
+ */
+export function cutWatchBytesMiddle(value: string | undefined, maxBytes: number): string {
+  const text = value ?? "";
+  if (text.length * 4 <= maxBytes || utf8Length(text) <= maxBytes) return text;
+  const chars = [...text];
+  const take = (from: number, step: 1 | -1, budget: number) => {
+    let used = 0;
+    let count = 0;
+    for (let i = from; i >= 0 && i < chars.length; i += step) {
+      const size = utf8Length(chars[i]!);
+      if (used + size > budget) break;
+      used += size;
+      count += 1;
+    }
+    return count;
+  };
+  const marker = (omitted: number) => `\n…（中间略去 ${omitted} 字）…\n`;
+  const room = maxBytes - utf8Length(marker(chars.length));
+  if (room < 200) return cutWatchBytes(text, maxBytes);
+  const headCount = take(0, 1, Math.floor(room * 0.75));
+  const tailCount = take(chars.length - 1, -1, room - utf8Length(chars.slice(0, headCount).join("")));
+  return `${chars.slice(0, headCount).join("").trimEnd()}${marker(chars.length - headCount - tailCount)}${chars
+    .slice(chars.length - tailCount)
+    .join("")
+    .trimStart()}`;
 }
 
 function baseName(path: string): string {
@@ -377,6 +492,8 @@ export function buildWatchSession(
     maxItems?: number;
     mode?: string;
     configOptions?: WatchConfigOption[];
+    /** The session the watch has open: its whole recent conversation, not a glance. */
+    focused?: boolean;
   } = {},
 ): WatchSession {
   const task = liveActivitySessionTask(session, online);
@@ -416,7 +533,9 @@ export function buildWatchSession(
           ...(options.planProgress.currentStep ? { currentStep: cut(options.planProgress.currentStep, 100) } : {}),
         }
       : undefined;
-  const maxItems = Math.max(4, Math.min(options.maxItems ?? 14, 56));
+  const maxItems = options.focused
+    ? Math.max(WATCH_FOCUSED_ITEMS, Math.min(options.maxItems ?? 0, WATCH_MAX_ITEMS))
+    : Math.max(4, Math.min(options.maxItems ?? 14, 56));
   const rawItems = options.items?.length ? options.items : fallbackTimelineItems(session, commandPreview, preview);
   const items =
     maxItems > 14
@@ -498,7 +617,30 @@ export interface BuildWatchSnapshotOptions {
   availableAgents?: string[];
   workspaces?: WatchWorkspace[];
   agentTiers?: Record<string, string>;
+  /** The session the watch has open; it stays in the snapshot even outside the top ten. */
+  focusedSessionId?: string;
   now?: number;
+}
+
+/** Failed, then busy, then most recently active: the order the watch lists terminals in. */
+export function sortWatchTerminals(terminals: TerminalInfo[]): TerminalInfo[] {
+  const rank = (s: ReturnType<typeof terminalState>) => (s.failed ? 0 : s.busy ? 1 : 2);
+  return [...terminals].sort((a, b) => {
+    const ra = rank(terminalState(a));
+    const rb = rank(terminalState(b));
+    if (ra !== rb) return ra - rb;
+    if (a.activeAt !== b.activeAt) return b.activeAt - a.activeAt;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/** The first `max`, with the focused one swapped in for the last when it falls outside. */
+function keepFocused<T extends { id: string }>(list: T[], max: number, focusedId: string | undefined): T[] {
+  const head = list.slice(0, max);
+  if (!focusedId || head.some((item) => item.id === focusedId)) return head;
+  const focused = list.find((item) => item.id === focusedId);
+  if (!focused) return head;
+  return head.length < max ? [...head, focused] : [...head.slice(0, max - 1), focused];
 }
 
 /**
@@ -548,14 +690,10 @@ export function buildWatchSnapshot(
     return a.id.localeCompare(b.id);
   });
 
-  const sortedTerminals = [...terminals].sort((a, b) => {
-    const sa = terminalState(a);
-    const sb = terminalState(b);
-    const rank = (s: ReturnType<typeof terminalState>) => (s.failed ? 0 : s.busy ? 1 : 2);
-    if (rank(sa) !== rank(sb)) return rank(sa) - rank(sb);
-    if (a.activeAt !== b.activeAt) return b.activeAt - a.activeAt;
-    return a.id.localeCompare(b.id);
-  });
+  const sortedTerminals = sortWatchTerminals(terminals);
+  const focusedId = options.focusedSessionId && liveSessions.some((s) => s.id === options.focusedSessionId)
+    ? options.focusedSessionId
+    : undefined;
 
   const statusLabel = !online
     ? "连接中断 · 正在重连"
@@ -596,10 +734,8 @@ export function buildWatchSnapshot(
   for (const s of sortedSessions) addWorkspace(s.worktree?.source ?? s.cwd);
   for (const t of sortedTerminals) addWorkspace(t.cwd);
 
-  const availableAgents = (options.availableAgents?.length
-    ? options.availableAgents
-    : ["claude", "codex", "gemini", "cursor", "opencode"]
-  )
+  // Only what the computer reported: an invented agent would fail when the watch starts it.
+  const availableAgents = (options.availableAgents ?? [])
     .map((id) => cut(id.trim(), 48))
     .filter(Boolean)
     .slice(0, 10);
@@ -610,6 +746,7 @@ export function buildWatchSnapshot(
     computerKey: cut(computerKey, 512),
     computerName: cut(computerName || "电脑", 64),
     online,
+    ...(focusedId ? { focusedSessionId: focusedId } : {}),
     statusLabel: cut(statusLabel, 80),
     waitingCount,
     runningCount,
@@ -618,7 +755,7 @@ export function buildWatchSnapshot(
     availableAgents,
     ...(workspaces.length ? { workspaces } : {}),
     computers: watchComputers,
-    sessions: sortedSessions.slice(0, 10).map((session) => {
+    sessions: keepFocused(sortedSessions, WATCH_SESSION_LIMIT, focusedId).map((session) => {
       const goal = goals[session.id];
       return buildWatchSession(session, online, computerKey, {
         pinned: pinnedSet.has(session.id),
@@ -630,9 +767,10 @@ export function buildWatchSnapshot(
         maxItems: itemLimits[session.id],
         mode: modes[session.id],
         configOptions: configs[session.id],
+        focused: session.id === focusedId,
       });
     }),
-    terminals: sortedTerminals.slice(0, 6).map((terminal) =>
+    terminals: sortedTerminals.slice(0, WATCH_TERMINAL_LIMIT).map((terminal) =>
       buildWatchTerminal(terminal, online, computerKey, terminalOutputs[terminal.id]),
     ),
   };
@@ -640,18 +778,117 @@ export function buildWatchSnapshot(
   return watchSnapshotContent(snapshot);
 }
 
+const ITEM_TEXT_BYTES = 600;
+const ITEM_DETAIL_BYTES = 360;
+const FOCUSED_TEXT_BYTES = 6_000;
+const FOCUSED_DETAIL_BYTES = 2_400;
+const IMAGE_MAX = 12_000;
+/** What the open conversation may take before the other sessions are squeezed. */
+const FOCUSED_SHARE = 0.65;
+
+type SnapshotSession = WatchSnapshot["sessions"][number];
+
+function jsonBytes(value: unknown): number {
+  return utf8Length(JSON.stringify(value));
+}
+
+function boundItem(item: WatchTimelineItem, focused: boolean): WatchTimelineItem {
+  const { imageBase64, imageMimeType, ...rest } = item;
+  // A cut base64 string is a broken picture, so an oversized one is left out whole.
+  const image = imageBase64 && imageBase64.length <= IMAGE_MAX ? imageBase64 : undefined;
+  return {
+    ...rest,
+    id: cut(item.id, 120),
+    ...(item.title ? { title: cut(item.title, 80) } : {}),
+    text: focused ? cutWatchBytesMiddle(item.text, FOCUSED_TEXT_BYTES) : cutWatchBytes(item.text, ITEM_TEXT_BYTES),
+    ...(item.detail ? { detail: cutWatchBytes(item.detail, focused ? FOCUSED_DETAIL_BYTES : ITEM_DETAIL_BYTES) } : {}),
+    ...(item.filePath ? { filePath: cut(item.filePath, 160) } : {}),
+    ...(item.subagentType ? { subagentType: cut(item.subagentType, 48) } : {}),
+    ...(item.subagentName ? { subagentName: cut(item.subagentName, 48) } : {}),
+    ...(item.subagentModel ? { subagentModel: cut(item.subagentModel, 64) } : {}),
+    ...(image ? { imageBase64: image, ...(imageMimeType ? { imageMimeType: cut(imageMimeType, 48) } : {}) } : {}),
+  };
+}
+
+function withoutImage(item: WatchTimelineItem): WatchTimelineItem {
+  if (!item.imageBase64) return item;
+  const { imageBase64: _image, imageMimeType: _mime, ...rest } = item;
+  return rest;
+}
+
 /**
- * Bounds a WatchSnapshot so it fits comfortably within WatchConnectivity's
- * applicationContext / message budget (<= 24 KB), never truncating action IDs.
+ * The newest items that fit in `budget` bytes. The newest message is the one being
+ * read, so it is cut rather than dropped; only the newest picture is kept; and the
+ * latest question from the user stays when the tail has none, so the answer has context.
  */
-export function watchSnapshotContent(snapshot: WatchSnapshot): WatchSnapshot {
+function fitItems(items: WatchTimelineItem[], budget: number): WatchTimelineItem[] {
+  const kept: WatchTimelineItem[] = [];
+  let used = 2;
+  let imageKept = false;
+  let index = items.length - 1;
+  for (; index >= 0; index -= 1) {
+    let item = items[index]!;
+    if (imageKept) item = withoutImage(item);
+    let size = jsonBytes(item) + 1;
+    if (used + size > budget && item.imageBase64) {
+      item = withoutImage(item);
+      size = jsonBytes(item) + 1;
+    }
+    if (used + size > budget) {
+      if (kept.length > 0) break;
+      let room = budget - used - jsonBytes({ ...item, text: "" }) - 1;
+      while (room >= 120 && used + size > budget) {
+        item = { ...item, text: cutWatchBytes(item.text, room) };
+        size = jsonBytes(item) + 1;
+        room = Math.floor(room * 0.8);
+      }
+      if (used + size > budget) break;
+    }
+    if (item.imageBase64) imageKept = true;
+    kept.push(item);
+    used += size;
+  }
+  if (index >= 0 && !kept.some((item) => item.kind === "user")) {
+    const earlier = items.slice(0, index + 1).reverse().find((item) => item.kind === "user");
+    if (earlier) {
+      const asked = withoutImage({ ...earlier, text: cutWatchBytes(earlier.text, ITEM_TEXT_BYTES) });
+      const size = jsonBytes(asked) + 1;
+      if (used + size <= budget) kept.push(asked);
+      else if (kept.length > 1 && jsonBytes(kept[kept.length - 1]) + 1 + budget - used >= size) {
+        kept[kept.length - 1] = asked;
+      }
+    }
+  }
+  return kept.reverse();
+}
+
+function squeezeSession(s: SnapshotSession, cap: number, textBytes: number): SnapshotSession {
+  if (!s.items) return s;
+  const items = sliceTimelinePreservingUsers(s.items, cap).map((item) => {
+    const { detail: _detail, ...rest } = withoutImage(item);
+    return { ...rest, text: cutWatchBytes(item.text, textBytes) };
+  });
+  return { ...s, items, hasEarlier: s.hasEarlier || items.length < s.items.length || undefined };
+}
+
+/**
+ * Bounds a WatchSnapshot to WATCH_SNAPSHOT_BYTE_LIMIT UTF-8 bytes, never truncating
+ * action IDs. The session the watch has open gets the largest share: pictures and the
+ * other sessions' items go first, and whatever their trimming frees goes back to it.
+ */
+export function watchSnapshotContent(snapshot: WatchSnapshot, limit = WATCH_SNAPSHOT_BYTE_LIMIT): WatchSnapshot {
+  const focusedId =
+    snapshot.focusedSessionId && snapshot.sessions.some((s) => s.id === snapshot.focusedSessionId)
+      ? snapshot.focusedSessionId
+      : undefined;
+  const isFocused = (s: { id: string }) => s.id === focusedId;
+  const { focusedSessionId: _focused, ...base } = snapshot;
   const next: WatchSnapshot = {
-    ...snapshot,
+    ...base,
+    ...(focusedId ? { focusedSessionId: focusedId } : {}),
     computerName: cut(snapshot.computerName, 64),
     statusLabel: cut(snapshot.statusLabel, 80),
-    ...(snapshot.availableAgents?.length
-      ? { availableAgents: snapshot.availableAgents.slice(0, 10).map((a) => cut(a, 48)) }
-      : {}),
+    ...(snapshot.availableAgents ? { availableAgents: snapshot.availableAgents.slice(0, 10).map((a) => cut(a, 48)) } : {}),
     ...(snapshot.workspaces?.length
       ? {
           workspaces: snapshot.workspaces.slice(0, 8).map((w) => ({
@@ -661,27 +898,18 @@ export function watchSnapshotContent(snapshot: WatchSnapshot): WatchSnapshot {
         }
       : {}),
     computers: snapshot.computers.slice(0, 12).map((c) => ({ ...c, name: cut(c.name, 64) })),
-    sessions: snapshot.sessions.slice(0, 10).map((s) => {
+    sessions: keepFocused(snapshot.sessions, WATCH_SESSION_LIMIT, focusedId).map((s) => {
+      const focused = isFocused(s);
       const validActions = (s.actions ?? []).filter((a) => watchActionSchema.safeParse(a).success).slice(0, 3);
       const rawValidItems = (s.items ?? []).filter((item) => Boolean(item.id && item.text?.trim()));
-      const itemCap = rawValidItems.length > 14 ? Math.min(rawValidItems.length, 48) : 14;
+      const itemCap = focused
+        ? WATCH_MAX_ITEMS
+        : rawValidItems.length > 14
+          ? Math.min(rawValidItems.length, 48)
+          : 14;
       const validItems = (
-        itemCap > 14
-          ? rawValidItems.slice(-itemCap)
-          : sliceTimelinePreservingUsers(rawValidItems, itemCap)
-      ).map((item) => ({
-        ...item,
-        id: cut(item.id, 120),
-        ...(item.title ? { title: cut(item.title, 80) } : {}),
-        text: cut(item.text, 360),
-        ...(item.detail ? { detail: cut(item.detail, 360) } : {}),
-        ...(item.filePath ? { filePath: cut(item.filePath, 160) } : {}),
-        ...(item.subagentType ? { subagentType: cut(item.subagentType, 48) } : {}),
-        ...(item.subagentName ? { subagentName: cut(item.subagentName, 48) } : {}),
-        ...(item.subagentModel ? { subagentModel: cut(item.subagentModel, 64) } : {}),
-        ...(item.imageBase64 ? { imageBase64: item.imageBase64.slice(0, 12_000) } : {}),
-        ...(item.imageMimeType ? { imageMimeType: cut(item.imageMimeType, 48) } : {}),
-      }));
+        itemCap > 14 ? rawValidItems.slice(-itemCap) : sliceTimelinePreservingUsers(rawValidItems, itemCap)
+      ).map((item) => boundItem(item, focused));
       const validConfigs = (s.configOptions ?? []).slice(0, 4).map((opt) => ({
         ...opt,
         id: cut(opt.id, 48),
@@ -721,10 +949,10 @@ export function watchSnapshotContent(snapshot: WatchSnapshot): WatchSnapshot {
         ...(validActions.length ? { actions: validActions } : { actions: undefined }),
         hasMoreActions: s.hasMoreActions || validActions.length < (s.actions?.length ?? 0) || undefined,
         ...(hasEarlier ? { hasEarlier: true } : { hasEarlier: undefined }),
-        ...(validItems.length ? { items: validItems } : {}),
+        ...(validItems.length ? { items: validItems } : { items: undefined }),
       };
     }),
-    terminals: snapshot.terminals.slice(0, 6).map((t) => ({
+    terminals: snapshot.terminals.slice(0, WATCH_TERMINAL_LIMIT).map((t) => ({
       ...t,
       title: cut(t.title, 80),
       subtitle: cut(t.subtitle, 120),
@@ -735,60 +963,57 @@ export function watchSnapshotContent(snapshot: WatchSnapshot): WatchSnapshot {
     })),
   };
 
-  const size = () => new TextEncoder().encode(JSON.stringify(next)).length;
-  if (size() > 24_000) {
-    next.sessions = next.sessions.map((s, idx) => {
-      const isExpanded = (s.items?.length ?? 0) > 14;
-      const cap = isExpanded ? 32 : idx < 4 ? 10 : 4;
-      return {
-        ...s,
-        hasEarlier: s.hasEarlier || (s.items?.length ?? 0) > cap || undefined,
-        items: s.items
-          ? (isExpanded ? s.items.slice(-cap) : sliceTimelinePreservingUsers(s.items, cap)).map((i) => ({
-              ...i,
-              text: cut(i.text, idx < 4 || isExpanded ? 260 : 160),
-              ...(i.detail ? { detail: cut(i.detail, 150) } : {}),
-              imageBase64: idx === 0 ? i.imageBase64 : undefined,
-            }))
-          : undefined,
-      };
-    });
-  }
-  if (size() > 24_000) {
+  const size = () => jsonBytes(next);
+  const over = () => size() > limit;
+  const others = (change: (s: SnapshotSession) => SnapshotSession) => {
+    next.sessions = next.sessions.map((s) => (isFocused(s) ? s : change(s)));
+  };
+  const focusedItems = next.sessions.find(isFocused)?.items ?? [];
+  // Everything but the open conversation, counted with an empty one in its place.
+  const restBytes = () =>
+    jsonBytes({ ...next, sessions: next.sessions.map((s) => (isFocused(s) ? { ...s, items: [], hasEarlier: true } : s)) });
+  let focusedTrimmed = false;
+  const fitFocused = (budget: number) => {
+    if (!focusedItems.length) return;
+    focusedTrimmed = true;
+    const items = fitItems(focusedItems, budget);
+    next.sessions = next.sessions.map((s) =>
+      isFocused(s)
+        ? {
+            ...s,
+            items: items.length ? items : undefined,
+            hasEarlier: s.hasEarlier || items.length < focusedItems.length || undefined,
+          }
+        : s,
+    );
+  };
+
+  if (over()) others((s) => (s.items ? { ...s, items: s.items.map(withoutImage) } : s));
+  if (over()) fitFocused(Math.max(Math.floor(limit * FOCUSED_SHARE), limit - restBytes()));
+  if (over()) others((s) => squeezeSession(s, 6, 300));
+  if (over()) {
     next.terminals = next.terminals.map((t) => ({
       ...t,
       outputPreview: t.outputPreview ? cut(t.outputPreview, 800) : undefined,
     }));
   }
-  if (size() > 24_000) {
-    next.sessions = next.sessions.map((s, idx) => {
-      const isExpanded = (s.items?.length ?? 0) > 14;
-      const cap = isExpanded ? 24 : idx < 3 ? 6 : 3;
-      return {
-        ...s,
-        configOptions: idx < 2 || isExpanded ? s.configOptions : undefined,
-        hasEarlier: s.hasEarlier || (s.items?.length ?? 0) > cap || undefined,
-        items: s.items
-          ? (isExpanded ? s.items.slice(-cap) : sliceTimelinePreservingUsers(s.items, cap)).map((i) => ({
-              ...i,
-              text: cut(i.text, 160),
-              detail: undefined,
-              imageBase64: undefined,
-            }))
-          : undefined,
-      };
-    });
+  if (over()) others((s) => ({ ...squeezeSession(s, 3, 160), configOptions: undefined }));
+  while (over() && next.terminals.length > 2) next.terminals.pop();
+  while (over() && next.sessions.filter((s) => !isFocused(s)).length > 3) {
+    const lastOther = next.sessions.map(isFocused).lastIndexOf(false);
+    next.sessions.splice(lastOther, 1);
   }
-  while (size() > 24_000 && next.terminals.length > 2) next.terminals.pop();
-  while (size() > 24_000 && next.sessions.length > 4) next.sessions.pop();
-  if (size() > 24_000) {
-    next.sessions = next.sessions.map((s) => ({
+  if (over()) {
+    others((s) => ({
       ...s,
       detailPreview: s.detailPreview ? cut(s.detailPreview, 60) : undefined,
       commandPreview: s.commandPreview ? cut(s.commandPreview, 60) : undefined,
       items: undefined,
+      hasEarlier: s.items?.length ? true : s.hasEarlier,
     }));
   }
+  // Whatever squeezing the others freed goes back to the open conversation.
+  if (focusedTrimmed || over()) fitFocused(limit - restBytes());
   return next;
 }
 

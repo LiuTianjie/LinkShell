@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWatchSnapshot,
+  cutWatchBytes,
+  cutWatchBytesMiddle,
   isWatchCommandCurrent,
+  WATCH_SNAPSHOT_BYTE_LIMIT,
   watchCommandSchema,
   watchSnapshotContent,
   watchSnapshotSchema,
+  watchPlainText,
+  watchTimelineText,
   type WatchCommand,
+  type WatchTimelineItem,
 } from "../src/watch.js";
 import type { PendingPermissionSummary, SessionSummary, TerminalInfo } from "../src/model.js";
 
@@ -194,7 +200,7 @@ describe("Watch snapshot builder & command contract", () => {
       buildWatchSnapshot("MacBook Pro", manySessions, manyTerminals, true, { computerKey: "computer-1" }),
     );
     const bytes = new TextEncoder().encode(JSON.stringify(snapshot)).length;
-    expect(bytes).toBeLessThanOrEqual(24_000);
+    expect(bytes).toBeLessThanOrEqual(WATCH_SNAPSHOT_BYTE_LIMIT);
     expect(snapshot.sessions[0]!.actions?.map((a) => a.optionId)).toEqual(["decline", "accept", "acceptForSession"]);
   });
 
@@ -287,6 +293,105 @@ describe("Watch snapshot builder & command contract", () => {
     expect(expandedSnap.sessions[0]?.items).toHaveLength(24);
     expect(expandedSnap.sessions[0]?.hasEarlier).toBeUndefined();
   });
+
+  const bytesOf = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
+  const cjkTimeline = (prefix: string, count: number, chars: number): WatchTimelineItem[] =>
+    Array.from({ length: count }, (_, idx) => ({
+      id: `${prefix}-${idx}`,
+      kind: idx % 3 === 0 ? "user" : "assistant",
+      text: `第${idx}条：${"中文内容".repeat(Math.ceil(chars / 4))}`.slice(0, chars),
+    }));
+
+  it("trims CJK text by bytes and gives the session the watch has open the largest share", () => {
+    const sessions: SessionSummary[] = Array.from({ length: 13 }, (_, idx) => ({
+      ...baseSession,
+      id: `codex:s-${idx}`,
+      title: `任务 ${idx}`,
+      preview: "进展".repeat(80),
+      updatedAt: 10_000 - idx,
+    }));
+    const timelines = Object.fromEntries(sessions.map((s) => [s.id, cjkTimeline(s.id, 40, 400)]));
+    // The oldest session: outside the top ten, but the one on the watch's screen.
+    const focusedId = "codex:s-12";
+    const snapshot = watchSnapshotContent(
+      buildWatchSnapshot("Mac", sessions, [], true, { computerKey: "c", timelines, focusedSessionId: focusedId }),
+    );
+
+    expect(bytesOf(snapshot)).toBeLessThanOrEqual(WATCH_SNAPSHOT_BYTE_LIMIT);
+    expect(watchSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(snapshot.focusedSessionId).toBe(focusedId);
+    const focused = snapshot.sessions.find((s) => s.id === focusedId)!;
+    expect(focused).toBeDefined();
+    // 400 CJK characters are 1.2 KB: a character-counted 24 KB budget fitted a handful.
+    expect(focused.items!.length).toBeGreaterThanOrEqual(25);
+    expect(focused.items!.at(-1)!.id).toBe(`${focusedId}-39`);
+    expect(focused.items!.at(-1)!.text).toBe(timelines[focusedId]!.at(-1)!.text);
+    expect(focused.hasEarlier).toBe(true);
+    for (const other of snapshot.sessions.filter((s) => s.id !== focusedId)) {
+      expect(other.items?.length ?? 0).toBeLessThan(focused.items!.length);
+    }
+    // Idempotent: the phone bounds the snapshot again before handing it to WatchConnectivity.
+    expect(watchSnapshotContent(snapshot)).toEqual(snapshot);
+  });
+
+  it("drops pictures before text", () => {
+    const image = "A".repeat(11_000);
+    const items: WatchTimelineItem[] = Array.from({ length: 12 }, (_, idx) => ({
+      id: `img-${idx}`,
+      kind: "image",
+      text: `截图 ${idx}：${"界面说明".repeat(60)}`,
+      imageBase64: image,
+      imageMimeType: "image/png",
+    }));
+    const other: SessionSummary = { ...baseSession, id: "codex:other", updatedAt: 9000 };
+    const snapshot = watchSnapshotContent(
+      buildWatchSnapshot("Mac", [baseSession, other], [], true, {
+        computerKey: "c",
+        timelines: { [baseSession.id]: items, [other.id]: items.map((i) => ({ ...i, id: `o-${i.id}` })) },
+        focusedSessionId: baseSession.id,
+      }),
+    );
+    expect(bytesOf(snapshot)).toBeLessThanOrEqual(WATCH_SNAPSHOT_BYTE_LIMIT);
+    const focused = snapshot.sessions.find((s) => s.id === baseSession.id)!;
+    expect(focused.items).toHaveLength(12);
+    expect(focused.items!.filter((i) => i.imageBase64)).toHaveLength(1);
+    expect(focused.items!.at(-1)!.imageBase64).toBe(image);
+    const otherOut = snapshot.sessions.find((s) => s.id === other.id)!;
+    expect(otherOut.items!.every((i) => !i.imageBase64)).toBe(true);
+  });
+
+  it("keeps line breaks and code blocks in timeline text and marks cuts", () => {
+    const raw = "## 修改如下：\r\n\r\n\r\n\r\n```ts\r\nconst a = 1;\r\n\tif (a) {\r\n\t\treturn;\r\n\t}\r\n```\r\n- **第一点**   \r\n- 见 [文档](https://x.y) 与 `pnpm test`";
+    // The watch renders answers as markdown: only whitespace is tidied.
+    expect(watchTimelineText(raw)).toBe(
+      "## 修改如下：\n\n```ts\nconst a = 1;\n  if (a) {\n    return;\n  }\n```\n- **第一点**\n- 见 [文档](https://x.y) 与 `pnpm test`",
+    );
+    // Thoughts are plain Text there: markup is unwrapped, code kept.
+    expect(watchPlainText("## 想法\n- **先**看 `a`\n```\n**x**\n```")).toBe("想法\n• 先看 a\n```\n**x**\n```");
+    const long = `开头${"甲".repeat(3000)}结论在这里`;
+    const middle = cutWatchBytesMiddle(long, 3000);
+    expect(new TextEncoder().encode(middle).length).toBeLessThanOrEqual(3000);
+    expect(middle.startsWith("开头")).toBe(true);
+    expect(middle.endsWith("结论在这里")).toBe(true);
+    expect(middle).toMatch(/中间略去 \d+ 字/);
+    const snapshot = buildWatchSnapshot("Mac", [baseSession], [], true, {
+      computerKey: "c",
+      timelines: { [baseSession.id]: [{ id: "a", kind: "assistant", text: watchTimelineText(raw) }] },
+    });
+    expect(snapshot.sessions[0]!.items![0]!.text).toContain("```ts\nconst a = 1;");
+
+    const cutText = cutWatchBytes("汉".repeat(1000), 300);
+    expect(cutText.endsWith("…")).toBe(true);
+    expect(new TextEncoder().encode(cutText).length).toBeLessThanOrEqual(300);
+    expect(cutWatchBytes("short", 300)).toBe("short");
+  });
+
+  it("offers no agents the computer did not report, and accepts long dictation", () => {
+    const snapshot = buildWatchSnapshot("Mac", [baseSession], [], true, { computerKey: "c" });
+    expect(snapshot.availableAgents).toEqual([]);
+    const prompt = (text: string) =>
+      watchCommandSchema.safeParse({ id: "p", kind: "prompt", computerKey: "c", sessionId: "s", text }).success;
+    expect(prompt("说".repeat(5000))).toBe(true);
+    expect(prompt("说".repeat(9000))).toBe(false);
+  });
 });
-
-

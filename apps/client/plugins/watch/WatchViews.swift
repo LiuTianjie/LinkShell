@@ -331,6 +331,98 @@ enum WatchImageCache {
   }
 }
 
+/// A message split into prose and fenced code, kept between redraws: a conversation holds hundreds
+/// of rows and the snapshot refreshes several times a second.
+@MainActor
+enum WatchTextCache {
+  enum Block { case prose(AttributedString), code(String) }
+  private final class Entry { let blocks: [Block]; init(_ blocks: [Block]) { self.blocks = blocks } }
+  private static let cache = NSCache<NSString, Entry>()
+
+  static func blocks(id: String, text: String, markdown: Bool) -> [Block] {
+    let key = "\(id):\(markdown):\(text.count):\(text.hashValue)" as NSString
+    if let hit = cache.object(forKey: key) { return hit.blocks }
+    var blocks: [Block] = [], prose: [String] = [], code: [String]? = nil
+    func flushProse() {
+      let joined = prose.joined(separator: "\n").trimmingCharacters(in: .newlines)
+      prose = []
+      guard !joined.isEmpty else { return }
+      let parsed = markdown ? try? AttributedString(markdown: joined, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) : nil
+      blocks.append(.prose(parsed ?? AttributedString(joined)))
+    }
+    for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+      if markdown && line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+        if let open = code { blocks.append(.code(open.joined(separator: "\n"))); code = nil } else { flushProse(); code = [] }
+      } else if code != nil {
+        code!.append(line)
+      } else if markdown, let heading = line.range(of: #"^\s{0,3}#{1,6}\s+"#, options: .regularExpression) {
+        prose.append("**\(line[heading.upperBound...])**")
+      } else if markdown, let bullet = line.range(of: #"^\s{0,3}[-*+]\s+"#, options: .regularExpression) {
+        prose.append("• " + line[bullet.upperBound...])
+      } else {
+        prose.append(line)
+      }
+    }
+    // A reply cut off (or still streaming) inside a code block shows what it has as code.
+    if let open = code { blocks.append(.code(open.joined(separator: "\n"))) }
+    flushProse()
+    cache.setObject(Entry(blocks), forKey: key)
+    return blocks
+  }
+}
+
+/// A message's text: prose with inline Markdown, code blocks in monospace. A long one shows its
+/// opening until expanded; the projection already bounds what one row carries.
+struct WatchMessageText: View {
+  let id: String
+  let text: String
+  let markdown: Bool
+  @State private var expanded = false
+
+  private static let collapsedCharacters = 600, collapsedLines = 14
+
+  private var collapsed: String? {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    guard text.count > Self.collapsedCharacters || lines.count > Self.collapsedLines else { return nil }
+    return String(lines.prefix(Self.collapsedLines).joined(separator: "\n").prefix(Self.collapsedCharacters)) + "…"
+  }
+
+  var body: some View {
+    let short = collapsed
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(Array(WatchTextCache.blocks(id: id, text: expanded ? text : short ?? text, markdown: markdown).enumerated()), id: \.offset) { _, block in
+        switch block {
+        case .prose(let value):
+          Text(value)
+            .font(.body)
+            .foregroundStyle(.white)
+            .fixedSize(horizontal: false, vertical: true)
+        case .code(let value):
+          Text(value)
+            .font(.system(.footnote, design: .monospaced))
+            .foregroundStyle(Color(white: 0.86))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+      }
+      if short != nil {
+        Button {
+          WatchHaptics.click()
+          withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
+        } label: {
+          Label(expanded ? "收起" : "展开全文", systemImage: expanded ? "chevron.up" : "chevron.down")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(WatchPalette.accent)
+            .frame(minHeight: 28)
+        }
+        .buttonStyle(.plain)
+      }
+    }
+  }
+}
+
 /// The header line of a timeline card: an icon and a short title in one colour.
 private struct WatchItemHeader: View {
   let icon: String
@@ -390,10 +482,7 @@ struct WatchTimelineItemCard: View {
         VStack(alignment: .trailing, spacing: 3.5) {
           if let image = decodedImage { picture(image, title: item.title ?? "图片预览", maxWidth: 118, maxHeight: 74) }
           VStack(alignment: .leading, spacing: 2) {
-            Text(item.text)
-              .font(.body)
-              .foregroundStyle(.white)
-              .fixedSize(horizontal: false, vertical: true)
+            WatchMessageText(id: item.id, text: item.text, markdown: false)
             if item.status == "running" {
               Text("已发送").font(.footnote).foregroundStyle(.white.opacity(0.72))
             }
@@ -501,13 +590,14 @@ struct WatchTimelineItemCard: View {
           Text(item.text)
             .font(.system(.footnote, design: .monospaced).weight(.medium))
             .foregroundStyle(Color(white: 0.92))
-            .lineLimit(isExpanded ? 6 : 2)
+            .lineLimit(isExpanded ? 12 : 2)
             .multilineTextAlignment(.leading)
           if let detail = item.detail, !detail.isEmpty, isExpanded || item.status == "failed" {
+            // The output's latest lines: the projection keeps a bounded tail.
             Text(detail)
               .font(.system(.footnote, design: .monospaced))
               .foregroundStyle(Color(white: 0.68))
-              .lineLimit(isExpanded ? 12 : 4)
+              .lineLimit(isExpanded ? 24 : 4)
               .padding(5)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -527,8 +617,8 @@ struct WatchTimelineItemCard: View {
           WatchItemHeader(icon: "sparkles", title: item.title ?? "思考", color: .secondary, trailing: chevron())
           Text(item.text)
             .font(.footnote)
-            .foregroundStyle(Color(white: 0.72))
-            .lineLimit(isExpanded ? 10 : 2)
+            .foregroundStyle(Color(white: 0.6))
+            .lineLimit(isExpanded ? 60 : 2)
             .multilineTextAlignment(.leading)
         }
         .padding(.horizontal, 9)
@@ -554,8 +644,10 @@ struct WatchTimelineItemCard: View {
       .privacySensitive()
 
     case "question":
+      let answered = item.status == "completed"
       VStack(alignment: .leading, spacing: 3.5) {
-        WatchItemHeader(icon: "questionmark.bubble.fill", title: item.title ?? "问题", color: WatchPalette.waiting)
+        WatchItemHeader(icon: answered ? "checkmark.bubble.fill" : "questionmark.bubble.fill", title: item.title ?? "问题",
+                        color: answered ? WatchPalette.accent : WatchPalette.waiting)
         Text(item.text)
           .font(.body.weight(.medium))
           .foregroundStyle(.white)
@@ -567,8 +659,36 @@ struct WatchTimelineItemCard: View {
       .padding(.horizontal, 9)
       .padding(.vertical, 7)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(tint: WatchPalette.waiting, radius: 12)
+      .watchCard(tint: answered ? WatchPalette.accent : WatchPalette.waiting, radius: 12)
       .privacySensitive()
+
+    case "permission":
+      let denied = item.status == "failed"
+      VStack(alignment: .leading, spacing: 2.5) {
+        WatchItemHeader(icon: denied ? "xmark.shield.fill" : "checkmark.shield.fill", title: item.title ?? "权限请求",
+                        color: denied ? WatchPalette.danger : WatchPalette.ok)
+        Text(item.text).font(.footnote).foregroundStyle(Color(white: 0.78))
+      }
+      .padding(.horizontal, 9)
+      .padding(.vertical, 6)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .privacySensitive()
+
+    case "notice":
+      // Handoffs, stops and agent notices: a quiet line between messages, as on the phone.
+      let warn = item.status == "waiting"
+      VStack(spacing: 2) {
+        if let title = item.title, !title.isEmpty {
+          Text(title).font(.footnote.weight(.semibold)).foregroundStyle(warn ? WatchPalette.waiting : .secondary)
+        }
+        Label(item.text, systemImage: warn ? "exclamationmark.circle" : "info.circle")
+          .font(.footnote)
+          .foregroundStyle(warn ? WatchPalette.waiting : .secondary)
+      }
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 3)
 
     case "error":
       VStack(alignment: .leading, spacing: 3) {
@@ -577,6 +697,9 @@ struct WatchTimelineItemCard: View {
           .font(.footnote)
           .foregroundStyle(.white)
           .fixedSize(horizontal: false, vertical: true)
+        if let hint = item.detail, !hint.isEmpty {
+          Text(hint).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
       }
       .padding(.horizontal, 9)
       .padding(.vertical, 7)
@@ -590,10 +713,7 @@ struct WatchTimelineItemCard: View {
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 3) {
           if let image = decodedImage { picture(image, title: agent.name, maxWidth: 120, maxHeight: 76) }
-          Text(item.text)
-            .font(.body)
-            .foregroundStyle(.white)
-            .fixedSize(horizontal: false, vertical: true)
+          WatchMessageText(id: item.id, text: item.text, markdown: true)
           if item.status == "running" {
             HStack(spacing: 3) {
               Circle().fill(WatchPalette.accent).frame(width: 4, height: 4)
@@ -1531,8 +1651,9 @@ public struct LinkShellWatchRootView: View {
         onOpenComputers: { showingComputers = true },
         onOpenQuickAdd: { showingQuickAdd = true }
       )
-      .onAppear { store.setForeground(scenePhase == .active) }
-      .onChange(of: scenePhase) { _, phase in store.setForeground(phase == .active) }
+      // Inactive (wrist down, Always On, a notification) keeps the connection; only background pauses it.
+      .onAppear { store.setForeground(scenePhase != .background) }
+      .onChange(of: scenePhase) { _, phase in store.setForeground(phase != .background) }
       .navigationBarTitleDisplayMode(.inline)
       .navigationDestination(item: $detailSessionId) { sessionId in
         WatchSessionDetailView(sessionId: sessionId, store: store)
