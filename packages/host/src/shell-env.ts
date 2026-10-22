@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
  * agents would fail auth. Falls back to the current environment.
  */
 export async function resolveLoginShellEnv(timeoutMs = 20_000, log?: (message: string) => void): Promise<NodeJS.ProcessEnv> {
-  if (process.platform === "win32") return process.env;
+  if (process.platform === "win32") return withRegistryPath(process.env);
   const shell = process.env.SHELL || "/bin/zsh";
   const problems: string[] = [];
   // Interactive first: most people set PATH and proxies in .zshrc. A profile that
@@ -56,6 +56,44 @@ async function shellEnv(shell: string, flags: string, timeoutMs: number): Promis
   }
   delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
   return resolved.PATH ? resolved : undefined;
+}
+
+/**
+ * Windows: the tray app's environment is from when it started, so an agent installed since is not on
+ * its PATH. The registry holds the current Machine and User PATH; they go first, then anything the
+ * process had that they don't.
+ */
+async function withRegistryPath(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  const read = async (key: string) => {
+    try {
+      const { stdout } = await execFileAsync("reg.exe", ["query", key, "/v", "Path"], { timeout: 5000, windowsHide: true });
+      return registryValue(stdout, env);
+    } catch {
+      return [];
+    }
+  };
+  const [machine, user] = await Promise.all([
+    read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"),
+    read("HKCU\\Environment"),
+  ]);
+  if (!machine.length && !user.length) return env;
+  const name = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "Path";
+  const seen = new Set<string>();
+  const entries = [...machine, ...user, ...(env[name] ?? "").split(";")].filter((entry) => {
+    const key = entry.trim().replace(/[\\/]+$/, "").toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { ...env, [name]: entries.join(";") };
+}
+
+/** The entries of a `reg query … /v Path` answer, with %VARIABLES% expanded from `env`. */
+export function registryValue(output: string, env: NodeJS.ProcessEnv): string[] {
+  const match = /\bPath\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(output);
+  if (!match) return [];
+  const lookup = (name: string) => Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  return match[1]!.trim().replace(/%([^%]+)%/g, (whole, name: string) => lookup(name) ?? whole).split(";").filter(Boolean);
 }
 
 /** Where agents' CLIs are usually installed; appended, so the user's own order still wins. */

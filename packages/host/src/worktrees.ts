@@ -12,7 +12,8 @@ import { RpcError, type GitInfo } from "@linkshell/wire";
 const run = promisify(execFile);
 
 async function git(cwd: string, args: string[], timeout = 60_000): Promise<string> {
-  const { stdout } = await run("git", ["-C", cwd, ...args], { timeout, maxBuffer: 16 * 1024 * 1024 });
+  // windowsHide: the host has no console, so each git would otherwise flash one open on Windows.
+  const { stdout } = await run("git", ["-C", cwd, ...args], { timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   return stdout.trim();
 }
 

@@ -3,8 +3,8 @@
   <SolidColorBrush x:Key="Sidebar" Color="#0B0C0F"/>
   <SolidColorBrush x:Key="Primary" Color="#F0F1F3"/>
   <SolidColorBrush x:Key="Secondary" Color="#A8ADB5"/>
-  <SolidColorBrush x:Key="Accent" Color="#3DE0BF"/>
-  <SolidColorBrush x:Key="OnAccent" Color="#060709"/>
+  <SolidColorBrush x:Key="Accent" Color="#6872E5"/>
+  <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF"/>
   <SolidColorBrush x:Key="Line" Color="#24262A"/>
   <SolidColorBrush x:Key="Selection" Color="#1B1D21"/>
   <SolidColorBrush x:Key="Warning" Color="#F3B66B"/>

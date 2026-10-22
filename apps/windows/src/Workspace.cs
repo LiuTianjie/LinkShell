@@ -46,9 +46,15 @@ namespace LinkShell.Windows {
         readonly Action manage;
         readonly Action<string> changeAppearance;
         readonly StackPanel status = new StackPanel { MaxWidth = 500, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        // The page's own sidebar, drawn while it loads, so the layout doesn't jump when the page arrives.
+        readonly Border loadingSidebar = new Border { Width = 232, HorizontalAlignment = HorizontalAlignment.Left, BorderThickness = new Thickness(0, 0, 1, 0) };
         public Workspace(Action management, Action<string> theme) {
             manage = management; changeAppearance = theme;
             SetResourceReference(BackgroundProperty, "Background");
+            loadingSidebar.SetResourceReference(Border.BackgroundProperty, "Sidebar");
+            loadingSidebar.SetResourceReference(Border.BorderBrushProperty, "Line");
+            status.Margin = new Thickness(232, 0, 0, 0);
+            Children.Add(loadingSidebar);
             Children.Add(status);
             ShowStatus("正在准备工作台…", false);
         }
@@ -56,7 +62,7 @@ namespace LinkShell.Windows {
         public bool Ready { get { return ready; } }
         void ShowStatus(string message, bool retry) {
             if (browser != null) browser.Visibility = Visibility.Hidden;
-            status.Visibility = Visibility.Visible; status.Children.Clear();
+            status.Visibility = Visibility.Visible; loadingSidebar.Visibility = Visibility.Visible; status.Children.Clear();
             var heading = new TextBlock { Text = "LinkShell 工作台", FontSize = 24, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) };
             heading.SetResourceReference(TextBlock.ForegroundProperty, "Primary"); status.Children.Add(heading);
             var detail = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 18) };
@@ -90,7 +96,10 @@ namespace LinkShell.Windows {
                     if (!disposed && sidecar == child) ShowStatus("工作台连接已断开。重新连接前会先尝试保存草稿。", true);
                 }));
                 browser = new WebView2 { CreationProperties = new CoreWebView2CreationProperties {
-                    UserDataFolder = Path.Combine(Desktop.Home, "webview2"), IsInPrivateModeEnabled = true
+                    UserDataFolder = Path.Combine(Desktop.Home, "webview2"), IsInPrivateModeEnabled = true,
+                    // Hidden in the tray or behind management, Chromium slows the page's timers and its
+                    // connection heartbeats come late: a dead link to another computer would look alive.
+                    AdditionalBrowserArguments = "--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-features=IntensiveWakeUpThrottling"
                 } };
                 Children.Insert(0, browser);
                 await browser.EnsureCoreWebView2Async();
@@ -113,12 +122,19 @@ namespace LinkShell.Windows {
                 // CoreWebView2.WebMessageReceived receives only the top-level document. Never subscribe to frame bridges.
                 Core.WebMessageReceived += Receive;
                 Core.DownloadStarting += Download;
-                Core.ProcessFailed += (s, e) => { ready = false; ShowStatus("工作台页面进程已退出，请重新连接。", true); };
+                Core.ProcessFailed += (s, e) => {
+                    // A GPU or utility process restarts by itself and the page carries on; only losing the
+                    // page's own renderer or the browser takes the workspace down.
+                    if (e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessExited &&
+                        e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessUnresponsive &&
+                        e.ProcessFailedKind != CoreWebView2ProcessFailedKind.BrowserProcessExited) return;
+                    ready = false; ShowStatus("工作台页面进程已退出，请重新连接。", true);
+                };
                 Core.NavigationCompleted += async (s, e) => {
                     if (disposed) return;
                     ready = e.IsSuccess && policy.Trusted(Core.Source);
                     if (!ready) { ShowStatus("工作台页面加载失败，请重新连接。", true); return; }
-                    status.Visibility = Visibility.Collapsed; browser.Visibility = Visibility.Visible;
+                    status.Visibility = Visibility.Collapsed; loadingSidebar.Visibility = Visibility.Collapsed; browser.Visibility = Visibility.Visible;
                     await UpdateState();
                 };
                 await Core.AddScriptToExecuteOnDocumentCreatedAsync("if(window===window.top){window.__LINKSHELL_DESKTOP_VISIBLE__=" + (visible ? "true" : "false") + ";window.__LINKSHELL_DESKTOP_APPEARANCE__=" + Desktop.Json.Serialize(appearance) + ";}");

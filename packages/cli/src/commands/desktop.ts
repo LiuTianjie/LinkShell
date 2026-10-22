@@ -1,7 +1,7 @@
 import { loadAuth } from "../auth.js";
 import { runLogin } from "./login.js";
 import { runLogout } from "./logout.js";
-import { joinGatewayAfterLogin, readHostConfig, writeHostConfig, refreshGateway } from "./host.js";
+import { followAccountGateway, joinGatewayAfterLogin, readHostConfig, writeHostConfig, refreshGateway } from "./host.js";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
@@ -81,7 +81,7 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
       process.stdout.write(`${JSON.stringify({ ...snapshot, ...result })}\n`);
       return;
     }
-    if (action === "account-refresh") await refreshMembership();
+    if (action === "account-refresh") await followAccountGateway((await refreshMembership()).plan);
     else if (action === "pair" || action === "pair-qr") {
       const result = await withRunningHost(async client => {
         const gateway = await client.call("gateway.status", {});

@@ -11,7 +11,7 @@ import { isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } 
 import { getValidToken, loadAuth } from "../auth.js";
 import { runLogin } from "./login.js";
 import { runLogout } from "./logout.js";
-import { silenceSqliteWarning } from "./host.js";
+import { followAccountGateway, refreshGateway, silenceSqliteWarning } from "./host.js";
 import { DesktopClientState, validStorageKey } from "./desktop-workspace-state.js";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -125,6 +125,13 @@ async function account(signal: AbortSignal) {
     userId: current.userId, email: current.email,
     ...(accessToken && current.accessToken === accessToken ? { accessToken } : {}),
   };
+}
+
+/** The running host follows a login or logout made here at once, as one made in the app does. */
+async function accountChanged(plan?: "pro" | "free"): Promise<void> {
+  try {
+    if (!(plan && await followAccountGateway(plan))) await refreshGateway(5_000);
+  } catch { /* The account itself changed; the host catches up on its next refresh. */ }
 }
 
 function proxyHost(client: WebSocket, target: string, upstreams: Set<WebSocket>): void {
@@ -255,12 +262,14 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           }
           const result = await login;
           if (!result?.success) throw new HttpError(409, "登录未完成，请重试");
+          await accountChanged(result.plan);
           json(response, 200, await account(accountAbort.signal)); return;
         }
         if (request.method === "POST" && path === "/desktop/logout") {
           loginAbort?.abort();
           await login;
           await runLogout();
+          await accountChanged();
           json(response, 200, {}); return;
         }
         throw new HttpError(404, "未找到操作");

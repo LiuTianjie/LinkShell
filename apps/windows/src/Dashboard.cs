@@ -116,8 +116,9 @@ namespace LinkShell.Windows {
                 using (var key = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize")) dark = key == null || Convert.ToInt32(key.GetValue("AppsUseLightTheme", 0)) == 0;
             }
             string[] keys = { "Background", "Sidebar", "Primary", "Secondary", "Accent", "OnAccent", "Line", "Selection", "Warning" };
-            string[] colors = dark ? new[] { "#060709", "#0B0C0F", "#F0F1F3", "#A8ADB5", "#3DE0BF", "#060709", "#24262A", "#1B1D21", "#F3B66B" }
-                : new[] { "#FAFAFB", "#F1F2F5", "#1F2129", "#616670", "#0A755C", "#FFFFFF", "#E0E1E5", "#EDEEF0", "#946019" };
+            // The workspace's palette (apps/web theme.ts), so the native and web halves read as one app.
+            string[] colors = dark ? new[] { "#0B0C0E", "#0B0C0E", "#F0F1F3", "#A0A3AB", "#6872E5", "#FFFFFF", "#24262A", "#1C1E24", "#D8B76C" }
+                : new[] { "#FAFAFB", "#F3F4F6", "#17181B", "#5C5F68", "#5E6AD2", "#FFFFFF", "#E0E1E5", "#E4E7EE", "#917021" };
             for (int i = 0; i < keys.Length; i++) ColorResource(keys[i], colors[i]);
             SetTitlebar();
             if (workspace != null) { var update = SyncWorkspace(); }

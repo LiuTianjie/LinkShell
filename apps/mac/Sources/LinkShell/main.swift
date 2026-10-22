@@ -37,6 +37,21 @@ import Foundation
 
 signal(SIGPIPE, SIG_IGN)
 
+/// This helper is the same app as the dashboard. With the dashboard quit, opening LinkShell from
+/// Finder, the Dock or Spotlight reaches this running instance instead of starting one, and
+/// nothing would appear: start the dashboard as its own instance (a running one takes it over).
+final class HelperReopen: NSObject, NSApplicationDelegate {
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.createsNewApplicationInstance = true
+    configuration.arguments = ["--dashboard"]
+    NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+      if let error { FileHandle.standardError.write(Data("dashboard did not open: \(error.localizedDescription)\n".utf8)) }
+    }
+    return false
+  }
+}
+
 if Launch.has("--status") {
   Link.standard.emit(Permissions.status())
   exit(0)
@@ -60,6 +75,8 @@ if let path = Launch.value(after: "--connect") {
   // With no window and no place in the Dock.
   let app = NSApplication.shared
   app.setActivationPolicy(.accessory)
+  let reopen = HelperReopen()
+  app.delegate = reopen
   let service = Service(link: link, options: ScreenSession.Options(clock: Launch.has("--clock"), loopback: Launch.has("--loopback"), motion: Launch.has("--motion")))
   service.start()
   app.run()

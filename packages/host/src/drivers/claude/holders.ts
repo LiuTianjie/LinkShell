@@ -52,6 +52,7 @@ export function sessionHolders(configDir: string, sessionId: string): SessionHol
 
 /** True when `pid` was started (directly or not) by `ancestor`. */
 export async function descendsFrom(pid: number, ancestor: number): Promise<boolean> {
+  if (process.platform === "win32") return descendsFromOnWindows(pid, ancestor);
   let current = pid;
   for (let hops = 0; hops < 8 && current > 1; hops++) {
     if (current === ancestor) return true;
@@ -64,4 +65,34 @@ export async function descendsFrom(pid: number, ancestor: number): Promise<boole
     }
   }
   return current === ancestor;
+}
+
+/** Windows has no /bin/ps: one CIM query gives every process's parent, walked here. */
+async function descendsFromOnWindows(pid: number, ancestor: number): Promise<boolean> {
+  let parents: Map<number, number>;
+  try {
+    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }"], { timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
+    parents = parseParents(stdout);
+  } catch {
+    return false;
+  }
+  let current = pid;
+  for (let hops = 0; hops < 8 && current > 0; hops++) {
+    if (current === ancestor) return true;
+    const parent = parents.get(current);
+    if (parent === undefined || parent === current) return false;
+    current = parent;
+  }
+  return current === ancestor;
+}
+
+/** "pid ppid" lines. */
+export function parseParents(listing: string): Map<number, number> {
+  const parents = new Map<number, number>();
+  for (const line of listing.split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (match) parents.set(Number(match[1]), Number(match[2]));
+  }
+  return parents;
 }

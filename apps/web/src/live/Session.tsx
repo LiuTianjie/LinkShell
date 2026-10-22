@@ -1,3 +1,4 @@
+import { ComposerConfig, ComposerPlace, ContextRing } from "./ComposerControls";
 import {
   Sheet,
   SheetContent,
@@ -60,6 +61,16 @@ import {
   Paperclip,
   Plus,
   X,
+  SquareSlash,
+  Target,
+  Plug,
+  Blocks,
+  SquareTerminal,
+  GitFork,
+  PencilLine,
+  Archive,
+  ArchiveRestore,
+  Trash2,
 } from "lucide-react";
 import { shownQueue } from "@linkshell/client-core";
 import type { ContentBlock, SessionSummary } from "@linkshell/wire";
@@ -649,33 +660,33 @@ export function Session({
                 <DropdownMenuGroup>
                   {commands.some((command) => command.name === "goal") && (
                     <DropdownMenuItem onSelect={() => setPanel("goal")}>
-                      持续目标
+                      <Target />持续目标
                     </DropdownMenuItem>
                   )}
                   {commands.some((command) => command.name === "mcp") && (
                     <DropdownMenuItem disabled={!canInteract} onSelect={() => nativePanel("mcp")}>
-                      MCP 服务
+                      <Plug />MCP 服务
                     </DropdownMenuItem>
                   )}
                   {commands.some((command) => command.name === "apps") && (
                     <DropdownMenuItem disabled={!canInteract} onSelect={() => nativePanel("apps")}>
-                      应用与连接器
+                      <Blocks />应用与连接器
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onSelect={() => setTerminals(true)}>
-                    终端
+                    <SquareTerminal />终端
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuItem disabled={!canInteract} onSelect={() => setForkAt(null)}>
-                    分叉会话
+                    <GitFork />分叉会话
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={!canInteract}
                     onSelect={() => void job.run(() => execute("/rename"))}
                   >
-                    重命名
+                    <PencilLine />重命名
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={!canInteract}
@@ -685,6 +696,7 @@ export function Session({
                       )
                     }
                   >
+                    {session.archived ? <ArchiveRestore /> : <Archive />}
                     {session.archived ? "取消归档" : "归档"}
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -733,7 +745,7 @@ export function Session({
                       })
                     }
                   >
-                    删除会话
+                    <Trash2 />删除会话
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
@@ -1220,29 +1232,26 @@ export function Session({
                           variant="ghost"
                           size="icon"
                           aria-label="打开命令面板"
+                          title="命令与技能 · /"
                           onClick={() => setPanel("commands")}
                         >
-                          /
+                          <SquareSlash />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="plain"
-                          className="composer-agent"
-                          title={session.model ?? "模型与权限"}
-                          onClick={() => setPanel("settings")}
-                        >
-                          {session.model ?? "模型与权限"}
-                        </Button>
-                        {view?.usage?.contextWindow && (
-                          <span className="context-meter" title="上下文用量">
-                            {Math.round(
-                              ((view.usage.usedTokens ?? 0) /
-                                view.usage.contextWindow) *
-                                100,
-                            )}
-                            %
-                          </span>
-                        )}
+                        <ComposerConfig
+                          session={session}
+                          config={view?.config ?? []}
+                          disabled={!online}
+                          openSettings={() => setPanel("settings")}
+                        />
+                      </div>
+                      <div>
+                        <ComposerPlace session={session} />
+                        {view?.usage?.contextWindow ? (
+                          <ContextRing
+                            used={view.usage.usedTokens ?? 0}
+                            window={view.usage.contextWindow}
+                          />
+                        ) : null}
                       </div>
                       <div>
                         {(view?.turnActive || session.state === "unknown") &&
@@ -1276,6 +1285,11 @@ export function Session({
                           aria-label={
                             view?.turnActive ? "加入发送队列" : "发送消息"
                           }
+                          title={
+                            view?.turnActive
+                              ? "加入队列 · Enter（⌘/Ctrl Enter 立即发送）"
+                              : "发送 · Enter（Shift Enter 换行）"
+                          }
                           disabled={
                             !canInteract ||
                             sendJob.busy ||
@@ -1294,14 +1308,17 @@ export function Session({
                   </InputGroup>
                 </PopoverAnchor>
               </Popover>
-              <div className="composer-caption" id="composer-hint">
-                <span>
-                  {view?.turnActive
-                    ? "Enter 加入队列 · ⌘/Ctrl Enter 立即发送"
-                    : "Enter 发送 · Shift Enter 换行 · / 命令"}
-                </span>
-                <span>{canInteract ? "端到端加密" : online ? "同步完成后可发送" : "草稿已保留"}</span>
-              </div>
+              {/* The keys are in the send button's tooltip; only a state worth knowing gets a line here. */}
+              <span className="sr-only" id="composer-hint">
+                {view?.turnActive
+                  ? "Enter 加入队列，⌘/Ctrl Enter 立即发送"
+                  : "Enter 发送，Shift Enter 换行，/ 打开命令"}
+              </span>
+              {!canInteract && (
+                <div className="composer-caption">
+                  <span>{online ? "同步完成后可发送" : "连接已断开，草稿已保留"}</span>
+                </div>
+              )}
             </div>
           </div>
           {panel && panel !== "commands" && (

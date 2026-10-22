@@ -232,6 +232,23 @@
     padding-inline: 6px;
     font-size: 12px;
   }
+  /* Copy and fork are icons alone; the name shows on hover. */
+  .message-actions [data-slot="button"][data-size="icon-sm"] {
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
+    padding: 0;
+    border-radius: 7px;
+    color: var(--tertiaryLabel);
+  }
+  .message-actions [data-slot="button"][data-size="icon-sm"]:hover {
+    color: var(--label);
+    background: var(--fillStrong);
+  }
+  .message-actions [data-slot="button"][data-size="icon-sm"] svg {
+    width: 14px;
+    height: 14px;
+  }
   .user-message:hover .message-actions,
   .message-actions:hover,
   .message-actions:focus-within,
@@ -635,10 +652,11 @@
     color: var(--tertiaryLabel);
     font-size: 11px;
   }
-  .tool-record.in_progress .tool-state {
-    color: var(--running);
-    animation: spin 1s linear infinite;
-  }
+  .tool-state svg { width: 13px; height: 13px; stroke-width: 2.2; }
+  .tool-record.in_progress .tool-state { color: var(--running); }
+  /* Only the spinner turns, about its own centre; the row and its other icons stay still. */
+  .tool-state-spinner { transform-origin: 50% 50%; animation: spin 0.9s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .tool-state-spinner { animation: none; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   .tool-record.completed > summary > .tool-state { color: var(--success); }
   .tool-record.failed > summary > .tool-state { color: var(--danger); }
@@ -1210,12 +1228,72 @@
     color: var(--secondaryLabel);
     font-size: 12px;
   }
-  .context-meter {
-    padding: 0 6px;
+  /* Composer controls: the mode, model and effort as menus, where the work happens, context used. */
+  .composer-toolbar > div:nth-child(2) {
+    flex: 1;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-right: 6px;
+    overflow: hidden;
+  }
+  .composer-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 180px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .composer-chip > span { overflow: hidden; text-overflow: ellipsis; }
+  .composer-chip svg { width: 14px; height: 14px; flex: none; }
+  .composer-chip .composer-chip-caret { width: 11px; height: 11px; opacity: 0.6; }
+  .composer-chip:hover,
+  .composer-chip[aria-expanded="true"] { background: var(--fillStrong); color: var(--label); }
+  .composer-chip[data-risky] { color: var(--warning); }
+  .composer-chip-menu { min-width: 220px; max-width: 340px; max-height: 360px; overflow: auto; }
+  .composer-chip-option { display: grid; gap: 1px; min-width: 0; }
+  .composer-chip-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .composer-chip-option small { color: var(--tertiaryLabel); font-size: 11px; line-height: 1.35; }
+  .composer-place {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .composer-place > span:not(.composer-place-branch) { overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+  .composer-place svg { width: 13px; height: 13px; flex: none; }
+  .composer-place-branch {
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--fill);
+    color: var(--secondaryLabel);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .context-ring {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: var(--tertiaryLabel);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
+  .context-ring svg { flex: none; }
+  .context-ring circle { fill: none; stroke-width: 2.2; stroke: var(--fillStrong); }
+  .context-ring circle + circle { stroke: var(--secondaryLabel); stroke-linecap: round; }
+  .context-ring[data-level="warm"] circle + circle { stroke: var(--warning); }
+  .context-ring[data-level="high"] circle + circle { stroke: var(--danger); }
+  .context-ring[data-level="high"] { color: var(--danger); }
   .send-button {
     border-radius: 8px;
   }
@@ -1395,12 +1473,13 @@
     .composer-wrap { padding: 8px 12px 12px; }
     .user-message { max-width: 94%; }
     .live-side-panel { width: 100%; }
-    .composer-agent { max-width: 120px; }
+    .composer-chip { max-width: 120px; }
+    .composer-place { display: none; }
   }
   @media (max-width: 640px) {
     .message-queue > div { flex-wrap: wrap; }
     .message-queue > div > span { min-width: 100%; }
-    .context-meter { display: none; }
+    .context-ring > span { display: none; }
     .before-after { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) {

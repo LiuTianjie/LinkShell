@@ -1047,7 +1047,7 @@ export function Terminals({
           title="一个随时能回来的终端"
           description="Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"
         >
-          <Button size="sm" disabled={!online} onClick={openCreate}>
+          <Button disabled={!online} onClick={openCreate}>
             <Plus data-icon="inline-start" />
             创建第一个终端
           </Button>

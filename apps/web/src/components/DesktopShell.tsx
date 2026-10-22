@@ -15,6 +15,7 @@ import {
   Monitor,
   Moon,
   Plus,
+  RefreshCw,
   Settings2,
   Sun,
   Terminal,
@@ -133,6 +134,11 @@ function ComputerPicker({
     selectComputer(computer);
     setOpenMobile(false);
   };
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await engine.refreshComputers(); } catch (error) { engine.report(error); } finally { setRefreshing(false); }
+  };
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -165,6 +171,9 @@ function ComputerPicker({
         ))}
         {!state.computers.length && <p className="desktop-menu-empty">连接后，在这里切换工作电脑。</p>}
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void refresh(); }} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "animate-spin" : undefined} />{refreshing ? "正在刷新…" : "刷新电脑列表"}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={connect}><Plus />连接另一台电脑</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

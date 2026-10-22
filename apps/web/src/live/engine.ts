@@ -384,15 +384,20 @@ export class BrowserEngine {
     relay.on("machines.changed", () => {
       void this.refresh(gateway).catch((error) => this.report(error));
     });
-    relay.on("presence", ({ id, online }) =>
+    relay.on("presence", ({ id, online }) => {
+      // A computer that just joined the account is announced before this list knows it.
+      if (online && !this.state.getState().computers.some((item) => item.gateway === gateway && item.machine.id === id)) {
+        void this.refresh(gateway).catch((error) => this.report(error));
+        return;
+      }
       this.state.setState((state) => ({
         computers: state.computers.map((item) =>
           item.gateway === gateway && item.machine.id === id
             ? { ...item, machine: { ...item.machine, online } }
             : item,
         ),
-      })),
-    );
+      }));
+    });
     relay.start();
     return relay;
   }
@@ -499,6 +504,18 @@ export class BrowserEngine {
     this.state.setState((state) => ({
       computers: state.computers.filter((item) => item.key !== computer.key),
     }));
+  }
+  /** Asks every gateway again for its computers (and the desktop for this one), now. */
+  async refreshComputers() {
+    if (!this.releaseLock) return;
+    const work: Promise<unknown>[] = [];
+    if (isDesktop) work.push(this.refreshDesktop());
+    for (const [gateway, relay] of this.relays) {
+      if (relay.status === "online") work.push(this.refresh(gateway));
+      else relay.reconnectNow();
+    }
+    const failed = (await Promise.allSettled(work)).find((result) => result.status === "rejected");
+    if (failed) throw (failed as PromiseRejectedResult).reason;
   }
   reconnect() {
     if (!this.releaseLock) return;

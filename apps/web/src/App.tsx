@@ -28,6 +28,10 @@ import {
   Clock,
   MessageSquarePlus,
   MonitorSmartphone,
+  Activity,
+  BellRing,
+  CalendarCheck,
+  Folders,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { deployment } from "./config";
@@ -540,6 +544,22 @@ function Home({
   );
   return (
     <section className="session-overview flex min-w-0 flex-col gap-4">
+      {isDesktop && !archived && loaded && (
+        <OverviewStats
+          sessions={Object.values(state.sessions).filter((session) => !session.archived)}
+          hostname={state.machine?.hostname}
+          filter={filter}
+          choose={(next) => setFilter((current) => (current === next ? "all" : next))}
+        />
+      )}
+      {isDesktop && archived && (
+        <div className="page-heading">
+          <div>
+            <h1>已归档</h1>
+            <p className="muted">归档的会话不再出现在对话列表里，记录仍保存在电脑上。</p>
+          </div>
+        </div>
+      )}
       <div className="session-overview-heading flex items-center justify-between gap-4">
         {isDesktop ? searchField : <div className="min-w-0">
           <h1 className="text-xl font-semibold">
@@ -971,7 +991,7 @@ function Computers({
   const job = useJob();
   const gateway = useLoad(() => link.call("gateway.status", {}), [link], 10000);
   const heading = (title: string, hint?: string) => (
-    <div className="px-3 pb-2">
+    <div className="computers-section-heading px-3 pb-2">
       <h2 className="text-xs font-semibold text-[var(--secondaryLabel)]">
         {title}
       </h2>
@@ -993,7 +1013,7 @@ function Computers({
         </Button>
       </div>
       <ErrorNotice error={job.error} />
-      <div>
+      <div className="computers-section">
         {heading("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。")}
         {state.computers.map((computer) => {
           const current = state.connection?.computer.key === computer.key;
@@ -1048,7 +1068,7 @@ function Computers({
           );
         })}
       </div>
-      <div>
+      <div className="computers-section">
         {heading(
           "当前电脑的 Agent",
           `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}`,
@@ -1081,7 +1101,7 @@ function Computers({
           </div>
         ))}
       </div>
-      <div>
+      <div className="computers-section">
         {heading("配对设备", "撤销后，该设备需要重新配对才能连接。")}
         <LoadState {...gateway} />
         {gateway.error && (
@@ -1131,5 +1151,132 @@ function Computers({
       </div>
       <AcpManager />
     </section>
+  );
+}
+
+/** The desktop home's glance: where the work stands, in a sentence and four numbers. */
+function OverviewStats({
+  sessions,
+  hostname,
+  filter,
+  choose,
+}: {
+  sessions: SessionSummary[];
+  hostname?: string;
+  filter: string;
+  choose: (filter: string) => void;
+}) {
+  const running = sessions.filter((session) => sessionGroup(session) === "running");
+  const waiting = sessions.filter(sessionNeedsAttention);
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime());
+  const finishedToday = today.filter((session) => session.state === "idle" && !sessionNeedsAttention(session)).length;
+  const recent = sessions.filter((session) => session.updatedAt >= Date.now() - 7 * 86_400_000);
+  const projects = new Map<string, number>();
+  for (const session of recent) projects.set(session.cwd, (projects.get(session.cwd) ?? 0) + 1);
+  const busiest = [...projects].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const name = (hostname ?? "这台电脑").replace(/\.local$/, "");
+  const headline = waiting.length
+    ? `${waiting.length} 项在等你`
+    : running.length
+      ? `${running.length} 个任务在跑`
+      : "一切就绪";
+  const latest = (list: SessionSummary[]) =>
+    [...list].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const cards: {
+    id: string;
+    icon: typeof Activity;
+    label: string;
+    value: number;
+    unit: string;
+    caption: string;
+    tone?: "attention" | "live";
+  }[] = [
+    {
+      id: "running",
+      icon: Activity,
+      label: "进行中",
+      value: running.length,
+      unit: "个",
+      caption: running.length ? `最近：${titleOf(latest(running)!)}` : "现在没有在跑的任务",
+      tone: running.length ? "live" : undefined,
+    },
+    {
+      id: "waiting",
+      icon: BellRing,
+      label: "需要你",
+      value: waiting.length,
+      unit: "项",
+      caption: waiting.length ? `${titleOf(latest(waiting)!)} 在等你回复` : "没有待审批或待回答的事项",
+      tone: waiting.length ? "attention" : undefined,
+    },
+    {
+      id: "idle",
+      icon: CalendarCheck,
+      label: "今天",
+      value: today.length,
+      unit: "个会话",
+      caption: today.length ? `其中 ${finishedToday} 个已完成` : "今天还没有动静",
+    },
+    {
+      id: "projects",
+      icon: Folders,
+      label: "近 7 天项目",
+      value: projects.size,
+      unit: "个",
+      caption: busiest ? `最常用：${busiest.split("/").filter(Boolean).pop()}` : "最近没有项目活动",
+    },
+  ];
+  return (
+    <div className="overview-glance">
+      <header>
+        <h1>
+          <span>{name}</span>
+          <span aria-hidden className="overview-glance-dot">·</span>
+          <span>{headline}</span>
+        </h1>
+        <p>
+          {sessions.length} 个会话 · 手机、桌面与网页共享同一份记录
+        </p>
+      </header>
+      <div className="overview-cards">
+        {cards.map(({ id, icon: CardIcon, label, value, unit, caption, tone }) => {
+          // Only these two filter the list below; the others are facts about it.
+          const filterable = id === "running" || id === "waiting";
+          const body = (
+            <>
+              <span className="overview-card-label">
+                <CardIcon aria-hidden />
+                {label}
+              </span>
+              <span className="overview-card-value">
+                {value}
+                <small>{unit}</small>
+              </span>
+              <span className="overview-card-caption">{caption}</span>
+            </>
+          );
+          return filterable ? (
+            <button
+              type="button"
+              key={id}
+              className="overview-card"
+              data-tone={tone}
+              data-selected={filter === id ? "" : undefined}
+              aria-pressed={filter === id}
+              title={filter === id ? "显示全部会话" : `只看${label}`}
+              onClick={() => choose(id)}
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={id} className="overview-card" data-tone={tone}>
+              {body}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

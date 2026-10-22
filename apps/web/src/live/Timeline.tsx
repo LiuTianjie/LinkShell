@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
@@ -95,7 +95,7 @@ function CopyText({
     <span className="message-copy">
       <Button
         variant="ghost"
-        size="sm"
+        size="icon-sm"
         disabled={job.busy}
         aria-label={copied ? "已复制" : label}
         title={copied ? "已复制" : label}
@@ -107,7 +107,6 @@ function CopyText({
         }
       >
         {copied ? <Check /> : <Copy />}
-        <span>{copied ? "已复制" : "复制"}</span>
       </Button>
       {job.error && (
         <span className="form-error" role="alert">
@@ -724,12 +723,14 @@ export function Timeline({
                 {onFork && !item.pending && !item.failed && (
                   <Button
                     variant="ghost"
-                    size="plain"
+                    size="icon-sm"
                     className="message-fork"
                     disabled={!online}
+                    aria-label="从这里分叉"
+                    title="从这里分叉"
                     onClick={() => onFork(item.id)}
                   >
-                    从这里分叉
+                    <GitFork />
                   </Button>
                 )}
               </div>
@@ -771,12 +772,14 @@ export function Timeline({
                   {onFork && (
                     <Button
                       variant="ghost"
-                      size="plain"
+                      size="icon-sm"
                       className="message-fork"
                       disabled={!online}
+                      aria-label="从这里分叉"
+                      title="从这里分叉"
                       onClick={() => onFork(item.id)}
                     >
-                      从这里分叉
+                      <GitFork />
                     </Button>
                   )}
                 </div>
@@ -857,15 +860,19 @@ export function Timeline({
         return (
           <details className={`tool-record ${item.status}`} key={item.id}>
             <summary>
-              <span className="tool-state">
+              <span className="tool-state" aria-hidden>
                 {item.detail?.type === "subagent" &&
-                item.detail.state === "unknown"
-                  ? "?"
-                  : item.status === "completed"
-                    ? "✓"
-                    : item.status === "failed"
-                      ? "!"
-                      : "◌"}
+                item.detail.state === "unknown" ? (
+                  <CircleHelp />
+                ) : item.status === "completed" ? (
+                  <Check />
+                ) : item.status === "failed" ? (
+                  <CircleAlert />
+                ) : item.status === "in_progress" ? (
+                  <LoaderCircle className="tool-state-spinner" />
+                ) : (
+                  <CircleDashed />
+                )}
               </span>
               <strong title={item.title}>{item.title}</strong>
               {(() => {

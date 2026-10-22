@@ -56,9 +56,7 @@ struct DesktopPairingView: View {
       } else if !paired {
         Text("同账号登录可自动发现；设备配对独立于账号。免登录配对需连接自建网关，官方网关需要 Pro 账号。").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
       }
-    }.padding(18)
-      .background(RoundedRectangle(cornerRadius: 12).fill(DesktopStyle.card))
-      .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(DesktopStyle.line, lineWidth: 1) }
+    }.desktopCard(padding: 18)
       .task {
         if model.preview {
           offer = DesktopPairingOffer(code: "000000", link: "https://example.invalid/linkshell-design-preview", gateway: "设计预览 · 示例二维码，不可用于配对", expiresAt: Date().timeIntervalSince1970 * 1000 + 600_000)

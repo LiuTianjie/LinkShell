@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Folder, GitBranch, Plus, Search, ChevronDown, X } from "lucide-react";
+import { Folder, GitBranch, Plus, Search, ChevronDown, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -99,12 +99,15 @@ export function Projects({
           {projects.length} 个项目
         </span>
         <Button
-          variant="ghost"
-          size="sm"
+          variant="outline"
+          size="icon"
+          className="ml-auto"
+          aria-label="刷新项目"
+          title="刷新项目"
           disabled={job.busy || state.status !== "online"}
           onClick={() => void job.run(() => actions.refresh())}
         >
-          {job.busy ? "正在刷新…" : "刷新"}
+          <RefreshCw className={job.busy ? "animate-spin" : undefined} />
         </Button>
       </div>
       <ErrorNotice error={state.sessionsError ?? job.error} />
@@ -118,7 +121,7 @@ export function Projects({
           return (
             <section
               key={project.cwd}
-              className="border-t border-[var(--separator)] py-3"
+              className="project-card border-t border-[var(--separator)] py-3"
             >
               <div className="flex items-center gap-3 px-3">
                 <Folder className="size-4 shrink-0 text-[var(--secondaryLabel)]" />

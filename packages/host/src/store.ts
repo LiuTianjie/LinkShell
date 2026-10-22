@@ -216,7 +216,8 @@ export interface WorktreeRecord {
 
 /** The worktree `cwd` is in, if any. */
 export function worktreeOf(cwd: string, worktrees: WorktreeRecord[]): WorktreeRecord | undefined {
-  return worktrees.find((worktree) => cwd === worktree.path || cwd.startsWith(`${worktree.path}/`));
+  // Either separator: Windows paths use backslashes.
+  return worktrees.find((worktree) => cwd === worktree.path || cwd.startsWith(`${worktree.path}/`) || cwd.startsWith(`${worktree.path}\\`));
 }
 
 /** The project a session in `cwd` belongs to: for a worktree, the directory it was made from. */
@@ -509,7 +510,7 @@ export class HostStore {
 
   /** Sessions whose directory is `path` or inside it. */
   sessionsUnder(path: string): string[] {
-    const rows = this.db.prepare("SELECT id FROM sessions WHERE cwd = ? OR substr(cwd, 1, ?) = ?").all(path, path.length + 1, `${path}/`) as { id: string }[];
+    const rows = this.db.prepare("SELECT id FROM sessions WHERE cwd = ? OR substr(cwd, 1, ?) IN (?, ?)").all(path, path.length + 1, `${path}/`, `${path}\\`) as { id: string }[];
     return rows.map((row) => row.id);
   }
 

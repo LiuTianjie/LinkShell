@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, uptime } from "node:os";
 import { spawn } from "node:child_process";
 
 const LINKSHELL_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
@@ -66,6 +66,12 @@ export function readPid(service: ServiceName): number | null {
     if (!existsSync(file)) return null;
     const pid = Number(readFileSync(file, "utf8").trim());
     if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+    // Written before the computer last started (a logoff or power cut left it): whatever runs under
+    // that pid now is some other process, and believing it would keep the host from being started.
+    if (statSync(file).mtimeMs < Date.now() - uptime() * 1000 - 60_000) {
+      removePid(service);
+      return null;
+    }
     try {
       process.kill(pid, 0);
       return pid;

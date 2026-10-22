@@ -274,3 +274,228 @@ html[data-desktop] [data-slot="sidebar-menu-button"]:focus-visible { outline: 2p
   html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 24px minmax(80px, 1fr) 70px 52px; column-gap: 7px; }
   html[data-desktop] .desktop-main .composer-wrap { padding-inline: 15px; padding-bottom: 12px; }
 }
+
+/* ── Texture ────────────────────────────────────────────────────────────────
+   Surfaces step up one tier each (page → card → raised), every card carries a
+   hairline and a one-pixel top highlight, numbers are set large and light, and
+   colour is kept for what matters: terracotta for the action, amber for what
+   waits on the user. Later rules here refine the layout rules above. */
+html[data-desktop] {
+  --radius-card: 18px;
+  --card-edge: 0 0 0 1px var(--separator), inset 0 1px 0 var(--desktop-highlight), 0 1px 2px var(--desktop-shadow);
+  --card-lift: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 6px 20px var(--desktop-shadow);
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", system-ui, sans-serif;
+}
+html[data-desktop] .desktop-root { background: var(--sidebarBackground); }
+/* One flat colour: the native titlebar above the page is this colour too, and any wash here shows a seam. */
+html[data-desktop] .desktop-main { background: var(--plain); }
+html[data-desktop] .desktop-sidebar { border-right-color: var(--separator); }
+
+/* Sidebar: quiet text, the current place set on a raised chip. */
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-group-label"] { color: var(--tertiaryLabel); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { border-radius: 10px; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"]:hover { background: var(--fill); }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] { background: var(--card); box-shadow: var(--card-edge); font-weight: 560; }
+html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] > svg { color: var(--accent); }
+html[data-desktop] .desktop-nav-badge[data-tone="running"] { background: var(--accentSoft); color: var(--running); }
+html[data-desktop] .desktop-nav-session-dot[data-state="running"] { background: var(--running); box-shadow: 0 0 0 3px var(--accentSoft); }
+html[data-desktop] .desktop-nav-session-dot[data-state="waiting"] { box-shadow: 0 0 0 3px var(--waitingSoft); }
+html[data-desktop] .desktop-computer-picker { height: 60px; min-height: 60px; border: 0; border-radius: 14px; background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-computer-picker:hover,
+html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: var(--cardRaised); box-shadow: var(--card-lift); }
+html[data-desktop] .desktop-presence[data-online] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent); }
+html[data-desktop] .desktop-sidebar-footer { border-top-color: var(--separator); }
+
+/* Controls: the action is a terracotta key with a lit top edge; the rest are quiet frames. */
+html[data-desktop] [data-slot="button"][data-variant="default"] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), 0 0 0 1px color-mix(in srgb, var(--accent) 70%, black), 0 1px 3px var(--desktop-shadow);
+  color: var(--primaryForeground); font-weight: 560;
+}
+html[data-desktop] [data-slot="button"][data-variant="default"]:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--accentHover) 88%, white), var(--accentHover)); }
+html[data-desktop] [data-slot="button"][data-variant="outline"] { border: 0; background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] [data-slot="button"][data-variant="outline"]:hover { background: var(--cardRaised); box-shadow: var(--card-lift); }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service),
+html[data-desktop] .desktop-main .page-heading [data-slot="button"] { height: 34px; padding-inline: 14px; border-radius: 10px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { border-radius: 10px; }
+html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
+html[data-desktop] .desktop-main [data-slot="select-trigger"] { height: 36px; border: 0; border-radius: 11px; background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer):focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 4px var(--accentSoft); }
+html[data-desktop] [data-slot="dropdown-menu-content"],
+html[data-desktop] [data-slot="select-content"] { border: 0; border-radius: 14px; background: var(--cardRaised); box-shadow: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 12px 32px var(--desktop-shadow), 0 2px 6px var(--desktop-shadow); }
+html[data-desktop] [data-slot="dropdown-menu-item"],
+html[data-desktop] [data-slot="select-item"] { border-radius: 8px; }
+html[data-desktop] [data-slot="dialog-content"] { border: 0; border-radius: 22px; background: var(--card); box-shadow: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 24px 64px rgb(0 0 0 / .28); }
+
+/* Segmented filters: a recessed track with the current choice raised in it. */
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { min-height: 36px; height: 36px; gap: 2px; padding: 3px; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 30px; padding-inline: 12px; border: 0; border-radius: 9px; color: var(--secondaryLabel); font-size: 12.5px; }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--card); color: var(--label); font-weight: 560; box-shadow: var(--card-edge); }
+
+/* Headings: a statement in display type, a quiet line under it, no rule. */
+html[data-desktop] .desktop-main .page-heading { min-height: 44px; margin-bottom: 22px; padding-bottom: 0; border-bottom: 0; }
+html[data-desktop] .desktop-main .page-heading h1,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
+html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-family: var(--display); font-size: 26px; font-weight: 600; letter-spacing: -.035em; line-height: 1.2; }
+html[data-desktop] .desktop-main .page-heading p,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
+html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 6px; font-size: 13px; }
+
+/* The home glance. */
+html[data-desktop] .overview-glance { display: grid; gap: 18px; margin-bottom: 6px; }
+html[data-desktop] .overview-glance h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; color: var(--label); }
+html[data-desktop] .overview-glance h1 > span:first-child { color: var(--secondaryLabel); font-weight: 500; }
+html[data-desktop] .overview-glance-dot { color: var(--quaternaryLabel); }
+html[data-desktop] .overview-glance p { margin-top: 6px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .overview-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+html[data-desktop] .overview-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 16px 18px 15px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); color: var(--label); text-align: left; font: inherit; transition: box-shadow var(--transition), background var(--transition), transform var(--transition); }
+html[data-desktop] button.overview-card { cursor: pointer; }
+html[data-desktop] button.overview-card:hover { background: var(--cardRaised); box-shadow: var(--card-lift); }
+html[data-desktop] button.overview-card:active { transform: translateY(1px); }
+html[data-desktop] button.overview-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-desktop] .overview-card[data-selected] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), 0 0 0 4px var(--accentSoft), inset 0 1px 0 var(--desktop-highlight); }
+html[data-desktop] .overview-card-label { display: flex; align-items: center; gap: 7px; color: var(--tertiaryLabel); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+html[data-desktop] .overview-card-label svg { width: 14px; height: 14px; }
+html[data-desktop] .overview-card-value { display: flex; align-items: baseline; gap: 6px; font-family: var(--display); font-size: 40px; font-weight: 400; letter-spacing: -.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+html[data-desktop] .overview-card-value small { color: var(--secondaryLabel); font-size: 14px; font-weight: 450; letter-spacing: 0; }
+html[data-desktop] .overview-card-caption { overflow: hidden; color: var(--secondaryLabel); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .overview-card[data-tone="live"] .overview-card-label { color: var(--running); }
+html[data-desktop] .overview-card[data-tone="attention"] .overview-card-label,
+html[data-desktop] .overview-card[data-tone="attention"] .overview-card-value { color: var(--warning); }
+@container desktop-workspace (max-width: 820px) {
+  html[data-desktop] .overview-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Lists sit on cards: a labelled group, rows divided by inset hairlines. */
+html[data-desktop] .desktop-main .session-group { padding: 6px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main .session-group > .list-section-title { min-height: 34px; padding: 6px 12px 4px; color: var(--tertiaryLabel); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--quaternaryLabel); font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 28%, transparent), inset 0 1px 0 var(--desktop-highlight), 0 1px 2px var(--desktop-shadow); }
+html[data-desktop] .desktop-main .session-group .list-row,
+html[data-desktop] .desktop-main .session-group .list-row:has(> .list-row-detail) { border-bottom: 0; border-radius: 12px; }
+html[data-desktop] .desktop-main .session-group .list-row:has(> .list-row-detail):hover { background: var(--fill); }
+html[data-desktop] .desktop-main .list-row-title:hover { color: var(--label); }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child .agent-mark { width: 26px; height: 26px; border-radius: 8px; box-shadow: 0 0 0 1px var(--separator); }
+html[data-desktop] .desktop-main .list-row-detail { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .list-row-status > span { font-weight: 500; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
+
+/* Computers and screens: each one a row on a shared card. */
+html[data-desktop] .desktop-main .screens-page > .border-t,
+html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 6px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main .screen-row { border-bottom: 0; border-radius: 12px; }
+html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--fill); box-shadow: none; }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { border-radius: 11px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
+
+/* Conversation: the page is paper, the composer a raised card, the user's words a soft inset. */
+html[data-desktop] .desktop-main .session-heading { background: color-mix(in srgb, var(--plain) 82%, transparent); backdrop-filter: blur(18px) saturate(1.2); border-bottom: 1px solid var(--separator); }
+html[data-desktop] .desktop-main .session-title h1 { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.03em; }
+html[data-desktop] .desktop-main .user-message { background: var(--userBubble); box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop] .desktop-main .markdown { color: var(--label); }
+html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 5px; border-radius: 6px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop] .desktop-main .markdown pre { border-radius: 12px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop] .desktop-main .tool-record,
+html[data-desktop] .desktop-main .plan-card,
+html[data-desktop] .desktop-main .notice-card,
+html[data-desktop] .desktop-main .diff-block { border-color: var(--separator); background: var(--card); }
+html[data-desktop] .desktop-main .composer-wrap { background: linear-gradient(180deg, transparent, var(--plain) 28%); }
+html[data-desktop] .desktop-main .composer { border: 0; border-radius: 20px; background: var(--card); box-shadow: var(--card-lift); }
+html[data-desktop] .desktop-main .composer:focus-within { border: 0; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 0 4px var(--accentSoft), inset 0 1px 0 var(--desktop-highlight), 0 8px 24px var(--desktop-shadow); }
+html[data-desktop] .desktop-main .approval-card { border: 0; border-radius: 20px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 32%, transparent), inset 0 1px 0 var(--desktop-highlight), 0 8px 24px var(--desktop-shadow); }
+
+/* Empty and welcome states. */
+html[data-desktop] .desktop-main .welcome-live h1 { font-family: var(--display); font-size: 32px; font-weight: 600; letter-spacing: -.045em; }
+html[data-desktop] .desktop-main .welcome-live img { box-shadow: 0 12px 32px var(--desktop-shadow), 0 0 0 1px var(--separator); }
+
+/* Computers: each part of the page is one card; its rows divide by inset hairlines. */
+html[data-desktop] .desktop-main .computers-section { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main .computers-section-heading { padding: 6px 12px 8px; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--tertiaryLabel); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 3px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .computers-section .list-row { border-bottom: 0; border-radius: 12px; }
+
+/* Rows on a card: a straight hairline inset from both edges, gone around the row under the pointer. */
+html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row,
+html[data-desktop] .desktop-main .screen-row { position: relative; }
+html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row + .list-row::before,
+html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row:hover::before,
+html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row:hover + .list-row::before,
+html[data-desktop] .desktop-main .screen-row:hover::before,
+html[data-desktop] .desktop-main .screen-row:hover + .screen-row::before,
+html[data-desktop] .desktop-main .screen-row[data-current]::before,
+html[data-desktop] .desktop-main .screen-row[data-current] + .screen-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .computers-section .list-row:hover { background: var(--fill); }
+
+/* Projects, files and services sit on cards like the session lists. */
+html[data-desktop] .desktop-main .project-card { padding: 12px 6px 6px; border-top: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main .project-card + .project-card { margin-top: 4px; }
+html[data-desktop] .desktop-main .project-card .list-row { position: relative; border-bottom: 0; border-radius: 12px; }
+html[data-desktop] .desktop-main .project-card .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main .project-card .list-row:hover::before,
+html[data-desktop] .desktop-main .project-card .list-row:hover + .list-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .project-card .list-row:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .resource-entry-list:not(:empty),
+html[data-desktop] .desktop-main .resource-service-list:not(:empty) { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main .resource-entry,
+html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: 10px; }
+html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
+html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main .resource-entry:hover::before,
+html[data-desktop] .desktop-main .resource-entry:hover + .resource-entry::before,
+html[data-desktop] .desktop-main .resource-service:hover::before,
+html[data-desktop] .desktop-main .resource-service:hover + .resource-service::before { opacity: 0; }
+html[data-desktop] .desktop-main .resource-services { max-height: 300px; overflow: visible; }
+html[data-desktop] .desktop-main .resource-service-list { max-height: 280px; overflow: auto; }
+
+/* Windows draws the mode switch in the page; it matches the Mac's native one: a recessed track, the current mode raised. */
+html[data-desktop] .windows-desktop-modes { padding: 3px; border-radius: 10px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 28px; border-radius: 7px; color: var(--secondaryLabel); font-weight: 500; }
+html[data-desktop] .windows-desktop-modes [data-slot="button"][aria-current="page"] { background: var(--card); color: var(--label); font-weight: 600; box-shadow: var(--card-edge); }
+html[data-desktop] .windows-desktop-modes [data-slot="button"]:not([aria-current]):hover { background: var(--fill); color: var(--label); }
+
+/* The desktop composer: a roomier card, its controls on a quiet strip under the text. */
+html[data-desktop] .desktop-main .composer { min-height: 112px; }
+html[data-desktop] .desktop-main .composer-toolbar { padding: 4px 10px 10px; }
+html[data-desktop] .desktop-main .composer-toolbar > div:first-child { gap: 2px; }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 30px; height: 30px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button):hover { background: var(--fillStrong); color: var(--label); }
+html[data-desktop] .desktop-main .composer .send-button { width: 32px; height: 32px; }
+html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 8px; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .composer-wrap { padding-bottom: 20px; }
+
+/* ── Detail pass ─────────────────────────────────────────────────────────── */
+
+/* Caps-style labels: Chinese is not set in capitals, so it keeps only a little tracking. */
+html[data-desktop] :is(.overview-card-label, .session-group > .list-section-title, .computers-section-heading h2, .desktop-navigation-group [data-slot="sidebar-group-label"]) { letter-spacing: .03em; }
+
+/* Session rows: fixed status and time columns, so a long project name never pushes the status out of line. */
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 26px minmax(0, 1fr) 84px 76px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { overflow: hidden; max-width: 220px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Back to the latest message: a floating pill that reads as a control, clear of the text. */
+html[data-desktop] .desktop-main .conversation-jump { bottom: 16px; }
+html[data-desktop] .desktop-main .conversation-jump button { height: 32px; padding-inline: 14px; border-radius: 999px; background: var(--cardRaised); box-shadow: var(--card-lift); font-size: 12.5px; }
+
+/* Empty states sit on the page as one card, centred, with a full-size action. */
+html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 4px; padding: 48px 24px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 15px; font-weight: 600; }
+html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 360px; color: var(--secondaryLabel); font-size: 13px; line-height: 1.6; }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 40px; height: 40px; border-radius: 12px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
+html[data-desktop] .desktop-main .worktree-list:not(:empty) { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
+
+/* Menus on the composer: wide enough that a model's description fits on one line. */
+html[data-desktop] .composer-chip-menu { min-width: 280px; }
+html[data-desktop] .desktop-main .composer-chip { max-width: 220px; }
+
+/* Command list: the command reads first, its argument as a quiet hint after it. */
+html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+html[data-desktop] .command-option-name strong { font-weight: 600; }
+html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+/* Inside a card an empty state is just its content, not a second card. */
+html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-card) [data-slot="empty"] { margin: 0; padding: 24px; background: transparent; box-shadow: none; }
+/* Windows: Segoe UI and Microsoft YaHei are already set tight; the Mac's negative tracking would cramp them. */
+html[data-desktop]:has(.windows-desktop-header) { --display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
+html[data-desktop]:has(.windows-desktop-header) :is(h1, .overview-card-value, .session-title h1, .welcome-live h1) { letter-spacing: -.01em; }

@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { killTreeOnWindows, spawnAgent } from "../../process.js";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -89,7 +90,7 @@ export class AcpClientServices {
         env[item.name] = item.value;
       }
       if (p.outputByteLimit != null && (!Number.isSafeInteger(p.outputByteLimit) || Number(p.outputByteLimit) < 0)) throw invalid("终端输出上限必须是非负整数");
-      const child = spawn(p.command, (p.args ?? []) as string[], { cwd, env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawnAgent(p.command, (p.args ?? []) as string[], { cwd, env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
       const terminalId = randomUUID();
       let finish!: (status: AcpTerminalSnapshot["exitStatus"]) => void;
       const terminal: Terminal = { sessionId: String(p.sessionId), child, output: "", truncated: false,
@@ -147,7 +148,7 @@ export class AcpClientServices {
   private snapshot(terminal: Terminal): AcpTerminalSnapshot { return { output: terminal.output, truncated: terminal.truncated, ...(terminal.exitStatus ? { exitStatus: terminal.exitStatus } : {}) }; }
   private async kill(terminal: Terminal): Promise<void> {
     const kill = (signal: NodeJS.Signals) => {
-      try { if (process.platform !== "win32" && terminal.child.pid) process.kill(-terminal.child.pid, signal); else terminal.child.kill(signal); }
+      try { if (!terminal.child.pid) return; if (process.platform === "win32") killTreeOnWindows(terminal.child.pid); else process.kill(-terminal.child.pid, signal); }
       catch { /* The process may have exited between the status check and the signal. */ }
     };
     // The launcher may exit while a detached-from-stdio child still owns its

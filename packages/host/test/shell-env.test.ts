@@ -97,3 +97,12 @@ describe("withCommonPaths", () => {
     }
   });
 });
+
+describe("registryValue", () => {
+  it("reads a REG_EXPAND_SZ Path and expands its variables", async () => {
+    const { registryValue } = await import("../src/shell-env.js");
+    const output = "\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    %USERPROFILE%\\AppData\\Local\\Programs;C:\\Tools;\r\n\r\n";
+    expect(registryValue(output, { USERPROFILE: "C:\\Users\\me" })).toEqual(["C:\\Users\\me\\AppData\\Local\\Programs", "C:\\Tools"]);
+    expect(registryValue("ERROR: The system was unable to find the specified registry key", {})).toEqual([]);
+  });
+});

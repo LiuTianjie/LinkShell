@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { killTreeOnWindows, spawnAgent } from "../../process.js";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { RpcError, type AcpMcpServer, type RpcId } from "@linkshell/wire";
@@ -20,7 +21,8 @@ export class AcpMcpBridge {
   open(config: Extract<AcpMcpServer, { type: "acp" }>, cwd: string): string {
     if (this.servers.size >= 64) throw RpcError.app("busy", "请先关闭不用的 MCP 服务");
     const serverId = randomUUID();
-    const child = spawn(config.command, config.args, { cwd, env: { ...this.options.env, ...config.env }, detached: process.platform !== "win32", stdio: "pipe" });
+    // spawnAgent: npx/npm-installed servers are .cmd shims on Windows, and a hidden console.
+    const child = spawnAgent(config.command, config.args, { cwd, env: { ...this.options.env, ...config.env }, detached: process.platform !== "win32", stdio: "pipe" }) as ChildProcessWithoutNullStreams;
     const server: Server = { child, pending: new Map(), buffer: "", decoder: new StringDecoder("utf8"), stopped: false };
     this.servers.set(serverId, server);
     child.stdout.on("data", (data: Buffer) => {
@@ -97,7 +99,7 @@ export class AcpMcpBridge {
       if (sessionId && server.sessionId !== sessionId) continue;
       if (ids && !ids.includes(id)) continue;
       this.servers.delete(id); this.fail(server, new Error("MCP 服务已关闭"));
-      const kill = (signal: NodeJS.Signals) => { try { if (process.platform !== "win32" && server.child.pid) process.kill(-server.child.pid, signal); else server.child.kill(signal); } catch { /* Already exited. */ } };
+      const kill = (signal: NodeJS.Signals) => { try { if (!server.child.pid) return; if (process.platform === "win32") killTreeOnWindows(server.child.pid); else process.kill(-server.child.pid, signal); } catch { /* Already exited. */ } };
       if (server.child.exitCode !== null) { kill("SIGKILL"); continue; }
       kill("SIGTERM");
       await new Promise<void>((resolve) => {

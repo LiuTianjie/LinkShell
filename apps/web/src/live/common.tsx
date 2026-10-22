@@ -91,6 +91,9 @@ export function AgentMark({
     <span
       data-size={size}
       className={`agent-mark ${agent.toLowerCase()} ${mark?.full ? "full-mark" : ""}`}
+      // The glyph is drawn in its light-scheme colour, so it needs its own tile: a white
+      // Copilot or Grok mark on the page's light inset would not be seen.
+      style={mark?.bg ? { background: mark.bg.light, boxShadow: "none" } : undefined}
     >
       {mark ? (
         <img

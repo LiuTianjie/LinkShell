@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   links: [] as { options: { createSocket(): unknown }; socket?: unknown }[],
   streams: [] as { connector?: unknown }[],
-  relays: [] as { options: { name: string; platform: string }; reauthenticate: ReturnType<typeof vi.fn> }[],
+  relays: [] as { options: { name: string; platform: string }; reauthenticate: ReturnType<typeof vi.fn>; handlers: Map<string, (data: unknown) => void>; request: ReturnType<typeof vi.fn>; status: string }[],
   supabase: vi.fn(),
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: mocks.supabase }));
@@ -37,9 +37,12 @@ vi.mock("@linkshell/wire", () => ({
   createIdentity: vi.fn(),
   RelayClient: class {
     reauthenticate = vi.fn();
+    handlers = new Map<string, (data: unknown) => void>();
+    request = vi.fn(async () => ({ machines: [] as unknown[] }));
+    status = "online";
     constructor(readonly options: { name: string; platform: string }) { mocks.relays.push(this); }
     onStatus() {}
-    on() {}
+    on(name: string, handler: (data: unknown) => void) { this.handlers.set(name, handler); }
     start() {}
     stop() {}
     reconnectNow() {}
@@ -194,5 +197,18 @@ describe("desktop client connections", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mocks.relays).toHaveLength(1);
     expect(mocks.relays[0].reauthenticate.mock.calls.length).toBe(signIns);
+  });
+
+  it("lists a computer that joins the account while the workspace is open, and refreshes on request", async () => {
+    const desktop = await start();
+    window.dispatchEvent(new CustomEvent(desktop.DESKTOP_ACCOUNT_EVENT, { detail: { userId: "user-a", email: "person@example.com", accessToken: "token-1" } }));
+    await vi.waitFor(() => expect(mocks.relays).toHaveLength(1));
+    const relay = mocks.relays[0];
+    relay.request.mockResolvedValue({ machines: [remote.machine] });
+    relay.handlers.get("presence")!({ id: "other", online: true });
+    await vi.waitFor(() => expect(engine!.state.getState().computers.map((item) => item.key)).toContain(remote.key));
+    const asked = relay.request.mock.calls.length;
+    await engine!.refreshComputers();
+    expect(relay.request.mock.calls.length).toBe(asked + 1);
   });
 });

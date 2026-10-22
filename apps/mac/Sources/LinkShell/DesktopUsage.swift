@@ -67,16 +67,15 @@ struct DesktopUsageView: View {
     VStack(alignment: .leading, spacing: 11) {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("用量统计").font(.system(size: 19, weight: .semibold))
-          Text("这台电脑的 Token 用量与模型分布").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+          Text("用量统计").font(.system(size: 26, weight: .semibold)).tracking(-0.9)
+          Text("这台电脑的 Token 用量与模型分布").font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
         }
         Spacer()
         Text(model.preview ? "示例数据" : "本机统计").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
         if loading { ProgressView().controlSize(.small) }
         Button { Task { await refresh() } } label: { Label("立即同步", systemImage: "arrow.clockwise") }
           .controlSize(.regular).disabled(loading || model.preview)
-      }.padding(.bottom, 2)
-      Rectangle().fill(DesktopStyle.line).frame(height: 1)
+      }.padding(.bottom, 9)
       HStack(spacing: 6) {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 2) {
@@ -133,9 +132,7 @@ struct DesktopUsageView: View {
             Text("K = 千 · M = 百万 · B = 十亿")
           }.font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(DesktopStyle.card))
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DesktopStyle.line, lineWidth: 1) }
+        .desktopCard(padding: 12)
         VStack(alignment: .leading, spacing: 0) {
           HStack {
             Text("模型明细").font(.system(size: 13.5, weight: .semibold))

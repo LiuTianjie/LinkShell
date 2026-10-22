@@ -6,6 +6,11 @@ import { join } from "node:path";
 export const spawnAgent = (command: string, args: string[], options: SpawnOptions = {}) =>
   crossSpawn(command, args, { windowsHide: true, ...options });
 
+/** Ends a child's whole process tree on Windows, where a signal reaches only the shim (cmd.exe) itself. */
+export function killTreeOnWindows(pid: number): void {
+  execFile(join(process.env.SystemRoot || "C:\\Windows", "System32/taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, () => {});
+}
+
 /** npm's Windows shim owns a cmd.exe parent; killing only that parent leaks the agent. */
 export async function stopAgent(child: ChildProcess): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;

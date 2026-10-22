@@ -205,6 +205,28 @@ export function describeGateway(gateway: GatewayStatus): string {
 }
 
 /** After `linkshell login`: this computer joins the gateway its account is for. */
+/**
+ * A signed-in Pro account's computer belongs on the official gateway: nobody should have to find
+ * a button for it before their phone can see this computer. A gateway of one's own (a URL) is kept;
+ * "off" is not. A stopped host is left stopped. True when the host was asked to reconnect.
+ */
+export async function followAccountGateway(plan: "pro" | "free" | "unknown"): Promise<boolean> {
+  if (plan !== "pro" || process.env.LINKSHELL_GATEWAY || !loadAuth()?.userId || !hostRuntimeOk()) return false;
+  const home = daemon.linkshellDir();
+  const config = readHostConfig(home);
+  if (config.gateway && config.gateway !== "off") return false;
+  const turnedOff = config.gateway === "off";
+  if (turnedOff) {
+    delete config.gateway;
+    writeHostConfig(home, config);
+  }
+  const status = await withRunningHost((client) => client.call("gateway.status", {}, 5000)).catch(() => undefined);
+  if (!status) return false;
+  if (!turnedOff && status.status !== "off" && sameGateway(status.url, OFFICIAL_GATEWAY)) return false;
+  await refreshGateway(15_000);
+  return true;
+}
+
 export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void> {
   const out = (line: string) => process.stderr.write(`  ${line}\n`);
   if (!hostRuntimeOk()) {

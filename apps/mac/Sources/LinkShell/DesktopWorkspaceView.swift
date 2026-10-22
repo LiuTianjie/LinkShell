@@ -14,6 +14,12 @@ struct DesktopRootView: View {
           .allowsHitTesting(!workspace.managing && workspace.problem == nil)
           .accessibilityHidden(workspace.managing || workspace.problem != nil)
         if !workspace.managing, workspace.loading || workspace.problem != nil {
+          // The page's own layout, drawn ahead of it: the brand above sits on a full-height sidebar
+          // instead of a lone card, and nothing jumps when the page takes over.
+          HStack(spacing: 0) {
+            Rectangle().fill(DesktopStyle.sidebar).frame(width: 232)
+              .overlay(alignment: .trailing) { Rectangle().fill(DesktopStyle.line).frame(width: 1) }
+              .ignoresSafeArea(.container, edges: .top)
           VStack(spacing: 18) {
             if let problem = workspace.problem {
               Image(systemName: "rectangle.connected.to.line.below").font(.system(size: 34, weight: .light)).foregroundStyle(DesktopStyle.secondary)
@@ -28,6 +34,7 @@ struct DesktopRootView: View {
               Text("正在打开工作台").font(.system(size: 16, weight: .medium))
               Text("连接电脑，继续对话与远程桌面").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
             }
+          }.frame(maxWidth: .infinity, maxHeight: .infinity)
           }.frame(maxWidth: .infinity, maxHeight: .infinity).background(DesktopStyle.background)
         }
       }

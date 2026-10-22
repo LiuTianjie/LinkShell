@@ -84,7 +84,11 @@ export function relayFor(gateway: string): RelayClient {
     useComputers.setState((state) => ({ relayStatus: { ...state.relayStatus, [url]: status } }));
     if (status === "online") refresh();
   });
-  relay.on("presence", ({ id, online }) => useComputers.getState().setOnline(url, id, online));
+  relay.on("presence", ({ id, online }) => {
+    // A computer that just joined the account is announced before this list knows it.
+    if (online && !useComputers.getState().live[url]?.some((machine) => machine.id === id)) refresh();
+    else useComputers.getState().setOnline(url, id, online);
+  });
   relay.on("machines.changed", refresh);
   relay.start();
   return relay;

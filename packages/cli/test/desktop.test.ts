@@ -3,7 +3,7 @@ import { desktopSnapshot, runDesktop } from "../src/commands/desktop.js";
 import { ensureHostRunning, withRunningHost } from "../src/commands/host.js";
 import { loadAuth } from "../src/auth.js";
 import { runLogin } from "../src/commands/login.js";
-import { joinGatewayAfterLogin } from "../src/commands/host.js";
+import { followAccountGateway, joinGatewayAfterLogin } from "../src/commands/host.js";
 import { readPid, stopDaemonAndWait } from "../src/utils/daemon.js";
 import { cachedMembership, redeemDesktopPro, refreshMembership } from "../src/pro-membership.js";
 import { refreshGateway } from "../src/commands/host.js";
@@ -12,7 +12,7 @@ import { Readable } from "node:stream";
 vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn() }));
 vi.mock("../src/pro-membership.js", () => ({ cachedMembership: vi.fn(), redeemDesktopPro: vi.fn(), refreshMembership: vi.fn() }));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
-vi.mock("../src/commands/host.js", () => ({ joinGatewayAfterLogin: vi.fn(), refreshGateway: vi.fn(), readHostConfig: vi.fn(), writeHostConfig: vi.fn(), ensureHostRunning: vi.fn(), withRunningHost: vi.fn(), silenceSqliteWarning: vi.fn() }));
+vi.mock("../src/commands/host.js", () => ({ followAccountGateway: vi.fn(), joinGatewayAfterLogin: vi.fn(), refreshGateway: vi.fn(), readHostConfig: vi.fn(), writeHostConfig: vi.fn(), ensureHostRunning: vi.fn(), withRunningHost: vi.fn(), silenceSqliteWarning: vi.fn() }));
 vi.mock("../src/utils/daemon.js", () => ({ linkshellDir: () => "/isolated", readPid: vi.fn(), readHostOwner: vi.fn(), readHostLaunch: () => ({}), stopDaemonAndWait: vi.fn() }));
 beforeEach(() => {
   vi.resetAllMocks(); process.exitCode = 0;
@@ -115,9 +115,12 @@ describe("native desktop snapshots", () => {
   });
   it("refreshes membership only through the explicit account action", async () => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    vi.mocked(refreshMembership).mockResolvedValue({ plan: "pro", planExpiresAt: null });
     await runDesktop("1.0.0", "account-refresh");
     expect(refreshMembership).toHaveBeenCalledTimes(1);
     expect(ensureHostRunning).not.toHaveBeenCalled();
+    // A Pro account's computer joins the official gateway without the user finding a button.
+    expect(followAccountGateway).toHaveBeenCalledWith("pro");
   });
   it("does not connect the gateway when login times out", async () => {
     vi.mocked(runLogin).mockResolvedValue(null);

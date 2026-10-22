@@ -77,11 +77,11 @@ export function Commands({
                 value={command.name}
                 onSelect={() => choose(command)}
               >
-                <div className="flex min-w-0 flex-col gap-1">
-                  <strong>
-                    /{command.name}
-                    {command.hint && <small> {command.hint}</small>}
-                  </strong>
+                <div className="command-option flex min-w-0 flex-col gap-0.5">
+                  <span className="command-option-name">
+                    <strong>/{command.name}</strong>
+                    {command.hint && <small>{command.hint}</small>}
+                  </span>
                   <span className="text-muted-foreground">
                     {commandDetail(command)}
                   </span>
@@ -869,6 +869,7 @@ export function Worktrees() {
       </div>
       {loaded.value?.length === 0 && (
         <EmptyState
+          icon={<GitBranch />}
           title="暂无独立工作目录"
           description="新建或分叉会话时选择 worktree，即可在独立分支中工作。"
         />
