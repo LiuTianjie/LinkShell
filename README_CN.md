@@ -68,9 +68,9 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 
 ## 在电脑上安装
 
-**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
+**Mac：独立 App**（macOS 13 及以上，[Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.52/LinkShell-0.10.52-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.52/LinkShell-0.10.52-x64.dmg)）。拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能。App 自带 CLI、Host 和 Node，一起更新，不需要另装别的。它还提供桌面工作台（连本机或其他电脑）、按 Agent 统计的 Token 用量和开机自启。详见[桌面版说明](docs/mac-desktop.md)。
 
-**Windows：桌面预览版**（Windows 10 1809+ / Windows 11 x64，[安装器](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-Setup-0.10.51-windows-x64.exe) · [便携 ZIP](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.51/LinkShell-0.10.51-windows-x64.zip)）。两者均内置 Node、CLI、Host、ConPTY 与屏幕组件，与 macOS 共用会话、终端、文件和端口预览工作台。工作台需要 Microsoft Edge WebView2 Evergreen Runtime。支持 H.264 视频直连、JPEG 回退和解锁桌面的鼠标键盘控制。安装包未签名，可能出现「未知发布者」或 SmartScreen 提示；安装与验证范围见 [Windows 桌面说明](docs/windows-desktop.md)。
+**Windows：桌面预览版**（Windows 10 1809+ / Windows 11 x64，[安装器](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.52/LinkShell-Setup-0.10.52-windows-x64.exe) · [便携 ZIP](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.52/LinkShell-0.10.52-windows-x64.zip)）。两者均内置 Node、CLI、Host、ConPTY 与屏幕组件，与 macOS 共用会话、终端、文件和端口预览工作台。工作台需要 Microsoft Edge WebView2 Evergreen Runtime。支持 H.264 视频直连、JPEG 回退和解锁桌面的鼠标键盘控制。安装包未签名，可能出现「未知发布者」或 SmartScreen 提示；安装与验证范围见 [Windows 桌面说明](docs/windows-desktop.md)。
 
 **macOS 或 Linux：CLI**（Node.js 22.13 或更新版本）。
 
