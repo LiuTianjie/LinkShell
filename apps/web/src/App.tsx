@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Archive,
+  ArrowLeft,
   RefreshCw,
   X,
   Plus,
@@ -28,10 +30,6 @@ import {
   Clock,
   MessageSquarePlus,
   MonitorSmartphone,
-  Activity,
-  BellRing,
-  CalendarCheck,
-  Folders,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { deployment } from "./config";
@@ -83,6 +81,7 @@ import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { Projects } from "./live/Projects";
 import { isDesktop, openDesktopManagement } from "./live/desktop";
+import { useDesktopCommand } from "./live/desktop-commands";
 import { useDesktopVisibility } from "./live/desktop-visibility";
 
 export function App() {
@@ -273,6 +272,9 @@ function Workspace({
   const [create, setCreate] = useState<string | null>();
   const [terminal, setTerminal] = useState<string>();
   const session = state.sessions[view];
+  useDesktopCommand((command) => {
+    if (command.command === "new-session" && state.status === "online") setCreate(command.cwd ?? null);
+  });
   return (
     <>
       {state.status !== "online" && (
@@ -544,24 +546,18 @@ function Home({
   );
   return (
     <section className="session-overview flex min-w-0 flex-col gap-4">
-      {isDesktop && !archived && loaded && (
-        <OverviewStats
+      {isDesktop && (
+        <OverviewHeading
+          archived={archived}
           sessions={Object.values(state.sessions).filter((session) => !session.archived)}
           hostname={state.machine?.hostname}
-          filter={filter}
-          choose={(next) => setFilter((current) => (current === next ? "all" : next))}
+          online={state.status === "online"}
+          create={create}
+          navigate={navigate}
         />
       )}
-      {isDesktop && archived && (
-        <div className="page-heading">
-          <div>
-            <h1>已归档</h1>
-            <p className="muted">归档的会话不再出现在对话列表里，记录仍保存在电脑上。</p>
-          </div>
-        </div>
-      )}
-      <div className="session-overview-heading flex items-center justify-between gap-4">
-        {isDesktop ? searchField : <div className="min-w-0">
+      {!isDesktop && <div className="session-overview-heading flex items-center justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">
             {archived ? "已归档会话" : "会话概览"}
           </h1>
@@ -573,7 +569,7 @@ function Home({
             <span aria-hidden>·</span>
             <span>{pending ? `${pending} 项需要你` : "暂无待处理事项"}</span>
           </p>
-        </div>}
+        </div>
         <Button
           variant="default"
           disabled={state.status !== "online"}
@@ -582,7 +578,7 @@ function Home({
           <Icon name="plus" />
           新建会话
         </Button>
-      </div>
+      </div>}
       <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3">
         <Tabs value={filter} onValueChange={setFilter}>
           <TabsList variant="line" aria-label="筛选会话">
@@ -605,7 +601,7 @@ function Home({
           </TabsList>
         </Tabs>
         <div className="session-overview-tools flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
-          {!isDesktop && searchField}
+          {searchField}
           <Choice
             className="w-[130px]"
             label="会话排序"
@@ -1154,129 +1150,57 @@ function Computers({
   );
 }
 
-/** The desktop home's glance: where the work stands, in a sentence and four numbers. */
-function OverviewStats({
+/** The desktop list's title row: the noun, then the one finding computed from the rows. */
+function OverviewHeading({
+  archived,
   sessions,
   hostname,
-  filter,
-  choose,
+  online,
+  create,
+  navigate,
 }: {
+  archived: boolean;
   sessions: SessionSummary[];
   hostname?: string;
-  filter: string;
-  choose: (filter: string) => void;
+  online: boolean;
+  create: () => void;
+  navigate: (id: string) => void;
 }) {
-  const running = sessions.filter((session) => sessionGroup(session) === "running");
-  const waiting = sessions.filter(sessionNeedsAttention);
+  const running = sessions.filter((session) => sessionGroup(session) === "running").length;
+  const waiting = sessions.filter(sessionNeedsAttention).length;
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime());
-  const finishedToday = today.filter((session) => session.state === "idle" && !sessionNeedsAttention(session)).length;
-  const recent = sessions.filter((session) => session.updatedAt >= Date.now() - 7 * 86_400_000);
-  const projects = new Map<string, number>();
-  for (const session of recent) projects.set(session.cwd, (projects.get(session.cwd) ?? 0) + 1);
-  const busiest = [...projects].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime()).length;
   const name = (hostname ?? "这台电脑").replace(/\.local$/, "");
-  const headline = waiting.length
-    ? `${waiting.length} 项在等你`
-    : running.length
-      ? `${running.length} 个任务在跑`
-      : "一切就绪";
-  const latest = (list: SessionSummary[]) =>
-    [...list].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  const cards: {
-    id: string;
-    icon: typeof Activity;
-    label: string;
-    value: number;
-    unit: string;
-    caption: string;
-    tone?: "attention" | "live";
-  }[] = [
-    {
-      id: "running",
-      icon: Activity,
-      label: "进行中",
-      value: running.length,
-      unit: "个",
-      caption: running.length ? `最近：${titleOf(latest(running)!)}` : "现在没有在跑的任务",
-      tone: running.length ? "live" : undefined,
-    },
-    {
-      id: "waiting",
-      icon: BellRing,
-      label: "需要你",
-      value: waiting.length,
-      unit: "项",
-      caption: waiting.length ? `${titleOf(latest(waiting)!)} 在等你回复` : "没有待审批或待回答的事项",
-      tone: waiting.length ? "attention" : undefined,
-    },
-    {
-      id: "idle",
-      icon: CalendarCheck,
-      label: "今天",
-      value: today.length,
-      unit: "个会话",
-      caption: today.length ? `其中 ${finishedToday} 个已完成` : "今天还没有动静",
-    },
-    {
-      id: "projects",
-      icon: Folders,
-      label: "近 7 天项目",
-      value: projects.size,
-      unit: "个",
-      caption: busiest ? `最常用：${busiest.split("/").filter(Boolean).pop()}` : "最近没有项目活动",
-    },
-  ];
+  const facts = [
+    waiting ? `${waiting} 项在等你` : "没有等你处理的事",
+    running ? `${running} 个在跑` : undefined,
+    `今天 ${today} 个会话`,
+  ].filter(Boolean);
   return (
-    <div className="overview-glance">
-      <header>
-        <h1>
-          <span>{name}</span>
-          <span aria-hidden className="overview-glance-dot">·</span>
-          <span>{headline}</span>
-        </h1>
+    <header className="desktop-page-title">
+      <div>
+        <h1>{archived ? "已归档会话" : "会话"}</h1>
         <p>
-          {sessions.length} 个会话 · 手机、桌面与网页共享同一份记录
+          {archived
+            ? "归档的会话不再出现在列表和侧栏里，记录仍保存在电脑上。"
+            : <><span>{name}</span>{facts.map((fact, index) => (
+                <span key={index} data-tone={index === 0 && waiting ? "waiting" : undefined}>{fact}</span>
+              ))}</>}
         </p>
-      </header>
-      <div className="overview-cards">
-        {cards.map(({ id, icon: CardIcon, label, value, unit, caption, tone }) => {
-          // Only these two filter the list below; the others are facts about it.
-          const filterable = id === "running" || id === "waiting";
-          const body = (
-            <>
-              <span className="overview-card-label">
-                <CardIcon aria-hidden />
-                {label}
-              </span>
-              <span className="overview-card-value">
-                {value}
-                <small>{unit}</small>
-              </span>
-              <span className="overview-card-caption">{caption}</span>
-            </>
-          );
-          return filterable ? (
-            <button
-              type="button"
-              key={id}
-              className="overview-card"
-              data-tone={tone}
-              data-selected={filter === id ? "" : undefined}
-              aria-pressed={filter === id}
-              title={filter === id ? "显示全部会话" : `只看${label}`}
-              onClick={() => choose(id)}
-            >
-              {body}
-            </button>
-          ) : (
-            <div key={id} className="overview-card" data-tone={tone}>
-              {body}
-            </div>
-          );
-        })}
       </div>
-    </div>
+      <div className="desktop-page-actions">
+        <Button variant="ghost" size="sm" onClick={() => navigate(archived ? "home" : "archive")}>
+          {archived ? <ArrowLeft data-icon="inline-start" /> : <Archive data-icon="inline-start" />}
+          {archived ? "返回会话" : "已归档"}
+        </Button>
+        {!archived && (
+          <Button variant="default" disabled={!online} onClick={create}>
+            <Icon name="plus" />
+            新建会话
+          </Button>
+        )}
+      </div>
+    </header>
   );
 }

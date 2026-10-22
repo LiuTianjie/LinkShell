@@ -6,7 +6,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AsyncQuestions } from "./AsyncQuestions";
 import {
   InputGroup,
@@ -55,8 +55,8 @@ import {
   useState,
 } from "react";
 import {
-  ArrowLeft,
   LoaderCircle,
+  PanelRight,
   MessageSquare,
   Paperclip,
   Plus,
@@ -107,6 +107,7 @@ import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
 import { isDesktop } from "./desktop";
+import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
 
 type Panel =
   | "commands"
@@ -118,7 +119,29 @@ type Panel =
   | "mcp"
   | "apps"
   | "preview"
+  | "terminal"
   | null;
+
+// The desktop inspector's own tabs; goal, MCP and apps join them only while open.
+const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] = [
+  { id: "changes", title: "变更" },
+  { id: "files", title: "文件" },
+  { id: "terminal", title: "终端" },
+  { id: "tasks", title: "任务" },
+  { id: "preview", title: "预览" },
+  { id: "settings", title: "设置" },
+];
+const panelTitles: Record<Exclude<Panel, null | "commands">, string> = {
+  settings: "会话设置",
+  changes: "变更",
+  files: "文件",
+  tasks: "任务",
+  goal: "目标",
+  mcp: "MCP 服务",
+  apps: "应用",
+  preview: "电脑操作预览",
+  terminal: "终端",
+};
 export function Session({
   session,
   navigate,
@@ -177,7 +200,46 @@ export function Session({
     [dialogs, panel],
   );
   const [terminal, setTerminal] = useState<string>();
-  const [terminals, setTerminals] = useState(false);
+  const [terminals, commitTerminals] = useState(false);
+  // On the desktop the terminal is an inspector tab beside the conversation, not a dialog over it.
+  const setTerminals = (open: boolean) => {
+    if (isDesktop) { if (open) void setPanel("terminal"); }
+    else commitTerminals(open);
+  };
+  const [inspectorWidth, commitInspectorWidth] = useState(() => readLocal("desktopInspectorWidth", 440));
+  const widthSave = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const setInspectorWidth = useCallback((width: number) => {
+    commitInspectorWidth(width);
+    // A drag reports every frame; the preference is written once it settles.
+    clearTimeout(widthSave.current);
+    widthSave.current = setTimeout(() => {
+      try { saveLocal("desktopInspectorWidth", width); } catch { /* A preference, not state. */ }
+    }, 400);
+  }, []);
+  const lastPanel = useRef<Exclude<Panel, null | "commands">>("changes");
+  useEffect(() => {
+    if (panel && panel !== "commands") lastPanel.current = panel;
+  }, [panel]);
+  const toggleInspector = (next?: Exclude<Panel, null | "commands">) => {
+    if (next) void setPanel(panel === next ? null : next);
+    else void setPanel(panel && panel !== "commands" ? null : lastPanel.current);
+  };
+  useDesktopCommand((command) => {
+    if (command.command === "inspector") {
+      if (command.panel) void setPanel(command.panel);
+      else toggleInspector();
+    }
+  });
+  useEffect(() => {
+    if (!isDesktop) return;
+    const keys = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || keysBelongToContent()) return;
+      if (matchesShortcut(event, desktopShortcuts.toggleInspector)) { event.preventDefault(); toggleInspector(); }
+      else if (matchesShortcut(event, desktopShortcuts.terminal)) { event.preventDefault(); toggleInspector("terminal"); }
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  });
   const [choice, setChoice] = useState(0);
   const [forkAt, setForkAt] = useState<string | null>();
   const [newWorktree, setNewWorktree] = useState(false);
@@ -465,37 +527,19 @@ export function Session({
       if (result === "failed") throw new Error(`/${name} 执行失败`);
     });
   }
-  return (
-    <SessionReady.Provider value={!!ready}>
-    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile }}>
-      <div className="session-page live-session">
+  const top = (
+    <>
         <div className="session-heading">
           <div className={isDesktop ? "session-heading-context" : undefined}>
-            {isDesktop && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="session-back"
-                    aria-label={session.archived ? "返回已归档会话" : "返回对话列表"}
-                    onClick={() => navigate(session.archived ? "archive" : "home")}
-                  >
-                    <ArrowLeft />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{session.archived ? "返回已归档会话" : "返回对话列表"}</TooltipContent>
-              </Tooltip>
-            )}
             <div className={isDesktop ? "session-heading-copy" : undefined}>
               <div className="session-title">
                 <h1 title={titleOf(session)}>{titleOf(session)}</h1>
                 <Badge state={session.state} />
               </div>
               <div className="session-subtitle">
-                <AgentMark agent={session.agent} size="md" />
+                <AgentMark agent={session.agent} size={isDesktop ? "sm" : "md"} />
                 <span>{isDesktop ? agent?.label ?? session.agent : session.agent}</span>
-                <span className="separator">/</span>
+                <span className="separator">{isDesktop ? "·" : "/"}</span>
                 {isDesktop ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -515,47 +559,43 @@ export function Session({
           <div className="session-actions">
             {isDesktop ? (
               <>
+                {([
+                  ["changes", "branch", "变更"],
+                  ["files", "folder", "文件"],
+                  ["terminal", "terminal", `终端 · ${shortcutText(desktopShortcuts.terminal)}`],
+                  ["preview", "computer", "电脑操作预览"],
+                ] as const).map(([id, icon, label]) => (
+                  <Tooltip key={id}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={label}
+                        aria-pressed={panel === id}
+                        data-active={panel === id || undefined}
+                        onClick={() => id === "files" && panel !== "files" ? void changeFile() : toggleInspector(id)}
+                      >
+                        <Icon name={icon} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{label}</TooltipContent>
+                  </Tooltip>
+                ))}
+                <span className="session-actions-divider" aria-hidden />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="查看变更"
-                      data-active={panel === "changes" || undefined}
-                      onClick={() => void setPanel("changes")}
+                      aria-label="检查器"
+                      aria-pressed={!!panel && panel !== "commands"}
+                      data-active={(!!panel && panel !== "commands") || undefined}
+                      onClick={() => toggleInspector()}
                     >
-                      <Icon name="branch" />
+                      <PanelRight />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>查看变更</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="浏览文件"
-                      data-active={panel === "files" || undefined}
-                      onClick={() => void changeFile()}
-                    >
-                      <Icon name="folder" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>浏览文件</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="打开预览"
-                      data-active={panel === "preview" || undefined}
-                      onClick={() => void setPanel("preview")}
-                    >
-                      <Icon name="computer" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>打开预览</TooltipContent>
+                  <TooltipContent>检查器 · {shortcutText(desktopShortcuts.toggleInspector)}</TooltipContent>
                 </Tooltip>
               </>
             ) : (
@@ -779,9 +819,9 @@ export function Session({
             </Button>
           </div>
         )}
-        <div
-          className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}
-        >
+    </>
+  );
+  const column = (
           <div className="conversation-column">
             {!canInteract && hasContent && (
               <div className="conversation-recovery" role="status">
@@ -894,7 +934,7 @@ export function Session({
                 }
               />
             )}
-            {terminal && !terminals && (
+            {!isDesktop && terminal && !terminals && (
               <div className="inline-terminal">
                 <div className="browser-toolbar">
                   <span>终端</span>
@@ -1321,21 +1361,30 @@ export function Session({
               )}
             </div>
           </div>
+  );
+  return (
+    <SessionReady.Provider value={!!ready}>
+    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile }}>
+      <div className="session-page live-session">
+        {!isDesktop && top}
+        <div
+          className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}
+          style={isDesktop ? ({ "--inspector-width": `${inspectorWidth}px` } as CSSProperties) : undefined}
+        >
+          {isDesktop ? (
+            <div className="session-main">
+              {top}
+              {column}
+            </div>
+          ) : column}
           {panel && panel !== "commands" && (
             <ConversationPanel
               close={() => setPanel(null)}
-              title={
-                {
-                  settings: "会话设置",
-                  changes: "变更",
-                  files: "文件",
-                  tasks: "任务",
-                  goal: "目标",
-                  mcp: "MCP 服务",
-                  apps: "应用",
-                  preview: "电脑操作预览",
-                }[panel]
-              }
+              title={panelTitles[panel]}
+              panel={panel}
+              choose={(next) => void (next === "files" ? changeFile() : setPanel(next))}
+              width={inspectorWidth}
+              resize={setInspectorWidth}
             >
               <div className="side-panel-content">
                 {panel === "settings" && (
@@ -1369,10 +1418,20 @@ export function Session({
                   <Tasks
                     session={session}
                     onFile={handleFile}
-                    onTerminal={setTerminal}
+                    onTerminal={(id) => {
+                      setTerminal(id);
+                      if (isDesktop) void setPanel("terminal");
+                    }}
                   />
                 )}
                 {panel === "goal" && <Goal session={session} view={view} />}
+                {panel === "terminal" && (
+                  <Terminals
+                    cwd={session.cwd}
+                    selected={terminal}
+                    onSelect={setTerminal}
+                  />
+                )}
                 {panel === "preview" && (
                   <ComputerPreview sessionId={session.id} />
                 )}
@@ -1470,10 +1529,18 @@ function ConversationPanel({
   title,
   close,
   children,
+  panel,
+  choose,
+  width,
+  resize,
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
+  panel?: Exclude<Panel, null | "commands">;
+  choose?: (panel: Exclude<Panel, null | "commands">) => void;
+  width?: number;
+  resize?: (width: number) => void;
 }) {
   const compact = useIsMobile(991);
   const panelElement = useRef<HTMLElement>(null);
@@ -1481,7 +1548,8 @@ function ConversationPanel({
     if (compact) return;
     const element = panelElement.current;
     const previous = document.activeElement;
-    (element?.querySelector("button") ?? element)?.focus({
+    // The desktop inspector takes focus itself; a focus ring on its first tab reads as a selection.
+    (isDesktop ? element : element?.querySelector("button") ?? element)?.focus({
       preventScroll: true,
     });
     return () => {
@@ -1531,11 +1599,73 @@ function ConversationPanel({
         }
       }}
     >
-      <div className="browser-toolbar">
-        <strong>{title}</strong>
-        {closeButton}
-      </div>
+      {isDesktop && panel && choose ? (
+        <>
+          {resize && width && <InspectorResizer width={width} resize={resize} />}
+          <div className="inspector-tabs" role="tablist" aria-label="检查器">
+            {[...inspectorTabs, ...(inspectorTabs.some((tab) => tab.id === panel) ? [] : [{ id: panel, title: title }])].map((tab) => (
+              <button
+                type="button"
+                role="tab"
+                key={tab.id}
+                aria-selected={tab.id === panel}
+                data-active={tab.id === panel || undefined}
+                onClick={() => choose(tab.id)}
+              >
+                {tab.title}
+              </button>
+            ))}
+            <span className="inspector-tabs-spacer" />
+            {closeButton}
+          </div>
+        </>
+      ) : (
+        <div className="browser-toolbar">
+          <strong>{title}</strong>
+          {closeButton}
+        </div>
+      )}
       {children}
     </aside>
+  );
+}
+
+/** The inspector's left edge: drag or use the arrow keys to give the diff or terminal more room. */
+function InspectorResizer({ width, resize }: { width: number; resize: (width: number) => void }) {
+  const clamp = (value: number) => Math.round(Math.min(Math.max(value, 320), Math.max(320, window.innerWidth * 0.62)));
+  return (
+    <div
+      className="inspector-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整检查器宽度"
+      aria-valuenow={width}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          resize(clamp(width + (event.key === "ArrowLeft" ? 24 : -24)));
+        }
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = width;
+        const target = event.currentTarget;
+        target.setPointerCapture(event.pointerId);
+        document.documentElement.dataset.resizing = "true";
+        const move = (next: PointerEvent) => resize(clamp(startWidth + startX - next.clientX));
+        const end = () => {
+          target.removeEventListener("pointermove", move);
+          target.removeEventListener("pointerup", end);
+          target.removeEventListener("pointercancel", end);
+          delete document.documentElement.dataset.resizing;
+        };
+        target.addEventListener("pointermove", move);
+        target.addEventListener("pointerup", end);
+        target.addEventListener("pointercancel", end);
+      }}
+      onDoubleClick={() => resize(440)}
+    />
   );
 }

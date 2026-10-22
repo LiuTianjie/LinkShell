@@ -67,37 +67,39 @@ struct DesktopUsageView: View {
     VStack(alignment: .leading, spacing: 11) {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("用量统计").font(.system(size: 26, weight: .semibold)).tracking(-0.9)
+          Text("用量统计").font(.system(size: 20, weight: .semibold)).tracking(-0.4)
           Text("这台电脑的 Token 用量与模型分布").font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
         }
         Spacer()
         Text(model.preview ? "示例数据" : "本机统计").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
         if loading { ProgressView().controlSize(.small) }
         Button { Task { await refresh() } } label: { Label("立即同步", systemImage: "arrow.clockwise") }
-          .controlSize(.regular).disabled(loading || model.preview)
+          .buttonStyle(DesktopPillStyle(.secondary)).disabled(loading || model.preview)
       }.padding(.bottom, 9)
       HStack(spacing: 6) {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 2) {
             agentTab("全部", "all")
             ForEach(agents) { entry in agentTab(entry.label, entry.id) }
-          }.padding(3).background(RoundedRectangle(cornerRadius: 8).fill(DesktopStyle.selection))
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopStyle.line, lineWidth: 1) }
+          }.padding(2).background(Capsule().fill(DesktopStyle.raised))
         }.fixedSize(horizontal: false, vertical: true)
         Spacer(minLength: 4)
         Picker("时间", selection: $days) { Text("今天").tag(1); Text("最近 7 天").tag(7); Text("最近 30 天").tag(30) }.labelsHidden().frame(width: 98)
       }
-      if let error { Text(error).foregroundStyle(.orange).font(.system(size: 12)) }
+      if let error { Text(error).foregroundStyle(DesktopStyle.waiting).font(.system(size: 12)) }
       if let report {
         if report.totals.records == 0 {
           Text("所选范围暂无可用数据；未上报用量不等于零消耗。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
         }
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
           metric("总用量", compact(report.totals.totalTokens), "Token", exact: number(report.totals.totalTokens) + " Token")
+          Rectangle().fill(DesktopStyle.line).frame(width: 1).padding(.vertical, 12)
           metric("用量记录", number(report.totals.records), "条", exact: "本地日志中的去重用量记录，并非网络请求数")
+          Rectangle().fill(DesktopStyle.line).frame(width: 1).padding(.vertical, 12)
           metric("会话", number(report.totals.sessions), "个", exact: "所选 Agent 和时间范围内的会话")
+          Rectangle().fill(DesktopStyle.line).frame(width: 1).padding(.vertical, 12)
           metric("缓存读取占比", String(format: "%.1f", report.totals.cacheReadTokens / max(1, report.totals.totalTokens) * 100), "%", exact: "缓存读取 Token / 总 Token，不等同于请求缓存命中率")
-        }
+        }.desktopCard(padding: 0)
         VStack(alignment: .leading, spacing: 10) {
           HStack {
             Text("使用趋势").font(.system(size: 13.5, weight: .semibold))
@@ -164,11 +166,11 @@ struct DesktopUsageView: View {
           Text(agents.filter { $0.status == "no_data" }.map(\.label).joined(separator: "、") + " 暂无用量数据")
             .font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary)
         }
-        ForEach(report.warnings, id: \.self) { Text($0).font(.system(size: 11)).foregroundStyle(.orange) }
+        ForEach(report.warnings, id: \.self) { Text($0).font(.system(size: 11)).foregroundStyle(DesktopStyle.waiting) }
         if let selected = agents.first(where: { $0.id == agent }) {
           Text(selected.note).font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary)
         }
-        Text("\(model.preview ? "示例数据 · " : "")\(report.timezone) · 输入不含缓存 · 本地日志统计，不代表账单或剩余额度").font(.system(size: 10.5)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 4)
+        Text("\(model.preview ? "示例数据 · " : "")\(report.timezone) · 输入不含缓存 · 本地日志统计，不代表账单或剩余额度").font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 4)
       }
     }.task(id: query) { selectedDate = nil; await refresh() }
   }
@@ -178,31 +180,26 @@ struct DesktopUsageView: View {
       HStack(spacing: 3.5) {
         if value != "all" { DesktopAgentMark(agent: value, size: 13) }
         Text(title)
-          .font(.system(size: 11, weight: selected ? .semibold : .medium))
+          .font(.system(size: 12, weight: .medium))
           .foregroundStyle(selected ? DesktopStyle.primary : DesktopStyle.secondary)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
       }
-      .padding(.horizontal, 5.5)
+      .padding(.horizontal, 9)
       .frame(height: 26)
-      .background(RoundedRectangle(cornerRadius: 6).fill(selected ? DesktopStyle.card : .clear))
-      .overlay {
-        if selected { RoundedRectangle(cornerRadius: 6).strokeBorder(DesktopStyle.line, lineWidth: 1) }
-      }
-      .contentShape(RoundedRectangle(cornerRadius: 6))
+      .background(Capsule().fill(selected ? DesktopStyle.selection : .clear))
+      .contentShape(Capsule())
     }.buttonStyle(.plain).help(title).accessibilityLabel(title).accessibilityAddTraits(selected ? [.isSelected] : [])
   }
   private func column(_ text: String) -> some View { Text(text).frame(width: 68, alignment: .trailing).lineLimit(1).minimumScaleFactor(0.85).help(text) }
   private func metric(_ title: String, _ value: String, _ unit: String, exact: String) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text(title).font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
+      Text(title).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
       HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Text(report?.totals.records == 0 ? "—" : value).font(.system(size: 23, weight: .semibold)).monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
-        Text(unit).font(.system(size: 10.5)).foregroundStyle(DesktopStyle.secondary)
+        Text(report?.totals.records == 0 ? "—" : value).font(.system(size: 22, weight: .medium)).monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
+        Text(unit).font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary)
       }
-    }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-      .background(RoundedRectangle(cornerRadius: 10).fill(DesktopStyle.card))
-      .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DesktopStyle.line, lineWidth: 1) }
+    }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
       .help(exact)
   }
   private func refresh() async {

@@ -1,23 +1,35 @@
-/* The bundled desktop workspace shares behavior with web, but keeps the mobile
-   app's quiet surfaces, generous controls and reading rhythm. These rules
-   intentionally sit outside Tailwind layers and only affect the native shell. */
+/* LinkShell desktop workspace: one neutral system shared with LinkShell.app's native pages
+   (DesktopStyle in apps/mac) and with StupidMirror.
 
+   - The window is a grey ground. On it sit panels: the sidebar, the main view and, beside a
+     session, the inspector. Each panel is one lightness step away from the ground with a
+     hairline edge. Inside a panel, a well (one more step) holds lists, code and settings.
+   - No gradients, glows, lit edges or resting shadows. Only what floats (menus, dialogs,
+     the palette) casts a shadow.
+   - Colour is state: mint while an agent works, amber when it waits on you, red when it
+     failed. The one filled control on a screen is inverted ink (white on dark, black on light).
+   - One face (the system font), sizes 11 · 12 · 13 · 14 · 15 · 20. Paths, branches, ports and
+     versions are in the monospace face; nothing else is.
+
+   These rules sit outside Tailwind layers and only apply inside the desktop shell. */
 
 html[data-desktop] {
-  --radius-card: 18px;
-  --radius-row: 12px;
-  --radius-control: 9px;
-  --transition: 160ms cubic-bezier(0.2, 0, 0.2, 1);
+  --radius-panel: 16px;
+  --radius-well: 12px;
+  --radius-row: 8px;
+  --radius-control: 10px;
+  --gutter: 10px;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --transition: 140ms cubic-bezier(0.2, 0, 0.2, 1);
+  --float-shadow: 0 0 0 1px var(--separatorStrong), 0 12px 32px var(--desktop-shadow), 0 2px 6px var(--desktop-shadow);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
 }
+html[data-desktop] body { overscroll-behavior: none; background: var(--background); }
+html[data-desktop][data-resizing] * { cursor: col-resize !important; user-select: none; }
 
-html[data-desktop] body { overscroll-behavior: none; }
+/* Scrollbars: a narrow thumb that shows itself on hover, never a bright gutter. */
 html[data-desktop],
-html[data-desktop] * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--secondaryLabel) 20%, transparent) transparent; }
-html[data-desktop]:hover,
-html[data-desktop] *:hover,
-html[data-desktop] *:focus-within { scrollbar-color: color-mix(in srgb, var(--secondaryLabel) 36%, transparent) transparent; }
-/* WebKit uses a narrow transparent track instead of reserving a bright gutter. */
+html[data-desktop] * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--secondaryLabel) 22%, transparent) transparent; }
 @supports selector(::-webkit-scrollbar) {
   html[data-desktop],
   html[data-desktop] * { scrollbar-width: auto; scrollbar-color: auto; scrollbar-gutter: auto; }
@@ -28,474 +40,471 @@ html[data-desktop] *:focus-within { scrollbar-color: color-mix(in srgb, var(--se
   html[data-desktop]::-webkit-scrollbar-corner,
   html[data-desktop] *::-webkit-scrollbar-corner { background: transparent; }
   html[data-desktop]::-webkit-scrollbar-thumb,
-  html[data-desktop] *::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--secondaryLabel) 20%, transparent); background-clip: padding-box; }
-  html[data-desktop]:hover::-webkit-scrollbar-thumb,
-  html[data-desktop] *:hover::-webkit-scrollbar-thumb,
-  html[data-desktop] *:focus-within::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--secondaryLabel) 36%, transparent); }
-  html[data-desktop]::-webkit-scrollbar-thumb:hover,
-  html[data-desktop] *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--secondaryLabel) 52%, transparent); }
+  html[data-desktop] *::-webkit-scrollbar-thumb { border-radius: 999px; background: color-mix(in srgb, var(--secondaryLabel) 18%, transparent); }
+  html[data-desktop] *:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--secondaryLabel) 34%, transparent); }
 }
-html[data-desktop] .desktop-root,
-html[data-desktop] .desktop-body { display: flex; min-width: 0; min-height: 0; height: 100dvh; overflow: hidden; }
-html[data-desktop] .desktop-root { background: var(--background); font-size: 13px; letter-spacing: -.012em; }
-html[data-desktop] .desktop-body { flex: 1; }
-html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 232px; height: 100%; padding-top: 104px; padding-bottom: 0; background: var(--sidebarBackground); border-right: 1px solid var(--separatorStrong); }
-html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: var(--sidebarBackground); }
-html[data-desktop] .desktop-sidebar-header { flex: none; padding: 8px 14px 14px; }
-/* Windows keeps the header in the page so WebRTC needs no WPF composition/capture pass. */
-html[data-desktop] .windows-desktop-header { position: absolute; top: 0; left: 0; width: 232px; height: 104px; padding: 14px 14px 12px; background: var(--sidebarBackground); }
-html[data-desktop] .windows-desktop-brand { display: flex; align-items: center; gap: 10px; height: 30px; margin-bottom: 14px; font-size: 17px; }
-html[data-desktop] .windows-desktop-brand img { width: 30px; height: 30px; border-radius: 7px; }
-html[data-desktop] .windows-desktop-modes { display: grid; grid-template-columns: 1fr 1fr; height: 34px; gap: 2px; }
-html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 34px; font-size: 12px; border-radius: 6px; padding: 0; }
-html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .windows-desktop-header { display: none; }
-html[data-desktop] .desktop-computer-picker { display: flex; justify-content: flex-start; gap: 10px; width: 100%; height: 58px; min-height: 58px; padding: 9px 11px; border: 1px solid var(--separatorStrong); border-radius: 10px; background: var(--card); color: var(--label); text-align: left; box-shadow: none; transition: background var(--transition), border-color var(--transition); }
-html[data-desktop] .desktop-computer-picker:hover,
-html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: color-mix(in srgb, var(--cardRaised) 50%, var(--card)); border-color: color-mix(in srgb, var(--secondaryLabel) 28%, transparent); }
-html[data-desktop] .desktop-computer-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
-html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-computer-copy > span { display: flex; align-items: center; gap: 4px; color: var(--secondaryLabel); font-size: 11px; font-weight: 400; }
-html[data-desktop] .desktop-connection-state { display: inline-flex; align-items: center; gap: 5px; color: var(--secondaryLabel); font-size: 11px; }
-html[data-desktop] .desktop-computer-picker > svg { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-presence { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tertiaryLabel); }
-html[data-desktop] .desktop-presence[data-online] { background: var(--success); }
-html[data-desktop] .desktop-computer-menu { min-width: 238px; max-width: min(340px, calc(100vw - 32px)); }
-html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-computer-menu small { color: var(--secondaryLabel); font-size: 10px; }
-html[data-desktop] .desktop-menu-empty { max-width: 230px; padding: 10px; color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-navigation { gap: 18px; padding: 0 14px 16px; overflow-y: auto; }
-html[data-desktop] .desktop-navigation-group { gap: 5px; padding: 0; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-group-label"] { height: 20px; padding-inline: 10px; color: var(--tertiaryLabel); font-size: 11px; font-weight: 600; letter-spacing: .015em; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu"] { gap: 2px; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { height: 34px; padding: 0 10px; gap: 10px; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; font-weight: 450; text-align: left; transition: background var(--transition), color var(--transition); }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] > svg { width: 16px; height: 16px; flex: none; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] > span:not(.agent-mark):not(.desktop-nav-badge):not(.desktop-nav-session-dot) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"]:hover { background: var(--fillStrong); color: var(--label); }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] { background: var(--sidebarAccent); color: var(--label); font-weight: 600; box-shadow: none; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] > svg { color: var(--label); }
-html[data-desktop] .desktop-nav-badge { flex: none; margin-left: auto; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 15px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-nav-badge[data-tone="waiting"] { background: var(--waitingSoft); color: var(--warning); }
-html[data-desktop] .desktop-nav-badge[data-tone="running"] { background: var(--accentSoft); color: var(--info); }
-html[data-desktop] .desktop-active-sessions [data-slot="sidebar-menu-button"] { height: 32px; gap: 8px; font-size: 12.5px; }
-html[data-desktop] .desktop-active-sessions .agent-mark { width: 16px; height: 16px; border-radius: 4px; flex: none; }
-html[data-desktop] .desktop-nav-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-nav-session-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-left: auto; }
-html[data-desktop] .desktop-nav-session-dot[data-state="waiting"] { background: var(--warning); }
-html[data-desktop] .desktop-nav-session-dot[data-state="running"] { background: var(--info); }
-html[data-desktop] .desktop-sidebar-footer { flex: none; gap: 0; padding: 12px 14px; border-top: 1px solid var(--separatorStrong); }
-html[data-desktop] .desktop-account-row { display: flex; align-items: center; gap: 4px; }
-html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 34px; padding: 0 8px; gap: 9px; color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-account-row > [data-slot="button"] { height: 30px; width: 30px; border-radius: 8px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-appearance-menu { min-width: 172px; }
+html[data-desktop] :focus-visible { outline: 2px solid color-mix(in srgb, var(--label) 70%, transparent); outline-offset: 2px; }
 
-/* Native titlebar owns the window title. Workspace views keep a clean, aligned context header. */
-html[data-desktop] .desktop-main { flex: 1; margin: 0; height: 100dvh; border: 0; border-radius: 0; overflow: hidden; background: var(--plain); outline: none; container-type: inline-size; container-name: desktop-workspace; }
+/* ── Frame ──────────────────────────────────────────────────────────────────
+   LinkShell.app draws the 46 pt top bar natively above the page; Windows draws it here. */
+html[data-desktop] .desktop-root { display: flex; flex-direction: column; min-width: 0; height: 100dvh; overflow: hidden; background: var(--background); color: var(--label); font-size: 13px; letter-spacing: -.005em; }
+html[data-desktop] .desktop-body { display: flex; flex: 1; gap: var(--gutter); min-width: 0; min-height: 0; padding: 0 var(--gutter); background: transparent; }
+html[data-desktop] .desktop-sidebar,
+html[data-desktop] .desktop-main,
+html[data-desktop] .desktop-main .session-main,
+html[data-desktop] .desktop-main .live-side-panel { border: 1px solid var(--separator); border-radius: var(--radius-panel); background: var(--plain); }
+html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 264px; height: 100%; overflow: hidden; }
+html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: transparent; }
+html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; margin: 0; overflow: hidden; outline: none; container-type: inline-size; container-name: desktop-workspace; }
 html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused) { container-type: normal; }
+/* Beside a session the main area is only a frame: the conversation and the inspector are the panels. */
+html[data-desktop] .desktop-main:has(> .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 html[data-desktop] .desktop-main > .live-overview,
 html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overflow: auto; }
-html[data-desktop] .desktop-main .live-overview,
-html[data-desktop] .desktop-main .screens-page { padding: 24px max(28px, calc((100% - 1060px) / 2)) 32px; }
-html[data-desktop] .desktop-main .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--separator); }
-html[data-desktop] .desktop-main .page-heading h1,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
-html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-size: 19px; line-height: 1.3; font-weight: 600; letter-spacing: -.025em; }
-html[data-desktop] .desktop-main .page-heading p,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
-html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 4px; font-size: 12px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 34px; padding-inline: 14px; border-radius: 9px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 31px; height: 31px; border-radius: 9px; }
+
+/* Windows: the same top bar, drawn by the page. */
+html[data-desktop] .windows-desktop-header { display: flex; flex: none; align-items: center; gap: 14px; height: 46px; padding: 0 16px; }
+html[data-desktop] .windows-desktop-brand { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+html[data-desktop] .windows-desktop-brand img { width: 22px; height: 22px; border-radius: 6px; }
+html[data-desktop] .windows-desktop-modes { display: flex; gap: 2px; height: 30px; padding: 2px; border-radius: 999px; background: var(--fill); }
+html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 26px; padding: 0 14px; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; font-weight: 500; }
+html[data-desktop] .windows-desktop-modes [data-slot="button"][aria-current="page"] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .desktop-top-search { display: flex; align-items: center; gap: 8px; width: min(420px, 40vw); height: 30px; margin: 0 auto; padding: 0 12px; border: 1px solid var(--separator); border-radius: 999px; background: var(--plain); color: var(--tertiaryLabel); font: inherit; font-size: 12.5px; }
+html[data-desktop] .desktop-top-search kbd { margin-left: auto; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) :is(.windows-desktop-header, .desktop-status-bar) { display: none; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .desktop-body { padding: 0; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .desktop-main { border: 0; border-radius: 0; }
+
+/* Shortcut keys, wherever they are shown. */
+html[data-desktop] kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--fill); color: var(--tertiaryLabel); font: 500 11px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: .02em; }
+
+/* The status line at the foot of the window. */
+html[data-desktop] .desktop-status-bar { display: flex; flex: none; align-items: center; gap: 16px; height: 30px; padding: 0 20px 0 24px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
+html[data-desktop] .desktop-status-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .desktop-status-item strong { color: var(--secondaryLabel); font-weight: 500; }
+html[data-desktop] .desktop-status-meta { font-family: var(--mono); font-size: 11px; }
+html[data-desktop] .desktop-status-spacer { flex: 1; }
+html[data-desktop] .desktop-status-item[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .desktop-status-item[data-tone="running"] { color: var(--running); }
+html[data-desktop] .desktop-status-action { height: 22px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+html[data-desktop] .desktop-status-action:hover { background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-status-bar > .desktop-status-action:last-child { margin-left: 0; }
+html[data-desktop] .desktop-presence { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--quaternaryLabel); }
+html[data-desktop] .desktop-presence[data-online] { background: var(--running); }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+/* Every sidebar row shares two edges: a 16 px icon column at x 20 and the text column at x 46. */
+html[data-desktop] .desktop-sidebar-header { flex: none; gap: 8px; padding: 10px 10px 8px; }
+html[data-desktop] .desktop-computer-picker { display: flex; align-items: center; gap: 10px; width: 100%; height: 46px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--label); text-align: left; font: inherit; cursor: pointer; transition: background var(--transition); }
+html[data-desktop] .desktop-computer-picker:hover,
+html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: var(--fill); }
+html[data-desktop] .desktop-computer-picker > .desktop-presence { margin-inline: 4.5px; }
+html[data-desktop] .desktop-computer-copy { display: grid; flex: 1; gap: 1px; min-width: 0; }
+html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13.5px; font-weight: 600; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-copy > span { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-picker > svg { flex: none; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-computer-menu { min-width: 244px; max-width: min(340px, calc(100vw - 32px)); }
+html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-menu-empty { max-width: 230px; padding: 10px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-sidebar-actions { display: flex; gap: 6px; }
+html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; height: 32px; padding: 0 7px 0 9px; border: 1px solid var(--separatorStrong); border-radius: 999px; background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background var(--transition); }
+html[data-desktop] .desktop-new-session kbd { margin-left: auto; }
+html[data-desktop] .desktop-new-session:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] .desktop-new-session:disabled { color: var(--tertiaryLabel); cursor: default; }
+html[data-desktop] .desktop-search { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 1px solid var(--separatorStrong); border-radius: 50%; background: transparent; color: var(--secondaryLabel); cursor: pointer; }
+html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(--label); }
+
+html[data-desktop] .desktop-navigation { gap: 0; padding: 2px 10px 12px; overflow-y: auto; }
+html[data-desktop] .desktop-places { display: grid; gap: 2px; }
+html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-place > svg { flex: none; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-place:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-place[data-active] { background: var(--sidebarAccent); color: var(--label); font-weight: 500; }
+html[data-desktop] .desktop-place[data-active] > svg { color: var(--label); }
+html[data-desktop] .desktop-nav-badge { flex: none; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* The working set: what waits on you, then projects and their sessions. */
+html[data-desktop] .tree-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding-top: 14px; }
+html[data-desktop] .tree-heading { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 10px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
+html[data-desktop] .tree-heading > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-heading[data-tone="waiting"],
+html[data-desktop] .tree-heading[data-tone="waiting"] > span { color: var(--warning); }
+html[data-desktop] .tree-heading-action { display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); cursor: pointer; }
+html[data-desktop] .tree-heading-action:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-note { padding: 4px 10px 8px 36px; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; }
+html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; }
+html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 28px; padding: 0 30px 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer; }
+html[data-desktop] .tree-project-toggle > svg { flex: none; margin-inline: 1.5px; color: var(--tertiaryLabel); transition: transform var(--transition); }
+html[data-desktop] .tree-project-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+html[data-desktop] .tree-project-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-project-toggle:hover { background: var(--fill); }
+html[data-desktop] .tree-running { flex: none; margin-left: -4px; color: var(--running); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-project-new { position: absolute; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: pointer; transition: opacity var(--transition); }
+html[data-desktop] .tree-project-row:hover .tree-project-new,
+html[data-desktop] .tree-project-new:focus-visible { opacity: 1; }
+html[data-desktop] .tree-project-new:hover { background: var(--fillStrong); color: var(--label); }
+html[data-desktop] .tree-sessions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding-bottom: 6px; }
+html[data-desktop] .tree-session { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+html[data-desktop] .tree-session:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-session[data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .tree-title { display: grid; flex: 1; min-width: 0; }
+html[data-desktop] .tree-title > span,
+html[data-desktop] .tree-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-title small { color: var(--tertiaryLabel); font-size: 11.5px; line-height: 16px; }
+html[data-desktop] .tree-session time { flex: none; color: var(--tertiaryLabel); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-state { flex: none; width: 7px; height: 7px; margin-inline: 4.5px; border-radius: 50%; }
+html[data-desktop] .tree-state[data-tone="waiting"] { background: var(--warning); }
+html[data-desktop] .tree-state[data-tone="error"] { background: var(--danger); }
+html[data-desktop] .tree-state[data-tone="running"] { width: 9px; height: 9px; margin: -1px 3.5px; border: 1.5px solid var(--running); border-top-color: transparent; animation: tree-spin 900ms linear infinite; }
+@keyframes tree-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  html[data-desktop] .tree-state[data-tone="running"] { width: 7px; height: 7px; margin: 0 4.5px; border: 0; background: var(--running); animation: none; }
+}
+html[data-desktop] .tree-more { height: 26px; padding: 0 10px 0 36px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+html[data-desktop] .tree-more-projects { margin-top: 4px; }
+html[data-desktop] .tree-more:hover { background: var(--fill); color: var(--label); }
+
+html[data-desktop] .desktop-account > svg { width: 16px; height: 16px; }
+html[data-desktop] .desktop-sidebar-footer { flex: none; flex-direction: row; align-items: center; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--separator); }
+html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 32px; padding: 0 9px; gap: 10px; color: var(--secondaryLabel); font-size: 12.5px; }
+html[data-desktop] .desktop-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-sidebar-footer > [data-slot="button"][data-size="icon"] { width: 32px; height: 32px; border-radius: 50%; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
+html[data-desktop] .desktop-root[data-sidebar="hidden"] .desktop-sidebar { display: none; }
+
+/* ── Controls ────────────────────────────────────────────────────────────── */
+/* The one primary per screen: inverted ink in a pill. */
+html[data-desktop] [data-slot="button"][data-variant="default"] { border: 0; border-radius: 999px; background: var(--accent); box-shadow: none; color: var(--primaryForeground); font-weight: 500; }
+html[data-desktop] [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--accentHover); }
+html[data-desktop] [data-slot="button"][data-variant="default"]:disabled { background: var(--fillStrong); color: var(--tertiaryLabel); opacity: 1; }
+/* Secondary: a hairline pill. Quiet: text until hovered. */
+html[data-desktop] [data-slot="button"][data-variant="outline"],
+html[data-desktop] [data-slot="button"][data-variant="secondary"] { border: 1px solid var(--separatorStrong); border-radius: 999px; background: transparent; box-shadow: none; color: var(--label); }
+html[data-desktop] [data-slot="button"][data-variant="outline"]:hover:not(:disabled),
+html[data-desktop] [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] [data-slot="button"][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
+html[data-desktop] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] [data-slot="button"][data-variant="destructive"] { border-radius: 999px; box-shadow: none; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 32px; padding-inline: 14px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] { height: 28px; padding-inline: 11px; font-size: 12.5px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 30px; height: 30px; border-radius: 50%; }
 html[data-desktop] .desktop-main [data-slot="button"][data-size="plain"] { text-align: left; justify-content: flex-start; }
+html[data-desktop] .desktop-main [data-slot="button"][data-active] { background: var(--sidebarAccent); color: var(--label); }
+
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
-html[data-desktop] .desktop-main [data-slot="select-trigger"] { height: 34px; border-radius: 8px; box-shadow: none; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer) { background: var(--card); border-color: var(--separatorStrong); }
-html[data-desktop] .desktop-main [data-slot="input-group"]:focus-within { border-color: var(--accent); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { min-height: 34px; gap: 3px; }
-html[data-desktop] .desktop-main [data-slot="tabs-trigger"] { padding-inline: 9px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="select-trigger"],
+html[data-desktop] .desktop-main input[data-slot="input"],
+html[data-desktop] [data-slot="dialog-content"] input[data-slot="input"] { height: 32px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer):focus-within,
+html[data-desktop] .desktop-main [data-slot="select-trigger"]:focus-visible { border-color: var(--tertiaryLabel); box-shadow: none; outline: none; }
+html[data-desktop] [data-slot="textarea"] { border-color: var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; }
+
+/* Segmented filters: pills in a recessed track; the current one is a grey step, never a hue. */
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 32px; min-height: 32px; gap: 2px; padding: 2px; border: 0; border-radius: 999px; background: var(--fill); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 28px; padding-inline: 12px; border: 0; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; font-weight: 500; }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--sidebarAccent); color: var(--label); box-shadow: none; }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
+
+/* Status marks: a hue on a tint of itself, a finished session stays grey. */
+html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; }
+html[data-desktop] [data-slot="badge"][data-variant="info"] { background: var(--runningSoft); color: var(--running); }
+html[data-desktop] [data-slot="badge"][data-variant="warning"] { background: var(--waitingSoft); color: var(--warning); }
+html[data-desktop] [data-slot="badge"][data-variant="destructive"] { background: var(--dangerSoft); color: var(--danger); }
+html[data-desktop] [data-slot="badge"][data-variant="success"],
+html[data-desktop] [data-slot="badge"][data-variant="secondary"] { background: var(--fill); color: var(--secondaryLabel); }
+
+/* Floating surfaces are the only things with a shadow. */
 html[data-desktop] [data-slot="dropdown-menu-content"],
-html[data-desktop] [data-slot="select-content"] { padding: 5px; border-radius: 11px; }
+html[data-desktop] [data-slot="select-content"],
+html[data-desktop] [data-slot="popover-content"],
+html[data-desktop] [data-slot="tooltip-content"] { border: 0; border-radius: 12px; background: var(--cardRaised); box-shadow: var(--float-shadow); color: var(--label); }
+html[data-desktop] [data-slot="dropdown-menu-content"],
+html[data-desktop] [data-slot="select-content"] { padding: 5px; }
+html[data-desktop] [data-slot="tooltip-content"] { border-radius: 8px; font-size: 12px; }
 html[data-desktop] [data-slot="dropdown-menu-item"],
 html[data-desktop] [data-slot="dropdown-menu-radio-item"],
-html[data-desktop] [data-slot="select-item"] { min-height: 31px; padding-inline: 9px; gap: 8px; border-radius: 6px; font-size: 12px; }
-html[data-desktop] [data-slot="dialog-content"] { border-radius: 20px; padding: 25px; }
+html[data-desktop] [data-slot="select-item"] { min-height: 30px; padding-inline: 9px; gap: 8px; border-radius: 7px; font-size: 13px; }
+html[data-desktop] [data-slot="dropdown-menu-label"] { color: var(--tertiaryLabel); font-size: 12px; font-weight: 500; }
+html[data-desktop] [data-slot="dialog-content"] { border: 0; border-radius: 20px; background: var(--plain); box-shadow: var(--float-shadow), 0 24px 64px rgb(0 0 0 / .3); padding: 24px; }
+html[data-desktop] [data-slot="dialog-overlay"] { background: rgb(0 0 0 / .32); backdrop-filter: none; }
+html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 
-/* Session summaries read as a diary, with a clear title and a quiet preview. */
-html[data-desktop] .desktop-main .session-overview { gap: 18px; }
+/* ⌘K */
+html[data-desktop] [data-slot="dialog-content"].command-center { width: min(640px, calc(100vw - 48px)); max-width: none; padding: 0; border-radius: 16px; }
+html[data-desktop] .command-center [data-slot="command"] { border-radius: 16px !important; background: transparent; padding: 0; }
+html[data-desktop] .command-center [data-slot="command-input-wrapper"] { padding: 8px 8px 0; }
+html[data-desktop] .command-center [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 44px !important; border: 0; background: transparent !important; }
+html[data-desktop] .command-center [data-slot="command-input"] { font-size: 15px; outline: none; }
+html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; }
+html[data-desktop] .desktop-main .live-side-panel:focus-visible { outline: none; }
+html[data-desktop] .command-center-list { max-height: min(460px, 60dvh); padding: 4px 6px 8px; border-top: 1px solid var(--separator); }
+html[data-desktop] .command-center [cmdk-group-heading] { padding: 10px 10px 4px !important; color: var(--tertiaryLabel) !important; font-size: 12px !important; font-weight: 500 !important; }
+html[data-desktop] .command-center [data-slot="command-item"] { min-height: 34px; padding: 0 10px; border-radius: 8px !important; font-size: 13px; }
+html[data-desktop] .command-center [data-slot="command-item"][data-selected="true"] { background: var(--sidebarAccent); }
+html[data-desktop] .command-center [data-slot="command-item"] > svg:first-child { color: var(--tertiaryLabel); }
+html[data-desktop] .command-center [data-slot="command-shortcut"] { color: var(--tertiaryLabel); font-size: 12px; letter-spacing: 0; }
+html[data-desktop] .command-center [data-slot="command-shortcut"][data-attention] { color: var(--warning); }
+html[data-desktop] .command-session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .command-session-project { flex: none; max-width: 40%; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .command-presence { flex: none; width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--quaternaryLabel); }
+html[data-desktop] .command-presence[data-online] { background: var(--running); }
+html[data-desktop] .shortcut-sheet { width: min(440px, calc(100vw - 48px)); }
+html[data-desktop] .shortcut-sheet dl { display: grid; margin-top: 8px; }
+html[data-desktop] .shortcut-sheet dl > div { display: flex; align-items: center; justify-content: space-between; min-height: 36px; border-top: 1px solid var(--separator); font-size: 13px; }
+html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-size: 12px; }
+
+/* ── Pages ───────────────────────────────────────────────────────────────── */
+html[data-desktop] .desktop-main .live-overview,
+html[data-desktop] .desktop-main .screens-page { padding: 22px max(28px, calc((100% - 1120px) / 2)) 32px; }
+html[data-desktop] .desktop-page-title,
+html[data-desktop] .desktop-main .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; margin: 0 0 18px; padding: 0; border: 0; }
+html[data-desktop] .desktop-page-title h1,
+html[data-desktop] .desktop-main .page-heading h1,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
+html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 28px; }
+html[data-desktop] .desktop-page-title p,
+html[data-desktop] .desktop-main .page-heading p,
+html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
+html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 2px; color: var(--secondaryLabel); font-size: 13px; line-height: 20px; }
+html[data-desktop] .desktop-page-title p > span + span::before { content: "·"; margin: 0 7px; color: var(--quaternaryLabel); }
+html[data-desktop] .desktop-page-title p > span[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .desktop-page-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+html[data-desktop] .desktop-main .session-overview { gap: 16px; }
 html[data-desktop] .desktop-main .session-overview > *,
 html[data-desktop] .desktop-main .session-overview-filters,
 html[data-desktop] .desktop-main [data-slot="tabs"],
 html[data-desktop] .desktop-main [data-slot="tabs-list"] { flex-shrink: 0; }
-html[data-desktop] .desktop-main .session-overview-heading { position: static; flex: none; min-height: 36px; margin: 0; padding: 0; background: transparent; border: 0; }
-html[data-desktop] .desktop-main .session-search { flex: 1; width: 100%; max-width: 380px; }
-html[data-desktop] .desktop-main .session-overview-tools { flex: none; margin-left: auto; }
-html[data-desktop] .desktop-main .session-overview-heading h1 { text-align: left; font-size: 20px; font-weight: 650; letter-spacing: -.025em; }
-html[data-desktop] .desktop-main .session-overview-heading > [data-slot="button"] { flex: none; }
-html[data-desktop] .desktop-main .session-group { overflow: visible; border: 0; border-radius: 0; background: transparent; }
-html[data-desktop] .desktop-main .session-group > .list-section-title { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0; padding: 0 10px 6px; color: var(--secondaryLabel); font-size: 12px; font-weight: 600; line-height: 18px; }
-html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-size: 11px; font-weight: 400; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] { border: 0; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--warning); background: transparent; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title > span { color: var(--warning); background: transparent; }
-html[data-desktop] .desktop-main .session-group .list-row:last-child { border-bottom: 0; }
-html[data-desktop] .desktop-main .list-row { height: 50px; min-height: 50px; padding: 0 12px; border-top: 0; border-bottom: 1px solid var(--separator); border-radius: 0; }
-html[data-desktop] .desktop-main .list-row-static:has(.truncate + .truncate) { height: 62px; min-height: 62px; padding: 0 12px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 24px minmax(160px, 1fr) auto minmax(68px, auto); grid-template-rows: 20px 20px; height: 62px; min-height: 62px; padding: 9px 12px; column-gap: 14px; row-gap: 4px; align-content: center; align-items: center; }
+html[data-desktop] .desktop-main .session-overview > .desktop-page-title { margin-bottom: 2px; }
+html[data-desktop] .desktop-main .session-search { flex: 1; width: 100%; max-width: 320px; }
+html[data-desktop] .desktop-main .session-overview-tools { flex: 1; justify-content: flex-end; }
+
+/* Lists: rows on the panel, divided by inset rules; a group is a label and its rows. */
+html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0; padding: 0 12px 4px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
+html[data-desktop] .desktop-main .session-group { overflow: visible; margin-inline: -12px; border: 0; border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .session-overview > :is(.list-row-more, [role="status"]) { margin-inline: -12px; }
+html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title,
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title > span { color: var(--warning); }
+html[data-desktop] .desktop-main .list-row { position: relative; height: 48px; min-height: 48px; padding: 0 12px; border: 0; border-radius: var(--radius-row); }
+html[data-desktop] .desktop-main .list-row + .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main .list-row:hover::before,
+html[data-desktop] .desktop-main .list-row:hover + .list-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .list-row:not(.list-row-static):hover { background: var(--fill); }
+html[data-desktop] .desktop-main .list-row-static:has(.truncate + .truncate) { height: 58px; min-height: 58px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 20px minmax(0, 1fr) 84px 72px; grid-template-rows: 20px 18px; height: 60px; min-height: 60px; padding: 10px 12px; column-gap: 14px; row-gap: 2px; align-content: center; align-items: center; cursor: pointer; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > * { margin-left: 0; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child { grid-row: 1 / 3; grid-column: 1; align-self: center; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; text-align: left; justify-content: flex-start; font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-detail { grid-row: 2; grid-column: 2; max-width: 100%; color: var(--secondaryLabel); font-size: 12px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-row-meta { font-size: 11.5px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { grid-row: 2; grid-column: 3 / -1; max-width: 180px; justify-self: end; text-align: right; }
-html[data-desktop] .desktop-main .list-row:has(> button:not(.list-row-title)) > .list-row-project { grid-column: 3; max-width: 140px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: auto; min-width: 56px; text-align: right; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child { grid-row: 1 / 3; grid-column: 1; align-self: start; padding-top: 1px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--label); font-size: 13.5px; font-weight: 500; line-height: 20px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; }
+html[data-desktop] .desktop-main .list-row-detail { grid-row: 2; grid-column: 2; max-width: 100%; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row-meta { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { grid-row: 2; grid-column: 3 / -1; max-width: 200px; overflow: hidden; justify-self: end; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row:has(> button:not(.list-row-title)) > .list-row-project { grid-column: 3; max-width: 120px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: auto; justify-self: end; color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-status { grid-row: 1; grid-column: 3; justify-self: end; white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-status > span { font-size: 11.5px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child .agent-mark { width: 23px; height: 23px; border-radius: 7px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail):hover { background: var(--fill); }
-html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; color: var(--link); }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 20px; min-height: 20px; justify-self: end; padding-block: 0; padding-inline: 8px; font-size: 11px; line-height: 18px; background: var(--waitingSoft); border-color: transparent; color: var(--warning); white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-more { border: 0; border-radius: 9px; }
-html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 24px minmax(140px, 190px) minmax(90px, 130px) minmax(180px, 1fr); gap: 14px; height: 50px; min-height: 50px; padding: 0 12px; align-items: center; }
+html[data-desktop] .desktop-main .list-row-status > span { font-size: 12px; line-height: 20px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 22px; min-height: 22px; justify-self: end; padding: 0 10px; border: 0; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 12px; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row-more { border: 0; border-radius: var(--radius-row); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .list-row-more:hover { background: var(--fill); }
+
+/* Agent marks are the agents' own logos: media in a row, small and on their own tile. */
+html[data-desktop] .agent-mark { width: 18px; height: 18px; border-radius: 5px; box-shadow: none; }
+html[data-desktop] .agent-mark[data-size="md"] { width: 22px; height: 22px; border-radius: 6px; }
+
+/* Wells: a step inside the panel that holds a group of rows. */
+html[data-desktop] .desktop-main :is(.computers-section, .project-card, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
+html[data-desktop] .desktop-main .screens-page > .border-t,
+html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 4px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
+html[data-desktop] .desktop-main .computers-section-heading { padding: 10px 12px 6px; }
+html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
+html[data-desktop] .desktop-main .computers-section + .computers-section { margin-top: -8px; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 22px minmax(140px, 190px) minmax(90px, 130px) minmax(180px, 1fr); gap: 14px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
-html[data-desktop] .desktop-main .computer-agent-label,
-html[data-desktop] .desktop-main .computer-agent-version,
-html[data-desktop] .desktop-main .computer-agent-auth { width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .computer-agent-label { font-size: 13px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-section-title { padding: 6px 15px 8px; font-size: 12px; font-weight: 600; }
-html[data-desktop] .desktop-main [data-slot="badge"] { font-size: 11px; }
-html[data-desktop] .desktop-main .screen-row { height: 68px; min-height: 68px; padding: 0 12px; margin: 0; border: 0; border-bottom: 1px solid var(--separator); border-radius: 0; background: transparent; }
-html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--fill); }
-html[data-desktop] .desktop-main .screens-page > .border-t { border-top: 0; }
-html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--inset); }
+html[data-desktop] .desktop-main .computer-agent-version { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main :is(.computer-agent-label, .computer-agent-version, .computer-agent-auth) { width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-card { padding: 10px 4px 4px; }
+html[data-desktop] .desktop-main .project-card + .project-card { margin-top: 8px; }
+html[data-desktop] .desktop-main .project-card :is(code, .font-mono),
+html[data-desktop] .desktop-main .project-card [title^="/"] { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-entry,
+html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: var(--radius-row); }
+html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
+html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover::before,
+html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover + :is(.resource-entry, .resource-service)::before { opacity: 0; }
+html[data-desktop] .desktop-main .resource-services { max-height: 300px; overflow: visible; }
+html[data-desktop] .desktop-main .resource-service-list { max-height: 280px; overflow: auto; }
+html[data-desktop] .desktop-main .screen-row { position: relative; height: 64px; min-height: 64px; margin: 0; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; }
+html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); }
+html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--sidebarAccent); }
+html[data-desktop] .desktop-main .screen-row:hover::before,
+html[data-desktop] .desktop-main .screen-row[data-current]::before,
+html[data-desktop] .desktop-main :is(.screen-row:hover, .screen-row[data-current]) + .screen-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--fill); }
+html[data-desktop] .desktop-main .screens-page > .border-t { border-top: 1px solid var(--separator); }
+/* Inside a well an empty state is just its words. */
+html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-card) [data-slot="empty"] { margin: 0; padding: 24px; border: 0; background: transparent; }
 
-/* Chat typography is shared with the mobile app; tools keep a quieter rhythm. */
-html[data-desktop] .desktop-main .session-heading { min-height: 72px; padding: 12px 24px; gap: 16px; align-items: center; flex-wrap: nowrap; background: var(--plain); }
-html[data-desktop] .desktop-main .session-heading-context { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+/* Empty, loading and welcome states. */
+html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 4px; padding: 44px 24px; border: 1px dashed var(--separatorStrong); border-radius: var(--radius-well); background: transparent; }
+html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 15px; font-weight: 600; }
+html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 380px; color: var(--secondaryLabel); font-size: 13px; line-height: 1.6; }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 40px; height: 40px; border-radius: 50%; background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .welcome-live { max-width: 520px; gap: 16px; margin: auto; padding: 36px; }
+html[data-desktop] .desktop-main .welcome-live img { width: 64px; height: 64px; border-radius: 16px; }
+html[data-desktop] .desktop-main .welcome-live h1 { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 10px 10px 0; border: 0; border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); font-size: 12.5px; }
+html[data-desktop] .desktop-main:has(> .session-page) > .connection-banner { margin: 0 0 var(--gutter); }
+
+/* ── Session ─────────────────────────────────────────────────────────────── */
+html[data-desktop] .desktop-main .session-page { background: transparent; }
+html[data-desktop] .desktop-main .live-session .session-layout { display: flex; gap: var(--gutter); min-height: 0; }
+html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; align-items: center; flex-wrap: nowrap; gap: 16px; height: 56px; min-height: 56px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--separator); background: transparent; backdrop-filter: none; }
+html[data-desktop] .desktop-main .session-heading-context { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; }
 html[data-desktop] .desktop-main .session-heading-copy { flex: 1; min-width: 0; }
-html[data-desktop] .desktop-main .session-back { flex: none; width: 28px; height: 28px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .session-title h1 { font-size: 18px; font-weight: 650; letter-spacing: -.02em; line-height: 1.4; text-align: left; }
-html[data-desktop] .desktop-main .session-subtitle { margin-top: 5px; font-size: 12px; }
+html[data-desktop] .desktop-main .session-title { gap: 8px; }
+html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 15px; font-weight: 600; letter-spacing: -.01em; line-height: 22px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .session-subtitle { gap: 6px; margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .session-subtitle .agent-mark { width: 15px; height: 15px; border-radius: 4px; }
 html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),
-html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; }
-html[data-desktop] .desktop-main .session-subtitle > span[title] { flex: 1; min-width: 0; }
-html[data-desktop] .desktop-main .session-actions { padding-top: 3px; }
-html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding: 31px max(27px, calc((100% - 770px) / 2)); }
-html[data-desktop] .desktop-main .conversation-history-top,
-html[data-desktop] .desktop-main .conversation-footer { padding-inline: max(27px, calc((100% - 770px) / 2)); }
-html[data-desktop] .desktop-main .markdown { font-size: 15px; line-height: 1.8; letter-spacing: -.005em; }
-html[data-desktop] .desktop-main .user-message { padding: 13px 18px; border-radius: 20px 20px 7px 20px; }
-html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.75; }
-html[data-desktop] .desktop-main .markdown h1 { font-size: 20px; }
-html[data-desktop] .desktop-main .markdown h2 { font-size: 17px; }
-html[data-desktop] .desktop-main .markdown h3 { font-size: 15px; }
-html[data-desktop] .desktop-main .tool-record > summary { min-height: 30px; padding: 5px 8px; font-size: 12px; }
-html[data-desktop] .desktop-main .tool-record,
-html[data-desktop] .desktop-main .plan-card,
-html[data-desktop] .desktop-main .notice-card,
-html[data-desktop] .desktop-main .diff-block { border-radius: 12px; }
-html[data-desktop] .desktop-main .tool-record[open] > summary { border-radius: 12px 12px 0 0; }
-html[data-desktop] .desktop-main .approval-card { padding: 19px; border: 1px solid color-mix(in srgb, var(--warning) 21%, var(--separator)); border-radius: 17px; box-shadow: 0 3px 12px var(--desktop-shadow); }
-html[data-desktop] .desktop-main .approval-icon { width: 35px; height: 35px; border-radius: 10px; }
-html[data-desktop] .desktop-main .composer-wrap { padding: 10px max(24px, calc((100% - 790px) / 2)) 18px; border-top: 0; background: var(--plain); }
-/* An empty message disables Send, not the editable composer around it. */
-html[data-desktop] .desktop-main .composer { height: auto; min-height: 104px; border: 1px solid var(--separatorStrong); border-radius: 15px; background: var(--card); opacity: 1; box-shadow: 0 2px 10px var(--desktop-shadow); }
-html[data-desktop] .desktop-main .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--separatorStrong)); box-shadow: 0 0 0 2px var(--accentSoft); }
-html[data-desktop] .desktop-main .composer textarea { min-height: 54px; padding: 12px 15px 6px; font-size: 14px; line-height: 1.7; }
-html[data-desktop] .desktop-main .composer-toolbar { padding: 3px 11px 10px; }
-html[data-desktop] .desktop-main .composer-caption { padding-top: 7px; color: var(--secondaryLabel); font-size: 11px; }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { border-radius: 50%; }
-html[data-desktop] .desktop-main .conversation-jump button { border-color: var(--separator); box-shadow: 0 4px 14px var(--desktop-shadow); }
-html[data-desktop] .desktop-main .welcome-live { max-width: 540px; gap: 18px; margin: auto; padding: 36px; }
-html[data-desktop] .desktop-main .welcome-live img { width: 70px; height: 70px; border-radius: 19px; }
-html[data-desktop] .desktop-main .welcome-live h1 { font-size: 27px; font-weight: 650; letter-spacing: -.045em; }
+html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; padding: 0; }
+html[data-desktop] .desktop-main .session-directory { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .branch-chip { padding: 0 7px; border-radius: 999px; background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; line-height: 18px; }
+html[data-desktop] .desktop-main .session-actions { display: flex; align-items: center; gap: 2px; padding: 0; }
+html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"]:hover { color: var(--label); }
+html[data-desktop] .session-actions-divider { width: 1px; height: 18px; margin: 0 6px; background: var(--separator); }
+html[data-desktop] .desktop-main .handoff-bar { flex: none; padding: 7px 20px; border-bottom: 1px solid var(--separator); background: var(--card); color: var(--secondaryLabel); font-size: 12.5px; }
+html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); }
 
-/* Screen content owns its height and may enter the existing focus mode. */
-html[data-desktop] .desktop-main .screen-detail-page { gap: 14px; padding: 19px; overflow: auto; }
-html[data-desktop] .desktop-main .screen-detail-page > .screen-page { min-height: 0; border-color: var(--separatorStrong); border-radius: 14px; }
+/* Reading column: about 76 characters of Chinese at 15px, centred in the conversation panel. */
+html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding: 28px max(28px, calc((100% - 760px) / 2)); }
+html[data-desktop] .desktop-main .conversation-history-top,
+html[data-desktop] .desktop-main .conversation-footer { padding-inline: max(28px, calc((100% - 760px) / 2)); }
+html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14.5px; line-height: 1.75; letter-spacing: 0; }
+html[data-desktop] .desktop-main .markdown h1 { font-size: 19px; }
+html[data-desktop] .desktop-main .markdown h2 { font-size: 16.5px; }
+html[data-desktop] .desktop-main .markdown h3 { font-size: 15px; }
+html[data-desktop] .desktop-main .markdown a { color: var(--link); }
+html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 5px; border-radius: 5px; background: var(--fill); font-family: var(--mono); font-size: .88em; box-shadow: none; }
+html[data-desktop] .desktop-main .markdown pre { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); box-shadow: none; }
+html[data-desktop] .desktop-main .user-message { padding: 11px 16px; border-radius: 16px 16px 6px 16px; background: var(--userBubble); box-shadow: none; }
+html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.7; }
+html[data-desktop] .desktop-main :is(.tool-record, .plan-card, .notice-card, .diff-block) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
+html[data-desktop] .desktop-main .tool-record > summary { min-height: 30px; padding: 5px 8px; font-size: 12.5px; }
+html[data-desktop] .desktop-main .tool-record[open] > summary { border-radius: var(--radius-well) var(--radius-well) 0 0; }
+html[data-desktop] .desktop-main .approval-card { padding: 18px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--separator)); border-radius: 16px; background: var(--plain); box-shadow: none; }
+html[data-desktop] .desktop-main .approval-icon { width: 34px; height: 34px; border-radius: 50%; }
+html[data-desktop] .desktop-main .conversation-jump { bottom: 14px; }
+html[data-desktop] .desktop-main .conversation-jump button { height: 30px; padding-inline: 14px; border: 0; border-radius: 999px; background: var(--cardRaised); box-shadow: var(--float-shadow); font-size: 12.5px; }
+
+/* The composer: a well at the foot of the conversation, its controls on one quiet row. */
+html[data-desktop] .desktop-main .composer-wrap { padding: 8px max(20px, calc((100% - 780px) / 2)) 16px; border: 0; background: transparent; }
+html[data-desktop] .desktop-main .composer { height: auto; min-height: 104px; border: 1px solid var(--separatorStrong); border-radius: 16px; background: var(--card); opacity: 1; box-shadow: none; }
+html[data-desktop] .desktop-main .composer:focus-within { border-color: var(--tertiaryLabel); box-shadow: none; }
+html[data-desktop] .desktop-main .composer textarea { min-height: 52px; padding: 12px 15px 6px; font-size: 14px; line-height: 1.65; }
+html[data-desktop] .desktop-main .composer-toolbar { padding: 2px 10px 10px; }
+html[data-desktop] .desktop-main .composer-toolbar > div:first-child { gap: 2px; }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 30px; height: 30px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button):hover { background: var(--fillStrong); color: var(--label); }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { width: 32px; height: 32px; border-radius: 50%; }
+html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 7px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .composer-place { display: none; }
+html[data-desktop] .composer-chip-menu { min-width: 280px; }
+html[data-desktop] .desktop-main .composer-chip { max-width: 220px; }
+html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+html[data-desktop] .command-option-name strong { font-weight: 600; }
+html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .message-queue { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
+
+/* The inspector: a second panel beside the conversation, its tools as tabs. */
+html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
+html[data-desktop] .inspector-tabs { display: flex; flex: none; align-items: center; gap: 2px; height: 56px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--separator); overflow-x: auto; }
+html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .inspector-tabs > button[data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .inspector-tabs-spacer { flex: 1; }
+html[data-desktop] .inspector-tabs [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: 50%; }
+html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
+html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .inspector-resizer:hover::after,
+html[data-desktop] .inspector-resizer:focus-visible::after,
+html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--separatorStrong); }
+html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
+html[data-desktop] .desktop-main .side-panel-content { padding: 14px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
+html[data-desktop] .desktop-main .side-panel-content .terminals-page > .page-heading { min-height: 0; margin-bottom: 10px; justify-content: flex-end; }
+html[data-desktop] .desktop-main .side-panel-content .terminals-page > .page-heading > div { display: none; }
+/* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
+html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
+html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-family: var(--mono); }
+@media (max-width: 1100px) {
+  /* A narrow window keeps the conversation readable: the inspector floats over it. */
+  html[data-desktop] .desktop-main .live-side-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; max-width: calc(100% - 40px); box-shadow: var(--float-shadow); }
+  html[data-desktop] .inspector-resizer { left: -4px; }
+}
+
+/* ── Tool pages ──────────────────────────────────────────────────────────── */
+html[data-desktop] .desktop-main .terminal-tab-bar { border-bottom-color: var(--separator); }
+html[data-desktop] .desktop-main :is(.terminal-live, .xterm-host) { border-radius: var(--radius-well); }
+html[data-desktop] .desktop-main .screen-detail-page { gap: 12px; padding: 16px; overflow: auto; }
+html[data-desktop] .desktop-main .screen-detail-page > .screen-page { min-height: 0; border: 1px solid var(--separator); border-radius: var(--radius-well); }
 html[data-desktop] .desktop-main .screen-detail-page > .screen-page.screen-focused,
 html[data-desktop] .desktop-main .screen-detail-page > .screen-page:fullscreen { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .screen-toolbar { padding: 10px 12px; }
-html[data-desktop] .desktop-main .screen-display-mark { border-radius: 17px; }
-html[data-desktop] .desktop-main .screen-caption { min-height: 32px; font-size: 11px; }
+html[data-desktop] .desktop-main .screen-display-mark { border-radius: 16px; }
+html[data-desktop] .desktop-main .screen-caption { min-height: 32px; font-size: 12px; }
 html[data-desktop] .desktop-main .screen-stage { min-height: 0; }
 html[data-desktop] .desktop-screen-settings { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 12px; border-bottom: 1px solid var(--separator); }
 html[data-desktop] .desktop-screen-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
-html[data-desktop] .desktop-screen-settings > div > span { margin-right: 6px; color: var(--secondaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-screen-settings > div > span { margin-right: 6px; color: var(--secondaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-native-screen .screen-stage { position: relative; }
-html[data-desktop] .desktop-main [data-slot="button"]:focus-visible,
-html[data-desktop] [data-slot="sidebar-menu-button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-@container desktop-workspace (max-width: 880px) {
-  html[data-desktop] .desktop-main .session-actions { padding-top: 0; }
-  html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="sm"] { font-size: 12px; padding-inline: 8px; gap: 5px; }
+/* ── Narrow windows ──────────────────────────────────────────────────────── */
+@container desktop-workspace (max-width: 760px) {
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { display: none; }
+  html[data-desktop] .desktop-main .list-row-detail { grid-column: 2 / -1; }
 }
 @container desktop-workspace (max-width: 600px) {
   html[data-desktop] .desktop-main .session-overview-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  html[data-desktop] .desktop-main .session-overview-tools { margin-left: 0; justify-content: flex-start; }
-  html[data-desktop] .desktop-main .computer-agent-row { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 4px 12px; }
+  html[data-desktop] .desktop-main .session-overview-tools { justify-content: flex-start; }
+  html[data-desktop] .desktop-main .computer-agent-row { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 4px 12px; }
   html[data-desktop] .desktop-main .computer-agent-row > .agent-mark { grid-column: 1; grid-row: 1 / 3; }
   html[data-desktop] .desktop-main .computer-agent-label { grid-column: 2; grid-row: 1; }
   html[data-desktop] .desktop-main .computer-agent-version { grid-column: 3; grid-row: 1; max-width: 110px; }
   html[data-desktop] .desktop-main .computer-agent-auth { grid-column: 2 / -1; grid-row: 2; }
 }
-@container desktop-workspace (max-width: 760px) {
-  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { display: none; }
-  html[data-desktop] .desktop-main .list-row-detail { grid-column: 2 / -1; }
-}
-
-@media (max-height: 760px) {
-  html[data-desktop] .desktop-navigation { gap: 17px; padding-bottom: 8px; }
-  html[data-desktop] .desktop-sidebar-footer { gap: 7px; padding-top: 8px; }
-}
-@media (max-height: 600px) {
-  html[data-desktop] .desktop-navigation { gap: 12px; }
-  html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { height: 35px; }
-  html[data-desktop] .desktop-sidebar-footer { padding-block: 8px; }
-  html[data-desktop] .desktop-main .session-heading { min-height: 67px; padding: 10px 20px; gap: 6px; }
-  html[data-desktop] .desktop-main .session-subtitle { margin-top: 4px; }
-  html[data-desktop] .desktop-main .composer-wrap { gap: 6px; padding-top: 7px; padding-bottom: 8px; }
-  html[data-desktop] .desktop-main .composer { min-height: 91px; }
-  html[data-desktop] .desktop-main .composer textarea { min-height: 48px; padding-top: 12px; padding-bottom: 6px; }
-  html[data-desktop] .desktop-main .composer-toolbar { padding-top: 0; padding-bottom: 7px; }
-  html[data-desktop] .desktop-main .composer-caption { padding-top: 4px; }
-  html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding-block: 20px; }
-}
 @media (max-width: 1080px) {
   html[data-desktop] .desktop-main .live-overview,
   html[data-desktop] .desktop-main .screens-page { padding-inline: 22px; }
-  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { column-gap: 8px; }
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { column-gap: 10px; }
 }
+@media (max-height: 640px) {
+  html[data-desktop] .desktop-main .session-heading { height: 52px; min-height: 52px; }
+  html[data-desktop] .inspector-tabs { height: 52px; }
+  html[data-desktop] .desktop-main .composer { min-height: 90px; }
+  html[data-desktop] .desktop-main .composer textarea { min-height: 46px; }
+  html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding-block: 18px; }
+}
+/* Below a tablet's width the sidebar folds away; ⌘B or the computer menu brings it back. */
 @media (max-width: 767px) {
-  html[data-desktop] .desktop-main { height: 100dvh; margin: 0; border: 0; border-radius: 0; }
-  html[data-desktop] .desktop-main .session-heading { padding-inline: 16px; }
+  html[data-desktop] .desktop-body { padding: 0; gap: 0; }
+  html[data-desktop] .desktop-sidebar { display: none; }
+  html[data-desktop] .desktop-main { border-radius: 0; border-inline: 0; }
   html[data-desktop] .desktop-main .live-overview,
   html[data-desktop] .desktop-main .screens-page { padding-inline: 16px; }
-  html[data-desktop] .desktop-main .list-row-detail { display: block; }
-  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 24px minmax(80px, 1fr) 70px 52px; column-gap: 7px; }
-  html[data-desktop] .desktop-main .composer-wrap { padding-inline: 15px; padding-bottom: 12px; }
+  html[data-desktop] .desktop-main .session-heading { padding-inline: 16px; }
+  html[data-desktop] .desktop-main .composer-wrap { padding-inline: 14px; padding-bottom: 12px; }
+  html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 20px minmax(80px, 1fr) 70px 52px; column-gap: 8px; }
+  html[data-desktop] .desktop-page-title { flex-wrap: wrap; }
 }
 
-/* ── Texture ────────────────────────────────────────────────────────────────
-   Surfaces step up one tier each (page → card → raised), every card carries a
-   hairline and a one-pixel top highlight, numbers are set large and light, and
-   colour is kept for what matters: terracotta for the action, amber for what
-   waits on the user. Later rules here refine the layout rules above. */
-html[data-desktop] {
-  --radius-card: 18px;
-  --card-edge: 0 0 0 1px var(--separator), inset 0 1px 0 var(--desktop-highlight), 0 1px 2px var(--desktop-shadow);
-  --card-lift: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 6px 20px var(--desktop-shadow);
-  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", system-ui, sans-serif;
-}
-html[data-desktop] .desktop-root { background: var(--sidebarBackground); }
-/* One flat colour: the native titlebar above the page is this colour too, and any wash here shows a seam. */
-html[data-desktop] .desktop-main { background: var(--plain); }
-html[data-desktop] .desktop-sidebar { border-right-color: var(--separator); }
-
-/* Sidebar: quiet text, the current place set on a raised chip. */
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-group-label"] { color: var(--tertiaryLabel); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"] { border-radius: 10px; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"]:hover { background: var(--fill); }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] { background: var(--card); box-shadow: var(--card-edge); font-weight: 560; }
-html[data-desktop] .desktop-navigation-group [data-slot="sidebar-menu-button"][data-active="true"] > svg { color: var(--accent); }
-html[data-desktop] .desktop-nav-badge[data-tone="running"] { background: var(--accentSoft); color: var(--running); }
-html[data-desktop] .desktop-nav-session-dot[data-state="running"] { background: var(--running); box-shadow: 0 0 0 3px var(--accentSoft); }
-html[data-desktop] .desktop-nav-session-dot[data-state="waiting"] { box-shadow: 0 0 0 3px var(--waitingSoft); }
-html[data-desktop] .desktop-computer-picker { height: 60px; min-height: 60px; border: 0; border-radius: 14px; background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-computer-picker:hover,
-html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: var(--cardRaised); box-shadow: var(--card-lift); }
-html[data-desktop] .desktop-presence[data-online] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent); }
-html[data-desktop] .desktop-sidebar-footer { border-top-color: var(--separator); }
-
-/* Controls: the action is a terracotta key with a lit top edge; the rest are quiet frames. */
-html[data-desktop] [data-slot="button"][data-variant="default"] {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), 0 0 0 1px color-mix(in srgb, var(--accent) 70%, black), 0 1px 3px var(--desktop-shadow);
-  color: var(--primaryForeground); font-weight: 560;
-}
-html[data-desktop] [data-slot="button"][data-variant="default"]:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--accentHover) 88%, white), var(--accentHover)); }
-html[data-desktop] [data-slot="button"][data-variant="outline"] { border: 0; background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] [data-slot="button"][data-variant="outline"]:hover { background: var(--cardRaised); box-shadow: var(--card-lift); }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service),
-html[data-desktop] .desktop-main .page-heading [data-slot="button"] { height: 34px; padding-inline: 14px; border-radius: 10px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { border-radius: 10px; }
-html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
-html[data-desktop] .desktop-main [data-slot="select-trigger"] { height: 36px; border: 0; border-radius: 11px; background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer):focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 4px var(--accentSoft); }
-html[data-desktop] [data-slot="dropdown-menu-content"],
-html[data-desktop] [data-slot="select-content"] { border: 0; border-radius: 14px; background: var(--cardRaised); box-shadow: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 12px 32px var(--desktop-shadow), 0 2px 6px var(--desktop-shadow); }
-html[data-desktop] [data-slot="dropdown-menu-item"],
-html[data-desktop] [data-slot="select-item"] { border-radius: 8px; }
-html[data-desktop] [data-slot="dialog-content"] { border: 0; border-radius: 22px; background: var(--card); box-shadow: 0 0 0 1px var(--separatorStrong), inset 0 1px 0 var(--desktop-highlight), 0 24px 64px rgb(0 0 0 / .28); }
-
-/* Segmented filters: a recessed track with the current choice raised in it. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { min-height: 36px; height: 36px; gap: 2px; padding: 3px; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 30px; padding-inline: 12px; border: 0; border-radius: 9px; color: var(--secondaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--card); color: var(--label); font-weight: 560; box-shadow: var(--card-edge); }
-
-/* Headings: a statement in display type, a quiet line under it, no rule. */
-html[data-desktop] .desktop-main .page-heading { min-height: 44px; margin-bottom: 22px; padding-bottom: 0; border-bottom: 0; }
-html[data-desktop] .desktop-main .page-heading h1,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
-html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-family: var(--display); font-size: 26px; font-weight: 600; letter-spacing: -.035em; line-height: 1.2; }
-html[data-desktop] .desktop-main .page-heading p,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
-html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 6px; font-size: 13px; }
-
-/* The home glance. */
-html[data-desktop] .overview-glance { display: grid; gap: 18px; margin-bottom: 6px; }
-html[data-desktop] .overview-glance h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; color: var(--label); }
-html[data-desktop] .overview-glance h1 > span:first-child { color: var(--secondaryLabel); font-weight: 500; }
-html[data-desktop] .overview-glance-dot { color: var(--quaternaryLabel); }
-html[data-desktop] .overview-glance p { margin-top: 6px; color: var(--secondaryLabel); font-size: 13px; }
-html[data-desktop] .overview-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-html[data-desktop] .overview-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 16px 18px 15px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); color: var(--label); text-align: left; font: inherit; transition: box-shadow var(--transition), background var(--transition), transform var(--transition); }
-html[data-desktop] button.overview-card { cursor: pointer; }
-html[data-desktop] button.overview-card:hover { background: var(--cardRaised); box-shadow: var(--card-lift); }
-html[data-desktop] button.overview-card:active { transform: translateY(1px); }
-html[data-desktop] button.overview-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-html[data-desktop] .overview-card[data-selected] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), 0 0 0 4px var(--accentSoft), inset 0 1px 0 var(--desktop-highlight); }
-html[data-desktop] .overview-card-label { display: flex; align-items: center; gap: 7px; color: var(--tertiaryLabel); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
-html[data-desktop] .overview-card-label svg { width: 14px; height: 14px; }
-html[data-desktop] .overview-card-value { display: flex; align-items: baseline; gap: 6px; font-family: var(--display); font-size: 40px; font-weight: 400; letter-spacing: -.045em; line-height: 1; font-variant-numeric: tabular-nums; }
-html[data-desktop] .overview-card-value small { color: var(--secondaryLabel); font-size: 14px; font-weight: 450; letter-spacing: 0; }
-html[data-desktop] .overview-card-caption { overflow: hidden; color: var(--secondaryLabel); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .overview-card[data-tone="live"] .overview-card-label { color: var(--running); }
-html[data-desktop] .overview-card[data-tone="attention"] .overview-card-label,
-html[data-desktop] .overview-card[data-tone="attention"] .overview-card-value { color: var(--warning); }
-@container desktop-workspace (max-width: 820px) {
-  html[data-desktop] .overview-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-/* Lists sit on cards: a labelled group, rows divided by inset hairlines. */
-html[data-desktop] .desktop-main .session-group { padding: 6px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main .session-group > .list-section-title { min-height: 34px; padding: 6px 12px 4px; color: var(--tertiaryLabel); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
-html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--quaternaryLabel); font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 28%, transparent), inset 0 1px 0 var(--desktop-highlight), 0 1px 2px var(--desktop-shadow); }
-html[data-desktop] .desktop-main .session-group .list-row,
-html[data-desktop] .desktop-main .session-group .list-row:has(> .list-row-detail) { border-bottom: 0; border-radius: 12px; }
-html[data-desktop] .desktop-main .session-group .list-row:has(> .list-row-detail):hover { background: var(--fill); }
-html[data-desktop] .desktop-main .list-row-title:hover { color: var(--label); }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child .agent-mark { width: 26px; height: 26px; border-radius: 8px; box-shadow: 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .list-row-detail { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .list-row-status > span { font-weight: 500; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
-
-/* Computers and screens: each one a row on a shared card. */
-html[data-desktop] .desktop-main .screens-page > .border-t,
-html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 6px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main .screen-row { border-bottom: 0; border-radius: 12px; }
-html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--fill); box-shadow: none; }
-html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { border-radius: 11px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
-
-/* Conversation: the page is paper, the composer a raised card, the user's words a soft inset. */
-html[data-desktop] .desktop-main .session-heading { background: color-mix(in srgb, var(--plain) 82%, transparent); backdrop-filter: blur(18px) saturate(1.2); border-bottom: 1px solid var(--separator); }
-html[data-desktop] .desktop-main .session-title h1 { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.03em; }
-html[data-desktop] .desktop-main .user-message { background: var(--userBubble); box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .markdown { color: var(--label); }
-html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 5px; border-radius: 6px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .markdown pre { border-radius: 12px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .tool-record,
-html[data-desktop] .desktop-main .plan-card,
-html[data-desktop] .desktop-main .notice-card,
-html[data-desktop] .desktop-main .diff-block { border-color: var(--separator); background: var(--card); }
-html[data-desktop] .desktop-main .composer-wrap { background: linear-gradient(180deg, transparent, var(--plain) 28%); }
-html[data-desktop] .desktop-main .composer { border: 0; border-radius: 20px; background: var(--card); box-shadow: var(--card-lift); }
-html[data-desktop] .desktop-main .composer:focus-within { border: 0; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 0 4px var(--accentSoft), inset 0 1px 0 var(--desktop-highlight), 0 8px 24px var(--desktop-shadow); }
-html[data-desktop] .desktop-main .approval-card { border: 0; border-radius: 20px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 32%, transparent), inset 0 1px 0 var(--desktop-highlight), 0 8px 24px var(--desktop-shadow); }
-
-/* Empty and welcome states. */
-html[data-desktop] .desktop-main .welcome-live h1 { font-family: var(--display); font-size: 32px; font-weight: 600; letter-spacing: -.045em; }
-html[data-desktop] .desktop-main .welcome-live img { box-shadow: 0 12px 32px var(--desktop-shadow), 0 0 0 1px var(--separator); }
-
-/* Computers: each part of the page is one card; its rows divide by inset hairlines. */
-html[data-desktop] .desktop-main .computers-section { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main .computers-section-heading { padding: 6px 12px 8px; }
-html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--tertiaryLabel); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
-html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 3px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .computers-section .list-row { border-bottom: 0; border-radius: 12px; }
-
-/* Rows on a card: a straight hairline inset from both edges, gone around the row under the pointer. */
-html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row,
-html[data-desktop] .desktop-main .screen-row { position: relative; }
-html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row + .list-row::before,
-html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
-html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row:hover::before,
-html[data-desktop] .desktop-main :is(.session-group, .computers-section) .list-row:hover + .list-row::before,
-html[data-desktop] .desktop-main .screen-row:hover::before,
-html[data-desktop] .desktop-main .screen-row:hover + .screen-row::before,
-html[data-desktop] .desktop-main .screen-row[data-current]::before,
-html[data-desktop] .desktop-main .screen-row[data-current] + .screen-row::before { opacity: 0; }
-html[data-desktop] .desktop-main .computers-section .list-row:hover { background: var(--fill); }
-
-/* Projects, files and services sit on cards like the session lists. */
-html[data-desktop] .desktop-main .project-card { padding: 12px 6px 6px; border-top: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main .project-card + .project-card { margin-top: 4px; }
-html[data-desktop] .desktop-main .project-card .list-row { position: relative; border-bottom: 0; border-radius: 12px; }
-html[data-desktop] .desktop-main .project-card .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
-html[data-desktop] .desktop-main .project-card .list-row:hover::before,
-html[data-desktop] .desktop-main .project-card .list-row:hover + .list-row::before { opacity: 0; }
-html[data-desktop] .desktop-main .project-card .list-row:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .resource-entry-list:not(:empty),
-html[data-desktop] .desktop-main .resource-service-list:not(:empty) { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main .resource-entry,
-html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: 10px; }
-html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
-html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
-html[data-desktop] .desktop-main .resource-entry:hover::before,
-html[data-desktop] .desktop-main .resource-entry:hover + .resource-entry::before,
-html[data-desktop] .desktop-main .resource-service:hover::before,
-html[data-desktop] .desktop-main .resource-service:hover + .resource-service::before { opacity: 0; }
-html[data-desktop] .desktop-main .resource-services { max-height: 300px; overflow: visible; }
-html[data-desktop] .desktop-main .resource-service-list { max-height: 280px; overflow: auto; }
-
-/* Windows draws the mode switch in the page; it matches the Mac's native one: a recessed track, the current mode raised. */
-html[data-desktop] .windows-desktop-modes { padding: 3px; border-radius: 10px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 28px; border-radius: 7px; color: var(--secondaryLabel); font-weight: 500; }
-html[data-desktop] .windows-desktop-modes [data-slot="button"][aria-current="page"] { background: var(--card); color: var(--label); font-weight: 600; box-shadow: var(--card-edge); }
-html[data-desktop] .windows-desktop-modes [data-slot="button"]:not([aria-current]):hover { background: var(--fill); color: var(--label); }
-
-/* The desktop composer: a roomier card, its controls on a quiet strip under the text. */
-html[data-desktop] .desktop-main .composer { min-height: 112px; }
-html[data-desktop] .desktop-main .composer-toolbar { padding: 4px 10px 10px; }
-html[data-desktop] .desktop-main .composer-toolbar > div:first-child { gap: 2px; }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 30px; height: 30px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button):hover { background: var(--fillStrong); color: var(--label); }
-html[data-desktop] .desktop-main .composer .send-button { width: 32px; height: 32px; }
-html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 8px; color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .composer-wrap { padding-bottom: 20px; }
-
-/* ── Detail pass ─────────────────────────────────────────────────────────── */
-
-/* Caps-style labels: Chinese is not set in capitals, so it keeps only a little tracking. */
-html[data-desktop] :is(.overview-card-label, .session-group > .list-section-title, .computers-section-heading h2, .desktop-navigation-group [data-slot="sidebar-group-label"]) { letter-spacing: .03em; }
-
-/* Session rows: fixed status and time columns, so a long project name never pushes the status out of line. */
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { grid-template-columns: 26px minmax(0, 1fr) 84px 76px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-project { overflow: hidden; max-width: 220px; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Back to the latest message: a floating pill that reads as a control, clear of the text. */
-html[data-desktop] .desktop-main .conversation-jump { bottom: 16px; }
-html[data-desktop] .desktop-main .conversation-jump button { height: 32px; padding-inline: 14px; border-radius: 999px; background: var(--cardRaised); box-shadow: var(--card-lift); font-size: 12.5px; }
-
-/* Empty states sit on the page as one card, centred, with a full-size action. */
-html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 4px; padding: 48px 24px; border: 0; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 15px; font-weight: 600; }
-html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 360px; color: var(--secondaryLabel); font-size: 13px; line-height: 1.6; }
-html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 40px; height: 40px; border-radius: 12px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--separator); color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
-html[data-desktop] .desktop-main .worktree-list:not(:empty) { padding: 6px; border-radius: var(--radius-card); background: var(--card); box-shadow: var(--card-edge); }
-
-/* Menus on the composer: wide enough that a model's description fits on one line. */
-html[data-desktop] .composer-chip-menu { min-width: 280px; }
-html[data-desktop] .desktop-main .composer-chip { max-width: 220px; }
-
-/* Command list: the command reads first, its argument as a quiet hint after it. */
-html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-html[data-desktop] .command-option-name strong { font-weight: 600; }
-html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-/* Inside a card an empty state is just its content, not a second card. */
-html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-card) [data-slot="empty"] { margin: 0; padding: 24px; background: transparent; box-shadow: none; }
-/* Windows: Segoe UI and Microsoft YaHei are already set tight; the Mac's negative tracking would cramp them. */
-html[data-desktop]:has(.windows-desktop-header) { --display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
-html[data-desktop]:has(.windows-desktop-header) :is(h1, .overview-card-value, .session-title h1, .welcome-live h1) { letter-spacing: -.01em; }
+/* Windows: Segoe UI and Microsoft YaHei are already set tight. */
+html[data-desktop]:has(.windows-desktop-header) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
+html[data-desktop]:has(.windows-desktop-header) :is(h1, .session-title h1) { letter-spacing: 0; }

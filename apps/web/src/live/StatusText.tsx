@@ -8,7 +8,7 @@ const tone = (state: string) =>
       : ["running", "active"].includes(state)
         ? "var(--running)"
         : ["idle", "completed", "complete"].includes(state)
-          ? "var(--success)"
+          ? "var(--idle, var(--success))"
           : "var(--tertiaryLabel)";
 
 /** Dot + text status; the colour comes only from semantic variables. */

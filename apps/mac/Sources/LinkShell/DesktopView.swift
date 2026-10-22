@@ -1,129 +1,12 @@
 import AppKit
 import SwiftUI
 
-enum DesktopStyle {
-  private static func adaptive(_ light: NSColor, _ dark: NSColor) -> Color {
-    Color(nsColor: NSColor(name: nil) { appearance in
-      appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-    })
-  }
-  static let windowBackground = NSColor(name: nil) { appearance in
-    appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-      ? NSColor(srgbRed: 0.059, green: 0.063, blue: 0.071, alpha: 1)
-      : NSColor(srgbRed: 0.980, green: 0.980, blue: 0.984, alpha: 1)
-  }
-  static let background = Color(nsColor: windowBackground)
-  static let sidebar = adaptive(
-    NSColor(srgbRed: 0.953, green: 0.957, blue: 0.965, alpha: 1),
-    NSColor(srgbRed: 0.043, green: 0.047, blue: 0.055, alpha: 1)
-  )
-  static let card = adaptive(
-    NSColor(srgbRed: 1.0, green: 1.0, blue: 1.0, alpha: 1),
-    NSColor(srgbRed: 0.078, green: 0.082, blue: 0.098, alpha: 1)
-  )
-  /// The one-pixel lit top edge every card carries (the workspace's --desktop-highlight).
-  static let highlight = adaptive(.white.withAlphaComponent(0.7), .white.withAlphaComponent(0.035))
-  static let shadow = adaptive(
-    NSColor(srgbRed: 0.141, green: 0.157, blue: 0.243, alpha: 0.06),
-    .black.withAlphaComponent(0.35)
-  )
-  static let tertiary = adaptive(
-    NSColor(srgbRed: 0.541, green: 0.553, blue: 0.588, alpha: 1),
-    NSColor(srgbRed: 0.439, green: 0.451, blue: 0.482, alpha: 1)
-  )
-  static let primary = adaptive(
-    NSColor(srgbRed: 0.090, green: 0.094, blue: 0.106, alpha: 1),
-    NSColor(srgbRed: 0.941, green: 0.945, blue: 0.953, alpha: 1)
-  )
-  static let secondary = adaptive(
-    NSColor(srgbRed: 0.361, green: 0.373, blue: 0.408, alpha: 1),
-    NSColor(srgbRed: 0.627, green: 0.639, blue: 0.671, alpha: 1)
-  )
-  static let accent = adaptive(
-    NSColor(srgbRed: 0.369, green: 0.416, blue: 0.824, alpha: 1),
-    NSColor(srgbRed: 0.408, green: 0.447, blue: 0.898, alpha: 1)
-  )
-  static let mint = adaptive(
-    NSColor(srgbRed: 0.129, green: 0.502, blue: 0.345, alpha: 1),
-    NSColor(srgbRed: 0.424, green: 0.761, blue: 0.604, alpha: 1)
-  )
-  static let line = adaptive(
-    NSColor(srgbRed: 0.094, green: 0.102, blue: 0.125, alpha: 0.10),
-    .white.withAlphaComponent(0.10)
-  )
-  static let selection = adaptive(
-    NSColor(srgbRed: 0.094, green: 0.102, blue: 0.125, alpha: 0.065),
-    .white.withAlphaComponent(0.08)
-  )
-  static let onAccent = Color.white
-}
-
-/// A surface on the page: hairline, lit top edge, a soft shadow. Matches the workspace's cards.
-struct DesktopCard: ViewModifier {
-  var radius: CGFloat = 16
-  var padding: CGFloat = 16
-  func body(content: Content) -> some View {
-    content
-      .padding(padding)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background {
-        RoundedRectangle(cornerRadius: radius, style: .continuous).fill(DesktopStyle.card)
-          .shadow(color: DesktopStyle.shadow, radius: 1.5, y: 1)
-      }
-      .overlay {
-        RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(DesktopStyle.line, lineWidth: 1)
-      }
-      .overlay(alignment: .top) {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-          .strokeBorder(LinearGradient(colors: [DesktopStyle.highlight, .clear], startPoint: .top, endPoint: .init(x: 0.5, y: 0.08)), lineWidth: 1)
-          .allowsHitTesting(false)
-      }
-  }
-}
-extension View {
-  /// Rows (each drawing its own rule under it) on one card; the last rule is clipped so the card's edge
-  /// is the only line at the bottom.
-  func rowsCard() -> some View {
-    VStack(alignment: .leading, spacing: 0) { self }
-      .padding(.horizontal, 16).padding(.bottom, -1).clipped()
-      .desktopCard(padding: 0)
-  }
-  func desktopCard(radius: CGFloat = 16, padding: CGFloat = 16) -> some View { modifier(DesktopCard(radius: radius, padding: padding)) }
-}
-
-/// One fact about this Mac, set the way the workspace's glance cards are: a small caps label, a large
-/// value, a line of explanation, and the action that fixes it when there is one.
-struct DesktopStatCard<Action: View>: View {
-  let symbol: String
-  let label: String
-  let value: String
-  let caption: String
-  var tone: Color = DesktopStyle.primary
-  @ViewBuilder var action: () -> Action
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 7) {
-        Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
-        Text(label).font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
-      }.foregroundStyle(DesktopStyle.tertiary)
-      Text(value).font(.system(size: 26, weight: .regular)).tracking(-0.8).foregroundStyle(tone).lineLimit(1).minimumScaleFactor(0.7)
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Text(caption).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineLimit(2)
-        Spacer(minLength: 0)
-        action()
-      }
-    }
-    .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-    .desktopCard()
-  }
-}
-
 struct DesktopBrand: View {
   var size: CGFloat = 40
   var body: some View {
     HStack(spacing: 13) {
       Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage()).resizable().frame(width: size, height: size)
-      Text("LinkShell").font(.system(size: 20, weight: .semibold))
+      Text("LinkShell").font(.system(size: 17, weight: .semibold))
     }
   }
 }
@@ -131,7 +14,7 @@ struct DesktopStatus: View {
   let text: String
   var tone: Color = DesktopStyle.secondary
   var body: some View {
-    HStack(spacing: 8) { Circle().fill(tone).frame(width: 7, height: 7); Text(text).foregroundStyle(DesktopStyle.secondary) }
+    HStack(spacing: 7) { Circle().fill(tone).frame(width: 6, height: 6); Text(text).foregroundStyle(DesktopStyle.secondary) }
       .font(.system(size: 13)).accessibilityElement(children: .combine)
   }
 }
@@ -139,89 +22,18 @@ struct DesktopStatus: View {
 struct DesktopView: View {
   @ObservedObject var model: DesktopModel
   @State private var confirm: String?
-  private let mainPages = [("总览", "house"), ("设备", "laptopcomputer"), ("用量统计", "chart.bar"), ("日志", "list.bullet.rectangle")]
+  private let mainPages = [("总览", "house"), ("设备", "iphone"), ("用量统计", "chart.bar"), ("日志", "text.alignleft")]
   var body: some View {
-    HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 4) {
-        Color.clear.frame(height: 104)
-        Text("本机与服务")
-          .font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
-          .foregroundStyle(DesktopStyle.secondary)
-          .padding(.horizontal, 12)
-          .padding(.top, 6)
-          .padding(.bottom, 2)
-        ScrollView(showsIndicators: false) {
-          VStack(alignment: .leading, spacing: 3) {
-            ForEach(mainPages, id: \.0) { page in navigation(page.0, page.1) }
-          }
-        }
-        rule.padding(.horizontal, 12).padding(.bottom, 8)
-        navigation("更新", "arrow.down.circle")
-        navigation("设置", "gearshape")
-        if model.preview { Text("设计预览 · 示例数据").font(.system(size: 10.5)).foregroundStyle(DesktopStyle.secondary).padding(.horizontal, 12).padding(.top, 8) }
+    VStack(spacing: 0) {
+      HStack(alignment: .top, spacing: DesktopStyle.gutter) {
+        sidebar.frame(width: DesktopStyle.sidebarWidth).frame(maxHeight: .infinity).panelSurface()
+        page.frame(maxWidth: .infinity, maxHeight: .infinity).panelSurface()
       }
-      .padding(.horizontal, 14).padding(.bottom, 18)
-      .frame(width: 232).background(DesktopStyle.sidebar)
-      .overlay(alignment: .trailing) { Rectangle().fill(DesktopStyle.line).frame(width: 1).ignoresSafeArea(.container, edges: .top) }
-
-      VStack(alignment: .leading, spacing: 0) {
-        if model.selected != "用量统计" {
-          HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(model.selected == "总览" ? "这台 Mac" : model.selected).font(.system(size: 26, weight: .semibold)).tracking(-0.9)
-              Text(subtitle).font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
-            }
-            Spacer()
-            if model.busy { ProgressView().controlSize(.small) }
-            Menu {
-              Button("刷新状态") { model.refresh() }
-              Button("启动服务") { model.action("start") }.disabled(model.healthy)
-              Button("重启服务…") { confirm = "restart" }.disabled(!model.healthy)
-              Button("停止服务…") { confirm = "stop" }.disabled(!model.healthy)
-            } label: {
-              HStack(spacing: 6) {
-                Text("本机服务").font(.system(size: 12, weight: .medium))
-                Image(systemName: "ellipsis").frame(width: 20, height: 18)
-              }
-            }
-            .menuStyle(.borderlessButton).fixedSize().padding(.horizontal, 10).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(DesktopStyle.card).shadow(color: DesktopStyle.shadow, radius: 1.5, y: 1))
-            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(DesktopStyle.line, lineWidth: 1) }
-            .disabled(model.busy || model.preview).accessibilityLabel("服务操作")
-          }.padding(.bottom, 20)
-        }
-        if let problem = model.problem {
-          HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
-            Text(problem).font(.system(size: 12)).textSelection(.enabled)
-            Spacer()
-            Button("重试") { model.refresh() }
-          }.padding(14).background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.08))).padding(.bottom, 16)
-        }
-        ScrollView {
-          VStack(alignment: .leading, spacing: 0) {
-            switch model.selected {
-            case "设备": devices
-            case "用量统计": DesktopUsageView(model: model)
-            case "日志": logs
-            case "更新": updates
-            case "设置": settings
-            default: overview
-            }
-          }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 12)
-        }
-        if model.selected != "更新" {
-          rule.padding(.top, 12)
-          HStack {
-            DesktopStatus(text: model.newVersion ? "有新版本可用" : "服务\(model.serviceLabel) · 网关\(model.gatewayLabel)", tone: model.newVersion ? DesktopStyle.mint : (model.healthy ? DesktopStyle.mint : DesktopStyle.secondary))
-            Spacer()
-            Button(model.newVersion ? "查看更新" : "检查更新") { model.selected = "更新"; model.checkUpdates() }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
-          }.padding(.top, 12)
-        }
-      }.padding(.horizontal, 28).padding(.top, 22).padding(.bottom, 18)
+      .padding(.horizontal, DesktopStyle.gutter)
+      statusLine.frame(height: DesktopStyle.statusBarHeight)
     }
     .background(DesktopStyle.background).foregroundStyle(DesktopStyle.primary)
-    .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: model.preview ? 620 : 540)
+    .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: model.preview ? 560 : 520)
     .alert(confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
       Button("取消", role: .cancel) { confirm = nil }
       Button("继续", role: .destructive) {
@@ -229,6 +41,87 @@ struct DesktopView: View {
         confirm = nil
       }
     } message: { Text(confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 Pro，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
+  }
+
+  private var sidebar: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(spacing: 10) {
+        // The dot takes the icon column so the name starts on the same edge as the pages below it.
+        Circle().fill(model.healthy ? DesktopStyle.mint : DesktopStyle.tertiary).frame(width: 7, height: 7).frame(width: 18)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(model.snapshot?.machine?.hostname.replacingOccurrences(of: ".local", with: "") ?? "这台 Mac")
+            .font(.system(size: 13.5, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+          Text("本机服务\(model.serviceLabel)").font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary).lineLimit(1)
+        }
+      }.padding(.horizontal, 10).frame(height: 46, alignment: .leading).padding(.bottom, 6)
+      ForEach(mainPages, id: \.0) { page in navigation(page.0, page.1) }
+      Spacer(minLength: 12)
+      navigation("更新", "arrow.down.circle")
+      navigation("设置", "gearshape")
+      if model.preview { Text("设计预览 · 示例数据").font(.system(size: 11)).foregroundStyle(DesktopStyle.tertiary).padding(.horizontal, 10).padding(.top, 8) }
+    }
+    .padding(10)
+  }
+
+  private var page: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      if model.selected != "用量统计" {
+        HStack(alignment: .center, spacing: 12) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(model.selected == "总览" ? "这台 Mac" : model.selected).font(.system(size: 20, weight: .semibold)).tracking(-0.4)
+            Text(subtitle).font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
+          }
+          Spacer()
+          if model.busy { ProgressView().controlSize(.small) }
+          Menu {
+            Button("刷新状态") { model.refresh() }
+            Button("启动服务") { model.action("start") }.disabled(model.healthy)
+            Button("重启服务…") { confirm = "restart" }.disabled(!model.healthy)
+            Button("停止服务…") { confirm = "stop" }.disabled(!model.healthy)
+          } label: {
+            Label("本机服务", systemImage: "ellipsis")
+          }
+          .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+          .padding(.horizontal, 12).frame(height: 30)
+          .overlay { Capsule().strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) }
+          .disabled(model.busy || model.preview).accessibilityLabel("服务操作")
+        }.padding(.bottom, 18)
+      }
+      if let problem = model.problem {
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "exclamationmark.circle").foregroundStyle(DesktopStyle.waiting)
+          Text(problem).font(.system(size: 12.5)).foregroundStyle(DesktopStyle.waiting).textSelection(.enabled)
+          Spacer()
+          Button("重试") { model.refresh() }.buttonStyle(DesktopPillStyle(.secondary, compact: true))
+        }.padding(12).background(RoundedRectangle(cornerRadius: 10).fill(DesktopStyle.tint(DesktopStyle.waiting))).padding(.bottom, 14)
+      }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
+          switch model.selected {
+          case "设备": devices
+          case "用量统计": DesktopUsageView(model: model)
+          case "日志": logs
+          case "更新": updates
+          case "设置": settings
+          default: overview
+          }
+        }.frame(maxWidth: 880, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 12)
+      }
+    }.padding(.horizontal, 28).padding(.top, 22)
+  }
+
+  private var statusLine: some View {
+    ZStack {
+      WindowDragArea()
+      HStack(spacing: 8) {
+        Circle().fill(model.healthy ? DesktopStyle.mint : DesktopStyle.tertiary).frame(width: 6, height: 6)
+        Text("服务\(model.serviceLabel) · 网关\(model.gatewayLabel)").foregroundStyle(DesktopStyle.tertiary)
+        if let version = model.snapshot?.machine?.hostVersion { Text("Host \(version)").font(DesktopStyle.mono(11)).foregroundStyle(DesktopStyle.tertiary) }
+        Spacer()
+        Button(model.newVersion ? "有新版本 · 查看" : "检查更新") { model.selected = "更新"; model.checkUpdates() }
+          .buttonStyle(.plain).foregroundStyle(model.newVersion ? DesktopStyle.mint : DesktopStyle.tertiary)
+      }.font(.system(size: 12)).padding(.horizontal, DesktopStyle.gutter + 8)
+    }
   }
 
   private var subtitle: String {
@@ -249,44 +142,38 @@ struct DesktopView: View {
       if title == "日志" { model.readLog() }
     } label: {
       HStack(spacing: 10) {
-        Image(systemName: symbol).font(.system(size: 15, weight: selected ? .semibold : .regular)).frame(width: 20)
-          .foregroundStyle(selected ? DesktopStyle.accent : DesktopStyle.secondary)
-        Text(title).font(.system(size: 13, weight: selected ? .semibold : .medium))
+        Image(systemName: symbol).font(.system(size: 14)).frame(width: 18)
+          .foregroundStyle(selected ? DesktopStyle.primary : DesktopStyle.tertiary)
+        Text(title).font(.system(size: 13, weight: selected ? .medium : .regular))
         Spacer()
         if title == "更新" && model.newVersion { Circle().fill(DesktopStyle.mint).frame(width: 6, height: 6) }
-      }.padding(.horizontal, 10).frame(height: 34).contentShape(Rectangle())
-        .background {
-          if selected {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(DesktopStyle.card)
-              .shadow(color: DesktopStyle.shadow, radius: 1.5, y: 1)
-              .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(DesktopStyle.line, lineWidth: 1) }
-          }
-        }
+      }.padding(.horizontal, 10).frame(height: 30).contentShape(Rectangle())
+        .background { if selected { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DesktopStyle.selection) } }
     }.buttonStyle(.plain).foregroundStyle(selected ? DesktopStyle.primary : DesktopStyle.secondary)
   }
   private func row(_ title: String, _ value: String, good: Bool = false, warning: Bool = false) -> some View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {
-        Text(title).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+        Text(title).font(.system(size: 13)).lineLimit(1)
         Spacer()
-        DesktopStatus(text: value, tone: warning ? .orange : good ? DesktopStyle.mint : DesktopStyle.secondary)
+        DesktopStatus(text: value, tone: warning ? DesktopStyle.waiting : good ? DesktopStyle.mint : DesktopStyle.tertiary)
           .lineLimit(1)
-      }.frame(height: 46)
+      }.frame(height: 44)
       rule
     }
   }
   private func valueRow(_ title: String, _ value: String, monospaced: Bool = false) -> some View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {
-        Text(title).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+        Text(title).font(.system(size: 13)).lineLimit(1)
         Spacer()
         Text(value)
-          .font(.system(size: 13, design: monospaced ? .monospaced : .default))
+          .font(monospaced ? DesktopStyle.mono(12) : .system(size: 13))
           .foregroundStyle(DesktopStyle.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
           .textSelection(.enabled)
-      }.frame(height: 46)
+      }.frame(height: 44)
       rule
     }
   }
@@ -295,85 +182,89 @@ struct DesktopView: View {
       accountSection
       if model.snapshot?.status == "stopped" {
         HStack {
-          Text("启动后台服务后，即可从手机连接这台 Mac。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
+          Text("启动后台服务后，即可从手机连接这台 Mac。").font(.system(size: 12.5)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
           Spacer()
-          Button("启动服务") { model.action("start") }.disabled(model.busy || model.preview)
+          Button("启动服务") { model.action("start") }.buttonStyle(DesktopPillStyle(.primary, compact: true)).disabled(model.busy || model.preview)
         }.padding(.bottom, 14)
       }
       if model.externalHost {
         HStack {
-          Text("当前服务由另一套 CLI 启动").font(.system(size: 12)).foregroundStyle(.orange).lineLimit(1)
+          Text("当前服务由另一套 CLI 启动").font(.system(size: 12.5)).foregroundStyle(DesktopStyle.waiting).lineLimit(1)
           Spacer()
-          Button("切换到 App 内置服务…") { confirm = "restart" }.disabled(model.busy)
+          Button("切换到 App 内置服务…") { confirm = "restart" }.buttonStyle(DesktopPillStyle(.secondary, compact: true)).disabled(model.busy)
         }.padding(.bottom, 14)
       }
-      LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-        DesktopStatCard(
-          symbol: "server.rack", label: "本机服务", value: model.serviceLabel,
-          caption: model.healthy ? "手机和工作台随时可以连接" : "启动后，即可从手机连接这台 Mac",
-          tone: model.healthy ? DesktopStyle.primary : .orange
-        ) {
-          if !model.healthy { Button("启动") { model.action("start") }.controlSize(.small).disabled(model.busy || model.preview) }
+      DesktopGroupLabel(title: "这台 Mac 的状态")
+      // Four facts in one divided well: a label, the value as type, why, and the fix when there is one.
+      HStack(alignment: .top, spacing: 0) {
+        fact("本机服务", model.serviceLabel,
+             model.healthy ? "手机和工作台随时可以连接" : "启动后，即可从手机连接这台 Mac",
+             tone: model.healthy ? DesktopStyle.primary : DesktopStyle.waiting) {
+          if !model.healthy { Button("启动") { model.action("start") }.buttonStyle(DesktopPillStyle(.primary, compact: true)).disabled(model.busy || model.preview) }
         }
-        DesktopStatCard(
-          symbol: "network", label: "网关连接", value: model.gatewayLabel,
-          caption: model.snapshot?.gateway?.error?.message ?? (model.snapshot?.gateway?.status == "online" ? "不在同一网络也能连上" : "只能在同一网络内连接"),
-          tone: model.healthy && model.snapshot?.gateway?.status == "online" ? DesktopStyle.primary : DesktopStyle.secondary
-        ) { EmptyView() }
-        DesktopStatCard(
-          symbol: "rectangle.on.rectangle", label: "屏幕与控制",
-          value: !model.permissionsKnown ? "检查中" : model.recording && model.control ? "已就绪" : "需要授权",
-          caption: model.recording && model.control ? "可以从手机查看和操作屏幕" : "需要录屏与辅助功能两项权限",
-          tone: !model.permissionsKnown || (model.recording && model.control) ? DesktopStyle.primary : .orange
-        ) {
-          if model.permissionsKnown && !(model.recording && model.control) { Button("授权") { model.permissions() }.controlSize(.small).disabled(model.preview) }
+        divider
+        fact("网关", model.gatewayLabel,
+             model.snapshot?.gateway?.error?.message ?? (model.snapshot?.gateway?.status == "online" ? "不在同一网络也能连上" : "只能在同一网络内连接"),
+             tone: model.healthy && model.snapshot?.gateway?.status == "online" ? DesktopStyle.primary : DesktopStyle.secondary) { EmptyView() }
+        divider
+        fact("屏幕与控制", !model.permissionsKnown ? "检查中" : model.recording && model.control ? "已就绪" : "需要授权",
+             model.recording && model.control ? "可以从手机查看和操作屏幕" : "需要录屏与辅助功能两项权限",
+             tone: !model.permissionsKnown || (model.recording && model.control) ? DesktopStyle.primary : DesktopStyle.waiting) {
+          if model.permissionsKnown && !(model.recording && model.control) { Button("授权") { model.permissions() }.buttonStyle(DesktopPillStyle(.secondary, compact: true)).disabled(model.preview) }
         }
-        DesktopStatCard(
-          symbol: "iphone", label: "已配对设备",
-          value: model.devices.isEmpty ? "暂无" : "\(model.devices.count) 台",
-          caption: model.devices.isEmpty ? "扫码配对手机，或用同一账号登录" : "\(model.devices.filter(\.online).count) 台在线",
-          tone: model.devices.isEmpty ? DesktopStyle.secondary : DesktopStyle.primary
-        ) {
-          Button("管理") { model.selected = "设备" }.controlSize(.small)
+        divider
+        fact("已配对设备", model.devices.isEmpty ? "0" : "\(model.devices.count)",
+             model.devices.isEmpty ? "扫码配对手机，或用同一账号登录" : "\(model.devices.filter(\.online).count) 台在线",
+             unit: "台", tone: DesktopStyle.primary) {
+          Button("管理设备") { model.selected = "设备" }.buttonStyle(DesktopPillStyle(.secondary, compact: true))
         }
-      }
+      }.desktopCard(padding: 0)
+      DesktopGroupLabel(title: "最近活动", trailing: model.activity.isEmpty ? nil : "最近 \(min(5, model.activity.count)) 条").padding(.top, 22)
       VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 7) {
-          Image(systemName: "clock").font(.system(size: 11, weight: .semibold))
-          Text("最近活动").font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
-        }.foregroundStyle(DesktopStyle.tertiary).padding(.bottom, 8)
-        if model.activity.isEmpty { empty("尚无活动", "连接服务后，状态变化会显示在这里。") }
+        if model.activity.isEmpty { empty("尚无活动", "连接服务后，状态变化会显示在这里。").padding(.horizontal, 14) }
         ForEach(Array(model.activity.prefix(5).enumerated()), id: \.offset) { index, event in
           if index > 0 { rule }
           HStack(spacing: 16) {
             Text(event.0, style: .time).font(.system(size: 12).monospacedDigit()).foregroundStyle(DesktopStyle.tertiary).frame(width: 44, alignment: .leading)
             Text(event.1).font(.system(size: 13)).foregroundStyle(DesktopStyle.primary).lineLimit(1)
             Spacer(minLength: 0)
-          }.frame(height: 34)
+          }.frame(height: 38).padding(.horizontal, 14)
         }
-      }.desktopCard().padding(.top, 12)
+      }.desktopCard(padding: 0)
     }
+  }
+  private var divider: some View { Rectangle().fill(DesktopStyle.line).frame(width: 1).padding(.vertical, 14) }
+  private func fact<Action: View>(_ label: String, _ value: String, _ caption: String, unit: String? = nil, tone: Color, @ViewBuilder action: () -> Action) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(label).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(value).font(.system(size: 22, weight: .medium)).tracking(-0.4).foregroundStyle(tone).lineLimit(1).minimumScaleFactor(0.7)
+        if let unit { Text(unit).font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary) }
+      }
+      Text(caption).font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+      action().padding(.top, 2)
+    }.frame(maxWidth: .infinity, alignment: .topLeading).padding(16)
   }
   private var devices: some View {
     VStack(alignment: .leading, spacing: 0) {
       DesktopPairingView(model: model).padding(.bottom, 22)
-      Text("已配对设备").font(.system(size: 14, weight: .semibold)).padding(.bottom, 8)
+      DesktopGroupLabel(title: "已配对设备", trailing: model.devices.isEmpty ? nil : "\(model.devices.count) 台")
       VStack(alignment: .leading, spacing: 0) {
         if model.devices.isEmpty { empty("暂无已配对设备", "在手机中打开「电脑 → 添加电脑」，扫描上方生成的二维码。") }
         ForEach(model.devices) { device in row(device.name, device.online ? "在线" : "离线", good: device.online) }
       }.rowsCard()
-      if let url = model.snapshot?.gateway?.url { Text(url).font(.system(size: 12, design: .monospaced)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled).padding(.top, 20) }
-      if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.footnote).foregroundStyle(.orange).padding(.top, 12) }
+      if let url = model.snapshot?.gateway?.url { Text(url).font(DesktopStyle.mono(12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled).padding(.top, 20) }
+      if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.footnote).foregroundStyle(DesktopStyle.waiting).padding(.top, 12) }
     }
   }
   private var logs: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Button("刷新日志") { model.readLog() }
-        Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.home + "/host.log")]) }.disabled(model.preview)
+        Button("刷新日志") { model.readLog() }.buttonStyle(DesktopPillStyle(.secondary))
+        Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.home + "/host.log")]) }.buttonStyle(DesktopPillStyle(.quiet)).disabled(model.preview)
       }
       Text(model.preview ? "设计预览不读取本机日志。" : model.log)
-        .font(.system(size: 11.5, design: .monospaced))
+        .font(DesktopStyle.mono(11.5)).lineSpacing(2)
         .foregroundStyle(DesktopStyle.secondary)
         .textSelection(.enabled)
         .desktopCard(padding: 14)
@@ -381,6 +272,7 @@ struct DesktopView: View {
   }
   private var updates: some View {
     VStack(alignment: .leading, spacing: 0) {
+      DesktopGroupLabel(title: "版本")
       VStack(alignment: .leading, spacing: 0) {
       valueRow("安装来源", model.standalone ? "独立 App · 内置运行环境" : model.snapshot?.source == "homebrew" ? "Homebrew" : model.snapshot?.source == "npm" ? "npm / CLI" : "未知")
       valueRow("CLI 版本", model.snapshot?.cliVersion ?? "未知", monospaced: true)
@@ -388,27 +280,27 @@ struct DesktopView: View {
       valueRow("Mac 界面版本", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版", monospaced: true)
       if model.standalone {
         HStack(spacing: 12) {
-          Text("更新通道").font(.system(size: 13.5, weight: .medium)).lineLimit(1); Spacer()
+          Text("更新通道").font(.system(size: 13)).lineLimit(1); Spacer()
           Picker("更新通道", selection: $model.updateChannel) { Text("稳定版").tag("stable"); Text("测试版").tag("beta") }.labelsHidden().pickerStyle(.segmented).frame(width: 200).disabled(model.busy || model.checking)
-        }.frame(height: 46)
+        }.frame(height: 44)
         rule
       } else { valueRow("更新通道", "稳定版 · latest") }
       HStack(spacing: 12) {
-        Text("自动检查更新").font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+        Text("自动检查更新").font(.system(size: 13)).lineLimit(1)
         Spacer()
         Toggle("自动检查更新", isOn: $model.autoCheck).labelsHidden().toggleStyle(.switch).disabled(model.preview)
-      }.frame(height: 46)
+      }.frame(height: 44)
       rule
       }.rowsCard()
       Text(model.updateMessage).font(.system(size: 13.5, weight: .medium)).padding(.top, 20).textSelection(.enabled)
       Text(model.standalone ? "App、内置 CLI、Host 与运行时作为整体更新。下载期间服务保持连接；仅在确认安装并重启时短暂重启服务，完成后自动恢复。" : "此安装通过 npm 或 Homebrew 更新。安装时可能重启后台服务，请先完成正在执行的任务。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineSpacing(4).padding(.top, 8)
       HStack(spacing: 12) {
-        Button(model.checking ? "正在检查…" : "检查更新") { model.checkUpdates() }.disabled(model.checking || model.preview)
+        Button(model.checking ? "正在检查…" : "检查更新") { model.checkUpdates() }.buttonStyle(DesktopPillStyle(model.newVersion ? .secondary : .primary)).disabled(model.checking || model.preview)
         if model.newVersion {
           Button(model.standalone ? "下载并更新 App…" : "安装更新…") {
             if model.standalone { model.upgrade() } else { confirm = "upgrade" }
           }
-            .buttonStyle(.borderedProminent).tint(DesktopStyle.accent).foregroundStyle(DesktopStyle.onAccent)
+            .buttonStyle(DesktopPillStyle(.primary))
             .disabled(model.busy || model.checking || model.preview)
         }
       }.padding(.top, 18)
@@ -425,12 +317,12 @@ struct DesktopView: View {
         Spacer()
         if model.signingIn {
           ProgressView().controlSize(.small)
-          Button("取消登录") { model.cancelLogin() }
+          Button("取消登录") { model.cancelLogin() }.buttonStyle(DesktopPillStyle(.secondary))
         } else if model.signedIn {
-          Button("退出登录…") { confirm = "logout" }.disabled(model.busy)
+          Button("退出登录…") { confirm = "logout" }.buttonStyle(DesktopPillStyle(.secondary)).disabled(model.busy)
         } else {
           Button("登录 / 注册") { model.login() }
-            .buttonStyle(.borderedProminent).tint(DesktopStyle.accent).foregroundStyle(DesktopStyle.onAccent)
+            .buttonStyle(DesktopPillStyle(.primary))
             .disabled(model.busy || model.preview)
         }
       }
@@ -439,21 +331,21 @@ struct DesktopView: View {
         accountMembership
         if !model.redemptionMessage.isEmpty {
           Text(model.redemptionMessage).font(.system(size: 12))
-            .foregroundStyle(model.redemptionIsError ? Color.orange : DesktopStyle.mint).textSelection(.enabled)
+            .foregroundStyle(model.redemptionIsError ? DesktopStyle.waiting : DesktopStyle.mint).textSelection(.enabled)
         }
         HStack {
           Text("网关：\(model.gatewayLabel)").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
           if model.snapshot?.gateway?.status != "online" {
-            Button("连接官方网关…") { confirm = "connect-gateway" }.disabled(model.busy || model.preview)
+            Button("连接官方网关…") { confirm = "connect-gateway" }.buttonStyle(DesktopPillStyle(.secondary, compact: true)).disabled(model.busy || model.preview)
           }
         }
-        if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.system(size: 12)).foregroundStyle(.orange).textSelection(.enabled) }
+        if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting).textSelection(.enabled) }
       } else {
         Text("官方网关需要 Pro；自建网关仍可通过配对使用。").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
       }
     }
     .desktopCard()
-    .padding(.bottom, 12)
+    .padding(.bottom, 22)
   }
 
   private var accountMembership: some View {
@@ -483,7 +375,7 @@ struct DesktopView: View {
             .disabled(model.busy || model.preview).onSubmit { model.redeemPro() }
             .accessibilityLabel("Pro 激活码")
           Button(model.redeeming ? "正在兑换…" : "兑换 Pro") { model.redeemPro() }
-            .buttonStyle(.borderedProminent).tint(DesktopStyle.accent).foregroundStyle(DesktopStyle.onAccent)
+            .buttonStyle(DesktopPillStyle(.primary))
             .disabled(!model.canRedeem)
         }
         HStack(spacing: 3) {
@@ -496,65 +388,68 @@ struct DesktopView: View {
 
   private var settings: some View {
     VStack(alignment: .leading, spacing: 0) {
+      DesktopGroupLabel(title: "外观与启动")
       VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 12) {
-        Text("外观").font(.system(size: 13.5, weight: .medium)).lineLimit(1); Spacer()
+        Text("外观").font(.system(size: 13)).lineLimit(1); Spacer()
         Picker("外观", selection: $model.appearance) {
           Text("跟随系统").tag("system")
           Text("浅色").tag("light")
           Text("深色").tag("dark")
         }.labelsHidden().pickerStyle(.segmented).frame(width: 240)
-      }.frame(height: 46)
+      }.frame(height: 44)
       rule
       if model.standalone {
         HStack(spacing: 12) {
-          Text("登录 Mac 时自动启动").font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+          Text("登录 Mac 时自动启动").font(.system(size: 13)).lineLimit(1)
           Spacer()
           Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             .labelsHidden().toggleStyle(.switch).disabled(model.preview)
-        }.frame(height: 46)
+        }.frame(height: 44)
         Text("登录 Mac 后自动打开 LinkShell。每次打开桌面版都会启动后台服务并连接已配置的网关，无需再点“启动服务”。")
           .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 12)
         if model.loginApprovalRequired {
-          Text("等待系统允许，请在“登录项”中启用 LinkShell。").font(.system(size: 12)).foregroundStyle(.orange)
-          Button("打开系统登录项设置") { model.openLoginItems() }.padding(.vertical, 10).disabled(model.preview)
+          Text("等待系统允许，请在“登录项”中启用 LinkShell。").font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting)
+          Button("打开系统登录项设置") { model.openLoginItems() }.buttonStyle(DesktopPillStyle(.secondary, compact: true)).padding(.vertical, 10).disabled(model.preview)
         }
         if !model.loginItemMessage.isEmpty {
-          Text(model.loginItemMessage).font(.system(size: 12)).foregroundStyle(.orange).textSelection(.enabled).padding(.bottom, 10)
+          Text(model.loginItemMessage).font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting).textSelection(.enabled).padding(.bottom, 10)
         }
       }
       }.rowsCard()
+      DesktopGroupLabel(title: "让手机查看和控制这台 Mac").padding(.top, 22)
       VStack(alignment: .leading, spacing: 0) {
       row("屏幕录制", !model.permissionsKnown ? "未知" : model.recording ? "已授权" : "未授权", good: model.permissionsKnown && model.recording)
       row("辅助功能", !model.permissionsKnown ? "未知" : model.control ? "已授权" : "未授权", good: model.permissionsKnown && model.control)
       HStack(spacing: 12) {
         Text("需要修改系统授权时，可打开权限向导或系统设置。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineLimit(1)
         Spacer()
-        Button("打开权限设置") { model.permissions() }.disabled(model.preview)
-      }.frame(height: 46)
+        Button("打开权限设置") { model.permissions() }.buttonStyle(DesktopPillStyle(.secondary, compact: true)).disabled(model.preview)
+      }.frame(height: 44)
       rule
-      }.rowsCard().padding(.top, 12)
-      VStack(alignment: .leading, spacing: 0) { valueRow("数据目录", model.home, monospaced: true) }.rowsCard().padding(.top, 12)
+      }.rowsCard()
+      DesktopGroupLabel(title: "数据").padding(.top, 22)
+      VStack(alignment: .leading, spacing: 0) { valueRow("数据目录", model.home, monospaced: true) }.rowsCard()
       Text("窗口关闭后，LinkShell 留在菜单栏。退出界面不会停止 Host 或代理任务。")
         .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).lineSpacing(4).padding(.top, 16)
       if model.standalone {
+        DesktopGroupLabel(title: "命令行工具").padding(.top, 22)
         VStack(alignment: .leading, spacing: 0) {
-        Text("命令行工具").font(.system(size: 13.5, weight: .semibold))
         Text("使用 App 内置 CLI，与 App 一起升级。已有 npm / Homebrew 安装不会被改动。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.top, 6)
         HStack(spacing: 12) {
-          Button("安装到 ~/.local/bin") { model.installCommand() }.disabled(model.preview)
-          Button("重试恢复后台服务") { Task { await model.appUpdater.recover() } }.disabled(model.busy || model.preview)
+          Button("安装到 ~/.local/bin") { model.installCommand() }.buttonStyle(DesktopPillStyle(.secondary)).disabled(model.preview)
+          Button("重试恢复后台服务") { Task { await model.appUpdater.recover() } }.buttonStyle(DesktopPillStyle(.quiet)).disabled(model.busy || model.preview)
         }.padding(.top, 12)
         if !model.commandMessage.isEmpty { Text(model.commandMessage).font(.system(size: 12)).textSelection(.enabled).padding(.top, 8) }
-        }.desktopCard().padding(.top, 16)
+        }.desktopCard()
       }
       HStack {
-        Button("退出 LinkShell 界面") { NSApp.terminate(nil) }
+        Button("退出 LinkShell 界面") { NSApp.terminate(nil) }.buttonStyle(DesktopPillStyle(.quiet))
       }.padding(.top, 18)
     }
   }
   private func empty(_ title: String, _ detail: String) -> some View {
-    VStack(alignment: .leading, spacing: 9) { Text(title).font(.system(size: 14)); Text(detail).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary) }.padding(.vertical, 20)
+    VStack(alignment: .leading, spacing: 6) { Text(title).font(.system(size: 13, weight: .medium)); Text(detail).font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary) }.padding(.vertical, 18)
   }
 }
 
@@ -570,7 +465,7 @@ struct DesktopPopover: View {
       entry("bubble.left", "会话", model.healthy ? "\(model.running) 个运行中" : "未知")
       if model.pending > 0 {
         Divider()
-        DesktopStatus(text: "\(model.pending) 个请求等待确认", tone: .orange).padding(.vertical, 18)
+        DesktopStatus(text: "\(model.pending) 个请求等待确认", tone: DesktopStyle.waiting).padding(.vertical, 18)
       }
       Divider().padding(.bottom, 10)
       link("arrow.up.forward.square", "打开工作台", "工作台")

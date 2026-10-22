@@ -490,10 +490,14 @@ export function Diff({
 }: {
   change: Extract<ToolCallContent, { type: "diff" | "patch" }>;
 }) {
+  // Inside the session's own directory the path reads from the project root; the full one is on hover.
+  const cwd = useContext(TimelineNavigation)?.cwd;
+  const shown = (path: string) =>
+    cwd && path.startsWith(`${cwd.replace(/\/$/, "")}/`) ? path.slice(cwd.replace(/\/$/, "").length + 1) : path;
   if (change.type === "diff")
     return (
       <details className="diff-block" open>
-        <summary>{change.path}</summary>
+        <summary title={change.path}>{shown(change.path)}</summary>
         <div className="before-after">
           <div>
             <small>修改前</small>
@@ -512,9 +516,9 @@ export function Diff({
     );
   return (
     <details className="diff-block" open>
-      <summary>
-        {change.path}
-        {change.movePath ? ` → ${change.movePath}` : ""}
+      <summary title={change.movePath ? `${change.path} → ${change.movePath}` : change.path}>
+        {shown(change.path)}
+        {change.movePath ? ` → ${shown(change.movePath)}` : ""}
       </summary>
       <pre tabIndex={0} aria-label={`${change.path} 的差异`}>
         {change.diff.split("\n").map((line, index) => (

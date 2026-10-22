@@ -18,7 +18,7 @@ struct DesktopPairingView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack(spacing: 14) {
-        Image(systemName: "qrcode.viewfinder").font(.system(size: 24)).foregroundStyle(DesktopStyle.accent)
+        Image(systemName: "qrcode.viewfinder").font(.system(size: 16, weight: .medium)).foregroundStyle(DesktopStyle.secondary).frame(width: 36, height: 36).background(Circle().fill(DesktopStyle.raised))
         VStack(alignment: .leading, spacing: 4) {
           Text("连接你的手机").font(.system(size: 15, weight: .semibold))
           Text("扫描二维码或输入配对码，添加这台 Mac").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
@@ -26,15 +26,15 @@ struct DesktopPairingView: View {
         Spacer()
         if offer == nil {
           Button("配对新设备") { Task { await start() } }
-            .buttonStyle(.borderedProminent).tint(DesktopStyle.accent).foregroundStyle(DesktopStyle.onAccent)
+            .buttonStyle(DesktopPillStyle(.primary))
             .disabled(loading || model.preview)
         } else {
-          Button("重新生成") { Task { await start() } }.disabled(loading || model.preview)
+          Button("重新生成") { Task { await start() } }.buttonStyle(DesktopPillStyle(.secondary)).disabled(loading || model.preview)
         }
       }
       if loading { ProgressView("正在生成安全配对码…") }
       if paired { Label("设备已配对", systemImage: "checkmark.circle.fill").foregroundStyle(DesktopStyle.mint) }
-      if let error { Text(error).font(.system(size: 12)).foregroundStyle(.orange) }
+      if let error { Text(error).font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting) }
       if let offer {
         TimelineView(.periodic(from: .now, by: 1)) { context in
           let remaining = max(0, Int(offer.expiresAt / 1000 - context.date.timeIntervalSince1970))

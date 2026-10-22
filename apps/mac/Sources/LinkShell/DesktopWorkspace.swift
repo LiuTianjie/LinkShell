@@ -210,6 +210,16 @@ import WebKit
     }
   }
 
+  /// Asks the page to run one of its own commands (the native top bar's search opens ⌘K).
+  func send(command: String) {
+    guard ["palette", "new-session"].contains(command) else { return }
+    setManaging(false)
+    guard policy?.isTrusted(webView.url) == true else { return }
+    webView.window?.makeFirstResponder(webView)
+    webView.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('linkshell-desktop-command', {detail: {command}}));",
+                                arguments: ["command": command], in: nil, in: .page, completionHandler: nil)
+  }
+
   func setWindowVisible(_ value: Bool) {
     windowVisible = value
     updateUserScripts()

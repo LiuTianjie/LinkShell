@@ -45,7 +45,7 @@ import SwiftUI
     }
     let root = NSHostingView(rootView: DesktopRootView(model: model, workspace: workspace))
     let windowStyle: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-    window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: model.preview && Launch.has("--dashboard-tall") ? 1000 : 760), styleMask: windowStyle, backing: .buffered, defer: false)
+    window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: model.preview && Launch.has("--dashboard-tall") ? 1000 : 820), styleMask: windowStyle, backing: .buffered, defer: false)
     window.title = "LinkShell"
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
@@ -53,7 +53,7 @@ import SwiftUI
     window.collectionBehavior.insert(.fullScreenPrimary)
     window.backgroundColor = DesktopStyle.windowBackground
     window.contentView = root
-    window.minSize = NSSize(width: 880, height: model.preview ? 650 : 680)
+    window.minSize = NSSize(width: 940, height: 640)
     window.isReleasedWhenClosed = false
     window.delegate = self
     if !model.preview { window.setFrameAutosaveName("LinkShellDesktop") }
