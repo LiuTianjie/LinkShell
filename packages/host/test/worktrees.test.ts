@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ContentBlock, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, ForkOptions } from "../src/drivers/types.js";
@@ -12,7 +12,7 @@ import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState } fro
 
 // Sessions in git worktrees, and forks: against a real repository.
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { windowsHide: true, encoding: "utf8" }).trim();
 
 let dir: string;
 let repo: string;
@@ -59,7 +59,7 @@ describe("worktrees", () => {
     writeFileSync(join(repo, "notes.txt"), "uncommitted, stays behind");
     const made = await createWorktree(join(repo, "packages", "api"), home, "Fix the 登录 bug!");
     expect(made.path.startsWith(join(home, "worktrees", "shop", "fix-the-bug-"))).toBe(true);
-    expect(made.branch).toBe(`linkshell/${made.path.split("/").pop()}`);
+    expect(made.branch).toBe(`linkshell/${basename(made.path)}`);
     // The session works at the same place inside the new checkout.
     expect(made.cwd).toBe(join(made.path, "packages", "api"));
     expect(existsSync(join(made.cwd, "index.ts"))).toBe(true);

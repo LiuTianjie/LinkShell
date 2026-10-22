@@ -20,7 +20,7 @@ export class AcpMcpBridge {
   open(config: Extract<AcpMcpServer, { type: "acp" }>, cwd: string): string {
     if (this.servers.size >= 64) throw RpcError.app("busy", "请先关闭不用的 MCP 服务");
     const serverId = randomUUID();
-    const child = spawn(config.command, config.args, { cwd, env: { ...this.options.env, ...config.env }, detached: process.platform !== "win32", stdio: "pipe" });
+    const child = spawn(config.command, config.args, { cwd, env: { ...this.options.env, ...config.env }, windowsHide: true, detached: process.platform !== "win32", stdio: "pipe" });
     const server: Server = { child, pending: new Map(), buffer: "", decoder: new StringDecoder("utf8"), stopped: false };
     this.servers.set(serverId, server);
     child.stdout.on("data", (data: Buffer) => {

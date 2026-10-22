@@ -50,7 +50,7 @@ namespace LinkShell.Windows {
         int days = 7, usageGeneration;
         bool busy, polling, signingIn, pairing, paired, usageLoading, checking, quitting, dark = true;
         Process login, accountAction;
-        Window trayPanel;
+        TrayPanel trayPanel;
         Button serviceMenuButton;
         Popup servicePopup;
         DateTime pairExpiry = DateTime.MinValue;
@@ -121,7 +121,7 @@ namespace LinkShell.Windows {
             for (int i = 0; i < keys.Length; i++) ColorResource(keys[i], colors[i]);
             SetTitlebar();
             if (workspace != null) { var update = SyncWorkspace(); }
-            if (trayPanel != null) trayPanel.Close();
+            if (trayPanel != null) trayPanel.Dismiss();
         }
         void SetTitlebar() { var hwnd = new WindowInteropHelper(this).Handle; if (hwnd != IntPtr.Zero) { int value = dark ? 1 : 0; try { DwmSetWindowAttribute(hwnd, 20, ref value, 4); } catch (DllNotFoundException) {} } }
         void SystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e) { if (appearance == "system") Dispatcher.BeginInvoke(new Action(() => { ApplyAppearance(); Render(); })); }
@@ -605,8 +605,8 @@ namespace LinkShell.Windows {
             popup.Child = card; servicePopup = popup; popup.IsOpen = true; refresh.Focus();
         }
         void ToggleTray() {
-            if (trayPanel != null) { trayPanel.Close(); return; }
-            trayPanel = new Window { Title = "LinkShell · 快捷面板", Width = 320, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Topmost = true, Background = Brush("Sidebar"), Foreground = Brush("Primary"), FontFamily = FontFamily, FontSize = 13, UseLayoutRounding = true };
+            if (trayPanel != null) { trayPanel.Dismiss(); return; }
+            trayPanel = new TrayPanel { Title = "LinkShell · 快捷面板", Width = 320, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Topmost = true, Background = Brush("Sidebar"), Foreground = Brush("Primary"), FontFamily = FontFamily, FontSize = 13, UseLayoutRounding = true };
             trayPanel.Resources = Resources;
             var logo = new StackPanel { Orientation = Orientation.Horizontal }; logo.Children.Add(new Image { Source = Asset("brand.png"), Width = 36, Height = 36, Margin = new Thickness(0, 0, 12, 0) }); logo.Children.Add(Text("LinkShell", 20, "Primary", true));
             var panel = Stack(logo); var status = (FrameworkElement)Status("服务" + ServiceLabel, Healthy ? "Accent" : "Secondary"); status.Margin = new Thickness(48, 10, 0, 20); panel.Children.Add(status); panel.Children.Add(Rule());
@@ -616,16 +616,19 @@ namespace LinkShell.Windows {
             panel.Children.Add(Rule(10, 8)); var exit = Button("退出界面", Quit, false, true); exit.HorizontalContentAlignment = HorizontalAlignment.Left; panel.Children.Add(exit);
             var border = Card(panel, 22); border.Background = Brush("Sidebar"); border.BorderBrush = Brush("Line"); border.BorderThickness = new Thickness(1); trayPanel.Content = border;
             trayPanel.Loaded += (s, e) => { if (trayPanel != null) { var area = SystemParameters.WorkArea; trayPanel.Left = area.Right - trayPanel.ActualWidth - 12; trayPanel.Top = area.Bottom - trayPanel.ActualHeight - 12; } };
-            trayPanel.PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape && trayPanel != null) { trayPanel.Close(); e.Handled = true; } };
-            trayPanel.Deactivated += (s, e) => { if (trayPanel != null) trayPanel.Close(); }; trayPanel.Closed += (s, e) => trayPanel = null; trayPanel.Show(); trayPanel.Activate();
+            trayPanel.PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { ((TrayPanel)s).Dismiss(); e.Handled = true; } };
+            var current = trayPanel;
+            current.Closed += (s, e) => { if (ReferenceEquals(trayPanel, s)) trayPanel = null; };
+            current.Show();
+            if (ReferenceEquals(trayPanel, current)) current.Activate();
         }
-        void ShowPage(string page) { if (trayPanel != null) trayPanel.Close(); Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); Navigate(page); }
+        void ShowPage(string page) { if (trayPanel != null) trayPanel.Dismiss(); Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); Navigate(page); }
         public void Restore() { ShowPage(management ? selected : "工作台"); }
         async void Quit() {
             if (exiting) return; exiting = true;
             try {
                 if (!await workspace.CanDiscard("退出")) return;
-                quitting = true; CancelLogin(); if (trayPanel != null) trayPanel.Close();
+                quitting = true; CancelLogin(); if (trayPanel != null) trayPanel.Dismiss();
                 if (accountAction != null) { try { if (!accountAction.HasExited) accountAction.Kill(); } catch (InvalidOperationException) {} }
                 await workspace.SetState(false, appearance); await workspace.Stop(); Close(); Application.Current.Shutdown();
             } finally { exiting = false; }

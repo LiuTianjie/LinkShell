@@ -13,7 +13,7 @@ const build = join(app, 'build');
 const framework = join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET/Framework64/v4.0.30319');
 const refs = ['PresentationFramework', 'PresentationCore', 'WindowsBase', 'System.Xaml'].map(name => `/r:${join(existsSync(join(framework, 'WPF', name + '.dll')) ? join(framework, 'WPF') : framework, name + '.dll')}`);
 const executable = join(build, 'LinkShell.WorkspaceQA.exe');
-const compiled = spawnSync(join(framework, 'csc.exe'), ['/nologo', '/platform:x64', '/codepage:65001', '/target:exe', '/main:LinkShell.Windows.WorkspaceTests', `/out:${executable}`, ...refs, ...await ensureWebView2(), '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Net.Http.dll', ...['src/Desktop.cs', 'src/Dashboard.cs', 'src/Workspace.cs', 'test/WorkspaceTests.cs'].map(name => join(app, name))], { windowsHide: true, stdio: 'inherit' });
+const compiled = spawnSync(join(framework, 'csc.exe'), ['/nologo', '/platform:x64', '/codepage:65001', '/target:exe', '/main:LinkShell.Windows.WorkspaceTests', `/out:${executable}`, ...refs, ...await ensureWebView2(), '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Net.Http.dll', ...['src/Desktop.cs', 'src/Dashboard.cs', 'src/TrayPanel.cs', 'src/Workspace.cs', 'test/WorkspaceTests.cs'].map(name => join(app, name))], { windowsHide: true, stdio: 'inherit' });
 if (compiled.error || compiled.status) throw compiled.error ?? new Error('Workspace QA compilation failed');
 if (!process.argv.includes('--native')) {
   const result = spawnSync(executable, [], { windowsHide: true, stdio: 'inherit' });

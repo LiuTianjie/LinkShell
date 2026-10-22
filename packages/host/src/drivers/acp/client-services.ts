@@ -89,7 +89,7 @@ export class AcpClientServices {
         env[item.name] = item.value;
       }
       if (p.outputByteLimit != null && (!Number.isSafeInteger(p.outputByteLimit) || Number(p.outputByteLimit) < 0)) throw invalid("终端输出上限必须是非负整数");
-      const child = spawn(p.command, (p.args ?? []) as string[], { cwd, env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(p.command, (p.args ?? []) as string[], { cwd, env, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
       const terminalId = randomUUID();
       let finish!: (status: AcpTerminalSnapshot["exitStatus"]) => void;
       const terminal: Terminal = { sessionId: String(p.sessionId), child, output: "", truncated: false,
