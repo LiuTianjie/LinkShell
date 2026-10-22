@@ -1,9 +1,9 @@
 import AppKit
 
 /// The setup window's face (`--setup`; what it does is `Setup`): the app's icon, a title and a
-/// sentence, a row for each permission, and a button to leave it for later. Its colours, fonts
-/// and symbols are the system's, so it follows light and dark, the accent colour and the
-/// look of whichever macOS it runs on.
+/// sentence, a row for each permission, and a button to leave it for later. It is drawn with the
+/// desktop app's own system (DesktopStyle): a grey ground, the rows on one panel, the thing to do
+/// next as the one ink pill, mint once a permission is on.
 final class SetupWindow {
   static let width: CGFloat = 600
 
@@ -17,7 +17,7 @@ final class SetupWindow {
   private let title = Label(size: 20, weight: .semibold)
   private let sentence = Label(size: 13, wraps: true)
   private var rows: [Permission: SetupRow] = [:]
-  private let leave: NSButton
+  private let leave: DesktopPillButton
 
   init(text: SetupText) {
     self.text = text
@@ -28,6 +28,7 @@ final class SetupWindow {
     window.titlebarAppearsTransparent = true
     window.isMovableByWindowBackground = true
     window.isReleasedWhenClosed = false
+    window.backgroundColor = DesktopStyle.windowBackground
     // Comes to the Space the user is looking at whenever it comes forward (System Settings may
     // open in another one and take the user there), and shows over an app that fills the screen.
     // Not `.canJoinAllSpaces`: with it the app is never made active, and the window never key
@@ -36,15 +37,15 @@ final class SetupWindow {
     window.standardWindowButton(.miniaturizeButton)?.isHidden = true
     window.standardWindowButton(.zoomButton)?.isHidden = true
 
-    leave = NSButton(title: text.later, target: window, action: #selector(NSWindow.performClose(_:)))
-    leave.controlSize = .large
+    leave = DesktopPillButton(title: text.later, kind: .secondary, target: window, action: #selector(NSWindow.performClose(_:)))
 
     done.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
     done.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 50, weight: .regular)
-    done.contentTintColor = .systemGreen
+    done.contentTintColor = DesktopStyle.mintColor
     title.alignment = .center
     sentence.alignment = .center
-    sentence.textColor = .secondaryLabelColor
+    title.textColor = DesktopStyle.primaryText
+    sentence.textColor = DesktopStyle.secondaryText
 
     let card = Card()
     let list = NSStackView()
@@ -55,9 +56,9 @@ final class SetupWindow {
       let row = SetupRow(permission: permission, text: text) { [weak self] in self?.onOpen(permission) }
       rows[permission] = row
       if !list.arrangedSubviews.isEmpty {
-        let line = NSBox()
-        line.boxType = .separator
+        let line = Rule()
         list.addArrangedSubview(line)
+        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
         // From where the rows' words begin, as a list's lines are.
         line.leadingAnchor.constraint(equalTo: list.leadingAnchor, constant: SetupRow.wordsFrom).isActive = true
         line.trailingAnchor.constraint(equalTo: list.trailingAnchor).isActive = true
@@ -113,6 +114,7 @@ final class SetupWindow {
       row.show(granted: granted[permission], first: granted.next == permission, pressed: pressed.contains(permission))
     }
     leave.title = finished ? text.done : text.later
+    leave.kind = finished ? .primary : .secondary
     // Return for the button to press next, Escape to leave it for later.
     leave.keyEquivalent = finished ? "\r" : "\u{1b}"
     fit()
@@ -164,7 +166,7 @@ final class SetupWindow {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     window.effectiveAppearance.performAsCurrentDrawingAppearance {
-      NSColor.windowBackgroundColor.setFill()
+      DesktopStyle.windowBackground.setFill()
       NSRect(origin: .zero, size: size).fill()
     }
     NSGraphicsContext.restoreGraphicsState()
@@ -177,7 +179,7 @@ final class SetupWindow {
 /// button that leads to its switch and, once that has been pressed, what to do there.
 final class SetupRow: NSView {
   /// From the row's leading edge to its words: the inset, the symbol's tile, the space after it.
-  static let wordsFrom: CGFloat = 16 + 36 + 12
+  static let wordsFrom: CGFloat = 16 + 34 + 12
 
   private let text: SetupText
   private let press: () -> Void
@@ -188,7 +190,7 @@ final class SetupRow: NSView {
   private let purpose = Label(size: 12, wraps: true)
   private let hint = Label(size: 12, weight: .medium, wraps: true)
   private let note = Label(size: 11, wraps: true)
-  private let button: NSButton
+  private let button: DesktopPillButton
   /// The space between what the permission is for and what to do about it.
   private var below = NSLayoutConstraint()
 
@@ -196,18 +198,17 @@ final class SetupRow: NSView {
     self.text = text
     self.press = press
     tile = Tile(symbol: permission == .recording ? "rectangle.dashed.badge.record" : "accessibility")
-    button = NSButton(title: text.open, target: nil, action: nil)
+    button = DesktopPillButton(title: text.open, kind: .secondary, target: nil, action: nil)
     super.init(frame: .zero)
-    button.controlSize = .large
     button.target = self
     button.action = #selector(pressed)
     name.stringValue = text.name(permission)
     purpose.stringValue = text.purpose(permission)
     hint.stringValue = text.hint
-    hint.textColor = .labelColor
+    hint.textColor = DesktopStyle.primaryText
     // Only Screen Recording has the system say the app must quit and reopen.
     note.stringValue = permission == .recording ? text.reopen : ""
-    note.textColor = .secondaryLabelColor
+    note.textColor = DesktopStyle.secondaryText
     mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
 
     let heading = NSStackView(views: [name, mark, state])
@@ -233,8 +234,8 @@ final class SetupRow: NSView {
     NSLayoutConstraint.activate([
       tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       tile.topAnchor.constraint(equalTo: topAnchor, constant: 14),
-      tile.widthAnchor.constraint(equalToConstant: 36),
-      tile.heightAnchor.constraint(equalToConstant: 36),
+      tile.widthAnchor.constraint(equalToConstant: 34),
+      tile.heightAnchor.constraint(equalToConstant: 34),
       words.leadingAnchor.constraint(equalTo: leadingAnchor, constant: SetupRow.wordsFrom),
       words.topAnchor.constraint(equalTo: topAnchor, constant: 14),
       words.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -12),
@@ -261,13 +262,15 @@ final class SetupRow: NSView {
   func show(granted: Bool, first: Bool, pressed: Bool) {
     let faint = !granted && !first
     tile.faint = faint
-    name.textColor = faint ? .secondaryLabelColor : .labelColor
-    purpose.textColor = faint ? .tertiaryLabelColor : .secondaryLabelColor
+    name.textColor = faint ? DesktopStyle.secondaryText : DesktopStyle.primaryText
+    purpose.textColor = faint ? DesktopStyle.tertiaryText : DesktopStyle.secondaryText
     mark.image = NSImage(systemSymbolName: granted ? "checkmark.circle.fill" : "circle", accessibilityDescription: nil)
-    mark.contentTintColor = granted ? .systemGreen : .tertiaryLabelColor
+    mark.contentTintColor = granted ? DesktopStyle.mintColor : DesktopStyle.tertiaryText
     state.stringValue = granted ? text.on : text.off
-    state.textColor = faint ? .tertiaryLabelColor : .secondaryLabelColor
+    state.textColor = granted ? DesktopStyle.mintColor : DesktopStyle.tertiaryText
     button.isHidden = granted
+    // The thing to do now is the window's one ink pill.
+    button.kind = first ? .primary : .secondary
     button.keyEquivalent = first ? "\r" : ""
     hint.isHidden = granted || !pressed
     note.isHidden = hint.isHidden || note.stringValue.isEmpty
@@ -296,13 +299,13 @@ private final class Label: NSTextField {
   }
 }
 
-/// The rounded square behind a row's symbol, in the user's accent colour.
+/// The neutral disc behind a row's symbol.
 private final class Tile: NSView {
   private let symbol = NSImageView()
 
   var faint = false {
     didSet {
-      symbol.contentTintColor = faint ? .tertiaryLabelColor : .controlAccentColor
+      symbol.contentTintColor = faint ? DesktopStyle.tertiaryText : DesktopStyle.secondaryText
       needsDisplay = true
     }
   }
@@ -310,7 +313,7 @@ private final class Tile: NSView {
   init(symbol name: String) {
     super.init(frame: .zero)
     symbol.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
-    symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+    symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
     symbol.translatesAutoresizingMaskIntoConstraints = false
     addSubview(symbol)
     NSLayoutConstraint.activate([
@@ -324,14 +327,16 @@ private final class Tile: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    (faint ? NSColor.tertiaryLabelColor : NSColor.controlAccentColor).withAlphaComponent(faint ? 0.1 : 0.14).setFill()
-    NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      DesktopStyle.raisedColor.setFill()
+      NSBezierPath(ovalIn: bounds).fill()
+    }
   }
 }
 
-/// The rounded box the rows are in: a little lighter than the window, with a hairline around it.
+/// The panel the rows are in: one step from the window ground, with a hairline around it.
 private final class Card: NSView {
-  private static let radius: CGFloat = 12
+  private static let radius: CGFloat = 16
 
   func fill(with view: NSView) {
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -345,20 +350,30 @@ private final class Card: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Card.radius, yRadius: Card.radius)
-    NSColor(white: 1, alpha: dark ? 0.05 : 0.6).setFill()
-    box.fill()
-    NSColor.separatorColor.setStroke()
-    box.stroke()
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Card.radius, yRadius: Card.radius)
+      DesktopStyle.panelColor.setFill()
+      box.fill()
+      DesktopStyle.lineColor.setStroke()
+      box.stroke()
+    }
   }
 }
 
-/// The app's icon. It is the phone app's: a full square, which a Mac shows with its corners
-/// rounded.
+/// The desktop app icon, including its transparent padding and rounded tile.
 private final class AppIcon: NSView {
   override func draw(_ dirtyRect: NSRect) {
     NSBezierPath(roundedRect: bounds, xRadius: bounds.width * 0.225, yRadius: bounds.height * 0.225).addClip()
     NSApp.applicationIconImage.draw(in: bounds)
+  }
+}
+
+/// The hairline between two rows, from where the rows' words begin.
+private final class Rule: NSView {
+  override func draw(_ dirtyRect: NSRect) {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      DesktopStyle.lineColor.setFill()
+      bounds.fill()
+    }
   }
 }

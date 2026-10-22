@@ -84,7 +84,7 @@ struct DesktopUsageView: View {
           }.padding(2).background(Capsule().fill(DesktopStyle.raised))
         }.fixedSize(horizontal: false, vertical: true)
         Spacer(minLength: 4)
-        Picker("时间", selection: $days) { Text("今天").tag(1); Text("最近 7 天").tag(7); Text("最近 30 天").tag(30) }.labelsHidden().frame(width: 98)
+        DesktopSegmented(options: [(1, "今天"), (7, "7 天"), (30, "30 天")], selection: $days).accessibilityLabel("时间范围")
       }
       if let error { Text(error).foregroundStyle(DesktopStyle.waiting).font(.system(size: 12)) }
       if let report {
@@ -107,11 +107,11 @@ struct DesktopUsageView: View {
             Circle().fill(DesktopStyle.accent).frame(width: 7, height: 7)
             Text(chartMetric == "tokens" ? "Token" : "记录（条）").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
             Spacer()
-            Picker("趋势指标", selection: $chartMetric) { Text("Token").tag("tokens"); Text("记录").tag("records") }.pickerStyle(.segmented).labelsHidden().frame(width: 135)
+            DesktopSegmented(options: [("tokens", "Token"), ("records", "记录")], selection: $chartMetric).accessibilityLabel("趋势指标")
           }
           Chart(report.daily) { day in
             BarMark(x: .value("日期", day.date), y: .value(chartMetric == "tokens" ? "Token" : "记录（条）", chartMetric == "tokens" ? day.totalTokens : (day.records ?? 0)))
-              .foregroundStyle(DesktopStyle.accent.opacity(selectedDate == nil || selectedDate == day.date ? 0.85 : 0.35)).cornerRadius(4)
+              .foregroundStyle(DesktopStyle.mint.opacity(selectedDate == nil || selectedDate == day.date ? 0.9 : 0.35)).cornerRadius(3)
               .accessibilityLabel(day.date).accessibilityValue("\(number(chartMetric == "tokens" ? day.totalTokens : (day.records ?? 0))) \(chartMetric == "tokens" ? "Token" : "条")")
           }
           .chartYAxis { AxisMarks(position: .leading) { value in AxisGridLine(); AxisValueLabel { if let n = value.as(Double.self) { Text(compact(n)) } } } }

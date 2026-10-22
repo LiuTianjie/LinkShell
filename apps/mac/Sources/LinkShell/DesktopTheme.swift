@@ -39,6 +39,20 @@ enum DesktopStyle {
   /// The outline of something that can be clicked: one step stronger than a hairline.
   static let controlStroke = Color(nsColor: gray(0.80, 0.24))
 
+  // AppKit views (the setup window) draw with the same values.
+  static let panelColor = gray(1.0, 0.067)
+  static let raisedColor = gray(0.938, 0.135)
+  static let selectionColor = gray(0.895, 0.17)
+  static let lineColor = gray(0.885, 0.15)
+  static let controlStrokeColor = gray(0.80, 0.24)
+  static let primaryText = gray(0.07, 0.95)
+  static let secondaryText = gray(0.30, 0.71)
+  static let tertiaryText = gray(0.38, 0.59)
+  static let inkColor = gray(0.10, 0.95)
+  static let inkPressedColor = gray(0.26, 0.80)
+  static let onInkColor = gray(1.0, 0.06)
+  static let mintColor = hue(rgb(0x077a66), rgb(0x3ddbb9))
+
   static let primary = Color(nsColor: gray(0.07, 0.95))
   /// About 8:1 on its panel in both appearances.
   static let secondary = Color(nsColor: gray(0.30, 0.71))
@@ -196,5 +210,109 @@ struct WindowDragArea: NSViewRepresentable {
     override func mouseDown(with event: NSEvent) {
       if event.clickCount == 2 { window?.performZoom(nil) } else { window?.performDrag(with: event) }
     }
+  }
+}
+
+/// The AppKit pill: the setup window's buttons, drawn like `DesktopPillStyle`.
+final class DesktopPillButton: NSButton {
+  enum Kind { case primary, secondary }
+  var kind: Kind = .secondary { didSet { needsDisplay = true } }
+  private var hovered = false { didSet { needsDisplay = true } }
+
+  convenience init(title: String, kind: Kind, target: AnyObject?, action: Selector?) {
+    self.init(frame: .zero)
+    self.title = title
+    self.kind = kind
+    self.target = target
+    self.action = action
+    isBordered = false
+    setButtonType(.momentaryChange)
+    font = .systemFont(ofSize: 13, weight: .medium)
+    focusRingType = .exterior
+  }
+
+  override var intrinsicContentSize: NSSize {
+    let text = (title as NSString).size(withAttributes: [.font: font ?? .systemFont(ofSize: 13)])
+    return NSSize(width: ceil(text.width) + 32, height: 30)
+  }
+  override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    trackingAreas.forEach(removeTrackingArea)
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+  }
+  override func mouseEntered(with event: NSEvent) { hovered = true }
+  override func mouseExited(with event: NSEvent) { hovered = false }
+
+  override func draw(_ dirtyRect: NSRect) {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: (bounds.height - 1) / 2, yRadius: (bounds.height - 1) / 2)
+      let pressed = isHighlighted
+      switch kind {
+      case .primary:
+        (pressed ? DesktopStyle.inkPressedColor : DesktopStyle.inkColor).setFill()
+        pill.fill()
+      case .secondary:
+        if pressed { DesktopStyle.selectionColor.setFill(); pill.fill() } else if hovered { DesktopStyle.raisedColor.setFill(); pill.fill() }
+        DesktopStyle.controlStrokeColor.setStroke()
+        pill.lineWidth = 1
+        pill.stroke()
+      }
+      let attributes: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 13, weight: .medium), .foregroundColor: kind == .primary ? DesktopStyle.onInkColor : DesktopStyle.primaryText]
+      let size = (title as NSString).size(withAttributes: attributes)
+      (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+    }
+  }
+  override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill() }
+  override var focusRingMaskBounds: NSRect { bounds }
+}
+
+/// Pills in a recessed track; the chosen one is a grey step, never a hue.
+struct DesktopSegmented<Value: Hashable>: View {
+  let options: [(Value, String)]
+  @Binding var selection: Value
+  @Environment(\.isEnabled) private var isEnabled
+  var body: some View {
+    HStack(spacing: 2) {
+      ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+        let chosen = option.0 == selection
+        Button { selection = option.0 } label: {
+          Text(option.1).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+            .foregroundStyle(chosen ? DesktopStyle.primary : DesktopStyle.secondary)
+            .padding(.horizontal, 12).frame(height: 26)
+            .background(Capsule().fill(chosen ? DesktopStyle.selection : .clear))
+            .contentShape(Capsule())
+        }.buttonStyle(.plain).accessibilityAddTraits(chosen ? [.isSelected] : [])
+      }
+    }
+    .padding(2).background(Capsule().fill(DesktopStyle.raised)).fixedSize()
+    .opacity(isEnabled ? 1 : 0.55)
+  }
+}
+
+/// The switch used on every settings row: mint when on, like a running state.
+struct DesktopSwitchStyle: ToggleStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    Button { configuration.isOn.toggle() } label: {
+      Capsule().fill(configuration.isOn ? DesktopStyle.mint : DesktopStyle.controlStroke)
+        .frame(width: 34, height: 20)
+        .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+          Circle().fill(Color.white).frame(width: 16, height: 16).padding(2)
+            .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+        }
+        .animation(.easeOut(duration: 0.15), value: configuration.isOn)
+    }
+    .buttonStyle(.plain)
+    .accessibilityValue(configuration.isOn ? "开" : "关").accessibilityAddTraits(.isButton)
+  }
+}
+
+extension View {
+  /// A text field set into a well, matching the workspace's inputs.
+  func desktopField() -> some View {
+    textFieldStyle(.plain).font(.system(size: 13)).padding(.horizontal, 12).frame(height: 32)
+      .background(DesktopStyle.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) }
   }
 }

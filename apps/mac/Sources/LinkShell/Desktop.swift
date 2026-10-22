@@ -63,6 +63,23 @@ import SwiftUI
     if model.preview && Launch.has("--workspace-preview-management") { workspace.setManaging(true) }
     if !model.preview { workspace.start() }
     if Launch.has("--check-updates") { workspace.setManaging(true); model.selected = "更新"; model.checkUpdates() }
+    // The menu-bar popover as it is drawn, for looking at it without a status item (preview only).
+    if let path = Launch.value(after: "--popover-snapshot"), model.preview {
+      let popoverView = NSHostingView(rootView: DesktopPopover(model: model, open: { _ in }))
+      popoverView.appearance = model.appearance == "light" ? NSAppearance(named: .aqua) : model.appearance == "dark" ? NSAppearance(named: .darkAqua) : nil
+      popoverView.frame = NSRect(origin: .zero, size: popoverView.fittingSize)
+      let holder = NSWindow(contentRect: popoverView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      holder.contentView = popoverView
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        popoverView.frame = NSRect(origin: .zero, size: popoverView.fittingSize)
+        popoverView.layoutSubtreeIfNeeded()
+        guard let bitmap = popoverView.bitmapImageRepForCachingDisplay(in: popoverView.bounds) else { exit(1) }
+        popoverView.cacheDisplay(in: popoverView.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(1) }
+        do { try data.write(to: URL(fileURLWithPath: path)); exit(0) } catch { exit(1) }
+      }
+      return
+    }
     if let path = Launch.value(after: "--dashboard-snapshot"), model.preview {
       root.layoutSubtreeIfNeeded()
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

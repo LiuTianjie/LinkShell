@@ -285,9 +285,10 @@ export function Permission({
         </form>
       )}
       <div className="permission-buttons">
-        {permission.options.map((option) => (
+        {permission.options.map((option, index) => (
           <Button
-            variant={option.kind.startsWith("allow") ? "default" : "outline"}
+            // One primary: the first allow is the answer most people give; the rest stay secondary.
+            variant={index === permission.options.findIndex((entry) => entry.kind.startsWith("allow")) ? "default" : "outline"}
             className="h-auto min-h-9 whitespace-normal"
             key={option.optionId}
             disabled={disabled}

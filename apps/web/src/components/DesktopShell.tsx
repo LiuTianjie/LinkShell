@@ -66,6 +66,7 @@ import {
 } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import "../styles/desktop.css";
+import "../styles/desktop-components.css";
 
 type Appearance = "system" | "light" | "dark";
 type NavigationItem = { id: string; title: string; icon: LucideIcon };

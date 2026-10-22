@@ -281,14 +281,14 @@ struct DesktopView: View {
       if model.standalone {
         HStack(spacing: 12) {
           Text("更新通道").font(.system(size: 13)).lineLimit(1); Spacer()
-          Picker("更新通道", selection: $model.updateChannel) { Text("稳定版").tag("stable"); Text("测试版").tag("beta") }.labelsHidden().pickerStyle(.segmented).frame(width: 200).disabled(model.busy || model.checking)
+          DesktopSegmented(options: [("stable", "稳定版"), ("beta", "测试版")], selection: $model.updateChannel).disabled(model.busy || model.checking).accessibilityLabel("更新通道")
         }.frame(height: 44)
         rule
       } else { valueRow("更新通道", "稳定版 · latest") }
       HStack(spacing: 12) {
         Text("自动检查更新").font(.system(size: 13)).lineLimit(1)
         Spacer()
-        Toggle("自动检查更新", isOn: $model.autoCheck).labelsHidden().toggleStyle(.switch).disabled(model.preview)
+        Toggle("自动检查更新", isOn: $model.autoCheck).labelsHidden().toggleStyle(DesktopSwitchStyle()).disabled(model.preview).accessibilityLabel("自动检查更新")
       }.frame(height: 44)
       rule
       }.rowsCard()
@@ -371,7 +371,7 @@ struct DesktopView: View {
       if model.membership == .free {
         HStack(spacing: 8) {
           TextField("输入激活码", text: $model.redemptionCode)
-            .textFieldStyle(.roundedBorder).disableAutocorrection(true).frame(maxWidth: 280)
+            .desktopField().disableAutocorrection(true).frame(maxWidth: 280)
             .disabled(model.busy || model.preview).onSubmit { model.redeemPro() }
             .accessibilityLabel("Pro 激活码")
           Button(model.redeeming ? "正在兑换…" : "兑换 Pro") { model.redeemPro() }
@@ -392,11 +392,7 @@ struct DesktopView: View {
       VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 12) {
         Text("外观").font(.system(size: 13)).lineLimit(1); Spacer()
-        Picker("外观", selection: $model.appearance) {
-          Text("跟随系统").tag("system")
-          Text("浅色").tag("light")
-          Text("深色").tag("dark")
-        }.labelsHidden().pickerStyle(.segmented).frame(width: 240)
+        DesktopSegmented(options: [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")], selection: $model.appearance).accessibilityLabel("外观")
       }.frame(height: 44)
       rule
       if model.standalone {
@@ -404,7 +400,7 @@ struct DesktopView: View {
           Text("登录 Mac 时自动启动").font(.system(size: 13)).lineLimit(1)
           Spacer()
           Toggle("登录 Mac 时自动启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-            .labelsHidden().toggleStyle(.switch).disabled(model.preview)
+            .labelsHidden().toggleStyle(DesktopSwitchStyle()).disabled(model.preview).accessibilityLabel("登录 Mac 时自动启动")
         }.frame(height: 44)
         Text("登录 Mac 后自动打开 LinkShell。每次打开桌面版都会启动后台服务并连接已配置的网关，无需再点“启动服务”。")
           .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).padding(.bottom, 12)
@@ -457,29 +453,65 @@ struct DesktopPopover: View {
   @ObservedObject var model: DesktopModel
   let open: (String) -> Void
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      DesktopBrand(size: 38).padding(.bottom, 10)
-      DesktopStatus(text: "服务\(model.serviceLabel)", tone: model.healthy ? DesktopStyle.mint : DesktopStyle.secondary).padding(.leading, 51).padding(.bottom, 20)
-      Divider()
-      entry("network", "网关", model.gatewayLabel)
-      entry("bubble.left", "会话", model.healthy ? "\(model.running) 个运行中" : "未知")
-      if model.pending > 0 {
-        Divider()
-        DesktopStatus(text: "\(model.pending) 个请求等待确认", tone: DesktopStyle.waiting).padding(.vertical, 18)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 10) {
+        Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage()).resizable().frame(width: 28, height: 28)
+        VStack(alignment: .leading, spacing: 1) {
+          Text("LinkShell").font(.system(size: 14, weight: .semibold))
+          Text(model.healthy ? "本机服务运行中" : "本机服务\(model.serviceLabel)").font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary)
+        }
+        Spacer()
+        Circle().fill(model.healthy ? DesktopStyle.mint : DesktopStyle.tertiary).frame(width: 7, height: 7)
       }
-      Divider().padding(.bottom, 10)
-      link("arrow.up.forward.square", "打开工作台", "工作台")
-      link("arrow.triangle.2.circlepath", "检查更新…", "更新")
-      link("chart.bar", "用量统计", "用量统计")
-      link("gearshape", "设置…", "设置")
-    }.padding(22).frame(width: 300).background(DesktopStyle.sidebar).foregroundStyle(DesktopStyle.primary).preferredColorScheme(model.colorScheme)
+      VStack(spacing: 0) {
+        fact("网关", model.gatewayLabel, tone: model.snapshot?.gateway?.status == "online" ? DesktopStyle.mint : nil)
+        Rectangle().fill(DesktopStyle.line).frame(height: 1).padding(.leading, 12)
+        fact("会话", model.healthy ? "\(model.running) 个运行中" : "未知", tone: model.running > 0 ? DesktopStyle.mint : nil)
+        if model.pending > 0 {
+          Rectangle().fill(DesktopStyle.line).frame(height: 1).padding(.leading, 12)
+          fact("等待确认", "\(model.pending) 个请求", tone: DesktopStyle.waiting)
+        }
+      }.desktopCard(padding: 0)
+      VStack(spacing: 1) {
+        link("macwindow", "打开工作台", "工作台", shortcut: "⌘1")
+        link("chart.bar", "用量统计", "用量统计")
+        link("arrow.triangle.2.circlepath", model.newVersion ? "有新版本…" : "检查更新…", "更新")
+        link("gearshape", "设置…", "设置")
+      }
+    }
+    .padding(14).frame(width: 300).background(DesktopStyle.panel).foregroundStyle(DesktopStyle.primary).preferredColorScheme(model.colorScheme)
   }
-  private func entry(_ icon: String, _ title: String, _ value: String) -> some View {
-    HStack(spacing: 12) { Image(systemName: icon).frame(width: 20); Text(title); Spacer(); Text(value).foregroundStyle(DesktopStyle.secondary) }.font(.system(size: 13)).padding(.vertical, 12)
+  private func fact(_ title: String, _ value: String, tone: Color? = nil) -> some View {
+    HStack(spacing: 10) {
+      Text(title).foregroundStyle(DesktopStyle.secondary)
+      Spacer()
+      if let tone { Circle().fill(tone).frame(width: 6, height: 6) }
+      Text(value).foregroundStyle(tone == DesktopStyle.waiting ? DesktopStyle.waiting : DesktopStyle.primary)
+    }.font(.system(size: 13)).padding(.horizontal, 12).frame(height: 38)
   }
-  private func link(_ icon: String, _ title: String, _ page: String) -> some View {
-    Button { open(page); if page == "更新" { model.checkUpdates() } } label: {
-      HStack(spacing: 12) { Image(systemName: icon).frame(width: 20); Text(title); Spacer() }.font(.system(size: 13)).padding(.vertical, 10).contentShape(Rectangle())
-    }.buttonStyle(.plain)
+  private func link(_ icon: String, _ title: String, _ page: String, shortcut: String? = nil) -> some View {
+    PopoverRow(icon: icon, title: title, shortcut: shortcut) { open(page); if page == "更新" { model.checkUpdates() } }
+  }
+}
+
+/// A menu row in the popover: a grey step under the pointer, the shortcut at the end.
+private struct PopoverRow: View {
+  let icon: String
+  let title: String
+  let shortcut: String?
+  let action: () -> Void
+  @State private var hovered = false
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 10) {
+        Image(systemName: icon).font(.system(size: 13)).foregroundStyle(DesktopStyle.tertiary).frame(width: 18)
+        Text(title).font(.system(size: 13))
+        Spacer()
+        if let shortcut { Text(shortcut).font(.system(size: 12)).foregroundStyle(DesktopStyle.tertiary) }
+      }
+      .padding(.horizontal, 8).frame(height: 30).contentShape(Rectangle())
+      .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovered ? DesktopStyle.raised : .clear))
+    }
+    .buttonStyle(.plain).onHover { hovered = $0 }
   }
 }
