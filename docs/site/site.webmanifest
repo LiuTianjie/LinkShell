@@ -5,8 +5,8 @@
   "start_url": "https://liutianjie.github.io/LinkShell/",
   "scope": "https://liutianjie.github.io/LinkShell/",
   "display": "standalone",
-  "background_color": "#050607",
-  "theme_color": "#050607",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
   "lang": "en",
   "icons": [
     {

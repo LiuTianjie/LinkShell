@@ -160,8 +160,8 @@ try {
   run("/usr/bin/ditto", [sparkleSource, sparkle]);
   cpSync(join(root, "THIRD_PARTY_NOTICES/Sparkle-LICENSE.txt"), join(staged, "Contents/Resources/Sparkle-LICENSE.txt"));
 
-  // The app's face in System Settings: the same icon as the phone app.
-  const icon = join(root, "../client/assets/icon.png");
+  // The desktop icon has its own transparent padding and rounded tile.
+  const icon = join(root, "assets/icon.png");
   let hasIcon = false;
   if (existsSync(icon)) {
     const iconset = join(work, "AppIcon.iconset");

@@ -17,7 +17,7 @@
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
-  <meta name="theme-color" content="#050607" />
+  <meta name="theme-color" content="#09090b" />
   <meta name="color-scheme" content="dark light" />
   <link rel="canonical" href="https://liutianjie.github.io/LinkShell/pricing/" />
   <link rel="manifest" href="site.webmanifest" />
@@ -448,6 +448,68 @@
       .faq { margin-top: 104px; }
     }
 
+
+    /* ── Section compositions: each feature takes its own shape ───────────── */
+    body { overflow-x: clip; }
+    .feature.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 72px; align-items: center; }
+    .feature.split > .text { max-width: 30em; }
+    .feature.split > .stage { margin: 0; }
+    .feature.split.flip > .text { order: 2; }
+    .feature.split.flip > .stage { order: 1; }
+    /* A band: the section's own full-width ground, one tone up, its words centred. */
+    .feature.band { position: relative; padding-block: 120px; }
+    .feature.band::before { content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1; background: var(--surface); }
+    .feature.center > .text { max-width: 760px; margin-inline: auto; text-align: center; }
+    .feature.center > .text h2 { margin-inline: auto; }
+    .feature.band > .feature-stage { margin-top: 56px; padding: 0; background: none; }
+    .feature.band .pair { gap: 64px; }
+    .feature.band .phone { width: min(100%, 380px); }
+    .feature.band .watch { width: min(100%, 260px); }
+    .feature.band .note-small { text-align: center; }
+    /* A field: the one full-width colour field on the page, its phone rising out of the bottom. */
+    .feature.field { position: relative; padding-top: 120px; align-items: end; }
+    .feature.field::before { content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1; background: var(--field); }
+    .feature.field > .text { align-self: center; padding-bottom: 120px; }
+    .feature.field > .text p { color: var(--field-sec); }
+    .feature.field > .text a { color: var(--field-ink); text-decoration: underline; text-underline-offset: 3px; }
+    .feature.field > .text h2 { color: var(--field-ink); }
+    .feature.field > .stage { padding: 0; background: none; align-self: end; }
+    .feature.field .phone { margin-bottom: -60px; border-color: color-mix(in srgb, var(--field) 70%, #000); }
+    :root { --field: #0d2b26; --field-ink: #e8fbf6; --field-sec: #9fd3c7; }
+    :root[data-theme="light"] { --field: #dff3ee; --field-ink: #053a31; --field-sec: #2f5f56; }
+    .feature.field + .feature { margin-top: 200px; }
+    .feature.center > .feature-stage { margin-top: 48px; padding: 0; background: none; }
+    .feature.center .phone.side { width: 100%; max-width: 1120px; }
+    .feature.center > dl.points { text-align: left; }
+    /* Intro row: the heading on the left, its sentence on the right, the content full width below. */
+    .feature.intro-row > .text { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px 72px; align-items: end; max-width: none; }
+    .feature.intro-row > .text > h2 { margin: 0; }
+    .feature.intro-row > .text > p { max-width: 36em; }
+    .feature.intro-row > .text > dl.more { grid-column: 1 / -1; }
+    /* Install: the heading stays in view on the left while the steps go by on the right. */
+    #install .text { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 72px; max-width: none; }
+    .install-intro { position: sticky; top: 112px; align-self: start; }
+    .install-steps > .step:first-child { margin-top: 0; }
+    /* The agents, passing by: every supported agent's own mark and name. */
+    .agent-strip { margin: 8px 0 32px; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); } /* taste-skill-ignore: a mask that fades the moving strip at its two ends, not a fill */
+    .agent-track { display: flex; gap: 12px; width: max-content; animation: agents 38s linear infinite; }
+    .agent-chip { display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px 0 12px; border-radius: 999px; background: var(--surface); color: var(--text); font-size: var(--body); font-weight: 500; white-space: nowrap; }
+    .agent-chip .av { width: 30px; height: 30px; }
+    .agent-strip:hover .agent-track { animation-play-state: paused; }
+    @keyframes agents { to { transform: translateX(-50%); } }
+    @media (prefers-reduced-motion: reduce) { .agent-strip { mask-image: none; } .agent-track { animation: none; flex-wrap: wrap; width: auto; } .agent-chip.again { display: none; } }
+    @media (max-width: 960px) {
+      .feature.split, .feature.intro-row > .text, #install .text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+      .feature.split.flip > .text, .feature.split.flip > .stage { order: 0; }
+      .feature.split > .stage { margin-top: 8px; }
+      .install-intro { position: static; }
+      .feature.band, .feature.field { padding-top: 88px; }
+      .feature.band { padding-bottom: 88px; }
+      .feature.field > .text { padding-bottom: 0; }
+      .feature.field .phone { margin-bottom: -40px; }
+      .feature.band .pair { gap: 28px; }
+    }
+
     /* Motion: the film opens like a shutter once; each section's parts rise in once; controls
        answer the pointer. Content is visible without scripts and without motion. */
     .js .rise { opacity: 0; transform: translateY(26px); transition: opacity .7s var(--ease), transform .8s var(--ease); transition-delay: var(--d, 0ms); }
@@ -544,7 +606,7 @@
     <section class="sec" id="features">
       <div class="wrap">
 
-        <article class="feature">
+        <article class="feature split">
           <div class="text">
             <h2><span lang="zh"><span class="nb">它在电脑上干活，</span><span class="nb">你在手机上看着</span></span><span lang="en">It works on your computer. <span class="nb">You watch from your phone.</span></span></h2>
             <p><span lang="zh">回复逐字出现；它读了什么、改了什么、跑了什么命令，实时更新，每个文件的改动都能看 diff。它需要权限、或者要你做选择的时候，请求推到手机上，点一下就行。</span><span lang="en">Replies stream in word by word; what it read, changed and ran updates live, with a diff for every file. When it needs permission, or wants you to choose, the request comes to your phone: one tap.</span></p>
@@ -557,7 +619,7 @@
           </div>
         </article>
 
-        <article class="feature" id="glance">
+        <article class="feature band center" id="glance">
           <div class="text">
             <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span></h2>
             <p><span lang="zh">iPhone 的实时活动在锁屏和灵动岛上显示 Agent 的进度；它要权限时，卡片上直接给出「拒绝 / 允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span></p>
@@ -571,7 +633,7 @@
           <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span></p>
         </article>
 
-        <article class="feature">
+        <article class="feature split flip">
           <div class="text">
             <h2><span lang="zh"><span class="nb">它正忙，</span><span class="nb">你照样能插话</span></span><span lang="en">Cut in while it is busy</span></h2>
             <p><span lang="zh">忙的时候发的消息先排队：可以调整顺序、取回重写，或者立即发送，Codex 和 Claude 直接插进当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">A message sent mid-turn waits in a queue: reorder it, take it back to rewrite, or send it now, straight into the running turn for Codex and Claude. A turn running on the computer can be stopped from the phone too.</span></p>
@@ -585,10 +647,10 @@
           </div>
         </article>
 
-        <article class="feature" id="computer-use">
+        <article class="feature field split" id="computer-use">
           <div class="text">
-            <h2><span lang="zh">手机上也能用 Computer Use，实时预览</span><span lang="en">Computer Use, from your phone. Watch it live.</span></h2>
-            <p><span lang="zh">在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话浮窗中实时预览。边看边聊，随时补充要求，不用回到电脑前。小窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）<a href="docs/#d-computer-use">了解用法</a>。</span><span lang="en">Ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="docs/#d-computer-use">How to use it</a>.</span></p>
+            <h2><span lang="zh"><span class="nb">手机上也能用</span> <span class="nb">Computer Use</span></span><span lang="en">Computer Use, <span class="nb">from your phone</span></span></h2>
+            <p><span lang="zh">实时预览：在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话浮窗中实时预览。边看边聊，随时补充要求，不用回到电脑前。小窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）<a href="docs/#d-computer-use">了解用法</a>。</span><span lang="en">Watch it live: ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="docs/#d-computer-use">How to use it</a>.</span></p>
           </div>
           <div class="stage feature-stage">
           <figure class="phone">
@@ -597,7 +659,7 @@
           </div>
         </article>
 
-        <article class="feature" id="remote-desktop">
+        <article class="feature center" id="remote-desktop">
           <div class="text">
             <h2><span lang="zh"><span class="nb">把 Mac 桌面，</span><span class="nb">装进口袋。</span></span><span lang="en">Your Mac. <span class="nb">In your pocket.</span></span></h2>
             <p><span lang="zh">电脑留在桌上，整个工作台随身带走。Agent 改完代码，就在手机上打开真实桌面：检查网页、操作编辑器、处理弹窗。横屏铺开、全屏查看、双指放大，需要亲自点一下的事，也能当场办完。（完整控制支持 macOS 13 及以上）</span><span lang="en">Bring the whole workspace with you. When an agent finishes a change, open the actual desktop to check a browser, work in your editor or handle a dialog. Turn the phone to landscape, go full screen and pinch to zoom. Take over wherever a human touch is needed. Full control requires macOS 13 or later.</span></p>
@@ -615,7 +677,7 @@
           </dl>
         </article>
 
-        <article class="feature" id="iphone-duo">
+        <article class="feature intro-row" id="iphone-duo">
           <div class="text">
             <h2><span lang="zh">iPhone Duo，<br />展开你的工作区。</span><span lang="en">iPhone Duo.<br />Room to do more.</span></h2>
             <p><span lang="zh">展开时，对话和改动或预览并排放；折叠时，界面按可用区域重新安排，当前会话不中断。普通 iPhone 用单栏，操作一样。</span><span lang="en">Open it up and the conversation sits beside the changes or a preview. Fold it and the interface rearranges around the available screen, without leaving the session. A regular iPhone gets a single column with the same controls.</span></p>
@@ -651,7 +713,7 @@
           </dl>
         </article>
 
-        <article class="feature">
+        <article class="feature intro-row">
           <div class="text">
             <h2><span lang="zh">还有这些</span><span lang="en">And the rest</span></h2>
             <dl class="more">
@@ -672,6 +734,7 @@
       <div class="wrap">
         <div class="text">
           <h2><span lang="zh"><span class="nb">每个 Agent</span> <span class="nb">做到它能做到的最好</span></span><span lang="en">Each agent, as far as it can go</span></h2>
+          <div class="agent-strip" aria-hidden="true"><div class="agent-track"></div></div>
           <p><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
 
           <div class="agent">
@@ -697,9 +760,12 @@
     <section class="sec" id="install">
       <div class="wrap">
         <div class="text">
+          <div class="install-intro">
           <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
           <p><span lang="zh">Mac 和 Windows 可直接下载桌面 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, download the desktop app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
 
+          </div>
+          <div class="install-steps">
           <div class="step">
             <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
             <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-0.10.55-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-0.10.55-x64.dmg">Mac · Intel</a></p>
@@ -730,6 +796,7 @@
 <span class="pr">$ </span>linkshell codex</code></pre>
             <p><span lang="zh">更多细节在<a href="docs/">文档</a>里。</span><span lang="en">The <a href="docs/">docs</a> have the details.</span></p>
           </div>
+        </div>
         </div>
       </div>
     </section>
@@ -1216,6 +1283,24 @@
       });
       ask.querySelector('.deny').addEventListener('click', () => { clearTimeout(timer); ask.dataset.state = 'denied'; });
       ask.querySelector('.again').addEventListener('click', () => { clearTimeout(timer); ask.dataset.state = 'waiting'; });
+    })();
+
+
+    // ── The agents strip: each agent's mark and name, twice over so the loop never shows a seam ──
+    (() => {
+      const track = document.querySelector('.agent-track');
+      if (!track) return;
+      const marks = [...document.querySelectorAll('#agents .agent .av[aria-label]')];
+      const chips = marks.map((mark) => {
+        const chip = document.createElement('span');
+        chip.className = 'agent-chip';
+        const copy = mark.cloneNode(true);
+        copy.removeAttribute('role'); copy.removeAttribute('aria-label');
+        chip.append(copy, document.createTextNode(mark.getAttribute('aria-label')));
+        return chip;
+      });
+      chips.forEach((chip) => track.append(chip));
+      chips.forEach((chip) => { const copy = chip.cloneNode(true); copy.classList.add('again'); track.append(copy); });
     })();
 
     // ── Motion: the film opens once; the parts of each section rise in once, in order ──

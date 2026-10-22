@@ -6,7 +6,7 @@ enum DesktopStatusIcon {
     let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
       NSColor.black.setStroke()
       let path = NSBezierPath()
-      path.lineWidth = 1.65
+      path.lineWidth = 2.1
       path.lineCapStyle = .round
       path.lineJoinStyle = .round
       path.move(to: NSPoint(x: 3.5, y: 13))
