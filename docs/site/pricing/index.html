@@ -42,7 +42,7 @@
   <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -90,58 +90,74 @@
   </script>
   <link rel="stylesheet" href="assets/duo/viewer.css?v=20261008-transparent-stage" />
   <style>
+    /* LinkShell's site. Dark zinc ground, one teal accent, the product's own recordings as the
+       pictures. Surfaces are told apart by a step in tone, never a line or a shadow; the only
+       outlines belong to the product fragments (data-ui) and to code. Five type steps:
+       display, heading, lead, body, small. */
     :root {
-      --bg: #050607;
-      --surface: #0c0d10;
-      --surface-2: #16181c;
-      --border: rgba(255, 255, 255, .1);
-      --border-strong: rgba(255, 255, 255, .22);
-      --text: #f0f1f3;
-      --text-sec: #a9adb5;
-      --text-muted: #a9adb5;
+      --bg: #09090b;
+      --surface: #111113;
+      --surface-2: #18181b;
+      --surface-3: #222226;
+      --border: rgba(255, 255, 255, .08);
+      --border-strong: rgba(255, 255, 255, .16);
+      --text: #f4f4f5;
+      --text-sec: #a1a1aa;
+      --text-muted: #a1a1aa;
       --accent: #3de0c0;
-      --ink: #f3f4f6;
-      --ink-fg: #050607;
-      --success: #3ecf8e;
+      --accent-ink: #052e26;
+      --ink: #f4f4f5;
+      --ink-fg: #09090b;
+      --success: #3de0c0;
       --danger: #ff7b7b;
-      --code-bg: #0b0c0f;
+      --warning: #f2a33d;
+      --code-bg: #111113;
       --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
       --sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
       --gutter: 32px;
       --measure: 680px;
+      --display: clamp(46px, 6.2vw, 84px);
+      --heading: clamp(30px, 3.7vw, 48px);
+      --lead: 20px;
+      --body: 17px;
+      --small: 14px;
+      --ease: cubic-bezier(.22, 1, .36, 1);
       color-scheme: dark;
     }
 
     :root[data-theme="light"] {
       --bg: #fafafa;
-      --surface: #ffffff;
-      --surface-2: #ecedef;
-      --border: rgba(8, 10, 14, .12);
-      --border-strong: rgba(8, 10, 14, .28);
-      --text: #0a0b0d;
-      --text-sec: #51555d;
-      --text-muted: #51555d;
+      --surface: #f2f2f3;
+      --surface-2: #e9e9eb;
+      --surface-3: #dcdcdf;
+      --border: rgba(9, 9, 11, .08);
+      --border-strong: rgba(9, 9, 11, .18);
+      --text: #09090b;
+      --text-sec: #52525b;
+      --text-muted: #52525b;
       --accent: #078570;
-      --ink: #0a0b0d;
-      --ink-fg: #ffffff;
-      --success: #17915a;
+      --accent-ink: #ffffff;
+      --ink: #09090b;
+      --ink-fg: #fafafa;
+      --success: #078570;
       --danger: #c93a3a;
-      --code-bg: #f0f1f2;
+      --warning: #965c05;
+      --code-bg: #f2f2f3;
       color-scheme: light;
     }
 
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.75 var(--sans); -webkit-font-smoothing: antialiased; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: var(--body)/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; text-underline-offset: 3px; }
     img { max-width: 100%; height: auto; display: block; }
-    h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; letter-spacing: -.025em; text-wrap: balance; }
-    html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: 0; line-height: 1.35; }
+    h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.1; letter-spacing: -.035em; text-wrap: balance; }
+    html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.01em; line-height: 1.22; }
     p { margin: 0; }
     code, pre { font-family: var(--mono); }
-    :not(pre) > code { font-size: .9em; background: var(--surface-2); padding: .12em .38em; border-radius: 5px; white-space: nowrap; }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    :not(pre) > code { font-size: .88em; background: var(--surface-2); padding: .12em .38em; border-radius: 6px; white-space: nowrap; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     button { font: inherit; color: inherit; }
 
@@ -152,209 +168,301 @@
     .js .page:not(.visible) { display: none; }
 
     /* one column: text keeps a reading measure, pictures use the full width */
-    .wrap { max-width: calc(1080px + var(--gutter) * 2); margin-inline: auto; padding-inline: var(--gutter); }
+    .wrap { max-width: calc(1120px + var(--gutter) * 2); margin-inline: auto; padding-inline: var(--gutter); }
     .text { max-width: var(--measure); }
     .text p { color: var(--text-sec); }
     .text p + p { margin-top: 16px; }
     .nb { display: inline-block; }
     @media (max-width: 700px) { :root { --gutter: 20px; } }
 
-    /* nav */
-    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border); }
-    .nav .wrap { display: flex; align-items: center; gap: 6px; height: 64px; }
-    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; font-weight: 600; color: var(--text); }
+    /* nav: a plain row on the page's own ground */
+    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); }
+    .nav .wrap { display: flex; align-items: center; gap: 4px; height: 68px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--text); font-size: var(--body); font-weight: 600; letter-spacing: -.01em; }
     .brand:hover { text-decoration: none; }
     .brand img { width: 28px; height: 28px; border-radius: 7px; }
     .nav nav { display: flex; }
-    .nav nav a { color: var(--text-sec); font-size: 15px; padding: 8px 12px; transition: color .15s; }
-    .nav nav a.active, .nav nav a:hover { color: var(--text); text-decoration: none; }
-    .nav button { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--text-sec); font-size: 15px; cursor: pointer; transition: color .15s; }
-    .nav button:hover { color: var(--text); }
-    .nav button svg { width: 18px; height: 18px; }
+    .nav nav a { padding: 8px 12px; border-radius: 999px; color: var(--text-sec); font-size: var(--small); transition: color .15s, background-color .15s; }
+    .nav nav a.active, .nav nav a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
+    .nav button { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
+    .nav button:hover { color: var(--text); background: var(--surface); }
+    .nav button svg { width: 17px; height: 17px; }
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
     :root[data-theme="light"] .theme .moon { display: block; }
     @media (max-width: 460px) { .nav nav a.wide { display: none; } .nav nav a { padding-inline: 9px; } }
     @media (max-width: 480px) { .btns .btn { flex: 1 1 auto; justify-content: center; } }
 
-    /* buttons */
-    .btns { display: flex; flex-wrap: wrap; gap: 12px; }
-    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 20px; border-radius: 8px; border: 1px solid transparent; font-weight: 500; font-size: 16px; cursor: pointer; transition: background-color .15s, border-color .15s, opacity .15s; }
+    /* buttons: one shape (a pill), one primary (ink), the rest a tone step */
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: 999px; font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
     .btn:hover { text-decoration: none; }
+    .btn:active { transform: scale(.97); }
     .btn-p { background: var(--ink); color: var(--ink-fg); }
-    .btn-p:hover { opacity: .86; }
-    .btn-s { color: var(--text); border-color: var(--border-strong); }
-    .btn-s:hover { background: var(--surface-2); }
+    .btn-p:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+    .btn-s { background: var(--surface-2); color: var(--text); }
+    .btn-s:hover { background: var(--surface-3); }
     .btn svg { width: 18px; height: 18px; flex: none; }
 
-    /* commands */
-    pre { margin: 0; background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; font-size: 14.5px; line-height: 1.8; overflow-x: auto; }
+    /* commands: real code, so the code face and its own frame */
+    pre { margin: 0; background: var(--code-bg); color: var(--text); border-radius: 14px; padding: 18px 20px; font-size: var(--small); line-height: 1.85; overflow-x: auto; }
     pre .cm { color: var(--text-sec); }
     pre .pr { color: var(--accent); user-select: none; }
     .code { position: relative; }
-    .code pre { padding-right: 56px; }
-    .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
-    .copy:hover { color: var(--text); background: var(--surface-2); }
+    .code pre { padding-right: 60px; }
+    .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
+    .copy:hover { color: var(--text); background: var(--surface-3); }
     .copy.ok { color: var(--accent); }
     .copy svg { width: 16px; height: 16px; }
-    .code .copy { position: absolute; top: 9px; right: 9px; background: var(--code-bg); }
-    .code .copy:hover { background: var(--surface-2); }
-    .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 7px 0 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); font: 15px var(--mono); }
+    .code .copy { position: absolute; top: 10px; right: 10px; background: var(--code-bg); }
+    .code .copy:hover { background: var(--surface-3); }
+    .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 7px 0 18px; border-radius: 999px; background: var(--surface); font: var(--small) var(--mono); }
     .cmd i { color: var(--accent); font-style: normal; user-select: none; }
     .cmd code { background: none; padding: 0; font-size: 1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     html:not(.js) .copy { display: none; }
     @media (max-width: 480px) { .cmd { display: flex; } .cmd code { flex: 1; } }
 
-    /* a still with its clip over it; both are the same shape, so nothing is ever cropped */
-    .media { position: relative; margin: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #07080d; }
+    /* the film: a still with its clip over it, set on a panel one tone up */
+    .stage { margin: 0; padding: 14px; border-radius: 34px; background: var(--surface); }
+    .media { position: relative; margin: 0; border-radius: 22px; overflow: hidden; background: #000; }
     .media img { width: 100%; aspect-ratio: 16 / 9; }
     .media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } }
+    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } .stage { padding: 8px; border-radius: 26px; } .media { border-radius: 20px; } }
 
-    /* home */
     /* A phone's screen recording, with the phone drawn around it: upright, or on its side for the computer's screen. */
-    .phone { position: relative; margin: 36px 0 0; width: min(100%, 340px); border: 8px solid #23262d; border-radius: 52px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--border-strong); }
+    .phone { position: relative; margin: 40px 0 0; width: min(100%, 340px); border: 9px solid var(--surface-3); border-radius: 54px; overflow: hidden; background: #000; }
     .phone img { display: block; width: 100%; height: auto; aspect-ratio: 540 / 1174; }
     .phone video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-    .phone.side { width: min(100%, 860px); border-radius: 44px; }
-    .pair { display: flex; align-items: flex-end; gap: 40px; margin-top: 36px; }
+    .phone.side { width: min(100%, 900px); border-radius: 46px; }
+    .pair { display: flex; align-items: flex-end; gap: 40px; margin-top: 40px; }
     .pair .phone { margin: 0; }
-    .watch { margin: 0; width: min(100%, 230px); border: 7px solid #23262d; border-radius: 58px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--border-strong); }
+    .watch { margin: 0; width: min(100%, 230px); border: 8px solid var(--surface-3); border-radius: 60px; overflow: hidden; background: #000; }
     .watch img { width: 100%; height: auto; aspect-ratio: 416 / 496; }
-    .note-small { margin-top: 18px; color: var(--text-sec); font-size: 15px; }
+    .note-small { margin-top: 20px; color: var(--text-sec); font-size: var(--small); }
     .phone.side img { aspect-ratio: 1280 / 588; }
     @media (max-width: 700px) { .phone { margin-inline: auto; } .phone.side { border-width: 6px; border-radius: 26px; } .pair { flex-direction: column; align-items: center; gap: 28px; } }
 
-    .hero { padding-block: 64px 0; }
-    .hero h1 { font-size: clamp(38px, 5.6vw, 60px); letter-spacing: -.04em; line-height: 1.1; }
-    html[lang^="zh"] .hero h1 { letter-spacing: -.01em; line-height: 1.22; }
-    .lead { max-width: var(--measure); margin-top: 20px; font-size: 19px; color: var(--text-sec); }
-    .hero .btns { margin-top: 28px; }
-    .hero .cmd { margin-top: 14px; }
-    .hero .media { margin-top: 44px; }
-    .duo-figure { margin: 32px 0 0; }
-    .duo-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border-strong); border-radius: 24px; background: #000; }
-    .duo-figure figcaption { margin-top: 12px; color: var(--text-sec); font-size: 13px; }
-    .duo-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin: 26px 0 0; padding: 0; list-style: none; }
-    .duo-points li { padding-top: 16px; border-top: 1px solid var(--border-strong); }
-    .duo-points b { display: block; margin-bottom: 5px; font-size: 16px; }
-    .duo-points p { color: var(--text-sec); font-size: 15px; }
-    @media (max-width: 700px) { .duo-points { grid-template-columns: 1fr; gap: 14px; } }
+    /* home: the first screen says what this is, and lets you do its one thing */
+    .hero { padding-block: 84px 0; }
+    .hero-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: end; }
+    .hero h1 { font-size: var(--display); font-weight: 600; letter-spacing: -.05em; line-height: 1; }
+    html[lang^="zh"] .hero h1 { letter-spacing: -.02em; line-height: 1.12; }
+    .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
+    .hero .btns { margin-top: 36px; }
+    .hero .stage { margin-top: 72px; }
+    @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
-    .sec { padding-block: 128px 0; }
-    .sec h2 { font-size: clamp(27px, 3.3vw, 34px); margin-bottom: 20px; }
-    .sec h3 { font-size: clamp(21px, 2.4vw, 24px); margin-bottom: 12px; }
-    .sec .media { margin-top: 36px; }
-    .feature { margin-top: 112px; }
+    /* The live fragment: the request an agent sends to your phone, answerable right here. Inside it
+       the product's own conventions hold (its card edge, its small radii). */
+    .ask { width: 100%; max-width: 440px; justify-self: end; padding: 18px; border-radius: 26px; background: var(--surface); color: var(--text); font-size: var(--small); line-height: 1.5; }
+    .ask-head { display: flex; align-items: center; gap: 10px; color: var(--text-sec); }
+    .ask-head img { width: 22px; height: 22px; border-radius: 6px; }
+    .ask-head b { color: var(--text); font-weight: 600; }
+    .ask-head time { margin-left: auto; font-variant-numeric: tabular-nums; }
+    .ask-card { margin-top: 14px; padding: 16px; border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-radius: 16px; background: var(--bg); } /* taste-skill-ignore: the request card inside the data-ui fragment keeps the product edge */
+    .ask-title { display: flex; gap: 10px; font-size: 15px; font-weight: 600; line-height: 1.45; }
+    .ask-title i { flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--warning); }
+    .ask-meta { margin: 4px 0 0 18px; color: var(--text-sec); }
+    .ask-cmd { margin: 12px 0 0; padding: 9px 12px; border-radius: 10px; background: var(--surface); font: 13px var(--mono); }
+    .ask-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .ask-actions button { flex: 1; height: 38px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: var(--small); font-weight: 500; cursor: pointer; transition: background-color .15s, transform .15s var(--ease); }
+    .ask-actions button:hover { background: var(--surface-3); }
+    .ask-actions button:active { transform: scale(.96); }
+    .ask-actions .allow { background: var(--ink); color: var(--ink-fg); }
+    .ask-actions .allow:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+    .ask-result { display: none; align-items: center; gap: 10px; margin-top: 14px; min-height: 38px; color: var(--text); }
+    .ask-result .spin { width: 14px; height: 14px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: ask-spin .8s linear infinite; }
+    .ask-result .tick { color: var(--accent); font-weight: 600; }
+    .ask-result button { margin-left: auto; border: 0; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; }
+    .ask-result button:hover { color: var(--text); }
+    .ask[data-state="running"] .ask-actions, .ask[data-state="done"] .ask-actions, .ask[data-state="denied"] .ask-actions { display: none; }
+    .ask[data-state="running"] .ask-result, .ask[data-state="done"] .ask-result, .ask[data-state="denied"] .ask-result { display: flex; }
+    .ask:not([data-state="running"]) .ask-result .spin { display: none; }
+    .ask[data-state="done"] .ask-card, .ask[data-state="denied"] .ask-card { border-color: var(--border); }
+    .ask:not([data-state="waiting"]) .ask-meta { display: none; }
+    .ask[data-state="done"] .ask-title i { background: var(--accent); }
+    .ask[data-state="denied"] .ask-title i { background: var(--text-sec); }
+    .ask-foot { margin-top: 12px; color: var(--text-sec); }
+    .ask-result [data-show] { display: none; }
+    .ask[data-state="running"] [data-show="running"], .ask[data-state="done"] [data-show="done"], .ask[data-state="denied"] [data-show="denied"] { display: inline; }
+    .ask[data-state="running"] .again { visibility: hidden; }
+    @keyframes ask-spin { to { transform: rotate(360deg); } }
+    @media (max-width: 960px) { .ask { justify-self: start; } }
+
+    /* Each recording stands on a stage panel the width of the column, so no screen is left bare. */
+    .feature-stage { display: flex; justify-content: center; margin-top: 44px; padding: 56px 32px; }
+    .feature-stage .phone, .feature-stage .pair { margin: 0; }
+    .feature-stage .phone.side { width: min(100%, 940px); }
+    @media (max-width: 700px) { .feature-stage { padding: 28px 16px; border-radius: 26px; } }
+    .duo-figure { margin: 40px 0 0; }
+    .duo-figure img { display: block; width: 100%; height: auto; border-radius: 24px; background: #000; }
+    .duo-figure figcaption { margin-top: 14px; color: var(--text-sec); font-size: var(--small); }
+
+    /* sections: a large gap between them, a heading on each */
+    .sec { padding-block: 168px 0; }
+    .sec h2 { font-size: var(--heading); margin-bottom: 22px; }
+    .sec h3 { font-size: var(--lead); margin-bottom: 10px; letter-spacing: -.015em; }
+    .sec .media { margin-top: 40px; }
+    .feature { margin-top: 152px; }
     #features .feature:first-child { margin-top: 0; }
 
-    .more { margin: 0; }
-    .more dt { font-weight: 600; margin-top: 22px; }
-    .more dd { margin: 4px 0 0; color: var(--text-sec); }
+    /* lists set as type: a bold line and its explanation, space between them */
+    .more { display: grid; gap: 26px; margin: 8px 0 0; }
+    .more dt { color: var(--text); font-size: var(--lead); font-weight: 600; letter-spacing: -.015em; line-height: 1.35; }
+    .more dd { margin: 6px 0 0; color: var(--text-sec); }
+    .more div { display: block; }
+    .points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin: 40px 0 0; }
+    .points dt { font-size: var(--body); }
+    @media (max-width: 860px) { .points { grid-template-columns: minmax(0, 1fr); gap: 22px; } }
 
-    .agent { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border); }
-    .agent-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 10px; }
-    .agent-name h3 { margin: 0; font-size: 20px; }
+    /* Lists that explain things run the column's width as rows: the name on the left, what it does
+       on the right, every other row a tone up so the eye tracks across. No lines. */
+    .text:has(> dl.more:not(.points)), #agents .text { max-width: none; }
+    .text:has(> dl.more:not(.points)) > :is(h2, p), #agents .text > p { max-width: var(--measure); }
+    dl.more:not(.points) { gap: 0; margin-top: 36px; }
+    dl.more:not(.points) > div, .agent { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px 40px; align-items: baseline; margin: 0; padding: 22px 28px; border-radius: 18px; }
+    dl.more:not(.points) > div:nth-child(odd), .agent:nth-of-type(odd) { background: var(--surface); }
+    dl.more:not(.points) dd { margin: 0; }
+    #agents .agent:first-of-type { margin-top: 36px; }
+    .agent { align-items: center; }
+    .agent p { color: var(--text-sec); }
+    .agent-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0; }
+    @media (max-width: 760px) { dl.more:not(.points) > div, .agent { grid-template-columns: minmax(0, 1fr); padding: 18px 20px; } }
+    .agent-name h3 { margin: 0; font-size: var(--lead); }
     .marks { display: flex; gap: 6px; }
-    .av { position: relative; flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--bd, var(--surface-2)); color: var(--fd, var(--text-sec)); }
+    .av { position: relative; flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bd, var(--surface-2)); color: var(--fd, var(--text-sec)); }
     :root[data-theme="light"] .av { background: var(--bl, var(--surface-2)); color: var(--fl, var(--text-sec)); }
-    .av::before { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
-    :root[data-theme="light"] .av::before { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
     .av svg { width: 54%; height: 54%; }
     .av.full svg { width: 100%; height: 100%; border-radius: 50%; }
 
-    .step { margin-top: 44px; }
+    /* The commands run wider than the reading measure, so the section uses the column's width. */
+    #install .text { max-width: none; }
+    #install .text > p, #install .step > p { max-width: var(--measure); }
+    .step { margin-top: 52px; }
     .step .code, .step > pre { margin-top: 16px; }
     .step .code + p { margin-top: 20px; }
+    .step h3 { font-size: var(--lead); }
 
-    .support + .support { margin-top: 56px; }
-    .sec .support h2 { font-size: clamp(21px, 2.4vw, 24px); margin-bottom: 12px; }
-    .sponsor { margin-top: 12px; font-size: 19px; }
+    /* support: who backs it, and how to say thanks, side by side so neither half is empty */
+    .support-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+    .support { padding: 32px; border-radius: 28px; background: var(--surface); }
+    .sec .support h3 { font-size: var(--lead); margin-bottom: 8px; letter-spacing: -.015em; }
+    .support p { color: var(--text-sec); }
+    .sponsor { margin-top: 20px; font-size: var(--lead); color: var(--text) !important; }
     .sponsor a { font-weight: 600; }
     .qr { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }
-    .qr figure { margin: 0; width: 148px; color: var(--text-sec); font-size: 15px; text-align: center; }
-    .qr img { width: 100%; border-radius: 8px; margin-bottom: 8px; }
+    .qr figure { margin: 0; width: 132px; color: var(--text-sec); font-size: var(--small); text-align: center; }
+    .qr img { width: 100%; border-radius: 12px; margin-bottom: 8px; }
+    @media (max-width: 860px) { .support-row { grid-template-columns: minmax(0, 1fr); gap: 16px; } .support { padding: 24px; } }
 
-    .close { padding-block: 128px; }
-    .close .btns { margin-top: 32px; }
+    /* the close: one large field a tone up, the page's last word at display size */
+    .close { padding-block: 168px 0; }
+    .close-card { padding: clamp(40px, 7vw, 96px); border-radius: 36px; background: var(--surface); }
+    .close-card h2 { max-width: 13em; font-size: var(--display); letter-spacing: -.05em; line-height: 1; }
+    html[lang^="zh"] .close-card h2 { letter-spacing: -.02em; line-height: 1.12; }
+    .close-card p { margin-top: 24px; color: var(--text-sec); font-size: var(--lead); }
+    .close .btns { margin-top: 40px; }
+    @media (max-width: 700px) { .close-card { margin-inline: calc(var(--gutter) * -1); padding: 44px 20px; border-radius: 28px; } }
 
-    footer { border-top: 1px solid var(--border); }
-    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; justify-content: space-between; padding-block: 32px; color: var(--text-sec); font-size: 15px; }
-    footer .brand { margin: 0; }
+    /* the footer: the name returns at full width */
+    footer { padding-top: 120px; overflow: hidden; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; justify-content: space-between; color: var(--text-sec); font-size: var(--small); }
+    footer .brand { margin: 0; font-size: var(--small); }
     footer .brand img { width: 22px; height: 22px; border-radius: 5px; }
     footer .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
     footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
+    .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
     @media (max-width: 700px) {
       .hero { padding-top: 56px; }
-      .hero .media { margin-top: 40px; }
-      .lead { font-size: 18px; margin-top: 20px; }
-      .sec { padding-top: 88px; }
-      .feature { margin-top: 72px; }
+      .hero .stage { margin-top: 48px; }
+      .lead { font-size: 18px; margin-top: 22px; }
+      .sec, .close { padding-top: 112px; }
+      .feature { margin-top: 96px; }
       .sec .media { margin-top: 28px; }
-      .close { padding-block: 88px; }
+      footer { padding-top: 88px; }
     }
 
     /* docs */
-    .docs { display: grid; grid-template-columns: 190px minmax(0, 720px); gap: 80px; padding-block: 72px 128px; }
-    .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
-    .toc a { color: var(--text-sec); padding: 5px 0; transition: color .15s; }
-    .toc a:hover { color: var(--text); text-decoration: none; }
-    .toc a.on { color: var(--accent); }
-    .doc h1 { font-size: clamp(34px, 4.6vw, 44px); margin-bottom: 16px; }
-    .doc h2 { font-size: 27px; margin: 64px 0 18px; padding-top: 48px; border-top: 1px solid var(--border); }
-    .doc h3 { font-size: 20px; margin: 36px 0 12px; }
+    .docs { display: grid; grid-template-columns: 200px minmax(0, 720px); gap: 80px; padding-block: 72px 128px; }
+    .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: var(--small); }
+    .toc a { padding: 6px 12px; border-radius: 999px; color: var(--text-sec); transition: color .15s, background-color .15s; }
+    .toc a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
+    .toc a.on { color: var(--text); background: var(--surface-2); }
+    .doc h1 { font-size: var(--heading); margin-bottom: 18px; }
+    .doc h2 { font-size: clamp(24px, 2.6vw, 30px); margin: 96px 0 18px; letter-spacing: -.02em; }
+    .doc h3 { font-size: var(--lead); margin: 40px 0 12px; }
     .doc p, .doc li, .doc dd { color: var(--text-sec); }
     .doc b { color: var(--text); font-weight: 600; }
     .doc :is(p, ul, pre, .code, .note) + :is(p, ul, pre, .code, .note) { margin-top: 18px; }
     .doc ul { margin-block: 0; padding-left: 22px; }
     .doc li + li { margin-top: 12px; }
     .doc dl { margin: 0; }
-    .doc dt { margin-top: 20px; }
+    .doc dt { margin-top: 22px; }
     .doc dt code { white-space: normal; background: none; padding: 0; color: var(--text); }
     .doc dt:first-child { margin-top: 0; }
     .doc dd { margin: 4px 0 0; }
-    .note { border-left: 2px solid var(--accent); padding: 2px 0 2px 18px; color: var(--text); }
+    .note { padding: 16px 20px; border-radius: 16px; background: var(--surface); color: var(--text); }
     @media (max-width: 860px) {
       .docs { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-block: 44px 88px; }
-      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 2px 20px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
-      .toc a.on { color: var(--text-sec); }
-      .doc h2 { margin-top: 48px; padding-top: 40px; }
+      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; }
+      .doc h2 { margin-top: 72px; }
     }
 
     /* pricing */
-    .pricing { padding-block: 104px 128px; }
-    .pricing h1 { font-size: clamp(34px, 5vw, 52px); }
-    .plan { margin-top: 64px; padding-top: 48px; border-top: 1px solid var(--border); }
-    .plan h2 { font-size: 22px; }
-    .price { margin-top: 10px; font-size: 52px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; font-variant-numeric: tabular-nums; }
-    .price small { margin-left: 6px; font-size: 18px; font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
-    .per { color: var(--text-sec); }
-    .cycle { display: inline-flex; gap: 4px; margin-top: 18px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
-    .cycle-btn { height: 36px; padding: 0 18px; border: 0; border-radius: 6px; background: none; color: var(--text-sec); font-size: 15px; cursor: pointer; transition: color .15s, background-color .15s; }
-    .cycle-btn.active { background: var(--surface-2); color: var(--text); }
-    .plan ul { margin: 24px 0 28px; padding-left: 22px; color: var(--text-sec); }
-    .plan li + li { margin-top: 6px; }
-    #pricing-buy { max-width: 400px; }
-    #pricing-buy ol { margin: 0 0 18px; padding-left: 22px; font-size: 16px; color: var(--text-sec); }
+    .pricing { padding-block: 104px 0; }
+    .pricing h1 { font-size: var(--display); letter-spacing: -.05em; line-height: 1; }
+    html[lang^="zh"] .pricing h1 { letter-spacing: -.02em; line-height: 1.12; }
+    .pricing .lead { margin-top: 24px; }
+    .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 72px; }
+    .plan { max-width: none; padding: 36px; border-radius: 30px; background: var(--surface); }
+    .plan.pro { background: var(--surface-2); }
+    .plan h2 { font-size: var(--lead); letter-spacing: -.015em; }
+    .price { margin-top: 18px; font-size: clamp(56px, 6vw, 80px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
+    .per { margin-top: 12px; color: var(--text-sec); }
+    .cycle { display: inline-flex; gap: 2px; margin-top: 20px; padding: 3px; border-radius: 999px; background: var(--surface-3); }
+    .cycle-btn { height: 34px; padding: 0 18px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
+    .cycle-btn.active { background: var(--ink); color: var(--ink-fg); }
+    .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
+    .plan li + li { margin-top: 8px; }
+    #pricing-buy { max-width: 420px; }
+    #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
-    #pricing-buy p { margin-top: 14px; font-size: 15px; color: var(--text-sec); }
-    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 500 16px var(--sans); cursor: pointer; text-decoration: none !important; transition: opacity .15s; }
-    .auth-btn:hover { opacity: .86; }
+    #pricing-buy p { margin-top: 16px; font-size: var(--small); color: var(--text-sec); }
+    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 999px; background: var(--surface-3); color: var(--text); font: 500 var(--body) var(--sans); cursor: pointer; text-decoration: none !important; transition: background-color .15s; }
+    .auth-btn:hover { background: color-mix(in srgb, var(--surface-3) 80%, var(--text)); }
     .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
+    .auth-btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
     .auth-btn + .auth-btn { margin-top: 10px; }
     .ts { color: var(--success); }
     .to { color: var(--text-sec); }
-    .faq h2 { font-size: 27px; }
-    .faq h3 { font-size: 19px; margin: 32px 0 8px; }
-    @media (max-width: 700px) {
-      .pricing { padding-block: 56px 88px; }
-      .plan { margin-top: 48px; padding-top: 40px; }
-      .price { font-size: 44px; }
+    .faq { margin-top: 152px; padding-bottom: 0; }
+    .faq h2 { font-size: var(--heading); }
+    .faq h3 { font-size: var(--lead); margin: 36px 0 8px; }
+    @media (max-width: 860px) {
+      .pricing { padding-block: 56px 0; }
+      .plans { grid-template-columns: minmax(0, 1fr); margin-top: 48px; }
+      .plan { padding: 28px 24px; }
+      .faq { margin-top: 104px; }
     }
 
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    /* Motion: the film opens like a shutter once; each section's parts rise in once; controls
+       answer the pointer. Content is visible without scripts and without motion. */
+    .js .rise { opacity: 0; transform: translateY(26px); transition: opacity .7s var(--ease), transform .8s var(--ease); transition-delay: var(--d, 0ms); }
+    .js .rise.in { opacity: 1; transform: none; }
+    .js .stage.shutter { clip-path: inset(0 0 100% 0 round 34px); }
+    .js .stage.shutter .media { transform: scale(1.12); }
+    .js .stage.shutter.in { clip-path: inset(0 0 0 0 round 34px); transition: clip-path 1.1s var(--ease); }
+    .js .stage.shutter.in .media { transform: none; transition: transform 1.4s var(--ease); }
+    .phone, .watch { transition: transform .5s var(--ease); }
+    .phone:hover, .watch:hover { transform: translateY(-4px); }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .js .rise, .js .stage.shutter, .js .stage.shutter .media { opacity: 1; transform: none; clip-path: none; transition: none; }
+      .ask-result .spin { animation: none; }
+    }
   </style>
 </head>
 
@@ -379,30 +487,56 @@
   <main class="page" data-page="home">
     <section class="hero">
       <div class="wrap">
-        <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
-        <p class="lead">
-          <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑。你在手机、手表或锁屏上看它干活、点一下批准、随时插话，需要时直接操作电脑屏幕。代码不离开你的电脑，连接端到端加密。</span>
-          <span lang="en">Claude Code, Codex and other coding agents keep running on your computer. From your phone, your watch or the Lock Screen you follow their work, approve with a tap, cut in any time, and take over the computer&#39;s screen when you need to. Your code stays on your machine, and the connection is end-to-end encrypted.</span>
-        </p>
-        <div class="btns">
-          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
-            <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
-          </a>
-          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-            Android APK
-          </a>
-          <a class="btn btn-s" href="#install"><span lang="zh">Mac 与电脑端</span><span lang="en">Mac and computer setup</span></a>
+        <div class="hero-top">
+          <div>
+            <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
+            <p class="lead">
+              <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑，你在手机、手表或锁屏上看它干活、点一下批准、随时插话。</span>
+              <span lang="en">Claude Code, Codex and other coding agents keep running on your computer while you follow them, approve with a tap and cut in from your phone, your watch or the Lock Screen.</span>
+            </p>
+            <div class="btns">
+              <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+                <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
+              </a>
+              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+                Android APK
+              </a>
+              <a class="btn btn-s" href="#install"><span lang="zh">Mac 与电脑端</span><span lang="en">Mac and computer setup</span></a>
+            </div>
+          </div>
+          <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="手机上收到的审批请求 / A request on your phone">
+            <div class="ask-head"><span class="av" style="--bl:#F4F1EA;--bd:#2A2926;width:22px;height:22px"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span><b>Claude</b><span>weather-app</span><time><span lang="zh">刚刚</span><span lang="en">now</span></time></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
+            <div class="ask-card">
+              <div class="ask-title"><i aria-hidden="true"></i><span><span lang="zh">运行测试，确认样式改动没有回归</span><span lang="en">Run the tests to check the style change broke nothing</span></span></div>
+              <p class="ask-meta"><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span></p>
+              <p class="ask-cmd">npm test</p>
+              <div class="ask-actions">
+                <button type="button" class="deny"><span lang="zh">拒绝</span><span lang="en">Deny</span></button>
+                <button type="button" class="allow"><span lang="zh">允许</span><span lang="en">Allow</span></button>
+              </div>
+              <div class="ask-result" aria-live="polite">
+                <span class="spin" aria-hidden="true"></span>
+                <span data-show="running"><span lang="zh">正在电脑上运行 npm test…</span><span lang="en">Running npm test on your computer…</span></span>
+                <span data-show="done"><svg class="tick" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> <span lang="zh">42 项测试通过，Agent 接着干</span><span lang="en">42 tests passed. The agent carries on.</span></span>
+                <span data-show="denied"><span lang="zh">已拒绝，Agent 会换个办法</span><span lang="en">Denied. The agent will try another way.</span></span>
+                <button type="button" class="again"><span lang="zh">再来一次</span><span lang="en">Again</span></button>
+              </div>
+            </div>
+            <p class="ask-foot"><span lang="zh">这就是手机上收到的请求。点一下试试。</span><span lang="en">This is the request your phone gets. Try it.</span></p>
+          </div>
         </div>
 
-        <figure class="media">
-          <picture>
-            <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" data-en="assets/promo/film-en-vertical.jpg" width="720" height="1280" />
-            <img src="assets/promo/film.jpg" data-en="assets/promo/film-en.jpg" width="1600" height="900" alt="LinkShell 介绍片：手机上看 Agent 干活、批准请求、锁屏与手表审批、插话、操作电脑屏幕 / LinkShell film: follow an agent, approve from the phone, the Lock Screen and the watch, cut in, use the computer's screen" />
-          </picture>
-          <video id="film" muted loop playsinline preload="none" data-start="5.1" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" data-wide-en="assets/promo/linkshell-en.mp4" data-tall-en="assets/promo/linkshell-en-vertical.mp4" aria-label="LinkShell"></video>
-        </figure>
+        <div class="stage" id="film-stage">
+          <figure class="media">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" data-en="assets/promo/film-en-vertical.jpg" width="720" height="1280" />
+              <img src="assets/promo/film.jpg" data-en="assets/promo/film-en.jpg" width="1600" height="900" alt="LinkShell 介绍片：手机上看 Agent 干活、批准请求、锁屏与手表审批、插话、操作电脑屏幕 / LinkShell film: follow an agent, approve from the phone, the Lock Screen and the watch, cut in, use the computer's screen" />
+            </picture>
+            <video id="film" muted loop playsinline preload="none" data-start="5.1" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" data-wide-en="assets/promo/linkshell-en.mp4" data-tall-en="assets/promo/linkshell-en-vertical.mp4" aria-label="LinkShell"></video>
+          </figure>
+        </div>
         <noscript><p class="lead"><a href="assets/promo/linkshell-2.0.mp4">看介绍片 / Watch the film</a></p></noscript>
       </div>
     </section>
@@ -415,10 +549,12 @@
             <h2><span lang="zh"><span class="nb">它在电脑上干活，</span><span class="nb">你在手机上看着</span></span><span lang="en">It works on your computer. <span class="nb">You watch from your phone.</span></span></h2>
             <p><span lang="zh">回复逐字出现；它读了什么、改了什么、跑了什么命令，实时更新，每个文件的改动都能看 diff。它需要权限、或者要你做选择的时候，请求推到手机上，点一下就行。</span><span lang="en">Replies stream in word by word; what it read, changed and ran updates live, with a diff for every file. When it needs permission, or wants you to choose, the request comes to your phone: one tap.</span></p>
           </div>
+          <div class="stage feature-stage">
           <figure class="phone">
             <img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="手机上的会话：Agent 读文件、改代码、列计划，然后请求运行测试的权限" />
             <video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video>
           </figure>
+          </div>
         </article>
 
         <article class="feature" id="glance">
@@ -426,9 +562,11 @@
             <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span></h2>
             <p><span lang="zh">iPhone 的实时活动在锁屏和灵动岛上显示 Agent 的进度；它要权限时，卡片上直接给出「拒绝 / 允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span></p>
           </div>
+          <div class="stage feature-stage">
           <div class="pair">
             <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的构建请求，带拒绝和允许按钮 / A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny / Allow" /></figure>
             <figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="Apple Watch 上的 LinkShell：一条待确认的请求，带拒绝和允许按钮 / LinkShell on Apple Watch: a pending request with Deny and Allow" /></figure>
+          </div>
           </div>
           <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span></p>
         </article>
@@ -439,10 +577,12 @@
             <p><span lang="zh">忙的时候发的消息先排队：可以调整顺序、取回重写，或者立即发送，Codex 和 Claude 直接插进当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">A message sent mid-turn waits in a queue: reorder it, take it back to rewrite, or send it now, straight into the running turn for Codex and Claude. A turn running on the computer can be stopped from the phone too.</span></p>
             <p><span lang="zh">会话在哪儿开的都行：终端里的 <code>linkshell claude</code> 和 <code>linkshell codex</code>，普通的 <code>claude</code> 和 <code>codex</code>，Claude 和 Codex 的桌面 App。手机上接着用，回到电脑前再接回去，上下文一点不丢。</span><span lang="en">Wherever the session was opened: <code>linkshell claude</code> and <code>linkshell codex</code> in a terminal, a plain <code>claude</code> or <code>codex</code>, the Claude and Codex desktop apps. Carry on from the phone and pick it back up at your desk, with all of its context.</span></p>
           </div>
+          <div class="stage feature-stage">
           <figure class="phone">
             <img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="Agent 正在构建时，一条排队的消息被立即发送，插进了当前这一轮" />
             <video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video>
           </figure>
+          </div>
         </article>
 
         <article class="feature" id="computer-use">
@@ -450,9 +590,11 @@
             <h2><span lang="zh">手机上也能用 Computer Use，实时预览</span><span lang="en">Computer Use, from your phone. Watch it live.</span></h2>
             <p><span lang="zh">在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话浮窗中实时预览。边看边聊，随时补充要求，不用回到电脑前。小窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）<a href="docs/#d-computer-use">了解用法</a>。</span><span lang="en">Ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="docs/#d-computer-use">How to use it</a>.</span></p>
           </div>
+          <div class="stage feature-stage">
           <figure class="phone">
             <img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗 / Computer Use live preview in a Codex conversation" />
           </figure>
+          </div>
         </article>
 
         <article class="feature" id="remote-desktop">
@@ -460,15 +602,17 @@
             <h2><span lang="zh"><span class="nb">把 Mac 桌面，</span><span class="nb">装进口袋。</span></span><span lang="en">Your Mac. <span class="nb">In your pocket.</span></span></h2>
             <p><span lang="zh">电脑留在桌上，整个工作台随身带走。Agent 改完代码，就在手机上打开真实桌面：检查网页、操作编辑器、处理弹窗。横屏铺开、全屏查看、双指放大，需要亲自点一下的事，也能当场办完。（完整控制支持 macOS 13 及以上）</span><span lang="en">Bring the whole workspace with you. When an agent finishes a change, open the actual desktop to check a browser, work in your editor or handle a dialog. Turn the phone to landscape, go full screen and pinch to zoom. Take over wherever a human touch is needed. Full control requires macOS 13 or later.</span></p>
           </div>
+          <div class="stage feature-stage">
           <figure class="phone side">
             <img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="手机横屏显示电脑屏幕：浏览器里的页面和终端，切到触控板模式后出现指针" />
             <video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video>
           </figure>
-          <ul class="duo-points">
-            <li><b><span lang="zh">4K 级细节，高刷屏适配</span><span lang="en">4K detail. Ready for high refresh.</span></b><p><span lang="zh">原生画质最高 3840 像素宽，iOS 适配最高 120 Hz 显示。实际画质、帧率与响应速度随设备和网络条件变化。</span><span lang="en">A picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Resolution, frame rate and responsiveness depend on devices and network conditions.</span></p></li>
-            <li><b><span lang="zh">指尖也有精细操控</span><span lang="en">Precision at your fingertips</span></b><p><span lang="zh">慢移精确定位，快移跨越桌面；触控板和「点哪点哪」随手切换，右键、滚动、拖拽都在指尖。</span><span lang="en">Move slowly for precision or swipe across the desktop. Choose trackpad control or direct touch, with right click, scrolling and dragging.</span></p></li>
-            <li><b><span lang="zh">多屏与快捷键，随身带走</span><span lang="en">Your displays and shortcuts, too</span></b><p><span lang="zh">切换显示器、复制粘贴、切换应用，一点就到。长文字和手机剪贴板也能直接发到电脑。</span><span lang="en">Switch displays, copy, paste and change apps with a tap. Send longer text and your phone's clipboard straight to the computer.</span></p></li>
-          </ul>
+          </div>
+          <dl class="more points">
+            <div><dt><span lang="zh">4K 级细节，高刷屏适配</span><span lang="en">4K detail. Ready for high refresh.</span></dt><dd><span lang="zh">原生画质最高 3840 像素宽，iOS 适配最高 120 Hz 显示。实际画质、帧率与响应速度随设备和网络条件变化。</span><span lang="en">A picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Resolution, frame rate and responsiveness depend on devices and network conditions.</span></dd></div>
+            <div><dt><span lang="zh">指尖也有精细操控</span><span lang="en">Precision at your fingertips</span></dt><dd><span lang="zh">慢移精确定位，快移跨越桌面；触控板和「点哪点哪」随手切换，右键、滚动、拖拽都在指尖。</span><span lang="en">Move slowly for precision or swipe across the desktop. Choose trackpad control or direct touch, with right click, scrolling and dragging.</span></dd></div>
+            <div><dt><span lang="zh">多屏与快捷键，随身带走</span><span lang="en">Your displays and shortcuts, too</span></dt><dd><span lang="zh">切换显示器、复制粘贴、切换应用，一点就到。长文字和手机剪贴板也能直接发到电脑。</span><span lang="en">Switch displays, copy, paste and change apps with a tap. Send longer text and your phone's clipboard straight to the computer.</span></dd></div>
+          </dl>
         </article>
 
         <article class="feature" id="iphone-duo">
@@ -500,31 +644,24 @@
             </div>
             <figcaption><span lang="zh">屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</span><span lang="en">Screen content captured from the running app · iPhone Duo simulator.</span></figcaption>
           </figure>
-          <ul class="duo-points">
-            <li><b><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></b><p><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></p></li>
-            <li><b><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></b><p><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></p></li>
-            <li><b><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></b><p><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></p></li>
-          </ul>
+          <dl class="more points">
+            <div><dt><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></dt><dd><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></dd></div>
+            <div><dt><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></dt><dd><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></dd></div>
+            <div><dt><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></dt><dd><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></dd></div>
+          </dl>
         </article>
 
         <article class="feature">
           <div class="text">
             <h2><span lang="zh">还有这些</span><span lang="en">And the rest</span></h2>
             <dl class="more">
-              <dt><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></dt>
-              <dd><span lang="zh">开一个终端跑 dev server、看日志、用 git，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></dd>
-              <dt><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></dt>
-              <dd><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included: no open ports, no shared Wi-Fi.</span></dd>
-              <dt><span lang="zh">分叉和 worktree</span><span lang="en">Forks and worktrees</span></dt>
-              <dd><span lang="zh">想换个思路，就从那条回复分叉出一个新会话；可以放进新的 git worktree，不碰你手头的工作区。</span><span lang="en">Fork a new session from any reply to try another direction, in a new git worktree if you like, away from what you are working on.</span></dd>
-              <dt><span lang="zh">子 Agent 与工作流</span><span lang="en">Sub-agents and Workflows</span></dt>
-              <dd><span lang="zh">按阶段跟进 Claude Workflow，打开每个 Agent 的对话和工具结果。后台工作流保留在输入框上方；标题旁可查看全部工作流和子 Agent。</span><span lang="en">Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</span></dd>
-              <dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span></dt>
-              <dd><span lang="zh">输入 <code>/</code> 列出 Agent 的命令和你的 skills。<code>/compact</code>、<code>/review</code> 对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</span></dd>
-              <dt><span lang="zh">Mac 上的完整工作台</span><span lang="en">A full workspace on the Mac</span></dt>
-              <dd><span lang="zh">Mac App 里也能继续对话、处理审批、开终端和远程桌面，连本机或别的电脑都行。还有按 Agent 统计的 Token 用量、开机自启和浅色 / 深色外观。</span><span lang="en">The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</span></dd>
-              <dt><span lang="zh">文件和会话管理</span><span lang="en">Files and tidy sessions</span></dt>
-              <dd><span lang="zh">浏览项目里的文件，把手机里的图片和文件传给 Agent。会话可以重命名、归档、删除，<code>claude --resume</code> 里也能看到新名字。</span><span lang="en">Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</span></dd>
+              <div><dt><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></dt><dd><span lang="zh">开一个终端跑 dev server、看日志、用 git，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></dd></div>
+              <div><dt><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></dt><dd><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included: no open ports, no shared Wi-Fi.</span></dd></div>
+              <div><dt><span lang="zh">分叉和 worktree</span><span lang="en">Forks and worktrees</span></dt><dd><span lang="zh">想换个思路，就从那条回复分叉出一个新会话；可以放进新的 git worktree，不碰你手头的工作区。</span><span lang="en">Fork a new session from any reply to try another direction, in a new git worktree if you like, away from what you are working on.</span></dd></div>
+              <div><dt><span lang="zh">子 Agent 与工作流</span><span lang="en">Sub-agents and Workflows</span></dt><dd><span lang="zh">按阶段跟进 Claude Workflow，打开每个 Agent 的对话和工具结果。后台工作流保留在输入框上方；标题旁可查看全部工作流和子 Agent。</span><span lang="en">Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</span></dd></div>
+              <div><dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span></dt><dd><span lang="zh">输入 <code>/</code> 列出 Agent 的命令和你的 skills。<code>/compact</code>、<code>/review</code> 对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</span></dd></div>
+              <div><dt><span lang="zh">Mac 上的完整工作台</span><span lang="en">A full workspace on the Mac</span></dt><dd><span lang="zh">Mac App 里也能继续对话、处理审批、开终端和远程桌面，连本机或别的电脑都行。还有按 Agent 统计的 Token 用量、开机自启和浅色 / 深色外观。</span><span lang="en">The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</span></dd></div>
+              <div><dt><span lang="zh">文件和会话管理</span><span lang="en">Files and tidy sessions</span></dt><dd><span lang="zh">浏览项目里的文件，把手机里的图片和文件传给 Agent。会话可以重命名、归档、删除，<code>claude --resume</code> 里也能看到新名字。</span><span lang="en">Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</span></dd></div>
             </dl>
           </div>
         </article>
@@ -542,7 +679,7 @@
             <p><span lang="zh">多端同步：用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">Shared: the terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></p>
           </div>
           <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div>
+            <div class="agent-name"><div class="marks"><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
             <p><span lang="zh">接力：电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Handoff: Claude&#39;s own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></p>
           </div>
           <div class="agent">
@@ -564,7 +701,7 @@
           <p><span lang="zh">Mac 和 Windows 可直接下载桌面 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, download the desktop app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
 
           <div class="step">
-            <h3><span lang="zh">1. 安装并启动</span><span lang="en">1. Install and start</span></h3>
+            <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
             <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-0.10.55-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-0.10.55-x64.dmg">Mac · Intel</a></p>
             <p><span lang="zh">macOS 13 及以上：拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能两个开关。App 自带 CLI、Host 和 Node，一起更新。</span><span lang="en">macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</span></p>
             <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-Setup-0.10.55-windows-x64.exe">Windows · <span lang="zh">安装器</span><span lang="en">Installer</span></a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.55/LinkShell-0.10.55-windows-x64.zip">Windows · ZIP</a></p>
@@ -578,7 +715,7 @@
 <span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
           </div>
           <div class="step">
-            <h3><span lang="zh">2. 连接手机</span><span lang="en">2. Connect your phone</span></h3>
+            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
             <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
             <pre><code><span class="cm"># Pro</span>
 <span class="pr">$ </span>linkshell login
@@ -587,7 +724,7 @@
 <span class="pr">$ </span>linkshell pair</code></pre>
           </div>
           <div class="step">
-            <h3><span lang="zh">3. 开始工作</span><span lang="en">3. Get going</span></h3>
+            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span></h3>
             <p><span lang="zh">在手机上新建会话；或者在电脑终端里这样启动 Agent，随时交给手机。</span><span lang="en">Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</span></p>
             <pre><code><span class="pr">$ </span>linkshell claude
 <span class="pr">$ </span>linkshell codex</code></pre>
@@ -601,34 +738,41 @@
       <div class="wrap">
         <div class="text">
           <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
-          <p><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。手机通过网关连进来，网关只负责把加密后的数据转过去。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now. The phone connects through a gateway that only passes encrypted data along.</span></p>
-          <p><span lang="zh">网关只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></p>
-          <p><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。屏幕和预览在能直连时点对点传输，网关只负责牵线。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free. The screen and previews go peer to peer when they can; the gateway only introduces the two sides.</span></p>
+          <p><span lang="zh">手机通过网关连进电脑，代码和 Agent 始终留在电脑上，连接端到端加密。</span><span lang="en">Your phone reaches the computer through a gateway. The code and the agents never leave the computer, and the connection is end-to-end encrypted.</span></p>
+          <dl class="more">
+            <div><dt><span lang="zh">你的电脑</span><span lang="en">Your computer</span></dt><dd><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now.</span></dd></div>
+            <div><dt><span lang="zh">网关</span><span lang="en">The gateway</span></dt><dd><span lang="zh">只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></dd></div>
+            <div><dt><span lang="zh">官方或自建</span><span lang="en">Official or your own</span></dt><dd><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></dd></div>
+            <div><dt><span lang="zh">屏幕和预览</span><span lang="en">Screen and previews</span></dt><dd><span lang="zh">能直连时点对点传输，网关只负责牵线。</span><span lang="en">They go peer to peer when they can; the gateway only introduces the two sides.</span></dd></div>
+          </dl>
         </div>
       </div>
     </section>
 
     <section class="sec">
       <div class="wrap">
-        <div class="text support">
-          <h2><span lang="zh">赞助商</span><span lang="en">Sponsors</span></h2>
+        <h2><span lang="zh">支持 LinkShell</span><span lang="en">Supporting LinkShell</span></h2>
+        <div class="support-row">
+        <div class="support">
+          <h3><span lang="zh">赞助商</span><span lang="en">Sponsors</span></h3>
           <p><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
           <p class="sponsor"><a href="https://ai18n.chat/">AI18N</a> · Unified AI API Gateway</p>
         </div>
-        <div class="text support">
-          <h2><span lang="zh">请作者喝杯咖啡</span><span lang="en">Buy me a coffee</span></h2>
+        <div class="support">
+          <h3><span lang="zh">请作者喝杯咖啡</span><span lang="en">Buy me a coffee</span></h3>
           <p><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
           <div class="qr">
             <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
             <figure><img src="assets/pay_ali.jpg" alt="Alipay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
           </div>
         </div>
+        </div>
       </div>
     </section>
 
-    <section class="sec close">
+    <section class="close">
       <div class="wrap">
-        <div class="text">
+        <div class="close-card">
           <h2><span lang="zh"><span class="nb">下次离开电脑，</span><span class="nb">把会话带上</span></span><span lang="en">Next time you leave your desk, take the session along</span></h2>
           <p><span lang="zh">全部功能免费，自建网关一条命令就能跑起来。</span><span lang="en">Every feature is free, and your own gateway is one command away.</span></p>
           <div class="btns">
@@ -792,7 +936,8 @@
         <p class="lead"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
       </div>
 
-      <section class="plan text">
+      <div class="plans">
+      <section class="plan">
         <h2>Free</h2>
         <div class="price">¥0</div>
         <p class="per"><span lang="zh">永久免费</span><span lang="en">Free forever</span></p>
@@ -805,7 +950,7 @@
         <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span></a>
       </section>
 
-      <section class="plan text">
+      <section class="plan pro">
         <h2>Pro</h2>
         <div id="price-monthly" class="price">¥9.9<small><span lang="zh">/月</span><span lang="en">/mo</span></small></div>
         <div id="price-yearly" class="price" style="display:none">¥99<small><span lang="zh">/年</span><span lang="en">/yr</span></small></div>
@@ -833,7 +978,9 @@
         </div>
       </section>
 
-      <section class="plan faq text">
+      </div>
+
+      <section class="faq text">
         <h2><span lang="zh">常见问题</span><span lang="en">Questions</span></h2>
         <h3><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></h3>
         <p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p>
@@ -860,6 +1007,7 @@
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
     </div>
+    <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>
 
   <script src="assets/duo/viewer.js?v=20261008-transparent-stage" defer></script>
@@ -1054,6 +1202,43 @@
     function initPricing() {
       setPricingCycle(pricingCycle);
     }
+  </script>
+  <script>
+    // ── The live request in the hero: what the phone shows when an agent asks ──
+    (() => {
+      const ask = document.getElementById('ask');
+      if (!ask) return;
+      let timer;
+      ask.querySelector('.allow').addEventListener('click', () => {
+        ask.dataset.state = 'running';
+        clearTimeout(timer);
+        timer = setTimeout(() => { ask.dataset.state = 'done'; }, 1800);
+      });
+      ask.querySelector('.deny').addEventListener('click', () => { clearTimeout(timer); ask.dataset.state = 'denied'; });
+      ask.querySelector('.again').addEventListener('click', () => { clearTimeout(timer); ask.dataset.state = 'waiting'; });
+    })();
+
+    // ── Motion: the film opens once; the parts of each section rise in once, in order ──
+    (() => {
+      if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const film = document.getElementById('film-stage');
+      if (film) { film.classList.add('shutter'); requestAnimationFrame(() => setTimeout(() => film.classList.add('in'), 120)); }
+      const parts = '.hero h1, .hero .lead, .hero .btns, .ask, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .duo-figure, .agent, .step, .support, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
+      const seen = new IntersectionObserver((entries) => entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('in');
+        seen.unobserve(entry.target);
+      }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+      document.querySelectorAll('.hero, .sec, .feature, .close, .pricing').forEach((section) => {
+        let n = 0;
+        section.querySelectorAll(parts).forEach((el) => {
+          if (el.closest('.rise') || el.closest('#film-stage')) return;
+          el.classList.add('rise');
+          el.style.setProperty('--d', `${Math.min(n++, 5) * 75}ms`);
+          seen.observe(el);
+        });
+      });
+    })();
   </script>
 </body>
 
