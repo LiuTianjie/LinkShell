@@ -73,15 +73,24 @@ const CALLBACK_PAGE = `<!DOCTYPE html>
     document.getElementById('body').innerHTML = copy[state][1];
     document.title = copy[state][0] + ' · LinkShell';
   }
+  // The result is shown on iTool so it follows the site's design; this card
+  // stays as the fallback if itool.tech can't be reached.
+  function finish(state) {
+    show(state);
+    var status = state === 'done' ? 'ok' : state === 'empty' ? 'empty' : 'failed';
+    window.location.replace('https://itool.tech/' + (zh ? 'zh' : 'en') + '/auth/linkshell/done?status=' + status);
+  }
   show('busy');
   // iTool returns the tokens in the fragment; older redirects used the query string.
   var data = window.location.hash.substring(1) || window.location.search.substring(1);
+  // Drop the tokens from the address bar and history before leaving the page.
+  history.replaceState(null, '', '/callback');
   if (data) {
     fetch('/token?' + data, { method: 'POST' })
-      .then(function (response) { if (!response.ok) throw new Error('failed'); show('done'); })
-      .catch(function () { show('error'); });
+      .then(function (response) { if (!response.ok) throw new Error('failed'); finish('done'); })
+      .catch(function () { finish('error'); });
   } else {
-    show('empty');
+    finish('empty');
   }
 </script>
 </body>
