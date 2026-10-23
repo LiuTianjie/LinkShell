@@ -28,3 +28,19 @@ it.each(["sign-out", "account-switch"])("does not resurrect an account when its 
   expect(useAccount.getState().session).toEqual(action === "sign-out" ? undefined : other);
   expect(secrets.write).not.toHaveBeenCalled();
 });
+
+it("signs out when the server says the session is over", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ code: 400, error_code: "refresh_token_already_used", msg: "Invalid Refresh Token: Already Used" }, { status: 400 })));
+  await expect(useAccount.getState().token()).resolves.toBeUndefined();
+  expect(useAccount.getState().session).toBeUndefined();
+  expect(secrets.remove).toHaveBeenCalledOnce();
+});
+
+it("stays signed in when the refresh fails for another reason", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error_code: "over_request_rate_limit" }, { status: 429 })));
+  await expect(useAccount.getState().token()).resolves.toBeUndefined();
+  vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+  await expect(useAccount.getState().token()).resolves.toBeUndefined();
+  expect(useAccount.getState().session).toEqual(expired);
+  expect(secrets.remove).not.toHaveBeenCalled();
+});

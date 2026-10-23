@@ -60,6 +60,45 @@ describe("the account on this computer", () => {
     expect(auth.loadAuth()).toMatchObject({ refreshToken: "refresh-1" });
   });
 
+  it("signs out when the server says the session is over, instead of staying half signed in", async () => {
+    for (const body of [{ code: 400, error_code: "refresh_token_already_used" }, { error: "invalid_grant" }]) {
+      auth.saveAuth(tokens(Date.now() - 1));
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json(body, { status: 400 })));
+      expect(await auth.getValidToken()).toBeNull();
+      expect(auth.loadAuth()).toBeNull();
+    }
+  });
+
+  it("stays signed in when a refusal is not about the token", async () => {
+    auth.saveAuth(tokens(Date.now() - 1));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error_code: "over_request_rate_limit" }, { status: 429 })));
+    expect(await auth.getValidToken()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error_code: "validation_failed" }, { status: 400 })));
+    expect(await auth.getValidToken()).toBeNull();
+    expect(auth.loadAuth()).toMatchObject({ refreshToken: "refresh-1" });
+  });
+
+  it("keeps the session another process rotated even when its own token was refused for good", async () => {
+    auth.saveAuth(tokens(Date.now() + 30_000));
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      auth.saveAuth({ ...tokens(Date.now() + 3_600_000), accessToken: "access-elsewhere", refreshToken: "refresh-elsewhere" });
+      return Response.json({ error_code: "refresh_token_already_used" }, { status: 400 });
+    }));
+    expect(await auth.getValidToken()).toBe("access-elsewhere");
+    expect(auth.loadAuth()).toMatchObject({ refreshToken: "refresh-elsewhere" });
+  });
+
+  it("keeps tokens the server already rotated even if the caller gave up waiting", async () => {
+    auth.saveAuth(tokens(Date.now() - 1));
+    const caller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      caller.abort();
+      return Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600, user: { id: "u1" } });
+    }));
+    expect(await auth.getValidToken({ signal: caller.signal })).toBeNull();
+    expect(auth.loadAuth()).toMatchObject({ accessToken: "access-2", refreshToken: "refresh-2" });
+  });
+
   it("takes the tokens another process refreshed meanwhile instead of giving up", async () => {
     auth.saveAuth(tokens(Date.now() + 30_000));
     // The desktop app refreshed first: the old refresh token is spent, and refused.

@@ -78,7 +78,7 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
           signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
         },
       );
-      if (!res.ok) return rotatedElsewhere(auth);
+      if (!res.ok) return (await refused(res)) ? signedOutElsewhere(auth) : rotatedElsewhere(auth);
       const body = (await res.json()) as {
         access_token: string;
         refresh_token: string;
@@ -94,10 +94,12 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
       };
       // A login or logout may finish while the refresh is in flight.
       const current = loadAuth();
-      if (options.signal?.aborted || tokens.userId !== auth.userId || current?.userId !== auth.userId) return null;
+      if (tokens.userId !== auth.userId || current?.userId !== auth.userId) return null;
       if (current.refreshToken !== auth.refreshToken) return rotatedElsewhere(auth);
+      // Saved even when the caller gave up: the old refresh token is spent now, and presenting it
+      // again later would make Supabase revoke the whole session.
       saveAuth(tokens);
-      return tokens;
+      return options.signal?.aborted ? null : tokens;
     } catch {
       return rotatedElsewhere(auth);
     }
@@ -115,6 +117,34 @@ function rotatedElsewhere(previous: AuthTokens): AuthTokens | null {
   const current = loadAuth();
   return current && current.userId === previous.userId && current.refreshToken !== previous.refreshToken &&
     current.expiresAt - Date.now() >= 60_000 ? current : null;
+}
+
+// What Supabase answers for a refresh token that can never work again (reused, revoked, its
+// session or user gone); anything else (rate limits, outages, proxies) may pass on a retry.
+const DEAD_REFRESH_TOKEN = new Set([
+  "refresh_token_already_used", "refresh_token_not_found", "session_not_found", "session_expired",
+  "user_not_found", "user_banned", "invalid_grant",
+]);
+
+async function refused(res: Response): Promise<boolean> {
+  if (![400, 401, 403].includes(res.status)) return false;
+  try {
+    const body = (await res.json()) as { error_code?: unknown; error?: unknown };
+    return DEAD_REFRESH_TOKEN.has(String(body.error_code ?? body.error));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The account was signed out on the server. Keeping its dead tokens would leave every client
+ * showing a signed-in account that nothing can use, so this computer signs out too.
+ */
+function signedOutElsewhere(previous: AuthTokens): AuthTokens | null {
+  const rotated = rotatedElsewhere(previous);
+  if (rotated) return rotated;
+  if (loadAuth()?.refreshToken === previous.refreshToken) clearAuth();
+  return null;
 }
 
 /**

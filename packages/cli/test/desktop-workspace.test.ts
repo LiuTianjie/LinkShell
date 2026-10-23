@@ -15,11 +15,12 @@ import { DesktopClientState } from "../src/commands/desktop-workspace-state.js";
 import { getValidToken, loadAuth } from "../src/auth.js";
 import { runLogin } from "../src/commands/login.js";
 import { runLogout } from "../src/commands/logout.js";
+import { refreshGateway } from "../src/commands/host.js";
 
 vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn(), getValidToken: vi.fn() }));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
 vi.mock("../src/commands/logout.js", () => ({ runLogout: vi.fn() }));
-vi.mock("../src/commands/host.js", () => ({ silenceSqliteWarning: vi.fn() }));
+vi.mock("../src/commands/host.js", () => ({ silenceSqliteWarning: vi.fn(), refreshGateway: vi.fn(), followAccountGateway: vi.fn() }));
 
 let directory: string;
 let assets: string;
@@ -204,6 +205,15 @@ describe("native desktop workspace service", () => {
     expect((await fetch(`${server.origin}/desktop/logout`, { method: "POST", headers: server.headers })).status).toBe(200);
     expect(runLogout).toHaveBeenCalledOnce();
     expect((await readdir(home)).sort()).toEqual(["desktop-client.json"]);
+  });
+
+  it("reports a session the server ended as signed out, and has the host leave the account", async () => {
+    vi.mocked(loadAuth).mockReturnValueOnce({ userId: "u1", email: "me@example.com", accessToken: "access-dead", refreshToken: "refresh-dead", expiresAt: 1 });
+    vi.mocked(loadAuth).mockReturnValue(null);
+    vi.mocked(getValidToken).mockResolvedValue(null);
+    const server = await workspace();
+    expect(await (await fetch(`${server.origin}/desktop/account`, { headers: server.headers })).json()).toEqual({});
+    expect(refreshGateway).toHaveBeenCalledOnce();
   });
 
   it("cancels pending browser login on shutdown and hides internal exception details", async () => {

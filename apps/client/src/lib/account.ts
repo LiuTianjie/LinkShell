@@ -36,6 +36,17 @@ interface AccountState {
   token(): Promise<string | undefined>;
 }
 
+// What Supabase answers for a refresh token that can never work again (reused, revoked, its
+// session or user gone); anything else (rate limits, outages) may pass on a retry.
+const DEAD_REFRESH_TOKEN = new Set([
+  "refresh_token_already_used", "refresh_token_not_found", "session_not_found", "session_expired",
+  "user_not_found", "user_banned", "invalid_grant",
+]);
+
+class AuthRefused extends Error {
+  constructor(message: string, readonly final: boolean) { super(message); }
+}
+
 async function auth(path: string, body: unknown): Promise<AccountSession> {
   const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
     method: "POST",
@@ -45,7 +56,8 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
   const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {
     const message = String(json.error_description ?? json.msg ?? json.message ?? "登录失败");
-    throw new Error(/invalid login credentials/i.test(message) ? "邮箱或密码不对" : /email not confirmed/i.test(message) ? "邮箱还没有验证，请先查收验证邮件" : message);
+    const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(json.error_code ?? json.error));
+    throw new AuthRefused(/invalid login credentials/i.test(message) ? "邮箱或密码不对" : /email not confirmed/i.test(message) ? "邮箱还没有验证，请先查收验证邮件" : message, final);
   }
   const user = json.user as { id: string; email?: string };
   return {
@@ -135,7 +147,11 @@ export const useAccount = create<AccountState>((set, get) => ({
         set({ session: next });
         return next;
       })
-      .catch(() => undefined)
+      .catch(async (error: unknown) => {
+        // The session ended on the server: show the account signed out, not signed in and unusable.
+        if (error instanceof AuthRefused && error.final && get().session?.refreshToken === session.refreshToken) await get().signOut();
+        return undefined;
+      })
       .finally(() => {
         refreshing = undefined;
       });

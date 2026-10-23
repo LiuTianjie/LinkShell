@@ -118,9 +118,14 @@ async function localComputer(target: string, upstreams: Set<WebSocket>): Promise
 }
 
 async function account(signal: AbortSignal) {
+  const before = loadAuth()?.userId;
   const accessToken = await getValidToken({ signal });
   const current = loadAuth();
-  if (!current?.userId) return {};
+  if (!current?.userId) {
+    // The refresh found the session ended on the server: the host leaves the account now too.
+    if (before) await accountChanged();
+    return {};
+  }
   return {
     userId: current.userId, email: current.email,
     ...(accessToken && current.accessToken === accessToken ? { accessToken } : {}),
