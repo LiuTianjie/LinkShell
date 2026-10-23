@@ -12,6 +12,7 @@ import { findWorkflowAgent } from "@/lib/workflows";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "../icon";
+import { SubagentGlyph } from "../subagent-glyph";
 import { PressableScale } from "../pressable-scale";
 import { useTimelineSession } from "./context";
 
@@ -121,7 +122,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
       style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 12, gap: 8 }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <SubagentGlyph failed={failed} size={30} />
+        <SubagentGlyph sessionId={sessionId} toolCallId={item.id} size={30} />
         <View style={{ flex: 1, gap: 1 }}>
           <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>
             {progress.name}
@@ -161,24 +162,6 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
     </PressableScale>
   );
 });
-
-export function SubagentGlyph({ failed, size }: { failed: boolean; size: number }) {
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size * 0.3,
-        borderCurve: "continuous",
-        backgroundColor: failed ? colors.dangerSoft : colors.accentSoft,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Icon sf="square.stack.3d.up.fill" md="layers" size={size * 0.5} color={failed ? colors.danger : colors.accent} />
-    </View>
-  );
-}
 
 export function StatusMark({ running, failed, paused, stopped, unknown }: { running: boolean; failed: boolean; paused?: boolean; stopped?: boolean; unknown?: boolean }) {
   if (paused) return <Icon sf="pause.circle" md="pause_circle" size={16} color={colors.waiting} />;

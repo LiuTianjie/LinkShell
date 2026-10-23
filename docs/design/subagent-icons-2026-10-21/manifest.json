@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "viewBox": [
+    0,
+    0,
+    32,
+    32
+  ],
+  "recommendedSizes": [
+    20,
+    24,
+    32
+  ],
+  "glyphs": [
+    {
+      "id": "solar",
+      "label": "Solar",
+      "index": 0,
+      "palette": "amber",
+      "files": {
+        "light": "light/01-solar.svg",
+        "dark": "dark/01-solar.svg"
+      }
+    },
+    {
+      "id": "corolla",
+      "label": "Corolla",
+      "index": 1,
+      "palette": "blue",
+      "files": {
+        "light": "light/02-corolla.svg",
+        "dark": "dark/02-corolla.svg"
+      }
+    },
+    {
+      "id": "spring",
+      "label": "Spring",
+      "index": 2,
+      "palette": "mint",
+      "files": {
+        "light": "light/03-spring.svg",
+        "dark": "dark/03-spring.svg"
+      }
+    },
+    {
+      "id": "vane",
+      "label": "Vane",
+      "index": 3,
+      "palette": "teal",
+      "files": {
+        "light": "light/04-vane.svg",
+        "dark": "dark/04-vane.svg"
+      }
+    },
+    {
+      "id": "prism",
+      "label": "Prism",
+      "index": 4,
+      "palette": "cyan",
+      "files": {
+        "light": "light/05-prism.svg",
+        "dark": "dark/05-prism.svg"
+      }
+    },
+    {
+      "id": "orbit",
+      "label": "Orbit",
+      "index": 5,
+      "palette": "amber",
+      "files": {
+        "light": "light/06-orbit.svg",
+        "dark": "dark/06-orbit.svg"
+      }
+    },
+    {
+      "id": "mosaic",
+      "label": "Mosaic",
+      "index": 6,
+      "palette": "iris",
+      "files": {
+        "light": "light/07-mosaic.svg",
+        "dark": "dark/07-mosaic.svg"
+      }
+    },
+    {
+      "id": "tide",
+      "label": "Tide",
+      "index": 7,
+      "palette": "blue",
+      "files": {
+        "light": "light/08-tide.svg",
+        "dark": "dark/08-tide.svg"
+      }
+    },
+    {
+      "id": "lantern",
+      "label": "Lantern",
+      "index": 8,
+      "palette": "amber",
+      "files": {
+        "light": "light/09-lantern.svg",
+        "dark": "dark/09-lantern.svg"
+      }
+    },
+    {
+      "id": "bow",
+      "label": "Bow",
+      "index": 9,
+      "palette": "rose",
+      "files": {
+        "light": "light/10-bow.svg",
+        "dark": "dark/10-bow.svg"
+      }
+    },
+    {
+      "id": "link",
+      "label": "Link",
+      "index": 10,
+      "palette": "mint",
+      "files": {
+        "light": "light/11-link.svg",
+        "dark": "dark/11-link.svg"
+      }
+    },
+    {
+      "id": "trefoil",
+      "label": "Trefoil",
+      "index": 11,
+      "palette": "iris",
+      "files": {
+        "light": "light/12-trefoil.svg",
+        "dark": "dark/12-trefoil.svg"
+      }
+    },
+    {
+      "id": "eclipse",
+      "label": "Eclipse",
+      "index": 12,
+      "palette": "rose",
+      "files": {
+        "light": "light/13-eclipse.svg",
+        "dark": "dark/13-eclipse.svg"
+      }
+    },
+    {
+      "id": "summit",
+      "label": "Summit",
+      "index": 13,
+      "palette": "teal",
+      "files": {
+        "light": "light/14-summit.svg",
+        "dark": "dark/14-summit.svg"
+      }
+    },
+    {
+      "id": "pebble",
+      "label": "Pebble",
+      "index": 14,
+      "palette": "iris",
+      "files": {
+        "light": "light/15-pebble.svg",
+        "dark": "dark/15-pebble.svg"
+      }
+    },
+    {
+      "id": "aperture",
+      "label": "Aperture",
+      "index": 15,
+      "palette": "cyan",
+      "files": {
+        "light": "light/16-aperture.svg",
+        "dark": "dark/16-aperture.svg"
+      }
+    }
+  ]
+}

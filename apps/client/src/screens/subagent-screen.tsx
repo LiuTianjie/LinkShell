@@ -10,7 +10,8 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { SheetHeader } from "@/components/sheet-header";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSession } from "@/components/timeline/context";
-import { StatusMark, SubagentGlyph, useSubagentProgress } from "@/components/timeline/subagent";
+import { StatusMark, useSubagentProgress } from "@/components/timeline/subagent";
+import { SubagentGlyph } from "@/components/subagent-glyph";
 import { Timeline } from "@/components/timeline/timeline";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { useTimelineSession } from "@/components/timeline/context";
@@ -107,7 +108,7 @@ function SubagentSheet({ item, fullScreen }: { item: ToolItem; fullScreen: boole
     <View collapsable={false} onLayout={(event) => setHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
       <View collapsable={false} style={{ paddingTop: Math.max(12, insets.top + 8), paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <SubagentGlyph failed={progress.failed} size={40} />
+          <SubagentGlyph sessionId={sessionId} toolCallId={item.id} size={40} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
               {progress.name}

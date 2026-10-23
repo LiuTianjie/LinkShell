@@ -9,7 +9,7 @@ import { Icon } from "@/components/icon";
 import { PressableScale } from "@/components/pressable-scale";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { LiveDot } from "@/components/status";
-import { SubagentGlyph } from "@/components/timeline/subagent";
+import { SubagentGlyph } from "@/components/subagent-glyph";
 import { TaskList } from "@/components/background-tasks";
 import { WorkflowCardContent } from "@/components/workflow";
 import { useActions, useClient } from "@/lib/client";
@@ -19,7 +19,7 @@ import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
-function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean; now: number; onPress: () => void }) {
+function Row({ sessionId, entry, last, now, onPress }: { sessionId: string; entry: SubagentInfo; last: boolean; now: number; onPress: () => void }) {
   const failed = entry.failed === true;
   const outcome = entry.state === "unknown" ? "结果待确认" : entry.state === "stopped" ? "已停止" : entry.state === "paused" ? "已暂停" : failed ? "失败" : "已完成";
   const state = entry.running
@@ -34,7 +34,7 @@ function Row({ entry, last, now, onPress }: { entry: SubagentInfo; last: boolean
       accessibilityHint="查看这个子 Agent 的全部过程"
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 14 }}>
-        <SubagentGlyph failed={failed} size={32} />
+        <SubagentGlyph sessionId={sessionId} toolCallId={entry.toolCallId} size={32} />
         <View
           style={{
             flex: 1,
@@ -140,7 +140,7 @@ export function SubagentsScreen() {
           ) : (
             <View style={{ backgroundColor: colors.sheetCard, borderRadius: 20, borderCurve: "continuous", overflow: "hidden" }}>
               {list.map((entry, index) => (
-                <Row key={entry.toolCallId} entry={entry} last={index === list.length - 1} now={now} onPress={() => open(entry)} />
+                <Row key={entry.toolCallId} sessionId={id} entry={entry} last={index === list.length - 1} now={now} onPress={() => open(entry)} />
               ))}
             </View>
           )}
