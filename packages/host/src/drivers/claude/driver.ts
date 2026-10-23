@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { RpcError, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
+import { RpcError, questionReplies, type AsyncQuestion, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
@@ -39,15 +39,15 @@ function writtenByAnotherClaude(line: string): boolean {
   return line.includes('"entrypoint":"') && !line.includes(REMOTE_ENTRYPOINT) && /"type":"(user|assistant)"/.test(line);
 }
 
-/**
- * Whether another Claude is in the middle of a turn, going by the transcript's
- * last message: a prompt or a tool result with no final reply after it. A turn
- * that has written nothing for `stalledMs` no longer counts (it waits on its
- * own approval prompt, or that Claude is gone).
- */
-function turnInProgress(path: string, stalledMs: number): boolean {
-  const { size, mtimeMs } = statSync(path);
-  if (Date.now() - mtimeMs > stalledMs) return false;
+interface TranscriptMessage {
+  type?: string;
+  isSidechain?: boolean;
+  message?: { stop_reason?: string | null; content?: unknown };
+}
+
+/** The transcript's last prompt, reply or tool result in the main conversation, with its raw line. */
+function lastMessage(path: string): { line: string; entry: TranscriptMessage } | undefined {
+  const { size } = statSync(path);
   // Lines can be megabytes (a screenshot in a tool result): widen the look until one is whole.
   for (const bytes of [512 * 1024, 8 * 1024 * 1024, size]) {
     const tail = readTail(path, Math.min(size, bytes));
@@ -55,20 +55,76 @@ function turnInProgress(path: string, stalledMs: number): boolean {
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!;
       if (!/"type":"(user|assistant)"/.test(line)) continue;
-      let entry: { type?: string; isSidechain?: boolean; message?: { stop_reason?: string | null; content?: unknown } };
+      let entry: TranscriptMessage;
       try {
-        entry = JSON.parse(line) as typeof entry;
+        entry = JSON.parse(line) as TranscriptMessage;
       } catch {
         continue;
       }
       if (entry.isSidechain || (entry.type !== "user" && entry.type !== "assistant")) continue;
-      if (line.includes(REMOTE_ENTRYPOINT)) return false;
-      if (entry.type === "assistant") return entry.message?.stop_reason == null || entry.message.stop_reason === "tool_use";
-      return !JSON.stringify(entry.message?.content ?? "").includes("[Request interrupted");
+      return { line, entry };
     }
     if (bytes >= size) break;
   }
-  return false;
+  return undefined;
+}
+
+/**
+ * Whether another Claude is in the middle of a turn, going by the transcript's
+ * last message: a prompt or a tool result with no final reply after it. A turn
+ * that has written nothing for `stalledMs` no longer counts (it waits on its
+ * own approval prompt, or that Claude is gone).
+ */
+function turnInProgress(path: string, stalledMs: number): boolean {
+  if (Date.now() - statSync(path).mtimeMs > stalledMs) return false;
+  const last = lastMessage(path);
+  if (!last || last.line.includes(REMOTE_ENTRYPOINT)) return false;
+  const { entry } = last;
+  if (entry.type === "assistant") return entry.message?.stop_reason == null || entry.message.stop_reason === "tool_use";
+  return !JSON.stringify(entry.message?.content ?? "").includes("[Request interrupted");
+}
+
+/** An AskUserQuestion that another Claude's turn stopped on: it waits for an answer typed at the computer. */
+interface WaitingAsk {
+  toolCallId: string;
+  questions: AsyncQuestion[];
+}
+
+/**
+ * The question the transcript ends on, unanswered, if another Claude asked it.
+ * However long ago: that turn waits for the answer, not for time.
+ */
+function waitingAsk(path: string): WaitingAsk | undefined {
+  const last = lastMessage(path);
+  if (!last || last.line.includes(REMOTE_ENTRYPOINT) || last.entry.type !== "assistant") return undefined;
+  const content = Array.isArray(last.entry.message?.content) ? (last.entry.message.content as Record<string, unknown>[]) : [];
+  const call = content.find((block) => block?.type === "tool_use" && block.name === "AskUserQuestion" && typeof block.id === "string");
+  const input = call?.input as { questions?: unknown } | undefined;
+  if (!call || !Array.isArray(input?.questions)) return undefined;
+  const questions = input.questions.flatMap((raw, index): AsyncQuestion[] => {
+    const question = raw as { question?: unknown; options?: unknown } | null;
+    if (typeof question?.question !== "string" || !question.question.trim()) return [];
+    const options = Array.isArray(question.options)
+      ? question.options.flatMap((option) => (typeof (option as { label?: unknown })?.label === "string" ? [(option as { label: string }).label] : []))
+      : [];
+    return [{ id: `${call.id as string}:${index}`, title: question.question.trim(), options }];
+  });
+  return questions.length > 0 ? { toolCallId: call.id as string, questions } : undefined;
+}
+
+/**
+ * What a device sent, as Claude gets it when it answers the question that
+ * Claude's turn stopped on: answers picked on a question card read as the
+ * question and its answer; anything else typed is the answer as it stands.
+ */
+function answerContent(content: ContentBlock[], ask: WaitingAsk): ContentBlock[] {
+  const [block] = content;
+  const replies = content.length === 1 && block?.type === "text" ? questionReplies(block.text) : undefined;
+  if (!replies) return content;
+  const answered = replies.map((reply) => `> ${reply.question}\n\n${reply.answer || "（跳过了这个问题）"}`);
+  const rest = ask.questions.length - replies.length;
+  if (rest > 0) answered.push(`（其余 ${rest} 个问题没有回答）`);
+  return [{ type: "text", text: answered.join("\n\n") }];
 }
 
 /** Taking a session over answers within this, under the device's 60 s, so it hears why. */
@@ -169,6 +225,7 @@ export class ClaudeDriver extends AcpDriver {
   /** Per session: the settings its transcript shows it running with (what the Claude on the computer is set to). */
   private readonly observed = new Map<string, ObservedSettings>();
   private readonly reportedStates = new Map<string, SessionState>();
+  private readonly reportedQuestions = new Map<string, string>();
   /** Per session: TodoWrite calls shown as the plan, whose results the tail skips. */
   private readonly hiddenTools = new Map<string, Set<string>>();
   /** Per session: calls that started an agent in the background and haven't heard back (see transcriptLine). */
@@ -321,6 +378,8 @@ export class ClaudeDriver extends AcpDriver {
     const mode = this.modes.get(nativeId) ?? "idle";
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_driver", driver: driverOf(mode) });
     this.reportState(nativeId, await this.discoveredState(nativeId, context.cwd));
+    // (Forced: the turn just replayed as under way cleared what the hub had.)
+    await this.reportQuestions(nativeId, true);
     if (mode === "remote") this.emitConfig(nativeId, state);
     else void this.loadTemplate(context.cwd).then(() => this.emitDesktopConfig(nativeId));
     return history;
@@ -332,13 +391,52 @@ export class ClaudeDriver extends AcpDriver {
     if (!path) return this.modes.has(nativeId) || this.host?.desktop(this.id, nativeId) ? "idle" : "offline";
     try {
       const held = this.host?.desktop(this.id, nativeId) || sessionHolders(this.configDir, nativeId).length > 0;
-      if (held) return turnInProgress(path, this.busyWindowMs) ? "running" : "idle";
+      if (held) return waitingAsk(path) ? "waiting" : turnInProgress(path, this.busyWindowMs) ? "running" : "idle";
       if (this.hasHolderRecords()) return "idle";
-      return (await this.elsewhere(nativeId))?.working ? "running" : "idle";
+      const other = await this.elsewhere(nativeId);
+      return other && waitingAsk(path) ? "waiting" : other?.working ? "running" : "idle";
     } catch {
       // The transcript can disappear between discovery and the bounded read.
       return "offline";
     }
+  }
+
+  /**
+   * The question another Claude stopped on, unanswered, while it has the
+   * session open (a `linkshell claude` terminal, the desktop app, a `claude`
+   * somewhere): the phone can answer it (see prompt).
+   */
+  private async waitingQuestion(nativeId: string): Promise<WaitingAsk | undefined> {
+    if (this.modes.get(nativeId) === "remote") return undefined;
+    const path = findTranscript(this.configDir, nativeId, this.sessions.get(nativeId)?.cwd ?? "");
+    if (!path) return undefined;
+    try {
+      // (The transcript first: looking for the processes that hold a session can mean running ps.)
+      const ask = waitingAsk(path);
+      if (!ask || (!this.host?.desktop(this.id, nativeId) && !(await this.elsewhere(nativeId)))) return undefined;
+      return ask;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** With the questions Claudes on the computer wait on, so lists, the watch and Live Activities can answer them unopened. */
+  override async listSessions(limit: number): Promise<DiscoveredSession[]> {
+    const found = await super.listSessions(limit);
+    return Promise.all(found.map(async (session) => {
+      if (this.modes.get(session.nativeId) === "remote") return session;
+      const asyncQuestions = session.state === "waiting" ? (await this.waitingQuestion(session.nativeId))?.questions ?? [] : [];
+      return { ...session, asyncQuestions };
+    }));
+  }
+
+  /** Puts the question a Claude on the computer waits on in front of the phone, as an async question card. */
+  private async reportQuestions(nativeId: string, force = false): Promise<void> {
+    const questions = (await this.waitingQuestion(nativeId))?.questions ?? [];
+    const key = JSON.stringify(questions);
+    if (!force && (this.reportedQuestions.get(nativeId) ?? "[]") === key) return;
+    this.reportedQuestions.set(nativeId, key);
+    this.host?.update(this.id, nativeId, { sessionUpdate: "ls_async_questions", questions });
   }
 
   private reportState(nativeId: string, state: SessionState): void {
@@ -481,6 +579,18 @@ export class ClaudeDriver extends AcpDriver {
 
   override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
     await this.reconcileDesktopWriter(nativeId);
+    // That turn stopped on a question and waits for its answer, not for time:
+    // what the phone sends is the answer. Claude takes answers to AskUserQuestion
+    // only from its own window, so that window's turn is stopped and the answer
+    // goes in as the next message, which Claude reads against its question.
+    const ask = await this.waitingQuestion(nativeId);
+    if (ask) {
+      await this.interruptElsewhere(nativeId, ask);
+      await this.ensureRemote(nativeId);
+      // The question's card would otherwise run forever: its answer is the message below.
+      this.emit(nativeId, { sessionUpdate: "tool_call_update", toolCallId: ask.toolCallId, status: "completed" });
+      return super.prompt(nativeId, answerContent(content, ask), clientMessageId);
+    }
     // Another Claude is in the middle of a turn here: the message waits for it to finish.
     if (this.waiting.get(nativeId)?.length || (await this.elsewhere(nativeId))?.working) {
       const waiting = this.waiting.get(nativeId) ?? [];
@@ -564,14 +674,22 @@ export class ClaudeDriver extends AcpDriver {
    * is running in this session, the way Ctrl-C would: asked to stop first,
    * told to quit if it doesn't. Only ever the processes that have this session open.
    */
-  private async interruptElsewhere(nativeId: string): Promise<void> {
-    if (!(await this.elsewhere(nativeId))?.working) return;
+  private async interruptElsewhere(nativeId: string, ask?: WaitingAsk): Promise<void> {
+    // A turn waiting on a question is stopped however long it has waited; it is
+    // over once the question is no longer what the transcript ends on.
+    const busy = async () => {
+      const other = await this.elsewhere(nativeId);
+      if (!ask) return !!other?.working;
+      const path = other && findTranscript(this.configDir, nativeId, this.sessions.get(nativeId)?.cwd ?? "");
+      return !!path && waitingAsk(path)?.toolCallId === ask.toolCallId;
+    };
+    if (!(await busy())) return;
     const recorded = (await this.foreignHolders(nativeId)).map((holder) => holder.pid);
     const pids = recorded.length > 0 || this.hasHolderRecords() ? recorded : await this.commandLineHolders(nativeId);
     const stopped = async (ms: number) => {
       const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
-        if (!(await this.elsewhere(nativeId))?.working) return true;
+        if (!(await busy())) return true;
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
       return false;
@@ -771,6 +889,8 @@ export class ClaudeDriver extends AcpDriver {
     this.beginTranscriptStream(nativeId);
     this.setWriter(nativeId, "remote");
     this.setMode(nativeId, "remote");
+    // From here Claude asks over ACP, in the phone's own question cards.
+    await this.reportQuestions(nativeId);
     this.emitConfig(nativeId, target);
     if (alsoOpenIn) {
       // That Claude keeps its own copy of the conversation and can't be told about this one.
@@ -818,7 +938,10 @@ export class ClaudeDriver extends AcpDriver {
     for (const nativeId of this.tails.keys()) {
       if (this.modes.get(nativeId) === "remote") continue;
       const state = await this.discoveredState(nativeId, this.sessions.get(nativeId)?.cwd ?? "");
-      if (this.modes.get(nativeId) !== "remote") this.reportState(nativeId, state);
+      if (this.modes.get(nativeId) !== "remote") {
+        this.reportState(nativeId, state);
+        await this.reportQuestions(nativeId);
+      }
     }
     for (const [nativeId, tasks] of this.tasks) {
       const activity = this.activity.get(nativeId);

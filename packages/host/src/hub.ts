@@ -980,7 +980,10 @@ export class SessionHub {
     if (!this.store.claimClientMessage(sessionId, clientMessageId)) return "duplicate";
     const live = this.liveFor(sessionId);
     // An answer belongs in the turn that asked it, even from an older client using the normal queue.
-    const answersQuestion = summary.agent === "codex" && content.length === 1 && content[0]?.type === "text" && questionReplies(content[0].text);
+    // A Claude on the computer waiting on its question waits for nothing else: anything sent answers it.
+    const answersQuestion =
+      (summary.agent === "codex" && content.length === 1 && content[0]?.type === "text" && questionReplies(content[0].text)) ||
+      (summary.agent === "claude" && this.questionsOf(sessionId).length > 0);
     if (whenBusy === "queue" && !answersQuestion && (live.turnActive || live.held.length > 0)) {
       live.held.push({ clientMessageId, content });
       this.announce(sessionId);

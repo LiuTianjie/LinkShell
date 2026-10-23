@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SessionEvent, SessionSummary } from "@linkshell/wire";
+import { asyncQuestionReply, type SessionEvent, type SessionSummary } from "@linkshell/wire";
 import { ClaudeDriver } from "../src/drivers/claude/driver.js";
 import { connectHost, type HostClient } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
@@ -548,6 +548,68 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(p.userTexts(desk.id)).not.toContain("never mind");
   }, 25_000);
+
+  it("answers the question a claude on the computer waits on, from its card or a typed message, by interrupting that claude", async () => {
+    // (A short busy window: a question waits for its answer however long ago it was asked.)
+    const e = makeEnv();
+    const host = await boot(e, 300, 100);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    desk.type("first");
+    await waitFor(() => host.hub.getSession(desk.id).title === "Task: first", 8000);
+    await desk.quit();
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    const nativeId = desk.id.slice("claude:".length);
+    const transcript = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"), `${nativeId}.jsonl`);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+    const asks = async (toolCallId: string, questions: { question: string; options: string[] }[]) => {
+      const plain = spawn(FAKE_CLAUDE, ["--resume", nativeId], { cwd: e.workDir, env: e.env, stdio: ["pipe", "ignore", "ignore"] });
+      cleanups.push(() => void plain.kill("SIGKILL"));
+      await waitFor(() => execSync(`ps -ww -o command= -p ${plain.pid}`).toString().includes(nativeId));
+      const input = { questions: questions.map(({ question, options }) => ({ question, header: "Q", multiSelect: false, options: options.map((label) => ({ label, description: "" })) })) };
+      appendFileSync(
+        transcript,
+        JSON.stringify({ type: "assistant", uuid: randomUUID(), isSidechain: false, sessionId: nativeId, cwd: e.workDir, entrypoint: "cli", timestamp: new Date().toISOString(), message: { id: `msg_${toolCallId}`, role: "assistant", content: [{ type: "tool_use", id: toolCallId, name: "AskUserQuestion", input }], stop_reason: "tool_use" } }) + "\n",
+      );
+      return { gone: new Promise<NodeJS.Signals | null>((resolve) => plain.once("exit", (_code, signal) => resolve(signal))) };
+    };
+    const closed = (toolCallId: string) =>
+      p.of(desk.id).some((ev) => ev.update.sessionUpdate === "tool_call_update" && ev.update.toolCallId === toolCallId && ev.update.status === "completed");
+
+    // Picked on the card: the question and its answer go to Claude as one message, at once.
+    let { gone } = await asks("toolu_restart", [{ question: "Restart the app?", options: ["Yes", "Not yet"] }, { question: "Which device?", options: ["iPhone", "Simulator"] }]);
+    await waitFor(() => host.hub.getSession(desk.id).asyncQuestions?.length === 2, 12_000);
+    expect(host.hub.getSession(desk.id).state).toBe("waiting");
+    // Still asking long after the busy window: it waits for the answer, not for time.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(host.hub.getSession(desk.id).state).toBe("waiting");
+    const [question] = host.hub.getSession(desk.id).asyncQuestions!;
+    expect(question).toEqual({ id: "toolu_restart:0", title: "Restart the app?", options: ["Yes", "Not yet"] });
+    // The session list finds it too, for lists, the watch and Live Activities that never opened it.
+    const driver = (host.hub as unknown as { drivers: Map<string, ClaudeDriver> }).drivers.get("claude")!;
+    const listed = (await driver.listSessions(10)).find((session) => session.nativeId === nativeId);
+    expect(listed?.state).toBe("waiting");
+    expect(listed?.asyncQuestions?.map((entry) => entry.title)).toEqual(["Restart the app?", "Which device?"]);
+    const reply = asyncQuestionReply([{ question: question!, answer: "Yes" }]);
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "a", content: text(reply) })).toEqual({ delivery: "started" });
+    expect(await gone).toBe("SIGINT");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: > Restart the app?\n\nYes\n\n（其余 1 个问题没有回答）"), 12_000);
+    expect(closed("toolu_restart")).toBe(true);
+    await waitFor(() => host.hub.getSession(desk.id).state === "idle", 12_000);
+    expect(host.hub.getSession(desk.id).asyncQuestions).toEqual([]);
+
+    // Typed in the composer instead: that is the answer, sent as it is, not queued behind the question.
+    await waitFor(() => host.hub.getSession(desk.id).driver === "remote");
+    ({ gone } = await asks("toolu_again", [{ question: "Go on?", options: ["Yes", "No"] }]));
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    await waitFor(() => host.hub.getSession(desk.id).asyncQuestions?.length === 1, 12_000);
+    expect(await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "b", content: text("sure, go ahead") }, 30_000)).toEqual({ delivery: "started" });
+    expect(await gone).toBe("SIGINT");
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: sure, go ahead"), 12_000);
+    expect(closed("toolu_again")).toBe(true);
+    expect(host.hub.getSession(desk.id).queue ?? []).toEqual([]);
+    expect(host.hub.getSession(desk.id).asyncQuestions).toEqual([]);
+  }, 60_000);
 
   it("continues a session the Claude desktop app has open, after its turn, and follows the app when it writes again", async () => {
     const e = makeEnv();

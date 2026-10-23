@@ -35,6 +35,7 @@ function paramsOf(item: ToolItem, subject: string): [string, string][] {
   if (item.toolKind === "execute" || item.toolKind === "edit" || item.toolKind === "delete" || item.toolKind === "move") return [];
   const input = item.rawInput;
   if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+  if (item.detail?.type === "question") return questionParams(input as Record<string, unknown>);
   const entries: [string, string][] = [];
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
     if (value === null || value === undefined || value === "") continue;
@@ -44,6 +45,22 @@ function paramsOf(item: ToolItem, subject: string): [string, string][] {
     if (entries.length === 8) break;
   }
   return entries;
+}
+
+/** Claude's AskUserQuestion, read as what it asks: each question and its options, not its JSON. */
+function questionParams(input: Record<string, unknown>): [string, string][] {
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  return questions.flatMap((raw, index): [string, string][] => {
+    const question = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    if (typeof question.question !== "string") return [];
+    const options = (Array.isArray(question.options) ? question.options : []).flatMap((entry) => {
+      const option = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+      if (typeof option.label !== "string") return [];
+      return [`· ${option.label}${typeof option.description === "string" && option.description ? `：${option.description}` : ""}`];
+    });
+    const header = typeof question.header === "string" && question.header ? question.header : `问题 ${index + 1}`;
+    return [[`${header}${question.multiSelect === true ? "（可多选）" : ""}`, [question.question, ...options].join("\n")]];
+  });
 }
 
 function exitCodeOf(item: ToolItem): number | undefined {
@@ -264,7 +281,7 @@ function ToolRow({ item }: { item: ToolItem }) {
 
       {open ? (
         <View style={{ marginLeft: GLYPH + 8, gap: 8 }}>
-          {params.length ? <ParamsBlock entries={params} /> : null}
+          {params.length ? <ParamsBlock entries={params} prose={item.detail?.type === "question"} /> : null}
           {described.changes.map((change) => (
             <View key={change.path} style={{ gap: 4 }}>
               {described.changes.length > 1 ? (
@@ -284,13 +301,13 @@ function ToolRow({ item }: { item: ToolItem }) {
   );
 }
 
-function ParamsBlock({ entries }: { entries: [string, string][] }) {
+function ParamsBlock({ entries, prose }: { entries: [string, string][]; prose?: boolean }) {
   return (
     <View style={{ backgroundColor: colors.inset, borderRadius: 12, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9, gap: 7 }}>
-      {entries.map(([key, value]) => (
-        <View key={key} style={{ gap: 1 }}>
+      {entries.map(([key, value], index) => (
+        <View key={`${index}:${key}`} style={{ gap: 1 }}>
           <Text style={[type.caption, { color: colors.tertiaryLabel, fontWeight: "600" }]}>{key}</Text>
-          <Text selectable style={[type.footnote, { color: colors.label, fontFamily: value.includes("\n") || value.startsWith("{") || value.startsWith("[") ? mono : undefined }]}>
+          <Text selectable style={[type.footnote, { color: colors.label, fontFamily: !prose && (value.includes("\n") || value.startsWith("{") || value.startsWith("[")) ? mono : undefined }]}>
             {value}
           </Text>
         </View>
