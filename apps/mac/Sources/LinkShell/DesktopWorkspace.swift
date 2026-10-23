@@ -54,6 +54,9 @@ import WebKit
     // Hidden or behind other windows, WebKit throttles the page's timers: connection
     // heartbeats then come late, and a dead link to another computer looks alive past a request's limit.
     if #available(macOS 14.0, *) { configuration.preferences.inactiveSchedulingPolicy = .none }
+    // Off by default: without it the page sees fullscreenEnabled false and the remote
+    // screen only fills the window instead of taking over the display.
+    configuration.preferences.isElementFullscreenEnabled = true
     configuration.userContentController.add(DesktopWorkspaceMessageProxy(self), name: "linkshellDesktop")
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = self
