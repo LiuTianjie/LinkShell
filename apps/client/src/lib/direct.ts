@@ -8,6 +8,12 @@ import { RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
 
 /** How long to look for addresses before sending the offer with the ones found. */
 const GATHER_MS = 2000;
+/**
+ * How long a channel may stay disconnected (a network change) before it is given up. WebRTC
+ * itself waits ~30 s to call it failed; meanwhile previews and the screen would stall on it
+ * instead of going through the gateway, and a new channel is offered right after.
+ */
+const DISCONNECTED_MS = 10_000;
 
 /** (The library's classes are event targets; its types don't say so.) */
 type Listens = { addEventListener(name: string, listener: (event: unknown) => void): void };
@@ -40,8 +46,13 @@ export const directConnector: DirectConnector = (iceServers) => {
     onState(listener) {
       channel.addEventListener("open", () => listener("open"));
       channel.addEventListener("close", () => listener("closed"));
+      let disconnected: ReturnType<typeof setTimeout> | undefined;
       connection.addEventListener("connectionstatechange", () => {
-        if (connection.connectionState === "failed" || connection.connectionState === "closed") listener("closed");
+        const state = connection.connectionState;
+        clearTimeout(disconnected);
+        disconnected = undefined;
+        if (state === "failed" || state === "closed") listener("closed");
+        else if (state === "disconnected") disconnected = setTimeout(() => listener("closed"), DISCONNECTED_MS);
       });
     },
     onMessage(listener) {

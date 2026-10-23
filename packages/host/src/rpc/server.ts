@@ -159,7 +159,7 @@ export class HostRpcServer {
           window: (startSeq) => context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }),
         };
         context.subscriptions.set(params.sessionId, subscriber);
-        return hub.subscribe(params.sessionId, params.fromSeq, subscriber);
+        return hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
       },
       "sessions.history": (params: P<"sessions.history">) => {
         const page = hub.history(params.sessionId, params.beforeSeq);

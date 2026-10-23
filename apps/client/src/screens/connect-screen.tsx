@@ -7,29 +7,46 @@ import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
-import { useClient, useConnection } from "@/lib/client";
+import { useClient, useConnection, useHasComputer } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
-import { useComputers } from "@/lib/computers";
+import { reconnectRelays, useComputers } from "@/lib/computers";
 import { normalizeHostUrl } from "@/lib/settings";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
 const HOST_COMMAND = "linkshell host --dev-port 7878";
+// The host's TCP port listens on loopback only and is for development: a phone can't reach it,
+// so a release build has no address form, only the connection it already has.
+const LAN_FORM = __DEV__;
 
 export function ConnectScreen() {
   const insets = usePageInsets();
-  const { url, setUrl, link } = useConnection();
+  const { url, computer, setUrl, link } = useConnection();
   const status = useClient((state) => state.status);
   const detail = useClient((state) => state.statusDetail);
   const machine = useClient((state) => state.machine);
-  const [draft, setDraft] = useState(url);
+  // Through a gateway: `url` is the gateway's, not an address to type in or save as a LAN computer.
+  const throughGateway = computer.kind === "relay";
+  const hasComputer = useHasComputer();
+  const [draft, setDraft] = useState(throughGateway ? "" : url);
   const [invalid, setInvalid] = useState(false);
   const online = status === "online";
   const normalized = normalizeHostUrl(draft);
   const changed = normalized !== null && normalized !== url;
 
+  const reconnect = () => {
+    haptics.medium();
+    // No computer yet: there is no connection to make again.
+    if (hasComputer) {
+      reconnectRelays();
+      link.reconnectNow();
+    }
+    router.back();
+  };
+
   const connect = () => {
+    if (throughGateway && draft.trim() === "") return reconnect();
     if (!normalized) {
       setInvalid(true);
       haptics.error();
@@ -43,7 +60,10 @@ export function ConnectScreen() {
 
   return (
     <KeyboardAwareScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 24, gap: 18 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" bottomOffset={20}>
-      <SheetHeader title="连接电脑" actions={[{ key: "connect", label: changed ? "连接" : "重新连接", icon: { sf: "link", md: "link" }, onPress: connect, prominent: true }]} />
+      <SheetHeader
+        title="连接电脑"
+        actions={[{ key: "connect", label: LAN_FORM && changed ? "连接" : "重新连接", icon: { sf: "link", md: "link" }, onPress: LAN_FORM ? connect : reconnect, prominent: true }]}
+      />
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <LiveDot size={8} color={online ? colors.ok : status === "connecting" ? colors.running : colors.waiting} live={status !== "stopped"} />
@@ -56,6 +76,8 @@ export function ConnectScreen() {
         </Text>
       </View>
 
+      {LAN_FORM ? (
+        <>
       <View style={{ gap: 8 }}>
         <Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: "600" }]}>电脑地址</Text>
         <TextInput
@@ -113,6 +135,14 @@ export function ConnectScreen() {
           <Icon sf="doc.on.doc" md="content_copy" size={14} color={colors.secondaryLabel} />
         </Pressable>
       </View>
+        </>
+      ) : (
+        <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+          {hasComputer
+            ? "连接会自动重试。一直连不上时，确认电脑开着、联网，并且 LinkShell 在运行（终端里运行 linkshell status 查看）。"
+            : "还没有添加电脑：在电脑上运行 linkshell pair，再用这台手机扫码。"}
+        </Text>
+      )}
     </KeyboardAwareScrollView>
   );
 }

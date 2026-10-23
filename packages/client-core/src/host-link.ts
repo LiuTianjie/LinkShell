@@ -72,6 +72,9 @@ export class HostLink {
   private readonly restoredListeners = new Set<(summary: SessionSummary) => void>();
   private readonly notificationListeners = new Map<string, Set<(params: unknown) => void>>();
   lastError?: string;
+  /** Set while away (`resumeLatest`): the next subscriptions start at the latest turns. */
+  private latest = false;
+  private openedAt = 0;
 
   constructor(private readonly options: HostLinkOptions) {}
 
@@ -128,10 +131,42 @@ export class HostLink {
   reconnectNow(): void {
     if (this.statusValue === "stopped") return;
     if (this.statusValue === "online") return;
+    // A connection being made right now is left to finish: starting another would abandon it
+    // half open (on the computer too, which keeps a few channels per device and drops the
+    // oldest). One that has been at it for a while is stuck (made before a suspension).
+    if (this.socket && Date.now() - this.openedAt < 30_000) return;
+    if (this.socket) {
+      const stuck = this.socket;
+      this.socket = undefined;
+      this.peer?.close("reconnecting");
+      stuck.onclose = null;
+      stuck.close();
+    }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.attempt = 0;
     this.open();
+  }
+
+  /**
+   * Checks an online connection still answers (the app came back to the foreground): one that
+   * doesn't within `timeoutMs` is closed, and made again.
+   */
+  probe(timeoutMs = 8000): void {
+    const socket = this.socket;
+    if (this.statusValue !== "online" || !socket || !this.peer) return;
+    this.peer.request("machine.info", {}, timeoutMs).catch(() => {
+      if (this.socket === socket) socket.close();
+    });
+  }
+
+  /**
+   * The app was away (in the background): sessions restored on the next connection start at
+   * their latest turns instead of replaying everything they missed, which loads as history
+   * when scrolled to. Older hosts ignore it and catch up as before.
+   */
+  resumeLatest(on = true): void {
+    this.latest = on;
   }
 
   async call<M extends MethodName>(method: M, params: MethodParams<M>, timeoutMs?: number): Promise<MethodResult<M>> {
@@ -141,7 +176,7 @@ export class HostLink {
     // offline connection still needs a bounded wait before reporting failure.
     await this.waitOnline(limit > 0 ? limit : this.options.requestTimeoutMs || 30_000);
     if (!this.peer || this.statusValue !== "online") {
-      throw RpcError.app("offline", "Not connected to the computer", { code: "offline" });
+      throw RpcError.app("offline", "没有连上电脑");
     }
     return this.peer.request<MethodResult<M>>(method, params, limit === 0 ? 0 : Math.max(1000, deadline - Date.now()));
   }
@@ -200,6 +235,7 @@ export class HostLink {
       return;
     }
     this.socket = socket;
+    this.openedAt = Date.now();
     const peer = new RpcPeer({
       send: (text) => {
         if (socket.readyState === OPEN) socket.send(text);
@@ -231,29 +267,40 @@ export class HostLink {
   private async onOpen(socket: SocketLike): Promise<void> {
     if (this.socket !== socket) return;
     this.attempt = 0;
-    // Restore every open session before announcing we're online, so nothing
-    // rendered in between is missing the events that happened while offline.
-    this.setStatus("online", "");
-    await Promise.all(
-      [...this.subscriptions.keys()].map((sessionId) =>
-        this.sendSubscribe(sessionId).then((result) => {
-          // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
-          if (result?.session) for (const listener of this.restoredListeners) listener(result.session);
-        }),
-      ),
-    );
-    for (const wake of [...this.waiters]) wake();
-    for (const listener of this.onlineListeners) listener();
+    // Watched from the start: restoring a long backlog mustn't leave a dead socket unnoticed.
     const heartbeat = this.options.heartbeatMs ?? 25_000;
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (heartbeat > 0) {
-      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = setInterval(() => {
-        if (this.socket !== socket || this.statusValue !== "online") return;
+        if (this.socket !== socket) return;
         this.peer?.request("machine.info", {}, 10_000).catch(() => {
           // The socket looks open but nothing answers (common after a network change).
           if (this.socket === socket) socket.close();
         });
       }, heartbeat);
+    }
+    // Online first, so calls made now go through; anyone waiting is woken once every open
+    // session is restored, so nothing they render is missing what happened while offline.
+    this.setStatus("online", "");
+    await Promise.all([...this.subscriptions.keys()].map((sessionId) => this.restore(sessionId, socket)));
+    if (this.socket !== socket) return;
+    this.latest = false;
+    for (const wake of [...this.waiters]) wake();
+    for (const listener of this.onlineListeners) listener();
+  }
+
+  /** Subscribes again after a (re)connect; one that fails is tried twice more. */
+  private async restore(sessionId: string, socket: SocketLike): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      if (this.socket !== socket || !this.subscriptions.has(sessionId)) return;
+      const result = await this.sendSubscribe(sessionId);
+      if (this.socket !== socket) return;
+      if (result?.session) {
+        // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
+        for (const listener of this.restoredListeners) listener(result.session);
+        return;
+      }
     }
   }
 
@@ -265,8 +312,13 @@ export class HostLink {
         sessionId,
         fromSeq: subscription.cursor(),
         lazyImages: this.options.lazyImages,
+        latest: this.latest || undefined,
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        // Gone on the host (deleted meanwhile): nothing to restore, and nothing to retry.
+        if (error instanceof RpcError && error.appCode === "not_found") this.subscriptions.delete(sessionId);
+        return undefined;
+      });
   }
 
   private scheduleReconnect(reason: string): void {

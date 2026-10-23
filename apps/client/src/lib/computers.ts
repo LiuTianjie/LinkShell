@@ -98,6 +98,11 @@ export function reconnectRelays(): void {
   for (const relay of relays.values()) relay.reconnectNow();
 }
 
+/** Back in the foreground: a gateway connection that looks open may have died meanwhile. */
+export function probeRelays(): void {
+  for (const relay of relays.values()) relay.probe();
+}
+
 // ── store ────────────────────────────────────────────────────────────
 
 interface ComputersState {
@@ -200,11 +205,18 @@ useAccount.subscribe((state, previous) => {
   const url = normalizeGateway(DEFAULT_GATEWAY);
   const relay = state.session ? relayFor(url) : relays.get(url);
   if (!relay) return;
-  // Reconnect so the gateway sees (or forgets) the account.
-  relay.stop();
-  relays.delete(url);
-  useComputers.setState((current) => ({ live: { ...current.live, [url]: [] } }));
-  if (state.session || useComputers.getState().saved.relay.some((entry) => entry.gateway === url)) relayFor(url);
+  // Signed out (or the session ended on the server): the gateway keeps a phone on its account
+  // through a missing or failed token, so it is told. Gateways from before `account.leave`
+  // answer unknown_method, and keep it as they always did.
+  const leaving = previous.session && !state.session ? relay.request("account.leave", {}, 5000).catch(() => undefined) : Promise.resolve(undefined);
+  void leaving.then(() => {
+    if (relays.get(url) !== relay) return;
+    // Reconnect so the gateway sees (or forgets) the account.
+    relay.stop();
+    relays.delete(url);
+    useComputers.setState((current) => ({ live: { ...current.live, [url]: [] } }));
+    if (useAccount.getState().session || useComputers.getState().saved.relay.some((entry) => entry.gateway === url)) relayFor(url);
+  });
 });
 
 /** All computers, merged: saved paired ones (with live status), account ones, and direct hosts. */
@@ -214,7 +226,13 @@ export function listComputers(state: Pick<ComputersState, "saved" | "live">): Co
   for (const entry of state.saved.relay) {
     const key = relayKey(entry.gateway, entry.machine.id);
     const live = state.live[entry.gateway]?.find((machine) => machine.id === entry.machine.id);
-    out.push({ key, kind: "relay", gateway: entry.gateway, machine: live ?? { ...entry.machine, online: false } });
+    // The signing key is the one pairing checked against the QR code, never what the gateway lists
+    // now: a gateway that swapped it could otherwise stand in for the computer. (The box key may
+    // come from the gateway: a wrong one only makes the signed handshake fail.) One listed with
+    // another signing key is shown offline.
+    const same = live && live.signKey === entry.machine.signKey;
+    const machine = live && same ? live : { ...entry.machine, ...(live ? { name: live.name } : {}), online: false };
+    out.push({ key, kind: "relay", gateway: entry.gateway, machine });
     seen.add(key);
   }
   for (const [gateway, machines] of Object.entries(state.live)) {

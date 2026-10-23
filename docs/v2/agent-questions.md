@@ -26,7 +26,7 @@ Grok 新建、载入、恢复和分叉会话携带 `_meta.askUserQuestion: true`
 
 Cursor 文档中的请求没有 `sessionId`。host 优先使用显式 `sessionId`，否则按当前工具调用定位会话；只有一个活跃会话时可使用该会话。多个会话同时运行且无法确定归属时返回错误，不猜测“最后打开的会话”。
 
-URL elicitation 未声明支持。它涉及外部页面的专门交互，不能用普通问题卡片代替。当前表单支持平面字符串、数字、整数、布尔值、单选和多选字段。计划审批扩展（例如 `cursor/create_plan`）不属于本次问题适配。
+host 在 `initialize` 中声明 `elicitation: { form, url }`。URL elicitation（`mode: url`）不用普通问题卡片代替：手机显示消息和链接，用户选择“打开授权页面”、“拒绝”或“取消”后返回 `accept` / `decline` / `cancel`，链接只在用户同意后打开，仅接受 http / https；Agent 发出 `elicitation/complete` 时对应卡片自动结束。当前表单支持平面字符串、数字、整数、布尔值、单选和多选字段。计划审批扩展（例如 `cursor/create_plan`）不属于本次问题适配。
 
 ## 上游边界
 

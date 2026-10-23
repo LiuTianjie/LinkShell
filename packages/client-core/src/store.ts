@@ -816,7 +816,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   });
   // Opened while the link was down, or back after a break: the backlog is in, the session can show.
   link.onRestored((summary) => subscribed(summary, true));
-  // Refresh the list after every (re)connect; retry unsent messages too.
+  // Refresh the list after every (re)connect. A message sent while offline waits up to 30 s for
+  // the link (`call`); one that failed after that stays failed, with its retry button.
   link.onOnline(() => {
     void store.getState().refresh();
   });

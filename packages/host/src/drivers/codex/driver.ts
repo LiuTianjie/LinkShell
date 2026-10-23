@@ -1537,6 +1537,9 @@ export class CodexDriver implements AgentDriver {
       // (What is joined in Codex's background server is still there.)
       if (this.inShared.has(threadId)) continue;
       this.loseTasks(threadId);
+      // The server that ran the turn is gone, so the turn is too; left open, the session would stay "running" with nothing behind it.
+      const turnId = this.stateOf(threadId).activeTurnId;
+      if (turnId) this.host?.update(this.id, threadId, { sessionUpdate: "ls_turn", state: "ended", turnId, stopReason: "error" });
       this.attached.delete(threadId);
       this.threads.delete(threadId);
       this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: "offline" });
@@ -1759,6 +1762,8 @@ export class CodexDriver implements AgentDriver {
       if (requestId.startsWith(sharedRequestId("")) !== (from === "shared")) continue;
       this.approvals.delete(requestId);
       pending.abandon();
+      // Reported like a cancel, or the card stays up (and comes back on replay) for a request no one can answer any more.
+      this.host?.update(this.id, pending.threadId, { sessionUpdate: "ls_permission_resolved", requestId, optionId: "cancel" });
     }
   }
 }

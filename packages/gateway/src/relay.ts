@@ -40,7 +40,10 @@ export interface GatewayOptions {
    * may stay that far behind before it is dropped (default 60 s).
    */
   maxBufferedBytes?: number;
+  /** How long a receiver may take nothing while its sender is held (default 15 s). */
   stalledPeerMs?: number;
+  /** How long a receiver that is reading, slowly, may hold its sender (default 60 s). */
+  slowPeerMs?: number;
 }
 
 /** The relay owns authentication/routing; transports only carry opaque v2 frames. */
@@ -350,10 +353,22 @@ export class Gateway {
     from.held = true;
     from.socket.pause();
     const since = Date.now();
+    let lowest = target.socket.bufferedAmount;
+    let progressAt = since;
     const timer = setInterval(() => {
       const open = target.socket.readyState === WebSocket.OPEN;
-      if (open && target.socket.bufferedAmount > limit / 4) {
-        if (Date.now() - since < (this.options.stalledPeerMs ?? 60_000)) return;
+      const behind = target.socket.bufferedAmount;
+      if (behind < lowest) {
+        lowest = behind;
+        progressAt = Date.now();
+      }
+      if (open && behind > limit / 4) {
+        // While the sender is held, what it sends its other peers waits too, so a receiver that
+        // takes nothing (a phone suspended in the background, a dead link) is let go soon. One
+        // that is slowly reading gets longer. Either catches up from its last seq on reconnect.
+        const stalled = Date.now() - progressAt >= (this.options.stalledPeerMs ?? 15_000);
+        const tooLong = Date.now() - since >= (this.options.slowPeerMs ?? 60_000);
+        if (!stalled && !tooLong) return;
         this.log(`${target.record.role} ${target.record.id.slice(0, 8)} can't keep up; dropping it`);
         target.socket.terminate();
       }
@@ -438,6 +453,19 @@ export class Gateway {
         const machine = this.store.peer(machineId);
         const ours = machine?.role === "machine" && peer.record.userId !== undefined && machine.userId === peer.record.userId;
         if (ours && !this.peers.has(machineId)) this.store.disown(machineId);
+        return {};
+      }
+      case "account.leave": {
+        // A phone signing out. Its binding outlives a missing or failed token (installed apps rely
+        // on that), so it is ended by asking.
+        need("device");
+        if (!peer.record.userId) return {};
+        const machines = this.store.reachable(peer.record.id).filter(({ via }) => via === "account");
+        this.store.disown(peer.record.id);
+        peer.record.userId = undefined;
+        peer.email = undefined;
+        // Their channels from it close now, not when it next reconnects.
+        for (const { peer: machine } of machines) this.event(machine.id, "presence", { id: peer.record.id, online: false });
         return {};
       }
       case "devices.list":

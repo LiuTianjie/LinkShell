@@ -256,6 +256,51 @@ describe("generic ACP driver (fake agent)", () => {
     expect(t.text(session.id)).not.toContain("echo: second");
   });
 
+  it("drops the queue when the agent exits, says so, and doesn't send it after the restart", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("SLOW one") });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "b", content: prompt("queued two") });
+    await waitFor(() => t.summaries.findLast((s) => s.id === session.id)?.queue?.length === 1);
+    const driver = (t.host.hub as unknown as { drivers: Map<string, AcpDriver> }).drivers.get("fake")!;
+    (driver as unknown as { onExit(reason: string): void }).onExit("test kill");
+    await waitFor(() => !t.summaries.findLast((s) => s.id === session.id)?.queue);
+    const notice = await waitFor(() => t.of(session.id).find((e) => e.update.sessionUpdate === "ls_notice"));
+    expect(notice.update).toMatchObject({ level: "warning", title: "Fake 已退出，1 条排队消息未发送" });
+    await waitFor(() => t.host.machineInfo().agents[0]?.problem === undefined, 10_000);
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "c", content: prompt("after") });
+    await waitFor(() => t.text(session.id).includes("echo: after"), 8000);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(t.text(session.id)).not.toContain("queued two");
+  }, 20_000);
+
+  it("tells the user when a permission request can't be shown and was refused", async () => {
+    const logs: string[] = [];
+    const t = await setup();
+    (t.host.hub as unknown as { log: (m: string) => void }).log = (m) => logs.push(m);
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("BADPERM") });
+    await waitFor(() => t.ended(session.id).length === 1);
+    expect(t.text(session.id)).toContain("perm: cancelled");
+    expect(logs.some((line) => line.includes("session/request_permission answered cancelled"))).toBe(true);
+    expect(t.of(session.id).find((e) => e.update.sessionUpdate === "ls_notice")?.update).toMatchObject({ level: "warning", title: "无法显示这个授权请求，已自动拒绝" });
+  });
+
+  it("says so when the model asked for at creation isn't available", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w", model: "nope" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    const notice = await waitFor(() => t.of(session.id).find((e) => e.update.sessionUpdate === "ls_notice"));
+    expect(notice.update).toMatchObject({ level: "warning", title: "所选模型 nope 不可用，已使用 Fake 的默认模型" });
+    const { session: chosen } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w", model: "smart" });
+    await t.client.call("sessions.subscribe", { sessionId: chosen.id, fromSeq: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(t.of(chosen.id).some((e) => e.update.sessionUpdate === "ls_notice")).toBe(false);
+  });
+
   it("renames, archives and deletes a session; a deleted one isn't rediscovered", async () => {
     const t = await setup();
     const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });

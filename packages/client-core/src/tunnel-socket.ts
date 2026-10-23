@@ -1,4 +1,4 @@
-import { openTunnel, randomBytes, toBase64, type Identity, type PublicIdentity, type RelayClient, type SecureChannel } from "@linkshell/wire";
+import { idOf, openTunnel, randomBytes, toBase64, type Identity, type PublicIdentity, type RelayClient, type SecureChannel } from "@linkshell/wire";
 import type { SocketLike } from "./host-link.js";
 
 // A SocketLike that is an end-to-end encrypted channel to one machine through
@@ -19,7 +19,7 @@ export class TunnelSocket implements SocketLike {
 
   private readonly ch = toBase64(randomBytes(12));
   private channel?: SecureChannel;
-  private readonly cleanup: (() => void)[] = [];
+  private cleanup: (() => void)[] = [];
   private timer?: ReturnType<typeof setTimeout>;
 
   constructor(
@@ -27,6 +27,12 @@ export class TunnelSocket implements SocketLike {
     device: Identity,
     private readonly machine: PublicIdentity,
   ) {
+    // The id is the hash of the signing key: a key that doesn't hash to it isn't this computer's.
+    if (idOf(machine.signKey) !== machine.id) {
+      this.cleanup = [];
+      queueMicrotask(() => this.fail("电脑的身份校验没有通过，请重新配对", "bad_identity"));
+      return;
+    }
     const opening = openTunnel(device, machine, this.ch);
     this.cleanup.push(
       relay.onFrame((from, _via, frame) => {

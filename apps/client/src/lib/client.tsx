@@ -14,7 +14,7 @@ import {
   type ClientState,
   type ClientStore,
 } from "@linkshell/client-core";
-import { relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
+import { probeRelays, relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
@@ -112,6 +112,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
             Boolean(s.asyncQuestions?.length)),
       );
     };
+    let latestTimer: ReturnType<typeof setTimeout> | undefined;
     const bgWatchdog = setInterval(() => {
       if (AppState.currentState !== "active" && !hasActiveWork()) return;
       if (store.getState().status !== "online") {
@@ -121,15 +122,26 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     }, 12_000);
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
+        // Back from the background, sessions show their latest turns at once; earlier ones load
+        // on scroll. Only for this return: a reconnect later (a network blip while reading)
+        // catches up in place.
+        clearTimeout(latestTimer);
+        latestTimer = setTimeout(() => link.resumeLatest(false), 45_000);
         reconnectRelays();
         link.reconnectNow();
+        // While suspended the sockets may have died without a word: ask, instead of waiting a
+        // heartbeat (up to 35 s) to find out.
+        probeRelays();
+        link.probe();
         connection.streams.connect();
-      } else if (state === "background" && hasActiveWork() && store.getState().status !== "online") {
+      } else if (state === "background") link.resumeLatest();
+      if (state === "background" && hasActiveWork() && store.getState().status !== "online") {
         reconnectRelays();
         link.reconnectNow();
       }
     });
     return () => {
+      clearTimeout(latestTimer);
       clearInterval(bgWatchdog);
       subscription.remove();
       connection.streams.stop();

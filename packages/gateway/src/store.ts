@@ -17,6 +17,11 @@ export interface PeerRecord {
 
 export class GatewayStore {
   private readonly db: DatabaseSync;
+  /**
+   * Who may reach whom, asked for every routed frame. Any write can change the answer, so every
+   * write empties it.
+   */
+  private readonly routes = new Map<string, "paired" | "account" | null>();
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -53,6 +58,7 @@ export class GatewayStore {
   }
 
   upsertPeer(peer: PeerRecord): void {
+    this.routes.clear();
     this.db
       .prepare(
         `INSERT INTO peers (id, role, sign_key, box_key, name, platform, user_id, last_seen)
@@ -68,10 +74,12 @@ export class GatewayStore {
   }
 
   link(machineId: string, deviceId: string, at = Date.now()): void {
+    this.routes.clear();
     this.db.prepare("INSERT OR IGNORE INTO links (machine_id, device_id, created_at) VALUES (?, ?, ?)").run(machineId, deviceId, at);
   }
 
   unlink(machineId: string, deviceId: string): boolean {
+    this.routes.clear();
     return this.db.prepare("DELETE FROM links WHERE machine_id = ? AND device_id = ?").run(machineId, deviceId).changes > 0;
   }
 
@@ -80,6 +88,7 @@ export class GatewayStore {
    * keys and pairings stay, and signing in again puts it back.
    */
   disown(id: string): boolean {
+    this.routes.clear();
     return this.db.prepare("UPDATE peers SET user_id = NULL WHERE id = ? AND user_id IS NOT NULL").run(id).changes > 0;
   }
 
@@ -111,6 +120,16 @@ export class GatewayStore {
 
   /** How `from` may reach `to`, or undefined when it may not. */
   route(from: string, to: string): "paired" | "account" | undefined {
+    const key = `${from}\n${to}`;
+    const cached = this.routes.get(key);
+    if (cached !== undefined) return cached ?? undefined;
+    const via = this.findRoute(from, to);
+    if (this.routes.size > 20_000) this.routes.clear();
+    this.routes.set(key, via ?? null);
+    return via;
+  }
+
+  private findRoute(from: string, to: string): "paired" | "account" | undefined {
     const a = this.peer(from);
     const b = this.peer(to);
     if (!a || !b || a.role === b.role) return undefined;

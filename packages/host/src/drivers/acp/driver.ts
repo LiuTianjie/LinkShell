@@ -113,6 +113,8 @@ export interface AcpSessionState {
   questions: Map<string, { rpcId: RpcId; request: AcpQuestionRequest; resolve: (response: unknown) => void }>;
   /** Cursor's documented question extension omits sessionId; tool calls provide its routing context. */
   toolCalls: Set<string>;
+  /** Said before the hub knows the session (createSession), so they wait for the attach that follows. */
+  pendingNotices?: SessionUpdate[];
 }
 
 /** Turns agent failures into something a person can act on. */
@@ -468,7 +470,15 @@ export class AcpDriver implements AgentDriver {
     state.loaded = true;
     state.config = toConfigOptions(response);
     this.sessionCommands(state, response);
-    if (options.model) await this.setConfig(response.sessionId, "model", options.model).catch(() => {});
+    if (options.model) {
+      await this.setConfig(response.sessionId, "model", options.model).catch((error: unknown) => {
+        // Still a usable session; the user should just know it isn't on the model they picked.
+        (state.pendingNotices ??= []).push({
+          sessionUpdate: "ls_notice", level: "warning", title: `所选模型 ${options.model} 不可用，已使用 ${this.label} 的默认模型`,
+          detail: error instanceof Error ? error.message.slice(0, 200) : undefined,
+        });
+      });
+    }
     const now = Date.now();
     return { nativeId: response.sessionId, cwd: options.cwd, createdAt: now, updatedAt: now, state: "idle" };
   }
@@ -481,6 +491,7 @@ export class AcpDriver implements AgentDriver {
     if (state.loaded) {
       this.emitConfig(nativeId, state);
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: this.localState(nativeId), turnActive: state.turnActive });
+      for (const notice of state.pendingNotices?.splice(0) ?? []) this.emit(nativeId, notice);
       return [];
     }
     const historyBehavior = this.acpBehavior.history;
@@ -767,6 +778,13 @@ export class AcpDriver implements AgentDriver {
         state.turnActive = false;
         this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "error" });
       }
+      // Sending these after the restart would run them out of order, after whatever turn comes next.
+      const dropped = state.queue.length;
+      if (dropped) {
+        state.queue = [];
+        this.reportQueue(nativeId, state);
+        this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: `${this.label} 已退出，${dropped} 条排队消息未发送`, detail: "Agent 重启后请重新发送。" });
+      }
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "offline" });
       this.host?.detached(this.id, nativeId);
     }
@@ -977,7 +995,15 @@ export class AcpDriver implements AgentDriver {
     const state = typeof sessionId === "string" ? this.sessions.get(sessionId) : undefined;
     const requestId = `${this.id}-${this.nextPermissionId++}-${String(id)}`;
     const mapped = mapPermissionRequest(params, requestId);
-    if (!state || !mapped) return { outcome: { outcome: "cancelled" } };
+    if (!state || !mapped) {
+      // Answering keeps the agent from waiting forever; saying so keeps the dropped tool call from looking like a refusal.
+      this.host?.log(`[${this.id}] ${method} answered cancelled: ${state ? `no usable options for session ${sessionId as string}` : `unknown session ${String(sessionId)}`}`);
+      if (state) {
+        this.closeMessage(sessionId as string);
+        this.emit(sessionId as string, { sessionUpdate: "ls_notice", level: "warning", title: "无法显示这个授权请求，已自动拒绝", detail: `${this.label} 的授权请求没有可选的操作，相关工具调用未执行。` });
+      }
+      return { outcome: { outcome: "cancelled" } };
+    }
     return new Promise((resolve) => {
       state.permissions.set(requestId, { rpcId: id, resolve });
       this.closeMessage(sessionId as string);

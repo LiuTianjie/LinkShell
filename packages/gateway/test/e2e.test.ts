@@ -262,6 +262,49 @@ describe("gateway v2 end to end", () => {
     expect((await local.call("gateway.status", {})).status).toBe("online");
   });
 
+  it("keeps a phone on its account through a failed token, and takes it off when it signs out", async () => {
+    const { url, host } = await world({ machineToken: "token-alice" });
+    let token: string | undefined = "token-alice";
+    const identity = createIdentity();
+    const phone = new RelayClient({
+      url: url + RELAY_PATH,
+      identity,
+      role: "device",
+      name: "Alice's phone",
+      token: () => token,
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
+    });
+    phone.start();
+    cleanups.push(() => phone.stop());
+    await phone.waitOnline(5000);
+    const [machine] = (await phone.request("machines.list", {})).machines;
+    expect(machine).toMatchObject({ id: host.gateway!.identity.id, via: "account" });
+    const link = connect(phone, identity, machine!);
+    expect((await link.call("machine.info", {})).hostname).toBeTruthy();
+
+    // Installed apps send no token while a refresh fails: as before, they stay on the account.
+    token = undefined;
+    phone.reauthenticate();
+    await phone.waitOnline(5000);
+    expect(phone.account?.userId).toBe("alice");
+    expect((await phone.request("machines.list", {})).machines).toHaveLength(1);
+
+    // Signing out says so: the account's computers are out of reach at once, and stay so.
+    await phone.request("account.leave", {});
+    expect((await phone.request("machines.list", {})).machines).toEqual([]);
+    await until(() => link.status !== "online");
+    phone.reauthenticate();
+    await phone.waitOnline(5000);
+    expect(phone.account).toBeUndefined();
+    expect((await phone.request("machines.list", {})).machines).toEqual([]);
+
+    // Signing in again brings it back.
+    token = "token-alice";
+    phone.reauthenticate();
+    await phone.waitOnline(5000);
+    expect((await phone.request("machines.list", {})).machines).toHaveLength(1);
+  });
+
   it("rejects a bad account token instead of connecting anonymously", async () => {
     const { url } = await world();
     const phone = device(url, "iPhone", "token-forged");

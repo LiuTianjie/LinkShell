@@ -449,9 +449,21 @@ describe("host + Codex driver (fake app-server)", () => {
   });
 
   it("restarts a crashed app-server and keeps serving", async () => {
+    // An approval the crash leaves unanswerable.
+    const { session: asking } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    await phone.client.call("sessions.subscribe", { sessionId: asking.id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: asking.id, clientMessageId: "before-crash", content: text("RUN the build") });
+    const request = await waitFor(() => phone.of(asking.id).find((e) => e.update.sessionUpdate === "ls_permission"));
+    expect(host.hub.getSession(asking.id)).toMatchObject({ state: "waiting", pendingPermissions: 1 });
+
     const tui = await rawCodexClient(host.paths.codexSocket);
     await tui.peer.request("fake/crash", {}).catch(() => {});
     await waitFor(() => host.hub.getSession(sessionId).state === "offline");
+    await waitFor(() => host.hub.getSession(asking.id).state === "offline");
+    expect(host.hub.getSession(asking.id).pendingPermissions).toBe(0);
+    const requestId = (request.update as { requestId: string }).requestId;
+    await waitFor(() => phone.of(asking.id).some((e) => e.update.sessionUpdate === "ls_permission_resolved" && e.update.requestId === requestId));
+    await waitFor(() => phone.turnsEnded(asking.id).length === 1);
     await waitFor(() => {
       const codex = host.machineInfo().agents[0];
       return codex?.installed && !codex.problem;

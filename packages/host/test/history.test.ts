@@ -212,6 +212,31 @@ describe("session history in pages", () => {
     expect(far.windows).toEqual([startSeq]);
   });
 
+  it("starts a returning client that asks for the latest at the newest page, not at everything it missed", async () => {
+    for (let n = 1; n <= 5; n++) turn(n, 5);
+    const at = store.getSession("fake:s1")!.lastSeq;
+    // Less than the catch-up budget, more than one page: an ordinary client replays it all…
+    for (let n = 6; n <= 20; n++) turn(n, 10);
+    const replay = collector();
+    expect((await hub.subscribe("fake:s1", at, replay.subscriber)).startSeq).toBe(at);
+    expect(replay.windows).toEqual([]);
+
+    // …one that asks for the latest gets the newest page, and pages back for the rest.
+    const latest = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", at, latest.subscriber, { latest: true });
+    expect(startSeq).toBeGreaterThan(at);
+    expect(latest.windows).toEqual([startSeq]);
+    expect(latest.events.filter((event) => event.seq > startSeq).length).toBeLessThan(replay.events.length);
+    expect(hub.history("fake:s1", startSeq + 1).events.length).toBeGreaterThan(0);
+
+    // Only a little missed: it catches up exactly as before.
+    const near = store.getSession("fake:s1")!.lastSeq;
+    turn(21, 2);
+    const back = collector();
+    expect((await hub.subscribe("fake:s1", near, back.subscriber, { latest: true })).startSeq).toBe(near);
+    expect(back.windows).toEqual([]);
+  });
+
   it("keeps pictures out of what it sends, and serves them one by one", async () => {
     for (let n = 1; n <= 30; n++) turn(n, 10, true);
     const client = collector();

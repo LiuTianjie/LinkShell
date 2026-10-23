@@ -38,7 +38,17 @@ export interface RelayClientOptions {
   minBackoffMs?: number;
   maxBackoffMs?: number;
   requestTimeoutMs?: number;
+  /**
+   * How often to ping the gateway while online (default 15 s; 0 disables). A connection that
+   * hears nothing for five of these is taken for dead: after a network change or a sleep the
+   * socket can look open for minutes while the gateway has long dropped it.
+   */
+  pingMs?: number;
 }
+
+/** Errors no retry soon will fix (wrong key, no account support, no subscription). */
+const LASTING_ERRORS = new Set(["bad_identity", "accounts_disabled", "not_admitted"]);
+const LASTING_RETRY_MS = 2 * 60_000;
 
 export class RelayRequestError extends Error {
   constructor(
@@ -56,6 +66,10 @@ export class RelayClient {
   private statusValue: RelayStatus = "offline";
   private attempt = 0;
   private timer?: ReturnType<typeof setTimeout>;
+  private pinger?: ReturnType<typeof setInterval>;
+  private probeTimer?: ReturnType<typeof setTimeout>;
+  /** When the current socket last received anything. */
+  private heardAt = 0;
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly statusListeners = new Set<(status: RelayStatus, error?: { code: string; message: string }) => void>();
@@ -108,6 +122,7 @@ export class RelayClient {
   stop(): void {
     this.setStatus("stopped");
     clearTimeout(this.timer);
+    this.stopPinging();
     this.socket?.close(1000, "stopped");
     this.socket = undefined;
     this.failPending("stopped");
@@ -122,10 +137,26 @@ export class RelayClient {
     this.open();
   }
 
+  /**
+   * Checks an online connection still works (the app came back to the foreground, the computer
+   * woke up): a connection that hears nothing within `timeoutMs` is dropped and made again.
+   */
+  probe(timeoutMs = 8000): void {
+    if (this.statusValue !== "online" || !this.socket || this.probeTimer) return;
+    const socket = this.socket;
+    const since = Date.now();
+    this.sendFrame({ t: "ping" });
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = undefined;
+      if (this.socket === socket && this.heardAt < since) this.drop(socket, "no answer from the gateway");
+    }, timeoutMs);
+  }
+
   /** Connects afresh so the gateway sees the current account (after a login or logout). */
   reauthenticate(): void {
     if (this.statusValue === "stopped") return;
     clearTimeout(this.timer);
+    this.stopPinging();
     this.attempt = 0;
     const socket = this.socket;
     this.socket = undefined;
@@ -204,8 +235,10 @@ export class RelayClient {
       return;
     }
     this.socket = socket;
+    this.heardAt = Date.now();
     let fatal: { code: string; message: string } | undefined;
     socket.onmessage = (event) => {
+      if (this.socket === socket) this.heardAt = Date.now();
       let frame;
       try {
         const parsed = serverFrameSchema.safeParse(JSON.parse(String(event.data)));
@@ -222,6 +255,7 @@ export class RelayClient {
           this.attempt = 0;
           this.account = frame.userId ? { userId: frame.userId, email: frame.email } : undefined;
           this.setStatus("online");
+          this.startPinging(socket);
           return;
         case "res": {
           const entry = this.pending.get(frame.id);
@@ -261,6 +295,7 @@ export class RelayClient {
     socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.socket = undefined;
+      this.stopPinging();
       this.failPending("connection closed");
       if (this.statusValue === "stopped") return;
       // Another connection with our identity took over: don't fight it.
@@ -270,6 +305,59 @@ export class RelayClient {
       }
       this.scheduleReconnect(fatal ?? { code: "disconnected", message: event.reason || "connection lost" });
     };
+  }
+
+  private startPinging(socket: RelaySocket): void {
+    this.stopPinging();
+    const every = this.options.pingMs ?? 15_000;
+    if (every <= 0) return;
+    let tickAt = Date.now();
+    this.pinger = setInterval(() => {
+      if (this.socket !== socket) return;
+      const now = Date.now();
+      // The timer ran late by far: the computer slept, or the app was suspended. Whatever the
+      // socket says, ask the gateway before trusting it.
+      const slept = now - tickAt > every * 2;
+      tickAt = now;
+      // Generous: while a gateway holds this connection back (a slow receiver) it reads none of
+      // it, pings included, for up to a minute. Sleeps and suspensions are caught sooner, above.
+      if (now - this.heardAt > every * 5) {
+        this.drop(socket, "no answer from the gateway");
+        return;
+      }
+      if (slept) this.probe();
+      else this.sendFrame({ t: "ping" });
+    }, every);
+  }
+
+  private stopPinging(): void {
+    clearInterval(this.pinger);
+    this.pinger = undefined;
+    clearTimeout(this.probeTimer);
+    this.probeTimer = undefined;
+  }
+
+  /**
+   * Gives up on a connection that stopped answering. A closing handshake on a dead path only
+   * ends when it times out, so this doesn't wait for one: the connection is over here, now.
+   */
+  private drop(socket: RelaySocket, message: string): void {
+    if (this.socket !== socket) return;
+    this.socket = undefined;
+    this.stopPinging();
+    socket.onclose = null;
+    socket.onmessage = null;
+    const terminate = (socket as { terminate?: () => void }).terminate;
+    try {
+      if (typeof terminate === "function") terminate.call(socket);
+      else socket.close(4002, message);
+    } catch {
+      // Already closed.
+    }
+    this.failPending("connection closed");
+    if (this.statusValue === "stopped") return;
+    this.attempt = 0;
+    this.scheduleReconnect({ code: "disconnected", message });
   }
 
   private async authenticate(nonce: string): Promise<void> {
@@ -294,7 +382,10 @@ export class RelayClient {
     this.setStatus("offline", error);
     const min = this.options.minBackoffMs ?? 500;
     const max = this.options.maxBackoffMs ?? 30_000;
-    const delay = Math.min(max, min * 2 ** this.attempt) * (0.75 + Math.random() * 0.5);
+    // Still tried now and then (a subscription can be bought, a key re-registered), and at once
+    // on reconnectNow, but not every 30 s for as long as the program runs.
+    const floor = LASTING_ERRORS.has(error.code) ? LASTING_RETRY_MS : 0;
+    const delay = Math.max(floor, Math.min(max, min * 2 ** this.attempt)) * (0.75 + Math.random() * 0.5);
     this.attempt += 1;
     this.timer = setTimeout(() => this.open(), delay);
   }

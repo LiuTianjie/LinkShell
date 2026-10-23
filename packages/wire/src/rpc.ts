@@ -175,6 +175,12 @@ const coreMethods = {
        * Without it, large pictures are replaced by a text note.
        */
       lazyImages: z.boolean().optional(),
+      /**
+       * Back after more than about a page of events (an app returning from the background): start
+       * at the latest turns, as a fresh subscription does, rather than replaying all it missed.
+       * What it skipped is read with `sessions.history`, as the user scrolls up to it.
+       */
+      latest: z.boolean().optional(),
     }),
     /**
      * A fresh subscription starts at the session's latest turns, not at its

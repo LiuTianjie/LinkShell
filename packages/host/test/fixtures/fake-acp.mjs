@@ -202,6 +202,11 @@ async function runPrompt(sessionId, text) {
     running.delete(sessionId);
     return "end_turn";
   }
+  if (text.includes("BADPERM")) {
+    // No option LinkShell can show: the client must still answer.
+    const answer = await requestClient("session/request_permission", { sessionId, toolCall: { toolCallId: "toolu_bad", title: "Odd", kind: "execute" }, options: [{ optionId: "x", name: "X", kind: "weird" }] });
+    update(sessionId, chunk("agent_message_chunk", `msg_${++messageCounter}`, `perm: ${answer?.outcome?.outcome} `));
+  }
   if (text.includes("RUN")) {
     const toolCallId = `toolu_${++messageCounter}`;
     update(sessionId, { sessionUpdate: "tool_call", toolCallId, title: "Run echo hi", kind: "execute", status: "pending", rawInput: { command: "echo hi" } });

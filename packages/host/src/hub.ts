@@ -708,7 +708,7 @@ export class SessionHub {
    * The backlog read and the subscriber registration happen in one synchronous
    * step, so no event can fall between them.
    */
-  async subscribe(sessionId: string, fromSeq: number, subscriber: Subscriber): Promise<{ session: SessionSummary; startSeq: number }> {
+  async subscribe(sessionId: string, fromSeq: number, subscriber: Subscriber, options: { latest?: boolean } = {}): Promise<{ session: SessionSummary; startSeq: number }> {
     const summary = this.getSession(sessionId);
     const driver = this.drivers.get(summary.agent);
     if (driver && driver.status().installed) {
@@ -733,10 +733,15 @@ export class SessionHub {
     const lastSeq = this.store.getSession(sessionId)?.lastSeq ?? 0;
     let startSeq = fromSeq;
     const missed = fromSeq > 0 && fromSeq <= lastSeq ? this.store.sizeAfter(sessionId, fromSeq) : undefined;
-    if (!missed || missed.events > CATCH_UP.events || missed.bytes > CATCH_UP.bytes) {
-      startSeq = this.store.pageStart(sessionId, lastSeq);
-      if (startSeq !== fromSeq) subscriber.window?.(startSeq);
-      for (const event of this.standingBefore(sessionId, startSeq, live)) subscriber.event(event);
+    const budget = options.latest ? { events: PAGE.minEvents, bytes: PAGE.minBytes } : CATCH_UP;
+    if (!missed || missed.events > budget.events || missed.bytes > budget.bytes) {
+      const page = this.store.pageStart(sessionId, lastSeq);
+      // The latest page reaches back to where the client is anyway: catching up is the same, and smaller.
+      if (!missed || !options.latest || page > fromSeq) {
+        startSeq = page;
+        if (startSeq !== fromSeq) subscriber.window?.(startSeq);
+        for (const event of this.standingBefore(sessionId, startSeq, live)) subscriber.event(event);
+      }
     }
     let cursor = startSeq;
     for (;;) {

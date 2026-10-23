@@ -448,6 +448,8 @@ export function AccountScreen() {
               accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
               onPress={() => router.push("/pair")}
             />
+            {__DEV__ ? (
+              <>
             <Separator inset={58} />
             <Row
               icon={{ sf: "wifi", md: "wifi" }}
@@ -458,6 +460,8 @@ export function AccountScreen() {
               accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
               onPress={() => router.push("/connect")}
             />
+              </>
+            ) : null}
           </Section>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 7, paddingHorizontal: 4 }}>
             <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} />
