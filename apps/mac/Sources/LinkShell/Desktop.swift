@@ -4,12 +4,13 @@ import Combine
 import SwiftUI
 
 /// The status UI has its own lifecycle; screen workers still exit with their host socket.
-@MainActor final class Desktop: NSObject, NSApplicationDelegate, NSWindowDelegate {
+@MainActor final class Desktop: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
   private let model = DesktopModel()
   private let workspace = DesktopWorkspace()
   private var window: NSWindow!
   private var statusItem: NSStatusItem!
   private let popover = NSPopover()
+  private var outsideClicks: Any?
   private static let wanted = Notification.Name("com.bd.linkshell.host.desktop.wanted")
   private var statusSubscription: AnyCancellable?
   private var appearanceSubscription: AnyCancellable?
@@ -99,6 +100,7 @@ import SwiftUI
     statusItem.button?.target = self
     statusItem.button?.action = #selector(togglePopover)
     popover.behavior = .transient
+    popover.delegate = self
     popover.contentViewController = NSHostingController(rootView: DesktopPopover(model: model, open: { [weak self] page in
       if page == "工作台" { self?.workspace.setManaging(false) }
       else { self?.workspace.setManaging(true); self?.model.selected = page }
@@ -152,6 +154,18 @@ import SwiftUI
   @objc private func togglePopover() {
     if popover.isShown { popover.performClose(nil) }
     else if let button = statusItem.button { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
+  }
+  // .transient only sees clicks while LinkShell is the active app, and opening the panel doesn't
+  // activate it; a click in another app or on the desktop only reaches a global monitor.
+  func popoverDidShow(_ notification: Notification) {
+    guard outsideClicks == nil else { return }
+    outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+      DispatchQueue.main.async { self?.popover.performClose(nil) }
+    }
+  }
+  func popoverDidClose(_ notification: Notification) {
+    if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
+    outsideClicks = nil
   }
   func windowWillClose(_ notification: Notification) {
     if !model.preview { workspace.setWindowVisible(false) }

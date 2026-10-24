@@ -224,12 +224,11 @@ html[data-desktop] [data-slot="tooltip-content"] { border: 0; border-radius: 12p
 html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"] { padding: 5px; }
 html[data-desktop] [data-slot="tooltip-content"] { border-radius: 8px; font-size: 12px; }
-/* A Mac tooltip has no pointer: the arrow was drawn in the dark foreground colour under a light card. */
-html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
-html[data-desktop] [data-slot="tooltip-content"][data-side="top"] { margin-bottom: 6px; }
-html[data-desktop] [data-slot="tooltip-content"][data-side="bottom"] { margin-top: 6px; }
-html[data-desktop] [data-slot="tooltip-content"][data-side="left"] { margin-right: 6px; }
-html[data-desktop] [data-slot="tooltip-content"][data-side="right"] { margin-left: 6px; }
+/* The arrow is Radix's downward triangle (its wrapper rotates it per side), filled like the card.
+   Its hairline comes from a 1px drop-shadow so only the two outer edges get it; the edge it
+   shares with the card covers the card's ring, so the two read as one outline. Spacing must
+   come from sideOffset, not margins: the arrow is placed against the positioned wrapper. */
+html[data-desktop] [data-slot="tooltip-arrow"] { width: 14px; height: 7px; translate: none; rotate: none; border-radius: 0; background: transparent; fill: var(--cardRaised); filter: drop-shadow(0 1px 0 var(--separatorStrong)); }
 html[data-desktop] [data-slot="dropdown-menu-item"],
 html[data-desktop] [data-slot="dropdown-menu-radio-item"],
 html[data-desktop] [data-slot="select-item"] { min-height: 30px; padding-inline: 9px; gap: 8px; border-radius: 7px; font-size: 13px; }
@@ -457,7 +456,10 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
 }
 
 /* ── Tool pages ──────────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .terminal-tab-bar { border-bottom-color: var(--separator); }
+/* The terminal below is already a framed well, so the tab bar is bare: no rule above or below,
+   and no pill track behind the tabs (that track spans the whole row here, not just the tabs). */
+html[data-desktop] .desktop-main .terminal-workspace { border-top: 0; }
+html[data-desktop] .desktop-main .terminal-tab-list[data-variant="line"] { padding: 0; background: transparent; }
 html[data-desktop] .desktop-main :is(.terminal-live, .xterm-host) { border-radius: var(--radius-well); }
 html[data-desktop] .desktop-main .screen-detail-page { gap: 12px; padding: 16px; overflow: auto; }
 html[data-desktop] .desktop-main .screen-detail-page > .screen-page { min-height: 0; border: 1px solid var(--separator); border-radius: var(--radius-well); }

@@ -201,7 +201,7 @@ html[data-desktop] .desktop-main .cm-editor,
 html[data-desktop] .desktop-main .resource-markdown pre { font-family: var(--mono); font-size: 12.5px; }
 
 /* ── Terminals ───────────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .terminal-tab-bar { gap: 6px; padding: 0 0 8px; border-bottom: 1px solid var(--separator); }
+html[data-desktop] .desktop-main .terminal-tab-bar { gap: 6px; padding: 0 0 8px; border-bottom: 0; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 12px !important; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--sidebarAccent); color: var(--label); }
 html[data-desktop] .desktop-main .terminal-tab-number { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; }
