@@ -422,6 +422,15 @@ NOT_FOUND = """<!doctype html>
 """
 
 
+def page_images(page: str, lang: str) -> list:
+    """The page's share image and the content images it shows, against the site root."""
+    found = [LANGS[lang]["og_image"]]
+    for src in re.findall(r'<img\b[^>]*?\ssrc="(assets/[^"?#]+)"', page):
+        if src not in found and not src.startswith("assets/duo/"):
+            found.append(src)
+    return found
+
+
 def main() -> None:
     source = (SITE / "index.src.html").read_text(encoding="utf-8")
     sitemap = SITE / "sitemap.xml"
@@ -437,16 +446,17 @@ def main() -> None:
             out.write_text(page, encoding="utf-8")
             print(f"wrote {out.relative_to(SITE.parent.parent)}")
             # A page keeps its date until its content changes.
-            entries.append((url(lang, view), previous.get(url(lang, view)) if unchanged and url(lang, view) in previous else today, view))
+            entries.append((url(lang, view), previous.get(url(lang, view)) if unchanged and url(lang, view) in previous else today, view, page_images(page, lang)))
 
     alternates = lambda view: "".join(
         f'\n    <xhtml:link rel="alternate" hreflang="{code}" href="{url(lang, view)}" />'
         for code, lang in (("zh-CN", "zh"), ("en", "en"), ("x-default", "zh"))
     )
-    body = "".join(f"  <url>\n    <loc>{loc}</loc>\n    <lastmod>{mod}</lastmod>{alternates(view)}\n  </url>\n" for loc, mod, view in entries)
+    images = lambda found: "".join(f"\n    <image:image><image:loc>{BASE + src}</image:loc></image:image>" for src in found)
+    body = "".join(f"  <url>\n    <loc>{loc}</loc>\n    <lastmod>{mod}</lastmod>{images(found)}{alternates(view)}\n  </url>\n" for loc, mod, view, found in entries)
     sitemap.write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n'
         f"{body}</urlset>\n",
         encoding="utf-8",
     )

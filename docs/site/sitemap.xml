@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://linkshell.itool.tech/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/film.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-follow.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/lock-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/watch-approval.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-queue.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/iphone-duo-expanded-dark.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/pay_wechat.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/pay_ali.jpg</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/" />
@@ -10,6 +22,18 @@
   <url>
     <loc>https://linkshell.itool.tech/en/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/film-en.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-follow.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/lock-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/watch-approval.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-queue.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/iphone-duo-expanded-dark.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/pay_wechat.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/pay_ali.jpg</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/" />
@@ -17,6 +41,8 @@
   <url>
     <loc>https://linkshell.itool.tech/docs/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/docs/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/docs/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/docs/" />
@@ -24,6 +50,8 @@
   <url>
     <loc>https://linkshell.itool.tech/en/docs/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/docs/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/docs/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/docs/" />
@@ -31,6 +59,8 @@
   <url>
     <loc>https://linkshell.itool.tech/pricing/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/pricing/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/pricing/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/pricing/" />
@@ -38,6 +68,8 @@
   <url>
     <loc>https://linkshell.itool.tech/en/pricing/</loc>
     <lastmod>2026-10-24</lastmod>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/pricing/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/pricing/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/pricing/" />
