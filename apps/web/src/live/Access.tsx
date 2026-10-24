@@ -83,7 +83,7 @@ export function AccessPasswordSettings() {
       setEditing(false);
       setPassword("");
       setConfirm("");
-      await status.reload();
+      status.reload();
     } catch (reason) {
       setError(message(reason));
     } finally {
