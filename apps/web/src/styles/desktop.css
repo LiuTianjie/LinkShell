@@ -473,8 +473,8 @@ html[data-desktop] .desktop-screen-settings { display: flex; flex-wrap: wrap; ga
 html[data-desktop] .desktop-screen-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 html[data-desktop] .desktop-screen-settings > div > span { margin-right: 6px; color: var(--secondaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-native-screen .screen-stage { position: relative; }
-/* Full screen is the remote picture alone, edge to edge. Esc, ⌃⌘F or the green button (shown at
-   the top edge) end it. */
+/* Full screen is the remote picture alone, edge to edge. The app's own bar near the top edge, ⌃⌘F
+   or the green button end it, and Esc too while the keyboard isn't controlling the other computer. */
 html[data-desktop] .desktop-native-screen.screen-fullscreen { background: #000; }
 html[data-desktop] .desktop-native-screen.screen-fullscreen > :not(.screen-stage) { display: none; }
 html[data-desktop] .desktop-native-screen.screen-fullscreen .screen-stage { flex: 1; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: #000; }

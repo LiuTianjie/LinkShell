@@ -171,6 +171,8 @@ import SwiftUI
     if !model.preview { workspace.setWindowVisible(false) }
     NSApp.setActivationPolicy(.accessory)
   }
+  func windowDidFailToEnterFullScreen(_ window: NSWindow) { workspace.fullScreenFailed() }
+  func windowDidFailToExitFullScreen(_ window: NSWindow) { workspace.fullScreenFailed() }
   func windowDidMiniaturize(_ notification: Notification) { if !model.preview { workspace.setWindowVisible(false) } }
   func windowDidDeminiaturize(_ notification: Notification) { if !model.preview { workspace.setWindowVisible(true) } }
   func applicationDidHide(_ notification: Notification) { if !model.preview { workspace.setWindowVisible(false) } }
