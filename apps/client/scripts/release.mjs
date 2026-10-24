@@ -74,35 +74,47 @@ if (platform === "ios") {
     `DEVELOPMENT_TEAM=${TEAM_ID}`,
     "COMPILER_INDEX_STORE_ENABLE=NO",
   ]);
+  const read = (command, args) => { try { return execFileSync(command, args, { encoding: "utf8" }); } catch { return ""; } };
   if (livePush) {
-    // What the phone runs is the archive: check it carries the push service and the entitlement.
-    const built = join(archive, "Products", "Applications", "LinkShell.app");
-    const read = (command, args) => { try { return execFileSync(command, args, { encoding: "utf8" }); } catch { return ""; } };
-    const url = read("plutil", ["-extract", "LinkShellLiveActivityPushURL", "raw", join(built, "Info.plist")]).trim();
-    const entitlements = read("codesign", ["-d", "--entitlements", "-", "--xml", built]);
-    const production = /<key>aps-environment<\/key>\s*<string>production<\/string>/.test(entitlements);
-    if (!url || !production) {
-      throw new Error(`Live Activity push is missing from the archive (service URL: ${url || "none"}, aps-environment=production: ${production}). Enable Push Notifications for com.bd.linkshell, or set LINKSHELL_LIVE_ACTIVITY_PUSH=0 on purpose.`);
-    }
-    console.log(`Live Activity push: ${url}, aps-environment=production`);
+    const url = read("plutil", ["-extract", "LinkShellLiveActivityPushURL", "raw", join(archive, "Products", "Applications", "LinkShell.app", "Info.plist")]).trim();
+    if (!url) throw new Error("Live Activity push is missing from the archive: no LinkShellLiveActivityPushURL. Set LINKSHELL_LIVE_ACTIVITY_PUSH=0 only on purpose.");
   }
-  const options = join(outDir, "ExportOptions.plist");
-  writeFileSync(
-    options,
-    `<?xml version="1.0" encoding="UTF-8"?>
+  const exportWith = (destination) => {
+    const options = join(outDir, `ExportOptions-${destination}.plist`);
+    writeFileSync(
+      options,
+      `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>${prepareOnly ? "export" : "upload"}</string>
+  <key>destination</key><string>${destination}</string>
   <key>teamID</key><string>${TEAM_ID}</string>
   <key>signingStyle</key><string>automatic</string>
   <key>uploadSymbols</key><true/>
 </dict>
 </plist>
 `,
-  );
-  run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportOptionsPlist", options, "-exportPath", join(outDir, "export"), "-allowProvisioningUpdates"]);
+    );
+    const path = join(outDir, destination === "upload" ? "upload" : "export");
+    rmSync(path, { recursive: true, force: true });
+    run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportOptionsPlist", options, "-exportPath", path, "-allowProvisioningUpdates"]);
+    return path;
+  };
+  // The archive is signed for development; the App Store export re-signs it. Check that copy, the
+  // one the phone runs, before anything is uploaded.
+  const exported = exportWith("export");
+  if (livePush) {
+    const unpacked = join(outDir, "ipa-check");
+    rmSync(unpacked, { recursive: true, force: true });
+    execFileSync("ditto", ["-x", "-k", join(exported, "LinkShell.ipa"), unpacked]);
+    const entitlements = read("codesign", ["-d", "--entitlements", "-", "--xml", join(unpacked, "Payload", "LinkShell.app")]);
+    const production = /<key>aps-environment<\/key>\s*<string>production<\/string>/.test(entitlements);
+    rmSync(unpacked, { recursive: true, force: true });
+    if (!production) throw new Error("Live Activity push: the App Store build lacks aps-environment=production. Enable Push Notifications for com.bd.linkshell, or set LINKSHELL_LIVE_ACTIVITY_PUSH=0 on purpose.");
+    console.log("Live Activity push: service URL present, App Store build has aps-environment=production");
+  }
+  if (!prepareOnly) exportWith("upload");
   console.log(prepareOnly ? `\nPrepared IPA in ${join(outDir, "export")}; no upload or publication performed.` : "\nUploaded to App Store Connect; the build shows up in TestFlight after processing.");
 } else {
   const android = join(root, "android");
