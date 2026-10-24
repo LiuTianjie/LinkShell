@@ -25,7 +25,7 @@ struct DesktopView: View {
   @State private var editingPassword = false
   @State private var newPassword = ""
   @State private var confirmPassword = ""
-  private let mainPages = [("总览", "house"), ("设备", "iphone"), ("用量统计", "chart.bar"), ("日志", "text.alignleft")]
+  private let mainPages = [("总览", "house"), ("设备", "iphone"), ("访问密码", "lock"), ("用量统计", "chart.bar"), ("日志", "text.alignleft")]
   var body: some View {
     VStack(spacing: 0) {
       HStack(alignment: .top, spacing: DesktopStyle.gutter) {
@@ -102,6 +102,7 @@ struct DesktopView: View {
         VStack(alignment: .leading, spacing: 0) {
           switch model.selected {
           case "设备": devices
+          case "访问密码": accessPassword
           case "用量统计": DesktopUsageView(model: model)
           case "日志": logs
           case "更新": updates
@@ -130,6 +131,7 @@ struct DesktopView: View {
   private var subtitle: String {
     switch model.selected {
     case "设备": return "扫描二维码配对手机，或管理已配对的设备"
+    case "访问密码": return "其他设备打开这台电脑前，要先输入这台电脑的密码"
     case "用量统计": return "这台电脑的 Token 用量与模型分布"
     case "日志": return "Host 最近 64 KB 日志 · 每 5 秒刷新"
     case "更新": return "检查版本与管理现有安装"
@@ -251,7 +253,6 @@ struct DesktopView: View {
   private var devices: some View {
     VStack(alignment: .leading, spacing: 0) {
       DesktopPairingView(model: model).padding(.bottom, 22)
-      if model.snapshot?.access != nil { accessPassword.padding(.bottom, 22) }
       DesktopGroupLabel(title: "已配对设备", trailing: model.devices.isEmpty ? nil : "\(model.devices.count) 台")
       VStack(alignment: .leading, spacing: 0) {
         if model.devices.isEmpty { empty("暂无已配对设备", "在手机中打开「电脑 → 添加电脑」，扫描上方生成的二维码。") }
@@ -265,7 +266,7 @@ struct DesktopView: View {
     let enabled = model.snapshot?.access?.password ?? false
     let mismatch = !confirmPassword.isEmpty && confirmPassword != newPassword
     return VStack(alignment: .leading, spacing: 0) {
-      DesktopGroupLabel(title: "访问密码")
+      DesktopGroupLabel(title: "这台电脑的密码")
       VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .top, spacing: 12) {
           Image(systemName: enabled ? "lock.fill" : "lock.open").font(.system(size: 13)).foregroundStyle(enabled ? DesktopStyle.primary : DesktopStyle.tertiary).frame(width: 18).padding(.top, 1)
@@ -303,6 +304,16 @@ struct DesktopView: View {
           Text(model.passwordMessage).font(.system(size: 12)).foregroundStyle(model.passwordIsError ? DesktopStyle.waiting : DesktopStyle.secondary).padding(.leading, 30)
         }
       }.desktopCard(padding: 14)
+      DesktopGroupLabel(title: "怎么生效").padding(.top, 22)
+      VStack(alignment: .leading, spacing: 0) {
+        valueRow("其他设备", "手机、网页和其他电脑上，这台电脑会带一把锁")
+        valueRow("打开时", "先输入密码；输错 5 次要等 5 分钟")
+        valueRow("记住多久", "同一台设备解锁后 7 天内不用再输")
+        valueRow("修改或移除", "已连接的设备会断开，按新设置重新连接")
+        valueRow("这台 Mac", "本机的工作台和命令行不需要密码")
+      }.rowsCard()
+      Text("每台电脑各自设置自己的密码，互不影响；没设密码的电脑照常使用。命令行也可以设置：linkshell password set")
+        .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled).padding(.top, 12)
     }
   }
   private var logs: some View {
