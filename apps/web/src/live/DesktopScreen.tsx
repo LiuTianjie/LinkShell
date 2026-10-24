@@ -5,7 +5,7 @@ import { cn } from "../lib/utils";
 import { ErrorNotice, LoadState, messageOf, useConnection, useJob, useLoad } from "./common";
 import { DESKTOP_FULLSCREEN_EVENT, readDesktopStorage, saveDesktopStorage, setDesktopScreenFullScreen } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
-import { NATIVE_SCREEN_EVENT, nativeScreenQuery, postNativeScreen, screenSignal, type NativeScreenEvent, type NativeScreenStatus } from "./desktop-screen";
+import { NATIVE_SCREEN_EVENT, leaveScreenFullscreen, nativeScreenQuery, postNativeScreen, screenSignal, windowFullscreenChanged, type NativeScreenEvent, type NativeScreenStatus, type ScreenFullscreen } from "./desktop-screen";
 import { autoScreenWidth, screenPreferences } from "./screen-preferences";
 import { openWebSocket } from "./transport";
 import type { ScreenProps } from "./Video";
@@ -20,11 +20,15 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   const [focused, setFocused] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   // Only the screen that asked for the window's full screen follows it or ends it.
-  const ownsFullscreen = useRef(false);
+  const fullscreenState = useRef<ScreenFullscreen>({ owns: false, fullscreen: false });
   const fullscreenRequest = (enabled: boolean) => {
-    if (!enabled && !ownsFullscreen.current) return;
-    ownsFullscreen.current = enabled;
-    if (!setDesktopScreenFullScreen(enabled)) { ownsFullscreen.current = false; setFocused(enabled); }
+    if (!enabled) {
+      const next = leaveScreenFullscreen(fullscreenState.current);
+      if (!next) return;
+      fullscreenState.current = next;
+      setFullscreen(false);
+    } else fullscreenState.current = { ...fullscreenState.current, owns: true };
+    if (!setDesktopScreenFullScreen(enabled)) { fullscreenState.current = { ...fullscreenState.current, owns: false }; setFocused(enabled); }
   };
   const [settings, setSettings] = useState(false);
   const [display, setDisplay] = useState(0);
@@ -51,11 +55,11 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   useEffect(() => {
     // The window's own full screen; while it lasts the page also fills the window.
     const changed = (event: Event) => {
-      if (!ownsFullscreen.current) return;
-      const value = (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true;
-      if (!value) ownsFullscreen.current = false;
-      setFullscreen(value);
-      setFocused(value);
+      const next = windowFullscreenChanged(fullscreenState.current, (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true);
+      if (!next) return;
+      fullscreenState.current = { owns: next.owns, fullscreen: next.fullscreen };
+      setFullscreen(next.fullscreen);
+      setFocused(next.focused);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;

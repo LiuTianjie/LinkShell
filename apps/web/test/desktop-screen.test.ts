@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nativeScreenQuery, screenSignal } from "../src/live/desktop-screen";
+import { leaveScreenFullscreen, nativeScreenQuery, screenSignal, windowFullscreenChanged, type ScreenFullscreen } from "../src/live/desktop-screen";
 
 describe("native desktop screen transport", () => {
   it("requests a native video track without loading the browser viewer", () => {
@@ -23,5 +23,36 @@ describe("native desktop screen transport", () => {
   it("surfaces host configuration and capture failures instead of leaving input locked", () => {
     expect(() => screenSignal('{"session":{"t":"error","requestId":1,"message":"显示器已断开"}}')).toThrow("显示器已断开");
     expect(() => screenSignal('{"error":"屏幕捕获失败"}')).toThrow("屏幕捕获失败");
+  });
+});
+
+describe("remote screen full screen", () => {
+  const idle: ScreenFullscreen = { owns: false, fullscreen: false };
+  const entered = (): ScreenFullscreen => {
+    const asked = { ...idle, owns: true };
+    const answer = windowFullscreenChanged(asked, true)!;
+    expect(answer).toEqual({ owns: true, fullscreen: true, focused: true });
+    return { owns: answer.owns, fullscreen: answer.fullscreen };
+  };
+
+  it("shows the toolbar again when Esc leaves full screen, before and after the window answers", () => {
+    const left = leaveScreenFullscreen(entered())!;
+    expect(left.fullscreen).toBe(false);
+    // The window's answer comes after the screen stopped owning the full screen: nothing to undo.
+    expect(windowFullscreenChanged(left, false)).toBeUndefined();
+  });
+
+  it("shows the toolbar again when the window leaves full screen on its own (green button)", () => {
+    expect(windowFullscreenChanged(entered(), false)).toEqual({ owns: false, fullscreen: false, focused: false });
+  });
+
+  it("brings back a screen still showing only the picture even if it no longer owns the full screen", () => {
+    expect(windowFullscreenChanged({ owns: false, fullscreen: true }, false)).toEqual({ owns: false, fullscreen: false, focused: false });
+  });
+
+  it("leaves other screens alone", () => {
+    expect(windowFullscreenChanged(idle, true)).toBeUndefined();
+    expect(windowFullscreenChanged(idle, false)).toBeUndefined();
+    expect(leaveScreenFullscreen(idle)).toBeUndefined();
   });
 });

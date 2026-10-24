@@ -36,3 +36,24 @@ export function nativeScreenQuery(token: string, display: number, width: string,
   if (hevc) query.set("codec", "hevc");
   return "/stream?" + query;
 }
+
+/** A screen's part in the window's full screen: whether it asked for it, and whether it shows only the picture. */
+export interface ScreenFullscreen { owns: boolean; fullscreen: boolean }
+
+/**
+ * The screen stops wanting full screen (its button, Esc, hidden, left the page). It shows its
+ * toolbar again at once: the window's answer can come later, or not at all.
+ */
+export function leaveScreenFullscreen(state: ScreenFullscreen): ScreenFullscreen | undefined {
+  return state.owns ? { owns: false, fullscreen: false } : undefined;
+}
+
+/**
+ * The window says whether it is full screen. Entering only concerns the screen that asked;
+ * leaving (green button, ⌃⌘F, Esc) gives any screen still showing only the picture its toolbar back,
+ * even one that already stopped owning the full screen. `focused` is what the page should then fill.
+ */
+export function windowFullscreenChanged(state: ScreenFullscreen, fullscreen: boolean): (ScreenFullscreen & { focused: boolean }) | undefined {
+  if (fullscreen) return state.owns ? { owns: true, fullscreen: true, focused: true } : undefined;
+  return state.owns || state.fullscreen ? { owns: false, fullscreen: false, focused: false } : undefined;
+}
