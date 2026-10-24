@@ -444,7 +444,10 @@ export function cleanAntigravityAgentContent(content: string): {
 
 function extractModelSelectionFromContent(content: string | undefined): string | undefined {
   if (!content) return undefined;
-  const regex = /changed setting `?Model Selection`? from .*? to ([^\r\n.<]+?)(?:\.(?:\s|$)|<\/USER_SETTINGS_CHANGE>|\r|\n|$)/gi;
+  // Names carry dots ("Claude Opus 5.5 (High)", "Gemini 3.8 Flash (Low)"): one ends at the sentence's
+  // full stop, a dot followed by a space or the line's end. Stopping at the first dot made the match
+  // skip ahead to "No need to comment…" and read that as the model.
+  const regex = /changed setting `?Model Selection`? from .+? to (.+?)(?:\.(?=\s|$)|<\/USER_SETTINGS_CHANGE>|$)/gim;
   let last: string | undefined;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
@@ -1929,9 +1932,7 @@ export class AntigravityDriver extends AcpDriver {
       if (found) return found;
     }
 
-    const fromDefault = matchByValueOrName(this.desktopDefaultModel);
-    if (fromDefault) return fromDefault;
-
+    // The model the user last picked in the app comes before the server's default.
     const desktop = this.desktop();
     if (desktop && existsSync(join(desktop.dataDir, "antigravity_state.pbtxt"))) {
       try {
@@ -1943,6 +1944,9 @@ export class AntigravityDriver extends AcpDriver {
         // ignore
       }
     }
+
+    const fromDefault = matchByValueOrName(this.desktopDefaultModel);
+    if (fromDefault) return fromDefault;
 
     return models[0];
   }

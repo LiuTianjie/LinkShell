@@ -257,6 +257,24 @@ describe("Antigravity ACP protocol mapping", () => {
     }
   });
 
+  it("reads model names that carry dots, as Antigravity writes them", () => {
+    const root = mkdtempSync(join(tmpdir(), "ls-agy-model-"));
+    try {
+      const change = (from: string, to: string) =>
+        `<USER_REQUEST>\nhi\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting \`Model Selection\` from ${from} to ${to}. No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name.\n</USER_SETTINGS_CHANGE>`;
+      const write = (name: string, contents: string[]) => {
+        const path = join(root, name);
+        writeFileSync(path, `${contents.map((content, index) => JSON.stringify({ step_index: index, type: "USER_INPUT", content })).join("\n")}\n`);
+        return path;
+      };
+      expect(parseAntigravityTranscript(write("a.jsonl", [change("None", "Claude Opus 5.5 (High)")]), 0).lastModelLabel).toBe("Claude Opus 5.5 (High)");
+      expect(parseAntigravityTranscript(write("b.jsonl", [change("None", "Claude Opus 5.5 (High)"), change("Claude Opus 5.5 (High)", "Gemini 3.8 Flash (Low)")]), 0).lastModelLabel).toBe("Gemini 3.8 Flash (Low)");
+      expect(parseAntigravityTranscript(write("c.jsonl", [change("Claude Sonnet 5.5 (Medium)", "Gemini 4 Argon (High)")]), 0).lastModelLabel).toBe("Gemini 4 Argon (High)");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("parses Goal Mode lifecycle, strips HTML/system tags, extracts model selection, and loads uploaded images", () => {
     const root = mkdtempSync(join(tmpdir(), "ls-agy-goal-"));
     try {
