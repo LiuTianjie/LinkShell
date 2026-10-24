@@ -28,6 +28,11 @@ if (platform !== "ios" && platform !== "android") {
 
 const env = { ...process.env };
 delete env.APP_VARIANT;
+// Without push the Live Activity only changes while the app is in the foreground: an approval or
+// a question asked while the phone is in another app never shows. On unless asked not to (=0, for
+// builds without the push service).
+if (platform === "ios") env.LINKSHELL_LIVE_ACTIVITY_PUSH ??= "1";
+const livePush = platform === "ios" && env.LINKSHELL_LIVE_ACTIVITY_PUSH === "1";
 
 function run(command, args, cwd = root) {
   console.log(`\n$ ${command} ${args.join(" ")}`);
@@ -69,6 +74,18 @@ if (platform === "ios") {
     `DEVELOPMENT_TEAM=${TEAM_ID}`,
     "COMPILER_INDEX_STORE_ENABLE=NO",
   ]);
+  if (livePush) {
+    // What the phone runs is the archive: check it carries the push service and the entitlement.
+    const built = join(archive, "Products", "Applications", "LinkShell.app");
+    const read = (command, args) => { try { return execFileSync(command, args, { encoding: "utf8" }); } catch { return ""; } };
+    const url = read("plutil", ["-extract", "LinkShellLiveActivityPushURL", "raw", join(built, "Info.plist")]).trim();
+    const entitlements = read("codesign", ["-d", "--entitlements", "-", "--xml", built]);
+    const production = /<key>aps-environment<\/key>\s*<string>production<\/string>/.test(entitlements);
+    if (!url || !production) {
+      throw new Error(`Live Activity push is missing from the archive (service URL: ${url || "none"}, aps-environment=production: ${production}). Enable Push Notifications for com.bd.linkshell, or set LINKSHELL_LIVE_ACTIVITY_PUSH=0 on purpose.`);
+    }
+    console.log(`Live Activity push: ${url}, aps-environment=production`);
+  }
   const options = join(outDir, "ExportOptions.plist");
   writeFileSync(
     options,

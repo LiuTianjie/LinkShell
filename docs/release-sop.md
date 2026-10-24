@@ -259,6 +259,8 @@ tap 仓库是 `LiuTianjie/homebrew-linkshell`，脚本每次都会重写其中�
 
 发布的 App 是 `com.bd.linkshell`（App Store / APK 上的 LinkShell）。开发版用 `APP_VARIANT=development`（`pnpm --filter @linkshell/client ios|android` 已带上），装成 `com.bd.linkshell.v2`，与正式版并存。见 `apps/client/app.config.js`。
 
+iOS 正式版默认打开实时活动远程推送（`LINKSHELL_LIVE_ACTIVITY_PUSH=1`，服务 `https://push.itool.tech`）：没有它，App 在后台时审批、提问不会出现在锁屏和灵动岛上。`release.mjs` 在归档后检查 `Info.plist` 的 `LinkShellLiveActivityPushURL` 和 `aps-environment=production`，缺任何一项就中止发版。只有明确不要推送的构建才设 `LINKSHELL_LIVE_ACTIVITY_PUSH=0`。
+
 移动端构建全部在本机 macOS 上执行（GitHub Actions 无移动端 runner）：
 
 ```bash
