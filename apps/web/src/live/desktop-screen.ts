@@ -30,7 +30,9 @@ export function screenSignal(data: string | ArrayBuffer): Record<string, unknown
   return message;
 }
 
-export function nativeScreenQuery(token: string, display: number, width: string, maxFps: string): string {
-  // H.264 is supported by all supported Macs; the native decoder still requires and verifies hardware.
-  return "/stream?" + new URLSearchParams({ token, display: String(display), width, maxFps, video: "1" });
+export function nativeScreenQuery(token: string, display: number, width: string, maxFps: string, hevc = false): string {
+  // HEVC is offered first and H.264 after, as the phone does; the native decoder accepts either in hardware.
+  const query = new URLSearchParams({ token, display: String(display), width, maxFps, video: "1" });
+  if (hevc) query.set("codec", "hevc");
+  return "/stream?" + query;
 }

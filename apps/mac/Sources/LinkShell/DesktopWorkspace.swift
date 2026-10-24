@@ -30,6 +30,11 @@ import WebKit
   private var screenClip: DesktopWorkspaceContainer?
   private var screenID: String?
   private var screenRect = CGRect.zero
+  /// The window went full screen for the remote screen, so leaving the screen takes it back out.
+  private var screenFullScreen = false
+  private var fullScreenObservers: [NSObjectProtocol] = []
+  /// What the page was last told, so a plain ⌃⌘F exit doesn't undo its own "fill window".
+  private var pageFullScreen = false
   private var visible: Bool { windowVisible && !managing }
 
   lazy var view: NSView = {
@@ -54,9 +59,6 @@ import WebKit
     // Hidden or behind other windows, WebKit throttles the page's timers: connection
     // heartbeats then come late, and a dead link to another computer looks alive past a request's limit.
     if #available(macOS 14.0, *) { configuration.preferences.inactiveSchedulingPolicy = .none }
-    // Off by default: without it the page sees fullscreenEnabled false and the remote
-    // screen only fills the window instead of taking over the display.
-    configuration.preferences.isElementFullscreenEnabled = true
     configuration.userContentController.add(DesktopWorkspaceMessageProxy(self), name: "linkshellDesktop")
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = self
@@ -201,7 +203,7 @@ import WebKit
 
   func setManaging(_ value: Bool) {
     guard value != managing else { return }
-    if value { webView.window?.makeFirstResponder(nil) }
+    if value { webView.window?.makeFirstResponder(nil); leaveScreenFullScreen() }
     managing = value
     updateUserScripts()
     setPageVisible(visible)
@@ -259,6 +261,7 @@ import WebKit
           let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
     if action == "manage" { setManaging(true) }
     else if action == "screen" { screenMessage(body) }
+    else if action == "screenFullScreen", let enabled = DesktopScreenBridge.boolean(body["enabled"]) { setScreenFullScreen(enabled) }
     else if action == "contentFocus", let focused = body["focused"] as? Bool {
       contentFocused = focused
     }
@@ -343,6 +346,60 @@ import WebKit
                                 arguments: ["detail": detail], in: nil, in: .page, completionHandler: nil)
   }
 
+  /// The native picture can't use WebKit's element full screen (it is an AppKit layer above the
+  /// page), so the page fills the window and the window itself goes full screen.
+  private func setScreenFullScreen(_ enabled: Bool) {
+    guard let window = webView.window else { return reportScreenFullScreen(false) }
+    observeFullScreen()
+    let isFull = window.styleMask.contains(.fullScreen)
+    if enabled {
+      guard visible else { return reportScreenFullScreen(false) }
+      // Already full screen on its own (⌃⌘F): show the picture there, but leave the window as it was.
+      if isFull { return reportScreenFullScreen(true) }
+      screenFullScreen = true
+      window.toggleFullScreen(nil)
+    } else if isFull && screenFullScreen {
+      window.toggleFullScreen(nil)
+    } else {
+      screenFullScreen = false
+      if pageFullScreen { reportScreenFullScreen(false) }
+    }
+  }
+
+  private func leaveScreenFullScreen() {
+    if screenFullScreen, let window = webView.window, window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+    screenFullScreen = false
+  }
+
+  private func observeFullScreen() {
+    guard fullScreenObservers.isEmpty else { return }
+    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+      fullScreenObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+        let window = (note.object as AnyObject?).map(ObjectIdentifier.init)
+        let entered = note.name == NSWindow.didEnterFullScreenNotification
+        MainActor.assumeIsolated { self?.windowFullScreenChanged(window: window, entered: entered) }
+      })
+    }
+  }
+
+  private func windowFullScreenChanged(window: ObjectIdentifier?, entered: Bool) {
+    guard let own = webView.window, window == ObjectIdentifier(own) else { return }
+    if entered {
+      if screenFullScreen { reportScreenFullScreen(true) }
+    } else {
+      // The green button or ⌃⌘F ends it as well; the page then stops filling the window.
+      screenFullScreen = false
+      if pageFullScreen { reportScreenFullScreen(false) }
+    }
+  }
+
+  private func reportScreenFullScreen(_ value: Bool) {
+    pageFullScreen = value
+    guard policy?.isTrusted(webView.url) == true else { return }
+    webView.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('linkshell-desktop-fullscreen', {detail: {fullscreen}}));",
+                                arguments: ["fullscreen": value], in: nil, in: .page, completionHandler: nil)
+  }
+
   private func stopNativeScreen() {
     screenID = nil
     screenReceiver?.stop(); screenReceiver = nil
@@ -396,7 +453,7 @@ extension DesktopWorkspace: WKNavigationDelegate {
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     if policy?.isTrusted(webView.url) == true { hasWorkspaceDocument = true }
   }
-  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { stopNativeScreen(); contentFocused = false }
+  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { stopNativeScreen(); leaveScreenFullScreen(); contentFocused = false }
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     if (error as NSError).code != NSURLErrorCancelled { loading = false; problem = "无法打开工作台：\(error.localizedDescription)" }
   }
@@ -404,7 +461,7 @@ extension DesktopWorkspace: WKNavigationDelegate {
     if (error as NSError).code != NSURLErrorCancelled { loading = false; problem = "工作台载入失败：\(error.localizedDescription)" }
   }
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-    stopNativeScreen()
+    stopNativeScreen(); leaveScreenFullScreen()
     contentFocused = false; loading = false; problem = "工作台页面意外退出。请重新连接以恢复电脑与会话。"
   }
 }

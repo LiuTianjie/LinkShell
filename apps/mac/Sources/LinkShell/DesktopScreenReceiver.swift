@@ -174,6 +174,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
         for candidate in self.candidates { peer.add(candidate) { _ in } }
         self.candidates.removeAll()
         self.attachTrack(peer)
+        self.preferReceiveCodecs(peer)
         peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { [weak self, weak peer] answer, error in
           self?.queue.async { [weak self, weak peer] in
             guard let self, let peer, !self.closed, self.peer === peer else { return }
@@ -200,6 +201,17 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     let value = RTCIceCandidate(sdp: candidate, sdpMLineIndex: Int32(index), sdpMid: mid)
     if let peer, peer.remoteDescription != nil { peer.add(value) { _ in } }
     else if candidates.count < 256 { candidates.append(value) }
+  }
+
+  /// Answers as the phone does: HEVC before H.264, and no FlexFEC. The process enables FlexFEC
+  /// for its sender; as a receiver it would only take bitrate for a recovery that is unproven.
+  private func preferReceiveCodecs(_ peer: RTCPeerConnection) {
+    guard let factory, let transceiver = peer.transceivers.first(where: { $0.mediaType == .video }) else { return }
+    let available = factory.rtpReceiverCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs
+      .filter { $0.name.uppercased() != "FLEXFEC-03" }
+    let codecs = available.filter { $0.name.uppercased() == "H265" } + available.filter { $0.name.uppercased() != "H265" }
+    guard codecs.contains(where: { ["H264", "H265"].contains($0.name.uppercased()) }) else { return }
+    try? transceiver.setCodecPreferences(codecs, error: ())
   }
 
   private func attachTrack(_ peer: RTCPeerConnection) {

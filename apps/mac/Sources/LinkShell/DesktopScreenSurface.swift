@@ -1,7 +1,8 @@
 import AppKit
 import CoreVideo
 import ImageIO
-import MetalKit
+import Metal
+import QuartzCore
 import WebRTC
 
 enum DesktopScreenGeometry {
@@ -72,12 +73,13 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     }
   }
   var receivedFrameCount: UInt64 { renderer.receivedFrameCount }
-  private let metalView = DesktopScreenMetalView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+  private let metalView = DesktopScreenMetalView(frame: .zero)
   private var renderer: DesktopScreenMetalRenderer!
   private var pictureSize = CGSize.zero
   private var heldButtons: Set<String> = []
   private var tracking: NSTrackingArea?
   private var windowObserver: NSObjectProtocol?
+  private var screenObserver: NSObjectProtocol?
   private var active = true
   private var stopped = false
   private var marked = NSAttributedString(string: "")
@@ -103,10 +105,11 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     metalView.autoresizingMask = [.width, .height]
     metalView.frame = bounds
     addSubview(metalView)
-    renderer = DesktopScreenMetalRenderer(view: metalView,
+    renderer = DesktopScreenMetalRenderer(layer: metalView.metalLayer,
       picture: { [weak self] size in self?.pictureSize = size; self?.positionOverlays() },
       firstFrame: { [weak self] in self?.onFirstFrame?() },
       failure: { [weak self] message in self?.onFailure?(message) })
+    metalView.onDrawableSize = { [weak self] in self?.renderer.drawableSizeChanged() }
     cursorView.image = NSCursor.arrow.image
     cursorView.imageScaling = .scaleAxesIndependently
     cursorSize = NSCursor.arrow.image.size
@@ -126,18 +129,25 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     setAccessibilityHelp("点击画面后可使用鼠标和键盘控制远程电脑")
   }
   required init?(coder: NSCoder) { nil }
-  deinit { if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) } }
+  deinit {
+    if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
+    if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+  }
 
   override func layout() { super.layout(); positionOverlays() }
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     if let windowObserver { NotificationCenter.default.removeObserver(windowObserver); self.windowObserver = nil }
+    if let screenObserver { NotificationCenter.default.removeObserver(screenObserver); self.screenObserver = nil }
     if let window {
       window.acceptsMouseMovedEvents = true
-      metalView.preferredFramesPerSecond = min(120, window.screen?.maximumFramesPerSecond ?? 60)
+      // Dragged between a 60 Hz display and a 120 Hz one, the picture follows the new display's rate.
+      screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+        self?.updateRunning()
+      }
       windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in self?.releaseInput(); self?.updateCursorVisibility() }
     } else { releaseInput() }
-    metalView.isPaused = window == nil || !active || stopped
+    updateRunning()
   }
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
@@ -161,14 +171,14 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     guard active != value else { return }
     active = value
     renderer.setActive(value && !stopped)
-    metalView.isPaused = !value || stopped || window == nil
+    updateRunning()
     if !value { releaseInput(); pictureSize = .zero }
     updateCursorVisibility()
   }
   func stop() {
     releaseInput()
     stopped = true; active = false
-    renderer.stop(); metalView.isPaused = true
+    renderer.stop()
     cursorShapes.removeAll(); cursorView.isHidden = true
   }
   func resetPresentation() {
@@ -185,6 +195,8 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     if message["t"] as? String == "cursor", let x = message["x"] as? Double, let y = message["y"] as? Double,
        x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) {
       cursorPosition = CGPoint(x: x, y: y)
+      // Position updates arrive many times a second: move the image only, on the main thread.
+      return placeCursor()
     } else if message["t"] as? String == "shape", let id = message["id"] as? String {
       if let png = message["png"] as? String, png.utf8.count <= 1_400_000,
          let w = message["w"] as? Double, let h = message["h"] as? Double,
@@ -214,9 +226,22 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
           let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
     return NSImage(cgImage: image, size: .zero)
   }
-  private func positionOverlays() {
+  /// The display link draws only while the picture is on screen, synced to the screen the window is on.
+  private func updateRunning() {
+    let number = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    renderer.setRunning(window != nil && active && !stopped, display: number.map { CGDirectDisplayID($0.uint32Value) })
+  }
+  private func cursorPoint() -> CGPoint {
     let rect = DesktopScreenGeometry.fittedRect(picture: pictureSize, in: bounds)
-    let point = CGPoint(x: rect.minX + cursorPosition.x * rect.width, y: rect.minY + cursorPosition.y * rect.height)
+    return CGPoint(x: rect.minX + cursorPosition.x * rect.width, y: rect.minY + cursorPosition.y * rect.height)
+  }
+  private func placeCursor() {
+    let point = cursorPoint()
+    cursorView.frame = CGRect(origin: CGPoint(x: point.x - cursorHotspot.x, y: point.y - cursorHotspot.y), size: cursorSize)
+    if !compositionLabel.isHidden { positionOverlays() }
+  }
+  private func positionOverlays() {
+    let point = cursorPoint()
     cursorView.frame = CGRect(origin: CGPoint(x: point.x - cursorHotspot.x, y: point.y - cursorHotspot.y), size: cursorSize)
     compositionLabel.sizeToFit()
     let width = min(max(24, compositionLabel.frame.width + 10), max(24, bounds.width - 16))
@@ -323,9 +348,26 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
   }
 }
 
-private final class DesktopScreenMetalView: MTKView {
+/// Layer-backed so the renderer can draw into its CAMetalLayer from the display link's thread.
+private final class DesktopScreenMetalView: NSView {
+  let metalLayer = CAMetalLayer()
+  var onDrawableSize: (() -> Void)?
+  override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true }
+  required init?(coder: NSCoder) { nil }
+  override func makeBackingLayer() -> CALayer { metalLayer }
   override var isOpaque: Bool { false }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
+  override func layout() { super.layout(); updateDrawableSize() }
+  override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); updateDrawableSize() }
+  override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); updateDrawableSize() }
+  private func updateDrawableSize() {
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    metalLayer.contentsScale = scale
+    let size = CGSize(width: max(1, (bounds.width * scale).rounded()), height: max(1, (bounds.height * scale).rounded()))
+    guard metalLayer.drawableSize != size else { return }
+    metalLayer.drawableSize = size
+    onDrawableSize?()
+  }
 }
 private final class DesktopScreenCursorView: NSImageView {
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -334,42 +376,49 @@ private final class DesktopScreenTextLabel: NSTextField {
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-private final class DesktopScreenMetalRenderer: NSObject, MTKViewDelegate {
+/// Draws on the display link's own thread, as the phone does: a busy main thread (the page,
+/// cursor and status updates) can no longer hold back the next frame. Incoming frames replace a
+/// single mailbox slot; the pixel buffer is retained until the GPU has finished with it.
+private final class DesktopScreenMetalRenderer {
   private struct Picture { let frame: RTCVideoFrame; let buffer: RTCCVPixelBuffer }
-  private let view: MTKView
+  private let layer: CAMetalLayer
   private let onPicture: (CGSize) -> Void
   private let onFirstFrame: () -> Void
   private let onFailure: (String) -> Void
+  /// Guards everything below it up to `failureReported`: the decoder, the main thread, the
+  /// display link and the GPU's completion handlers all touch it.
   private let lock = NSLock()
   private var pending: Picture?
+  private var current: Picture?
   private var accepting = true
   private var stopped = false
+  private var running = false
   private var received: UInt64 = 0
-  private var current: Picture?
-  private var lastSize = CGSize.zero
-  private var dirty = false
-  private var clearRequested = false
-  private var firstFrame = true
-  private var failureReported = false
   private var generation: UInt64 = 0
+  private var changes: UInt64 = 0
+  private var drawn: UInt64 = 0
+  private var clearRequested = false
+  private var reportedSize = CGSize.zero
+  private var reportedFirst = false
+  private var failureReported = false
   private let inFlight = DispatchSemaphore(value: 1)
+  private var link: CVDisplayLink?
   private var queue: MTLCommandQueue?
   private var pipeline: MTLRenderPipelineState?
   private var cache: CVMetalTextureCache?
   var receivedFrameCount: UInt64 { lock.lock(); defer { lock.unlock() }; return received }
 
-  init(view: MTKView, picture: @escaping (CGSize) -> Void, firstFrame: @escaping () -> Void, failure: @escaping (String) -> Void) {
-    self.view = view; onPicture = picture; onFirstFrame = firstFrame; onFailure = failure
-    super.init()
-    view.colorPixelFormat = .bgra8Unorm
-    view.framebufferOnly = true
-    view.clearColor = MTLClearColorMake(0, 0, 0, 1)
-    view.autoResizeDrawable = true
-    view.enableSetNeedsDisplay = false
-    view.isPaused = true
-    view.delegate = self
-    if let layer = view.layer as? CAMetalLayer { layer.maximumDrawableCount = 2; layer.presentsWithTransaction = false; layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB); layer.isOpaque = false; layer.backgroundColor = NSColor.clear.cgColor }
-    guard let device = view.device, let queue = device.makeCommandQueue() else { fail("这台 Mac 无法使用 Metal 显示远程桌面"); return }
+  init(layer: CAMetalLayer, picture: @escaping (CGSize) -> Void, firstFrame: @escaping () -> Void, failure: @escaping (String) -> Void) {
+    self.layer = layer; onPicture = picture; onFirstFrame = firstFrame; onFailure = failure
+    layer.device = MTLCreateSystemDefaultDevice()
+    layer.pixelFormat = .bgra8Unorm
+    layer.framebufferOnly = true
+    layer.maximumDrawableCount = 2
+    layer.presentsWithTransaction = false
+    layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+    layer.isOpaque = false
+    layer.backgroundColor = NSColor.clear.cgColor
+    guard let device = layer.device, let queue = device.makeCommandQueue() else { fail("这台 Mac 无法使用 Metal 显示远程桌面"); return }
     self.queue = queue
     guard CVMetalTextureCacheCreate(nil, nil, device, nil, &cache) == kCVReturnSuccess else { fail("原生屏幕纹理缓存初始化失败"); return }
     do {
@@ -380,47 +429,76 @@ private final class DesktopScreenMetalRenderer: NSObject, MTKViewDelegate {
       descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
       pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
     } catch { fail("原生屏幕渲染初始化失败") }
+    var made: CVDisplayLink?
+    guard CVDisplayLinkCreateWithActiveCGDisplays(&made) == kCVReturnSuccess, let made else { fail("无法与显示器刷新同步，请重新连接"); return }
+    CVDisplayLinkSetOutputHandler(made) { [weak self] _, _, _, _, _ in self?.draw(); return kCVReturnSuccess }
+    link = made
   }
+  deinit { if let link { CVDisplayLinkStop(link) } }
+
   func receive(_ frame: RTCVideoFrame) {
     guard let buffer = frame.buffer as? RTCCVPixelBuffer else { return fail("远程桌面未收到原生硬件解码画面") }
     lock.lock()
     if accepting && !stopped { pending = Picture(frame: frame, buffer: buffer); received &+= 1 }
     lock.unlock()
   }
+  /// Draws only while the surface is on screen; `display` follows the window to its current screen.
+  func setRunning(_ value: Bool, display: CGDirectDisplayID?) {
+    guard let link else { return }
+    if let display { CVDisplayLinkSetCurrentCGDisplay(link, display) }
+    lock.lock(); let was = running; running = value && !stopped; let now = running
+    if now && !was { changes &+= 1 }
+    lock.unlock()
+    if now && !was { CVDisplayLinkStart(link) } else if !now && was { CVDisplayLinkStop(link) }
+  }
+  func drawableSizeChanged() { lock.lock(); changes &+= 1; lock.unlock() }
   func setActive(_ value: Bool) {
-    lock.lock(); accepting = value && !stopped; if !accepting { pending = nil }; lock.unlock()
+    lock.lock()
+    accepting = value && !stopped; if !accepting { pending = nil }
     generation &+= 1
-    if !value { current = nil; dirty = false; firstFrame = true; lastSize = .zero; clearRequested = true }
+    if !value { current = nil; clearRequested = true; changes &+= 1; reportedSize = .zero; reportedFirst = false }
+    lock.unlock()
   }
   func resetPresentation() {
-    lock.lock(); pending = nil; lock.unlock()
-    generation &+= 1; current = nil; dirty = false; firstFrame = true; lastSize = .zero; clearRequested = true
+    lock.lock()
+    pending = nil; current = nil; generation &+= 1; clearRequested = true; changes &+= 1
+    reportedSize = .zero; reportedFirst = false
+    lock.unlock()
   }
   func stop() {
-    lock.lock(); stopped = true; accepting = false; pending = nil; lock.unlock()
-    generation &+= 1; current = nil; dirty = false
+    lock.lock(); stopped = true; accepting = false; pending = nil; current = nil; generation &+= 1; lock.unlock()
+    setRunning(false, display: nil)
     if let cache { CVMetalTextureCacheFlush(cache, 0) }
   }
-  func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { dirty = true }
-  func draw(in view: MTKView) {
-    guard !stopped, accepting, inFlight.wait(timeout: .now()) == .success else { return }
+
+  private func draw() {
+    lock.lock()
+    guard !stopped, accepting, running else { lock.unlock(); return }
+    if let next = pending { current = next; pending = nil; changes &+= 1 }
+    let picture = current, mark = changes, ticket = generation
+    let clear = clearRequested && picture == nil
+    let needed = clear || (picture != nil && mark != drawn)
+    lock.unlock()
+    guard needed, inFlight.wait(timeout: .now()) == .success else { return }
     var committed = false
     defer { if !committed { inFlight.signal() } }
-    lock.lock(); let next = pending; pending = nil; lock.unlock()
-    if let next { current = next; dirty = true }
-    if clearRequested, current == nil, let command = queue?.makeCommandBuffer(), let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable {
+    guard let queue, let command = queue.makeCommandBuffer(), let drawable = layer.nextDrawable() else { return }
+    let pass = MTLRenderPassDescriptor()
+    pass.colorAttachments[0].texture = drawable.texture
+    pass.colorAttachments[0].loadAction = .clear
+    pass.colorAttachments[0].storeAction = .store
+    if clear {
       pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
       guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
       encoder.endEncoding()
       command.addCompletedHandler { [inFlight] _ in inFlight.signal() }
-      command.present(drawable); command.commit(); committed = true; clearRequested = false
+      command.present(drawable); command.commit(); committed = true
+      lock.lock(); drawn = mark; clearRequested = false; lock.unlock()
       return
     }
-    guard dirty, let picture = current, let cache, let queue, let pipeline, let command = queue.makeCommandBuffer(),
-          let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else { return }
+    guard let picture, let cache, let pipeline else { return }
     let buffer = picture.buffer.pixelBuffer
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
-    pass.colorAttachments[0].loadAction = .clear
     let format = CVPixelBufferGetPixelFormatType(buffer)
     guard format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange else { return fail("原生屏幕收到不支持的硬件像素格式") }
     var heldTextures: [CVMetalTexture] = []
@@ -434,7 +512,7 @@ private final class DesktopScreenMetalRenderer: NSObject, MTKViewDelegate {
     let rotation = Int(picture.frame.rotation.rawValue)
     let turned = rotation == 90 || rotation == 270
     let size = CGSize(width: Int(turned ? picture.frame.height : picture.frame.width), height: Int(turned ? picture.frame.width : picture.frame.height))
-    let rect = DesktopScreenGeometry.fittedRect(picture: size, in: CGRect(origin: .zero, size: view.drawableSize))
+    let rect = DesktopScreenGeometry.fittedRect(picture: size, in: CGRect(x: 0, y: 0, width: drawable.texture.width, height: drawable.texture.height))
     encoder.setViewport(MTLViewport(originX: rect.minX, originY: rect.minY, width: rect.width, height: rect.height, znear: 0, zfar: 1))
     encoder.setRenderPipelineState(pipeline)
     encoder.setFragmentTexture(y, index: 0); encoder.setFragmentTexture(uv, index: 1)
@@ -453,23 +531,39 @@ private final class DesktopScreenMetalRenderer: NSObject, MTKViewDelegate {
     encoder.setVertexBytes(&turn, length: MemoryLayout<Int32>.size, index: 1)
     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     encoder.endEncoding()
-    let ticket = generation
     command.addCompletedHandler { [weak self, heldTextures, inFlight] buffer in
       _ = heldTextures; _ = picture
       inFlight.signal()
-      DispatchQueue.main.async { [weak self] in
-        guard let self, self.generation == ticket, self.accepting, !self.stopped else { return }
-        if buffer.status == .error { self.fail("远程桌面渲染失败，请重新连接"); return }
-        if self.lastSize != size { self.lastSize = size; self.onPicture(size) }
-        if self.firstFrame { self.firstFrame = false; self.onFirstFrame() }
-      }
+      self?.presented(ticket: ticket, size: size, failed: buffer.status == .error)
     }
-    command.present(drawable); command.commit(); committed = true; dirty = false; clearRequested = false
+    command.present(drawable); command.commit(); committed = true
+    lock.lock(); drawn = mark; clearRequested = false; lock.unlock()
+  }
+  /// Runs on Metal's completion thread; the main thread hears only about a new size or the first frame.
+  private func presented(ticket: UInt64, size: CGSize, failed: Bool) {
+    lock.lock()
+    guard generation == ticket, accepting, !stopped else { lock.unlock(); return }
+    let newSize = reportedSize != size, first = !reportedFirst
+    if !failed { reportedSize = size; reportedFirst = true }
+    lock.unlock()
+    if failed { return fail("远程桌面渲染失败，请重新连接") }
+    guard newSize || first else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.lock.lock(); let live = self.generation == ticket && self.accepting && !self.stopped; self.lock.unlock()
+      guard live else { return }
+      if newSize { self.onPicture(size) }
+      if first { self.onFirstFrame() }
+    }
   }
   private func fail(_ message: String) {
     DispatchQueue.main.async { [weak self] in
-      guard let self, !self.stopped, !self.failureReported else { return }
-      self.failureReported = true; self.onFailure(message)
+      guard let self else { return }
+      self.lock.lock()
+      let report = !self.stopped && !self.failureReported
+      self.failureReported = true
+      self.lock.unlock()
+      if report { self.onFailure(message) }
     }
   }
   private static let shader = """

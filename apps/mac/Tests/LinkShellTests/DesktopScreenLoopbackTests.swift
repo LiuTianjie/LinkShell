@@ -14,17 +14,25 @@ final class DesktopScreenLoopbackTests: XCTestCase {
     XCTAssertTrue(Thread.isMainThread)
     _ = NSApplication.shared
     let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
+    // In a window the display link draws; the first presented frame turns the picture live.
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = surface
+    defer { window.contentView = nil }
     let decoded = expectation(description: "VideoToolbox confirms hardware after decoding a real H264 frame")
     var hardwareStatus: [String: Any]?
+    var live = false
+    var answer: String?
     var errors: [String] = []
     var lateEvents = 0
     var stopped = false
     var sender: SyntheticScreenSender?
     let receiver = DesktopScreenReceiver(surface: surface, onSignal: { message in
       if stopped { lateEvents += 1 }
+      if message["t"] as? String == "rtc.answer" { answer = message["sdp"] as? String }
       sender?.receive(message)
     }, onStatus: { status in
       if stopped { lateEvents += 1 }
+      if status["live"] as? Bool == true { live = true }
       if status["hardware"] as? Bool == true, hardwareStatus == nil {
         hardwareStatus = status
         decoded.fulfill()
@@ -41,6 +49,10 @@ final class DesktopScreenLoopbackTests: XCTestCase {
     XCTAssertEqual(hardwareStatus?["codec"] as? String, "H264")
     XCTAssertEqual(hardwareStatus?["decoder"] as? String, "LinkShellVideoToolboxH264Hardware")
     XCTAssertTrue(eventually { surface.receivedFrameCount >= 3 }, "Decoded CVPixelBuffers must reach the native surface")
+    XCTAssertTrue(eventually { live }, "The display link must present a decoded frame, off the main thread")
+    let sdp = try XCTUnwrap(answer)
+    XCTAssertFalse(sdp.lowercased().contains("flexfec"), "The receiver answers without FlexFEC, as the phone does")
+    XCTAssertTrue(sdp.contains("H264"))
     XCTAssertTrue(errors.isEmpty, errors.joined(separator: "\n"))
 
     // Let already-enqueued main-queue notifications drain, then continue sending real media

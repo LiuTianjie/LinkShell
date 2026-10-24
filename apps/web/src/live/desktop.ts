@@ -173,7 +173,7 @@ export function desktopHostSocket(): WebSocket {
   return new WebSocket(url);
 }
 
-function nativeCommand(message: { action: "manage" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean }): boolean {
+function nativeCommand(message: { action: "manage" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean }): boolean {
   if (isWindowsDesktop) {
     const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
     if (!webview) return false;
@@ -187,6 +187,12 @@ function nativeCommand(message: { action: "manage" } | { action: "external"; url
   handler.postMessage(message);
   return true;
 }
+
+/** Asks the Mac window to go full screen for the native remote screen; the answer arrives as `DESKTOP_FULLSCREEN_EVENT`. */
+export function setDesktopScreenFullScreen(enabled: boolean): boolean {
+  return nativeCommand({ action: "screenFullScreen", enabled });
+}
+export const DESKTOP_FULLSCREEN_EVENT = "linkshell-desktop-fullscreen";
 
 export function openDesktopManagement(): void {
   if (!nativeCommand({ action: "manage" })) reportDesktopError("请通过 LinkShell 菜单打开本机服务");

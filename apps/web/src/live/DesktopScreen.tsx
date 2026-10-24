@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, Expand, LoaderCircle, Monitor, RotateCw, SlidersHorizontal, Square } from "lucide-react";
+import { ArrowDownLeft, Expand, LoaderCircle, Maximize, Minimize, Monitor, RotateCw, SlidersHorizontal, Square } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import { ErrorNotice, LoadState, messageOf, useConnection, useJob, useLoad } from "./common";
-import { readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, readDesktopStorage, saveDesktopStorage, setDesktopScreenFullScreen } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { NATIVE_SCREEN_EVENT, nativeScreenQuery, postNativeScreen, screenSignal, type NativeScreenEvent, type NativeScreenStatus } from "./desktop-screen";
 import { autoScreenWidth, screenPreferences } from "./screen-preferences";
@@ -18,10 +18,23 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   const access = useLoad(() => link.call("screen.access", {}), [link]);
   const [started, setStarted] = useState(autoStart);
   const [focused, setFocused] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  // Only the screen that asked for the window's full screen follows it or ends it.
+  const ownsFullscreen = useRef(false);
+  const fullscreenRequest = (enabled: boolean) => {
+    if (!enabled && !ownsFullscreen.current) return;
+    ownsFullscreen.current = enabled;
+    if (!setDesktopScreenFullScreen(enabled)) { ownsFullscreen.current = false; setFocused(enabled); }
+  };
   const [settings, setSettings] = useState(false);
   const [display, setDisplay] = useState(0);
   const [displays, setDisplays] = useState<{ index: number; name: string }[]>([]);
-  const [preferences, setPreferences] = useState(() => screenPreferences((key) => readDesktopStorage(`screen:${key}`, undefined)));
+  const [preferences, setPreferences] = useState(() => {
+    const read = (key: string) => readDesktopStorage<string | undefined>(`screen:${key}`, undefined);
+    const view = screenPreferences(read);
+    // Like the phone: ask for 120 unless a rate was chosen; the sender still bounds it by both displays.
+    return read("linkshell.screen.maxFps") ? view : { ...view, maxFps: "120" };
+  });
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState<NativeScreenStatus>({});
   const [error, setError] = useState<string>();
@@ -33,12 +46,29 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   const running = started && active && visible;
 
   useEffect(() => {
-    if (!active || !visible) setFocused(false);
+    if (!active || !visible) { setFocused(false); fullscreenRequest(false); }
   }, [active, visible]);
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setFocused(false); };
+    // The window's own full screen; while it lasts the page also fills the window.
+    const changed = (event: Event) => {
+      if (!ownsFullscreen.current) return;
+      const value = (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true;
+      if (!value) ownsFullscreen.current = false;
+      setFullscreen(value);
+      setFocused(value);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setFocused(false);
+      fullscreenRequest(false);
+    };
+    window.addEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
     window.addEventListener("keydown", escape);
-    return () => window.removeEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
+      window.removeEventListener("keydown", escape);
+      fullscreenRequest(false);
+    };
   }, []);
 
   useEffect(() => {
@@ -131,7 +161,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
         if (!alive) return;
         setDisplays(viewer.displays);
         if (viewer.displays.length && !viewer.displays.some((entry) => entry.index === display)) appliedDisplay = viewer.displays[0].index;
-        const opened = await openWebSocket(streams, viewer.port, nativeScreenQuery(viewer.token, appliedDisplay, width, preferences.maxFps), {
+        const opened = await openWebSocket(streams, viewer.port, nativeScreenQuery(viewer.token, appliedDisplay, width, preferences.maxFps, preferences.codec === "auto"), {
           open: () => { socketOpen = true; flush(); },
           data: (data) => {
             if (!alive) return;
@@ -164,7 +194,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       window.removeEventListener("resize", layout);
       window.removeEventListener("scroll", layout, true);
     };
-  }, [running, revision, link, streams, display, preferences.width, preferences.maxFps]);
+  }, [running, revision, link, streams, display, preferences.width, preferences.maxFps, preferences.codec]);
 
   function choose(key: "width" | "maxFps", value: string) {
     saveDesktopStorage(`screen:linkshell.screen.${key}`, value);
@@ -199,8 +229,9 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       <div className="screen-actions">
         <Button variant="ghost" size="icon" aria-label="画质设置" aria-expanded={settings} onClick={() => setSettings(!settings)}><SlidersHorizontal /></Button>
         {started && <><Button variant={controlling ? "secondary" : "outline"} disabled={!status.live || access.value?.control === false} aria-pressed={controlling} onClick={control}>{controlling ? "停止控制" : controlRequested ? "取消控制请求" : "控制电脑"}</Button><Button variant="ghost" size="icon" aria-label="重新连接" onClick={() => setRevision((value) => value + 1)}><RotateCw /></Button></>}
-        <Button variant="outline" onClick={() => setFocused(!focused)}>{focused ? <ArrowDownLeft data-icon="inline-start" /> : <Expand data-icon="inline-start" />}{focused ? "退出铺满" : "铺满窗口"}</Button>
-        {started && <Button variant="ghost" size="icon" aria-label="停止观看" onClick={() => { setStarted(false); setFocused(false); setStatus({}); setError(undefined); }}><Square /></Button>}
+        {!fullscreen && <Button variant="outline" onClick={() => setFocused(!focused)}>{focused ? <ArrowDownLeft data-icon="inline-start" /> : <Expand data-icon="inline-start" />}{focused ? "退出铺满" : "铺满窗口"}</Button>}
+        {started && <Button variant="outline" onClick={() => fullscreenRequest(!fullscreen)}>{fullscreen ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}{fullscreen ? "退出全屏" : "全屏"}</Button>}
+        {started && <Button variant="ghost" size="icon" aria-label="停止观看" onClick={() => { setStarted(false); setFocused(false); fullscreenRequest(false); setStatus({}); setError(undefined); }}><Square /></Button>}
       </div>
     </div>
     {settings && <div className="desktop-screen-settings">
