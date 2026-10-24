@@ -214,6 +214,42 @@ describe("gateway v2 end to end", () => {
     expect((await other.relay.request("machines.list", {})).machines).toEqual([]);
   });
 
+  it("shows a computer with an access password as locked, and opens it only with the password or a saved unlock", async () => {
+    const { url, host, local } = await world({ machineToken: "token-alice" });
+    const mine = device(url, "Alice's phone", "token-alice");
+    await mine.relay.waitOnline(5000);
+    const id = host.gateway!.identity.id;
+    expect((await mine.relay.request("machines.list", {})).machines[0]).not.toHaveProperty("locked");
+
+    await local.call("access.set", { password: "open-sesame" });
+    await until(async () => (await mine.relay.request("machines.list", {})).machines.find((machine) => machine.id === id)?.locked === true);
+    const [machine] = (await mine.relay.request("machines.list", {})).machines;
+
+    let saved: string | undefined;
+    const store = { load: () => saved, save: (token: string | undefined) => (saved = token) };
+    const link = new HostLink({ url: "tunnel", createSocket: () => new TunnelSocket(mine.relay, mine.identity, machine!), heartbeatMs: 0, accessToken: store });
+    link.start();
+    cleanups.push(() => link.stop());
+    await until(() => link.status === "locked");
+    await expect(link.call("sessions.list", {})).rejects.toMatchObject({ data: { code: "locked" } });
+    await expect(link.unlock("nope")).rejects.toMatchObject({ data: { code: "wrong_password" } });
+    expect(link.status).toBe("locked");
+    await link.unlock("open-sesame");
+    expect(link.status).toBe("online");
+    expect(saved).toBeTruthy();
+    expect((await link.call("sessions.list", {})).sessions).toEqual([]);
+
+    // A later connection from this phone uses the saved unlock: no password asked.
+    const again = new HostLink({ url: "tunnel", createSocket: () => new TunnelSocket(mine.relay, mine.identity, machine!), heartbeatMs: 0, accessToken: store });
+    again.start();
+    cleanups.push(() => again.stop());
+    await until(() => again.status === "online");
+    expect((await again.call("sessions.list", {})).sessions).toEqual([]);
+
+    await local.call("access.set", {});
+    await until(async () => !(await mine.relay.request("machines.list", {})).machines.find((entry) => entry.id === id)?.locked);
+  });
+
   it("takes a computer that is gone off the account when a device on it says so, and not one that is there", async () => {
     const { url, host } = await world({ machineToken: "token-alice" });
     const mine = device(url, "Alice's phone", "token-alice");

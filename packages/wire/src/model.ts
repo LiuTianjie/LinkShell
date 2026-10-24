@@ -322,6 +322,8 @@ export const machineInfoSchema = z.object({
    * are the STUN servers both sides use to find a path.
    */
   direct: z.object({ iceServers: z.array(z.string()) }).optional(),
+  /** The computer has an access password and this connection must `access.unlock` first; until then the rest is withheld. */
+  locked: z.boolean().optional(),
 });
 export type MachineInfo = z.infer<typeof machineInfoSchema>;
 

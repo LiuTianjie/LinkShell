@@ -21,7 +21,8 @@ export interface SocketLike {
   onmessage: ((event: { data: unknown }) => void) | null;
 }
 
-export type LinkStatus = "idle" | "connecting" | "online" | "reconnecting" | "stopped";
+/** `locked`: connected, but the computer has an access password and this device hasn't given it (`unlock`). */
+export type LinkStatus = "idle" | "connecting" | "online" | "locked" | "reconnecting" | "stopped";
 
 export interface HostLinkOptions {
   url: string;
@@ -36,6 +37,8 @@ export interface HostLinkOptions {
    * (`sessions.image`), so the host sends references instead of the data.
    */
   lazyImages?: boolean;
+  /** Keeps the token an unlock returns, so later connections to this computer don't ask for the password again. */
+  accessToken?: { load(): string | undefined; save(token: string | undefined): void };
 }
 
 const OPEN = 1;
@@ -75,6 +78,8 @@ export class HostLink {
   /** Set while away (`resumeLatest`): the next subscriptions start at the latest turns. */
   private latest = false;
   private openedAt = 0;
+  /** Used when no `accessToken` store is given: lasts as long as this link. */
+  private heldToken?: string;
 
   constructor(private readonly options: HostLinkOptions) {}
 
@@ -130,7 +135,7 @@ export class HostLink {
   /** Reconnects now (e.g. the app came back to the foreground). */
   reconnectNow(): void {
     if (this.statusValue === "stopped") return;
-    if (this.statusValue === "online") return;
+    if (this.statusValue === "online" || this.statusValue === "locked") return;
     // A connection being made right now is left to finish: starting another would abandon it
     // half open (on the computer too, which keeps a few channels per device and drops the
     // oldest). One that has been at it for a while is stuck (made before a suspension).
@@ -175,6 +180,7 @@ export class HostLink {
     // Interactive authentication can wait for the user indefinitely, while an
     // offline connection still needs a bounded wait before reporting failure.
     await this.waitOnline(limit > 0 ? limit : this.options.requestTimeoutMs || 30_000);
+    if (this.statusValue === "locked") throw RpcError.app("locked", "请先输入这台电脑的访问密码");
     if (!this.peer || this.statusValue !== "online") {
       throw RpcError.app("offline", "没有连上电脑");
     }
@@ -213,7 +219,7 @@ export class HostLink {
   }
 
   private waitOnline(timeoutMs: number): Promise<void> {
-    if (this.statusValue === "online" || this.statusValue === "stopped") return Promise.resolve();
+    if (this.statusValue === "online" || this.statusValue === "locked" || this.statusValue === "stopped") return Promise.resolve();
     return new Promise((resolve) => {
       const done = () => {
         clearTimeout(timer);
@@ -279,6 +285,47 @@ export class HostLink {
         });
       }, heartbeat);
     }
+    // Hosts without a password (and older hosts) don't say `locked`: nothing changes for them.
+    const info = await this.peer?.request<{ locked?: boolean }>("machine.info", {}, 10_000).catch(() => undefined);
+    if (this.socket !== socket) return;
+    if (info?.locked) {
+      const token = this.loadToken();
+      const unlocked = token ? await this.peer?.request<{ token: string }>("access.unlock", { token }, 10_000).then((result) => result, () => undefined) : undefined;
+      if (this.socket !== socket) return;
+      if (!unlocked) {
+        if (token) this.saveToken(undefined);
+        this.setStatus("locked", "这台电脑设置了访问密码");
+        for (const wake of [...this.waiters]) wake();
+        return;
+      }
+      this.saveToken(unlocked.token);
+    }
+    await this.goOnline(socket);
+  }
+
+  /**
+   * Gives the computer's access password (status `locked`). A wrong one throws (`wrong_password`,
+   * or `busy` after too many tries) and the link stays locked.
+   */
+  async unlock(password: string): Promise<void> {
+    const socket = this.socket;
+    if (this.statusValue !== "locked" || !socket || !this.peer) throw RpcError.app("offline", "没有连上电脑");
+    const result = await this.peer.request<{ token: string }>("access.unlock", { password }, 20_000);
+    if (this.socket !== socket) return;
+    this.saveToken(result.token);
+    await this.goOnline(socket);
+  }
+
+  private loadToken(): string | undefined {
+    return this.options.accessToken ? this.options.accessToken.load() : this.heldToken;
+  }
+
+  private saveToken(token: string | undefined): void {
+    if (this.options.accessToken) this.options.accessToken.save(token);
+    else this.heldToken = token;
+  }
+
+  private async goOnline(socket: SocketLike): Promise<void> {
     // Online first, so calls made now go through; anyone waiting is woken once every open
     // session is restored, so nothing they render is missing what happened while offline.
     this.setStatus("online", "");

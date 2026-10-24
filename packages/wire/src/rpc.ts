@@ -55,6 +55,8 @@ export const appErrorCodeSchema = z.enum([
   "busy",
   /** Client side: the link to the computer is down. */
   "offline",
+  /** The computer has an access password and this connection hasn't been unlocked (`access.unlock`). */
+  "locked",
   "internal",
 ]);
 export type AppErrorCode = z.infer<typeof appErrorCodeSchema>;
@@ -413,6 +415,23 @@ const coreMethods = {
     result: z.object({ link: z.string(), code: z.string(), expiresAt: z.number(), gateway: z.string() }),
   },
   "devices.revoke": { params: z.object({ deviceId: z.string().min(1) }), result: empty },
+  // ── Access password: optional, set on the computer itself ──
+  /**
+   * Unlocks this connection with the password, or with a `token` an earlier unlock returned (so a
+   * reconnect doesn't ask again). Hosts without the method have no password. Wrong guesses are
+   * throttled per device (`busy`).
+   */
+  "access.unlock": {
+    params: z.object({ password: z.string().max(256).optional(), token: z.string().max(512).optional() }),
+    result: z.object({ token: z.string(), expiresAt: z.number() }),
+  },
+  /** Whether this computer has a password (local only). */
+  "access.status": { params: empty, result: z.object({ password: z.boolean() }) },
+  /** Sets the password, or removes it when none is given (local only). Remote connections reconnect. */
+  "access.set": {
+    params: z.object({ password: z.string().min(4).max(128).optional() }),
+    result: z.object({ password: z.boolean() }),
+  },
   // ── Git: sessions in worktrees ──
   /** What git says about `path`; no `git` when it isn't in a repository. */
   "git.info": { params: z.object({ path: z.string().min(1) }), result: z.object({ git: gitInfoSchema.optional() }) },

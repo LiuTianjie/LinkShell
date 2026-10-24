@@ -31,7 +31,8 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
         const online = selected ? status === "online" : computer.kind === "relay" && computer.machine.online && gateway === "online";
         const connecting = selected && (status === "connecting" || status === "reconnecting");
         // Gateway presence says a host is reachable, not that its RPC connection is ready.
-        const stateLabel = online ? selected ? "已连接" : "在线" : connecting ? "正在连接…"
+        const locked = computer.kind === "relay" && computer.machine.locked;
+        const stateLabel = selected && status === "locked" ? "需要密码" : online ? selected ? "已连接" : "在线" : connecting ? "正在连接…"
           : selected ? "未连接" : computer.kind === "direct" ? "局域网连接"
           : gateway !== "online" ? "状态待确认" : "离线";
         const platform = selected ? machine?.platform : computer.kind === "relay" ? computer.machine.platform : undefined;
@@ -41,7 +42,7 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${name}，${stateLabel}${selected ? "，当前电脑" : ""}`}
+              accessibilityLabel={`${name}，${stateLabel}${locked ? "，需要访问密码" : ""}${selected ? "，当前电脑" : ""}`}
               accessibilityState={{ selected }}
               onPress={() => { haptics.selection(); useComputers.getState().select(computer.key); onSelect?.(); }}
               style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minHeight: 72, paddingVertical: 12, borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}
@@ -50,6 +51,7 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                 <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                   <Text numberOfLines={2} style={[type.headline, { flex: 1, color: colors.label }]}>{name}</Text>
+                  {locked ? <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} /> : null}
                   {selected ? <Text style={[type.subhead, { color: colors.secondaryLabel }]}>当前</Text> : null}
                 </View>
                 <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>{[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}</Text>

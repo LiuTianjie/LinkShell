@@ -34,6 +34,8 @@ export interface RelayClientOptions {
   platform?: string;
   /** Account token, fetched fresh for each connection. */
   token?: () => Promise<string | undefined> | string | undefined;
+  /** A machine with an access password (read at each connection). */
+  locked?: () => boolean;
   createSocket: (url: string) => RelaySocket;
   minBackoffMs?: number;
   maxBackoffMs?: number;
@@ -375,6 +377,7 @@ export class RelayClient {
       name: this.options.name.slice(0, 120),
       platform: this.options.platform,
       token,
+      ...(this.options.locked?.() ? { locked: true } : {}),
     });
   }
 

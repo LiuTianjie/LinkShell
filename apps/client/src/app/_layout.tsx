@@ -150,6 +150,7 @@ export default function RootLayout() {
                 />
                 <Stack.Screen name="archived" options={{ title: "已归档" }} />
                 <Stack.Screen name="rename-computer" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
+                <Stack.Screen name="unlock" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
                 <Stack.Screen name="screen" options={{ title: "屏幕" }} />
                 <Stack.Screen
                   name="ports"

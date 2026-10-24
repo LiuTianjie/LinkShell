@@ -12,6 +12,23 @@ export function ConnectionBanner() {
   const detail = useClient((state) => state.statusDetail);
   const { link } = useConnection();
   if (status === "online" || status === "idle") return null;
+  if (status === "locked") {
+    return (
+      <Pressable
+        onPress={() => router.push("/unlock")}
+        accessibilityRole="button"
+        accessibilityHint="输入访问密码"
+        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 20, borderCurve: "continuous", backgroundColor: colors.card }}
+      >
+        <Icon sf="lock.fill" md="lock" size={18} color={colors.secondaryLabel} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>这台电脑设置了访问密码</Text>
+          <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>轻点输入密码后继续</Text>
+        </View>
+        <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
+      </Pressable>
+    );
+  }
   const connecting = status === "connecting";
   return (
     <Pressable

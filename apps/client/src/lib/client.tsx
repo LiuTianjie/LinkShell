@@ -1,4 +1,5 @@
 import { setHostHome } from "@/lib/format";
+import { deleteSecret, readSecret, writeSecret } from "./secure";
 import { createContext, use, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
@@ -52,15 +53,28 @@ function fallbackComputer(): Computer {
   return { key: `direct:${DEFAULT_HOST_URL}`, kind: "direct", url: DEFAULT_HOST_URL, name: "本机开发" };
 }
 
+/** The token an access-password unlock returned, per computer: reconnects don't ask again. */
+function accessToken(computer: Computer) {
+  const key = `linkshell.access.${computer.key.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+  return {
+    load: () => readSecret<string>(key),
+    save: (token: string | undefined) => {
+      if (token) writeSecret(key, token);
+      else void deleteSecret(key);
+    },
+  };
+}
+
 function createConnection(computer: Computer): Connection {
   const link =
     computer.kind === "direct"
-      ? new HostLink({ url: computer.url, createSocket, lazyImages: true })
+      ? new HostLink({ url: computer.url, createSocket, lazyImages: true, accessToken: accessToken(computer) })
       : // Through a gateway: an end-to-end encrypted channel that behaves like a WebSocket.
         new HostLink({
           url: `${computer.gateway}#${computer.machine.id}`,
           createSocket: () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine),
           lazyImages: true,
+          accessToken: accessToken(computer),
         });
   const url = computer.kind === "direct" ? computer.url : computer.gateway;
   // Pictures in history come as references and load when shown (`useImage`).

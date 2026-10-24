@@ -133,6 +133,30 @@ program
     await runPair();
   });
 
+const passwordCmd = program
+  .command("password")
+  .description("Show whether this computer has an access password (other devices enter it before opening this computer)")
+  .action(async () => {
+    const { runPassword } = await import("./commands/password.js");
+    await runPassword("status");
+  });
+
+passwordCmd
+  .command("set")
+  .description("Set or change this computer's access password")
+  .action(async () => {
+    const { runPassword } = await import("./commands/password.js");
+    await runPassword("set");
+  });
+
+passwordCmd
+  .command("remove")
+  .description("Remove this computer's access password")
+  .action(async () => {
+    const { runPassword } = await import("./commands/password.js");
+    await runPassword("remove");
+  });
+
 const devicesCmd = program
   .command("devices")
   .description("List the phones paired with this computer")

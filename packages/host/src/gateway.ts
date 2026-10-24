@@ -64,6 +64,8 @@ export interface GatewayLinkOptions {
   /** Account token (from `linkshell login`); the machine then belongs to that account. */
   token?: () => Promise<string | undefined> | string | undefined;
   name?: string;
+  /** This computer has an access password: devices see a lock before they connect. */
+  locked?: () => boolean;
   /** Serves a decrypted channel as a client connection. */
   serve: (transport: RpcTransport) => void;
   onChange?: (status: GatewayStatus) => void;
@@ -115,6 +117,7 @@ export class GatewayLink {
       name: this.name,
       platform: platform(),
       token: options.token,
+      locked: options.locked,
       createSocket: (url) => new WebSocket(url, { perMessageDeflate: false }) as unknown as RelaySocket,
     });
     this.relay.onStatus((status, error) => {
@@ -253,6 +256,7 @@ export class GatewayLink {
         this.relay.send(from.id, answer.welcome);
         this.options.serve({
           local: false,
+          deviceId: from.id,
           send: (text) => {
             if (!tunnel.closed) this.relay.send(from.id, { k: "data", ch: frame.ch, box: tunnel.channel.seal(text) });
           },

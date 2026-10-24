@@ -28,6 +28,8 @@ export const machineEntrySchema = publicIdentitySchema.extend({
   online: z.boolean(),
   /** How this device may reach it: it paired, or both belong to the same account. */
   via: z.enum(["paired", "account"]),
+  /** It has an access password (as it last told the gateway while online). */
+  locked: z.boolean().optional(),
 });
 export type MachineEntry = z.infer<typeof machineEntrySchema>;
 
@@ -51,6 +53,8 @@ export const clientFrameSchema = z.discriminatedUnion("t", [
     platform: z.string().max(40).optional(),
     /** Account access token, when signed in. */
     token: z.string().optional(),
+    /** A machine with an access password, so devices can show a lock. Older gateways drop it. */
+    locked: z.boolean().optional(),
   }),
   z.object({ t: z.literal("req"), id: z.number().int(), method: z.string(), params: z.unknown().optional() }),
   /** An encrypted frame for a peer. */

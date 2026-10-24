@@ -24,6 +24,7 @@ import {
   SunMoon,
   Terminal,
   type LucideIcon,
+  Lock,
 } from "lucide-react";
 import appMark from "../../../client/assets/mark.png";
 import { engine, type Computer, type Connection } from "../live/engine";
@@ -86,7 +87,7 @@ const PROJECTS_SHOWN = 8;
 const SESSIONS_SHOWN = 5;
 
 function connectionLabel(status: string): string {
-  return status === "online" ? "已连接" : status === "connecting" ? "连接中" : status === "reconnecting" ? "正在恢复" : "未连接";
+  return status === "online" ? "已连接" : status === "locked" ? "需要密码" : status === "connecting" ? "连接中" : status === "reconnecting" ? "正在恢复" : "未连接";
 }
 
 function sessionTone(session: SessionSummary): "waiting" | "running" | "error" | undefined {
@@ -166,6 +167,7 @@ function ComputerPicker({
           <DropdownMenuItem key={computer.key} onSelect={() => selectComputer(computer)}>
             <span className="desktop-presence" data-online={computer.machine.online || undefined} />
             <span className="desktop-menu-computer-name">{computerName(computer, names)}</span>
+            {computer.machine.locked && <Lock className="computer-lock-mark" size={12} aria-label="已设置访问密码" />}
             {computer.key === DESKTOP_LOCAL && <small>本机</small>}
             {selected?.key === computer.key && <Check size={14} />}
           </DropdownMenuItem>

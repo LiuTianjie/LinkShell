@@ -100,6 +100,8 @@ export interface ClientActions {
   dismissNotice(sessionId: string, id: string): void;
   connect(): void;
   disconnect(): void;
+  /** Gives the computer's access password while `status` is `locked`; throws when it's wrong. */
+  unlock(password: string): Promise<void>;
   refresh(): Promise<void>;
   openSession(sessionId: string): void;
   closeSession(sessionId: string): void;
@@ -403,6 +405,10 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       disconnect() {
         link.stop();
+      },
+
+      unlock(password) {
+        return link.unlock(password);
       },
       dismissNotice(sessionId, id) { set((state) => ({ notices: { ...state.notices, [sessionId]: (state.notices[sessionId] ?? []).filter((notice) => notice.id !== id) } })); },
 

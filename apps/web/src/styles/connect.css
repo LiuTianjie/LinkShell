@@ -59,3 +59,76 @@
     }
 }
 }
+
+/* Access password: the unlock view stands in for the workspace while a computer is locked. */
+.access-unlock {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: min(60vh, 440px);
+  padding: 40px 24px;
+  text-align: center;
+}
+.access-unlock-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--secondaryLabel);
+}
+.access-unlock h2 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--label);
+}
+.access-unlock p {
+  max-width: 360px;
+  font-size: 13px;
+  color: var(--secondaryLabel);
+}
+.access-unlock-form {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(340px, 100%);
+  margin-top: 8px;
+  text-align: left;
+}
+.access-unlock-form > [data-slot="field"] {
+  flex: 1;
+}
+.access-settings {
+  align-items: flex-start;
+}
+.access-settings-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--tertiaryLabel);
+}
+.access-settings-mark[data-enabled] {
+  color: var(--label);
+}
+.access-settings-form {
+  display: grid;
+  gap: 10px;
+  max-width: 320px;
+  margin-top: 12px;
+}
+.computer-lock-mark {
+  display: inline-block;
+  flex: none;
+  margin-left: 6px;
+  vertical-align: -1px;
+  color: var(--tertiaryLabel);
+}

@@ -42,6 +42,7 @@ import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
 import { engine } from "./live/engine";
 import { ComputerName } from "./live/ComputerName";
+import { AccessPasswordSettings, AccessUnlock, LockMark } from "./live/Access";
 import {
   computerName,
   computerOption,
@@ -272,9 +273,15 @@ function Workspace({
   const [create, setCreate] = useState<string | null>();
   const [terminal, setTerminal] = useState<string>();
   const session = state.sessions[view];
+  const engineState = useStore(engine.state);
+  const names = useStore(computerNames.store);
   useDesktopCommand((command) => {
     if (command.command === "new-session" && state.status === "online") setCreate(command.cwd ?? null);
   });
+  if (state.status === "locked") {
+    const computer = engineState.connection?.computer;
+    return <AccessUnlock name={computer ? computerName(computer, names) : "这台电脑"} />;
+  }
   return (
     <>
       {state.status !== "online" && (
@@ -1022,6 +1029,7 @@ function Computers({
                   title={computerName(computer, names)}
                 >
                   {computerName(computer, names)}
+                  <LockMark locked={computer.machine.locked} />
                 </div>
                 <div
                   className="truncate text-xs text-[var(--tertiaryLabel)]"
@@ -1064,6 +1072,12 @@ function Computers({
           );
         })}
       </div>
+      {state.connection?.computer.key === "desktop:local" && (
+        <div className="computers-section">
+          {heading("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。")}
+          <AccessPasswordSettings />
+        </div>
+      )}
       <div className="computers-section">
         {heading(
           "当前电脑的 Agent",

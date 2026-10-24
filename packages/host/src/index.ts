@@ -12,3 +12,4 @@ export { ClaudeDriver } from "./drivers/claude/driver.js";
 export { ACP_AGENTS, defaultDrivers } from "./drivers/registry.js";
 
 export { shippedApp } from "./input.js";
+export { AccessControl, accessPath, writeAccessPassword } from "./access.js";

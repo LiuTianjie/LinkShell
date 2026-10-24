@@ -26,6 +26,7 @@ import { ComputerPreviewServer } from "../computer-preview.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 import type { LiveActivityRelay } from "../live-activities.js";
+import type { AccessControl } from "../access.js";
 
 // How a development client names this machine: loopback, or the Android emulator's alias for its host's loopback.
 const DEVELOPMENT_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "10.0.2.2"]);
@@ -60,6 +61,10 @@ export interface HostRpcServerOptions {
   liveActivities?: LiveActivityRelay;
   usage?: UsageStatistics;
   shutdown?: () => void;
+  /** The optional access password remote connections unlock with. */
+  access?: AccessControl;
+  /** The password was set or removed (the gateway is told whether this computer is locked). */
+  onAccessChanged?: () => void;
 }
 
 type Handler = (params: never, context: ConnectionContext) => Promise<unknown> | unknown;
@@ -72,6 +77,8 @@ export interface RpcTransport {
   onClose(listener: () => void): void;
   /** Local transports (this machine's own sockets) may use desktop.* methods. */
   local: boolean;
+  /** The device on the other end of a gateway channel. */
+  deviceId?: string;
 }
 
 interface ConnectionContext {
@@ -86,6 +93,10 @@ interface ConnectionContext {
   proxy: ProxyStreams;
   /** The connection's peer-to-peer channel for those streams, once the device has offered one. */
   direct: DirectPeer;
+  /** Past the access password (or none is set): anything but `machine.info` and `access.unlock` waits for this. */
+  unlocked: boolean;
+  deviceId?: string;
+  close: () => void;
 }
 
 /**
@@ -96,7 +107,7 @@ interface ConnectionContext {
 export class HostRpcServer {
   private readonly servers: Server[] = [];
   private readonly sockets = new Set<WebSocket>();
-  private readonly connections = new Set<RpcPeer>();
+  private readonly connections = new Map<RpcPeer, ConnectionContext>();
   private gateway?: GatewayLink;
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
@@ -135,7 +146,11 @@ export class HostRpcServer {
       "agents.respond": async (params: P<"agents.respond">) => { await hub.respondInteraction(params.agent, params.requestId, params); return {}; },
       "agents.providers": async (params: P<"agents.providers">) => ({ providers: await hub.providers(params.agent, params.operation, params.config) }),
       "agents.custom": async (params: P<"agents.custom">) => ({ agents: await hub.customAgents(params.save, params.remove) }),
-      "machine.info": () => {
+      "machine.info": (_params: P<"machine.info">, context) => {
+        if (!context.unlocked) {
+          const info = options.machineInfo();
+          return { machineId: info.machineId, hostname: info.hostname, platform: info.platform, hostVersion: info.hostVersion, agents: [], locked: true };
+        }
         void hub.refreshAuthIfStale();
         return options.machineInfo();
       },
@@ -252,6 +267,33 @@ export class HostRpcServer {
         if (!context.local) throw RpcError.app("forbidden", "pairing starts on the computer itself");
         if (!this.gateway) throw RpcError.app("not_supported", "no gateway: run linkshell login for the official one, or linkshell host --gateway <url>");
         return this.gateway.startPairing();
+      },
+      "access.unlock": (params: P<"access.unlock">, context) => {
+        if (context.local || !options.access?.enabled) {
+          this.unlock(context);
+          return { token: "", expiresAt: Date.now() };
+        }
+        const result = options.access.unlock(context.deviceId ?? "", params);
+        if (!result.ok) {
+          if (result.reason === "throttled") throw RpcError.app("busy", "密码错误次数过多，请 5 分钟后再试");
+          if (result.reason === "invalid_token") throw RpcError.app("locked", "请输入这台电脑的访问密码");
+          throw RpcError.app("wrong_password", "访问密码不正确");
+        }
+        this.unlock(context);
+        return { token: result.token, expiresAt: result.expiresAt };
+      },
+      "access.status": (_params: P<"access.status">, context) => {
+        if (!context.local) throw RpcError.app("forbidden", "访问密码只能在这台电脑上查看");
+        return { password: options.access?.enabled ?? false };
+      },
+      "access.set": (params: P<"access.set">, context) => {
+        if (!context.local) throw RpcError.app("forbidden", "访问密码只能在这台电脑上设置");
+        if (!options.access) throw RpcError.app("not_supported", "本机服务不支持访问密码");
+        options.access.set(params.password);
+        // Unlocks given under the old password (or none) no longer count: every remote device reconnects and asks.
+        for (const context of this.connections.values()) if (!context.local) context.close();
+        options.onAccessChanged?.();
+        return { password: options.access.enabled };
       },
       "devices.revoke": async (params: P<"devices.revoke">) => {
         await this.gateway?.revoke(params.deviceId);
@@ -407,6 +449,20 @@ export class HostRpcServer {
     });
   }
 
+  private readonly listeners = new Map<ConnectionContext, () => void>();
+
+  private startPushes(context: ConnectionContext): void {
+    const start = this.listeners.get(context);
+    this.listeners.delete(context);
+    start?.();
+  }
+
+  private unlock(context: ConnectionContext): void {
+    if (context.unlocked) return;
+    context.unlocked = true;
+    this.startPushes(context);
+  }
+
   setGateway(gateway: GatewayLink | undefined): void {
     this.gateway = gateway;
   }
@@ -417,7 +473,7 @@ export class HostRpcServer {
 
   /** A notification to every connected client. */
   broadcast<N extends NotificationName>(name: N, params: NotificationParams<N>): void {
-    for (const peer of this.connections) peer.notify(name, params);
+    for (const [peer, context] of this.connections) if (context.unlocked) peer.notify(name, params);
   }
 
   /** Serves one client connection over `transport` until it closes. */
@@ -429,6 +485,9 @@ export class HostRpcServer {
     const direct = new DirectPeer(this.options.machineInfo().direct?.iceServers ?? [], this.options.log);
     const context: ConnectionContext = {
       local: transport.local,
+      deviceId: transport.deviceId,
+      unlocked: transport.local || !this.options.access?.enabled,
+      close: () => transport.close(),
       desktops: new Map(),
       subscriptions: new Map(),
       terminals: new Map(),
@@ -442,25 +501,29 @@ export class HostRpcServer {
       direct,
       peer,
     };
-    this.connections.add(context.peer);
-    const stopInteractions = this.options.hub.onInteraction((agent, request) => context.peer.notify("agent.interaction", { agent, request }));
-    const stopAgents = this.options.hub.onAgent((agent) => context.peer.notify("agent.changed", { agent }));
-    const stopSummaries = this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session }));
-    const stopRemoved = this.options.hub.onRemoved((sessionId) => {
-      context.subscriptions.delete(sessionId);
-      context.peer.notify("session.removed", { sessionId });
+    this.connections.set(context.peer, context);
+    const stops: Array<() => void> = [];
+    // A locked connection hears nothing until it unlocks: these carry sessions, prompts and terminals.
+    this.listeners.set(context, () => {
+      stops.push(
+        this.options.hub.onInteraction((agent, request) => context.peer.notify("agent.interaction", { agent, request })),
+        this.options.hub.onAgent((agent) => context.peer.notify("agent.changed", { agent })),
+        this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session })),
+        this.options.hub.onRemoved((sessionId) => {
+          context.subscriptions.delete(sessionId);
+          context.peer.notify("session.removed", { sessionId });
+        }),
+        this.options.terminals.onChange((terminal, closed) =>
+          context.peer.notify("terminal.changed", closed ? { terminal, closed } : { terminal }),
+        ),
+      );
     });
-    const stopTerminals = this.options.terminals.onChange((terminal, closed) =>
-      context.peer.notify("terminal.changed", closed ? { terminal, closed } : { terminal }),
-    );
+    if (context.unlocked) this.startPushes(context);
     transport.onMessage((text) => context.peer.receive(text));
     transport.onClose(() => {
       this.connections.delete(context.peer);
-      stopSummaries();
-      stopInteractions();
-      stopAgents();
-      stopRemoved();
-      stopTerminals();
+      this.listeners.delete(context);
+      for (const stop of stops) stop();
       for (const [terminalId, listener] of context.terminals) this.options.terminals.detach(terminalId, listener);
       context.terminals.clear();
       for (const [sessionId, subscriber] of context.subscriptions) this.options.hub.unsubscribe(sessionId, subscriber);
@@ -481,6 +544,8 @@ export class HostRpcServer {
     if (!isMethodName(method)) throw new RpcError(RPC_METHOD_NOT_FOUND, `unknown method ${method}`);
     // The terminal shim's methods launch local processes with a given environment: never over the network.
     if (method.startsWith("desktop.") && !context.local) throw RpcError.app("forbidden", `${method} is only available locally`);
+    // Older apps can't unlock: the message is what they show.
+    if (!context.unlocked && method !== "machine.info" && method !== "access.unlock") throw RpcError.app("locked", "这台电脑设置了访问密码，请更新 App 后输入密码");
     const parsed = methods[method].params.safeParse(params ?? {});
     if (!parsed.success) {
       throw new RpcError(RPC_INVALID_PARAMS, `invalid params for ${method}`, {

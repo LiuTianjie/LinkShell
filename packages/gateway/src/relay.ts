@@ -99,6 +99,8 @@ export class Gateway {
   readonly store: GatewayStore;
   private server?: Server;
   private readonly peers = new Map<string, Peer>();
+  /** Machines that said they have an access password, as of their last sign-in (memory only: the schema stays as it is). */
+  private readonly locked = new Set<string>();
   private readonly offers = new Map<string, Offer>();
   private readonly decisions = new Map<string, { machineId: string; resolve: (accept: boolean) => void }>();
   private readonly claimTimes = new Map<string, number[]>();
@@ -308,6 +310,12 @@ export class Gateway {
       lastSeen: Date.now(),
     };
     this.store.upsertPeer(record);
+    if (role === "machine") {
+      const was = this.locked.has(record.id);
+      if (frame.locked) this.locked.add(record.id);
+      else this.locked.delete(record.id);
+      if (was !== Boolean(frame.locked)) for (const { peer: device } of this.store.reachable(record.id)) this.event(device.id, "machines.changed", {});
+    }
     const previous = this.peers.get(record.id);
     const peer: Peer = { record, socket, email };
     this.peers.set(record.id, peer);
@@ -399,6 +407,7 @@ export class Gateway {
       platform: peer.platform,
       online: this.peers.has(peer.id),
       via,
+      ...(this.locked.has(peer.id) ? { locked: true } : {}),
     };
   }
 

@@ -9,6 +9,7 @@ import { AcpSettingsStore } from "./acp-settings.js";
 import type { AgentDriver } from "./drivers/types.js";
 import { SessionHub } from "./hub.js";
 import { connectHost } from "./rpc/client.js";
+import { AccessControl } from "./access.js";
 import { HostRpcServer } from "./rpc/server.js";
 import { GatewayLink } from "./gateway.js";
 import { HostStore } from "./store.js";
@@ -190,10 +191,15 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     log,
   });
   liveActivities.start();
+  const access = new AccessControl(paths.home);
+  let gateway: GatewayLink | undefined;
   const server = new HostRpcServer({
     hub,
     terminals,
     machineInfo,
+    access,
+    // The gateway shows a lock on this computer from its next sign-in.
+    onAccessChanged: () => gateway?.reauthenticate(),
     usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }, { agents: () => hub.agents(), events: () => store.usageEvents() }),
     socketPath: paths.hostSocket,
     shutdown: options.shutdown,
@@ -203,7 +209,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   });
   await server.start();
 
-  let gateway: GatewayLink | undefined;
   const chosen = options.gateway;
   /** Follows the gateway choice: connects, moves or disconnects; an unchanged one signs in again. */
   const syncGateway = (): GatewayStatus => {
@@ -219,6 +224,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
           home: paths.home,
           token: chosen?.token,
           name: chosen?.name,
+          locked: () => access.enabled,
           serve: (transport) => server.connect(transport),
           // A link that was replaced has nothing more to say.
           onChange: (status) => {
