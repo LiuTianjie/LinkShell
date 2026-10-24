@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { isDesktop } from "./desktop";
 
 export const SCREEN_RETAIN_MS = 120_000;
 
@@ -15,8 +16,13 @@ export function ScreenSessionSlot({
   children: (key: string, active: boolean) => ReactNode;
 }) {
   const [retained, setRetained] = useState(activeKey);
-  const [visible, setVisible] = useState(() => !document.hidden);
+  // In the desktop app WebKit reports the page hidden while its window goes in or out of full
+  // screen (about half a second): following that unmounted the screen mid-transition, and its
+  // cleanup cancelled the full screen it had just asked for. The app says when the window is
+  // really hidden (`enabled`, from its own visibility).
+  const [visible, setVisible] = useState(() => isDesktop || !document.hidden);
   useEffect(() => {
+    if (isDesktop) return;
     const changed = () => setVisible(!document.hidden);
     document.addEventListener("visibilitychange", changed);
     return () => document.removeEventListener("visibilitychange", changed);
