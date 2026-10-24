@@ -12,6 +12,7 @@ import { sep, join } from "node:path";
 import { ensureHostRunning, silenceSqliteWarning, withRunningHost } from "./host.js";
 import { linkshellDir, readHostLaunch, readHostOwner, readPid, stopDaemonAndWait } from "../utils/daemon.js";
 import { cachedMembership, redeemDesktopPro, refreshMembership } from "../pro-membership.js";
+import { accessPasswordEnabled, applyAccessPassword } from "./password.js";
 
 export function installationSource(path: string): "homebrew" | "npm" {
   return path.includes(`${sep}Cellar${sep}linkshell${sep}`) ? "homebrew" : "npm";
@@ -27,7 +28,8 @@ export async function desktopSnapshot(version: string) {
   let executable = process.argv[1]!;
   try { executable = realpathSync(executable); } catch { /* Retain the launch path for diagnosis. */ }
   const account = desktopAccount();
-  const base = { account, schema: 1, cliVersion: version, home: linkshellDir(), source: standaloneBundle() ? "standalone" : installationSource(executable), executable, hostOwner: readPid("host") ? readHostOwner(readPid("host")!) ?? "external" : "none", appBundle: standaloneBundle() };
+  const access = { password: await accessPasswordEnabled().catch(() => false) };
+  const base = { account, access, schema: 1, cliVersion: version, home: linkshellDir(), source: standaloneBundle() ? "standalone" : installationSource(executable), executable, hostOwner: readPid("host") ? readHostOwner(readPid("host")!) ?? "external" : "none", appBundle: standaloneBundle() };
   const result = await withRunningHost(async (client) => {
     const machine = await client.call("machine.info", {}, 5000);
     const [gateway, sessions] = await Promise.all([
@@ -38,6 +40,22 @@ export async function desktopSnapshot(version: string) {
     return { machine, gateway, sessions: sessions.sessions, hasMoreSessions: Boolean(sessions.nextBefore), ...(screen ? { screen } : {}) };
   });
   return result ? { ...base, status: "running", ...result } : { ...base, status: readPid("host") ? "unreachable" : "stopped" };
+}
+
+/** The new password, as JSON on stdin (never on the command line, where `ps` shows it). */
+async function passwordInput(input: AsyncIterable<string | Buffer>): Promise<string> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of input) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > 4096) throw new Error("密码过长，请输入 4 到 128 位");
+    chunks.push(buffer);
+  }
+  let password: unknown;
+  try { password = JSON.parse(Buffer.concat(chunks).toString("utf8"))?.password; } catch { /* Never echo the input. */ }
+  if (typeof password !== "string" || password.length < 4 || password.length > 128) throw new Error("密码需要 4 到 128 位");
+  return password;
 }
 
 async function redemptionInput(input: AsyncIterable<string | Buffer>): Promise<{ code: string; userId: string }> {
@@ -122,6 +140,8 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
       await ensureHostRunning();
       await refreshGateway(15_000);
     }
+    else if (action === "set-password") await applyAccessPassword(await passwordInput(input));
+    else if (action === "remove-password") await applyAccessPassword(undefined);
     else if (action === "prepare-update") { await prepareDesktopUpdate(); }
     else if (action === "recover-update") { await recoverDesktopUpdate(version); }
     else if (action === "stop-update-host") { await stopDesktopUpdateHost(); }

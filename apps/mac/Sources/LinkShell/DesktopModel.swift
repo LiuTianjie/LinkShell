@@ -27,6 +27,9 @@ enum DesktopMembership: Equatable {
 }
 struct DesktopSnapshot: Decodable {
   struct Machine: Decodable { let hostname: String; let hostVersion: String }
+  /// Older CLIs don't report it: unknown, and the section isn't offered.
+  struct Access: Decodable { let password: Bool }
+  let access: Access?
   struct Gateway: Decodable {
     struct Problem: Decodable { let message: String }
     let status: String
@@ -165,6 +168,9 @@ enum DesktopCommand {
   @Published var signingIn = false
   @Published var accountMessage = ""
   @Published var redemptionCode = ""
+  @Published var passwordMessage = ""
+  @Published var passwordIsError = false
+  @Published var savingPassword = false
   @Published var redemptionMessage = ""
   @Published var redemptionIsError = false
   @Published var redeeming = false
@@ -245,6 +251,7 @@ enum DesktopCommand {
         sample["account"] = ["state": "signed-in", "userId": "preview", "email": "preview@example.com", "plan": plan,
                              "planExpiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(30 * 86400))]
       }
+      if let access = Launch.value(after: "--dashboard-access") { sample["access"] = ["password": access == "on"] }
       if let data = try? JSONSerialization.data(withJSONObject: sample) { snapshot = try? JSONDecoder().decode(DesktopSnapshot.self, from: data) }
       recording = true; control = true; permissionsKnown = true
       activity = [(Date(), "手机已连接"), (Date().addingTimeInterval(-240), "本机服务已连接")]
@@ -429,6 +436,34 @@ enum DesktopCommand {
         if next.account?.userId == userId { accountMessage = next.accountWarning ?? "" }
       } catch {
         if generation == accountGeneration { accountMessage = error.localizedDescription }
+      }
+    }
+  }
+
+  /// Sets (or with nil removes) this computer's access password; other devices then ask for it.
+  func setAccessPassword(_ password: String?) {
+    guard !busy, !preview else { return }
+    var input: Data?
+    if let password {
+      guard (4...128).contains(password.count), let data = try? JSONSerialization.data(withJSONObject: ["password": password]) else {
+        passwordMessage = "密码需要 4 到 128 位。"; passwordIsError = true
+        return
+      }
+      input = data
+    }
+    busy = true; savingPassword = true; passwordMessage = ""; passwordIsError = false
+    Task {
+      defer { savingPassword = false; busy = false }
+      do {
+        let action = password == nil ? "remove-password" : "set-password"
+        let data = try await Task.detached { try DesktopCommand.run(["desktop", "--action", action], timeout: 45, input: input) }.value
+        let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
+        if let error = next.error { throw NSError(domain: "LinkShell", code: 1, userInfo: [NSLocalizedDescriptionKey: error]) }
+        snapshot = next
+        passwordMessage = password == nil ? "已移除访问密码。" : "已设置访问密码。其他设备下次打开这台电脑时需要输入。"
+        event(password == nil ? "访问密码已移除" : "访问密码已设置")
+      } catch {
+        passwordMessage = error.localizedDescription; passwordIsError = true
       }
     }
   }

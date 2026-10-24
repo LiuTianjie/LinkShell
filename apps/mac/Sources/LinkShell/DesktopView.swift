@@ -22,6 +22,9 @@ struct DesktopStatus: View {
 struct DesktopView: View {
   @ObservedObject var model: DesktopModel
   @State private var confirm: String?
+  @State private var editingPassword = false
+  @State private var newPassword = ""
+  @State private var confirmPassword = ""
   private let mainPages = [("总览", "house"), ("设备", "iphone"), ("用量统计", "chart.bar"), ("日志", "text.alignleft")]
   var body: some View {
     VStack(spacing: 0) {
@@ -34,13 +37,13 @@ struct DesktopView: View {
     }
     .background(DesktopStyle.background).foregroundStyle(DesktopStyle.primary)
     .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: model.preview ? 560 : 520)
-    .alert(confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
+    .alert(confirm == "remove-password" ? "移除访问密码？" : confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
       Button("取消", role: .cancel) { confirm = nil }
       Button("继续", role: .destructive) {
-        if let action = confirm { if action == "upgrade" { model.upgrade() } else if action == "logout" || action == "connect-gateway" { model.accountAction(action) } else { model.action(action) } }
+        if let action = confirm { if action == "remove-password" { model.setAccessPassword(nil) } else if action == "upgrade" { model.upgrade() } else if action == "logout" || action == "connect-gateway" { model.accountAction(action) } else { model.action(action) } }
         confirm = nil
       }
-    } message: { Text(confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 Pro，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
+    } message: { Text(confirm == "remove-password" ? "其他设备将可以直接打开这台 Mac，不再需要输入密码。" : confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 Pro，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
   }
 
   private var sidebar: some View {
@@ -248,6 +251,7 @@ struct DesktopView: View {
   private var devices: some View {
     VStack(alignment: .leading, spacing: 0) {
       DesktopPairingView(model: model).padding(.bottom, 22)
+      if model.snapshot?.access != nil { accessPassword.padding(.bottom, 22) }
       DesktopGroupLabel(title: "已配对设备", trailing: model.devices.isEmpty ? nil : "\(model.devices.count) 台")
       VStack(alignment: .leading, spacing: 0) {
         if model.devices.isEmpty { empty("暂无已配对设备", "在手机中打开「电脑 → 添加电脑」，扫描上方生成的二维码。") }
@@ -255,6 +259,50 @@ struct DesktopView: View {
       }.rowsCard()
       if let url = model.snapshot?.gateway?.url { Text(url).font(DesktopStyle.mono(12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled).padding(.top, 20) }
       if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.footnote).foregroundStyle(DesktopStyle.waiting).padding(.top, 12) }
+    }
+  }
+  private var accessPassword: some View {
+    let enabled = model.snapshot?.access?.password ?? false
+    let mismatch = !confirmPassword.isEmpty && confirmPassword != newPassword
+    return VStack(alignment: .leading, spacing: 0) {
+      DesktopGroupLabel(title: "访问密码")
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
+          Image(systemName: enabled ? "lock.fill" : "lock.open").font(.system(size: 13)).foregroundStyle(enabled ? DesktopStyle.primary : DesktopStyle.tertiary).frame(width: 18).padding(.top, 1)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(enabled ? "已开启" : "未设置").font(.system(size: 13, weight: .medium))
+            Text(enabled ? "其他设备（手机、其他电脑）打开这台 Mac 前要先输入密码。这台 Mac 自己不用输。" : "设置后，同一账号或已配对的其他设备打开这台 Mac 前要先输入密码。随时可以修改或移除。")
+              .font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 8)
+          if !editingPassword {
+            HStack(spacing: 6) {
+              Button(enabled ? "修改" : "设置密码") { newPassword = ""; confirmPassword = ""; model.passwordMessage = ""; editingPassword = true }
+                .buttonStyle(DesktopPillStyle(.secondary, compact: true)).disabled(model.busy || model.preview)
+              if enabled {
+                Button("移除") { confirm = "remove-password" }.buttonStyle(DesktopPillStyle(.quiet, compact: true)).disabled(model.busy || model.preview)
+              }
+            }
+          }
+        }
+        if editingPassword {
+          VStack(alignment: .leading, spacing: 8) {
+            SecureField(enabled ? "新密码（至少 4 位）" : "密码（至少 4 位）", text: $newPassword).desktopField().frame(maxWidth: 280).accessibilityLabel("新密码")
+            SecureField("再输一次", text: $confirmPassword).desktopField().frame(maxWidth: 280).accessibilityLabel("再输一次密码")
+              .onSubmit { if newPassword.count >= 4 && newPassword == confirmPassword { model.setAccessPassword(newPassword); editingPassword = false } }
+            if mismatch { Text("两次输入不一致").font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting) }
+            HStack(spacing: 8) {
+              Button(model.savingPassword ? "正在保存…" : "保存") { model.setAccessPassword(newPassword); editingPassword = false }
+                .buttonStyle(DesktopPillStyle(.primary, compact: true))
+                .disabled(model.busy || newPassword.count < 4 || newPassword != confirmPassword)
+              Button("取消") { editingPassword = false; newPassword = ""; confirmPassword = "" }.buttonStyle(DesktopPillStyle(.quiet, compact: true))
+            }
+          }.padding(.leading, 30)
+        }
+        if !model.passwordMessage.isEmpty {
+          Text(model.passwordMessage).font(.system(size: 12)).foregroundStyle(model.passwordIsError ? DesktopStyle.waiting : DesktopStyle.secondary).padding(.leading, 30)
+        }
+      }.desktopCard(padding: 14)
     }
   }
   private var logs: some View {

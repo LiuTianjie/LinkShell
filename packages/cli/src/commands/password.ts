@@ -1,6 +1,6 @@
 import { RpcError } from "@linkshell/wire";
 import { linkshellDir } from "../utils/daemon.js";
-import { assertHostRuntime, withRunningHost } from "./host.js";
+import { assertHostRuntime, silenceSqliteWarning, withRunningHost } from "./host.js";
 
 /** Reads a line without echoing it; from a pipe, just the first line. */
 function readHidden(prompt: string): Promise<string> {
@@ -44,7 +44,7 @@ function unknownMethod(error: unknown): boolean {
 }
 
 /** Applies the change through the running host, or writes it for the next start. */
-async function apply(password: string | undefined): Promise<"live" | "restart" | "file"> {
+export async function applyAccessPassword(password: string | undefined): Promise<"live" | "restart" | "file"> {
   try {
     const result = await withRunningHost((client) => client.call("access.set", password ? { password } : {}));
     if (result) return "live";
@@ -60,8 +60,17 @@ async function apply(password: string | undefined): Promise<"live" | "restart" |
   return "file";
 }
 
+/** Whether this computer has an access password: the running host's answer, else the file. */
+export async function accessPasswordEnabled(): Promise<boolean> {
+  const live = await withRunningHost((client) => client.call("access.status", {})).catch(() => undefined);
+  if (live) return live.password;
+  const host = await import("@linkshell/host");
+  return new host.AccessControl(linkshellDir()).enabled;
+}
+
 export async function runPassword(action: "status" | "set" | "remove"): Promise<void> {
   assertHostRuntime();
+  silenceSqliteWarning();
   const host = await import("@linkshell/host");
   if (action === "status") {
     const live = await withRunningHost((client) => client.call("access.status", {})).catch(() => undefined);
@@ -84,7 +93,7 @@ export async function runPassword(action: "status" | "set" | "remove"): Promise<
       throw error;
     }
   }
-  const how = await apply(password);
+  const how = await applyAccessPassword(password);
   const what = password ? "Access password set." : "Access password removed.";
   const when =
     how === "live"
