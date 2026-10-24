@@ -56,7 +56,7 @@ html[data-desktop] .desktop-main .live-side-panel { border: 1px solid var(--sepa
 html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 264px; height: 100%; overflow: hidden; }
 html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: transparent; }
 html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; margin: 0; overflow: hidden; outline: none; container-type: inline-size; container-name: desktop-workspace; }
-html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused) { container-type: normal; }
+html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) { container-type: normal; }
 /* Beside a session the main area is only a frame: the conversation and the inspector are the panels. */
 html[data-desktop] .desktop-main:has(> .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 html[data-desktop] .desktop-main > .live-overview,
@@ -71,9 +71,9 @@ html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 26px; p
 html[data-desktop] .windows-desktop-modes [data-slot="button"][aria-current="page"] { background: var(--sidebarAccent); color: var(--label); }
 html[data-desktop] .desktop-top-search { display: flex; align-items: center; gap: 8px; width: min(420px, 40vw); height: 30px; margin: 0 auto; padding: 0 12px; border: 1px solid var(--separator); border-radius: 999px; background: var(--plain); color: var(--tertiaryLabel); font: inherit; font-size: 12.5px; }
 html[data-desktop] .desktop-top-search kbd { margin-left: auto; }
-html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) :is(.windows-desktop-header, .desktop-status-bar) { display: none; }
-html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .desktop-body { padding: 0; }
-html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused) .desktop-main { border: 0; border-radius: 0; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) :is(.windows-desktop-header, .desktop-status-bar) { display: none; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) .desktop-body { padding: 0; }
+html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) .desktop-main { border: 0; border-radius: 0; }
 
 /* Shortcut keys, wherever they are shown. */
 html[data-desktop] kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--fill); color: var(--tertiaryLabel); font: 500 11px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: .02em; }
@@ -224,6 +224,12 @@ html[data-desktop] [data-slot="tooltip-content"] { border: 0; border-radius: 12p
 html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"] { padding: 5px; }
 html[data-desktop] [data-slot="tooltip-content"] { border-radius: 8px; font-size: 12px; }
+/* A Mac tooltip has no pointer: the arrow was drawn in the dark foreground colour under a light card. */
+html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
+html[data-desktop] [data-slot="tooltip-content"][data-side="top"] { margin-bottom: 6px; }
+html[data-desktop] [data-slot="tooltip-content"][data-side="bottom"] { margin-top: 6px; }
+html[data-desktop] [data-slot="tooltip-content"][data-side="left"] { margin-right: 6px; }
+html[data-desktop] [data-slot="tooltip-content"][data-side="right"] { margin-left: 6px; }
 html[data-desktop] [data-slot="dropdown-menu-item"],
 html[data-desktop] [data-slot="dropdown-menu-radio-item"],
 html[data-desktop] [data-slot="select-item"] { min-height: 30px; padding-inline: 9px; gap: 8px; border-radius: 7px; font-size: 13px; }

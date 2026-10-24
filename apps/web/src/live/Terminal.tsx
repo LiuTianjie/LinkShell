@@ -18,6 +18,8 @@ import {
   CircleStop,
   Copy,
   LoaderCircle,
+  Maximize,
+  Minimize,
   Upload,
   FolderOpen,
   Plus,
@@ -29,9 +31,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { fileBase64 } from "./Files";
 import { readLocal, saveLocal } from "./storage";
+import { DESKTOP_FULLSCREEN_EVENT, isWindowsDesktop, setDesktopScreenFullScreen } from "./desktop";
 import { replayTerminal, writeTerminal } from "./terminal-replay";
 import { useDialogs } from "@/components/Dialogs";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -45,6 +48,14 @@ import {
   useClient,
   useJob,
 } from "./common";
+
+/** Whether a #rrggbb background is a light one. */
+function isLight(color: string): boolean {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color.trim())?.[1];
+  if (!hex) return false;
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 140;
+}
 
 export function Terminal({
   id,
@@ -84,6 +95,39 @@ export function Terminal({
   const uploadJob = useJob();
   const fontRef = useRef(fontSize);
   fontRef.current = fontSize;
+  // Full screen like the remote screen's: on the Mac the window goes full screen and the terminal
+  // fills it; elsewhere it fills the window. Esc stays with the terminal (vim, less, …).
+  const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenRef = useRef(false);
+  fullscreenRef.current = fullscreen;
+  const ownsFullscreen = useRef(false);
+  const fullscreenRequest = useCallback((enabled: boolean) => {
+    if (!enabled && !ownsFullscreen.current && !fullscreenRef.current) return;
+    ownsFullscreen.current = enabled;
+    const native = !isWindowsDesktop && setDesktopScreenFullScreen(enabled);
+    if (!native) {
+      ownsFullscreen.current = false;
+      setFullscreen(enabled);
+    }
+  }, []);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if (!ownsFullscreen.current) return;
+      const value = (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true;
+      if (!value) ownsFullscreen.current = false;
+      setFullscreen(value);
+    };
+    window.addEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
+    return () => {
+      window.removeEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
+      if (ownsFullscreen.current) setDesktopScreenFullScreen(false);
+      ownsFullscreen.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    // Another tab or page took its place.
+    if (!active) fullscreenRequest(false);
+  }, [active, fullscreenRequest]);
   const ended =
     closed || Boolean(info && (info.exitCode != null || info.interrupted));
   const canInput = onlineStatus && !restoring && !restoreFailed && !ended;
@@ -179,6 +223,25 @@ export function Terminal({
       brightCyan: "#7fd3e0",
       brightWhite: "#f2f2f7",
     };
+    // The same hues, deep enough to read on the light background.
+    const ansiLight = {
+      black: "#2b2b33",
+      red: "#c4374a",
+      green: "#3f7f26",
+      yellow: "#8a6200",
+      blue: "#3553c9",
+      magenta: "#8a3fb8",
+      cyan: "#17768c",
+      white: "#6b6b76",
+      brightBlack: "#7c7c88",
+      brightRed: "#d64a5c",
+      brightGreen: "#4c9430",
+      brightYellow: "#9c7200",
+      brightBlue: "#4a66d8",
+      brightMagenta: "#9b4fca",
+      brightCyan: "#1f879e",
+      brightWhite: "#3b3b45",
+    };
     const syncTheme = () => {
       const styles = getComputedStyle(document.documentElement);
       const bg = styles.getPropertyValue("--code").trim();
@@ -190,10 +253,14 @@ export function Terminal({
         cursor: accent,
         cursorAccent: bg,
         selectionBackground: accent + "40",
-        ...ansi,
+        ...(isLight(bg) ? ansiLight : ansi),
       };
     };
     syncTheme();
+    // Following the system: its switch changes the colours without touching data-theme.
+    const scheme = matchMedia("(prefers-color-scheme: dark)");
+    const schemeChanged = () => requestAnimationFrame(syncTheme);
+    scheme.addEventListener("change", schemeChanged);
     const themeObserver = new MutationObserver(syncTheme);
     themeObserver.observe(document.documentElement, {
       attributes: true,
@@ -427,6 +494,7 @@ export function Terminal({
       clearTimeout(timer);
       observer.disconnect();
       themeObserver.disconnect();
+      scheme.removeEventListener("change", schemeChanged);
       output();
       changed();
       online();
@@ -463,7 +531,7 @@ export function Terminal({
 
   return (
     <div
-      className="terminal-live"
+      className={cn("terminal-live", fullscreen && "terminal-fullscreen")}
       data-dragging={dragging || undefined}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -559,6 +627,16 @@ export function Terminal({
         >
           <ArrowDownToLine data-icon="inline-start" />
           回到底部
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={fullscreen}
+          title={fullscreen ? "退出全屏（⌃⌘F）" : "全屏（⌃⌘F 退出）"}
+          onClick={() => fullscreenRequest(!fullscreen)}
+        >
+          {fullscreen ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}
+          {fullscreen ? "退出全屏" : "全屏"}
         </Button>
       </div>
       <div className="terminal-feedback">

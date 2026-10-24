@@ -205,7 +205,10 @@ html[data-desktop] .desktop-main .terminal-tab-bar { gap: 6px; padding: 0 0 8px;
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 12px !important; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--sidebarAccent); color: var(--label); }
 html[data-desktop] .desktop-main .terminal-tab-number { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; }
-html[data-desktop] .desktop-main :is(.terminal-live, .terminal-workspace .xterm-mount) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: #0b0b0b; overflow: hidden; }
+/* The frame takes the terminal's own colour (light or dark), so it never shows as a dark rim. */
+html[data-desktop] .desktop-main :is(.terminal-live, .terminal-workspace .xterm-mount) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--code); overflow: hidden; }
+html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen { border: 0; border-radius: 0; }
+html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen .xterm-mount { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-controls { gap: 4px; }
 html[data-desktop] .desktop-main .terminal-controls [data-slot="button"] { height: 28px; min-width: 28px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
 
