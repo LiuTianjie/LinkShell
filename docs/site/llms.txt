@@ -1,0 +1,27 @@
+# LinkShell
+
+> LinkShell lets you follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini CLI, GitHub Copilot and other ACP agents) from an iPhone, Android phone or Apple Watch, with remote desktop control of a Mac, a terminal and local web previews. Traffic between phone and computer is end-to-end encrypted; the relay gateway can be self-hosted.
+
+- Website: https://linkshell.itool.tech/ (English: https://linkshell.itool.tech/en/)
+- Docs: https://linkshell.itool.tech/en/docs/ (Chinese: https://linkshell.itool.tech/docs/)
+- Pricing: https://linkshell.itool.tech/en/pricing/
+- Source: https://github.com/LiuTianjie/LinkShell
+- iPhone app: https://apps.apple.com/cn/app/linkshell/id6761547516
+- Android APK and desktop apps: https://github.com/LiuTianjie/LinkShell/releases/latest
+
+## How it works
+
+- The host is a daemon on the computer (`linkshell host`). It owns the agent sessions, terminals, port previews and the screen, and keeps their history.
+- The app (iOS / Android) is a client of the host.
+- The gateway relays between them. Everything it routes is end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305); it only authenticates peers by key and brokers pairing.
+- Remote desktop on a Mac: LinkShell.app captures the screen with ScreenCaptureKit and sends H.264 video over WebRTC directly to the phone.
+
+## Install
+
+- Desktop app for Mac (Apple silicon, Intel) and Windows: https://github.com/LiuTianjie/LinkShell/releases/latest
+- CLI: `npm i -g linkshell-cli`, `brew install LiuTianjie/linkshell/linkshell`, or `curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh`
+- Then run `linkshell setup` once and pair the phone.
+
+## Pricing
+
+Every feature is free with a self-hosted gateway. Pro (¥9.9 a month or ¥99 a year) adds the official gateway: no server to run, sign in with the same account on both sides.

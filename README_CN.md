@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/">官网</a> ·
-  <a href="https://liutianjie.github.io/LinkShell/docs/">文档</a> ·
+  <a href="https://linkshell.itool.tech/">官网</a> ·
+  <a href="https://linkshell.itool.tech/docs/">文档</a> ·
   <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> ·
   <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android</a> ·
   <a href="#在电脑上安装">Mac</a> ·
@@ -25,8 +25,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片：50 秒，全部来自 App 实录" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-2.0.mp4">看介绍片</a>（50 秒，App 实录）</sub>
+  <a href="https://linkshell.itool.tech/assets/promo/linkshell-2.0.mp4"><img src="docs/site/assets/promo/poster.jpg" alt="LinkShell 介绍片：50 秒，全部来自 App 实录" width="820" /></a><br />
+  <sub>▶ <a href="https://linkshell.itool.tech/assets/promo/linkshell-2.0.mp4">看介绍片</a>（50 秒，App 实录）</sub>
 </p>
 
 Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手机上看它干活、批准它的请求、往正在进行的这一轮里插话，需要时直接打开电脑屏幕。回到电脑前，会话还在终端里。代码和 Agent 进程都不离开你的电脑，手机和电脑之间的数据全程端到端加密。

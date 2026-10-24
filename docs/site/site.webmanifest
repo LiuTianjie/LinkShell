@@ -2,19 +2,16 @@
   "name": "LinkShell",
   "short_name": "LinkShell",
   "description": "Follow, steer and approve the coding agents running on your computer from your phone.",
-  "start_url": "https://liutianjie.github.io/LinkShell/",
-  "scope": "https://liutianjie.github.io/LinkShell/",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#09090b",
   "theme_color": "#09090b",
-  "lang": "en",
+  "lang": "zh-CN",
   "icons": [
-    {
-      "src": "assets/adaptive-icon.png",
-      "sizes": "1024x1024",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "categories": ["developer", "productivity", "utilities"]
 }

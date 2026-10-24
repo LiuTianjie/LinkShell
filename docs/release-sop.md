@@ -339,7 +339,7 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 - [ ] Homebrew formula 已更新
 - [ ] `cli-vX.Y.Z` tag 已推送（按名字推，没有用 `--tags`）
 - [ ] App 有改动时：`vX.Y.Z` 已发，TestFlight 和 GitHub Release（带 APK）都在；本地构建的话 CI 里重复的构建已取消
-- [ ] README、README_CN、docs/site（改完跑 `python3 scripts/build-site-pages.py`）、包级 README 已同步新功能
+- [ ] README、README_CN、docs/site（改 `index.src.html` 后跑 `python3 scripts/build-site-pages.py`，再执行 `~/seos/deploy.sh linkshell` 更新 linkshell.itool.tech）、包级 README 已同步新功能
 
 ## 仅准备制品（不发布）
 

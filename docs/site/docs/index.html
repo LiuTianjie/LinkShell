@@ -1,94 +1,183 @@
 <!doctype html>
-<html lang="zh-CN" data-lang="zh">
+<html lang="zh-CN" data-lang="zh" data-prefix="" data-alt="en/docs/">
 
 <head>
   <meta charset="UTF-8" />
+  <script>if(location.hostname.endsWith("github.io"))location.replace("https://linkshell.itool.tech"+location.pathname.replace(/^\/LinkShell/i,"")+location.search+location.hash)</script>
   <base href="../" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LinkShell 文档 | 安装、连接手机、自建网关</title>
-  <meta name="description"
-    content="LinkShell 文档：安装 CLI、启动 host、用官方网关或自建网关连接手机、在终端里用 linkshell claude / codex 接力，以及常见问题。" />
-  <meta name="keywords"
-    content="LinkShell, Claude Code, OpenAI Codex, Gemini CLI, GitHub Copilot, coding agent, mobile, remote desktop, remote Mac, remote terminal, handoff, iOS, Android, end-to-end encryption, self-hosted gateway" />
-  <meta name="author" content="LinkShell" />
+  <meta name="description" content="LinkShell 文档：安装 Mac / Windows 桌面 App 或 CLI，启动 Host，用官方网关或自建网关连接手机，远程桌面，在终端里用 linkshell claude / codex 接力，以及常见问题。" />
+  <meta name="keywords" content="LinkShell 文档, LinkShell 安装, 自建网关, linkshell claude, linkshell codex, 远程桌面, 连接手机" />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
-  <meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <meta name="applicable-device" content="pc,mobile" />
+  <meta http-equiv="Cache-Control" content="no-transform" />
+  <link rel="canonical" href="https://linkshell.itool.tech/docs/" />
+  <link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/docs/" />
+  <link rel="alternate" hreflang="en" href="https://linkshell.itool.tech/en/docs/" />
+  <link rel="alternate" hreflang="x-default" href="https://linkshell.itool.tech/docs/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="LinkShell" />
+  <meta property="og:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
+  <meta property="og:description" content="LinkShell 文档：安装 Mac / Windows 桌面 App 或 CLI，启动 Host，用官方网关或自建网关连接手机，远程桌面，在终端里用 linkshell claude / codex 接力，以及常见问题。" />
+  <meta property="og:url" content="https://linkshell.itool.tech/docs/" />
+  <meta property="og:image" content="https://linkshell.itool.tech/assets/og.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="LinkShell：在手机上继续电脑里的编程 Agent" />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
+  <meta name="twitter:description" content="LinkShell 文档：安装 Mac / Windows 桌面 App 或 CLI，启动 Host，用官方网关或自建网关连接手机，远程桌面，在终端里用 linkshell claude / codex 接力，以及常见问题。" />
+  <meta name="twitter:image" content="https://linkshell.itool.tech/assets/og.png" />
+  <meta name="twitter:image:alt" content="LinkShell：在手机上继续电脑里的编程 Agent" />
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://linkshell.itool.tech/#organization",
+      "name": "LinkShell",
+      "url": "https://linkshell.itool.tech/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://linkshell.itool.tech/assets/icon-512.png",
+        "width": 512,
+        "height": 512
+      },
+      "sameAs": [
+        "https://github.com/LiuTianjie/LinkShell",
+        "https://www.producthunt.com/products/linkshell",
+        "https://apps.apple.com/cn/app/linkshell/id6761547516"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://linkshell.itool.tech/#website",
+      "url": "https://linkshell.itool.tech/",
+      "name": "LinkShell",
+      "inLanguage": [
+        "zh-CN",
+        "en"
+      ],
+      "publisher": {
+        "@id": "https://linkshell.itool.tech/#organization"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://linkshell.itool.tech/docs/#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "首页",
+          "item": "https://linkshell.itool.tech/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "文档",
+          "item": "https://linkshell.itool.tech/docs/"
+        }
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://linkshell.itool.tech/docs/#webpage",
+      "url": "https://linkshell.itool.tech/docs/",
+      "name": "LinkShell 文档 | 安装、连接手机、自建网关",
+      "description": "LinkShell 文档：安装 Mac / Windows 桌面 App 或 CLI，启动 Host，用官方网关或自建网关连接手机，远程桌面，在终端里用 linkshell claude / codex 接力，以及常见问题。",
+      "inLanguage": "zh-CN",
+      "isPartOf": {
+        "@id": "https://linkshell.itool.tech/#website"
+      },
+      "primaryImageOfPage": {
+        "@type": "ImageObject",
+        "url": "https://linkshell.itool.tech/assets/og.png",
+        "width": 1200,
+        "height": 630
+      },
+      "breadcrumb": {
+        "@id": "https://linkshell.itool.tech/docs/#breadcrumb"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://linkshell.itool.tech/docs/#faq",
+      "inLanguage": "zh-CN",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "App 显示「电脑暂时连不上」",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "确认电脑没睡眠、linkshell host status 里网关是已连接，然后运行 linkshell doctor。连接恢复后 App 会自动重连。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Agent 显示「未登录」",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "在电脑终端里给那个 Agent 登录一次（claude 里的 /login、codex login、copilot login 等），LinkShell 用的就是那份登录。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "从 1.x 升级",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "2.0 的 App 和电脑端协议都换了，需要两边一起升级，再重新配对一次。1.x 的 App 和 linkshell start 已不再支持。"
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+  <meta name="author" content="LinkShell" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
   <meta name="theme-color" content="#09090b" />
   <meta name="color-scheme" content="dark light" />
-  <link rel="canonical" href="https://liutianjie.github.io/LinkShell/docs/" />
   <link rel="manifest" href="site.webmanifest" />
-  <link rel="icon" type="image/png" href="assets/adaptive-icon.png" />
-  <link rel="apple-touch-icon" href="assets/adaptive-icon.png" />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="LinkShell" />
-  <meta property="og:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
-  <meta property="og:description"
-    content="LinkShell 文档：安装 CLI、启动 host、用官方网关或自建网关连接手机、在终端里用 linkshell claude / codex 接力，以及常见问题。" />
-  <meta property="og:url" content="https://liutianjie.github.io/LinkShell/docs/" />
-  <meta property="og:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="LinkShell 在手机上继续一个 Claude Code 会话" />
-  <meta property="og:locale" content="zh_CN" />
-  <meta property="og:locale:alternate" content="en_US" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="LinkShell 文档 | 安装、连接手机、自建网关" />
-  <meta name="twitter:description"
-    content="Follow your coding agents from your phone, then open your Mac desktop to inspect the result and take control." />
-  <meta name="twitter:image" content="https://liutianjie.github.io/LinkShell/assets/og.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
-  <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@graph": [
-        {
-          "@type": "Organization",
-          "@id": "https://liutianjie.github.io/LinkShell/#organization",
-          "name": "LinkShell",
-          "url": "https://liutianjie.github.io/LinkShell/",
-          "logo": "https://liutianjie.github.io/LinkShell/assets/adaptive-icon.png",
-          "sameAs": ["https://github.com/LiuTianjie/LinkShell", "https://www.producthunt.com/products/linkshell"]
-        },
-        {
-          "@type": "SoftwareApplication",
-          "name": "LinkShell",
-          "operatingSystem": "iOS, Android, macOS, Windows, Linux",
-          "applicationCategory": "DeveloperApplication",
-          "description": "Follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini, Copilot) from your phone, with remote desktop control, a terminal and local web previews. End-to-end encrypted.",
-          "url": "https://liutianjie.github.io/LinkShell/",
-          "downloadUrl": "https://github.com/LiuTianjie/LinkShell/releases/latest",
-          "offers": [
-            { "@type": "Offer", "price": "0", "priceCurrency": "CNY", "name": "Free" },
-            { "@type": "Offer", "price": "9.9", "priceCurrency": "CNY", "name": "Pro (monthly)" }
-          ]
-        }
-      ]
-    }
-  </script>
   <script>
-    // Before first paint: the theme (?theme=, then the saved choice; dark otherwise),
-    // the language (?lang=, the saved choice, then the browser's), and that scripts run.
+    // Before first paint: the theme (?theme=, then the saved choice; dark otherwise) and that
+    // scripts run. Each language has its own address (data-alt is the other one's, against
+    // <base>): the visitor's choice (?lang=, then the saved one) leads there, and with no
+    // choice yet a Chinese page (the root is x-default) follows the browser's language, but
+    // never for a crawler, which must see both versions where they are.
     (function () {
       var root = document.documentElement, query = new URLSearchParams(location.search);
-      var theme = query.get('theme'), lang = query.get('lang');
+      var theme = query.get('theme'), lang = query.get('lang'), saved = null;
       try {
         if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme');
-        if (lang !== 'en' && lang !== 'zh') lang = localStorage.getItem('linkshell-lang');
+        saved = localStorage.getItem('linkshell-lang');
+        if (lang === 'en' || lang === 'zh') localStorage.setItem('linkshell-lang', lang);
       } catch (e) { }
-      if (lang !== 'en' && lang !== 'zh') lang = /^zh/i.test(navigator.language) ? 'zh' : 'en';
       root.dataset.theme = theme === 'light' ? 'light' : 'dark';
-      root.dataset.lang = lang;
-      root.lang = lang === 'zh' ? 'zh-CN' : 'en';
       root.classList.add('js');
+      if (lang !== 'en' && lang !== 'zh') lang = saved;
+      if (lang !== 'en' && lang !== 'zh' && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
+        lang = /^zh/i.test(navigator.language) ? 'zh' : 'en';
+      }
+      if ((lang === 'en' || lang === 'zh') && lang !== root.dataset.lang && root.dataset.alt) {
+        location.replace(new URL(root.dataset.alt, document.baseURI).href + location.hash);
+      }
     })();
   </script>
-  <link rel="stylesheet" href="assets/duo/viewer.css?v=20261008-transparent-stage" />
   <style>
     /* LinkShell's site. Dark zinc ground, one teal accent, the product's own recordings as the
        pictures. Surfaces are told apart by a step in tone, never a line or a shadow; the only
@@ -184,8 +273,8 @@
     .nav nav { display: flex; }
     .nav nav a { padding: 8px 12px; border-radius: 999px; color: var(--text-sec); font-size: var(--small); transition: color .15s, background-color .15s; }
     .nav nav a.active, .nav nav a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
-    .nav button { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
-    .nav button:hover { color: var(--text); background: var(--surface); }
+    .nav button, .nav .lang-switch { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
+    .nav button:hover, .nav .lang-switch:hover { color: var(--text); background: var(--surface); text-decoration: none; }
     .nav button svg { width: 17px; height: 17px; }
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
     :root[data-theme="light"] .theme .moon { display: block; }
@@ -533,570 +622,186 @@
     <div class="wrap">
       <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="28" height="28" />LinkShell</a>
       <nav>
-        <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span></a>
-        <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a href="docs/" data-page-link="docs">文档</a>
+        <a href="pricing/" data-page-link="pricing">定价</a>
         <a class="wide" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
       </nav>
-      <button class="theme" id="theme-toggle" type="button" aria-label="Toggle light / dark">
+      <button class="theme" id="theme-toggle" type="button" aria-label="切换浅色或深色模式">
         <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"/></svg>
       </button>
-      <button id="lang-toggle" type="button" aria-label="Switch language">EN</button>
+      <a class="lang-switch" id="lang-toggle" href="en/docs/" hreflang="en" lang="en">EN</a>
     </div>
   </header>
 
-  <!-- ═════════════════════════ HOME ═════════════════════════ -->
-  <main class="page" data-page="home">
-    <section class="hero">
-      <div class="wrap">
-        <div class="hero-top">
-          <div>
-            <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
-            <p class="lead">
-              <span lang="zh">Claude Code、Codex 这些编程 Agent 留在你的电脑上跑，你在手机、手表或锁屏上看它干活、点一下批准、随时插话。</span>
-              <span lang="en">Claude Code, Codex and other coding agents keep running on your computer while you follow them, approve with a tap and cut in from your phone, your watch or the Lock Screen.</span>
-            </p>
-            <div class="btns">
-              <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
-                <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span>
-              </a>
-              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-                Android APK
-              </a>
-              <a class="btn btn-s" href="#install"><span lang="zh">Mac 与电脑端</span><span lang="en">Mac and computer setup</span></a>
-            </div>
-          </div>
-          <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="手机上收到的审批请求 / A request on your phone">
-            <div class="ask-head"><span class="av" style="--bl:#F4F1EA;--bd:#2A2926;width:22px;height:22px"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span><b>Claude</b><span>weather-app</span><time><span lang="zh">刚刚</span><span lang="en">now</span></time></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
-            <div class="ask-card">
-              <div class="ask-title"><i aria-hidden="true"></i><span><span lang="zh">运行测试，确认样式改动没有回归</span><span lang="en">Run the tests to check the style change broke nothing</span></span></div>
-              <p class="ask-meta"><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span></p>
-              <p class="ask-cmd">npm test</p>
-              <div class="ask-actions">
-                <button type="button" class="deny"><span lang="zh">拒绝</span><span lang="en">Deny</span></button>
-                <button type="button" class="allow"><span lang="zh">允许</span><span lang="en">Allow</span></button>
-              </div>
-              <div class="ask-result" aria-live="polite">
-                <span class="spin" aria-hidden="true"></span>
-                <span data-show="running"><span lang="zh">正在电脑上运行 npm test…</span><span lang="en">Running npm test on your computer…</span></span>
-                <span data-show="done"><svg class="tick" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> <span lang="zh">42 项测试通过，Agent 接着干</span><span lang="en">42 tests passed. The agent carries on.</span></span>
-                <span data-show="denied"><span lang="zh">已拒绝，Agent 会换个办法</span><span lang="en">Denied. The agent will try another way.</span></span>
-                <button type="button" class="again"><span lang="zh">再来一次</span><span lang="en">Again</span></button>
-              </div>
-            </div>
-            <p class="ask-foot"><span lang="zh">这就是手机上收到的请求。点一下试试。</span><span lang="en">This is the request your phone gets. Try it.</span></p>
-          </div>
-        </div>
-
-        <div class="stage" id="film-stage">
-          <figure class="media">
-            <picture>
-              <source media="(max-width: 700px)" srcset="assets/promo/film-vertical.jpg" data-en="assets/promo/film-en-vertical.jpg" width="720" height="1280" />
-              <img src="assets/promo/film.jpg" data-en="assets/promo/film-en.jpg" width="1600" height="900" alt="LinkShell 介绍片：手机上看 Agent 干活、批准请求、锁屏与手表审批、插话、操作电脑屏幕 / LinkShell film: follow an agent, approve from the phone, the Lock Screen and the watch, cut in, use the computer's screen" />
-            </picture>
-            <video id="film" muted loop playsinline preload="none" data-start="5.1" data-wide="assets/promo/linkshell-2.0.mp4" data-tall="assets/promo/linkshell-2.0-vertical.mp4" data-wide-en="assets/promo/linkshell-en.mp4" data-tall-en="assets/promo/linkshell-en-vertical.mp4" aria-label="LinkShell"></video>
-          </figure>
-        </div>
-        <noscript><p class="lead"><a href="assets/promo/linkshell-2.0.mp4">看介绍片 / Watch the film</a></p></noscript>
-      </div>
-    </section>
-
-    <section class="sec" id="features">
-      <div class="wrap">
-
-        <article class="feature split">
-          <div class="text">
-            <h2><span lang="zh"><span class="nb">它在电脑上干活，</span><span class="nb">你在手机上看着</span></span><span lang="en">It works on your computer. <span class="nb">You watch from your phone.</span></span></h2>
-            <p><span lang="zh">回复逐字出现；它读了什么、改了什么、跑了什么命令，实时更新，每个文件的改动都能看 diff。它需要权限、或者要你做选择的时候，请求推到手机上，点一下就行。</span><span lang="en">Replies stream in word by word; what it read, changed and ran updates live, with a diff for every file. When it needs permission, or wants you to choose, the request comes to your phone: one tap.</span></p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="手机上的会话：Agent 读文件、改代码、列计划，然后请求运行测试的权限" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video>
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature band center" id="glance">
-          <div class="text">
-            <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span></h2>
-            <p><span lang="zh">iPhone 的实时活动在锁屏和灵动岛上显示 Agent 的进度；它要权限时，卡片上直接给出「拒绝 / 允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span></p>
-          </div>
-          <div class="stage feature-stage">
-          <div class="pair">
-            <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的构建请求，带拒绝和允许按钮 / A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny / Allow" /></figure>
-            <figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="Apple Watch 上的 LinkShell：一条待确认的请求，带拒绝和允许按钮 / LinkShell on Apple Watch: a pending request with Deny and Allow" /></figure>
-          </div>
-          </div>
-          <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span></p>
-        </article>
-
-        <article class="feature split flip">
-          <div class="text">
-            <h2><span lang="zh"><span class="nb">它正忙，</span><span class="nb">你照样能插话</span></span><span lang="en">Cut in while it is busy</span></h2>
-            <p><span lang="zh">忙的时候发的消息先排队：可以调整顺序、取回重写，或者立即发送，Codex 和 Claude 直接插进当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">A message sent mid-turn waits in a queue: reorder it, take it back to rewrite, or send it now, straight into the running turn for Codex and Claude. A turn running on the computer can be stopped from the phone too.</span></p>
-            <p><span lang="zh">会话在哪儿开的都行：终端里的 <code>linkshell claude</code> 和 <code>linkshell codex</code>，普通的 <code>claude</code> 和 <code>codex</code>，Claude 和 Codex 的桌面 App。手机上接着用，回到电脑前再接回去，上下文一点不丢。</span><span lang="en">Wherever the session was opened: <code>linkshell claude</code> and <code>linkshell codex</code> in a terminal, a plain <code>claude</code> or <code>codex</code>, the Claude and Codex desktop apps. Carry on from the phone and pick it back up at your desk, with all of its context.</span></p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="Agent 正在构建时，一条排队的消息被立即发送，插进了当前这一轮" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video>
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature field split" id="computer-use">
-          <div class="text">
-            <h2><span lang="zh"><span class="nb">手机上也能用</span> <span class="nb">Computer Use</span></span><span lang="en">Computer Use, <span class="nb">from your phone</span></span></h2>
-            <p><span lang="zh">实时预览：在手机上直接让 Codex 操作电脑里的浏览器和桌面应用，操作画面在会话浮窗中实时预览。边看边聊，随时补充要求，不用回到电脑前。小窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）<a href="docs/#d-computer-use">了解用法</a>。</span><span lang="en">Watch it live: ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="docs/#d-computer-use">How to use it</a>.</span></p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗 / Computer Use live preview in a Codex conversation" />
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature center" id="remote-desktop">
-          <div class="text">
-            <h2><span lang="zh"><span class="nb">把 Mac 桌面，</span><span class="nb">装进口袋。</span></span><span lang="en">Your Mac. <span class="nb">In your pocket.</span></span></h2>
-            <p><span lang="zh">电脑留在桌上，整个工作台随身带走。Agent 改完代码，就在手机上打开真实桌面：检查网页、操作编辑器、处理弹窗。横屏铺开、全屏查看、双指放大，需要亲自点一下的事，也能当场办完。（完整控制支持 macOS 13 及以上）</span><span lang="en">Bring the whole workspace with you. When an agent finishes a change, open the actual desktop to check a browser, work in your editor or handle a dialog. Turn the phone to landscape, go full screen and pinch to zoom. Take over wherever a human touch is needed. Full control requires macOS 13 or later.</span></p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone side">
-            <img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="手机横屏显示电脑屏幕：浏览器里的页面和终端，切到触控板模式后出现指针" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video>
-          </figure>
-          </div>
-          <dl class="more points">
-            <div><dt><span lang="zh">4K 级细节，高刷屏适配</span><span lang="en">4K detail. Ready for high refresh.</span></dt><dd><span lang="zh">原生画质最高 3840 像素宽，iOS 适配最高 120 Hz 显示。实际画质、帧率与响应速度随设备和网络条件变化。</span><span lang="en">A picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Resolution, frame rate and responsiveness depend on devices and network conditions.</span></dd></div>
-            <div><dt><span lang="zh">指尖也有精细操控</span><span lang="en">Precision at your fingertips</span></dt><dd><span lang="zh">慢移精确定位，快移跨越桌面；触控板和「点哪点哪」随手切换，右键、滚动、拖拽都在指尖。</span><span lang="en">Move slowly for precision or swipe across the desktop. Choose trackpad control or direct touch, with right click, scrolling and dragging.</span></dd></div>
-            <div><dt><span lang="zh">多屏与快捷键，随身带走</span><span lang="en">Your displays and shortcuts, too</span></dt><dd><span lang="zh">切换显示器、复制粘贴、切换应用，一点就到。长文字和手机剪贴板也能直接发到电脑。</span><span lang="en">Switch displays, copy, paste and change apps with a tap. Send longer text and your phone's clipboard straight to the computer.</span></dd></div>
-          </dl>
-        </article>
-
-        <article class="feature intro-row" id="iphone-duo">
-          <div class="text">
-            <h2><span lang="zh">iPhone Duo，<br />展开你的工作区。</span><span lang="en">iPhone Duo.<br />Room to do more.</span></h2>
-            <p><span lang="zh">展开时，对话和改动或预览并排放；折叠时，界面按可用区域重新安排，当前会话不中断。普通 iPhone 用单栏，操作一样。</span><span lang="en">Open it up and the conversation sits beside the changes or a preview. Fold it and the interface rearranges around the available screen, without leaving the session. A regular iPhone gets a single column with the same controls.</span></p>
-          </div>
-          <figure class="duo-figure">
-            <div class="duo-viewer" id="duo-viewer" data-state="idle">
-              <div class="duo-controls" role="group" aria-label="iPhone Duo">
-                <p class="duo-controls-title"><span lang="zh">换个角度看看</span><span lang="en">Take a closer look</span></p>
-                  <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled><span lang="zh">横屏</span><span lang="en">Wide</span></button>
-                  <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled><span lang="zh">竖屏</span><span lang="en">Tall</span></button>
-                  <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled><span lang="zh">闭合</span><span lang="en">Closed</span></button>
-                  <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled><span lang="zh">坐立</span><span lang="en">Seated</span></button>
-                  <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled><span lang="zh">站立</span><span lang="en">Standing</span></button>
-                <label class="duo-fold" for="duo-fold">
-                  <span class="duo-fold-head"><span lang="zh">折叠程度</span><span lang="en">Fold</span><output id="duo-angle">100%</output></span>
-                  <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
-                </label>
-              </div>
-              <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
-                <div class="duo-poster">
-                  <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell 夜间模式实际截图：iPhone Duo 展开时的会话与代码改动双栏 / LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
-                  <button class="duo-start" type="button"><span lang="zh">打开 3D 预览</span><span lang="en">Explore in 3D</span></button>
-                </div>
-              </div>
-              <p class="duo-hint" id="duo-status" aria-live="polite"><span lang="zh">点选姿态，拖动模型自由旋转</span><span lang="en">Choose a pose. Drag to rotate.</span></p>
-            </div>
-            <figcaption><span lang="zh">屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</span><span lang="en">Screen content captured from the running app · iPhone Duo simulator.</span></figcaption>
-          </figure>
-          <dl class="more points">
-            <div><dt><span lang="zh">对话与工具并排</span><span lang="en">Chat beside your tools</span></dt><dd><span lang="zh">空间足够时，直接在会话旁看改动或预览。</span><span lang="en">With enough room, review changes or a preview beside the conversation.</span></dd></div>
-            <div><dt><span lang="zh">识别折叠区域</span><span lang="en">Aware of the fold</span></dt><dd><span lang="zh">随姿态和方向调整，给输入和操作保留可用空间。</span><span lang="en">Adapt to posture and orientation, preserving usable space for input and controls.</span></dd></div>
-            <div><dt><span lang="zh">普通 iPhone 同样顺手</span><span lang="en">Still at home on iPhone</span></dt><dd><span lang="zh">较窄的屏幕使用合适的单栏布局，操作保持一致。</span><span lang="en">Narrower screens use an appropriate single-column layout with familiar controls.</span></dd></div>
-          </dl>
-        </article>
-
-        <article class="feature intro-row">
-          <div class="text">
-            <h2><span lang="zh">还有这些</span><span lang="en">And the rest</span></h2>
-            <dl class="more">
-              <div><dt><span lang="zh">电脑上的真终端</span><span lang="en">A real terminal on your computer</span></dt><dd><span lang="zh">开一个终端跑 dev server、看日志、用 git，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</span><span lang="en">Run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</span></dd></div>
-              <div><dt><span lang="zh">在手机上打开 localhost</span><span lang="en">Open localhost on your phone</span></dt><dd><span lang="zh">电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，不用暴露端口，也不用同一个 Wi-Fi。</span><span lang="en">Your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included: no open ports, no shared Wi-Fi.</span></dd></div>
-              <div><dt><span lang="zh">分叉和 worktree</span><span lang="en">Forks and worktrees</span></dt><dd><span lang="zh">想换个思路，就从那条回复分叉出一个新会话；可以放进新的 git worktree，不碰你手头的工作区。</span><span lang="en">Fork a new session from any reply to try another direction, in a new git worktree if you like, away from what you are working on.</span></dd></div>
-              <div><dt><span lang="zh">子 Agent 与工作流</span><span lang="en">Sub-agents and Workflows</span></dt><dd><span lang="zh">按阶段跟进 Claude Workflow，打开每个 Agent 的对话和工具结果。后台工作流保留在输入框上方；标题旁可查看全部工作流和子 Agent。</span><span lang="en">Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</span></dd></div>
-              <div><dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span></dt><dd><span lang="zh">输入 <code>/</code> 列出 Agent 的命令和你的 skills。<code>/compact</code>、<code>/review</code> 对 Codex 同样可用。</span><span lang="en">Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</span></dd></div>
-              <div><dt><span lang="zh">Mac 上的完整工作台</span><span lang="en">A full workspace on the Mac</span></dt><dd><span lang="zh">Mac App 里也能继续对话、处理审批、开终端和远程桌面，连本机或别的电脑都行。还有按 Agent 统计的 Token 用量、开机自启和浅色 / 深色外观。</span><span lang="en">The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</span></dd></div>
-              <div><dt><span lang="zh">文件和会话管理</span><span lang="en">Files and tidy sessions</span></dt><dd><span lang="zh">浏览项目里的文件，把手机里的图片和文件传给 Agent。会话可以重命名、归档、删除，<code>claude --resume</code> 里也能看到新名字。</span><span lang="en">Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</span></dd></div>
-            </dl>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section class="sec" id="agents">
-      <div class="wrap">
-        <div class="text">
-          <h2><span lang="zh"><span class="nb">每个 Agent</span> <span class="nb">做到它能做到的最好</span></span><span lang="en">Each agent, as far as it can go</span></h2>
-          <div class="agent-strip" aria-hidden="true"><div class="agent-track"></div></div>
-          <p><span lang="zh">Agent 用你电脑上已经安装、已经登录的那一份。LinkShell 不经手任何 Agent 的账号和密钥。</span><span lang="en">Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</span></p>
-
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span></div><h3>Codex</h3></div>
-            <p><span lang="zh">多端同步：用 <code>linkshell codex</code> 打开的终端和手机同时在线，任何一端都能发消息、打断、审批。</span><span lang="en">Shared: the terminal opened with <code>linkshell codex</code> and your phone are live at once; either can send, interrupt and approve.</span></p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
-            <p><span lang="zh">接力：电脑上用原生界面（<code>linkshell claude</code>），手机发消息即接管，电脑按任意键收回。</span><span lang="en">Handoff: Claude&#39;s own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</span></p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span></div><h3><span lang="zh">Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok</span><span lang="en">Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok</span></h3></div>
-            <p><span lang="zh">远程会话：通过 Agent Client Protocol 在手机上新建、继续会话，实时输出、审批、切换模式和模型。</span><span lang="en">Remote sessions: start and continue sessions from the phone over the Agent Client Protocol, with live output, approvals, modes and models.</span></p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av plain" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 16 5-4-5-4M13 17h6"/></svg></span></div><h3><span lang="zh">任何命令行工具</span><span lang="en">Any CLI</span></h3></div>
-            <p><span lang="zh">终端：在电脑上开一个终端，手机上看和输入。</span><span lang="en">Terminal: a terminal on the computer, viewed and typed into from the phone.</span></p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="sec" id="install">
-      <div class="wrap">
-        <div class="text">
-          <div class="install-intro">
-          <h2><span lang="zh">三步连上你的电脑</span><span lang="en">Three steps to your computer</span></h2>
-          <p><span lang="zh">Mac 和 Windows 可直接下载桌面 App；命令行方式支持 macOS / Linux，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, download the desktop app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</span></p>
-
-          </div>
-          <div class="install-steps">
-          <div class="step">
-            <h3><span lang="zh">安装并启动</span><span lang="en">Install and start</span></h3>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-x64.dmg">Mac · Intel</a></p>
-            <p><span lang="zh">macOS 13 及以上：拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能两个开关。App 自带 CLI、Host 和 Node，一起更新。</span><span lang="en">macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</span></p>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-Setup-0.10.59-windows-x64.exe">Windows · <span lang="zh">安装器</span><span lang="en">Installer</span></a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-windows-x64.zip">Windows · ZIP</a></p>
-            <p><span lang="zh">Windows 10 1809+ / Windows 11 x64：内置 CLI、Host 和 Node，与 Mac 共用会话、终端、文件和端口预览工作台。工作台需要 Microsoft Edge WebView2 Evergreen Runtime。安装包未签名，可能出现「未知发布者」或 SmartScreen 提示。</span><span lang="en">Windows 10 1809+ / Windows 11 x64: includes CLI, Host and Node, with the same workspace as Mac for conversations, terminals, files and port previews. The workspace requires Microsoft Edge WebView2 Evergreen Runtime. Packages are unsigned and may show unknown-publisher or SmartScreen prompts.</span></p>
-            <p><span lang="zh">Linux，或者更想用命令行：装 CLI，运行一次设置。它在后台启动 LinkShell、带你打开屏幕需要的两个权限，再连上手机。</span><span lang="en">On Linux, or if you prefer the command line: install the CLI and run the setup once. It starts LinkShell in the background, takes you to the two permissions the screen needs, and connects your phone.</span></p>
-            <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
-<span class="pr">$ </span>linkshell setup</code></pre>
-            <p><span lang="zh">不用 npm 的话，也可以用 Homebrew 或安装脚本：</span><span lang="en">Without npm, install it with Homebrew or the install script:</span></p>
-            <pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
-<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
-<span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
-          </div>
-          <div class="step">
-            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
-            <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
-            <pre><code><span class="cm"># Pro</span>
-<span class="pr">$ </span>linkshell login
-<span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span></span>
-<span class="pr">$ </span>linkshell host --gateway wss://gw.you
-<span class="pr">$ </span>linkshell pair</code></pre>
-          </div>
-          <div class="step">
-            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span></h3>
-            <p><span lang="zh">在手机上新建会话；或者在电脑终端里这样启动 Agent，随时交给手机。</span><span lang="en">Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</span></p>
-            <pre><code><span class="pr">$ </span>linkshell claude
-<span class="pr">$ </span>linkshell codex</code></pre>
-            <p><span lang="zh">更多细节在<a href="docs/">文档</a>里。</span><span lang="en">The <a href="docs/">docs</a> have the details.</span></p>
-          </div>
-        </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="sec" id="how">
-      <div class="wrap">
-        <div class="text">
-          <h2><span lang="zh">Agent 留在你的电脑上</span><span lang="en">The agents stay on your computer</span></h2>
-          <p><span lang="zh">手机通过网关连进电脑，代码和 Agent 始终留在电脑上，连接端到端加密。</span><span lang="en">Your phone reaches the computer through a gateway. The code and the agents never leave the computer, and the connection is end-to-end encrypted.</span></p>
-          <dl class="more">
-            <div><dt><span lang="zh">你的电脑</span><span lang="en">Your computer</span></dt><dd><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now.</span></dd></div>
-            <div><dt><span lang="zh">网关</span><span lang="en">The gateway</span></dt><dd><span lang="zh">只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></dd></div>
-            <div><dt><span lang="zh">官方或自建</span><span lang="en">Official or your own</span></dt><dd><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></dd></div>
-            <div><dt><span lang="zh">屏幕和预览</span><span lang="en">Screen and previews</span></dt><dd><span lang="zh">能直连时点对点传输，网关只负责牵线。</span><span lang="en">They go peer to peer when they can; the gateway only introduces the two sides.</span></dd></div>
-          </dl>
-        </div>
-      </div>
-    </section>
-
-    <section class="sec">
-      <div class="wrap">
-        <h2><span lang="zh">支持 LinkShell</span><span lang="en">Supporting LinkShell</span></h2>
-        <div class="support-row">
-        <div class="support">
-          <h3><span lang="zh">赞助商</span><span lang="en">Sponsors</span></h3>
-          <p><span lang="zh">感谢以下赞助商对 LinkShell 的支持。</span><span lang="en">Thanks to our sponsors for supporting LinkShell.</span></p>
-          <p class="sponsor"><a href="https://ai18n.chat/">AI18N</a> · Unified AI API Gateway</p>
-        </div>
-        <div class="support">
-          <h3><span lang="zh">请作者喝杯咖啡</span><span lang="en">Buy me a coffee</span></h3>
-          <p><span lang="zh">如果 LinkShell 对你有帮助，可以请作者喝杯咖啡。</span><span lang="en">If LinkShell helps you, you can buy the author a coffee.</span></p>
-          <div class="qr">
-            <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">微信支付</span><span lang="en">WeChat Pay</span></figcaption></figure>
-            <figure><img src="assets/pay_ali.jpg" alt="Alipay" width="148" height="148" loading="lazy" /><figcaption><span lang="zh">支付宝</span><span lang="en">Alipay</span></figcaption></figure>
-          </div>
-        </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="close">
-      <div class="wrap">
-        <div class="close-card">
-          <h2><span lang="zh"><span class="nb">下次离开电脑，</span><span class="nb">把会话带上</span></span><span lang="en">Next time you leave your desk, take the session along</span></h2>
-          <p><span lang="zh">全部功能免费，自建网关一条命令就能跑起来。</span><span lang="en">Every feature is free, and your own gateway is one command away.</span></p>
-          <div class="btns">
-            <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
-            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
-            <a class="btn btn-s" href="#install"><span lang="zh">安装电脑端</span><span lang="en">Set up your computer</span></a>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
 
   <!-- ═════════════════════════ DOCS ═════════════════════════ -->
-  <main class="page" data-page="docs">
+  <main class="page visible" data-page="docs">
     <div class="wrap docs">
       <aside class="toc">
-        <a href="#d-install"><span lang="zh">安装</span><span lang="en">Install</span></a>
-        <a href="#d-desktop"><span lang="zh">Mac 桌面版</span><span lang="en">Mac desktop</span></a>
-        <a href="#d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></a>
-        <a href="#d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></a>
-        <a href="#d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></a>
-        <a href="#d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></a>
-        <a href="#d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></a>
-        <a href="#d-screen"><span lang="zh">远程桌面</span><span lang="en">Remote screen</span></a>
+        <a href="#d-install">安装</a>
+        <a href="#d-desktop">Mac 桌面版</a>
+        <a href="#d-host">启动 LinkShell</a>
+        <a href="#d-connect">连接手机</a>
+        <a href="#d-gateway">自建网关</a>
+        <a href="#d-terminal">在电脑终端里用</a>
+        <a href="#d-phone">在手机上用</a>
+        <a href="#d-screen">远程桌面</a>
         <a href="#d-iphone-duo">iPhone Duo</a>
         <a href="#d-computer-use">Computer Use</a>
-        <a href="#d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></a>
-        <a href="#d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></a>
+        <a href="#d-commands">命令一览</a>
+        <a href="#d-faq">常见问题</a>
       </aside>
       <article class="doc">
-        <h1><span lang="zh">文档</span><span lang="en">Documentation</span></h1>
-        <p><span lang="zh">LinkShell 分两部分：电脑上的 Host（可用 Mac、Windows 桌面 App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</span><span lang="en">LinkShell has two parts: the Host on your computer, managed by the Mac or Windows desktop app or CLI, and the app on your phone. Here it is, in order.</span></p>
+        <h1>LinkShell 文档</h1>
+        <p>LinkShell 分两部分：电脑上的 Host（可用 Mac、Windows 桌面 App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</p>
 
-        <h2 id="d-install"><span lang="zh">安装</span><span lang="en">Install</span></h2>
-        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-x64.dmg">Mac · Intel</a></p>
-        <p><span lang="zh">独立 Mac App 需要 macOS 13 及以上，内置运行环境，无需另外安装 Node。打开 App 即可登录、管理服务与更新；下面是可选的命令行安装方式。</span><span lang="en">The standalone Mac app requires macOS 13 or later and includes its runtime; no separate Node installation is needed. Open it to sign in, manage the host and install updates. The CLI installation below is an alternative.</span></p>
-        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-Setup-0.10.59-windows-x64.exe">Windows · <span lang="zh">安装器</span><span lang="en">Installer</span></a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.59/LinkShell-0.10.59-windows-x64.zip">Windows · ZIP</a></p>
-        <p><span lang="zh">Windows 桌面版需要 Windows 10 1809+ / Windows 11 x64，内置 CLI、Host 和 Node；共享工作台需要 Microsoft Edge WebView2 Evergreen Runtime。安装器和便携 ZIP 均未签名，可能出现「未知发布者」或 SmartScreen 提示。</span><span lang="en">The Windows desktop app requires Windows 10 1809+ / Windows 11 x64 and bundles CLI, Host and Node. Its shared workspace requires Microsoft Edge WebView2 Evergreen Runtime. The installer and portable ZIP are unsigned and may show unknown-publisher or SmartScreen prompts.</span></p>
-        <p><span lang="zh">CLI 方式需要 macOS 或 Linux、Node.js 22.13 或更新版本（独立 Mac App 已内置）。</span><span lang="en">The CLI requires macOS or Linux and Node.js 22.13 or newer (already bundled in the standalone Mac app).</span></p>
+        <h2 id="d-install">安装</h2>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.61/LinkShell-0.10.61-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.61/LinkShell-0.10.61-x64.dmg">Mac · Intel</a></p>
+        <p>独立 Mac App 需要 macOS 13 及以上，内置运行环境，无需另外安装 Node。打开 App 即可登录、管理服务与更新；下面是可选的命令行安装方式。</p>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.61/LinkShell-Setup-0.10.61-windows-x64.exe">Windows · 安装器</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.61/LinkShell-0.10.61-windows-x64.zip">Windows · ZIP</a></p>
+        <p>Windows 桌面版需要 Windows 10 1809+ / Windows 11 x64，内置 CLI、Host 和 Node；共享工作台需要 Microsoft Edge WebView2 Evergreen Runtime。安装器和便携 ZIP 均未签名，可能出现「未知发布者」或 SmartScreen 提示。</p>
+        <p>CLI 方式需要 macOS 或 Linux、Node.js 22.13 或更新版本（独立 Mac App 已内置）。</p>
         <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
-<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
+<span class="cm"># 或</span>
 <span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
-<span class="cm"># <span lang="zh">或</span><span lang="en">or</span></span>
+<span class="cm"># 或</span>
 <span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
-        <p><span lang="zh">要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</span><span lang="en">Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</span></p>
+        <p>要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</p>
 
-        <h2 id="d-desktop"><span lang="zh">Mac 桌面版与更新</span><span lang="en">Mac desktop app and updates</span></h2>
-        <p><span lang="zh">总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 Pro。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</span><span lang="en">Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires Pro. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</span></p>
-        <p><span lang="zh">App、CLI、Host 和 Node 整体更新。自动检查只检查版本，安装需确认，可能中断正在运行的任务；完成后恢复本 App 托管的 Host，保留机器身份、配对和历史。已有 npm / Homebrew 安装不会被覆盖。设置可选安装终端命令，该命令随 App 更新。</span><span lang="en">The app, CLI, Host and Node update together. Automatic checks only check versions; installation requires confirmation and may interrupt active work. The app restores its owned Host and preserves identity, pairings and history. Existing npm / Homebrew installations are not overwritten. Settings can install an optional terminal command that follows app updates.</span></p>
-        <p><span lang="zh">本机数据默认在 <code>~/.linkshell</code>，不在 App 内。完整说明见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">桌面版使用说明</a>。</span><span lang="en">Local data stays in <code>~/.linkshell</code>, outside the app. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">desktop guide</a>.</span></p>
+        <h2 id="d-desktop">Mac 桌面版与更新</h2>
+        <p>总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 Pro。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</p>
+        <p>App、CLI、Host 和 Node 整体更新。自动检查只检查版本，安装需确认，可能中断正在运行的任务；完成后恢复本 App 托管的 Host，保留机器身份、配对和历史。已有 npm / Homebrew 安装不会被覆盖。设置可选安装终端命令，该命令随 App 更新。</p>
+        <p>本机数据默认在 <code>~/.linkshell</code>，不在 App 内。完整说明见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">桌面版使用说明</a>。</p>
 
-        <h2 id="d-host"><span lang="zh">启动 LinkShell</span><span lang="en">Start LinkShell</span></h2>
-        <pre><code><span class="pr">$ </span>linkshell host --daemon   <span class="cm"># <span lang="zh">后台运行</span><span lang="en">run in the background</span></span>
-<span class="pr">$ </span>linkshell host status     <span class="cm"># <span lang="zh">Agent、会话、网关状态</span><span lang="en">agents, sessions, gateway</span></span>
+        <h2 id="d-host">启动 LinkShell</h2>
+        <pre><code><span class="pr">$ </span>linkshell host --daemon   <span class="cm"># 后台运行</span>
+<span class="pr">$ </span>linkshell host status     <span class="cm"># Agent、会话、网关状态</span>
 <span class="pr">$ </span>linkshell host stop</code></pre>
-        <p><span lang="zh">host 用你登录 shell 的环境变量启动 Agent，所以 PATH、代理、API key 这些和在终端里一样。会话和历史保存在 <code>~/.linkshell</code>，重启电脑不需要重新配对。</span><span lang="en">The host starts agents with your login shell's environment, so PATH, proxies and API keys match your terminal. Sessions and history live in <code>~/.linkshell</code>; restarting the computer doesn't need a new pairing.</span></p>
+        <p>host 用你登录 shell 的环境变量启动 Agent，所以 PATH、代理、API key 这些和在终端里一样。会话和历史保存在 <code>~/.linkshell</code>，重启电脑不需要重新配对。</p>
 
-        <h2 id="d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></h2>
-        <h3><span lang="zh">Pro：官方网关</span><span lang="en">Pro: the official gateway</span></h3>
+        <h2 id="d-connect">连接手机</h2>
+        <h3>Pro：官方网关</h3>
         <pre><code><span class="pr">$ </span>linkshell login
 <span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
-        <p><span lang="zh">在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 Pro</a>。</span><span lang="en">Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="pricing/">About Pro</a>.</span></p>
-        <h3><span lang="zh">自建网关：配对</span><span lang="en">Your own gateway: pairing</span></h3>
+        <p>在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 Pro</a>。</p>
+        <h3>自建网关：配对</h3>
         <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
 <span class="pr">$ </span>linkshell pair</code></pre>
-        <p><span lang="zh">终端里会出现二维码和 6 位配对码。在 App 的「电脑 → 添加电脑」里扫码或输入配对码。网关地址会保存下来，之后启动 host 不用再写 <code>--gateway</code>；<code>--gateway off</code> 可以关掉。</span><span lang="en">The terminal shows a QR code and a 6-digit code. In the app, go to Computers → Add computer and scan it or type the code. The gateway is remembered, so later starts don't need <code>--gateway</code>; <code>--gateway off</code> turns it off.</span></p>
+        <p>终端里会出现二维码和 6 位配对码。在 App 的「电脑 → 添加电脑」里扫码或输入配对码。网关地址会保存下来，之后启动 host 不用再写 <code>--gateway</code>；<code>--gateway off</code> 可以关掉。</p>
 
-        <h2 id="d-gateway"><span lang="zh">自建网关</span><span lang="en">Self-host a gateway</span></h2>
-        <p><span lang="zh">网关只转发加密数据，不需要多少资源。任选一种：</span><span lang="en">A gateway only relays encrypted data and needs very little. Pick one:</span></p>
-        <pre><code><span class="cm"># <span lang="zh">在服务器上用 CLI</span><span lang="en">with the CLI on a server</span></span>
+        <h2 id="d-gateway">自建网关</h2>
+        <p>网关只转发加密数据，不需要多少资源。任选一种：</p>
+        <pre><code><span class="cm"># 在服务器上用 CLI</span>
 <span class="pr">$ </span>linkshell gateway --port 8787 --daemon
-<span class="cm"># <span lang="zh">或 Docker</span><span lang="en">or Docker</span></span>
+<span class="cm"># 或 Docker</span>
 <span class="pr">$ </span>docker run -d --name linkshell-gateway -p 8787:8787 \
     -v linkshell-gateway:/data nickname4th/linkshell-gateway</code></pre>
-        <p><span lang="zh">公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx 都行），然后用 <code>wss://你的域名</code>。只在家里用的话，可以直接把网关跑在这台电脑上，用 <code>ws://局域网IP:8787</code>。</span><span lang="en">On the internet, put an HTTPS reverse proxy in front (Caddy or Nginx) and use <code>wss://your-domain</code>. For home use only, you can run the gateway on the computer itself and use <code>ws://LAN-IP:8787</code>.</span></p>
+        <p>公网上请在前面加一层 HTTPS 反向代理（Caddy、Nginx 都行），然后用 <code>wss://你的域名</code>。只在家里用的话，可以直接把网关跑在这台电脑上，用 <code>ws://局域网IP:8787</code>。</p>
 
-        <h2 id="d-terminal"><span lang="zh">在电脑终端里用</span><span lang="en">From your terminal</span></h2>
-        <pre><code><span class="pr">$ </span>linkshell claude [<span lang="zh">参数</span><span lang="en">args</span>]   <span class="cm"># <span lang="zh">Claude Code，可交给手机</span><span lang="en">Claude Code, hand-off ready</span></span>
-<span class="pr">$ </span>linkshell codex [<span lang="zh">参数</span><span lang="en">args</span>]    <span class="cm"># <span lang="zh">Codex，和手机同步</span><span lang="en">Codex, shared with the phone</span></span></code></pre>
-        <p><span lang="zh">参数原样传给 Agent（比如 <code>linkshell claude --resume &lt;id&gt;</code>）。Claude 在电脑上运行时，手机能实时看到进度；在手机上发消息就接管，终端会显示「已由手机接管」，按任意键收回。</span><span lang="en">Arguments pass straight through (for example <code>linkshell claude --resume &lt;id&gt;</code>). While Claude runs at your desk the phone follows along live; sending from the phone takes over, the terminal says so, and any key takes it back.</span></p>
-        <p class="note"><span lang="zh">Claude 在收到第一条消息之前不会保存会话，所以一个还没发过消息的会话不能交给手机。</span><span lang="en">Claude doesn't save a session until its first message, so a session with no messages yet can't be handed to the phone.</span></p>
+        <h2 id="d-terminal">在电脑终端里用</h2>
+        <pre><code><span class="pr">$ </span>linkshell claude [参数]   <span class="cm"># Claude Code，可交给手机</span>
+<span class="pr">$ </span>linkshell codex [参数]    <span class="cm"># Codex，和手机同步</span></code></pre>
+        <p>参数原样传给 Agent（比如 <code>linkshell claude --resume &lt;id&gt;</code>）。Claude 在电脑上运行时，手机能实时看到进度；在手机上发消息就接管，终端会显示「已由手机接管」，按任意键收回。</p>
+        <p class="note">Claude 在收到第一条消息之前不会保存会话，所以一个还没发过消息的会话不能交给手机。</p>
 
-        <h2 id="d-phone"><span lang="zh">在手机上用</span><span lang="en">On your phone</span></h2>
+        <h2 id="d-phone">在手机上用</h2>
         <ul>
-          <li><span lang="zh"><b>新建会话</b>：选 Agent 和项目目录，直接开始。</span><span lang="en"><b>New session</b>: pick an agent and a project folder and go.</span></li>
-          <li><span lang="zh"><b>回答提问</b>：Codex（含 Desktop 异步提问）、Claude、Cursor 和 Grok 的结构化问题会显示「需要用户输入」，可在手机卡片中作答或跳过。Cursor 支持选择，其他类型按 Agent 提供的能力支持文字回答。</span><span lang="en"><b>Answer questions</b>: Codex (including Desktop asynchronous questions), Claude, Cursor and Grok show when input is needed. Answer or skip from the phone's question card. Cursor supports choices; text answers depend on the agent.</span></li>
-          <li><span lang="zh"><b>忙的时候发消息</b>：消息在输入框上方排队，可以调整顺序、取回编辑、立即发送（Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮）；停止时排队的文字会放回输入框。</span><span lang="en"><b>Messages while busy</b>: they queue above the composer, where you can reorder them, take one back to edit, or send it now (into the running turn for Codex and Claude; other agents stop the turn first). Stopping puts queued text back in the composer.</span></li>
-          <li><span lang="zh"><b>分叉与 worktree</b>：每条回复下方可以「从这里分叉」，会话菜单里可以分叉整个会话；新建会话或分叉时可以选择放进新的 git worktree（在 <code>~/.linkshell/worktrees/</code> 下，独立分支），删除会话时没有改动的 worktree 会一起清掉。</span><span lang="en"><b>Fork and worktrees</b>: fork from under any reply, or the whole session from its menu; a new session or a fork can go into a new git worktree (under <code>~/.linkshell/worktrees/</code>, on its own branch). A worktree without changes is removed with its session.</span></li>
-          <li><span lang="zh"><b>命令面板</b>：输入 <code>/</code>、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令与 skills；草稿会保留。</span><span lang="en"><b>Command palette</b>: type <code>/</code>, tap the composer’s command button, or choose Commands from the session menu. Search commands and skills without losing your draft.</span></li>
-          <li><span lang="zh"><b>持续目标</b>：Codex 和 Claude Code 支持 <code>/goal</code>，也可从菜单进入目标页面。Codex 可设置预算、暂停和继续；Claude 可设置或清除完成条件。需电脑上的 Agent 支持相应能力。</span><span lang="en"><b>Persistent goals</b>: use <code>/goal</code> with Codex or Claude Code, or open the goal screen from the menu. Codex supports token budgets, pause and resume; Claude supports setting and clearing completion conditions. Requires support from the installed agent.</span></li>
-          <li><span lang="zh"><b>后台任务</b>：<code>/tasks</code> 或标题旁的入口可查看回复结束后仍运行的命令、输出和退出码。Codex 支持单任务停止；Claude Bash / Monitor 目前只支持查看，停止请在电脑端操作。</span><span lang="en"><b>Background tasks</b>: <code>/tasks</code> or the session header shows commands that keep running after a reply, their output and exit codes. Stop individual Codex tasks; Claude Bash / Monitor tasks are viewable, with stopping handled on the computer.</span></li>
-          <li><span lang="zh"><b>屏幕适配</b>：iPhone Duo 和普通 iPhone 都会根据可用空间调整聊天、输入框和操作区。</span><span lang="en"><b>Adaptive layouts</b>: the conversation, composer and controls adapt to the available space on iPhone Duo and standard iPhones.</span></li>
-          <li><span lang="zh"><b>工作流、子 Agent 与文件</b>：会话标题旁的按钮列出工作流和子 Agent；输入框上方可回到后台工作流；会话和终端的菜单里可以浏览项目文件。</span><span lang="en"><b>Workflows, sub-agents and files</b>: the button beside a session's title lists its Workflows and sub-agents; return to background runs above the composer, and browse project files from a session's or a terminal's menu.</span></li>
-          <li><span lang="zh"><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</span><span lang="en"><b>Settings</b>: under the composer, change model, effort and permission mode (whatever the agent offers).</span></li>
-          <li><span lang="zh"><b>Agent 连接与工具</b>：从「电脑」里的 Agent 设置完成登录、配置 MCP 服务和附加目录，也可以添加自定义 ACP 连接。支持编辑建议的 Agent 可以在文件页提出修改，预览后再应用；具体功能取决于 Agent 提供的能力。</span><span lang="en"><b>Agent connections and tools</b>: open an agent's settings under Computers to sign in, configure MCP servers and additional directories, or add a custom ACP connection. Agents that support edit suggestions can propose changes from the file page for you to preview and apply; available features depend on the agent.</span></li>
-          <li><span lang="zh"><b>整理</b>：长按会话可以重命名、归档、删除；从首页底部进入已归档，也可以搜索查找。Codex 归档同步到原生记录，查看历史不会解除归档；Claude 和其他 Agent 的归档仅保存在 LinkShell。不再使用的电脑，在账号页的「我的电脑」里长按移除。</span><span lang="en"><b>Tidying</b>: long-press a session to rename, archive or delete it; open Archives from the bottom of Home or find it in search. Codex archives sync with its native records and remain readable without restoring them. Claude and other agents are archived only in LinkShell. Remove an unused computer by long-pressing it under My computers.</span></li>
-          <li><span lang="zh"><b>会话恢复</b>：电脑端 CLI 0.10.19 会重新核对任务状态，避免已结束的任务一直显示运行中。原始记录缺失或读取失败时会显示原因，并保留已经缓存的消息；重新打开可重试。</span><span lang="en"><b>Session recovery</b>: CLI 0.10.19 rechecks task activity so finished tasks do not keep appearing as running. Missing or unreadable history shows an explanation while retaining cached messages; reopen the session to retry.</span></li>
-          <li><span lang="zh"><b>Apple Watch</b>：2.3.33 加入独立腕表连接。在腕表「连接设置」登录邮箱/密码账号或输入电脑配对码，查看会话、处理简单审批并发送短消息；也可切换 iPhone 配套模式。独立连接在 App 前台运行，需要 Gateway 0.6.20 或更新版本。</span><span lang="en"><b>Apple Watch</b>: 2.3.33 adds independent watch connections. Sign in with an email/password account or enter a computer pairing code in Connection Settings to view sessions, handle simple approvals and send short messages. Optional iPhone companion mode remains available. Independent connections run in the foreground and require Gateway 0.6.20 or later.</span></li>
-          <li><span lang="zh"><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上，独立 App 请按芯片选择下载，CLI helper 自动适配架构；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</span><span lang="en"><b>Terminal, preview, screen</b>: from Computers, open a terminal, open a local port (full screen available), or view the screen and control it with a trackpad and keyboard. The screen&#39;s toolbar has one-tap shortcuts (copy, paste, switch app, Mission Control, screenshots, F-keys, and your own) and a text box to write in and send, with the phone&#39;s clipboard. Supports Apple silicon and Intel Macs on macOS 13 or later; choose the standalone download for your chip, while the CLI helper selects the native architecture automatically; <code>linkshell setup</code> takes you through its two permissions, <code>linkshell screen</code> does just that part.</span></li>
+          <li><b>新建会话</b>：选 Agent 和项目目录，直接开始。</li>
+          <li><b>回答提问</b>：Codex（含 Desktop 异步提问）、Claude、Cursor 和 Grok 的结构化问题会显示「需要用户输入」，可在手机卡片中作答或跳过。Cursor 支持选择，其他类型按 Agent 提供的能力支持文字回答。</li>
+          <li><b>忙的时候发消息</b>：消息在输入框上方排队，可以调整顺序、取回编辑、立即发送（Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮）；停止时排队的文字会放回输入框。</li>
+          <li><b>分叉与 worktree</b>：每条回复下方可以「从这里分叉」，会话菜单里可以分叉整个会话；新建会话或分叉时可以选择放进新的 git worktree（在 <code>~/.linkshell/worktrees/</code> 下，独立分支），删除会话时没有改动的 worktree 会一起清掉。</li>
+          <li><b>命令面板</b>：输入 <code>/</code>、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令与 skills；草稿会保留。</li>
+          <li><b>持续目标</b>：Codex 和 Claude Code 支持 <code>/goal</code>，也可从菜单进入目标页面。Codex 可设置预算、暂停和继续；Claude 可设置或清除完成条件。需电脑上的 Agent 支持相应能力。</li>
+          <li><b>后台任务</b>：<code>/tasks</code> 或标题旁的入口可查看回复结束后仍运行的命令、输出和退出码。Codex 支持单任务停止；Claude Bash / Monitor 目前只支持查看，停止请在电脑端操作。</li>
+          <li><b>屏幕适配</b>：iPhone Duo 和普通 iPhone 都会根据可用空间调整聊天、输入框和操作区。</li>
+          <li><b>工作流、子 Agent 与文件</b>：会话标题旁的按钮列出工作流和子 Agent；输入框上方可回到后台工作流；会话和终端的菜单里可以浏览项目文件。</li>
+          <li><b>设置</b>：输入框下方可以换模型、思考强度、权限模式（取决于 Agent 提供了哪些）。</li>
+          <li><b>Agent 连接与工具</b>：从「电脑」里的 Agent 设置完成登录、配置 MCP 服务和附加目录，也可以添加自定义 ACP 连接。支持编辑建议的 Agent 可以在文件页提出修改，预览后再应用；具体功能取决于 Agent 提供的能力。</li>
+          <li><b>整理</b>：长按会话可以重命名、归档、删除；从首页底部进入已归档，也可以搜索查找。Codex 归档同步到原生记录，查看历史不会解除归档；Claude 和其他 Agent 的归档仅保存在 LinkShell。不再使用的电脑，在账号页的「我的电脑」里长按移除。</li>
+          <li><b>会话恢复</b>：电脑端 CLI 0.10.19 会重新核对任务状态，避免已结束的任务一直显示运行中。原始记录缺失或读取失败时会显示原因，并保留已经缓存的消息；重新打开可重试。</li>
+          <li><b>Apple Watch</b>：2.3.33 加入独立腕表连接。在腕表「连接设置」登录邮箱/密码账号或输入电脑配对码，查看会话、处理简单审批并发送短消息；也可切换 iPhone 配套模式。独立连接在 App 前台运行，需要 Gateway 0.6.20 或更新版本。</li>
+          <li><b>终端、预览、屏幕</b>：在「电脑」页开终端、打开本地端口（可全屏），或看电脑屏幕，并用触控板和键盘控制它。屏幕工具条上有快捷操作（复制、粘贴、切换应用、调度中心、截图、F 键，也可以添加自己的）和「发送文字」（写好一段再发，可以带上手机剪贴板）。支持 Apple 芯片和 Intel Mac，需要 macOS 13 及以上，独立 App 请按芯片选择下载，CLI helper 自动适配架构；两项权限由 <code>linkshell setup</code> 带你打开，单独设置用 <code>linkshell screen</code>。</li>
         </ul>
 
-        <h2 id="d-screen"><span lang="zh">远程桌面的画面与连接</span><span lang="en">Remote screen quality and connection</span></h2>
-        <p><span lang="zh">网页端的「电脑屏幕」页支持搜索电脑和自定义名称，名称保存在当前浏览器。打开电脑后进入独立观看页，可切换显示器、调整清晰度和全屏观看；离线电脑保留在列表中。</span><span lang="en">The web Screens page lets you search computers and save custom names in the current browser. Open a computer in its own viewing page to choose a display, adjust quality or enter fullscreen. Offline computers remain listed.</span></p>
-        <p><span lang="zh">在手机上打开 Mac 桌面，可以切换显示器、横屏或全屏查看、双指缩放。触控板模式适合精确移动指针，「点哪点哪」适合直接点击；右键、滚动、拖拽和常用 Mac 快捷键都可使用，也能把手机上写好的长文字或剪贴板内容发送过去。完整控制支持 macOS 13 及以上，Linux 支持观看。</span><span lang="en">Open your Mac desktop on the phone, switch displays, use landscape or full screen and pinch to zoom. Choose trackpad mode for precise pointer movement or direct touch to click a spot. Right click, scroll, drag and use familiar Mac shortcuts, or send longer text and your phone's clipboard. Full control requires macOS 13 or later; Linux supports viewing.</span></p>
-        <p><span lang="zh">在「连接信息」中选择流畅 1280、标准 1920、高清 2560 或原生宽度（最高 3840，不超过源屏幕）。iOS 适配最高 120 Hz 显示，实际画质、帧率和延迟取决于两端设备、源显示器、网络、电量和温控。连接不佳时可能降低画质；需要重新建立连接时可点击重试。</span><span lang="en">Connection info offers widths of 1280, 1920, 2560 or native (up to 3840, bounded by the source display). iOS supports displays up to 120 Hz; actual resolution, frame rate and latency depend on both devices, the source display, network, power and temperature. Quality may decrease on a poor connection; use Retry when you need a new connection.</span></p>
-        <p><span lang="zh">切换显示器或清晰度会沿用已经建立的屏幕连接。在 App 或网页工作区内离开屏幕页时暂停采集，两分钟内返回可复用连接继续观看。进入后台、隐藏网页标签或断线后会释放连接，下次重新建立；旧版电脑端仍按原有方式重连。</span><span lang="en">Changing displays or quality keeps the established screen connection. Visiting another page in the app or web workspace pauses capture; return within two minutes to resume on the same connection. Backgrounding the app, hiding the browser tab or disconnecting releases it, so the next visit connects again. Older host versions keep their existing reconnect behavior.</span></p>
-        <p class="note"><span lang="zh">稳定 120 fps、稳定 4K/60 和真机弱网效果仍待验证。完整技术链路、回退规则和已知问题见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">远程桌面架构与链路图</a>。</span><span lang="en">Sustained 120 fps, stable 4K/60 and real-device weak-network performance remain unproven. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">remote-desktop architecture and diagrams</a> for the paths, fallback rules and known issues.</span></p>
+        <h2 id="d-screen">远程桌面的画面与连接</h2>
+        <p>网页端的「电脑屏幕」页支持搜索电脑和自定义名称，名称保存在当前浏览器。打开电脑后进入独立观看页，可切换显示器、调整清晰度和全屏观看；离线电脑保留在列表中。</p>
+        <p>在手机上打开 Mac 桌面，可以切换显示器、横屏或全屏查看、双指缩放。触控板模式适合精确移动指针，「点哪点哪」适合直接点击；右键、滚动、拖拽和常用 Mac 快捷键都可使用，也能把手机上写好的长文字或剪贴板内容发送过去。完整控制支持 macOS 13 及以上，Linux 支持观看。</p>
+        <p>在「连接信息」中选择流畅 1280、标准 1920、高清 2560 或原生宽度（最高 3840，不超过源屏幕）。iOS 适配最高 120 Hz 显示，实际画质、帧率和延迟取决于两端设备、源显示器、网络、电量和温控。连接不佳时可能降低画质；需要重新建立连接时可点击重试。</p>
+        <p>切换显示器或清晰度会沿用已经建立的屏幕连接。在 App 或网页工作区内离开屏幕页时暂停采集，两分钟内返回可复用连接继续观看。进入后台、隐藏网页标签或断线后会释放连接，下次重新建立；旧版电脑端仍按原有方式重连。</p>
+        <p class="note">稳定 120 fps、稳定 4K/60 和真机弱网效果仍待验证。完整技术链路、回退规则和已知问题见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">远程桌面架构与链路图</a>。</p>
 
-        <h2 id="d-iphone-duo"><span lang="zh">iPhone Duo 与自适应布局</span><span lang="en">iPhone Duo and adaptive layouts</span></h2>
-        <p><span lang="zh">从 App 2.3.7 起，LinkShell 支持 iPhone Duo 的可用区域和折叠信息。宽度足够时，打开「改动」或「预览」可以与对话并排；折叠区域会参与内容与操作区的布局计算。较窄的窗口与普通 iPhone 使用单栏布局。布局变化时保留会话和工具面板的状态。</span><span lang="en">From app 2.3.7, LinkShell uses iPhone Duo’s available regions and fold information. With sufficient width, Changes or Preview can sit beside the conversation. Fold regions inform the layout of content and controls; narrower windows and standard iPhones use one column. Session and tool-panel state is preserved as the layout changes.</span></p>
-        <p class="note"><span lang="zh">Duo 布局已通过模拟器交互验证；实际显示取决于系统报告的尺寸和姿态。</span><span lang="en">Duo layouts have been checked in the simulator; actual presentation depends on the size and posture reported by the system.</span></p>
+        <h2 id="d-iphone-duo">iPhone Duo 与自适应布局</h2>
+        <p>从 App 2.3.7 起，LinkShell 支持 iPhone Duo 的可用区域和折叠信息。宽度足够时，打开「改动」或「预览」可以与对话并排；折叠区域会参与内容与操作区的布局计算。较窄的窗口与普通 iPhone 使用单栏布局。布局变化时保留会话和工具面板的状态。</p>
+        <p class="note">Duo 布局已通过模拟器交互验证；实际显示取决于系统报告的尺寸和姿态。</p>
 
-        <h2 id="d-computer-use"><span lang="zh">在手机上用 Computer Use</span><span lang="en">Use Computer Use from your phone</span></h2>
-        <p><span lang="zh">在手机会话里告诉 Codex 你想做什么，让它操作电脑上的浏览器或桌面应用。操作画面会在浮窗中实时预览，你可以边看边补充要求，继续推进任务。</span><span lang="en">Tell Codex what you want done in the phone conversation and let it work in your computer's browser or desktop apps. Watch its actions live in a floating preview and keep giving instructions as it works.</span></p>
+        <h2 id="d-computer-use">在手机上用 Computer Use</h2>
+        <p>在手机会话里告诉 Codex 你想做什么，让它操作电脑上的浏览器或桌面应用。操作画面会在浮窗中实时预览，你可以边看边补充要求，继续推进任务。</p>
         <ul>
-          <li><span lang="zh"><b>边聊边看</b>：小窗不随聊天滚动，可以拖到一边、点击放大，也可以收起成图标或关闭；关闭后在会话菜单点「显示电脑画面」恢复。</span><span lang="en"><b>Watch while chatting</b>: the preview stays in place as you scroll. Drag it aside, tap to enlarge it, collapse it to an icon or close it. Reopen it with “Show computer preview” in the session menu.</span></li>
-          <li><span lang="zh"><b>回来接着看</b>：回合结束后保留最后画面，重新进入会话会恢复预览状态。</span><span lang="en"><b>Pick up where you left off</b>: the last frame stays after the turn, and reopening the session restores the preview state.</span></li>
+          <li><b>边聊边看</b>：小窗不随聊天滚动，可以拖到一边、点击放大，也可以收起成图标或关闭；关闭后在会话菜单点「显示电脑画面」恢复。</li>
+          <li><b>回来接着看</b>：回合结束后保留最后画面，重新进入会话会恢复预览状态。</li>
         </ul>
-        <p class="note"><span lang="zh">目前支持 macOS 上的 Codex，需已配置兼容的 Computer Use 工具，并使用支持此功能的电脑端和手机 App。请在 Mac 上允许 LinkShell 录制屏幕，可运行 <code>linkshell screen</code> 完成设置。</span><span lang="en">Currently supports Codex on macOS with compatible Computer Use tools configured, and versions of the computer and phone apps that support this feature. Allow LinkShell to record the Mac's screen; run <code>linkshell screen</code> to set it up.</span></p>
+        <p class="note">目前支持 macOS 上的 Codex，需已配置兼容的 Computer Use 工具，并使用支持此功能的电脑端和手机 App。请在 Mac 上允许 LinkShell 录制屏幕，可运行 <code>linkshell screen</code> 完成设置。</p>
 
-        <h2 id="d-commands"><span lang="zh">命令一览</span><span lang="en">Commands</span></h2>
+        <h2 id="d-commands">命令一览</h2>
         <dl>
           <dt><code>linkshell setup</code></dt>
-          <dd><span lang="zh">首次设置：启动 LinkShell、打开屏幕的两项权限、连接手机</span><span lang="en">First-time setup: start LinkShell, the screen&#39;s two permissions, connect your phone</span></dd>
+          <dd>首次设置：启动 LinkShell、打开屏幕的两项权限、连接手机</dd>
           <dt><code>linkshell host <span class="nb">[--daemon]</span> <span class="nb">[--gateway &lt;url&gt;]</span></code></dt>
-          <dd><span lang="zh">启动 LinkShell；<code>status</code>、<code>stop</code></span><span lang="en">Start LinkShell; <code>status</code>, <code>stop</code></span></dd>
+          <dd>启动 LinkShell；<code>status</code>、<code>stop</code></dd>
           <dt><code>linkshell pair</code></dt>
-          <dd><span lang="zh">通过网关配对手机</span><span lang="en">Pair a phone through the gateway</span></dd>
+          <dd>通过网关配对手机</dd>
           <dt><code>linkshell devices</code></dt>
-          <dd><span lang="zh">列出已配对的手机；<code>remove</code> 移除一台</span><span lang="en">List paired phones; <code>remove</code> unpairs one</span></dd>
+          <dd>列出已配对的手机；<code>remove</code> 移除一台</dd>
           <dt><code>linkshell screen</code></dt>
-          <dd><span lang="zh">设置看屏幕和控制屏幕（macOS 的两项权限）</span><span lang="en">Set up watching and controlling the screen (the two macOS permissions)</span></dd>
+          <dd>设置看屏幕和控制屏幕（macOS 的两项权限）</dd>
           <dt><code>linkshell login</code> / <code>logout</code></dt>
-          <dd><span lang="zh">Pro 账号（官方网关）</span><span lang="en">Pro account (official gateway)</span></dd>
+          <dd>Pro 账号（官方网关）</dd>
           <dt><code>linkshell claude</code> / <code>codex</code></dt>
-          <dd><span lang="zh">在终端里启动 Agent，可与手机共享</span><span lang="en">Start an agent in your terminal, shared with the phone</span></dd>
+          <dd>在终端里启动 Agent，可与手机共享</dd>
           <dt><code>linkshell gateway <span class="nb">[--port]</span> <span class="nb">[--daemon]</span></code></dt>
-          <dd><span lang="zh">运行自己的网关；<code>status</code>、<code>stop</code></span><span lang="en">Run your own gateway; <code>status</code>, <code>stop</code></span></dd>
+          <dd>运行自己的网关；<code>status</code>、<code>stop</code></dd>
           <dt><code>linkshell doctor</code></dt>
-          <dd><span lang="zh">检查环境和连接</span><span lang="en">Check the environment and connectivity</span></dd>
+          <dd>检查环境和连接</dd>
           <dt><code>linkshell upgrade</code></dt>
-          <dd><span lang="zh">升级到最新版</span><span lang="en">Upgrade to the latest version</span></dd>
+          <dd>升级到最新版</dd>
         </dl>
 
-        <h2 id="d-faq"><span lang="zh">常见问题</span><span lang="en">FAQ</span></h2>
-        <h3><span lang="zh">App 显示「电脑暂时连不上」</span><span lang="en">The app says the computer can't be reached</span></h3>
-        <p><span lang="zh">确认电脑没睡眠、<code>linkshell host status</code> 里网关是已连接，然后运行 <code>linkshell doctor</code>。连接恢复后 App 会自动重连。</span><span lang="en">Check the computer is awake and <code>linkshell host status</code> shows the gateway connected, then run <code>linkshell doctor</code>. The app reconnects on its own once it's back.</span></p>
-        <h3><span lang="zh">Agent 显示「未登录」</span><span lang="en">An agent shows "not logged in"</span></h3>
-        <p><span lang="zh">在电脑终端里给那个 Agent 登录一次（<code>claude</code> 里的 <code>/login</code>、<code>codex login</code>、<code>copilot login</code> 等），LinkShell 用的就是那份登录。</span><span lang="en">Sign in to that agent once in a terminal on the computer (<code>/login</code> in <code>claude</code>, <code>codex login</code>, <code>copilot login</code>…); LinkShell uses that sign-in.</span></p>
-        <h3><span lang="zh">从 1.x 升级</span><span lang="en">Upgrading from 1.x</span></h3>
-        <p><span lang="zh">2.0 的 App 和电脑端协议都换了，需要两边一起升级，再重新配对一次。1.x 的 App 和 <code>linkshell start</code> 已不再支持。</span><span lang="en">2.0 changed both the app and the computer side, so upgrade both and pair again. The 1.x app and <code>linkshell start</code> are no longer supported.</span></p>
+        <h2 id="d-faq">常见问题</h2>
+        <h3>App 显示「电脑暂时连不上」</h3>
+        <p>确认电脑没睡眠、<code>linkshell host status</code> 里网关是已连接，然后运行 <code>linkshell doctor</code>。连接恢复后 App 会自动重连。</p>
+        <h3>Agent 显示「未登录」</h3>
+        <p>在电脑终端里给那个 Agent 登录一次（<code>claude</code> 里的 <code>/login</code>、<code>codex login</code>、<code>copilot login</code> 等），LinkShell 用的就是那份登录。</p>
+        <h3>从 1.x 升级</h3>
+        <p>2.0 的 App 和电脑端协议都换了，需要两边一起升级，再重新配对一次。1.x 的 App 和 <code>linkshell start</code> 已不再支持。</p>
       </article>
     </div>
   </main>
 
-  <!-- ═════════════════════════ PRICING ═════════════════════════ -->
-  <main class="page" data-page="pricing">
-    <div class="wrap pricing">
-      <div class="text">
-        <h1><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h1>
-        <p class="lead"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
-      </div>
-
-      <div class="plans">
-      <section class="plan">
-        <h2>Free</h2>
-        <div class="price">¥0</div>
-        <p class="per"><span lang="zh">永久免费</span><span lang="en">Free forever</span></p>
-        <ul>
-          <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span></li>
-          <li><span lang="zh">端到端加密</span><span lang="en">End-to-end encryption</span></li>
-          <li><span lang="zh">自建网关（一条命令或 Docker）</span><span lang="en">Self-hosted gateway (one command or Docker)</span></li>
-          <li><span lang="zh">扫码配对，长期有效</span><span lang="en">QR pairing that lasts</span></li>
-        </ul>
-        <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span></a>
-      </section>
-
-      <section class="plan pro">
-        <h2>Pro</h2>
-        <div id="price-monthly" class="price">¥9.9<small><span lang="zh">/月</span><span lang="en">/mo</span></small></div>
-        <div id="price-yearly" class="price" style="display:none">¥99<small><span lang="zh">/年</span><span lang="en">/yr</span></small></div>
-        <p class="per"><span id="price-alt-monthly"><span lang="zh">或年付 ¥99</span><span lang="en">or ¥99 billed yearly</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">相当于 ¥8.25/月</span><span lang="en">works out to ¥8.25/month</span></span></p>
-        <div class="cycle">
-          <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
-          <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
-        </div>
-        <ul>
-          <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
-          <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span></li>
-          <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span></li>
-          <li><span lang="zh">优先支持</span><span lang="en">Priority support</span></li>
-        </ul>
-
-        <div id="pricing-buy">
-          <ol>
-            <li><span lang="zh">在链动小铺买一张激活码，微信或支付宝付款。</span><span lang="en">Buy an activation code on Liandong Xiaopu, with WeChat Pay or Alipay.</span></li>
-            <li><span lang="zh">用普通账户登录 LinkShell，在手机 App、Mac App 或网页版的账号区域输入激活码兑换；Apple Watch 独立模式下，在「连接设置 → 会员与激活码」兑换。成功后会更新 Pro 状态与到期时间。</span><span lang="en">Sign in to LinkShell with a Free account and redeem the code in the phone app, Mac app or web workspace's account controls. On Apple Watch, use Connection Settings → Membership &amp; activation codes in independent mode. Pro status and expiry update after redemption.</span></li>
-          </ol>
-          <a id="buy-link" href="https://pay.ldxp.cn/item/7lgv1s" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary"><span lang="zh">购买激活码 ↗</span><span lang="en">Buy a code ↗</span></a>
-          <a lang="zh" href="https://itool.tech/zh/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">也可在 iTool 兑换或续期 ↗</a>
-          <a lang="en" href="https://itool.tech/en/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">Redeem or renew on iTool ↗</a>
-          <p><span lang="zh">LinkShell Pro 就是 iTool Pro：同一个账号，同一份会员，iTool 里的 Pro 功能也一起开通。已有 Pro 的账户可在 iTool「设置 → 升级 Pro」兑换续期，时长会在剩余时间上叠加。</span><span lang="en">LinkShell Pro is iTool Pro: one account, one membership, and iTool's Pro features come with it. To renew an active Pro membership, redeem another code under iTool Settings → Upgrade to Pro; its duration adds to the time you have left.</span></p>
-        </div>
-      </section>
-
-      </div>
-
-      <section class="faq text">
-        <h2><span lang="zh">常见问题</span><span lang="en">Questions</span></h2>
-        <h3><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></h3>
-        <p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p>
-        <h3><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></h3>
-        <p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p>
-        <h3><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></h3>
-        <p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p>
-        <h3><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></h3>
-        <p><span lang="zh">在链动小铺买激活码，支持微信和支付宝。普通账户可直接在 LinkShell 手机 App、Mac App、网页版或 Apple Watch 独立模式里兑换；也可在 iTool 用同一账号兑换。</span><span lang="en">Buy an activation code on Liandong Xiaopu with WeChat Pay or Alipay. Free accounts can redeem it directly in the LinkShell phone app, Mac app, web workspace or Apple Watch independent mode, or on iTool with the same account.</span></p>
-      </section>
-    </div>
-  </main>
 
   <footer>
     <div class="wrap">
       <div class="who">
         <a class="brand" href="./"><img src="assets/adaptive-icon.png" alt="" width="22" height="22" loading="lazy" />LinkShell</a>
-        <span><span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
+        <span>出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span>
       </div>
       <nav>
         <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
-        <a href="docs/"><span lang="zh">文档</span><span lang="en">Docs</span></a>
-        <a href="pricing/"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a href="docs/">文档</a>
+        <a href="pricing/">定价</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
     </div>
     <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>
 
-  <script src="assets/duo/viewer.js?v=20261008-transparent-stage" defer></script>
   <script>
-    // ── Language ──
-    let currentLang = 'zh';
-    function applyLanguage(lang) {
-      currentLang = lang;
-      document.documentElement.dataset.lang = lang;
-      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-      document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
-      try { localStorage.setItem('linkshell-lang', lang); } catch { }
-      // Stills with an English cut show it to English visitors (the film follows in its loader).
-      document.querySelectorAll('[data-en]').forEach((el) => {
-        const attr = el.tagName === 'SOURCE' ? 'srcset' : 'src';
-        if (!el.dataset.zh) el.dataset.zh = el.getAttribute(attr);
-        el.setAttribute(attr, lang === 'en' ? el.dataset.en : el.dataset.zh);
-      });
-      if (window.reloadFilm) window.reloadFilm();
-    }
-    applyLanguage(document.documentElement.dataset.lang === 'en' ? 'en' : 'zh');
-    document.getElementById('lang-toggle').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
+    // ── Language: each page is in one; the switch remembers the choice and keeps the place ──
+    const currentLang = document.documentElement.dataset.lang === 'en' ? 'en' : 'zh';
+    document.getElementById('lang-toggle').addEventListener('click', (event) => {
+      try { localStorage.setItem('linkshell-lang', currentLang === 'zh' ? 'en' : 'zh'); } catch { }
+      if (location.hash) event.currentTarget.hash = location.hash;
+    });
 
     // ── Theme ──
     document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -1157,14 +862,6 @@
         video.src = src;
         if (at) video.addEventListener('loadedmetadata', () => { video.currentTime = at; }, { once: true });
       }
-      // A change of language swaps the film for the other cut, from the same moment.
-      window.reloadFilm = () => videos.forEach((video) => {
-        if (!video.dataset.shown || !video.dataset.wideEn) return;
-        const playing = !video.paused;
-        if (playing) video.dataset.away = '1';
-        load(video);
-        if (playing) video.play().catch(() => { });
-      });
       tall.addEventListener('change', () => videos.forEach((video) => {
         if (!video.dataset.shown) return;
         const playing = !video.paused;
@@ -1214,10 +911,16 @@
     const navLinks = document.querySelectorAll('[data-page-link]');
     let shown = null;
     function showPage(page) {
+      if (![...pages].some((p) => p.dataset.page === page)) {
+        const path = (document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
+        location.replace(new URL(path, document.baseURI).href + (location.hash.startsWith('#d-') ? location.hash : ''));
+        return false;
+      }
       pages.forEach((p) => p.classList.toggle('visible', p.dataset.page === page));
       navLinks.forEach((a) => a.classList.toggle('active', a.dataset.pageLink === page));
       if (shown !== page) window.scrollTo(0, 0);
       shown = page;
+      return true;
     }
     function route() {
       const path = location.pathname.replace(/\/+$/, '');
@@ -1225,7 +928,7 @@
       const hash = location.hash.replace('#', '');
       // (A docs anchor on the site's root is a link from before /docs/ had its own address.)
       const page = hash === 'docs' || hash === 'pricing' ? hash : hash.startsWith('d-') ? 'docs' : pathPage;
-      showPage(page);
+      if (!showPage(page)) return;
       // The pricing script below defines initPricing; it isn't there yet on the first call.
       if (page === 'pricing' && typeof initPricing === 'function') initPricing();
       if (hash && hash !== page) {

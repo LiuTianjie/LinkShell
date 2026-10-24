@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://liutianjie.github.io/LinkShell/sitemap.xml
+Sitemap: https://linkshell.itool.tech/sitemap.xml

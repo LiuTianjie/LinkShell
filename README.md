@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/">Website</a> ·
-  <a href="https://liutianjie.github.io/LinkShell/docs/">Docs</a> ·
+  <a href="https://linkshell.itool.tech/en/">Website</a> ·
+  <a href="https://linkshell.itool.tech/en/docs/">Docs</a> ·
   <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> ·
   <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android</a> ·
   <a href="#install-on-your-computer">Mac</a> ·
@@ -25,8 +25,8 @@
 </p>
 
 <p align="center">
-  <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-en.mp4"><img src="docs/site/assets/promo/poster-en.jpg" alt="LinkShell: a 50-second film recorded from the app" width="820" /></a><br />
-  <sub>▶ <a href="https://liutianjie.github.io/LinkShell/assets/promo/linkshell-en.mp4">Watch the film</a> (50 s, recorded from the app)</sub>
+  <a href="https://linkshell.itool.tech/assets/promo/linkshell-en.mp4"><img src="docs/site/assets/promo/poster-en.jpg" alt="LinkShell: a 50-second film recorded from the app" width="820" /></a><br />
+  <sub>▶ <a href="https://linkshell.itool.tech/assets/promo/linkshell-en.mp4">Watch the film</a> (50 s, recorded from the app)</sub>
 </p>
 
 Claude Code, Codex and other coding agents keep running on your computer. From your phone you watch them work, approve what they ask for, send a message into a running turn, and open the computer's screen when you need to. When you sit down again, the session is still in your terminal. Your code and the agent processes never leave your machine, and everything between phone and computer is end-to-end encrypted.
