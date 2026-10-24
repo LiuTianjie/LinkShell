@@ -223,7 +223,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       </div>
     </section>;
   }
-  return <section className={cn("screen-page desktop-native-screen", embedded && "screen-embedded", started && "screen-is-started", focused && "screen-focused")} aria-label={`${title}观看区域`} role={focused ? "dialog" : undefined} aria-modal={focused || undefined}>
+  return <section className={cn("screen-page desktop-native-screen", embedded && "screen-embedded", started && "screen-is-started", focused && "screen-focused", fullscreen && "screen-fullscreen")} aria-label={`${title}观看区域`} role={focused ? "dialog" : undefined} aria-modal={focused || undefined}>
     <div className="screen-toolbar">
       <strong className="screen-view-title"><Monitor size={17} /><span>{title}</span></strong>
       <div className="screen-actions">

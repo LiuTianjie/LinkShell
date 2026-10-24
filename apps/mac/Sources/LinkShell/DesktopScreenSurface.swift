@@ -298,6 +298,9 @@ final class DesktopScreenSurface: NSView, RTCVideoRenderer, NSTextInputClient {
     return true
   }
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    // ⌃⌘F stays with this Mac, so full screen can always be left while controlling the other one.
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if flags.contains([.command, .control]), event.charactersIgnoringModifiers?.lowercased() == "f" { return super.performKeyEquivalent(with: event) }
     if window?.firstResponder === self, canControl, !hasMarkedText(), event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) { return sendKey(event) }
     return super.performKeyEquivalent(with: event)
   }

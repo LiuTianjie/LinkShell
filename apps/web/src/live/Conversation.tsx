@@ -19,6 +19,42 @@ import { StepsSummary, Timeline } from "./Timeline";
 type Row = ReturnType<typeof foldStepRuns>[number];
 const rowKey = (row: Row) => (row.type === "steps" ? row.key : row.item.id);
 
+interface ListContext {
+  earlier: boolean;
+  loading: boolean;
+  failed: boolean;
+  online: boolean;
+  retry: () => void;
+  /** The top of the list: while it is in view, earlier history loads by itself. */
+  top: (node: HTMLDivElement | null) => void;
+  footer: React.ReactNode;
+}
+
+// Stable component types (inline ones remount on every render), fed through Virtuoso's context.
+function HistoryTop({ context }: { context: ListContext }) {
+  return (
+    <div ref={context.top} className="conversation-history-top">
+      {context.earlier &&
+        (context.loading ? (
+          <span className="conversation-history-status" role="status">
+            <LoaderCircle aria-hidden="true" />
+            正在加载更早的历史…
+          </span>
+        ) : context.failed ? (
+          <Button variant="link" size="sm" disabled={!context.online} onClick={context.retry}>
+            没有加载成功，重试
+          </Button>
+        ) : null)}
+    </div>
+  );
+}
+
+function ListFooter({ context }: { context: ListContext }) {
+  return <div className="conversation-footer">{context.footer}</div>;
+}
+
+const LIST_COMPONENTS = { Header: HistoryTop, Footer: ListFooter };
+
 export function Conversation({
   view,
   sessionId,
@@ -100,14 +136,73 @@ export function Conversation({
     prevCount.current = rows.length;
   }, [rows]);
 
-  const startReached = useCallback(() => {
-    if (view.startSeq > 0 && online && !loadingEarlier) void loadEarlier();
-  }, [view.startSeq, online, loadingEarlier, loadEarlier]);
+  // Earlier history loads by itself when the top of the list comes into view. Virtuoso's
+  // startReached alone missed it (a list already at its top, a page that didn't fill the view),
+  // which left only a button to click; the top's visibility is watched as well.
+  const [topVisible, setTopVisible] = useState(false);
+  // The list opens at its newest messages; before it is placed there its top shows for a frame,
+  // which mustn't count as the reader scrolling up.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), 400);
+    return () => clearTimeout(timer);
+  }, []);
+  const [failedAt, setFailedAt] = useState<number>();
+  const startSeq = useRef(view.startSeq);
+  startSeq.current = view.startSeq;
+  const inFlight = useRef(false);
+  const watcher = useRef<IntersectionObserver | undefined>(undefined);
+  const top = useCallback((node: HTMLDivElement | null) => {
+    watcher.current?.disconnect();
+    watcher.current = undefined;
+    if (!node) return setTopVisible(false);
+    // The viewport as root: the conversation's scroller clips it, so this is "on screen".
+    const observer = new IntersectionObserver(([entry]) => setTopVisible(entry?.isIntersecting ?? false));
+    observer.observe(node);
+    watcher.current = observer;
+  }, []);
+  useEffect(() => () => watcher.current?.disconnect(), []);
+
+  const load = useCallback(async () => {
+    const from = startSeq.current;
+    if (from === 0 || !online || loadingEarlier || inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const loaded = await loadEarlier();
+      // A page that didn't come is offered as a retry, not asked for again in a loop.
+      if (!loaded && startSeq.current === from) setFailedAt(from);
+    } finally {
+      inFlight.current = false;
+    }
+  }, [online, loadingEarlier, loadEarlier]);
+
+  useEffect(() => {
+    // Each page arrives above the reader, who stays where they were; the top then leaves the
+    // view. A page too short to push it out is followed by the next.
+    if (settled && topVisible && view.startSeq > 0 && failedAt !== view.startSeq) void load();
+  }, [settled, topVisible, view.startSeq, failedAt, load]);
+
+  const context = useMemo<ListContext>(
+    () => ({
+      earlier: view.startSeq > 0,
+      loading: loadingEarlier,
+      failed: failedAt === view.startSeq,
+      online,
+      retry: () => {
+        setFailedAt(undefined);
+        void load();
+      },
+      top,
+      footer,
+    }),
+    [view.startSeq, loadingEarlier, failedAt, online, load, top, footer],
+  );
 
   return (
     <div className="conversation-column">
-      <Virtuoso
+      <Virtuoso<Row, ListContext>
         ref={handle}
+        context={context}
         className="conversation"
         data={rows}
         computeItemKey={(_, row) => rowKey(row)}
@@ -116,31 +211,9 @@ export function Conversation({
         followOutput={(bottom) => (bottom ? "smooth" : false)}
         atBottomStateChange={setAtBottom}
         atBottomThreshold={120}
-        startReached={startReached}
+        startReached={() => settled && void load()}
         increaseViewportBy={{ top: 600, bottom: 600 }}
-        components={{
-          Header: () => (
-            <div className="conversation-history-top">
-              {view.startSeq > 0 &&
-                (loadingEarlier ? (
-                  <span className="conversation-history-status" role="status">
-                    <LoaderCircle aria-hidden="true" />
-                    正在加载更早的历史…
-                  </span>
-                ) : (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    disabled={!online}
-                    onClick={() => void loadEarlier()}
-                  >
-                    加载更早的历史
-                  </Button>
-                ))}
-            </div>
-          ),
-          Footer: () => <div className="conversation-footer">{footer}</div>,
-        }}
+        components={LIST_COMPONENTS}
         itemContent={(_, row) =>
           row.type === "steps" ? (
             <div className="live-timeline">
