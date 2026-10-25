@@ -513,7 +513,7 @@ export function Session({
     setBlocks((current) => current.filter((block) => !blocks.includes(block)));
     setAttachmentError(undefined);
     composer.current?.focus();
-    // Virtuoso's followOutput keeps us pinned to the newest message after send.
+    // The conversation scrolls to the message just sent (Conversation.tsx).
   }
   async function nativePanel(name: "mcp" | "apps") {
     if (!canInteract) return;

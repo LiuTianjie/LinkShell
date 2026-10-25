@@ -389,9 +389,7 @@ html[data-desktop] .desktop-main .handoff-bar { flex: none; padding: 7px 20px; b
 html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); }
 
 /* Reading column: about 76 characters of Chinese at 15px, centred in the conversation panel. */
-html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding: 28px max(28px, calc((100% - 760px) / 2)); }
-html[data-desktop] .desktop-main .conversation-history-top,
-html[data-desktop] .desktop-main .conversation-footer { padding-inline: max(28px, calc((100% - 760px) / 2)); }
+html[data-desktop] .desktop-main .conversation-content { padding: 28px max(28px, calc((100% - 760px) / 2)); }
 html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14.5px; line-height: 1.75; letter-spacing: 0; }
 html[data-desktop] .desktop-main .markdown h1 { font-size: 19px; }
 html[data-desktop] .desktop-main .markdown h2 { font-size: 16.5px; }
@@ -503,7 +501,7 @@ html[data-desktop] .desktop-native-screen.screen-fullscreen .screen-stage { flex
   html[data-desktop] .inspector-tabs { height: 52px; }
   html[data-desktop] .desktop-main .composer { min-height: 90px; }
   html[data-desktop] .desktop-main .composer textarea { min-height: 46px; }
-  html[data-desktop] .desktop-main [data-testid="virtuoso-item-list"] { padding-block: 18px; }
+  html[data-desktop] .desktop-main .conversation-content { padding-block: 18px; }
 }
 /* Below a tablet's width the sidebar folds away; ⌘B or the computer menu brings it back. */
 @media (max-width: 767px) {

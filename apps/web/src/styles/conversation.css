@@ -104,30 +104,23 @@
     min-width: 0;
     min-height: 0;
   }
-  /* The Virtuoso scroller. Horizontal padding centers the reading column;
-     vertical breathing room lives on the header/footer and item margins so it
-     doesn't confuse Virtuoso's size measurement. */
+  /* The conversation's scroller. Its content is laid out normally (no virtual
+     list), so the scrollbar is the real height. Scroll anchoring is done in
+     Conversation.tsx for every engine; the browser's own would move it twice. */
   .conversation {
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
-  }
-  .conversation > div[data-testid="virtuoso-scroller"],
-  .conversation {
+    overflow-anchor: none;
     scrollbar-gutter: stable;
   }
-  [data-testid="virtuoso-item-list"] {
+  /* Horizontal padding centers the reading column. A flow root, so the last
+     row's margin stays inside the box use-stick-to-bottom measures. */
+  .conversation-content {
+    display: flow-root;
     padding: 20px max(20px, calc((100% - 820px) / 2));
-  }
-  [data-testid="virtuoso-item-list"] > div {
-    padding-bottom: 3px;
-  }
-  /* The header (history loader) and footer (permissions / activity / notices /
-     async) are siblings of the item list, so they need the same centered
-     column padding or their content hugs the far-left edge. */
-  .conversation-history-top,
-  .conversation-footer {
-    padding: 0 max(20px, calc((100% - 820px) / 2));
   }
   .conversation-footer:empty {
     display: none;

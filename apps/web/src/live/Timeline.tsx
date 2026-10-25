@@ -12,6 +12,7 @@ import {
   Children,
   isValidElement,
   createContext,
+  memo,
   useContext,
   useEffect,
   useRef,
@@ -585,56 +586,36 @@ function UserBlocks({
   return <Blocks blocks={blocks} sessionId={sessionId} onFile={onFile} />;
 }
 
-export function Timeline({
-  items,
-  sessionId,
-  agent,
-  onFile,
-  onFork,
-  onTerminal,
-  showAsyncQuestions = true,
-  answeredOverride,
-}: {
-  items: TimelineItem[];
+interface EntryProps {
   sessionId: string;
   agent: string;
   onFile: (path: string, line?: number) => void;
   onFork?: (id: string) => void;
   onTerminal?: (id: string) => void;
-  showAsyncQuestions?: boolean;
-  /** When a parent virtualizes rows, it computes the whole-conversation
-      answered-question map once and passes it so single-item slices still dedup. */
-  answeredOverride?: Map<string, string>;
-}) {
+  showAsyncQuestions: boolean;
+  /** The whole conversation's answered async questions (Codex Desktop), for dedup. */
+  answered: ReadonlyMap<string, string>;
+}
+
+/**
+ * One timeline item. Memoized: a conversation re-renders only the item that
+ * changed while a reply streams, not every message above it.
+ */
+export const TimelineEntry = memo(function TimelineEntry({
+  item,
+  sessionId,
+  agent,
+  onFile,
+  onFork,
+  onTerminal,
+  showAsyncQuestions,
+  answered,
+}: EntryProps & { item: TimelineItem }) {
   const actions = useActions();
   const { link } = useConnection();
   const job = useJob();
   const online = useSessionOnline();
-  const tail = useRef<HTMLDivElement>(null);
-  // Which folded step runs the reader has opened in place.
-  const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
-  const toggleSteps = (key: string) =>
-    setOpenSteps((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  // Finished runs of tool/thought steps fold into one summary line, Desktop-style.
-  const rows = foldStepRuns(items, openSteps);
-  // The agent's async questions (Codex Desktop) are answered by a message quoting them, here or on the computer.
-  const answered =
-    answeredOverride ??
-    new Map(
-      items.flatMap((item) =>
-        item.kind === "user" && !item.failed && !item.pending
-          ? item.blocks.flatMap((block) =>
-              block.type === "text" ? answeredQuestions(block.text) : [],
-            )
-          : [],
-      ),
-    );
-  const renderItem = (item: TimelineItem) => {
+  const entry = (() => {
     if (item.kind === "turn-end" || item.kind === "driver")
           return (
             <p className="timeline-divider" key={item.id}>
@@ -1004,7 +985,60 @@ export function Timeline({
             )}
           </details>
         );
-  };
+  })();
+  return job.error ? (
+    <>
+      {entry}
+      <ErrorNotice error={job.error} />
+    </>
+  ) : (
+    entry
+  );
+});
+
+/** Whole-timeline map of async questions already answered by a later message. */
+export function answeredMap(items: TimelineItem[]): Map<string, string> {
+  return new Map(
+    items.flatMap((item) =>
+      item.kind === "user" && !item.failed && !item.pending
+        ? item.blocks.flatMap((block) =>
+            block.type === "text" ? answeredQuestions(block.text) : [],
+          )
+        : [],
+    ),
+  );
+}
+
+export function Timeline({
+  items,
+  sessionId,
+  agent,
+  onFile,
+  onFork,
+  onTerminal,
+  showAsyncQuestions = true,
+}: {
+  items: TimelineItem[];
+  sessionId: string;
+  agent: string;
+  onFile: (path: string, line?: number) => void;
+  onFork?: (id: string) => void;
+  onTerminal?: (id: string) => void;
+  showAsyncQuestions?: boolean;
+}) {
+  // Which folded step runs the reader has opened in place.
+  const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
+  const toggleSteps = (key: string) =>
+    setOpenSteps((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  // Finished runs of tool/thought steps fold into one summary line, Desktop-style.
+  const rows = foldStepRuns(items, openSteps);
+  // The agent's async questions (Codex Desktop) are answered by a message quoting them, here or on the computer.
+  const answered = answeredMap(items);
   return (
     <div className="live-timeline">
       {rows.map((row) =>
@@ -1016,11 +1050,19 @@ export function Timeline({
             onToggle={() => toggleSteps(row.key)}
           />
         ) : (
-          renderItem(row.item)
+          <TimelineEntry
+            key={row.item.id}
+            item={row.item}
+            sessionId={sessionId}
+            agent={agent}
+            onFile={onFile}
+            onFork={onFork}
+            onTerminal={onTerminal}
+            showAsyncQuestions={showAsyncQuestions}
+            answered={answered}
+          />
         ),
       )}
-      <ErrorNotice error={job.error} />
-      <div ref={tail} />
     </div>
   );
 }

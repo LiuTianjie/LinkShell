@@ -1,60 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useStickToBottom } from "use-stick-to-bottom";
 import { ArrowDown, LoaderCircle } from "lucide-react";
-import {
-  answeredQuestions,
-  foldStepRuns,
-  type SessionView,
-} from "@linkshell/client-core";
+import { foldStepRuns, type SessionView, type Step } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
-import { StepsSummary, Timeline } from "./Timeline";
+import { StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
+
+/** A folded-steps row with a stable toggle, so it is memoizable like the message entries. */
+const StepsRow = memo(function StepsRow({
+  stepKey,
+  steps,
+  open,
+  toggle,
+}: {
+  stepKey: string;
+  steps: Step[];
+  open: boolean;
+  toggle: (key: string) => void;
+}) {
+  return <StepsSummary steps={steps} open={open} onToggle={() => toggle(stepKey)} />;
+});
 
 /**
- * The scrolling conversation. react-virtuoso owns the scroll container so long
- * sessions stay light and — the part a hand-rolled scroller kept getting wrong
- * — `firstItemIndex` keeps the reader pinned in place when earlier history is
- * prepended, instead of jumping. New messages at the bottom auto-follow only
- * when the reader is already there.
+ * The first row element whose bottom is at or below the top of the view — the
+ * one the reader is looking at. Rows are in document order, so a binary search
+ * reads only ~log₂(n) rects instead of every row's.
  */
-type Row = ReturnType<typeof foldStepRuns>[number];
-const rowKey = (row: Row) => (row.type === "steps" ? row.key : row.item.id);
-
-interface ListContext {
-  earlier: boolean;
-  loading: boolean;
-  failed: boolean;
-  online: boolean;
-  retry: () => void;
-  /** The top of the list: while it is in view, earlier history loads by itself. */
-  top: (node: HTMLDivElement | null) => void;
-  footer: React.ReactNode;
+function topRow(rows: HTMLElement, viewTop: number): Element | undefined {
+  const children = rows.children;
+  let low = 0;
+  let high = children.length - 1;
+  let found: Element | undefined;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const child = children[middle]!;
+    if (child.getBoundingClientRect().bottom > viewTop) {
+      found = child;
+      high = middle - 1;
+    } else low = middle + 1;
+  }
+  return found;
 }
 
-// Stable component types (inline ones remount on every render), fed through Virtuoso's context.
-function HistoryTop({ context }: { context: ListContext }) {
-  return (
-    <div ref={context.top} className="conversation-history-top">
-      {context.earlier &&
-        (context.loading ? (
-          <span className="conversation-history-status" role="status">
-            <LoaderCircle aria-hidden="true" />
-            正在加载更早的历史…
-          </span>
-        ) : context.failed ? (
-          <Button variant="link" size="sm" disabled={!context.online} onClick={context.retry}>
-            没有加载成功，重试
-          </Button>
-        ) : null)}
-    </div>
-  );
-}
-
-function ListFooter({ context }: { context: ListContext }) {
-  return <div className="conversation-footer">{context.footer}</div>;
-}
-
-const LIST_COMPONENTS = { Header: HistoryTop, Footer: ListFooter };
-
+/**
+ * The scrolling conversation. Every row is laid out by the browser, so the
+ * scrollbar always has the real height. A virtual list had to guess the height
+ * of each row it hadn't measured (markdown, images, folded steps, text still
+ * streaming); the guesses left the end out of reach and made the scrollbar jump
+ * while it was dragged. use-stick-to-bottom keeps the newest message in view
+ * while the reader is at the bottom and lets go as soon as they scroll up.
+ * Entries are memoized, so a streaming reply re-renders only itself.
+ */
 export function Conversation({
   view,
   sessionId,
@@ -80,8 +75,14 @@ export function Conversation({
   onTerminal: (id: string) => void;
   footer: React.ReactNode;
 }) {
-  const handle = useRef<VirtuosoHandle>(null);
+  // Opening a session lands on its newest message at once; later growth follows smoothly.
+  const { scrollRef, contentRef, scrollToBottom, isAtBottom, state } = useStickToBottom({
+    initial: "instant",
+    resize: "smooth",
+  });
+
   const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
+  // Stable, so a folded-steps row re-renders only when its own open state flips, not every chunk.
   const toggleSteps = useCallback(
     (key: string) =>
       setOpenSteps((previous) => {
@@ -92,53 +93,90 @@ export function Conversation({
       }),
     [],
   );
-  const [atBottom, setAtBottom] = useState(true);
+  const rows = useMemo(() => foldStepRuns(view.items, openSteps), [view.items, openSteps]);
+  // Every entry gets this map; it keeps its identity until its content changes, or each streamed
+  // chunk (a new items array) would re-render the whole conversation.
+  const answeredRef = useRef<Map<string, string>>(new Map());
+  const answered = useMemo(() => {
+    const next = answeredMap(view.items);
+    const previous = answeredRef.current;
+    const same =
+      next.size === previous.size && [...next].every(([question, answer]) => previous.get(question) === answer);
+    return same ? previous : next;
+  }, [view.items]);
+  useLayoutEffect(() => {
+    answeredRef.current = answered;
+  }, [answered]);
 
-  const rows = useMemo(
-    () => foldStepRuns(view.items, openSteps),
-    [view.items, openSteps],
-  );
-  // Whole-conversation answered-question map, computed once and shared so each
-  // virtualized single-item slice still dedups Codex async questions.
-  const answered = useMemo(
-    () =>
-      new Map(
-        view.items.flatMap((item) =>
-          item.kind === "user" && !item.failed && !item.pending
-            ? item.blocks.flatMap((block) =>
-                block.type === "text" ? answeredQuestions(block.text) : [],
-              )
-            : [],
-        ),
-      ),
-    [view.items],
-  );
-
-  // Virtuoso needs a stable, descending index for the first row so prepended
-  // history keeps the viewport steady. We seed it high and subtract however many
-  // rows got added to the front on each change.
-  const START = 1_000_000;
-  const firstIndex = useRef(START);
-  const prevFirstId = useRef<string | undefined>(
-    rows[0] ? rowKey(rows[0]) : undefined,
-  );
-  const prevCount = useRef(rows.length);
-  const [firstItemIndex, setFirstItemIndex] = useState(START);
+  // A message the reader just sent brings them to it, wherever they were reading.
+  const lastItem = view.items[view.items.length - 1];
+  const sentId = lastItem?.kind === "user" && lastItem.pending ? lastItem.id : undefined;
   useEffect(() => {
-    const firstKey = rows[0] ? rowKey(rows[0]) : undefined;
-    if (firstKey !== prevFirstId.current && rows.length > prevCount.current) {
-      // Rows were prepended (history page) — shift the base index down so
-      // existing rows keep their absolute index and Virtuoso holds position.
-      firstIndex.current -= rows.length - prevCount.current;
-      setFirstItemIndex(firstIndex.current);
-    }
-    prevFirstId.current = firstKey;
-    prevCount.current = rows.length;
-  }, [rows]);
+    if (sentId) void scrollToBottom("instant");
+  }, [sentId, scrollToBottom]);
 
-  // Earlier history loads by itself when the top of the list comes into view. Virtuoso's
-  // startReached alone missed it (a list already at its top, a page that didn't fill the view),
-  // which left only a button to click; the top's visibility is watched as well.
+  // The session page passes fresh closures on every render; entries get stable ones that call
+  // the latest, or every memoized entry would re-render with each streamed chunk.
+  const handlers = useRef({ onFile, onFork, onTerminal });
+  useLayoutEffect(() => {
+    handlers.current = { onFile, onFork, onTerminal };
+  });
+  const openFile = useCallback((path: string, line?: number) => handlers.current.onFile(path, line), []);
+  const fork = useCallback((id: string) => handlers.current.onFork(id), []);
+  const terminal = useCallback((id: string) => handlers.current.onTerminal(id), []);
+
+  // Reading back, the row at the top of the view stays put when anything above it changes height:
+  // a page of earlier history, an image that finished loading, steps opened above. WebKit (the
+  // Mac app's WKWebView, Safari before 27) has no scroll anchoring, so it is done here, the same
+  // in every engine (`overflow-anchor: none` on the scroller keeps Chrome's out of the way).
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const rows = list.current;
+    if (!scroller || !rows) return;
+    // The row the reader has at the top of the view, where it sits, and the scrollTop that was
+    // measured at — so a correction can tell its own writes from the reader's and from a resize.
+    let anchor: { node: Element; offset: number; fromBottom: number; scrollTop: number } | undefined;
+    const note = () => {
+      const viewTop = scroller.getBoundingClientRect().top;
+      const node = topRow(rows, viewTop);
+      anchor = node
+        ? {
+            node,
+            offset: node.getBoundingClientRect().top - viewTop,
+            fromBottom: scroller.scrollHeight - scroller.scrollTop,
+            scrollTop: scroller.scrollTop,
+          }
+        : undefined;
+    };
+    const keep = () => {
+      // At the bottom the newest message stays in view; use-stick-to-bottom owns that.
+      if (state.isAtBottom) return note();
+      // The reader scrolled since the anchor was taken (events can lag a resize): re-take it first,
+      // or the correction would undo their scroll by that much.
+      if (!anchor || Math.abs(scroller.scrollTop - anchor.scrollTop) > 1) note();
+      if (!anchor) return;
+      const moved = anchor.node.isConnected
+        ? anchor.node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset
+        : // The row was replaced (a folded run regrouped at a page boundary): hold the distance from the end.
+          scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom;
+      // Through the hook's state, so its own scroll handler doesn't read this as the reader scrolling.
+      if (Math.abs(moved) >= 0.5) state.scrollTop = scroller.scrollTop + moved;
+      note();
+    };
+    note();
+    scroller.addEventListener("scroll", note, { passive: true });
+    // Fires after layout, before paint, so the correction is never seen. The content box is
+    // watched, not the rows: the history loader above the rows changes height too.
+    const observer = new ResizeObserver(keep);
+    observer.observe(scroller.firstElementChild ?? rows);
+    return () => {
+      scroller.removeEventListener("scroll", note);
+      observer.disconnect();
+    };
+  }, [scrollRef, state]);
+
+  // Earlier history loads by itself as the top of the list comes near.
   const [topVisible, setTopVisible] = useState(false);
   // The list opens at its newest messages; before it is placed there its top shows for a frame,
   // which mustn't count as the reader scrolling up.
@@ -149,19 +187,23 @@ export function Conversation({
   }, []);
   const [failedAt, setFailedAt] = useState<number>();
   const startSeq = useRef(view.startSeq);
-  startSeq.current = view.startSeq;
+  useLayoutEffect(() => {
+    startSeq.current = view.startSeq;
+  });
   const inFlight = useRef(false);
-  const watcher = useRef<IntersectionObserver | undefined>(undefined);
-  const top = useCallback((node: HTMLDivElement | null) => {
-    watcher.current?.disconnect();
-    watcher.current = undefined;
-    if (!node) return setTopVisible(false);
-    // The viewport as root: the conversation's scroller clips it, so this is "on screen".
-    const observer = new IntersectionObserver(([entry]) => setTopVisible(entry?.isIntersecting ?? false));
+  const top = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = top.current;
+    const root = scrollRef.current;
+    if (!node || !root) return;
+    // Half a screen ahead, so the next page is usually there before the reader reaches the top.
+    const observer = new IntersectionObserver(([entry]) => setTopVisible(entry?.isIntersecting ?? false), {
+      root,
+      rootMargin: "400px 0px 0px 0px",
+    });
     observer.observe(node);
-    watcher.current = observer;
-  }, []);
-  useEffect(() => () => watcher.current?.disconnect(), []);
+    return () => observer.disconnect();
+  }, [scrollRef]);
 
   const load = useCallback(async () => {
     const from = startSeq.current;
@@ -175,81 +217,68 @@ export function Conversation({
       inFlight.current = false;
     }
   }, [online, loadingEarlier, loadEarlier]);
-
   useEffect(() => {
     // Each page arrives above the reader, who stays where they were; the top then leaves the
     // view. A page too short to push it out is followed by the next.
     if (settled && topVisible && view.startSeq > 0 && failedAt !== view.startSeq) void load();
   }, [settled, topVisible, view.startSeq, failedAt, load]);
 
-  const context = useMemo<ListContext>(
-    () => ({
-      earlier: view.startSeq > 0,
-      loading: loadingEarlier,
-      failed: failedAt === view.startSeq,
-      online,
-      retry: () => {
-        setFailedAt(undefined);
-        void load();
-      },
-      top,
-      footer,
-    }),
-    [view.startSeq, loadingEarlier, failedAt, online, load, top, footer],
-  );
-
   return (
     <div className="conversation-column">
-      <Virtuoso<Row, ListContext>
-        ref={handle}
-        context={context}
-        className="conversation"
-        data={rows}
-        computeItemKey={(_, row) => rowKey(row)}
-        firstItemIndex={firstItemIndex}
-        initialTopMostItemIndex={Math.max(0, rows.length - 1)}
-        followOutput={(bottom) => (bottom ? "smooth" : false)}
-        atBottomStateChange={setAtBottom}
-        atBottomThreshold={120}
-        startReached={() => settled && void load()}
-        increaseViewportBy={{ top: 600, bottom: 600 }}
-        components={LIST_COMPONENTS}
-        itemContent={(_, row) =>
-          row.type === "steps" ? (
-            <div className="live-timeline">
-              <StepsSummary
-                steps={row.steps}
-                open={openSteps.has(row.key)}
-                onToggle={() => toggleSteps(row.key)}
-              />
-            </div>
-          ) : (
-            <Timeline
-              items={[row.item]}
-              sessionId={sessionId}
-              agent={agent}
-              showAsyncQuestions={showAsyncQuestions}
-              answeredOverride={answered}
-              onFile={onFile}
-              onFork={onFork}
-              onTerminal={onTerminal}
-            />
-          )
-        }
-      />
-      {!atBottom && (
+      <div ref={scrollRef} className="conversation" data-testid="conversation-scroller">
+        <div ref={contentRef} className="conversation-content">
+          <div ref={top} className="conversation-history-top">
+            {view.startSeq > 0 &&
+              (loadingEarlier ? (
+                <span className="conversation-history-status" role="status">
+                  <LoaderCircle aria-hidden="true" />
+                  正在加载更早的历史…
+                </span>
+              ) : failedAt === view.startSeq ? (
+                <Button
+                  variant="link"
+                  size="sm"
+                  disabled={!online}
+                  onClick={() => {
+                    setFailedAt(undefined);
+                    void load();
+                  }}
+                >
+                  没有加载成功，重试
+                </Button>
+              ) : null)}
+          </div>
+          <div ref={list} className="live-timeline">
+            {rows.map((row) =>
+              row.type === "steps" ? (
+                <StepsRow
+                  key={row.key}
+                  stepKey={row.key}
+                  steps={row.steps}
+                  open={openSteps.has(row.key)}
+                  toggle={toggleSteps}
+                />
+              ) : (
+                <TimelineEntry
+                  key={row.item.id}
+                  item={row.item}
+                  sessionId={sessionId}
+                  agent={agent}
+                  showAsyncQuestions={showAsyncQuestions}
+                  answered={answered}
+                  onFile={openFile}
+                  onFork={fork}
+                  onTerminal={terminal}
+                />
+              ),
+            )}
+          </div>
+          <div className="conversation-footer">{footer}</div>
+        </div>
+      </div>
+      {!isAtBottom && (
         <div className="conversation-jump">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              handle.current?.scrollToIndex({
-                index: rows.length - 1,
-                align: "end",
-                behavior: "auto",
-              })
-            }
-          >
+          <Button variant="outline" size="sm" onClick={() => void scrollToBottom("instant")}>
             <ArrowDown data-icon="inline-start" />
             回到最新消息
           </Button>

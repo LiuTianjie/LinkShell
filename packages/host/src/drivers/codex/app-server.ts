@@ -135,6 +135,71 @@ export function enableArgs(listing: string): string[] {
 }
 
 /**
+ * What Codex said when its app-server exited: colours removed, and the error line
+ * first. Codex puts warnings (an unknown config key, say) ahead of the one that
+ * explains the exit, and its log lines carry ANSI colours a phone shows as boxes.
+ */
+export function exitReason(stderr: string): string {
+  // eslint-disable-next-line no-control-regex
+  const plain = stderr.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trim();
+  const lines = plain.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lastMatch = (re: RegExp) => { for (let i = lines.length - 1; i >= 0; i--) if (re.test(lines[i]!)) return lines[i]; return undefined; };
+  const error = lastMatch(/^error\b/i) ?? lastMatch(/\bERROR\b/);
+  return (error ?? lines[lines.length - 1] ?? "").slice(0, 500);
+}
+
+/** The processes whose command line is an app-server listening on `socketPath`, from `ps`. */
+async function appServersOn(socketPath: string): Promise<number[]> {
+  try {
+    const { stdout } = await execFileAsync("ps", ["-axww", "-o", "pid=,command="], { timeout: 5000 });
+    const listen = `--listen unix://${socketPath}`;
+    return stdout.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (!match) return [];
+      const [, pid, command] = match;
+      // The path is this host's own run directory: nothing else is started with it.
+      return / app-server\b/.test(command!) && (command!.endsWith(listen) || command!.includes(`${listen} `)) ? [Number(pid)] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Stops an app-server an earlier host left behind on this host's socket (one
+ * killed outright, so it never stopped its child). Codex keeps a control socket
+ * per listen path; while the old server holds it, every new one exits with
+ * "control socket is already in use" and Codex stays unavailable.
+ */
+async function stopOrphan(socketPath: string, log: (message: string) => void): Promise<void> {
+  const pids = (await appServersOn(socketPath)).filter((pid) => pid !== process.pid);
+  for (const pid of pids) {
+    log(`[codex] stopping an app-server left from an earlier run (pid ${pid})`);
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      continue;
+    }
+    const deadline = Date.now() + 3000;
+    while (alive(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    if (alive(pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
+  }
+}
+
+/**
  * Owns one `codex app-server --listen unix://…` process and a client connection
  * to it. The same socket is what `codex --remote` attaches the desktop TUI to,
  * so the TUI and LinkShell are peers on the same threads.
@@ -153,7 +218,10 @@ export class CodexAppServer {
 
   async start(): Promise<void> {
     this.stopping = false;
-    if (process.platform !== "win32" && existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
+    if (process.platform !== "win32") {
+      await stopOrphan(this.options.socketPath, this.options.log);
+      if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
+    }
     const child = spawn(
       this.options.command ?? "codex",
       ["app-server", ...(await featureArgs(this.options.command, this.options.env)), "--listen", process.platform === "win32" ? "stdio://" : `unix://${this.options.socketPath}`],
@@ -167,7 +235,8 @@ export class CodexAppServer {
     if (process.platform !== "win32") child.stdout?.on("data", () => {});
     const exited = new Promise<never>((_, reject) => {
       child.once("exit", (code, signal) => {
-        const reason = `codex app-server exited (${signal ?? code})${stderrTail ? `: ${stderrTail.trim()}` : ""}`;
+        const said = exitReason(stderrTail);
+        const reason = `codex app-server exited (${signal ?? code})${said ? `: ${said}` : ""}`;
         this.peer?.close(reason);
         if (!this.stopping) this.options.onDown(reason);
         reject(new Error(reason));
