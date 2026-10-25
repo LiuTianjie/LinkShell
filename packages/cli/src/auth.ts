@@ -65,44 +65,25 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
     if (!auth?.refreshToken) return null;
     if (auth.expiresAt - Date.now() >= 60_000) return auth;
 
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ refresh_token: auth.refreshToken }),
-          signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000),
-        },
-      );
-      if (!res.ok) return (await refused(res)) ? signedOutElsewhere(auth) : rotatedElsewhere(auth);
-      const body = (await res.json()) as {
-        access_token: string;
-        refresh_token: string;
-        expires_in: number;
-        user: { id: string; email?: string };
-      };
-      const tokens: AuthTokens = {
-        accessToken: body.access_token,
-        refreshToken: body.refresh_token,
-        expiresAt: Date.now() + body.expires_in * 1000,
-        userId: body.user.id,
-        email: body.user.email ?? auth.email,
-      };
-      // A login or logout may finish while the refresh is in flight.
-      const current = loadAuth();
-      if (tokens.userId !== auth.userId || current?.userId !== auth.userId) return null;
-      if (current.refreshToken !== auth.refreshToken) return rotatedElsewhere(auth);
-      // Saved even when the caller gave up: the old refresh token is spent now, and presenting it
-      // again later would make Supabase revoke the whole session.
-      saveAuth(tokens);
-      return options.signal?.aborted ? null : tokens;
-    } catch {
-      return rotatedElsewhere(auth);
-    }
+    const outcome = await exchangeRefreshToken(auth.refreshToken, options.signal);
+    if (outcome.kind === "dead") return signedOutElsewhere(auth);
+    if (outcome.kind === "retryable") return rotatedElsewhere(auth);
+    const body = outcome.body;
+    const tokens: AuthTokens = {
+      accessToken: body.access_token,
+      refreshToken: body.refresh_token,
+      expiresAt: Date.now() + body.expires_in * 1000,
+      userId: body.user.id,
+      email: body.user.email ?? auth.email,
+    };
+    // A login or logout may finish while the refresh is in flight.
+    const current = loadAuth();
+    if (tokens.userId !== auth.userId || current?.userId !== auth.userId) return null;
+    if (current.refreshToken !== auth.refreshToken) return rotatedElsewhere(auth);
+    // Saved even when the caller gave up: the old refresh token is spent now, and presenting it
+    // again later would make Supabase revoke the whole session.
+    saveAuth(tokens);
+    return options.signal?.aborted ? null : tokens;
   })().finally(() => {
     inflightRefresh = null;
   });
@@ -134,6 +115,71 @@ async function refused(res: Response): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// itool.tech proxies the Supabase token exchange so clients in regions that can't reach
+// supabase.co directly can still refresh. Set LINKSHELL_TOKEN_PROXY=off to skip it (kill switch).
+const TOKEN_PROXY_URL = "https://itool.tech/api/linkshell/token";
+
+interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  user: { id: string; email?: string };
+}
+
+type ExchangeOutcome =
+  | { kind: "ok"; body: TokenResponse }
+  | { kind: "dead" } // the refresh token can never work again → sign out
+  | { kind: "retryable" }; // outage, network, rate limit → keep the tokens and try again later
+
+function exchangeSignal(signal?: AbortSignal): AbortSignal {
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000);
+}
+
+/**
+ * Tries the itool.tech proxy. Returns an outcome to act on, or null meaning the proxy itself
+ * couldn't give a verdict (unreachable, 5xx, unexpected shape) so the caller should fall back to
+ * Supabase directly. Only a definite `invalid_grant` from the proxy signs the account out.
+ */
+async function exchangeViaProxy(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome | null> {
+  try {
+    const res = await fetch(TOKEN_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: exchangeSignal(signal),
+    });
+    if (res.ok) return { kind: "ok", body: (await res.json()) as TokenResponse };
+    const body = (await res.json().catch(() => ({}))) as { code?: string };
+    if (body.code === "invalid_grant") return { kind: "dead" };
+    return null; // temporarily_unavailable, invalid_request, anything else → fall back to direct
+  } catch {
+    return null; // couldn't reach itool.tech → fall back to direct
+  }
+}
+
+async function exchangeDirect(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: exchangeSignal(signal),
+    });
+    if (res.ok) return { kind: "ok", body: (await res.json()) as TokenResponse };
+    return (await refused(res)) ? { kind: "dead" } : { kind: "retryable" };
+  } catch {
+    return { kind: "retryable" };
+  }
+}
+
+async function exchangeRefreshToken(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome> {
+  if (process.env.LINKSHELL_TOKEN_PROXY !== "off") {
+    const viaProxy = await exchangeViaProxy(refreshToken, signal);
+    if (viaProxy) return viaProxy;
+  }
+  return exchangeDirect(refreshToken, signal);
 }
 
 /**

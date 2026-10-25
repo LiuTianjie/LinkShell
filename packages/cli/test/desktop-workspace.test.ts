@@ -367,7 +367,7 @@ describe("desktop workspace process ownership", () => {
     await writeFile(join(home, "auth.json"), JSON.stringify({ accessToken: "dummy-access", refreshToken: "dummy-refresh", expiresAt: 0, userId: "dummy-user" }));
     const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
     const entry = new URL("../src/commands/desktop-workspace.ts", import.meta.url).href;
-    const script = `const originalFetch = globalThis.fetch; globalThis.fetch = (input, init) => originalFetch(String(input).startsWith('https://mkbeusztkzffnzjdwmqk.supabase.co/') ? 'http://127.0.0.1:${address.port}/never' : input, init); const { runDesktopWorkspace } = await import(${JSON.stringify(entry)}); await runDesktopWorkspace(${JSON.stringify(assets)});`;
+    const script = `const originalFetch = globalThis.fetch; const stalls = (u) => u.startsWith('https://mkbeusztkzffnzjdwmqk.supabase.co/') || u.startsWith('https://itool.tech/api/linkshell/token'); globalThis.fetch = (input, init) => originalFetch(stalls(String(input)) ? 'http://127.0.0.1:${address.port}/never' : input, init); const { runDesktopWorkspace } = await import(${JSON.stringify(entry)}); await runDesktopWorkspace(${JSON.stringify(assets)});`;
     const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "--eval", script], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: "/usr/bin:/bin", LINKSHELL_HOME: home },
     });
