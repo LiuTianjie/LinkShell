@@ -75,7 +75,7 @@ export async function refreshAccessToken(options: { signal?: AbortSignal } = {})
             apikey: SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({ refresh_token: auth.refreshToken }),
-          signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+          signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000),
         },
       );
       if (!res.ok) return (await refused(res)) ? signedOutElsewhere(auth) : rotatedElsewhere(auth);
@@ -161,5 +161,18 @@ export async function getValidToken(options: { signal?: AbortSignal } = {}): Pro
     return refreshed?.accessToken ?? null;
   }
 
+  return auth.accessToken;
+}
+
+/**
+ * The access token on hand right now, without ever blocking on the network. Returns whatever is
+ * saved (even if expired), and kicks off a background refresh when it is close to expiring. The
+ * gateway keeps a peer's account binding when an expired token is presented, so a stale token here
+ * still connects — the point is that a slow or unreachable Supabase can't stall the handshake.
+ */
+export function getCachedToken(): string | null {
+  const auth = loadAuth();
+  if (!auth) return null;
+  if (auth.expiresAt - Date.now() < 120_000) void refreshAccessToken().catch(() => {});
   return auth.accessToken;
 }

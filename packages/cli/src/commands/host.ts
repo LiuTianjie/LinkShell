@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GatewayStatus } from "@linkshell/wire";
-import { getValidToken, isLoggedIn, loadAuth } from "../auth.js";
+import { getCachedToken, isLoggedIn, loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
 // node:sqlite prints an ExperimentalWarning on load; it is expected here and
@@ -111,7 +111,9 @@ export async function runHostForeground(version: string): Promise<void> {
       url: () => resolveGateway(home),
       // The account is LinkShell's, so its token goes to LinkShell's gateway and to no other: a
       // gateway of one's own has no accounts, and would refuse a computer that offered one.
-      token: async () => (sameGateway(resolveGateway(home), OFFICIAL_GATEWAY) ? ((await getValidToken()) ?? undefined) : undefined),
+      // Never blocks: the cached token (even expired) goes out at once so a slow Supabase can't
+      // stall the gateway handshake; a background refresh keeps it fresh for the next connection.
+      token: async () => (sameGateway(resolveGateway(home), OFFICIAL_GATEWAY) ? (getCachedToken() ?? undefined) : undefined),
     },
     tcpPort: devPort,
     claudeCommand: process.env.LINKSHELL_CLAUDE_COMMAND || undefined,
