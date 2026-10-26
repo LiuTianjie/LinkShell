@@ -61,7 +61,7 @@ const filePath = (id) => join(DISK, `${id}.json`);
 const lockPath = (id) => join(DISK, `${id}.lock`);
 
 function save(thread) {
-  if (!DISK || thread.turns.length === 0) return;
+  if (!DISK || thread.turns.length === 0 || thread.meta.ephemeral) return;
   writeFileSync(filePath(thread.meta.id), JSON.stringify({ meta: thread.meta, archived: thread.archived === true, turns: thread.turns }));
 }
 function onDisk(id) {
@@ -292,7 +292,8 @@ async function runTurn(thread, turn, text) {
     text = `answers ${JSON.stringify(answers)}`;
   }
   const slow = text.includes("SLOW");
-  const chunks = slow ? Array.from({ length: 40 }, (_, i) => `w${i} `) : ["echo: ", ...text.split(/(\s+)/).filter(Boolean)];
+  const prefix = thread.side ? `side[${thread.side.sandbox}/${thread.side.approvalPolicy}/${thread.side.injected.length}/${thread.turns.length}]: ` : "echo: ";
+  const chunks = slow ? Array.from({ length: 40 }, (_, i) => `w${i} `) : [prefix, ...text.split(/(\s+)/).filter(Boolean)];
   const messageId = randomUUID();
   notifyThread(thread, "item/started", { threadId, turnId: turn.id, item: { type: "agentMessage", id: messageId, text: "" }, startedAtMs: Date.now() });
   let accumulated = "";
@@ -417,7 +418,9 @@ const handlers = {
     if (!source) throw { code: -32600, message: "unknown thread" };
     const end = params.lastTurnId ? source.turns.findIndex((turn) => turn.id === params.lastTurnId) : source.turns.length - 1;
     if (end < 0 && params.lastTurnId) throw { code: -32600, message: "unknown turn" };
-    const thread = newThread(params.cwd ?? source.meta.cwd, { name: source.meta.name, preview: source.meta.preview });
+    const thread = newThread(params.cwd ?? source.meta.cwd, { name: source.meta.name, preview: source.meta.preview, ...(params.ephemeral ? { ephemeral: true } : {}) });
+    // What a side conversation is set up with, to say in its replies.
+    if (params.ephemeral) thread.side = { instructions: params.developerInstructions ?? "", sandbox: params.sandbox, approvalPolicy: params.approvalPolicy, injected: [] };
     // A fork is on disk with its own copies of the turns it was made through.
     thread.turns = source.turns.slice(0, end + 1).map((turn) => ({ ...turn, id: randomUUID(), items: turn.items.map((item) => ({ ...item })) }));
     save(thread);
@@ -442,6 +445,12 @@ const handlers = {
     thread.loaded = true;
     thread.subscribers.add(conn);
     return { thread: params.excludeTurns === true ? view(thread, false) : resumeView(thread), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
+  },
+  "thread/inject_items": (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: "unknown thread" };
+    thread.side?.injected.push(...params.items);
+    return {};
   },
   "thread/unsubscribe": (params, conn) => {
     const thread = threads.get(params.threadId);

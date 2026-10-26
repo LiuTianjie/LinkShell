@@ -143,6 +143,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const subagentsRunning = summary?.subagents?.running ?? 0;
   const hasSubagents = taskCount > 0 || (summary?.tasks?.total ?? 0) > 0 || hasWorkflows || subagentsTotal > 0 || subagentsListed > 0;
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
+  const sideCount = useClient((state) => state.sides[id]?.length ?? 0);
   const actions = useActions();
   const commandControls = useSessionCommands(id);
   const hasDraft = useHasComposerDraft(id);
@@ -425,6 +426,9 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
             icon: { sf: "ellipsis", md: "more_vert" },
             label: "更多",
             items: [
+              ...(agentInfo?.capabilities.side && online
+                ? [{ title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => router.push({ pathname: "/session/[id]/side", params: { id } }) }]
+                : []),
               { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
               { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
               ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),

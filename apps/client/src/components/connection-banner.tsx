@@ -1,3 +1,4 @@
+import { HOST_PROTOCOL } from "@linkshell/wire";
 import { router } from "expo-router";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
@@ -11,6 +12,19 @@ export function ConnectionBanner() {
   const status = useClient((state) => state.status);
   const detail = useClient((state) => state.statusDetail);
   const { link } = useConnection();
+  // An absent revision is a host from before revisions: older than this app either way.
+  const outdated = useClient((state) => !!state.machine && (state.machine.protocol ?? 0) < HOST_PROTOCOL);
+  if (status === "online" && outdated) {
+    return (
+      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 20, borderCurve: "continuous", backgroundColor: colors.card }}>
+        <Icon sf="arrow.down.circle" md="system_update" size={18} color={colors.secondaryLabel} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑上的 LinkShell 比 App 旧</Text>
+          <Text numberOfLines={3} style={[type.footnote, { color: colors.secondaryLabel }]}>部分新功能暂时用不了：桌面版会自动更新，命令行版在电脑上运行 linkshell upgrade</Text>
+        </View>
+      </View>
+    );
+  }
   if (status === "online" || status === "idle") return null;
   if (status === "locked") {
     return (

@@ -37,7 +37,7 @@ import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "./components/Choice";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import type { SessionSummary } from "@linkshell/wire";
+import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
 import { engine } from "./live/engine";
@@ -1081,7 +1081,7 @@ function Computers({
       <div className="computers-section">
         {heading(
           "当前电脑的 Agent",
-          `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}`,
+          `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}${machine && (machine.protocol ?? 0) < HOST_PROTOCOL ? "（比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell）" : ""}`,
         )}
         {!machine && <LoadState loading />}
         {machine?.agents.map((agent) => (

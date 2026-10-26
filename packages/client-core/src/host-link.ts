@@ -1,4 +1,5 @@
 import {
+  RPC_METHOD_NOT_FOUND,
   RpcError,
   RpcPeer,
   type MethodName,
@@ -184,7 +185,13 @@ export class HostLink {
     if (!this.peer || this.statusValue !== "online") {
       throw RpcError.app("offline", "没有连上电脑");
     }
-    return this.peer.request<MethodResult<M>>(method, params, limit === 0 ? 0 : Math.max(1000, deadline - Date.now()));
+    return this.peer.request<MethodResult<M>>(method, params, limit === 0 ? 0 : Math.max(1000, deadline - Date.now())).catch((error: unknown) => {
+      // A method this app knows and the computer doesn't: what to do about it, not the RPC error.
+      if (error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND) {
+        throw RpcError.app("host_outdated", "电脑上的 LinkShell 比 App 旧，还不支持这个功能：请更新电脑上的 LinkShell", { method });
+      }
+      throw error;
+    });
   }
 
   /** A session's subscription was restored after a (re)connect: its backlog has been delivered. */
@@ -336,7 +343,10 @@ export class HostLink {
     for (const listener of this.onlineListeners) listener();
   }
 
-  /** Subscribes again after a (re)connect; one that fails is tried twice more. */
+  /**
+   * Subscribes again after a (re)connect; one that fails is tried twice more, then left to
+   * `restoreLater` so the reconnect isn't held up by it.
+   */
   private async restore(sessionId: string, socket: SocketLike): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
@@ -345,6 +355,24 @@ export class HostLink {
       if (this.socket !== socket) return;
       if (result?.session) {
         // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
+        for (const listener of this.restoredListeners) listener(result.session);
+        return;
+      }
+    }
+    void this.restoreLater(sessionId, socket);
+  }
+
+  /**
+   * Keeps trying, less and less often, for as long as this connection lasts: given up on, the
+   * session would show nothing new until it was closed and opened again.
+   */
+  private async restoreLater(sessionId: string, socket: SocketLike): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 5000 * 2 ** attempt)));
+      if (this.socket !== socket || !this.subscriptions.has(sessionId)) return;
+      const result = await this.sendSubscribe(sessionId);
+      if (this.socket !== socket) return;
+      if (result?.session) {
         for (const listener of this.restoredListeners) listener(result.session);
         return;
       }

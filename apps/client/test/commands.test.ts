@@ -50,6 +50,12 @@ describe("mobile command entry", () => {
     }
   });
 
+  it("offers the agent's own side-conversation command only where it has one", () => {
+    expect(sessionCommands("codex", [], [], true).find((entry) => entry.action === "side")?.name).toBe("side");
+    expect(sessionCommands("claude", [], [], true).find((entry) => entry.action === "side")?.name).toBe("btw");
+    expect(sessionCommands("gemini", [], []).some((entry) => entry.action === "side")).toBe(false);
+  });
+
   it("keeps remote Claude commands and maps reported settings to controls without duplicates", () => {
     const native = ["mcp", "output-style", "config", "reload-skills", "goal", "model", "fork"].map((name) => command(name));
     const list = sessionCommands("claude", native, [{ id: "model", name: "Model", category: "model", current: "sonnet", values: [{ value: "sonnet", name: "Sonnet" }] }]);

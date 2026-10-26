@@ -367,6 +367,36 @@ describe("generic ACP driver (fake agent)", () => {
     expect(t.host.hub.getSession(session.id)).toMatchObject({ state: "idle", pendingPermissions: 0 });
   });
 
+  it("says why an agent in a no-ask mode still asks", async () => {
+    const t = await setup();
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.setConfig", { sessionId: session.id, optionId: "mode", value: "yolo" });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "a", content: prompt("RUN it") });
+    const request = await waitFor(() => t.of(session.id).find((e) => e.update.sessionUpdate === "ls_permission"));
+    expect((request.update as { detail?: string }).detail).toBe("echo hi\n\n当前是不询问的模式，Fake 仍要求确认这一步。");
+    await t.client.call("sessions.permission", { sessionId: session.id, requestId: (request.update as { requestId: string }).requestId, optionId: "reject" });
+    await waitFor(() => t.ended(session.id).length === 1);
+  });
+
+  it("asks Grok's /btw for a side question and passes the earlier ones along", async () => {
+    const g = await setup({}, undefined, "grok");
+    const { session } = await g.client.call("sessions.create", { agent: "grok", cwd: "/w" });
+    const sides: { side: { running: boolean; messages: { text: string }[] } }[] = [];
+    g.client.on("session.side", (event) => sides.push(event));
+    const { side } = await g.client.call("sessions.side", { sessionId: session.id, text: "why" });
+    await waitFor(() => sides.find((event) => !event.side.running));
+    await g.client.call("sessions.side", { sessionId: session.id, sideId: side.sideId, text: "and" });
+    const done = await waitFor(() => sides.find((event) => !event.side.running && event.side.messages.length === 4));
+    expect(done.side.messages[1]!.text).toBe("btw: why");
+    expect(done.side.messages[3]!.text).toBe("btw: Earlier side question: why\nYour answer: btw: why\n\nSide question now: and");
+    expect(g.of(session.id).some((e) => JSON.stringify(e.update).includes("btw"))).toBe(false);
+
+    const t = await setup();
+    const { session: other } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await expect(t.client.call("sessions.side", { sessionId: other.id, text: "why" })).rejects.toMatchObject({ appCode: "not_supported" });
+  });
+
   it("routes Cursor questions without sessionId to their tool's session, even with two pending turns", async () => {
     const f = await setup({}, undefined, "cursor");
     const { session: first } = await f.client.call("sessions.create", { agent: "cursor", cwd: "/one" });

@@ -61,6 +61,7 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
 - **Questions, plans and goals.** Answer an agent's structured questions; use plan mode, `/goal`, slash commands and your skills. See [agent questions](docs/v2/agent-questions.md) and [commands and goals](docs/v2/commands-and-goals.md).
 - **Sub-agents, Workflows and background tasks.** Follow a Claude Workflow by phase, open each sub-agent's conversation, and check commands that outlive a reply. See [background tasks](docs/v2/background-tasks.md).
 - **Forks and worktrees.** Fork a session from any reply to try another direction, in the same directory or a new git worktree.
+- **Side conversations.** Ask about a session without interrupting it or adding to it, the agent's own way: Codex's `/side` (a read-only temporary fork), Claude's and Grok's `/btw`.
 - **A real terminal and localhost.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar, and your dev server's port on the phone over the same encrypted channel, with no open ports.
 - **Files, settings and connections.** Browse the project, send photos and files to the agent, change model, effort and permission mode, configure MCP servers and custom [ACP](docs/v2/acp-support.md) agents.
 - **Adaptive layouts.** iPhone Duo puts the conversation beside its changes or a preview, and adapts to folds and orientation; iPad uses a split view.
@@ -124,6 +125,7 @@ Codex works with ChatGPT sign-in, an API key or a custom provider (including one
 | --- | --- | --- | --- |
 | A message during a running turn | joins the turn | joins the turn | stops the turn, then runs |
 | Fork a session, or from a reply | native | native | by LinkShell: the conversation is passed as text |
+| Side conversation | `/side`: a read-only temporary fork | `/btw`: answered from the conversation, no tools | Grok's `/btw`; not in the others |
 | Sessions in git worktrees | yes | yes | yes |
 | Slash commands | `/compact`, `/review`, `/init`, your skills | Claude's own list and your skills | whatever the agent offers |
 | Questions for you | yes, including Desktop asynchronous questions | yes | Cursor choices, Grok questions, standard ACP forms |

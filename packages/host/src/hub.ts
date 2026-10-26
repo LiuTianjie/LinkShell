@@ -25,6 +25,7 @@ import {
   type AcpRemoteAgent,
   type PendingPermissionSummary,
   type EditorRequest,
+  type SideChat,
 } from "@linkshell/wire";
 import type { AcpSettingsStore } from "./acp-settings.js";
 import type {
@@ -46,6 +47,7 @@ import { slimEvent } from "./slim.js";
 import { outputRange } from "./task-output.js";
 import { ComputerPreviews } from "./computer-preview.js";
 import { MacPreviewCapture } from "./computer-preview-capture.js";
+import { SideChats } from "./side.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
@@ -131,6 +133,8 @@ type PermissionUpdate = Extract<SessionUpdate, { sessionUpdate: "ls_permission" 
 interface LiveSession {
   attached: boolean;
   attaching?: Promise<void>;
+  /** Being detached because nobody had it open (see `detachWhenIdle`); attaching waits for it. */
+  detaching?: Promise<void>;
   /** Live updates that arrive while native history is being imported. */
   buffer?: { update: SessionUpdate; itemId?: string; ts?: number }[];
   subscribers: Set<Subscriber>;
@@ -152,6 +156,9 @@ interface LiveSession {
   importing?: boolean;
   importChanged?: boolean;
 }
+
+/** How long a session nobody has open stays attached to a driver that pays to follow it. */
+const IDLE_DETACH_MS = 10 * 60_000;
 
 const PREVIEW_LENGTH = 160;
 const TITLE_LENGTH = 60;
@@ -184,6 +191,9 @@ export class SessionHub {
   private readonly removedListeners = new Set<(sessionId: string) => void>();
   private readonly interactionListeners = new Set<(agent: string, request: PendingPermissionSummary | { requestId: string; resolved: true }) => void>();
   private readonly agentListeners = new Set<(agent: AgentInfo) => void>();
+  private readonly sideListeners = new Set<(sessionId: string, side: SideChat, closed?: boolean) => void>();
+  private readonly sides: SideChats;
+  private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly auth = new Map<string, { value: AgentAuth; checkedAt: number }>();
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
@@ -266,6 +276,9 @@ export class SessionHub {
       capture: capture ? (target, frame, failed) => capture.capture(target, frame, failed) : undefined,
     });
     for (const driver of drivers) this.drivers.set(driver.id, driver);
+    this.sides = new SideChats((sessionId, side, closed) => {
+      for (const listener of this.sideListeners) listener(sessionId, side, closed);
+    }, log);
   }
 
   async start(options: { discoveryIntervalMs?: number } = {}): Promise<void> {
@@ -363,8 +376,43 @@ export class SessionHub {
 
   async stop(): Promise<void> {
     if (this.discoveryTimer) clearInterval(this.discoveryTimer);
+    for (const timer of this.idleTimers.values()) clearTimeout(timer);
+    this.idleTimers.clear();
+    await this.sides.stop((sessionId) => this.sideTarget(sessionId));
     await Promise.allSettled([...this.drivers.values()].map((driver) => driver.stop()));
     await this.previews.stop();
+  }
+
+  // ── side conversations ────────────────────────────────────────────
+
+  onSide(listener: (sessionId: string, side: SideChat, closed?: boolean) => void): () => void {
+    this.sideListeners.add(listener);
+    return () => this.sideListeners.delete(listener);
+  }
+
+  side(sessionId: string, sideId: string | undefined, text: string): SideChat {
+    const summary = this.getSession(sessionId);
+    return this.sides.ask(sessionId, { driver: this.requireDriver(summary.agent), nativeId: summary.nativeId, cwd: summary.cwd }, sideId, text);
+  }
+
+  listSides(sessionId: string): SideChat[] {
+    this.getSession(sessionId);
+    return this.sides.list(sessionId);
+  }
+
+  cancelSide(sessionId: string, sideId: string): void {
+    this.sides.cancel(sessionId, sideId);
+  }
+
+  async closeSide(sessionId: string, sideId: string): Promise<void> {
+    const target = this.sideTarget(sessionId);
+    await this.sides.close(sessionId, sideId, target?.driver, target?.nativeId ?? "");
+  }
+
+  private sideTarget(sessionId: string): { driver: AgentDriver; nativeId: string } | undefined {
+    const summary = this.store.getSession(sessionId);
+    const driver = summary && this.drivers.get(summary.agent);
+    return summary && driver ? { driver, nativeId: summary.nativeId } : undefined;
   }
 
   agents(): AgentInfo[] {
@@ -788,6 +836,8 @@ export class SessionHub {
       cursor = batch[batch.length - 1]!.seq;
     }
     live.subscribers.add(subscriber);
+    clearTimeout(this.idleTimers.get(sessionId));
+    this.idleTimers.delete(sessionId);
     if (live.subscribers.size === 1) driver?.watched?.(summary.nativeId, true);
     return { session: this.getSession(sessionId), startSeq };
   }
@@ -1001,6 +1051,36 @@ export class SessionHub {
     if (!live?.subscribers.delete(subscriber) || live.subscribers.size > 0) return;
     const summary = this.store.getSession(sessionId);
     if (summary) this.drivers.get(summary.agent)?.watched?.(summary.nativeId, false);
+    this.detachWhenIdle(sessionId);
+  }
+
+  /**
+   * Detaches a session nobody has open, from a driver that pays to follow it, once it has been
+   * left alone a while with nothing under way. Without this every session opened since the host
+   * started stays followed for good.
+   */
+  private detachWhenIdle(sessionId: string, delay = IDLE_DETACH_MS): void {
+    const summary = this.store.getSession(sessionId);
+    const driver = summary && this.drivers.get(summary.agent);
+    if (!summary || !driver?.detachWhenIdle) return;
+    clearTimeout(this.idleTimers.get(sessionId));
+    const timer = setTimeout(() => {
+      this.idleTimers.delete(sessionId);
+      const live = this.live.get(sessionId);
+      if (!live || live.subscribers.size > 0 || !live.attached || live.attaching || live.detaching) return;
+      const tasks = this.tasksOf(sessionId, live);
+      const working = live.turnActive || live.permissions.size > 0 || !!live.queue?.length || live.held.length > 0
+        || [...tasks.values()].some((task) => task.state === "running")
+        || [...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state));
+      // Something is under way: looked at again later.
+      if (working) return this.detachWhenIdle(sessionId, delay);
+      live.attached = false;
+      live.detaching = driver.detach(summary.nativeId)
+        .catch((error: unknown) => this.log(`[hub] idle detach ${sessionId}: ${String(error)}`))
+        .finally(() => { live.detaching = undefined; });
+    }, delay);
+    timer.unref?.();
+    this.idleTimers.set(sessionId, timer);
   }
 
   async prompt(
@@ -1204,8 +1284,11 @@ export class SessionHub {
   /** Drops a session from LinkShell and tells every client. */
   private forget(sessionId: string): void {
     if (!this.store.getSession(sessionId)) return;
+    clearTimeout(this.idleTimers.get(sessionId));
+    this.idleTimers.delete(sessionId);
     this.live.delete(sessionId);
     this.previews.forget(sessionId);
+    this.sides.forget(sessionId);
     this.store.removeSession(sessionId);
     this.emitRemoved(sessionId);
   }
@@ -1365,6 +1448,7 @@ export class SessionHub {
   /** Never throws synchronously: failures always arrive as a rejected promise. */
   private ensureAttached(sessionId: string): Promise<void> {
     const live = this.liveFor(sessionId);
+    if (live.detaching) return live.detaching.then(() => this.ensureAttached(sessionId));
     if (live.attached) return Promise.resolve();
     if (live.attaching) return live.attaching;
     let summary: SessionSummary;

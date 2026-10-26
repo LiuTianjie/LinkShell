@@ -188,6 +188,16 @@ export class HostRpcServer {
       "sessions.subagent": (params: P<"sessions.subagent">) => ({
         events: hub.subagent(params.sessionId, params.toolCallId).map((event) => slimEvent(event, { lazyImages: params.lazyImages })),
       }),
+      "sessions.side": (params: P<"sessions.side">) => ({ side: hub.side(params.sessionId, params.sideId, params.text) }),
+      "sessions.sides": (params: P<"sessions.sides">) => ({ sides: hub.listSides(params.sessionId) }),
+      "sessions.sideCancel": (params: P<"sessions.sideCancel">) => {
+        hub.cancelSide(params.sessionId, params.sideId);
+        return {};
+      },
+      "sessions.sideClose": async (params: P<"sessions.sideClose">) => {
+        await hub.closeSide(params.sessionId, params.sideId);
+        return {};
+      },
       "sessions.preview": (params: P<"sessions.preview">, context) => {
         hub.getSession(params.sessionId);
         return this.computerPreview.open(params.sessionId, params.direct === true && context.direct.open);
@@ -509,6 +519,7 @@ export class HostRpcServer {
         this.options.hub.onInteraction((agent, request) => context.peer.notify("agent.interaction", { agent, request })),
         this.options.hub.onAgent((agent) => context.peer.notify("agent.changed", { agent })),
         this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session })),
+        this.options.hub.onSide((sessionId, side, closed) => context.peer.notify("session.side", closed ? { sessionId, side, closed } : { sessionId, side })),
         this.options.hub.onRemoved((sessionId) => {
           context.subscriptions.delete(sessionId);
           context.peer.notify("session.removed", { sessionId });

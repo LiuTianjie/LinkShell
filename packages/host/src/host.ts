@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { DEFAULT_ICE_SERVERS, type GatewayStatus, type MachineInfo } from "@linkshell/wire";
+import { DEFAULT_ICE_SERVERS, HOST_PROTOCOL, type GatewayStatus, type MachineInfo } from "@linkshell/wire";
 import { defaultDrivers, remoteDriver } from "./drivers/registry.js";
 import { AcpSettingsStore } from "./acp-settings.js";
 import type { AgentDriver } from "./drivers/types.js";
@@ -179,6 +179,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hostname: process.env.LINKSHELL_MACHINE_NAME || hostname(),
     platform: platform(),
     hostVersion: options.version,
+    protocol: HOST_PROTOCOL,
     home: homedir(),
     agents: hub.agents(),
     // LINKSHELL_ICE_SERVERS: STUN servers for the direct channel, comma separated ("off": never direct).

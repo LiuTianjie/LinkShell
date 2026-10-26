@@ -33,6 +33,8 @@ export const agentCapabilitiesSchema = z.object({
    * shows the conversation and its agent is told it as text.
    */
   fork: z.boolean(),
+  /** The agent has a side conversation of its own (`sessions.side`). Absent from older hosts. */
+  side: z.boolean().optional(),
   models: z.boolean(),
   modes: z.boolean(),
 });
@@ -314,6 +316,8 @@ export const machineInfoSchema = z.object({
   hostname: z.string(),
   platform: z.string(),
   hostVersion: z.string(),
+  /** The host's RPC revision (`HOST_PROTOCOL`); absent from hosts older than it. */
+  protocol: z.number().int().nonnegative().optional(),
   /** The host user's home directory, so apps can show paths as `~/…`. */
   home: z.string().optional(),
   agents: z.array(agentInfoSchema),

@@ -96,6 +96,10 @@ export default function RootLayout() {
                   options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
                 />
                 <Stack.Screen
+                  name="session/[id]/side"
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.62, 0.92], sheetInitialDetentIndex: 1, sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                />
+                <Stack.Screen
                   name="session/[id]/settings"
                   options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.7, 0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
                 />

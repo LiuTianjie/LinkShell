@@ -106,6 +106,7 @@ function config(session) {
       availableModes: [
         { id: "default", name: "Default" },
         { id: "plan", name: "Plan" },
+        { id: "yolo", name: "YOLO" },
       ],
     },
     configOptions: [
@@ -349,6 +350,11 @@ const handlers = {
       current.handedOff = true;
     }
     return { stopReason: await runPrompt(params.sessionId, text) };
+  },
+  // Grok's /btw: answered at once, from the session, without entering it.
+  "_x.ai/btw": (params) => {
+    if (!sessions[params.sessionId]) throw { code: -32602, message: "unknown session" };
+    return { result: { answer: `btw: ${params.question}` } };
   },
   "session/set_mode": (params) => {
     requireSession(params).mode = params.modeId;

@@ -47,7 +47,9 @@ class FakeDriver implements AgentDriver {
     await this.attachGate;
     return this.history;
   }
-  async detach() {}
+  detachWhenIdle = false;
+  detaches = 0;
+  async detach() { this.detaches += 1; }
   async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string) {
     this.prompts.push({ nativeId, content, clientMessageId });
     return "started" as const;
@@ -101,6 +103,36 @@ afterEach(async () => {
 });
 
 describe("SessionHub", () => {
+  it("detaches a session nobody has open from a driver that pays to follow it, not while something runs, and attaches it again", async () => {
+    driver.detachWhenIdle = true;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const sessionId = hub.listSessions({}).sessions[0]!.id;
+      const first = collector();
+      await hub.subscribe(sessionId, 0, first.subscriber);
+      driver.emit({ sessionUpdate: "ls_turn", state: "started", turnId: "t1" });
+      hub.unsubscribe(sessionId, first.subscriber);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(driver.detaches).toBe(0);
+
+      driver.emit({ sessionUpdate: "ls_turn", state: "ended", turnId: "t1", stopReason: "end_turn" });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(driver.detaches).toBe(1);
+
+      const again = collector();
+      await hub.subscribe(sessionId, 0, again.subscriber);
+      expect(driver.attachCalls).toBe(2);
+      // Open again before the time is up: it stays attached.
+      hub.unsubscribe(sessionId, again.subscriber);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await hub.subscribe(sessionId, 0, again.subscriber);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(driver.detaches).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reconciles native archives omitted from discovery without deleting history or hiding older active sessions", async () => {
     driver.history = [{ itemId: "m0", updates: [chunk("m0", "still readable")] }];
     await hub.subscribe("fake:s1", 0, collector().subscriber);

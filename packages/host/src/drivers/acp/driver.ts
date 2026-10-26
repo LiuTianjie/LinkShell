@@ -32,7 +32,7 @@ import { AcpClientServices } from "./client-services.js";
 import { AcpUpdates, usageUpdate } from "./updates.js";
 import { AcpMcpBridge } from "./mcp.js";
 import { AcpEditor } from "./editor.js";
-import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem } from "../types.js";
+import type { AgentDriver, AttachContext, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, SideOutput, SideRequest } from "../types.js";
 import { AcpConnection, AcpProtocolError } from "./connection.js";
 import { acpBehavior } from "./behavior.js";
 import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
@@ -49,6 +49,8 @@ import {
   type SourcedConfigOption,
 } from "./mapper.js";
 
+/** Permission modes whose point is not to be asked (Claude's bypass, Gemini's and Qwen's yolo). */
+const NO_ASK_MODES = new Set(["bypassPermissions", "yolo"]);
 
 export interface AcpAgentSpec {
   id: string;
@@ -155,7 +157,34 @@ export class AcpDriver implements AgentDriver {
 
   get behavior(): DriverBehavior { return this.acpBehavior; }
   get tier(): AgentTier { return this.behavior.desktop; }
-  get capabilities(): AgentCapabilities { return { ...this.capabilityState, ...behaviorCapabilities(this.behavior) }; }
+  get capabilities(): AgentCapabilities { return { ...this.capabilityState, ...behaviorCapabilities(this.behavior), side: this.hasSide() }; }
+
+  /** Grok's ACP server answers `/btw` itself (`_x.ai/btw`); ACP has no side conversation of its own. */
+  protected hasSide(): boolean {
+    return this.id === "grok";
+  }
+
+  /**
+   * Grok's `/btw`: answered from the session's context and kept out of it. It
+   * doesn't remember earlier side questions, so they go along with the new one.
+   */
+  async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
+    if (!this.hasSide()) throw RpcError.app("not_supported", `${this.label} 没有旁支对话`);
+    if (!this.sessions.get(nativeId)?.loaded) throw RpcError.app("not_ready", "先打开这个会话，再问旁支问题");
+    const question = request.history.length === 0
+      ? request.question
+      : `${request.history.map((turn) => `Earlier side question: ${turn.question}\nYour answer: ${turn.answer}`).join("\n\n")}\n\nSide question now: ${request.question}`;
+    const asked = this.rpc<{ answer?: unknown; result?: { answer?: unknown } }>("_x.ai/btw", { sessionId: nativeId, question }, 180_000)
+      .catch((error: unknown) => {
+        if (error instanceof RpcError && error.code === -32601) throw RpcError.app("not_supported", `这个版本的 ${this.label} 没有 /btw：请更新它`);
+        throw error;
+      });
+    // Grok can't be told to stop one: the answer that comes after is dropped.
+    const stopped = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("已停止")), { once: true }));
+    const response = await Promise.race([asked, stopped]);
+    const answer = typeof response?.answer === "string" ? response.answer : response?.result?.answer;
+    if (typeof answer === "string" && answer) out.text(answer);
+  }
 
   protected host?: DriverHost;
   /** Set when the agent refused a session for want of a login (ACP auth_required). */
@@ -1004,11 +1033,23 @@ export class AcpDriver implements AgentDriver {
       }
       return { outcome: { outcome: "cancelled" } };
     }
+    // Asked although the session is in a mode that shouldn't ask: the agent
+    // decided this one is exempt. Said, or the mode looks like it didn't take.
+    const mode = state.config.find((option) => option.category === "mode")?.current;
+    const update = mode && NO_ASK_MODES.has(mode)
+      ? { ...mapped.update, detail: [mapped.update.detail, this.exemptNote()].filter(Boolean).join("\n\n") }
+      : mapped.update;
     return new Promise((resolve) => {
       state.permissions.set(requestId, { rpcId: id, resolve });
       this.closeMessage(sessionId as string);
-      this.publish(sessionId as string, mapped.update);
+      this.publish(sessionId as string, update);
     });
+  }
+
+  private exemptNote(): string {
+    return this.id === "claude"
+      ? "当前是「跳过所有确认」，Claude 仍要求确认这一步：删除类命令、受保护的目录（如 .git、.claude）和 Claude 设置里的 ask 规则不受这个模式影响。"
+      : `当前是不询问的模式，${this.label} 仍要求确认这一步。`;
   }
 
   /** Questions are routed by explicit session id, then Cursor's tool id, never a "last session". */

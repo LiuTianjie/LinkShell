@@ -1381,6 +1381,59 @@
     flex-direction: column;
     gap: 18px;
   }
+  /* ---- Side conversations: a short chat of their own ---- */
+  .side-chat-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .side-chat-tabs button {
+    max-width: 100%;
+    padding: 4px 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--fill);
+    color: var(--label);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .side-chat-tabs button[data-active] {
+    background: var(--accentSoft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .side-chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .side-chat-messages .user-message p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .side-answer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .side-activity {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+  }
+  .side-activity li {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .side-activity li::before {
+    content: "· ";
+  }
   .settings-panel > p {
     margin: 0;
     font-size: 12px;

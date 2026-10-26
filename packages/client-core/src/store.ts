@@ -17,6 +17,7 @@ import {
   type SubagentInfo,
   type GitInfo,
   type WorktreeEntry,
+  type SideChat,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
 import { applyTaskEvent, mergeTaskList, type TaskRecords } from "./tasks.js";
@@ -75,6 +76,8 @@ export interface ClientState {
   queueing: Record<string, QueueEntry[]>;
   /** Local feedback until the host reports a turn or a queue entry for this send. */
   promptProgress: Record<string, PromptProgress>;
+  /** Each session's open side conversations, oldest first (`loadSides`, then kept live). */
+  sides: Record<string, SideChat[]>;
 }
 
 export interface PromptProgress {
@@ -167,6 +170,12 @@ export interface ClientActions {
   closeSubagent(sessionId: string, toolCallId: string): void;
   /** The picture behind an image block that came as a `linkshell-event:` uri, as a data: URI. */
   loadImage(sessionId: string, uri: string): Promise<string>;
+  /** Fetches the session's side conversations (also kept in `sides`). */
+  loadSides(sessionId: string): Promise<SideChat[]>;
+  /** Asks in a side conversation (a new one without `sideId`); the answer arrives in `sides`. */
+  askSide(sessionId: string, text: string, sideId?: string): Promise<SideChat>;
+  cancelSide(sessionId: string, sideId: string): Promise<void>;
+  closeSide(sessionId: string, sideId: string): Promise<void>;
 }
 
 export type ClientStore = StoreApi<ClientState & ClientActions>;
@@ -329,10 +338,31 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         queueing: without(state.queueing),
         promptProgress: without(state.promptProgress),
         subagents: without(state.subagents),
+        sides: without(state.sides),
         workflows: without(state.workflows),
         tasks: without(state.tasks),
         subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
       };
+    });
+  }
+
+  /** A side conversation as the host last said it is; an older copy (a notification overtaken by an answer) doesn't replace a newer one. */
+  function putSide(sessionId: string, side: SideChat): void {
+    store.setState((state) => {
+      const list = state.sides[sessionId] ?? [];
+      const index = list.findIndex((entry) => entry.sideId === side.sideId);
+      const current = index >= 0 ? list[index] : undefined;
+      if (current && current.revision > side.revision) return state;
+      const next = index >= 0 ? list.map((entry, at) => (at === index ? side : entry)) : [...list, side];
+      return { sides: { ...state.sides, [sessionId]: next } };
+    });
+  }
+
+  function dropSide(sessionId: string, sideId: string): void {
+    store.setState((state) => {
+      const list = state.sides[sessionId];
+      if (!list?.some((entry) => entry.sideId === sideId)) return state;
+      return { sides: { ...state.sides, [sessionId]: list.filter((entry) => entry.sideId !== sideId) } };
     });
   }
 
@@ -398,6 +428,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       outbox: {},
       queueing: {},
       promptProgress: {},
+      sides: {},
 
       connect() {
         link.start();
@@ -767,6 +798,27 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         return loading;
       },
 
+      async loadSides(sessionId) {
+        const { sides } = await link.call("sessions.sides", { sessionId });
+        set((state) => ({ sides: { ...state.sides, [sessionId]: sides } }));
+        return sides;
+      },
+
+      async askSide(sessionId, text, sideId) {
+        const { side } = await link.call("sessions.side", { sessionId, sideId, text }, 30_000);
+        putSide(sessionId, side);
+        return side;
+      },
+
+      async cancelSide(sessionId, sideId) {
+        await link.call("sessions.sideCancel", { sessionId, sideId });
+      },
+
+      async closeSide(sessionId, sideId) {
+        await link.call("sessions.sideClose", { sessionId, sideId });
+        dropSide(sessionId, sideId);
+      },
+
       async createSession(input) {
         const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
@@ -793,6 +845,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     store.setState((state) => ({ notices: { ...state.notices, [sessionId]: [...(state.notices[sessionId] ?? []).slice(-4), { ...notice, id: newId() }] } }));
   });
   link.on("session.removed", ({ sessionId }) => forget(sessionId));
+  link.on("session.side", ({ sessionId, side, closed }) => (closed ? dropSide(sessionId, side.sideId) : putSide(sessionId, side)));
   // What the host sends next for this session starts after `startSeq`.
   link.on("session.window", ({ sessionId, startSeq }) => {
     flushEvents();

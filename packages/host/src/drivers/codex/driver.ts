@@ -4,10 +4,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { archivedThreadIds } from "./archives.js";
 import { codexPreview } from "./computer-preview.js";
-import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState } from "@linkshell/wire";
+import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
-import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
+import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
 import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
 import { CodexAppServer, CodexSharedServer, findCodex, sharedServerSocket } from "./app-server.js";
 import {
@@ -167,8 +167,34 @@ const HELD_NOW =
   "这一轮跑在电脑的 Codex 桌面 App（或 IDE 插件）里，这次没能从手机插进去。它结束后这条消息会自动发送；想现在就插入，在电脑上对这条排队消息点 Steer。一直这样的话，重启一下 Codex 桌面 App。";
 const HELD_COMMAND = "会话开在电脑的另一个 Codex 里，要在那边关掉它之后才能从手机做。";
 
+/**
+ * What a side conversation's thread is told, as Codex's own `/side` tells it:
+ * the history it was forked with is for reference, and it changes nothing.
+ */
+const SIDE_INSTRUCTIONS = [
+  "You are in a side conversation forked from the user's main thread, not in the main thread itself.",
+  "The history before the side-conversation boundary is reference only: do not continue, carry out or complete any task, plan, tool call, approval or edit from it. Only messages after the boundary are instructions for you.",
+  "Answer questions and explore without changing anything: you may read and search files and run commands that change nothing, but do not modify files, git state, configuration or the workspace, do not ask for broader permissions, and do not start or talk to sub-agents.",
+  "Keep answers short; the user is reading them on a phone.",
+].join("\n\n");
+
+const SIDE_BOUNDARY = "Side conversation boundary. Everything before this point is the main thread's history, for reference only. What the user asks from here on is the side conversation.";
+
+interface SideThread {
+  key: string;
+  threadId: string;
+  turnId?: string;
+  /** The message the last text belonged to: a new one starts a new paragraph. */
+  messageId?: string;
+  out?: SideOutput;
+  finish?: (error?: Error) => void;
+}
+
 interface PendingApproval {
   threadId: string;
+  method: string;
+  /** The turn that asked (the parent's, for a sub-agent). */
+  turnId?: string;
   request: ApprovalRequest;
   answer: (result: unknown) => void;
   abandon: () => void;
@@ -203,6 +229,7 @@ export class CodexDriver implements AgentDriver {
     images: true,
     models: true,
     modes: true,
+    side: true,
     ...behaviorCapabilities(this.behavior),
   };
 
@@ -220,7 +247,13 @@ export class CodexDriver implements AgentDriver {
   /** Recent tool titles by item, so a file-change approval can name its files. */
   private readonly toolTitles = new Map<string, string>();
   private readonly settings = new Map<string, CodexSettings>();
+  /** What a device chose for each thread; kept in the host's state so a restart before the next turn doesn't lose it. */
   private readonly overrides = new Map<string, CodexOverrides>();
+  /** Side conversations (`sideAsk`), by `<parent>\n<sideId>`, and their threads. */
+  private readonly sides = new Map<string, SideThread>();
+  private readonly sideThreads = new Map<string, SideThread>();
+  /** Turns that run under the full access a device chose, started with it or chosen while they ran. */
+  private readonly fullAccessTurns = new Set<string>();
   /** Sub-agent thread → the parent thread and the spawnAgent call its work nests under. */
   private readonly children = new Map<string, { threadId: string; toolCallId: string; path?: string; stamp?: string }>();
   /** Threads Codex reported as sub-agents (parentThreadId set); never shown as sessions. */
@@ -852,7 +885,7 @@ export class CodexDriver implements AgentDriver {
 
   private desktopMessage(threadId: string, input: unknown[], clientMessageId: string) {
     const current = this.settings.get(threadId) ?? {};
-    const overrides = this.overrides.get(threadId) ?? {};
+    const overrides = this.overridesOf(threadId);
     return {
       input,
       text: textOf(input as Record<string, unknown>[]),
@@ -1149,7 +1182,7 @@ export class CodexDriver implements AgentDriver {
       const lines: string[] = [];
       if (command.name === "status") {
         const { thread } = await this.rpcFor<{ thread: CodexThread }>(nativeId, "thread/read", { threadId: nativeId, includeTurns: false });
-        const current = effective(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, await this.loadModels());
+        const current = effective(this.settings.get(nativeId) ?? {}, this.overridesOf(nativeId), await this.loadModels());
         const running = this.observed.get(nativeId)?.running ?? Boolean(this.stateOf(nativeId).activeTurnId);
         lines.push(`目录：${thread.cwd}`, `模型：${current.model ?? "默认"}`, `推理强度：${current.effort ?? "默认"}`, `状态：${running ? "运行中" : "空闲"}`);
       } else if (command.name === "stop") {
@@ -1238,13 +1271,14 @@ export class CodexDriver implements AgentDriver {
         this.host?.log(`[codex] steer failed, starting a new turn: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const overrides = this.overrides.get(nativeId) ?? {};
-    await this.rpcFor(nativeId, "turn/start", {
+    const overrides = this.overridesOf(nativeId);
+    const started = await this.rpcFor<{ turn?: { id?: unknown } } | undefined>(nativeId, "turn/start", {
       threadId: nativeId,
       clientUserMessageId: clientMessageId,
       input,
       ...turnOverrides(overrides, overrides.plan === undefined ? {} : effective(this.settings.get(nativeId) ?? {}, overrides, await this.loadModels())),
     });
+    if (overrides.permissions === "full-access" && typeof started?.turn?.id === "string") this.markFullAccess(started.turn.id);
     return "started";
   }
 
@@ -1281,12 +1315,12 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  /** Model, reasoning effort and permissions apply from the next turn on. */
+  /** Model, reasoning effort and permissions apply from the next turn on (full access at once, see autoApproval). */
   async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
     const models = await this.loadModels();
     const base = this.settings.get(nativeId) ?? {};
-    const current = effective(base, this.overrides.get(nativeId) ?? {}, models);
-    const next: CodexOverrides = { ...this.overrides.get(nativeId) };
+    const current = effective(base, this.overridesOf(nativeId), models);
+    const next: CodexOverrides = { ...this.overridesOf(nativeId) };
     if (optionId === "model") {
       if (!models.some((m) => m.model === value) && value !== current.model) {
         throw RpcError.app("invalid_params", `unknown model ${value}`);
@@ -1309,7 +1343,15 @@ export class CodexDriver implements AgentDriver {
     } else {
       throw RpcError.app("not_supported", `Codex has no setting ${optionId}`);
     }
-    this.overrides.set(nativeId, next);
+    this.setOverrides(nativeId, next);
+    // Codex fixes approvals when a turn starts, so the turn under way would go on asking.
+    const running = this.stateOf(nativeId).activeTurnId ?? this.observed.get(nativeId)?.turnId;
+    if (optionId === "permissions" && running) {
+      if (value === "full-access") {
+        this.markFullAccess(running);
+        this.approvePending(nativeId);
+      } else this.fullAccessTurns.delete(running);
+    }
     if (this.observed.has(nativeId) && this.desktopBusPath) {
       const updated = effective(base, next, models);
       const threadSettings = turnOverrides(next, { model: updated.model, effort: updated.effort });
@@ -1320,9 +1362,171 @@ export class CodexDriver implements AgentDriver {
         optionId === "permissions" ? (this.observed.get(nativeId)?.turnId ?? null) : null,
       ).catch((error: unknown) => {
         this.host?.log(`[codex] desktop settings sync for ${nativeId}: ${error instanceof Error ? error.message : String(error)}`);
+        // The window keeps its own settings until then; saying nothing would look like the choice took.
+        this.host?.update(this.id, nativeId, {
+          sessionUpdate: "ls_notice",
+          level: "warning",
+          title: "Codex 桌面 App 没有接受这项设置",
+          detail: "电脑上那个窗口仍按原来的设置运行；从这里发下一条消息时会按新设置开始。",
+        });
       });
     }
     await this.announceConfig(nativeId);
+  }
+
+  private overridesOf(threadId: string): CodexOverrides {
+    let overrides = this.overrides.get(threadId);
+    if (!overrides) {
+      try {
+        overrides = JSON.parse(this.host?.state(this.id, threadId).get("overrides") ?? "{}") as CodexOverrides;
+      } catch {
+        overrides = {};
+      }
+      this.overrides.set(threadId, overrides);
+    }
+    return overrides;
+  }
+
+  private setOverrides(threadId: string, next: CodexOverrides): void {
+    this.overrides.set(threadId, next);
+    this.host?.state(this.id, threadId).set("overrides", JSON.stringify(next));
+  }
+
+  /**
+   * With full access chosen, what Codex still asks in the thread (the turn
+   * under way started with the old approvals) is approved here, as it would
+   * not have been asked from the next turn on. Questions still go to the user.
+   */
+  private autoApproval(method: string, request: ApprovalRequest, turnId: string | undefined): string | undefined {
+    // Only such turns: a turn someone else started keeps the approvals it was started with.
+    if (!APPROVAL_METHODS.has(method) || !turnId || !this.fullAccessTurns.has(turnId)) return undefined;
+    if (this.overridesOf(request.threadId).permissions !== "full-access") return undefined;
+    const options = request.update.options;
+    return (options.find((option) => option.kind === "allow_always") ?? options.find((option) => option.kind === "allow_once"))?.optionId;
+  }
+
+  // ── side conversations (/side) ────────────────────────────────────
+
+  /**
+   * Codex's `/side`: an ephemeral fork of the thread (never written to disk),
+   * read-only, told where the inherited history ends. Each question is a turn
+   * in it; what it writes goes to `out`, not into the session.
+   */
+  async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    const key = `${nativeId}\n${request.sideId}`;
+    const side = this.sides.get(key) ?? (await this.openSide(key, nativeId));
+    if (signal.aborted) return;
+    const done = new Promise<void>((resolve, reject) => {
+      side.out = out;
+      side.finish = (error) => (error ? reject(error) : resolve());
+    });
+    const stop = () => {
+      side.finish?.();
+      if (side.turnId) void this.rpcFor(side.threadId, "turn/interrupt", { threadId: side.threadId, turnId: side.turnId }).catch(() => {});
+    };
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      const started = await this.rpcFor<{ turn?: { id?: unknown } } | undefined>(side.threadId, "turn/start", {
+        threadId: side.threadId,
+        input: toCodexInput([{ type: "text", text: request.question }]),
+      });
+      if (typeof started?.turn?.id === "string") side.turnId = started.turn.id;
+      if (signal.aborted) stop();
+      await done;
+    } catch (error) {
+      // The fork may be gone (Codex restarted it away): the next question opens a new one.
+      if (!side.turnId) {
+        this.sides.delete(side.key);
+        this.sideThreads.delete(side.threadId);
+      }
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", stop);
+      side.out = undefined;
+      side.finish = undefined;
+      side.turnId = undefined;
+      side.messageId = undefined;
+    }
+  }
+
+  async sideClose(nativeId: string, sideId: string): Promise<void> {
+    const side = this.sides.get(`${nativeId}\n${sideId}`);
+    if (!side) return;
+    this.sides.delete(side.key);
+    this.sideThreads.delete(side.threadId);
+    side.finish?.();
+    // Nobody subscribed, an ephemeral thread is unloaded: nothing of it is left.
+    await this.rpcFor(side.threadId, "thread/unsubscribe", { threadId: side.threadId }).catch(() => {});
+    this.inShared.delete(side.threadId);
+    this.threads.delete(side.threadId);
+  }
+
+  private async openSide(key: string, parent: string): Promise<SideThread> {
+    let forked: { thread?: { id?: unknown } };
+    try {
+      forked = await this.rpcFor(parent, "thread/fork", {
+        threadId: parent,
+        ephemeral: true,
+        excludeTurns: true,
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        developerInstructions: SIDE_INSTRUCTIONS,
+      });
+    } catch (error) {
+      if (error instanceof Error && /at least one turn|no rollout/i.test(error.message)) throw RpcError.app("not_ready", "这个 Codex 会话还没有任何消息：先发一条再问");
+      throw error;
+    }
+    const threadId = typeof forked.thread?.id === "string" ? forked.thread.id : undefined;
+    if (!threadId) throw RpcError.app("agent_error", "Codex 没有开出旁支对话");
+    const side: SideThread = { key, threadId };
+    this.sides.set(key, side);
+    this.sideThreads.set(threadId, side);
+    // The fork lives where its parent is loaded.
+    if (this.inShared.has(parent)) this.inShared.add(threadId);
+    await this.rpcFor(threadId, "thread/inject_items", {
+      threadId,
+      items: [{ type: "message", role: "developer", content: [{ type: "input_text", text: SIDE_BOUNDARY }] }],
+    }).catch((error: unknown) => this.host?.log(`[codex] side boundary not injected: ${error instanceof Error ? error.message : String(error)}`));
+    return side;
+  }
+
+  /** Their server went away, and an ephemeral thread with it: the next question opens a new one. */
+  private loseSides(from: Home): void {
+    for (const side of [...this.sides.values()]) {
+      if (this.inShared.has(side.threadId) !== (from === "shared")) continue;
+      this.sides.delete(side.key);
+      this.sideThreads.delete(side.threadId);
+      this.inShared.delete(side.threadId);
+      side.finish?.(new Error("Codex 重启了，这个回答没有完成：再问一次即可，之前的旁支内容 Codex 已不记得"));
+    }
+  }
+
+  private sideUpdate(side: SideThread, update: SessionUpdate): void {
+    if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+      if (side.messageId && side.messageId !== update.messageId) side.out?.text("\n\n");
+      side.messageId = update.messageId;
+      side.out?.text(update.content.text);
+    }
+    else if (update.sessionUpdate === "tool_call") side.out?.activity(update.title);
+    else if (update.sessionUpdate === "ls_error") side.finish?.(new Error(update.message));
+    else if (update.sessionUpdate === "ls_turn" && update.state === "ended" && (!side.turnId || !update.turnId || update.turnId === side.turnId)) side.finish?.();
+  }
+
+  private markFullAccess(turnId: string): void {
+    this.fullAccessTurns.add(turnId);
+    if (this.fullAccessTurns.size > 200) this.fullAccessTurns.delete(this.fullAccessTurns.values().next().value!);
+  }
+
+  private approvePending(threadId: string): void {
+    for (const [requestId, pending] of this.approvals) {
+      if (pending.threadId !== threadId) continue;
+      const optionId = this.autoApproval(pending.method, pending.request, pending.turnId);
+      if (!optionId) continue;
+      this.approvals.delete(requestId);
+      pending.answer(pending.request.respond(optionId));
+      this.host?.update(this.id, threadId, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
+    }
   }
 
   private loadModels(): Promise<CodexModel[]> {
@@ -1338,7 +1542,7 @@ export class CodexDriver implements AgentDriver {
 
   private async announceConfig(nativeId: string): Promise<void> {
     const models = await this.loadModels();
-    const options = configOptions(this.settings.get(nativeId) ?? {}, this.overrides.get(nativeId) ?? {}, models);
+    const options = configOptions(this.settings.get(nativeId) ?? {}, this.overridesOf(nativeId), models);
     if (options.length > 0 && this.isNews(`config:${nativeId}`, options)) this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
   }
 
@@ -1533,6 +1737,7 @@ export class CodexDriver implements AgentDriver {
     if (this.stopped) return;
     this.host?.log(`[codex] ${reason}`);
     this.abandonApprovals("own");
+    this.loseSides("own");
     for (const threadId of [...this.attached]) {
       // (What is joined in Codex's background server is still there.)
       if (this.inShared.has(threadId)) continue;
@@ -1604,6 +1809,8 @@ export class CodexDriver implements AgentDriver {
     if (method === "thread/started") {
       const thread = (params as { thread?: CodexThread } | undefined)?.thread;
       if (!thread?.id) return;
+      // A side conversation (ours, or one a TUI opened with /side): gone when it closes, never a session.
+      if ((thread as { ephemeral?: boolean }).ephemeral) return;
       if ((thread as { parentThreadId?: string | null }).parentThreadId) {
         // A sub-agent: its work shows inside the parent session, not as a session of its own.
         this.subThreads.add(thread.id);
@@ -1626,6 +1833,11 @@ export class CodexDriver implements AgentDriver {
       return;
     }
     const threadId = (params as { threadId?: unknown } | undefined)?.threadId;
+    const side = typeof threadId === "string" ? this.sideThreads.get(threadId) : undefined;
+    if (side) {
+      for (const mapped of mapNotification(method, params, (id) => this.stateOf(id))) this.sideUpdate(side, mapped.update);
+      return;
+    }
     const held = typeof threadId === "string" ? this.joining.get(threadId) : undefined;
     if (held) {
       held.push({ method, params, from });
@@ -1693,15 +1905,32 @@ export class CodexDriver implements AgentDriver {
     if (!APPROVAL_METHODS.has(method) && !QUESTION_METHODS.has(method)) return ABANDON;
     const requestId = from === "shared" ? sharedRequestId(String(id)) : String(id);
     const mapped = QUESTION_METHODS.has(method) ? mapQuestionRequest(method, params, requestId) : mapApprovalRequest(method, params, requestId);
+    const side = mapped && this.sideThreads.get(mapped.threadId);
+    if (side && mapped) {
+      // A side conversation changes nothing (it runs read-only and is told so): what it would need asking for is declined.
+      const options = mapped.update.options;
+      const decline = (options.find((option) => option.kind === "reject_once") ?? options[0])!.optionId;
+      side.out?.activity(`已拒绝：${mapped.update.title}（旁支对话只读）`);
+      return mapped.answer ? mapped.answer([]) : mapped.respond(decline);
+    }
     // A sub-agent asking for permission asks in its parent session.
     const request = mapped && this.children.has(mapped.threadId) ? { ...mapped, threadId: this.children.get(mapped.threadId)!.threadId } : mapped;
     if (!request || !this.attached.has(request.threadId)) return ABANDON;
     // "Edit app.ts" says more than "Apply file changes".
     const toolTitle = method === "item/fileChange/requestApproval" && request.update.toolCallId && this.toolTitles.get(request.update.toolCallId);
     if (toolTitle) request.update = { ...request.update, title: toolTitle };
+    const asking = (params as { turnId?: unknown } | undefined)?.turnId;
+    const turnId = mapped && mapped.threadId !== request.threadId ? this.stateOf(request.threadId).activeTurnId : typeof asking === "string" ? asking : undefined;
+    const approved = this.autoApproval(method, request, turnId);
+    if (approved) {
+      this.host?.log(`[codex] ${method} in ${request.threadId} approved under the full access a device chose`);
+      return request.respond(approved);
+    }
     return new Promise((resolve) => {
       this.approvals.set(requestId, {
         threadId: request.threadId,
+        method,
+        turnId,
         request,
         answer: resolve,
         abandon: () => resolve(ABANDON),
@@ -1744,6 +1973,7 @@ export class CodexDriver implements AgentDriver {
     if (this.stopped) return;
     this.host?.log("[codex] lost Codex's background server");
     this.abandonApprovals("shared");
+    this.loseSides("shared");
     const joined = [...this.inShared].filter((threadId) => this.attached.delete(threadId));
     this.inShared.clear();
     for (const threadId of joined) {

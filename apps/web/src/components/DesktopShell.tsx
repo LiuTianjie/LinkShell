@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useStore } from "zustand";
-import type { SessionSummary } from "@linkshell/wire";
+import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import {
   BookOpen,
   Check,
@@ -506,6 +506,9 @@ function ConnectionFacts({ connection, name, navigate }: { connection: Connectio
         <span>{status === "online" ? route : detail ?? connectionLabel(status)}</span>
       </span>
       {machine?.hostVersion && <span className="desktop-status-item desktop-status-meta">Host {machine.hostVersion}</span>}
+      {machine && (machine.protocol ?? 0) < HOST_PROTOCOL && (
+        <span className="desktop-status-item" data-tone="waiting" title="电脑上的 LinkShell 比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell">Host 较旧</span>
+      )}
       <span className="desktop-status-spacer" />
       {waiting > 0 && (
         <button type="button" className="desktop-status-item desktop-status-action" data-tone="waiting" onClick={() => navigate("home")}>

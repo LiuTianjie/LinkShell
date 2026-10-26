@@ -366,6 +366,58 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(host.hub.getSession(sessionId)).toMatchObject({ pendingPermissions: 0, state: "idle" });
   });
 
+  it("full access chosen mid-turn answers what the turn already asked and what it asks next", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "fa1", content: text("RUN it") });
+    const request = await waitFor(() => phone.of(id).find((e) => e.update.sessionUpdate === "ls_permission"));
+    const requestId = (request.update as { requestId: string }).requestId;
+
+    await phone.client.call("sessions.setConfig", { sessionId: id, optionId: "permissions", value: "full-access" });
+    const resolved = await waitFor(() => phone.of(id).find((e) => e.update.sessionUpdate === "ls_permission_resolved" && e.update.requestId === requestId));
+    expect(resolved.update).toMatchObject({ optionId: "acceptForSession" });
+    await waitFor(() => phone.turnsEnded(id).length === 1);
+    expect(host.hub.getSession(id)).toMatchObject({ pendingPermissions: 0 });
+
+    // The fake asks whatever the policy: the host answers it, and no card shows.
+    const asked = phone.of(id).filter((e) => e.update.sessionUpdate === "ls_permission").length;
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "fa2", content: text("RUN again") });
+    await waitFor(() => phone.turnsEnded(id).length === 2);
+    expect(phone.of(id).filter((e) => e.update.sessionUpdate === "ls_permission")).toHaveLength(asked);
+    expect(phone.of(id).filter((e) => e.update.sessionUpdate === "tool_call_update" && e.update.appendOutput === "hi\n")).toHaveLength(2);
+  });
+
+  it("answers side questions in an ephemeral read-only fork that never becomes a session or enters this one", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const id = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "side-main", content: text("main work") });
+    await waitFor(() => phone.turnsEnded(id).length === 1);
+    const sessionsBefore = (await phone.client.call("sessions.list", {})).sessions.length;
+
+    const sides: { side: { sideId: string; running: boolean; messages: { role: string; text: string }[] }; closed?: boolean }[] = [];
+    phone.client.on("session.side", (event) => { if (event.sessionId === id) sides.push(event); });
+    const { side } = await phone.client.call("sessions.side", { sessionId: id, text: "what is this" });
+    expect(side).toMatchObject({ running: true, messages: [{ role: "user", text: "what is this" }, { role: "assistant", text: "" }] });
+    const answered = await waitFor(() => sides.find((event) => !event.side.running && event.side.messages.length === 2));
+    expect(answered.side.messages[1]!.text).toMatch(/^side\[read-only\/never\/1\/\d+\]: what is this/);
+
+    const again = await phone.client.call("sessions.side", { sessionId: id, sideId: side.sideId, text: "and then" });
+    expect(again.side.sideId).toBe(side.sideId);
+    const second = await waitFor(() => sides.find((event) => !event.side.running && event.side.messages.length === 4));
+    expect(second.side.messages[3]!.text).toContain("and then");
+    expect((await phone.client.call("sessions.sides", { sessionId: id })).sides).toHaveLength(1);
+
+    // Not a session, and nothing of it in this one.
+    expect((await phone.client.call("sessions.list", {})).sessions).toHaveLength(sessionsBefore);
+    expect(phone.of(id).some((e) => JSON.stringify(e.update).includes("what is this"))).toBe(false);
+
+    await phone.client.call("sessions.sideClose", { sessionId: id, sideId: side.sideId });
+    await waitFor(() => sides.some((event) => event.closed));
+    expect((await phone.client.call("sessions.sides", { sessionId: id })).sides).toEqual([]);
+  });
+
   it("resumes a reconnecting client from its last seq, with nothing missing or repeated", async () => {
     const all = phone.of(sessionId);
     const cursor = all[all.length - 4]!.seq;

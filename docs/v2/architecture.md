@@ -187,6 +187,7 @@ sessions.permission.respond {sessionId, requestId, optionId}
 sessions.takeover / sessions.release      驾驶权
 sessions.setConfig {model?, mode?, effort?}
 sessions.rename / archive / delete / fork
+sessions.side / sides / sideCancel / sideClose   旁支对话（Codex /side，Claude、Grok /btw）→ 推送 session.side
 inbox.subscribe               跨会话的「需要你」动态（首页用）
 terminals.* / tunnel.*        终端与开发预览
 ```

@@ -21,6 +21,7 @@ import {
   pendingPermissionSchema,
 } from "./model.js";
 import { contentBlockSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
+import { sideChatSchema } from "./side.js";
 
 // ── JSON-RPC 2.0 framing ─────────────────────────────────────────────
 
@@ -66,6 +67,14 @@ export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_APP_ERROR = -32000;
 
 // ── Methods (client → host) ──────────────────────────────────────────
+
+/**
+ * The host's RPC revision, in `machine.info`. Goes up when the host gains
+ * methods or notifications an app may rely on, so an app can tell the
+ * computer is older than itself and say so (an absent revision is 0).
+ * 1: side conversations (`sessions.side`), `machine.info.protocol` itself.
+ */
+export const HOST_PROTOCOL = 1;
 
 const empty = z.object({}).passthrough();
 
@@ -217,6 +226,31 @@ const coreMethods = {
   "sessions.subagent": {
     params: z.object({ sessionId: z.string().min(1), toolCallId: z.string().min(1), lazyImages: z.boolean().optional() }),
     result: z.object({ events: z.array(sessionEventSchema) }),
+  },
+  /**
+   * Asks in a side conversation of the session (a new one without `sideId`):
+   * answered from what the session knows, never added to it. Returns once the
+   * question is on its way; the answer comes in `session.side`. Only for an
+   * agent whose capabilities say `side`.
+   */
+  "sessions.side": {
+    params: z.object({ sessionId: z.string().min(1), sideId: z.string().min(1).optional(), text: z.string().min(1).max(20_000) }),
+    result: z.object({ side: sideChatSchema }),
+  },
+  /** The session's open side conversations, oldest first. */
+  "sessions.sides": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.object({ sides: z.array(sideChatSchema) }),
+  },
+  /** Stops the answer under way. */
+  "sessions.sideCancel": {
+    params: z.object({ sessionId: z.string().min(1), sideId: z.string().min(1) }),
+    result: empty,
+  },
+  /** Ends a side conversation: it is forgotten, and whatever the agent kept for it let go. */
+  "sessions.sideClose": {
+    params: z.object({ sessionId: z.string().min(1), sideId: z.string().min(1) }),
+    result: empty,
   },
   /** The commands this session left running in the background, and the ones that have ended; newest first. */
   "sessions.tasks": {
@@ -690,6 +724,8 @@ export const notifications = {
    */
   "session.window": z.object({ sessionId: z.string(), startSeq: z.number().int().nonnegative() }),
   "session.summary": z.object({ session: sessionSummarySchema }),
+  /** A side conversation changed (to every client), or ended (`closed`). */
+  "session.side": z.object({ sessionId: z.string(), side: sideChatSchema, closed: z.boolean().optional() }),
   /** A session was deleted (from any device, or natively by the agent). */
   "session.removed": z.object({ sessionId: z.string() }),
   "session.preview.show": z.object({ sessionId: z.string() }),

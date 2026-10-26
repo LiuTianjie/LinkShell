@@ -58,6 +58,7 @@ import {
   LoaderCircle,
   PanelRight,
   MessageSquare,
+  MessagesSquare,
   Paperclip,
   Plus,
   X,
@@ -103,6 +104,7 @@ import { TimelineNavigation } from "./Timeline";
 import { Conversation } from "./Conversation";
 import { FileView, Files, fileBase64 } from "./Files";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
+import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
@@ -116,6 +118,7 @@ type Panel =
   | "files"
   | "tasks"
   | "goal"
+  | "side"
   | "mcp"
   | "apps"
   | "preview"
@@ -137,6 +140,7 @@ const panelTitles: Record<Exclude<Panel, null | "commands">, string> = {
   files: "文件",
   tasks: "任务",
   goal: "目标",
+  side: "旁支对话",
   mcp: "MCP 服务",
   apps: "应用",
   preview: "电脑操作预览",
@@ -167,8 +171,8 @@ export function Session({
   const notices = useClient((state) => state.notices[session.id]);
   const commands = useMemo(
     () =>
-      sessionCommands(session.agent, view?.commands ?? [], view?.config ?? []),
-    [session.agent, view?.commands, view?.config],
+      sessionCommands(session.agent, view?.commands ?? [], view?.config ?? [], !!agent?.capabilities.side),
+    [session.agent, view?.commands, view?.config, agent?.capabilities.side],
   );
   const draftKey = `draft.${connection.computer.key}.${session.id}`;
   const [draft, setDraft] = useState(() => readLocal(draftKey, ""));
@@ -374,6 +378,11 @@ export function Session({
       case "goal":
         if (args && args !== "edit") return false;
         await setPanel("goal");
+        break;
+      case "side":
+        // Asked at once; the panel shows the answer coming.
+        if (args) await actions.askSide(session.id, args);
+        await setPanel("side");
         break;
       case "settings": {
         const option = view?.config.find(
@@ -698,6 +707,11 @@ export function Session({
                   </>
                 )}
                 <DropdownMenuGroup>
+                  {agent?.capabilities.side && (
+                    <DropdownMenuItem disabled={!canInteract} onSelect={() => void setPanel("side")}>
+                      <MessagesSquare />旁支对话
+                    </DropdownMenuItem>
+                  )}
                   {commands.some((command) => command.name === "goal") && (
                     <DropdownMenuItem onSelect={() => setPanel("goal")}>
                       <Target />持续目标
@@ -1425,6 +1439,7 @@ export function Session({
                   />
                 )}
                 {panel === "goal" && <Goal session={session} view={view} />}
+                {panel === "side" && <Side session={session} label={agent?.label ?? session.agent} />}
                 {panel === "terminal" && (
                   <Terminals
                     cwd={session.cwd}

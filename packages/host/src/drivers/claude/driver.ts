@@ -8,7 +8,7 @@ import { RpcError, questionReplies, type AsyncQuestion, type ContentBlock, type 
 import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
-import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec } from "../types.js";
+import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
 import type { DriverBehavior } from "../behavior.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
 import { ClaudeTasks } from "./tasks.js";
@@ -126,6 +126,15 @@ function answerContent(content: ContentBlock[], ask: WaitingAsk): ContentBlock[]
   const rest = ask.questions.length - replies.length;
   if (rest > 0) answered.push(`（其余 ${rest} 个问题没有回答）`);
   return [{ type: "text", text: answered.join("\n\n") }];
+}
+
+/**
+ * The SDK's query with the side question it has but doesn't declare: the
+ * CLI's `side_question`, what `/btw` asks.
+ */
+interface SideQuery extends AsyncIterable<unknown> {
+  askSideQuestion(question: string, options?: { history?: { question: string; response: string }[] }): Promise<{ response: string; synthetic?: boolean } | null>;
+  close(): void;
 }
 
 /** Taking a session over answers within this, under the device's 60 s, so it hears why. */
@@ -295,6 +304,7 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async stop(): Promise<void> {
+    for (const key of [...this.sideClaudes.keys()]) this.closeSideClaude(key);
     clearInterval(this.remoteWatch);
     this.remoteWatch = undefined;
     await this.remoteWatchRun;
@@ -539,9 +549,16 @@ export class ClaudeDriver extends AcpDriver {
     if (this.modes.get(nativeId) === "desktop") this.setMode(nativeId, "idle");
   }
 
+  /** Each attached session polls its transcript and its agents' (see SessionHub.detachWhenIdle). */
+  readonly detachWhenIdle = true;
+
   override async detach(nativeId: string): Promise<void> {
     this.tails.get(nativeId)?.stop();
     this.tails.delete(nativeId);
+    this.activity.get(nativeId)?.stop();
+    this.activity.delete(nativeId);
+    this.reportedStates.delete(nativeId);
+    this.reportedQuestions.delete(nativeId);
     await super.detach(nativeId);
     this.unwrittenSessions.delete(nativeId);
     this.endTranscriptStream(nativeId);
@@ -757,6 +774,94 @@ export class ClaudeDriver extends AcpDriver {
     await this.ensureRemote(nativeId);
   }
 
+  // ── side questions (/btw) ─────────────────────────────────────────
+
+  /** Per side conversation: a Claude of its own on the session, kept open between questions. */
+  private readonly sideClaudes = new Map<string, { query: SideQuery; end: () => void; idle?: ReturnType<typeof setTimeout> }>();
+
+  protected override hasSide(): boolean {
+    return true;
+  }
+
+  /**
+   * Claude's `/btw`: a question answered from the session's conversation, not
+   * added to it, while the session goes on (on the computer or here). It is
+   * asked of a Claude started for it on the session's transcript, which writes
+   * nothing, so it never becomes a writer of the session.
+   */
+  override async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
+    if (!findTranscript(this.configDir, nativeId, request.cwd)) throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先发一条再问");
+    const key = `${nativeId}\n${request.sideId}`;
+    const side = this.sideClaudes.get(key) ?? (await this.openSideClaude(key, nativeId, request.cwd));
+    clearTimeout(side.idle);
+    const stop = () => this.closeSideClaude(key);
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      const answer = await side.query.askSideQuestion(request.question, { history: request.history.map((turn) => ({ question: turn.question, response: turn.answer })) });
+      if (signal.aborted) return;
+      if (!answer?.response) throw new Error("Claude 没有回答这个问题，可以再问一次");
+      out.text(answer.response);
+    } catch (error) {
+      if (signal.aborted) return;
+      this.closeSideClaude(key);
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", stop);
+    }
+    // Follow-up questions within a few minutes reuse it; then it goes.
+    const kept = this.sideClaudes.get(key);
+    if (kept) {
+      kept.idle = setTimeout(() => this.closeSideClaude(key), 5 * 60_000);
+      kept.idle.unref?.();
+    }
+  }
+
+  async sideClose(_nativeId: string, sideId: string): Promise<void> {
+    for (const key of this.sideClaudes.keys()) if (key.endsWith(`\n${sideId}`)) this.closeSideClaude(key);
+  }
+
+  private async openSideClaude(key: string, nativeId: string, cwd: string): Promise<{ query: SideQuery; end: () => void; idle?: ReturnType<typeof setTimeout> }> {
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+    let end!: () => void;
+    const ended = new Promise<void>((resolve) => (end = resolve));
+    // A prompt that never says anything: the session is only asked side questions.
+    const prompt = (async function* () { await ended; })();
+    const started = query({
+      prompt,
+      options: {
+        cwd,
+        resume: nativeId,
+        // Reads the transcript, writes nothing: the session stays as the computer left it.
+        persistSession: false,
+        pathToClaudeCodeExecutable: this.claudePath,
+        env: { ...this.env, CLAUDE_CONFIG_DIR: this.configDir },
+        // A side answer uses no tools: no MCP servers to start for it.
+        strictMcpConfig: true,
+        mcpServers: {},
+        stderr: (data: string) => this.host?.log(`[claude] side: ${data.trim().slice(0, 300)}`),
+      },
+    }) as unknown as SideQuery;
+    if (typeof started.askSideQuestion !== "function") {
+      end();
+      started.close();
+      throw RpcError.app("not_supported", "LinkShell 里的 Claude SDK 不支持 /btw：请更新 LinkShell");
+    }
+    // Its messages aren't read; the generator still has to be drained for the process to run.
+    void (async () => { try { for await (const _ of started) { /* nothing to show */ } } catch { /* closed */ } })();
+    const side = { query: started, end };
+    this.sideClaudes.set(key, side);
+    return side;
+  }
+
+  private closeSideClaude(key: string): void {
+    const side = this.sideClaudes.get(key);
+    if (!side) return;
+    this.sideClaudes.delete(key);
+    clearTimeout(side.idle);
+    side.end();
+    side.query.close();
+  }
+
   async reclaim(nativeId: string, _context: DesktopLaunchContext): Promise<LaunchSpec> {
     await this.leaveRemote(nativeId);
     this.setMode(nativeId, "desktop");
@@ -916,7 +1021,11 @@ export class ClaudeDriver extends AcpDriver {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${Math.round(Math.max(0, left) / 1000)} s`)), Math.max(0, left)); });
         await Promise.race([super.setConfig(nativeId, optionId, value), late])
-          .catch((error: unknown) => this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`))
+          .catch((error: unknown) => {
+            this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`);
+            // The settings shown next are what Claude runs with; this says why the choice isn't among them.
+            this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: "没能应用之前选的设置", detail: `${option.name} 仍是 Claude 原来的设置，可以再选一次。` });
+          })
           .finally(() => clearTimeout(timer));
       }
     }

@@ -110,6 +110,22 @@ export interface AttachContext {
   cwd: string;
 }
 
+export interface SideRequest {
+  sideId: string;
+  /** The session's directory. */
+  cwd: string;
+  question: string;
+  /** The side conversation so far, for an agent that doesn't keep it itself. */
+  history: { question: string; answer: string }[];
+}
+
+/** Where a side answer goes as it is written. */
+export interface SideOutput {
+  text(delta: string): void;
+  /** One step of the agent's on the way (a file read, a search). */
+  activity(line: string): void;
+}
+
 /** A terminal running an agent's native UI via `linkshell <agent>`. */
 export interface DesktopController {
   /** Asks the terminal to exit its native UI; resolves once it has (or went away). */
@@ -182,6 +198,12 @@ export interface AgentDriver {
    * while someone is looking.
    */
   watched?(nativeId: string, open: boolean): void;
+  /**
+   * Following an attached session costs this driver something for as long as
+   * it is attached (Claude polls the transcript): the host detaches one nobody
+   * has open and nothing runs in, and attaches it again when it is opened.
+   */
+  readonly detachWhenIdle?: boolean;
 
   /**
    * `context`: what the agent should know before this message without it
@@ -215,6 +237,16 @@ export interface AgentDriver {
   taskOutput?(nativeId: string, taskId: string, before: number | undefined, limit: number): TaskOutput | undefined;
   /** Stops one background task (one whose record says `canStop`), leaving the turn and the other tasks alone. */
   stopTask?(nativeId: string, taskId: string): Promise<void>;
+
+  /**
+   * Answers a question in a side conversation of the session, the agent's own
+   * way (present only where the agent has one; `capabilities.side` says so).
+   * Nothing of it enters the session. Resolves when the answer is complete;
+   * `signal` stops it.
+   */
+  sideAsk?(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void>;
+  /** The side conversation is over: let go of whatever the agent keeps for it. */
+  sideClose?(nativeId: string, sideId: string): Promise<void>;
 
   // Housekeeping, where the agent keeps its own record. Without these the host
   // archives, names and forgets sessions on its side only.

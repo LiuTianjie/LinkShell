@@ -61,6 +61,7 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 - **提问、计划和目标。** 回答 Agent 的结构化提问；使用计划模式、`/goal`、斜杠命令和你的 skills。详见 [Agent 提问](docs/v2/agent-questions.md)和[命令与目标](docs/v2/commands-and-goals.md)。
 - **子 Agent、工作流和后台任务。** 按阶段跟进 Claude Workflow，打开每个子 Agent 的对话，查看回复结束后仍在运行的命令。详见[后台任务](docs/v2/background-tasks.md)。
 - **分叉和 worktree。** 从任意一条回复分叉出新会话换个思路，可以留在当前目录，也可以放进新的 git worktree。
+- **旁支对话。** 问一个关于会话的问题，不打断它、也不进入会话，用 Agent 自己的方式：Codex 的 `/side`（只读的临时分叉），Claude 和 Grok 的 `/btw`。
 - **真终端和 localhost。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；dev server 的端口走同一条加密通道在手机上打开，不用暴露端口。
 - **文件、设置和连接。** 浏览项目文件，把照片和文件传给 Agent；修改模型、思考强度和权限模式；配置 MCP 服务和自定义 [ACP](docs/v2/acp-support.md) Agent。
 - **适应不同屏幕。** iPhone Duo 展开时对话与改动或预览并排，并随折叠和方向调整；iPad 使用分栏布局。
@@ -124,6 +125,7 @@ Codex 可以用 ChatGPT 登录、API Key 或自定义服务商（包括 CC Switc
 | --- | --- | --- | --- |
 | 运行中发消息 | 插进当前这一轮 | 插进当前这一轮 | 先停下当前这一轮再执行 |
 | 分叉会话（整段或从某条回复） | 原生 | 原生 | 由 LinkShell 代做：把之前的对话以文字交给它 |
+| 旁支对话 | `/side`：只读的临时分叉 | `/btw`：依据对话回答，不用工具 | Grok 的 `/btw`；其他暂无 |
 | 在 git worktree 里开会话 | 支持 | 支持 | 支持 |
 | 斜杠命令 | `/compact`、`/review`、`/init` 和你的 skills | Claude 自己的命令和你的 skills | Agent 提供什么就有什么 |
 | 向你提问 | 支持，包括 Desktop 异步提问 | 支持 | Cursor 选项、Grok 提问、标准 ACP 表单 |

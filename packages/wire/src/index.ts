@@ -17,3 +17,4 @@ export * from "./editor.js";
 export * from "./live-activity.js";
 export * from "./watch.js";
 export * from "./usage.js";
+export * from "./side.js";

@@ -15,7 +15,8 @@ export function useSessionCommands(id: string) {
   const actions = useActions();
   const native = view?.commands ?? NO_COMMANDS;
   const config = view?.config ?? NO_CONFIG;
-  const commands = useMemo(() => sessionCommands(session?.agent ?? "", native, config), [session?.agent, native, config]);
+  const side = useClient((state) => !!state.machine?.agents.find((agent) => agent.id === session?.agent)?.capabilities.side);
+  const commands = useMemo(() => sessionCommands(session?.agent ?? "", native, config, side), [session?.agent, native, config, side]);
 
   const send = async (content: ContentBlock[]) => {
     const text = content.length === 1 && content[0]?.type === "text" ? content[0].text : undefined;
@@ -58,6 +59,12 @@ export function useSessionCommands(id: string) {
       case "changes":
         router.push({ pathname: "/session/[id]/changes", params: { id } });
         break;
+      case "side": {
+        // Asked at once, in a new side conversation; it opens to show the answer coming.
+        const opened = args ? await actions.askSide(id, args) : undefined;
+        router.push({ pathname: "/session/[id]/side", params: opened ? { id, side: opened.sideId } : { id } });
+        break;
+      }
       case "rename":
         if (args) await actions.rename(id, args);
         else router.push({ pathname: "/rename", params: { id } });

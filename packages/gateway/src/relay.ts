@@ -167,8 +167,11 @@ export class Gateway {
     return total;
   }
 
-  /** Drops connections that didn't answer the previous ping, pings the rest. */
+  /** Drops connections that didn't answer the previous ping, pings the rest; forgets what has run out. */
   private sweep(): void {
+    const now = Date.now();
+    for (const [code, offer] of this.offers) if (offer.expiresAt < now) this.offers.delete(code);
+    for (const [deviceId, times] of this.claimTimes) if (times.every((t) => now - t >= 60_000)) this.claimTimes.delete(deviceId);
     for (const peer of this.peers.values()) {
       // A held peer isn't read, so its pong can't arrive; it is checked again once released.
       if (peer.held) continue;

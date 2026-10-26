@@ -711,6 +711,7 @@
           <li><b>回答提问</b>：Codex（含 Desktop 异步提问）、Claude、Cursor 和 Grok 的结构化问题会显示「需要用户输入」，可在手机卡片中作答或跳过。Cursor 支持选择，其他类型按 Agent 提供的能力支持文字回答。</li>
           <li><b>忙的时候发消息</b>：消息在输入框上方排队，可以调整顺序、取回编辑、立即发送（Codex 和 Claude 直接插进当前这一轮，其他 Agent 先停下当前这一轮）；停止时排队的文字会放回输入框。</li>
           <li><b>分叉与 worktree</b>：每条回复下方可以「从这里分叉」，会话菜单里可以分叉整个会话；新建会话或分叉时可以选择放进新的 git worktree（在 <code>~/.linkshell/worktrees/</code> 下，独立分支），删除会话时没有改动的 worktree 会一起清掉。</li>
+          <li><b>旁支对话</b>：会话菜单里的「旁支对话」，或直接输入 <code>/side</code>（Codex）、<code>/btw</code>（Claude、Grok）加问题。Codex 在只读的临时分叉里回答，可以查看文件；Claude 和 Grok 只依据对话回答。旁支只保存在电脑上，关掉就没了，不写进会话。</li>
           <li><b>命令面板</b>：输入 <code>/</code>、点击输入框的命令按钮，或从会话菜单打开命令面板，搜索 Agent 的命令与 skills；草稿会保留。</li>
           <li><b>持续目标</b>：Codex 和 Claude Code 支持 <code>/goal</code>，也可从菜单进入目标页面。Codex 可设置预算、暂停和继续；Claude 可设置或清除完成条件。需电脑上的 Agent 支持相应能力。</li>
           <li><b>后台任务</b>：<code>/tasks</code> 或标题旁的入口可查看回复结束后仍运行的命令、输出和退出码。Codex 支持单任务停止；Claude Bash / Monitor 目前只支持查看，停止请在电脑端操作。</li>
