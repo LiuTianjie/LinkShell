@@ -37,7 +37,7 @@ import { type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth, type HeaderAction } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
 import { sessionTimelineItems } from "@/lib/workflows";
-import { SessionWorkspace, useSessionWorkspace } from "@/components/session-workspace";
+import { SessionWorkspace, useSessionWorkspace, type Panel } from "@/components/session-workspace";
 import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
 import { useSessionFoldLayout } from "@/lib/session-fold-layout";
 import { useIPadKeyboard } from "@/lib/use-ipad-keyboard";
@@ -110,17 +110,19 @@ function countChanges(items: TimelineItem[]): number {
 
 export function SessionScreen() {
   const { id, panel } = useLocalSearchParams<{ id: string; panel?: string }>();
-  return <AdaptivePage surface="plain"><SessionWorkspace key={id} sessionId={id} initialPanel={panel === "preview" || panel === "changes" ? panel : undefined}><SessionContent sessionId={id} /></SessionWorkspace></AdaptivePage>;
+  return <AdaptivePage surface="plain"><SessionWorkspace key={id} sessionId={id} initialPanel={panel === "preview" || panel === "changes" || panel === "side" ? panel : undefined}><SessionContent sessionId={id} /></SessionWorkspace></AdaptivePage>;
 }
 
-export function SessionContent({ sessionId: id, embedded = false, navigation = !embedded, toolbarActions = [], onOpenPanel, navigationTitle, consumedBottomInset = 0 }: {
+export function SessionContent({ sessionId: id, embedded = false, navigation = !embedded, toolbarActions = [], onOpenPanel, panelsBeside = false, navigationTitle, consumedBottomInset = 0 }: {
   sessionId: string;
   embedded?: boolean;
   navigation?: boolean;
   navigationTitle?: string;
   consumedBottomInset?: number;
   toolbarActions?: HeaderAction[];
-  onOpenPanel?: (panel: "changes" | "preview") => void;
+  onOpenPanel?: (panel: Panel) => void;
+  /** Whether a panel opened through `onOpenPanel` sits beside the conversation. */
+  panelsBeside?: boolean;
 }) {
   const workspace = useSessionWorkspace();
   const folded = useSessionFoldLayout();
@@ -145,7 +147,14 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const sideCount = useClient((state) => state.sides[id]?.length ?? 0);
   const actions = useActions();
-  const commandControls = useSessionCommands(id);
+  // Beside the conversation when there is room for both; a sheet over it otherwise.
+  const sideBeside = onOpenPanel ? panelsBeside : workspace?.split === true;
+  const openSide = (sideId?: string) => {
+    if (sideBeside && onOpenPanel) onOpenPanel("side");
+    else if (sideBeside) workspace?.show("side");
+    else router.push({ pathname: "/session/[id]/side", params: sideId ? { id, side: sideId } : { id } });
+  };
+  const commandControls = useSessionCommands(id, openSide);
   const hasDraft = useHasComposerDraft(id);
   const { computer } = useConnection();
   const insets = usePageInsets();
@@ -427,7 +436,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
             label: "更多",
             items: [
               ...(agentInfo?.capabilities.side && online
-                ? [{ title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => router.push({ pathname: "/session/[id]/side", params: { id } }) }]
+                ? [{ title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => openSide() }]
                 : []),
               { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
               { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },

@@ -9,7 +9,7 @@ const NO_COMMANDS: { name: string; description: string }[] = [];
 const NO_CONFIG: SessionConfigOption[] = [];
 
 /** Both typed commands and the picker resolve against the same live catalog. */
-export function useSessionCommands(id: string) {
+export function useSessionCommands(id: string, openSide?: (sideId?: string) => void) {
   const session = useClient((state) => state.sessions[id]);
   const view = useClient((state) => state.views[id]);
   const actions = useActions();
@@ -62,7 +62,8 @@ export function useSessionCommands(id: string) {
       case "side": {
         // Asked at once, in a new side conversation; it opens to show the answer coming.
         const opened = args ? await actions.askSide(id, args) : undefined;
-        router.push({ pathname: "/session/[id]/side", params: opened ? { id, side: opened.sideId } : { id } });
+        if (openSide) openSide(opened?.sideId);
+        else router.push({ pathname: "/session/[id]/side", params: opened ? { id, side: opened.sideId } : { id } });
         break;
       }
       case "rename":

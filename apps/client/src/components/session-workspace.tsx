@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Text, TextInput } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { ChangesContent } from "@/screens/changes-screen";
+import { SideContent } from "@/screens/side-screen";
 import { PreviewContent } from "@/screens/preview-screen";
 import { ConsumedTopInset, usePageInsets } from "./adaptive-page";
 import { MountedMotionPane, type PaneFrame } from "./mounted-motion-pane";
@@ -18,14 +19,20 @@ import { homeNavigationLayout } from "@/lib/home-layout";
 import { SessionFoldLayoutContext } from "@/lib/session-fold-layout";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
-import { Icon } from "./icon";
+import { Icon, type IconProps } from "./icon";
 import { Button } from "./button";
 import { PortRow } from "./port-row";
 import { positionOf } from "./session-row";
 import { haptics } from "@/lib/haptics";
 import { LayoutProbe } from "../../modules/link-layout";
 
-type Panel = "changes" | "preview";
+export type Panel = "changes" | "preview" | "side";
+const PANEL_ICON: Record<Panel, Pick<IconProps, "sf" | "md">> = {
+  changes: { sf: "plus.forwardslash.minus", md: "difference" },
+  preview: { sf: "globe", md: "language" },
+  side: { sf: "bubble.left.and.text.bubble.right", md: "forum" },
+};
+const PANEL_LABEL: Record<Panel, string> = { changes: "改动", preview: "预览", side: "旁支" };
 const Workspace = createContext<{ split: boolean; headerConsumed: boolean; show: (panel: Panel) => void } | null>(null);
 export const useSessionWorkspace = () => use(Workspace);
 
@@ -89,21 +96,26 @@ export function SessionTools({ sessionId, panel, onPanel, onClose, active = true
   const [body, setBody] = useState({ width: 0, height: 0 });
   const [previewVisited, setPreviewVisited] = useState(panel === "preview");
   useEffect(() => { if (panel === "preview") setPreviewVisited(true); }, [panel]);
+  // Mounted once opened, so switching tabs keeps a draft and the conversation picked.
+  const [sideVisited, setSideVisited] = useState(panel === "side");
+  useEffect(() => { if (panel === "side") setSideVisited(true); }, [panel]);
   const cwd = useClient((state) => state.sessions[sessionId]?.cwd);
+  const side = useClient((state) => !!state.machine?.agents.find((agent) => agent.id === state.sessions[sessionId]?.agent)?.capabilities.side);
+  const panels: Panel[] = side ? ["changes", "preview", "side"] : ["changes", "preview"];
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", padding: 12, gap: 4 }}>
-        {(["changes", "preview"] as const).map((item) => (
+        {panels.map((item) => (
           <Pressable
             key={item}
             onPress={() => { haptics.selection(); onPanel(item); }}
             accessibilityRole="tab"
             accessibilityState={{ selected: panel === item }}
-            accessibilityLabel={item === "changes" ? "改动面板" : "预览面板"}
+            accessibilityLabel={`${PANEL_LABEL[item]}面板`}
             style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 44, paddingHorizontal: 12, borderRadius: 14, backgroundColor: panel === item ? colors.card : "transparent", opacity: pressed ? 0.65 : 1 })}
           >
-            <Icon sf={item === "changes" ? "plus.forwardslash.minus" : "globe"} md={item === "changes" ? "difference" : "language"} size={16} color={panel === item ? colors.label : colors.secondaryLabel} />
-            <Text style={[type.subhead, { color: panel === item ? colors.label : colors.secondaryLabel, fontWeight: "600" }]}>{item === "changes" ? "改动" : "预览"}</Text>
+            <Icon {...PANEL_ICON[item]} size={16} color={panel === item ? colors.label : colors.secondaryLabel} />
+            <Text style={[type.subhead, { color: panel === item ? colors.label : colors.secondaryLabel, fontWeight: "600" }]}>{PANEL_LABEL[item]}</Text>
           </Pressable>
         ))}
         <View style={{ flex: 1 }} />
@@ -118,6 +130,11 @@ export function SessionTools({ sessionId, panel, onPanel, onClose, active = true
           {port !== null ? <PreviewContent key={port} port={port} embedded /> : null}
           <View style={{ flex: 1, display: port === null ? "flex" : "none" }}>{previewVisited || panel === "preview" ? <PreviewPicker cwd={cwd} onOpen={setPort} active={panel === "preview" && port === null && active} /> : null}</View>
         </MountedMotionPane>
+        {side ? (
+          <MountedMotionPane frame={{ left: panel === "side" ? 0 : 12, top: 0, ...body }} visible={panel === "side"} action={motionAction} geometry={motionGeometry ?? `${body.width}:${body.height}`}>
+            {sideVisited ? <SideContent sessionId={sessionId} embedded /> : null}
+          </MountedMotionPane>
+        ) : null}
       </View>
     </View>
   );

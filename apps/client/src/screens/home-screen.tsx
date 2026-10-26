@@ -49,7 +49,7 @@ import { Glass } from "@/components/glass";
 import { LayoutProbe } from "../../modules/link-layout";
 import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
 import { HeaderActions, type HeaderAction } from "@/components/header-actions";
-import { SessionTools } from "@/components/session-workspace";
+import { SessionTools, type Panel } from "@/components/session-workspace";
 
 type Item =
   | {
@@ -298,7 +298,7 @@ function HomeWorkspace() {
   useEffect(() => { if (!laptop) setLaptopListOpen(false); }, [laptop]);
   const [motionAction, setMotionAction] = useState(0);
   const [detailVisited, setDetailVisited] = useState(false);
-  const [tool, setTool] = useState<"changes" | "preview" | null>(null);
+  const [tool, setTool] = useState<Panel | null>(null);
   const first = useMemo(() => Object.values(sessions).filter((session) => !session.archived).sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || b.updatedAt - a.updatedAt)[0], [sessions]);
   const selected = selectedId && sessions[selectedId] && !sessions[selectedId].archived ? sessions[selectedId] : first;
   const select = useCallback((id: string) => {
@@ -353,8 +353,8 @@ function HomeWorkspace() {
     else if (showTools) { setTool(null); setSidebarCollapsed(false); }
     else setSidebarCollapsed((value) => !value);
   };
-  const openTool = (panel: "changes" | "preview") => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool(panel); };
-  const toggleTool = (panel: "changes" | "preview") => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool((current) => current === panel ? null : panel); };
+  const openTool = (panel: Panel) => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool(panel); };
+  const toggleTool = (panel: Panel) => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool((current) => current === panel ? null : panel); };
   const closeTool = () => { setMotionAction((value) => value + 1); setTool(null); };
   const sessionTools: HeaderAction[] = [{ ...NEW_SESSION, kind: "button" }, ...(["changes", "preview"] as const).map((panel): HeaderAction => ({
     kind: "button", key: panel,
@@ -393,7 +393,7 @@ function HomeWorkspace() {
                   </Pressable>
                 ))}
               </View> : null}
-              <SessionContent key={selected.id} sessionId={selected.id} embedded consumedBottomInset={bottom} navigation={Platform.OS === "ios" && showDetail} navigationTitle={split ? "" : undefined} toolbarActions={split ? sessionTools : []} onOpenPanel={openTool} />
+              <SessionContent key={selected.id} sessionId={selected.id} embedded consumedBottomInset={bottom} navigation={Platform.OS === "ios" && showDetail} navigationTitle={split ? "" : undefined} toolbarActions={split ? sessionTools : []} onOpenPanel={openTool} panelsBeside={split} />
             </> : null}
             </SessionFoldLayoutContext>
           </MountedMotionPane>

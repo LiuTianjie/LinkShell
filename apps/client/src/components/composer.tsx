@@ -586,7 +586,7 @@ function PermissionDetail({ detail }: { detail: string }) {
   );
 }
 
-function RoundButton({
+export function RoundButton({
   label,
   onPress,
   disabled = false,
