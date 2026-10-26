@@ -500,7 +500,7 @@ export function ComputerScreen() {
         </View>
 
         <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
-        <ComputerPanel title="设备" onAdd={() => { haptics.selection(); router.push("/pair"); }}>
+        <ComputerPanel title="电脑" onAdd={() => { haptics.selection(); router.push("/pair"); }}>
           <ComputerList />
         </ComputerPanel>
         <ComputerPanel

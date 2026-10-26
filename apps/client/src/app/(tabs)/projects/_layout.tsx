@@ -6,7 +6,8 @@ export default function ProjectsStack() {
   return (
     <Stack screenOptions={largeTitleHeader}>
       <Stack.Screen name="index" options={{ title: "", headerLargeTitleEnabled: false, headerShown: Platform.OS === "ios" }} />
-      <Stack.Screen name="detail" options={{ title: "", headerLargeTitleEnabled: false }} />
+      {/* The list draws its own heading, so its title is empty: name the way back, or VoiceOver says "Back". */}
+      <Stack.Screen name="detail" options={{ title: "", headerLargeTitleEnabled: false, headerBackTitle: "项目" }} />
     </Stack>
   );
 }

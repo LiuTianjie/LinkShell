@@ -53,12 +53,12 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
                   <Text numberOfLines={2} style={[type.headline, { flex: 1, color: colors.label }]}>{name}</Text>
                   {locked ? <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} /> : null}
                 </View>
-                {/* Which one is in use, on the status line: a tag beside the name sat off the row's centre line. */}
                 <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>
-                  {selected ? <Text style={{ color: colors.accent, fontWeight: "600" }}>当前 · </Text> : null}
                   {[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}
                 </Text>
               </View>
+              {/* The one in use is ticked, the way a system picker marks its choice. */}
+              {selected ? <Icon sf="checkmark" md="check" size={17} color={colors.accent} weight="semibold" /> : null}
             </Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={`给 ${name} 改名`}
               onPress={() => { haptics.selection(); router.push({ pathname: "/rename-computer", params: { computer: computer.key } }); }}

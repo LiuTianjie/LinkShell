@@ -252,7 +252,7 @@ function Summary({ small = false }: { small?: boolean }) {
         router.push("/computers");
       }}
       accessibilityRole="button"
-      accessibilityLabel={`当前电脑：${name}，点击切换设备`}
+      accessibilityLabel={`当前电脑：${name}，点按切换电脑`}
       hitSlop={6}
       style={({ pressed }) => ({
         flexDirection: "row",

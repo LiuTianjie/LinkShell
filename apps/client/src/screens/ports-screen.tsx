@@ -10,6 +10,7 @@ import { openPreview, PortRow } from "@/components/port-row";
 import { positionOf } from "@/components/session-row";
 import { usePorts } from "@/lib/ports";
 import { SheetHeader } from "@/components/sheet-header";
+import { sheetBottom } from "@/lib/sheet-bottom";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -43,19 +44,21 @@ export function PortsScreen() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    // No flex anywhere: the sheet fits its contents, and a flexed child has none to fit.
+    <View>
       <SheetHeader title="预览" />
-      <View style={{ flex: 1, overflow: "hidden" }}>
+      <View style={{ overflow: "hidden" }}>
         <KeyboardAwareScrollView
-        contentInsetAdjustmentBehavior="never"
+          contentInsetAdjustmentBehavior="never"
           bottomOffset={24}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: insets.bottom + 24, gap: 24 }}
+          style={{ flexGrow: 0 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: sheetBottom(insets.bottom), gap: 24 }}
         >
           <Text style={[type.subhead, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
-            电脑上正在运行的网页，经加密通道在手机上打开，热更新照常工作。
+            {/* Word joiners keep 热更新 on one line. */}
+            {"电脑上正在运行的网页，经加密通道在手机上打开，热\u2060更\u2060新照常工作。"}
           </Text>
 
           {ports === null ? (

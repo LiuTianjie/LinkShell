@@ -1,7 +1,7 @@
 import type { SessionSummary } from "@linkshell/wire";
-import { Link, router, type Href } from "expo-router";
+import { router } from "expo-router";
 import { memo, useRef } from "react";
-import { Platform, StyleSheet, View, type ColorValue } from "react-native";
+import { StyleSheet, View, type ColorValue } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { activityText, plainPreview, sessionTitle, needsUserInput } from "@/lib/describe";
@@ -108,7 +108,6 @@ export function ListRow({
   warn = false,
   position,
   onPress,
-  href,
   accessibilityLabel,
   menu,
   selected = false,
@@ -128,8 +127,6 @@ export function ListRow({
   warn?: boolean;
   position: RowPosition;
   onPress: () => void;
-  /** Where onPress goes; on iOS the long-press menu needs it (a context menu on the link). */
-  href?: Href;
   accessibilityLabel: string;
   /** Long-press actions. */
   menu?: RowMenuItem[];
@@ -138,14 +135,14 @@ export function ListRow({
   const { fontScale } = useWindowDimensions();
   const largeText = fontScale >= 1.3;
   const floating = useRef<FloatingMenuHandle>(null);
-  const iosMenu = Platform.OS === "ios" && !!menu?.length && !!href;
-  const floatingMenu = !iosMenu && !!menu?.length;
+  // The app's own long-press menu everywhere. The system context menu on a
+  // Link took the whole row out of the accessibility tree: VoiceOver skipped it.
+  const floatingMenu = !!menu?.length;
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
   const row = (
     <PressableScale
-      // Under a Link, the link presses.
-      onPress={iosMenu ? undefined : onPress}
+      onPress={onPress}
       onLongPress={floatingMenu ? () => floating.current?.open() : undefined}
       pressedScale={0.985}
       accessibilityRole="button"
@@ -220,21 +217,6 @@ export function ListRow({
       </View>
     </PressableScale>
   );
-  if (iosMenu) {
-    // The system context menu, which (unlike a menu wrapped around the row) leaves taps alone.
-    return (
-      <Link href={href!} asChild>
-        <Link.Trigger>{row}</Link.Trigger>
-        <Link.Menu>
-          {menu!.map((item) => (
-            <Link.MenuAction key={item.title} icon={item.icon.sf} destructive={item.destructive} onPress={item.onPress}>
-              {item.title}
-            </Link.MenuAction>
-          ))}
-        </Link.Menu>
-      </Link>
-    );
-  }
   if (!floatingMenu) return row;
   return (
     <OwnedFloatingMenu
@@ -353,7 +335,6 @@ export const SessionRow = memo(function SessionRow({
       warn={failed}
       position={position}
       onPress={onPress ?? (() => openSession(session.id))}
-      href={onPress ? undefined : { pathname: "/session/[id]", params: { id: session.id } }}
       accessibilityLabel={[title, project, look.name, detail].filter(Boolean).join("，")}
       menu={menu}
     />

@@ -1,6 +1,6 @@
 import { MenuView, type MenuAction, type NativeActionEvent } from "@react-native-menu/menu";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { Modal, Platform, Pressable, ScrollView, useColorScheme, View, type StyleProp, type ViewStyle } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, useColorScheme, View, type StyleProp, type ViewStyle } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,9 +29,10 @@ export interface FloatingMenuHandle {
 }
 
 /**
- * Android only: the floating card opened by the caller (a row's own long
- * press), for children that handle their own touches — wrapping them in
- * another Pressable would never see the long press.
+ * The floating card opened by the caller (a row's own long press), for
+ * children that handle their own touches — wrapping them in another Pressable
+ * would never see the long press. On iOS too: a UIMenu wrapped round a row
+ * takes its taps, and a Link's context menu hid the row from VoiceOver.
  */
 export function OwnedFloatingMenu({ handle, ...props }: Omit<AppMenuProps, "shouldOpenOnLongPress"> & { handle: Ref<FloatingMenuHandle> }) {
   return <FloatingMenu {...props} handle={handle} />;
@@ -143,6 +144,7 @@ function FloatingMenu({
   const above = Math.max(0, anchorTop - safeTop - 6);
   const openUp = below < 280 && above > below;
   const maxHeight = openUp ? above : below;
+  const dark = useColorScheme() === "dark";
 
   return (
     <>
@@ -163,6 +165,13 @@ function FloatingMenu({
       {anchor && anchor.geometry === geometry && level ? (
         <Modal visible transparent statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={close}>
           <Pressable onPress={close} style={{ flex: 1 }} accessibilityLabel="关闭菜单">
+            {/* The page dims and the row it belongs to stays lit above it, the way a context menu lifts its source. */}
+            <Animated.View
+              entering={FadeIn.duration(160)}
+              exiting={FadeOut.duration(100)}
+              pointerEvents="none"
+              style={{ position: "absolute", inset: 0, backgroundColor: dark ? "rgba(0,0,0,0.5)" : "rgba(10,12,24,0.2)" }}
+            />
             <Animated.View
               entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
               exiting={FadeOut.duration(100)}
@@ -175,6 +184,9 @@ function FloatingMenu({
                 borderRadius: 18,
                 backgroundColor: colors.cardRaised,
                 boxShadow: "0 12px 36px rgba(12,14,30,0.22), 0 2px 6px rgba(12,14,30,0.08)",
+                // A shadow doesn't show on black; the edge does.
+                borderWidth: dark ? StyleSheet.hairlineWidth : 0,
+                borderColor: colors.separator,
                 overflow: "hidden",
               }}
             >
@@ -235,6 +247,9 @@ function FloatingMenu({
                           <Icon sf="chevron.right" md="chevron_right" size={16} color={colors.tertiaryLabel} />
                         ) : checked ? (
                           <Icon sf="checkmark" md="check" size={18} color={colors.accent} weight="semibold" />
+                        ) : action.image && Platform.OS === "ios" ? (
+                          // Actions name SF Symbols; Android's card goes without, as its own menus do.
+                          <Icon sf={action.image as never} md="circle" size={17} color={destructive ? colors.danger : colors.label} />
                         ) : null}
                       </Pressable>
                     );
@@ -242,6 +257,19 @@ function FloatingMenu({
                 </ScrollView>
               </Pressable>
             </Animated.View>
+            {/* Over the card, so its shadow doesn't fall across the row. */}
+            {handle ? (
+              <Animated.View
+                entering={FadeIn.duration(120)}
+                exiting={FadeOut.duration(100)}
+                pointerEvents="none"
+                importantForAccessibility="no-hide-descendants"
+                accessibilityElementsHidden
+                style={{ position: "absolute", left: anchor.x, top: anchor.y, width: anchor.width, height: anchor.height, borderRadius: 20, overflow: "hidden", transform: [{ scale: 1.015 }] }}
+              >
+                {children}
+              </Animated.View>
+            ) : null}
           </Pressable>
         </Modal>
       ) : null}

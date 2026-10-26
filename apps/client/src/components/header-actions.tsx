@@ -19,12 +19,14 @@ export interface HeaderMenuItem {
   section?: string;
   /** A submenu of these instead of an action (iOS); Android lists them in place. */
   children?: HeaderMenuItem[];
+  /** A child's title when listed in place, if the parent's title before its own doesn't read. */
+  flatTitle?: string;
   onPress?: () => void;
 }
 
 /** Submenus spelled out in place, for a menu that has none. */
 function flat(items: HeaderMenuItem[]): HeaderMenuItem[] {
-  return items.flatMap((item) => item.children?.map((child) => ({ ...child, title: `${item.title}${child.title}` })) ?? [item]);
+  return items.flatMap((item) => item.children?.map((child) => ({ ...child, title: child.flatTitle ?? `${item.title}${child.title}` })) ?? [item]);
 }
 
 /** Consecutive items of one section, in order. */
@@ -76,7 +78,7 @@ export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
                   {group.map((item) => item.children ? (
                     <Stack.Toolbar.Menu key={item.title} icon={item.icon.sf} title={item.title}>
                       {item.children.map((child) => (
-                        <Stack.Toolbar.MenuAction key={child.title} icon={child.icon.sf} destructive={child.destructive} onPress={child.onPress}>
+                        <Stack.Toolbar.MenuAction key={child.title} icon={child.icon.sf} subtitle={child.subtitle} destructive={child.destructive} onPress={child.onPress}>
                           {child.title}
                         </Stack.Toolbar.MenuAction>
                       ))}

@@ -1,6 +1,6 @@
 import { mediaKind, type DownloadProgress } from "@linkshell/client-core";
 import { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { Button } from "@/components/button";
 import { Text } from "@/components/fixed-text";
 import { useConnection } from "@/lib/client";
@@ -9,7 +9,12 @@ import { fileSize } from "@/lib/format";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
-export function FileSaveActions({ path }: { path: string }) {
+/**
+ * Saving a remote file to the phone. The actions live in the file's ⋯ menu,
+ * where a viewer keeps them; `strip` is only there while a save is running or
+ * has something to say, so the file itself starts at the top of the page.
+ */
+export function useFileSave(path: string) {
   const { link } = useConnection();
   const task = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState<"photos" | "files" | null>(null);
@@ -21,6 +26,12 @@ export function FileSaveActions({ path }: { path: string }) {
     setBusy(null); setProgress(undefined); setMessage(""); setError("");
     return () => { task.current?.abort(); task.current = null; };
   }, [link, path]);
+  // A finished save says so for a moment, then gets out of the way.
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 3500);
+    return () => clearTimeout(timer);
+  }, [message]);
   async function save(destination: "photos" | "files") {
     if (task.current) return;
     const controller = new AbortController();
@@ -37,14 +48,19 @@ export function FileSaveActions({ path }: { path: string }) {
       if (task.current === controller) { task.current = null; setBusy(null); }
     }
   }
-  return <View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 6 }}>
-    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      {mediaKind(path) ? <Button title="保存到相册" icon={{ sf: "photo", md: "photo_library" }} size="small" busy={busy === "photos"} disabled={busy !== null} onPress={() => void save("photos")} /> : null}
-      <Button title="保存到文件" icon={{ sf: "square.and.arrow.down", md: "file_download" }} size="small" busy={busy === "files"} disabled={busy !== null} onPress={() => void save("files")} />
+  const media = !!mediaKind(path);
+  const items = [
+    ...(media ? [{ title: "保存到相册", icon: { sf: "photo", md: "photo_library" } as const, onPress: () => void save("photos") }] : []),
+    { title: "保存到文件", icon: { sf: "square.and.arrow.down", md: "file_download" } as const, onPress: () => void save("files") },
+  ];
+  const strip = busy || message || error ? (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }}>
+      {busy ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : null}
+      <Text accessibilityLiveRegion="polite" numberOfLines={2} style={[type.footnote, { flex: 1, color: error ? colors.danger : colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
+        {error || (busy ? exporting ? "正在保存…" : progress ? `正在下载 ${fileSize(progress.received)} / ${fileSize(progress.total)}` : "正在准备保存…" : message)}
+      </Text>
       {busy && !exporting ? <Button title="取消" size="small" variant="plain" onPress={() => task.current?.abort()} /> : null}
     </View>
-    {busy || message || error ? <Text accessibilityLiveRegion="polite" style={[type.caption, { color: error ? colors.danger : colors.secondaryLabel }]}>
-      {error || (busy ? exporting ? "正在保存…" : progress ? `正在下载 ${fileSize(progress.received)} / ${fileSize(progress.total)}` : "正在准备保存…" : message)}
-    </Text> : null}
-  </View>;
+  ) : null;
+  return { items, strip, save: () => void save("files"), busy: busy !== null };
 }

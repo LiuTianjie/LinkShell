@@ -682,7 +682,7 @@ function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: (
         </View>
         <View style={{ flex: 1, minWidth: 120, gap: 2 }}>
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑正在操作这个会话</Text>
-          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>接管后在手机上继续，电脑随时能收回</Text>
+          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>在手机上继续，电脑随时能收回</Text>
         </View>
         {/* The turn running on the computer can be stopped from here without taking over. */}
         {onStop ? <RoundButton label="停止" onPress={() => void onStop()} busy={stopping} tone="stop" /> : null}

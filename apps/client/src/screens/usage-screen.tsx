@@ -3,13 +3,55 @@ import { UsageDashboard } from "@/components/usage-dashboard";
 import type { UsageQuery, UsageReport } from "@linkshell/wire";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { Button } from "@/components/button";
 import { usePageInsets } from "@/components/adaptive-page";
+import { HeaderActions } from "@/components/header-actions";
+import { Segmented } from "@/components/segmented";
+import { EmptyState, LoadingState } from "@/components/state-views";
 import { useConnection } from "@/lib/client";
+import { haptics } from "@/lib/haptics";
+import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
+
+const RANGES = [
+  { value: 1, label: "今天" },
+  { value: 7, label: "7 天" },
+  { value: 30, label: "30 天" },
+] as const;
+
+/** One agent to filter by: its tile and short name, the chosen one on a card. */
+function AgentChip({ agent, label, selected, onPress }: { agent?: string; label: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={() => {
+        if (selected) return;
+        haptics.selection();
+        onPress();
+      }}
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        height: 34,
+        paddingLeft: agent ? 5 : 14,
+        paddingRight: 12,
+        borderRadius: 17,
+        borderCurve: "continuous",
+        backgroundColor: selected ? colors.accentSoft : pressed ? colors.fillStrong : colors.card,
+        borderWidth: 1,
+        borderColor: selected ? colors.accent : "transparent",
+      })}
+    >
+      {agent ? <AgentTile agent={agent} size={24} /> : null}
+      <Text style={{ fontSize: 13, fontWeight: selected ? "600" : "500", color: selected ? colors.accent : colors.label }}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export function UsageScreen() {
   const { link } = useConnection();
@@ -20,41 +62,103 @@ export function UsageScreen() {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pulled, setPulled] = useState(false);
   const generation = useRef(0);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
-    setLoading(true); setError(null); setReport(null);
+    // The last report stays up, dimmed, while the next one is read: a filter
+    // change doesn't blank the page for the seconds the logs take to scan.
+    setLoading(true);
+    setError(null);
     try {
       const next = await link.call("usage.summary", { days, agent }, 120_000);
-      if (generation.current === request) { setReport(next); setAgents(next.agents ?? []); }
+      if (generation.current === request) {
+        setReport(next);
+        setAgents(next.agents ?? []);
+      }
     } catch (reason) {
       if (generation.current === request) setError(`无法读取用量，请确认电脑在线并已更新 LinkShell。${reason instanceof Error ? reason.message : String(reason)}`);
-    } finally { if (generation.current === request) setLoading(false); }
+    } finally {
+      if (generation.current === request) {
+        setLoading(false);
+        setPulled(false);
+      }
+    }
   }, [link, days, agent]);
-  useFocusEffect(useCallback(() => {
-    void refresh();
-    return () => { generation.current++; };
-  }, [refresh]));
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+      return () => {
+        generation.current++;
+      };
+    }, [refresh]),
+  );
 
-  return <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 24, gap: 22 }}>
-    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <Text style={[type.caption, { color: colors.secondaryLabel }]}>Agent 用量 · 本机统计</Text>
-      <Button title="立即同步" size="small" busy={loading} onPress={() => void refresh()} />
-    </View>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4, padding: 4, backgroundColor: colors.fill, borderRadius: 9 }}>
-      {[{ id: "all", label: "全部" }, ...agents].map(({ id: value, label }) => <Pressable key={value} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: agent === value }} onPress={() => setAgent(value)} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, backgroundColor: agent === value ? colors.card : "transparent" }}>
-        {value === "all" ? <Text style={{ color: colors.label, fontSize: 13, fontWeight: "600", lineHeight: 24 }}>全部</Text> : <AgentTile agent={value} size={24} />}
-      </Pressable>)}
-    </ScrollView>
-    <View style={{ flexDirection: "row", gap: 8 }}>
-      {([1, 7, 30] as const).map(value => <Button key={value} title={value === 1 ? "今天" : `${value} 天`} variant={days === value ? "primary" : "tonal"} size="small" onPress={() => setDays(value)} />)}
-    </View>
-    {loading ? <ActivityIndicator color={colors.accent} accessibilityLabel="正在读取用量" /> : null}
-    {error ? <Text selectable style={[type.footnote, { color: colors.danger }]}>{error}</Text> : null}
-    {report ? <>
-      <UsageDashboard key={`${days}-${agent}`} report={report} days={days} />
-      {report.warnings.map(warning => <Text key={warning} style={[type.footnote, { color: colors.waiting }]}>{warning}</Text>)}
-      <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{new Date(report.generatedAt).toLocaleTimeString()} 更新。仅统计日志已记录的 Token，不代表订阅剩余额度或实际账单。</Text>
-    </> : null}
-  </ScrollView>;
+  const current = report && report.days === days && report.agent === agent ? report : null;
+  const empty = current?.totals.records === 0;
+  const chosen = agents.find((entry) => entry.id === agent);
+
+  return (
+    <>
+      <HeaderActions actions={[{ kind: "button", key: "refresh", icon: { sf: "arrow.clockwise", md: "refresh" }, label: "重新统计", onPress: () => void refresh() }]} />
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        refreshControl={
+          <RefreshControl
+            refreshing={pulled}
+            onRefresh={() => {
+              setPulled(true);
+              void refresh();
+            }}
+          />
+        }
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 28, gap: 18 }}
+      >
+        <View style={{ gap: 12 }}>
+          <Segmented label="时间范围" options={RANGES} value={days} onChange={setDays} />
+          {agents.length > 1 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Agent"
+              style={{ marginHorizontal: -16 }}
+              contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
+            >
+              <AgentChip label="全部" selected={agent === "all"} onPress={() => setAgent("all")} />
+              {agents.map((entry) => (
+                <AgentChip key={entry.id} agent={entry.id} label={agentLook(entry.id, entry.label).short} selected={agent === entry.id} onPress={() => setAgent(entry.id)} />
+              ))}
+            </ScrollView>
+          ) : null}
+        </View>
+
+        {error ? <Text selectable style={[type.footnote, { color: colors.danger, paddingHorizontal: 4 }]}>{error}</Text> : null}
+
+        {!report && loading ? (
+          <LoadingState label="正在统计这台电脑上的用量…" />
+        ) : empty ? (
+          <EmptyState
+            icon={{ sf: "chart.bar", md: "bar_chart" }}
+            title={days === 1 ? "今天还没有用量记录" : `近 ${days} 天没有用量记录`}
+            message={chosen && chosen.status === "no_data" ? chosen.note : "这里只统计 Agent 日志里记下的 Token。"}
+          />
+        ) : report ? (
+          <View style={{ gap: 18, opacity: current ? 1 : 0.45 }}>
+            <UsageDashboard key={`${report.days}-${report.agent}`} report={report} />
+            <View style={{ gap: 6, paddingHorizontal: 4 }}>
+              {report.warnings.map((warning) => (
+                <Text key={warning} style={[type.footnote, { color: colors.waiting }]}>
+                  {warning}
+                </Text>
+              ))}
+              <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+                {new Date(report.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 统计 · 只算日志里记下的 Token，不代表剩余额度或账单
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+    </>
+  );
 }

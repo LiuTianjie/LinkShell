@@ -209,7 +209,12 @@ export function FilesScreen() {
         keyExtractor={(entry) => entry.path}
         renderItem={({ item, index }) => <Row entry={item} position={positionOf(index, entries.length)} onPress={open} selected={selected === item.path} />}
         estimatedItemSize={46}
-        ListHeaderComponent={branch ? <View style={{ paddingBottom: 12 }}><BranchTag branch={branch} max={28} /></View> : null}
+        ListHeaderComponent={branch ? (
+          // A capsule like the terminal's directory: the folder's branch, said once above its files.
+          <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", height: 26, paddingHorizontal: 10, marginBottom: 12, borderRadius: 13, borderCurve: "continuous", backgroundColor: colors.fill }}>
+            <BranchTag branch={branch} max={28} />
+          </View>
+        ) : null}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: 16 }}
         style={{ flex: 1, backgroundColor: colors.background }}

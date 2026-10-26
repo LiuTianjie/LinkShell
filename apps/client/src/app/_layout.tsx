@@ -39,7 +39,8 @@ export default function RootLayout() {
             <Fragment key={Platform.OS === "android" ? (scheme ?? "light") : "tree"}>
               {!nativeStatusBar ? <StatusBar style="auto" /> : null}
               <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal", ...(nativeStatusBar ? { statusBarStyle: "auto", statusBarHidden: false } as const : {}), headerStyle: { backgroundColor: colors.background as string } }}>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                {/* Its title is what a pushed page's back button says to VoiceOver: not the group's "(tabs)". */}
+                <Stack.Screen name="(tabs)" options={{ headerShown: false, title: "返回" }} />
                 <Stack.Screen name="usage" options={{ title: "用量统计" }} />
                 <Stack.Screen name="activity" options={{ title: "任务" }} />
                 <Stack.Screen name="acp" options={{ title: "ACP", contentStyle: sheetContent }} />
@@ -163,7 +164,7 @@ export default function RootLayout() {
                     presentation: "formSheet",
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
-                    sheetAllowedDetents: [0.7, 0.92],
+                    sheetAllowedDetents: "fitToContents",
                     sheetCornerRadius: 28,
                     contentStyle: sheetContent,
                     headerShown: true,
@@ -174,9 +175,9 @@ export default function RootLayout() {
                   options={{
                     presentation: "formSheet",
                     sheetGrabberVisible: true,
-                    sheetAllowedDetents: [0.55, 0.92],
-                    sheetInitialDetentIndex: 0,
-                    sheetExpandsWhenScrolledToEdge: true,
+                    // As tall as the list: two computers don't need half the screen.
+                    sheetAllowedDetents: "fitToContents",
+                    sheetExpandsWhenScrolledToEdge: false,
                     sheetCornerRadius: 32,
                     contentStyle: sheetContent,
                     headerShown: false,

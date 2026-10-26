@@ -1,6 +1,7 @@
-import type { TerminalInfo } from "@linkshell/wire";
+import { terminalState as wireTerminalState, type TerminalInfo } from "@linkshell/wire";
 import { useEffect, useState } from "react";
 import { useConnection } from "./client";
+import { baseName } from "./format";
 
 /** The host's terminals, live: listed on connect and updated as they change. */
 export function useTerminals(): { terminals: TerminalInfo[]; loaded: boolean; error: string; retry: () => void } {
@@ -44,4 +45,15 @@ export function useTerminals(): { terminals: TerminalInfo[]; loaded: boolean; er
   return { terminals, loaded, error, retry: () => setAttempt((value) => value + 1) };
 }
 
-export { terminalState, commandTitle } from "@linkshell/wire";
+/**
+ * The wire's reading of a terminal, except that a plain shell is named after
+ * its directory: a list of shells all called "终端" tells them apart by nothing.
+ * `named` says the title already is the directory, so a row doesn't repeat it.
+ */
+export function terminalState(terminal: TerminalInfo) {
+  const state = wireTerminalState(terminal);
+  const named = !state.mono && !!terminal.cwd;
+  return { ...state, title: named ? baseName(terminal.cwd) : state.title, named };
+}
+
+export { commandTitle } from "@linkshell/wire";

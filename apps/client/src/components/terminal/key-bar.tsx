@@ -1,6 +1,6 @@
 import type { TerminalKeyModifiers } from "../../../modules/link-terminal/src";
 import { useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { swipeKeySteps } from "@/lib/terminal-snippets";
@@ -103,6 +103,14 @@ function ActionCircle({
   );
 }
 
+/**
+ * Where the scrolling keys end and the fixed buttons begin: on glass a fade
+ * can't match the material, so a rule says that keys cut at it scroll on.
+ */
+function Rule() {
+  return <View style={{ width: StyleSheet.hairlineWidth * 2, height: 20, borderRadius: 1, backgroundColor: colors.separator }} />;
+}
+
 export function KeyBar({
   ctrl,
   alt = false,
@@ -149,12 +157,13 @@ export function KeyBar({
           onPress={onToggleSnippets}
         />
       ) : null}
+      {onToggleSnippets ? <Rule /> : null}
 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         keyboardShouldPersistTaps="always"
-        contentContainerStyle={{ gap: 5, alignItems: "center", paddingRight: 4 }}
+        contentContainerStyle={{ gap: 5, alignItems: "center", paddingHorizontal: 2 }}
         style={{ flex: 1 }}
       >
         <KeyPill label="Ctrl" active={ctrl} onPress={onToggleCtrl}>
@@ -248,6 +257,7 @@ export function KeyBar({
         </View>
       ) : null}
 
+      <Rule />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
         <ActionCircle icon={{ sf: "doc.on.clipboard", md: "content_paste" }} label="粘贴" onPress={onPaste} />
         {onVoice ? <ActionCircle icon={{ sf: "mic.fill", md: "mic" }} label="语音输入" onPress={onVoice} /> : null}

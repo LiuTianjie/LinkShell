@@ -465,7 +465,7 @@ export function TerminalScreen() {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 240 }}>
                   <Text numberOfLines={1} style={[type.caption, { flexShrink: 1, color: colors.secondaryLabel }]}>
                     {shortPath(info.cwd)}
-                    {branch ? "" : ` · ${ended ? state?.detail : state?.busy ? state.detail : `${info.cols}×${info.rows}`}`}
+                    {!branch && (ended || state?.busy) ? ` · ${state?.detail}` : ""}
                   </Text>
                   {branch ? (
                     <View style={{ flexShrink: 0 }}>
@@ -492,50 +492,65 @@ export function TerminalScreen() {
               {
                 title: "抓取输出发给 AI",
                 icon: { sf: "sparkles", md: "auto_awesome" },
+                section: "send",
                 onPress: () => void captureOutputToAgent(),
-              },
-              {
-                title: `放大字号（${fontSize}）`,
-                icon: { sf: "textformat.size.larger", md: "text_increase" },
-                onPress: () => setTerminalFontSize(Math.min(fontSize + 1, TERMINAL_FONT_MAX)),
-              },
-              {
-                title: fontSize <= TERMINAL_FONT_MIN ? `已是最小字号（${TERMINAL_FONT_MIN}）` : `缩小字号（${fontSize}）`,
-                icon: { sf: "textformat.size.smaller", md: "text_decrease" },
-                onPress: () => setTerminalFontSize(Math.max(fontSize - 1, TERMINAL_FONT_MIN)),
-              },
-              {
-                title: `恢复默认字号（${TERMINAL_FONT_DEFAULT}）`,
-                icon: { sf: "arrow.counterclockwise", md: "restart_alt" },
-                onPress: () => setTerminalFontSize(TERMINAL_FONT_DEFAULT),
               },
               ...(info && !ended
                 ? [
-                    { title: "上传照片", icon: { sf: "photo", md: "image" } as const, onPress: () => void sendFile(pickPhoto) },
-                    { title: "上传文件", icon: { sf: "doc.badge.arrow.up", md: "upload_file" } as const, onPress: () => void sendFile(pickFile) },
+                    { title: "上传照片", icon: { sf: "photo", md: "image" } as const, section: "send", onPress: () => void sendFile(pickPhoto) },
+                    { title: "上传文件", icon: { sf: "doc.badge.arrow.up", md: "upload_file" } as const, section: "send", onPress: () => void sendFile(pickFile) },
                   ]
                 : []),
-              ...(info ? [{ title: "预览网页", icon: { sf: "globe", md: "language" } as const, onPress: () => router.push({ pathname: "/ports", params: { cwd: info.cwd } }) }] : []),
+              {
+                // One row that opens: three size rows made the menu taller than the screen allows.
+                title: `字号（${fontSize}）`,
+                icon: { sf: "textformat.size", md: "format_size" },
+                section: "open",
+                children: [
+                  {
+                    title: fontSize >= TERMINAL_FONT_MAX ? "已是最大" : "放大",
+                    flatTitle: fontSize >= TERMINAL_FONT_MAX ? `已是最大字号（${TERMINAL_FONT_MAX}）` : `放大字号（${fontSize}）`,
+                    icon: { sf: "textformat.size.larger", md: "text_increase" },
+                    onPress: () => setTerminalFontSize(Math.min(fontSize + 1, TERMINAL_FONT_MAX)),
+                  },
+                  {
+                    title: fontSize <= TERMINAL_FONT_MIN ? "已是最小" : "缩小",
+                    flatTitle: fontSize <= TERMINAL_FONT_MIN ? `已是最小字号（${TERMINAL_FONT_MIN}）` : `缩小字号（${fontSize}）`,
+                    icon: { sf: "textformat.size.smaller", md: "text_decrease" },
+                    onPress: () => setTerminalFontSize(Math.max(fontSize - 1, TERMINAL_FONT_MIN)),
+                  },
+                  {
+                    title: fontSize === TERMINAL_FONT_DEFAULT ? `已是默认（${TERMINAL_FONT_DEFAULT}）` : `恢复默认（${TERMINAL_FONT_DEFAULT}）`,
+                    flatTitle: `恢复默认字号（${TERMINAL_FONT_DEFAULT}）`,
+                    icon: { sf: "arrow.counterclockwise", md: "restart_alt" },
+                    // The grid follows the font; this is where its size is worth knowing.
+                    subtitle: info ? `现在 ${info.cols} 列 × ${info.rows} 行` : undefined,
+                    onPress: () => setTerminalFontSize(TERMINAL_FONT_DEFAULT),
+                  },
+                ],
+              },
+              ...(info ? [{ title: "预览网页", icon: { sf: "globe", md: "language" } as const, section: "open", onPress: () => router.push({ pathname: "/ports", params: { cwd: info.cwd } }) }] : []),
               {
                 title: "项目文件",
                 icon: { sf: "folder", md: "folder_open" },
+                section: "open",
                 onPress: () => router.push({ pathname: "/files", params: info ? { path: info.cwd } : {} }),
               },
-              ...(info && !ended ? [{ title: "重新运行", icon: { sf: "arrow.clockwise", md: "refresh" } as const, onPress: rerun }] : []),
-              { title: ended ? "删除记录" : "关闭终端", icon: { sf: ended ? "trash" : "xmark.circle", md: ended ? "delete" : "close" }, destructive: true, onPress: close },
+              ...(info && !ended ? [{ title: "重新运行", icon: { sf: "arrow.clockwise", md: "refresh" } as const, section: "end", onPress: rerun }] : []),
+              { title: ended ? "删除记录" : "关闭终端", icon: { sf: ended ? "trash" : "xmark.circle", md: ended ? "delete" : "close" }, destructive: true, section: "end", onPress: close },
             ],
           },
         ]}
       />
       {Platform.OS === "ios" && info ? (
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 14, paddingBottom: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 6 }}>
           <Pressable
             onPress={() => {
               haptics.selection();
               router.push({ pathname: "/files", params: { path: info.cwd } });
             }}
             accessibilityRole="button"
-            accessibilityLabel={`打开目录 ${shortPath(info.cwd)}`}
+            accessibilityLabel={`打开目录 ${shortPath(info.cwd)}${branch ? `，分支 ${branch}` : ""}`}
             style={({ pressed }) => ({
               flexDirection: "row",
               alignItems: "center",
@@ -552,25 +567,14 @@ export function TerminalScreen() {
             <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500", flexShrink: 1 }]}>
               {shortPath(info.cwd)}
             </Text>
+            {/* One capsule says where the shell is: the directory and its branch. */}
+            {branch ? (
+              <>
+                <View style={{ width: StyleSheet.hairlineWidth * 2, height: 12, backgroundColor: colors.separator }} />
+                <BranchTag branch={branch} max={18} />
+              </>
+            ) : null}
           </Pressable>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            {branch ? <BranchTag branch={branch} max={18} /> : null}
-            <View
-              style={{
-                paddingHorizontal: 8,
-                height: 22,
-                borderRadius: 11,
-                borderCurve: "continuous",
-                backgroundColor: colors.fill,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ fontFamily: mono, fontSize: 10.5, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }}>
-                {info.cols}×{info.rows}
-              </Text>
-            </View>
-          </View>
         </View>
       ) : null}
       <Animated.View style={[{ flex: 1 }, lift]}>

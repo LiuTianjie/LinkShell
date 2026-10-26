@@ -262,7 +262,8 @@ function Intro({ agentName, how, quoting, disabled, onAsk }: { agentName: string
         <Text style={[type.headline, { color: colors.label }]}>{quoting ? `问 ${agentName} 这一段，不打断会话` : `问 ${agentName} 一句，不打断会话`}</Text>
         <Text style={[type.subhead, { color: colors.secondaryLabel }]}>问答不进入会话。{how}</Text>
       </View>
-      <View style={{ alignItems: "flex-start", gap: 8 }}>
+      {/* Wrapped side by side: a short question needn't take a line of its own. */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {(quoting ? QUOTE_SUGGESTIONS : SUGGESTIONS).map((question) => (
           <Pressable
             key={question}

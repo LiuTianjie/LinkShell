@@ -74,7 +74,7 @@ export const TerminalRow = memo(function TerminalRow({
 }) {
   const { link } = useConnection();
   const state = terminalState(terminal);
-  const project = showProject ? baseName(terminal.cwd) : undefined;
+  const project = showProject && !state.named ? baseName(terminal.cwd) : undefined;
   return (
     <ListRow
       leading={<TerminalTile busy={state.busy} dimmed={state.ended} />}
@@ -87,7 +87,6 @@ export const TerminalRow = memo(function TerminalRow({
       warn={state.failed}
       position={position}
       onPress={() => openTerminal(terminal.id)}
-      href={{ pathname: "/terminal/[id]", params: { id: terminal.id } }}
       accessibilityLabel={["终端", state.title, project, state.detail].filter(Boolean).join("，")}
       menu={[
         {

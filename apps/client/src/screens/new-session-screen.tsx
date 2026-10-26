@@ -52,6 +52,7 @@ function ChoiceCard({
         onPress();
       }}
       accessibilityRole="radio"
+      accessibilityLabel={note ? `${label}，${note}` : label}
       accessibilityState={{ selected, disabled }}
       style={{
         width: 78,
@@ -342,7 +343,8 @@ export function NewSessionScreen() {
             placeholderTextColor={colors.placeholder as string}
             style={[
               type.callout,
-              terminal ? { fontFamily: mono, fontSize: 15 } : null,
+              // Mono only for a typed command: the Chinese placeholder in a mono face falls back unevenly.
+              terminal && prompt ? { fontFamily: mono, fontSize: 15 } : null,
               {
                 minHeight: terminal ? 50 : 96,
                 maxHeight: 200,

@@ -27,6 +27,10 @@ export function Icon({ sf, md, size = 20, color = colors.label, weight = "regula
       weight={weight}
       animationSpec={animation}
       style={[{ width: size, height: size }, style]}
+      // Decorative: what it means is said by the control around it. VoiceOver read the symbol's own name ("Forward", "lock.shield").
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
     />
   );
 }
