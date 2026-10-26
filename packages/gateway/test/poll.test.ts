@@ -240,10 +240,13 @@ describe("HTTPS transport for the v2 relay", () => {
     const [slow, first, second] = watches;
     machine.send(slow.identity.id, { k: "data", ch: "c", box: "a".repeat(200_000) });
     machine.send(slow.identity.id, { k: "data", ch: "c", box: "a".repeat(200_000) });
+    // Polling can return after the first WebSocket frame, before the second hits the queue limit.
+    await until(() => gateway.poll.stats.lingering === 1);
     expect((await slow.exchange([], 1000)).closed).toBe("receiver too slow");
     machine.send(first.identity.id, { k: "data", ch: "c", box: "a".repeat(250_000) });
     await until(() => gateway.poll.stats.queuedBytes > 250_000);
     machine.send(second.identity.id, { k: "data", ch: "c", box: "a".repeat(250_000) });
+    await until(() => gateway.poll.stats.lingering === 2);
     expect((await second.exchange([], 1000)).closed).toBe("gateway busy");
     const delivered = await first.exchange([], 1000);
     expect(delivered.closed).toBeUndefined();
@@ -253,6 +256,7 @@ describe("HTTPS transport for the v2 relay", () => {
     expect(gateway.poll.stats.queuedBytes).toBeLessThan(10_000);
     await new Promise((resolve) => setTimeout(resolve, 400));
     machine.send(first.identity.id, { k: "data", ch: "c", box: "late" });
+    await until(() => gateway.poll.stats.lingering === 3);
     expect((await first.exchange([], 1000)).closed).toBe("receiver gone");
   });
 });
