@@ -15,6 +15,7 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
 const NO_SIDES: SideChat[] = [];
+const NEW = "new";
 
 /** How the agent answers a side question, in a line. */
 function howItAnswers(agent: string, name: string): string {
@@ -34,21 +35,19 @@ export function SideScreen() {
   const sides = useClient((state) => state.sides[id] ?? NO_SIDES);
   const online = useClient((state) => state.status === "online");
   const actions = useActions();
+  // Nothing picked shows the latest one: coming back after closing the sheet
+  // mid-answer lands on that conversation. A new one is asked for (NEW).
   const [sideId, setSideId] = useState<string | undefined>(initial);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const scroll = useRef<KeyboardAwareScrollViewRef>(null);
   const look = agentLook(session?.agent ?? "");
-  const current = sides.find((entry) => entry.sideId === sideId);
+  const current = sideId === NEW ? undefined : (sides.find((entry) => entry.sideId === sideId) ?? sides[sides.length - 1]);
 
   // What the computer has open, on arrival and after every reconnect.
   useEffect(() => {
     if (online) void actions.loadSides(id).catch(() => {});
   }, [online, actions, id]);
-  // The one picked is gone (closed elsewhere): show another, or a new one.
-  useEffect(() => {
-    if (sideId && !current && sides.length > 0) setSideId(sides[sides.length - 1]!.sideId);
-  }, [sideId, current, sides]);
   const last = current?.messages[current.messages.length - 1];
   useEffect(() => {
     const timer = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50);
@@ -84,7 +83,7 @@ export function SideScreen() {
       <SheetHeader
         title="旁支对话"
         actions={[
-          { key: "new", label: "新的旁支", icon: { sf: "plus.bubble", md: "add_comment" }, onPress: () => setSideId(undefined), disabled: !current },
+          { key: "new", label: "新的旁支", icon: { sf: "plus.bubble", md: "add_comment" }, onPress: () => setSideId(NEW), disabled: !current },
           { key: "close", label: "结束这个旁支", icon: { sf: "xmark.bin", md: "delete" }, onPress: close, disabled: !current },
         ]}
       />
@@ -96,24 +95,19 @@ export function SideScreen() {
           keyboardDismissMode="interactive"
           bottomOffset={16}
         >
-          {sides.length > 1 ? (
+          {/* Shown with even one open, so a new question never hides the one there is. */}
+          {sides.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {sides.map((entry, index) => {
-                const picked = entry.sideId === current?.sideId;
-                return (
-                  <Pressable
-                    key={entry.sideId}
-                    onPress={() => { haptics.selection(); setSideId(entry.sideId); }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: picked }}
-                    style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: picked ? colors.accentSoft : colors.fill }}
-                  >
-                    <Text numberOfLines={1} style={[type.footnote, { color: picked ? colors.accent : colors.label, fontWeight: "600", maxWidth: 160 }]}>
-                      {entry.messages[0]?.text ?? `旁支 ${index + 1}`}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+              {sides.map((entry, index) => (
+                <SideChip
+                  key={entry.sideId}
+                  label={entry.messages[0]?.text || `旁支 ${index + 1}`}
+                  picked={entry.sideId === current?.sideId}
+                  running={entry.running}
+                  onPress={() => setSideId(entry.sideId)}
+                />
+              ))}
+              <SideChip label="＋ 新的旁支" picked={!current} onPress={() => setSideId(NEW)} />
             </ScrollView>
           ) : null}
           {!current ? (
@@ -147,6 +141,20 @@ export function SideScreen() {
         </KeyboardAwareScrollView>
       </LinkBase>
     </>
+  );
+}
+
+function SideChip({ label, picked, running, onPress }: { label: string; picked: boolean; running?: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={() => { haptics.selection(); onPress(); }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: picked, busy: running }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: picked ? colors.accentSoft : colors.fill }}
+    >
+      {running ? <ActivityIndicator size="small" color={picked ? colors.accent : colors.secondaryLabel} /> : null}
+      <Text numberOfLines={1} style={[type.footnote, { color: picked ? colors.accent : colors.label, fontWeight: "600", maxWidth: 160 }]}>{label}</Text>
+    </Pressable>
   );
 }
 
