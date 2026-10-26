@@ -10,7 +10,7 @@ type Size = "small" | "medium" | "large";
 
 function fills(): Record<Variant, { background: ColorValue; foreground: ColorValue }> {
   return {
-    primary: { background: colors.accent, foreground: colors.onAccent },
+    primary: { background: colors.accentFill, foreground: colors.onAccent },
     tonal: { background: colors.fill, foreground: colors.label },
     plain: { background: "transparent", foreground: colors.accent },
     destructive: { background: colors.dangerSoft, foreground: colors.danger },

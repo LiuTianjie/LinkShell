@@ -295,7 +295,7 @@ function SignedIn() {
   return (
     <Section>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 16 }}>
-        <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.accentFill, alignItems: "center", justifyContent: "center" }}>
           <Text style={{ fontSize: 22, fontWeight: "600", color: "#ffffff" }}>{initial}</Text>
         </View>
         <View style={{ flex: 1, gap: 2 }}>

@@ -37,6 +37,8 @@ import { UsageRing } from "./usage-ring";
 import { VoiceInputBar } from "./voice-input-bar";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** How far the cards' glass shadow reaches past them (pt); the composer's side padding bounds `side`. */
+const CARD_SHADOW = { top: 10, side: 10, bottom: 14 };
 
 export interface ComposerProps {
   sessionId: string;
@@ -269,8 +271,11 @@ export function Composer(props: ComposerProps) {
     <View onLayout={props.onLayout} style={{ paddingHorizontal: 10, paddingBottom: bottomInset + 8, paddingTop: 6, gap: hasCards && cardsHeight > 0 ? 8 : 0 }}>
       {hasCards ? <KeyboardAwareScrollView
         ref={cardsScroll}
-        style={{ maxHeight: cardsHeight, flexGrow: 0 }}
-        contentContainerStyle={{ gap: 8, paddingBottom: 12 }}
+        // A scroll view clips to its rectangle, and the cards' glass shadow cut there
+        // reads as a square plate: the frame reaches past the cards by their shadow,
+        // the margins give that space back, and the layout stays where it was.
+        style={{ maxHeight: cardsHeight + CARD_SHADOW.top + CARD_SHADOW.bottom, flexGrow: 0, marginHorizontal: -CARD_SHADOW.side, marginTop: -CARD_SHADOW.top, marginBottom: -CARD_SHADOW.bottom }}
+        contentContainerStyle={{ gap: 8, paddingHorizontal: CARD_SHADOW.side, paddingTop: CARD_SHADOW.top, paddingBottom: 12 + CARD_SHADOW.bottom }}
         bottomOffset={composerCardsKeyboardOffset(measuredInputHeight)}
         // The sticky parent already sits above the keyboard; reserve only the pinned input when scrolling.
         extraKeyboardSpace={-keyboardHeight}
@@ -448,7 +453,13 @@ export function Composer(props: ComposerProps) {
       <View onLayout={(event) => setInputHeight(event.nativeEvent.layout.height)}>
       {desktopDriving && !blocked ? (
         <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
-          <ScrollView style={{ maxHeight: Math.max(0, viewport.available - bottomInset - 14) }} keyboardShouldPersistTaps="handled" bounces={false}>
+          {/* Room for the glass shadow inside the scroll view's clip, as for the cards. */}
+          <ScrollView
+            style={{ maxHeight: Math.max(0, viewport.available - bottomInset - 14) + CARD_SHADOW.top + CARD_SHADOW.bottom, marginHorizontal: -CARD_SHADOW.side, marginTop: -CARD_SHADOW.top, marginBottom: -CARD_SHADOW.bottom }}
+            contentContainerStyle={{ paddingHorizontal: CARD_SHADOW.side, paddingTop: CARD_SHADOW.top, paddingBottom: CARD_SHADOW.bottom }}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
+          >
             <TakeoverPanel onTakeover={props.onTakeover} onStop={turnActive ? stop : undefined} stopping={stopping} />
           </ScrollView>
         </Animated.View>
@@ -601,7 +612,7 @@ export function RoundButton({
   wide?: boolean;
   tone: "send" | "stop";
 }) {
-  const background = tone === "stop" ? colors.label : disabled ? colors.fillStrong : colors.accent;
+  const background = tone === "stop" ? colors.label : disabled ? colors.fillStrong : colors.accentFill;
   const foreground = tone === "stop" ? colors.plain : disabled ? colors.tertiaryLabel : colors.onAccent;
   return (
     <Pressable

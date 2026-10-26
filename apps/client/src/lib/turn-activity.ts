@@ -19,7 +19,9 @@ export function turnActivity({ session, progress, online, ready, hasPermission, 
 }): TurnActivityState | undefined {
   if (!online) return { label: "连接已断开，等待重连…", tone: "muted", animated: false };
   if (!ready) return { label: "正在同步会话…", tone: "muted", animated: true };
-  if (hasPermission || session.state === "waiting") return { label: "等待你确认或回答", tone: "waiting", animated: false };
+  // The request's own card sits right under the conversation and says it better.
+  if (hasPermission) return undefined;
+  if (session.state === "waiting") return { label: "等待你确认或回答", tone: "waiting", animated: false };
   if (progress) return { label: progress.phase === "sending" ? "正在发送…" : "已发送，等待 Agent 开始…", tone: "active", animated: true };
   if (session.state === "running") return { label: activityText(session.activity), tone: "active", animated: true };
   if (session.state === "error") return { label: "本轮执行出错", tone: "error", animated: false };

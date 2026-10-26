@@ -8,6 +8,15 @@ export function useTimelineSession(): string | undefined {
   return useContext(TimelineSession);
 }
 
+const NOTHING_WAITING: ReadonlySet<string> = new Set();
+
+/** The tool calls held for the user's permission: they wait, they don't run. */
+export const TimelineWaiting = createContext<ReadonlySet<string>>(NOTHING_WAITING);
+
+export function useTimelineWaiting(): ReadonlySet<string> {
+  return useContext(TimelineWaiting);
+}
+
 /** Opens a side conversation about a passage picked in a reply (set where the agent has side conversations). */
 export const TimelineSide = createContext<((quote: string) => void) | undefined>(undefined);
 

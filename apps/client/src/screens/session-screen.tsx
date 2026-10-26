@@ -23,7 +23,7 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
-import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide } from "@/components/timeline/context";
+import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting } from "@/components/timeline/context";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
@@ -155,6 +155,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
     else if (sideBeside) workspace?.show("side");
     else router.push({ pathname: "/session/[id]/side", params: sideId ? { id, side: sideId } : { id } });
   };
+  const permissions = view?.permissions;
+  const waitingCalls = useMemo(() => new Set((permissions ?? []).flatMap((request) => (request.toolCallId ? [request.toolCallId] : []))), [permissions]);
   // A passage picked in a reply: a new side conversation about it.
   const askAboutQuote = agentInfo?.capabilities.side && online ? (quote: string) => { quoteForSide(id, quote); openSide(); } : undefined;
   const commandControls = useSessionCommands(id, openSide);
@@ -438,43 +440,36 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
             icon: { sf: "ellipsis", md: "more_vert" },
             label: "更多",
             items: [
+              // Ask, steer, look, keep: the menu reads in groups, the way iOS draws them. Commands
+              // (the composer's +) and stopping (its stop button) are where the hand already is.
               ...(agentInfo?.capabilities.side && online
-                ? [{ title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => openSide() }]
+                ? [{ section: "ask", title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", subtitle: "问一句，不打断这一轮", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => openSide() }]
                 : []),
-              { title: "命令", icon: { sf: "command", md: "terminal" }, onPress: () => router.push({ pathname: "/session/[id]/commands", params: { id } }) },
-              { title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
-              ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
-              { title: "显示电脑画面", icon: { sf: "desktopcomputer", md: "desktop_windows" }, onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown") },
-              ...(turnActive
-                ? [{ title: "停止这一轮", icon: { sf: "stop.circle", md: "stop_circle" } as const, destructive: true, onPress: () => void guard(() => actions.cancel(id), "停止失败") }]
+              ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ section: "ask", title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
+              { section: "steer", title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
+              ...(canFork
+                ? [{ section: "steer", title: "分叉会话", icon: { sf: "arrow.triangle.branch", md: "fork_right" } as const, onPress: () => askFork() }]
                 : []),
               ...(tier === "handoff" && driver === "remote"
-                ? [{ title: "交还电脑", icon: { sf: "laptopcomputer", md: "laptop_mac" } as const, onPress: () => void guard(() => actions.release(id), "交还失败") }]
+                ? [{ section: "steer", title: "交还电脑", icon: { sf: "laptopcomputer", md: "laptop_mac" } as const, onPress: () => void guard(() => actions.release(id), "交还失败") }]
                 : []),
-              ...(changeCount > 0
-                ? [
-                    {
-                      title: `查看改动（${changeCount} 个文件）`,
-                      icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
-                      onPress: () => onOpenPanel ? onOpenPanel("changes") : workspace ? workspace.show("changes") : router.push({ pathname: "/session/[id]/changes", params: { id } }),
-                    },
-                  ]
-                : []),
-              ...(canFork
-                ? [{ title: "分叉会话", icon: { sf: "arrow.triangle.branch", md: "fork_right" } as const, onPress: () => askFork() }]
-                : []),
+              // The changes have their own button in the bar.
+              { section: "look", title: "显示电脑画面", icon: { sf: "desktopcomputer", md: "desktop_windows" }, onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown") },
               {
+                section: "look",
                 title: "预览网页",
                 icon: { sf: "globe", md: "language" },
                 onPress: () => onOpenPanel ? onOpenPanel("preview") : workspace ? workspace.show("preview") : router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
               },
               {
+                section: "look",
                 title: "项目文件",
                 icon: { sf: "folder", md: "folder_open" },
                 onPress: () => router.push({ pathname: "/files", params: { path: summary.cwd } }),
               },
-              { title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(summary) },
+              { section: "keep", title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(summary) },
               {
+                section: "keep",
                 title: summary.archived ? "取消归档" : "归档",
                 icon: summary.archived ? { sf: "tray.and.arrow.up", md: "unarchive" } : { sf: "archivebox", md: "archive" },
                 onPress: () => {
@@ -484,22 +479,30 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                 },
               },
               {
-                title: "复制会话 ID",
+                section: "keep",
+                title: "复制",
                 icon: { sf: "doc.on.doc", md: "content_copy" },
-                onPress: () => {
-                  void Clipboard.setStringAsync(summary.nativeId);
-                  haptics.success();
-                },
+                children: [
+                  {
+                    title: "会话 ID",
+                    icon: { sf: "number", md: "tag" },
+                    onPress: () => {
+                      void Clipboard.setStringAsync(summary.nativeId);
+                      haptics.success();
+                    },
+                  },
+                  {
+                    title: "项目路径",
+                    icon: { sf: "folder", md: "folder" },
+                    onPress: () => {
+                      void Clipboard.setStringAsync(summary.cwd);
+                      haptics.success();
+                    },
+                  },
+                ],
               },
               {
-                title: "复制项目路径",
-                icon: { sf: "folder", md: "folder" },
-                onPress: () => {
-                  void Clipboard.setStringAsync(summary.cwd);
-                  haptics.success();
-                },
-              },
-              {
+                section: "keep",
                 title: "删除",
                 icon: { sf: "trash", md: "delete" },
                 destructive: true,
@@ -518,6 +521,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <TimelineQuestions.Provider value={questions}>
       <TimelineSide.Provider value={askAboutQuote}>
+      <TimelineWaiting.Provider value={waitingCalls}>
       <Timeline
         computerPreview
         previewHeaderConsumed={headerConsumed}
@@ -532,6 +536,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onScroll={onScroll}
         earlier={earlier}
       />
+      </TimelineWaiting.Provider>
       </TimelineSide.Provider>
       </TimelineQuestions.Provider>
       </TimelineFork.Provider>

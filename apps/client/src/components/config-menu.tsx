@@ -4,12 +4,12 @@ import type { SessionConfigOption } from "@linkshell/wire";
 import { Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
-import { chipLabel, isRisky, isToggle, modelChipLabel, optionLabel, valueLabel } from "@/lib/labels";
+import { isRisky, isToggle, modelChipLabel, optionLabel, valueLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";
 
-/** A compact chip that opens the platform's native menu for one session setting. */
+/** The value of one session setting, at the end of its row; a tap opens the platform's menu of choices. */
 export function ConfigMenu({
   option,
   onChange,
@@ -20,7 +20,6 @@ export function ConfigMenu({
   disabled?: boolean;
 }) {
   const risky = option.category === "mode" && isRisky(option.current);
-  const tint = risky ? colors.waiting : colors.label;
   // One line per choice: its name, and a check on the current one. Descriptions made a menu of six fill half the screen.
   const actions: MenuAction[] = option.values.map((value) => ({
     id: value.value,
@@ -39,40 +38,21 @@ export function ConfigMenu({
         if (nativeEvent.event !== option.current) onChange(nativeEvent.event);
       }}
     >
-      {option.category === "mode" ? (
-        // Permissions are a glance, not a label: a shield, orange when the agent can do anything.
-        <View
-          accessibilityRole="button"
-          accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            backgroundColor: risky ? colors.waitingSoft : undefined,
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: disabled ? 0.5 : 1,
-          }}
-        >
-          <Icon
-            sf={risky ? "exclamationmark.shield.fill" : "lock.shield"}
-            md={risky ? "gpp_maybe" : "shield"}
-            size={15}
-            color={risky ? colors.waiting : colors.secondaryLabel}
-          />
-        </View>
-      ) : (
-        <View
-          accessibilityRole="button"
-          accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
-          style={{ minHeight: 44, paddingVertical: 7, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 3, opacity: disabled ? 0.5 : 1 }}
-        >
-          <Text numberOfLines={1} style={[type.footnote, { color: tint, fontWeight: option.category === "model" ? "600" : "500", maxWidth: 150 }]}>
-            {option.category === "model" ? modelChipLabel(option) : chipLabel(option)}
-          </Text>
-          <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />
-        </View>
-      )}
+      {/* One shape for every setting: the value on the right, a shield before a permission mode (orange when the agent can do anything). */}
+      <View
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`${optionLabel(option)}：${valueLabel(option, option.current)}`}
+        style={{ minHeight: 44, paddingVertical: 7, paddingLeft: 6, flexDirection: "row", alignItems: "center", gap: 5, opacity: disabled ? 0.5 : 1 }}
+      >
+        {option.category === "mode" ? (
+          <Icon sf={risky ? "exclamationmark.shield.fill" : "lock.shield"} md={risky ? "gpp_maybe" : "shield"} size={14} color={risky ? colors.waiting : colors.secondaryLabel} />
+        ) : null}
+        <Text numberOfLines={1} style={[type.subhead, { color: risky ? colors.waiting : colors.secondaryLabel, maxWidth: 170 }]}>
+          {option.category === "model" ? modelChipLabel(option) : valueLabel(option, option.current)}
+        </Text>
+        <Icon sf="chevron.up.chevron.down" md="unfold_more" size={11} color={colors.tertiaryLabel} weight="semibold" />
+      </View>
     </AppMenu>
   );
 }

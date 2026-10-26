@@ -268,7 +268,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
             <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>{name}</Text>
             <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>{file ? `${fileSize(file.size)} · ${relativeTime(file.modifiedAt)}` : shortPath(directory)}</Text>
           </View>
-          <AppMenu actions={items.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf }))} onPressAction={({ nativeEvent }) => items[Number(nativeEvent.event)]?.onPress()}>
+          <AppMenu actions={items.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf }))} onPressAction={({ nativeEvent }) => items[Number(nativeEvent.event)]?.onPress?.()}>
             <View accessibilityRole="button" accessibilityLabel="文件操作" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="ellipsis" md="more_vert" size={20} color={colors.accent} /></View>
           </AppMenu>
         </View>

@@ -1,11 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { Button } from "@/components/button";
-import { Alert, Platform, ScrollView, Switch, View } from "react-native";
+import { Alert, Platform, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { SheetHeader } from "@/components/sheet-header";
 import { ConfigMenu } from "@/components/config-menu";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
-import { optionLabel, valueLabel } from "@/lib/labels";
+import { optionLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
@@ -26,10 +26,14 @@ export function SessionSettingsScreen() {
   return <ScrollView contentContainerStyle={{ padding: 16, paddingTop: Platform.OS === "android" ? 24 : 16, gap: 12 }} keyboardShouldPersistTaps="handled">
     <SheetHeader title="会话设置" />
     {heldElsewhere ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>会话同时开在电脑的另一个 Codex 里，修改将同步到下一轮对话。</Text> : null}
-    {options.length ? options.map((option) => <View key={option.id} style={{ padding: 12, borderRadius: 16, backgroundColor: colors.sheetCard, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <View style={{ flex: 1, gap: 4 }}><Text style={[type.body, { color: colors.label }]}>{optionLabel(option)}</Text>{option.description ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{option.description}</Text> : option.category === "mode" ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{valueLabel(option, option.current)}</Text> : null}</View>
-      {option.type === "boolean" ? <Switch accessibilityLabel={optionLabel(option)} disabled={!online} value={option.current === "on"} onValueChange={(value) => void actions.setConfig(id, option.id, value ? "on" : "off").catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} /> : <ConfigMenu option={option} disabled={!online} onChange={(value) => void actions.setConfig(id, option.id, value).catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} />}
-    </View>) : <Text style={[type.body, { color: colors.secondaryLabel }]}>Agent 尚未报告会话设置，接管会话后会自动更新。</Text>}
+    {/* One grouped list, as Settings draws one: a label and its value per row. */}
+    {options.length ? <View style={{ borderRadius: 16, borderCurve: "continuous", backgroundColor: colors.sheetCard, overflow: "hidden" }}>
+      {options.map((option, index) => <View key={option.id} style={{ minHeight: 52, paddingLeft: 16, paddingRight: option.type === "boolean" ? 16 : 10, paddingVertical: 4, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: index ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.separator }}>
+        <View style={{ flex: 1, gap: 2, paddingVertical: 8 }}><Text style={[type.body, { color: colors.label }]}>{optionLabel(option)}</Text>{option.description ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{option.description}</Text> : null}</View>
+        {option.type === "boolean" ? <Switch accessibilityLabel={optionLabel(option)} disabled={!online} value={option.current === "on"} onValueChange={(value) => void actions.setConfig(id, option.id, value ? "on" : "off").catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} /> : <ConfigMenu option={option} disabled={!online} onChange={(value) => void actions.setConfig(id, option.id, value).catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} />}
+      </View>)}
+    </View> : <Text style={[type.body, { color: colors.secondaryLabel }]}>Agent 尚未报告会话设置，接管会话后会自动更新。</Text>}
+    <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>改动从下一条消息开始生效。</Text>
     {usage?.tokens ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>输入 {usage.tokens.inputTokens.toLocaleString()} · 输出 {usage.tokens.outputTokens.toLocaleString()} · 总计 {usage.tokens.totalTokens.toLocaleString()} tokens</Text> : null}
     {usage?.cost ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>累计费用 {usage.cost.currency} {usage.cost.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</Text> : null}
     {acp && summary ? <Button title="会话工具与附加目录" onPress={() => router.push({ pathname: "/acp", params: { agent: summary.agent, sessionId: id } })} /> : null}

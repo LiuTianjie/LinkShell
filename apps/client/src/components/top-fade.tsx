@@ -2,7 +2,7 @@ import { useColorScheme, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 /** Lets content fade out under a floating header instead of colliding with it. */
-export function TopFade({ height, color: override }: { height: number; color?: string }) {
+export function TopFade({ height, color: override, solid = 0.6 }: { height: number; color?: string; /** How much of the height, from the top, stays opaque. */ solid?: number }) {
   const dark = useColorScheme() === "dark";
   const color = override ?? (dark ? "#000000" : "#ffffff");
   return (
@@ -11,7 +11,7 @@ export function TopFade({ height, color: override }: { height: number; color?: s
         <Defs>
           <LinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={color} stopOpacity={1} />
-            <Stop offset="0.6" stopColor={color} stopOpacity={0.9} />
+            <Stop offset={solid} stopColor={color} stopOpacity={1} />
             <Stop offset="1" stopColor={color} stopOpacity={0} />
           </LinearGradient>
         </Defs>

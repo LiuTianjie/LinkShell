@@ -30,7 +30,7 @@ export function SheetHeader({ title, actions = [], onClose = dismiss }: { title:
           </Stack.Toolbar>
           <Stack.Toolbar placement="right">
             {actions.map((action) => (
-              <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} disabled={action.disabled} variant={action.prominent ? "done" : "plain"} onPress={action.onPress}>{action.label}</Stack.Toolbar.Button>
+              <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} disabled={action.disabled} variant={action.prominent ? "done" : "plain"} tintColor={action.prominent ? colors.accentFill : undefined} onPress={action.onPress}>{action.label}</Stack.Toolbar.Button>
             ))}
           </Stack.Toolbar>
         </>

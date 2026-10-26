@@ -11,8 +11,9 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
+import { GLYPH } from "./tool-call";
 import { AgentInbox } from "./agent-inbox";
-import { useTimelineFork, useTimelineQuestions, useTimelineSide } from "./context";
+import { useTimelineFork, useTimelineQuestions, useTimelineSide, useTimelineWaiting } from "./context";
 import { automationMessage, cleanAgentHeartbeatText, questionReplies, userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
@@ -201,7 +202,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
         hitSlop={4}
         style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
       >
-        <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={14} color={copied ? colors.ok : colors.tertiaryLabel} />
+        <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={15} color={copied ? colors.ok : colors.secondaryLabel} />
       </Pressable>
       {fork ? (
         <Pressable
@@ -214,7 +215,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
           hitSlop={4}
           style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
         >
-          <Icon sf="arrow.triangle.branch" md="fork_right" size={14} color={colors.tertiaryLabel} />
+          <Icon sf="arrow.triangle.branch" md="fork_right" size={15} color={colors.secondaryLabel} />
         </Pressable>
       ) : null}
     </View>
@@ -237,14 +238,18 @@ export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) 
         }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", minHeight: 44 }}
+        // A tool row's height, so a run of steps keeps one rhythm; the slop keeps the target 44.
+        hitSlop={8}
+        style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", minHeight: 28 }}
       >
-        {/* One glyph: a spinner while it thinks, the sparkle once it's done. */}
-        {item.streaming ? (
-          <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.75 }], width: 13, height: 13 }} />
-        ) : (
-          <Icon sf="sparkles" md="auto_awesome" size={13} color={colors.tertiaryLabel} />
-        )}
+        {/* One glyph: a spinner while it thinks, the sparkle once it's done; in the tool rows' glyph column, so the run lines up. */}
+        <View style={{ width: GLYPH, alignItems: "center" }}>
+          {item.streaming ? (
+            <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.75 }], width: 13, height: 13 }} />
+          ) : (
+            <Icon sf="sparkles" md="auto_awesome" size={14} color={colors.secondaryLabel} />
+          )}
+        </View>
         <Text style={[type.subhead, { flexShrink: 1, color: colors.secondaryLabel }]}>{label}</Text>
         {item.streaming ? null : (
           <Animated.View
@@ -260,7 +265,7 @@ export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) 
         )}
       </Pressable>
       {open ? (
-        <View style={{ borderLeftWidth: 2, borderLeftColor: colors.separator, paddingLeft: 12, marginLeft: 5 }}>
+        <View style={{ borderLeftWidth: 2, borderLeftColor: colors.separator, paddingLeft: 12, marginLeft: GLYPH / 2 - 1 }}>
           <Markdown text={item.text.trim()} variant="thought" />
         </View>
       ) : null}
@@ -269,6 +274,8 @@ export const Thought = memo(function Thought({ item }: { item: Of<"thought"> }) 
 });
 
 export const PlanCard = memo(function PlanCard({ item, active }: { item: Of<"plan">; active: boolean }) {
+  // While the agent waits for the user, the step it is on waits too: no spinner.
+  const held = useTimelineWaiting().size > 0;
   const done = item.entries.filter((entry) => entry.status === "completed").length;
   const total = item.entries.length;
   return (
@@ -301,6 +308,8 @@ export const PlanCard = memo(function PlanCard({ item, active }: { item: Of<"pla
               <View style={{ width: 18, height: 20, alignItems: "center", justifyContent: "center" }}>
                 {complete ? (
                   <Icon sf="checkmark.circle.fill" md="check_circle" size={16} color={colors.ok} />
+                ) : current && active && held ? (
+                  <Icon sf="pause.circle.fill" md="pause_circle" size={16} color={colors.waiting} />
                 ) : current && active ? (
                   <ActivityIndicator size="small" color={colors.accent} style={{ transform: [{ scale: 0.75 }] }} />
                 ) : (

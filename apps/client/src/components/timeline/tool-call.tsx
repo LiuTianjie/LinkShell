@@ -7,10 +7,12 @@ import Animated, { cubicBezier } from "react-native-reanimated";
 import { describeTool, type FileChange } from "@/lib/describe";
 import { baseName, duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Attachments } from "./attachments";
+import { useTimelineWaiting } from "./context";
 import { SubagentCard } from "./subagent";
 import { WorkflowCard } from "../workflow";
 
@@ -189,7 +191,8 @@ export function DiffView({
 /** Width of the glyph column; bodies indent to the text after it. */
 export const GLYPH = 18;
 
-function StatusGlyph({ status }: { status: ToolItem["status"] }) {
+function StatusGlyph({ status, waiting }: { status: ToolItem["status"]; waiting: boolean }) {
+  if (waiting) return <Text style={[type.footnote, { color: colors.waiting, fontWeight: "600" }]}>等你允许</Text>;
   if (status === "in_progress" || status === "pending") return <ActivityIndicator size="small" color={colors.secondaryLabel} />;
   if (status === "failed") return <Icon sf="xmark.circle.fill" md="cancel" size={15} color={colors.danger} />;
   return null;
@@ -206,7 +209,10 @@ function ToolRow({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(false);
   const described = describeTool(item);
   const output = outputOf(item);
+  const held = useTimelineWaiting().has(item.id);
   const running = item.status === "in_progress" || item.status === "pending";
+  // Held for permission, it isn't running: no spinner, the waiting colour instead.
+  const waiting = running && held;
   const failed = item.status === "failed";
   const media = mediaOf(item);
   const images = media.filter((block) => block.type !== "resource_link");
@@ -218,7 +224,7 @@ function ToolRow({ item }: { item: ToolItem }) {
   const hasBody = (collapsedImages && images.length > 0) || described.changes.length > 0 || !!output || links.length > 0 || params.length > 0 || (terminal && !output);
   const added = described.changes.reduce((sum, c) => sum + c.added, 0);
   const removed = described.changes.reduce((sum, c) => sum + c.removed, 0);
-  const tone = failed ? colors.danger : running ? colors.running : colors.secondaryLabel;
+  const tone = failed ? colors.danger : waiting ? colors.waiting : running ? colors.running : colors.secondaryLabel;
 
   return (
     <View style={{ gap: 6 }}>
@@ -251,14 +257,14 @@ function ToolRow({ item }: { item: ToolItem }) {
         </Text>
         {added || removed ? (
           <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
-            <Text style={{ color: colors.diffAddText }}>+{added}</Text> <Text style={{ color: colors.diffDelText }}>−{removed}</Text>
+            <DiffStat added={added} removed={removed} />
           </Text>
         ) : exitCode !== undefined ? (
           <Text style={[type.footnote, { color: colors.danger, fontVariant: ["tabular-nums"] }]}>退出码 {exitCode}</Text>
         ) : item.endedTs && item.endedTs - item.ts >= 2000 ? (
           <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{duration(item.endedTs - item.ts)}</Text>
         ) : null}
-        {exitCode === undefined ? <StatusGlyph status={item.status} /> : null}
+        {exitCode === undefined ? <StatusGlyph status={item.status} waiting={waiting} /> : null}
         {hasBody && !running ? (
           <Animated.View
             style={{
@@ -280,7 +286,8 @@ function ToolRow({ item }: { item: ToolItem }) {
       ) : null}
 
       {open ? (
-        <View style={{ marginLeft: GLYPH + 8, gap: 8 }}>
+        // Room under an opened body, so the next step doesn't sit on it.
+        <View style={{ marginLeft: GLYPH + 8, gap: 8, paddingBottom: 6 }}>
           {params.length ? <ParamsBlock entries={params} prose={item.detail?.type === "question"} /> : null}
           {described.changes.map((change) => (
             <View key={change.path} style={{ gap: 4 }}>

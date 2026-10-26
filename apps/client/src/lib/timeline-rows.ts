@@ -4,7 +4,7 @@ import { clockTime } from "./format";
 export type Step = Extract<TimelineItem, { kind: "tool" | "thought" }>;
 
 export type Row =
-  | { type: "item"; key: string; item: TimelineItem; gap: number; /** The agent's reply that ends its turn. */ last?: boolean }
+  | { type: "item"; key: string; item: TimelineItem; gap: number; /** The agent's reply that ends its turn. */ last?: boolean; /** A step of an opened fold: drawn inside it. */ nested?: boolean }
   | { type: "steps"; key: string; steps: Step[]; open: boolean; gap: number }
   | { type: "time"; key: string; label: string };
 
@@ -23,8 +23,9 @@ export function visible(item: TimelineItem): boolean {
 
 type Rhythm = TimelineItem["kind"] | "card";
 
-/** Sub-agent cards space like cards, not like one-line tool rows. */
+/** Sub-agent cards space like cards, not like one-line tool rows; a thought is a step like a tool call. */
 function rhythmOf(item: TimelineItem): Rhythm {
+  if (item.kind === "thought") return "tool";
   return item.kind === "tool" && item.detail?.type === "subagent" && item.detail.action === "spawn" ? "card" : item.kind;
 }
 
@@ -86,9 +87,9 @@ export function buildRows(all: TimelineItem[], now: number, open: ReadonlySet<st
   let previousTs = 0;
   let run: Step[] = [];
 
-  const push = (item: TimelineItem) => {
+  const push = (item: TimelineItem, nested = false) => {
     const rhythm = rhythmOf(item);
-    const row: Extract<Row, { type: "item" }> = { type: "item", key: item.id, item, gap: gapBetween(previousKind, rhythm) };
+    const row: Extract<Row, { type: "item" }> = { type: "item", key: item.id, item, gap: gapBetween(previousKind, rhythm), ...(nested ? { nested } : {}) };
     rows.push(row);
     if (item.kind === "user") endTurn();
     else if (item.kind === "agent") reply = row;
@@ -102,7 +103,7 @@ export function buildRows(all: TimelineItem[], now: number, open: ReadonlySet<st
       rows.push({ type: "steps", key, steps: run, open: expanded, gap: gapBetween(previousKind, "tool") });
       previousKind = "tool";
       previousTs = run[run.length - 1]!.ts;
-      if (expanded) for (const step of run) push(step);
+      if (expanded) for (const step of run) push(step, true);
     } else {
       for (const step of run) push(step);
     }

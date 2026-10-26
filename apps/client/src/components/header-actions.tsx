@@ -11,9 +11,31 @@ type Glyph = Pick<IconProps, "sf" | "md">;
 
 export interface HeaderMenuItem {
   title: string;
+  /** A line under the title, for an action whose name alone doesn't say what it does. */
+  subtitle?: string;
   icon: Glyph;
   destructive?: boolean;
-  onPress: () => void;
+  /** Items sharing one, next to each other, are drawn as one group between separators (iOS). */
+  section?: string;
+  /** A submenu of these instead of an action (iOS); Android lists them in place. */
+  children?: HeaderMenuItem[];
+  onPress?: () => void;
+}
+
+/** Submenus spelled out in place, for a menu that has none. */
+function flat(items: HeaderMenuItem[]): HeaderMenuItem[] {
+  return items.flatMap((item) => item.children?.map((child) => ({ ...child, title: `${item.title}${child.title}` })) ?? [item]);
+}
+
+/** Consecutive items of one section, in order. */
+function sections(items: HeaderMenuItem[]): HeaderMenuItem[][] {
+  const out: HeaderMenuItem[][] = [];
+  for (const item of items) {
+    const last = out[out.length - 1];
+    if (last && last[0]!.section === item.section) last.push(item);
+    else out.push([item]);
+  }
+  return out;
 }
 
 export type HeaderAction =
@@ -49,10 +71,22 @@ export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
           ) : (
             <Stack.Toolbar.Menu key={action.key} icon={action.icon.sf} accessibilityLabel={action.label}>
               <Stack.Toolbar.Label>{action.label}</Stack.Toolbar.Label>
-              {action.items.map((item) => (
-                <Stack.Toolbar.MenuAction key={item.title} icon={item.icon.sf} destructive={item.destructive} onPress={item.onPress}>
-                  {item.title}
-                </Stack.Toolbar.MenuAction>
+              {sections(action.items).map((group) => (
+                <Stack.Toolbar.Menu key={group[0]!.section ?? group[0]!.title} inline>
+                  {group.map((item) => item.children ? (
+                    <Stack.Toolbar.Menu key={item.title} icon={item.icon.sf} title={item.title}>
+                      {item.children.map((child) => (
+                        <Stack.Toolbar.MenuAction key={child.title} icon={child.icon.sf} destructive={child.destructive} onPress={child.onPress}>
+                          {child.title}
+                        </Stack.Toolbar.MenuAction>
+                      ))}
+                    </Stack.Toolbar.Menu>
+                  ) : (
+                    <Stack.Toolbar.MenuAction key={item.title} icon={item.icon.sf} subtitle={item.subtitle} destructive={item.destructive} onPress={item.onPress}>
+                      {item.title}
+                    </Stack.Toolbar.MenuAction>
+                  ))}
+                </Stack.Toolbar.Menu>
               ))}
             </Stack.Toolbar.Menu>
           ),
@@ -116,13 +150,13 @@ function MaterialActions({ actions }: { actions: HeaderAction[] }) {
         ) : (
           <AppMenu
             key={action.key}
-            actions={action.items.map((item, index) => ({
+            actions={flat(action.items).map((item, index) => ({
               id: String(index),
               title: item.title,
               attributes: { destructive: item.destructive },
             }))}
             onOpenMenu={() => haptics.selection()}
-            onPressAction={({ nativeEvent }) => action.items[Number(nativeEvent.event)]?.onPress()}
+            onPressAction={({ nativeEvent }) => flat(action.items)[Number(nativeEvent.event)]?.onPress?.()}
             shouldOpenOnLongPress={false}
           >
             <IconButton icon={{ sf: action.icon.sf, md: "more_vert" }} label={action.label} />

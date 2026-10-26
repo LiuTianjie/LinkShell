@@ -183,7 +183,7 @@ export function NewSessionScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <SheetHeader title="新会话" actions={[{ key: "start", label: terminal ? "打开终端" : "开始", icon: { sf: "play.fill", md: "play_arrow" }, onPress: () => void start(), disabled: !ready, prominent: true }]} />
+      <SheetHeader title="新会话" actions={[{ key: "start", label: terminal ? "打开终端" : "开始", icon: { sf: "arrow.up", md: "arrow_upward" }, onPress: () => void start(), disabled: !ready, prominent: true }]} />
 
       {/* Wrapped: a sheet stretches a scroll view that's a direct child of the screen over the whole sheet. */}
       <View style={{ flex: 1, overflow: "hidden" }}>

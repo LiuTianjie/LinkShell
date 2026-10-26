@@ -101,7 +101,8 @@ export default function RootLayout() {
                 />
                 <Stack.Screen
                   name="session/[id]/settings"
-                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.7, 0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                  // A few rows: the sheet is as tall as they are.
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: "fitToContents", sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
                 />
                 <Stack.Screen
                   name="new"

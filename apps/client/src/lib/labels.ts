@@ -91,12 +91,6 @@ export function isRisky(value: string): boolean {
   return value === "full-access" || value === "bypassPermissions" || value === "dontAsk";
 }
 
-/** Compact chip text: the value, with a prefix where the value alone is ambiguous. */
-export function chipLabel(option: SessionConfigOption): string {
-  const value = valueLabel(option, option.current);
-  return option.category === "effort" ? `推理 ${value}` : value;
-}
-
 /** The model as a chip shows it: what "default" resolves to, without the word. */
 export function modelChipLabel(option: SessionConfigOption): string {
   const current = option.values.find((v) => v.value === option.current);

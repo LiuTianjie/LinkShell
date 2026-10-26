@@ -13,7 +13,7 @@ import { type } from "@/theme/type";
 import { Icon } from "../icon";
 import { AgentMessage, DriverChange, ErrorCard, Notice, PermissionResult, PlanCard, Thought, TimeSeparator, TurnEnd, UserMessage } from "./items";
 import { StepsSummary } from "./steps";
-import { ToolCall } from "./tool-call";
+import { GLYPH, ToolCall } from "./tool-call";
 import { FloatingComputerUse } from "../computer-use-preview";
 import { computerUseTopInset } from "@/lib/computer-use";
 import type { TurnActivityState } from "@/lib/turn-activity";
@@ -305,6 +305,14 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
         case "permission-result":
           content = <PermissionResult item={item} />;
           break;
+      }
+      // An opened fold's steps hang off it: indented under its glyph, along a rule, so it's clear where the run ends.
+      if (row.nested) {
+        return (
+          <View style={{ paddingHorizontal: 16 }}>
+            <View style={{ marginLeft: GLYPH / 2, paddingLeft: GLYPH / 2 + 4, paddingTop: row.gap, borderLeftWidth: 1.5, borderLeftColor: colors.separator }}>{content}</View>
+          </View>
+        );
       }
       return <View style={{ paddingHorizontal: 16, paddingTop: row.gap }}>{content}</View>;
     },

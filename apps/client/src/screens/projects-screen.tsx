@@ -53,6 +53,11 @@ function ProjectCard({ project, now }: { project: ProjectSummary; now: number })
   );
 }
 
+function parentOf(path: string): string {
+  const cut = path.replace(/\/+$/, "").lastIndexOf("/");
+  return cut > 0 ? path.slice(0, cut) : path;
+}
+
 function ProjectRow({ project, position, now }: { project: ProjectSummary; position: RowPosition; now: number }) {
   return (
     <ListRow
@@ -60,7 +65,8 @@ function ProjectRow({ project, position, now }: { project: ProjectSummary; posit
       title={project.name}
       titleTag={project.branch ? <BranchTag branch={project.branch} size={13} max={20} /> : undefined}
       time={relativeTime(project.lastActiveAt, now)}
-      detail={`${shortPath(project.cwd)} · ${project.sessionCount} 个会话`}
+      // The folder it is in, not its own name again: enough to tell two of one name apart.
+      detail={`${parentOf(shortPath(project.cwd))} · ${project.sessionCount} 个会话`}
       position={position}
       onPress={() => router.push({ pathname: "/projects/detail", params: { cwd: project.cwd } })}
       accessibilityLabel={`${project.name}，${project.sessionCount} 个会话`}
@@ -134,7 +140,8 @@ export function ProjectsScreen() {
           </View>
         )}
       </ScrollView>
-      {Platform.OS !== "ios" ? <StatusBarFade /> : null}
+      {/* Without a native bar (iOS draws one only beside a side toolbar), content would run under the clock. */}
+      {Platform.OS !== "ios" || inlineControls ? <StatusBarFade /> : null}
     </>
   );
 }

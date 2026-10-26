@@ -11,6 +11,7 @@ import { useActions, useClient } from "@/lib/client";
 import { fileChanges, type FileChange } from "@/lib/describe";
 import { baseName, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -115,7 +116,7 @@ function FileRow({
           </Text>
         </View>
         <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
-          <Text style={{ color: colors.diffAddText }}>+{entry.added}</Text> <Text style={{ color: colors.diffDelText }}>−{entry.removed}</Text>
+          <DiffStat added={entry.added} removed={entry.removed} />
         </Text>
         <Icon sf={open ? "chevron.up" : "chevron.down"} md={open ? "expand_less" : "expand_more"} size={12} color={colors.tertiaryLabel} />
       </Pressable>
@@ -235,8 +236,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
           <>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 4 }}>
               <Text style={[type.subhead, { color: colors.secondaryLabel }]}>
-                {files.length} 个文件 · <Text style={{ color: colors.diffAddText, fontWeight: "600" }}>+{added}</Text>{" "}
-                <Text style={{ color: colors.diffDelText, fontWeight: "600" }}>−{removed}</Text>
+                {files.length} 个文件{added || removed ? " · " : ""}<Text style={{ fontWeight: "600" }}><DiffStat added={added} removed={removed} /></Text>
               </Text>
               <Text style={[type.caption, { color: colors.tertiaryLabel }]}>点击任意代码行添加修改批注</Text>
             </View>

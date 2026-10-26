@@ -52,6 +52,8 @@ const nativeColors = {
   fillStrong: system(Color.ios.secondarySystemFill, "fillStrong", "#e4e4eb"),
 
   accent: brand("accent"),
+  /** Behind white text: dark mode's accent is light enough for text on black, too light under it. */
+  accentFill: brand("accentFill"),
   onAccent: "#ffffff",
   accentSoft: brand("accentSoft"),
 

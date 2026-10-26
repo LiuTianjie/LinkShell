@@ -200,7 +200,7 @@ export function VoiceInputBar({
               width: 38,
               height: 38,
               borderRadius: 19,
-              backgroundColor: hasText ? colors.accent : colors.fillStrong,
+              backgroundColor: hasText ? colors.accentFill : colors.fillStrong,
               alignItems: "center",
               justifyContent: "center",
               transform: [{ scale: pressed ? 0.94 : 1 }],

@@ -113,5 +113,6 @@ export function StatusBarFade() {
   if (Platform.OS !== "ios") {
     return <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.background }} />;
   }
-  return <TopFade height={insets.top + 18} color={dark ? "#000000" : "#f2f2f7"} />;
+  // Opaque over the whole status bar, so nothing reads beside the clock; the fade is below it.
+  return <TopFade height={insets.top + 22} solid={insets.top / (insets.top + 22)} color={dark ? "#000000" : "#f2f2f7"} />;
 }

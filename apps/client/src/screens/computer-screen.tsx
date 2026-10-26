@@ -13,6 +13,7 @@ import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
 import { useAccount } from "@/lib/account";
+import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
 import { relativeTime } from "@/lib/format";
@@ -338,29 +339,30 @@ function ComputerPanel({ title, children, expanded = true, onToggle, onAdd, deta
   onAdd?: () => void;
   detail?: string;
 }) {
+  // The heading sits above the card, as 预览 and 网关 do: one kind of section on the page.
   const heading = (
     <>
-      <Text accessibilityRole="header" style={{ flex: 1, fontSize: 22, lineHeight: 28, fontWeight: "700", color: colors.label }}>{title}</Text>
-      {detail ? <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{detail}</Text> : null}
+      <Text accessibilityRole="header" style={{ flex: 1, fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.secondaryLabel }}>{title}</Text>
+      {detail ? <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{detail}</Text> : null}
     </>
   );
-  const control = (icon: ReactNode) => <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>{icon}</View>;
+  const control = (icon: ReactNode) => <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>{icon}</View>;
   return (
-    <View style={{ backgroundColor: colors.card, borderRadius: 24, borderCurve: "continuous", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }}>
+    <View style={{ gap: 8 }}>
       {onToggle ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "收起" : "展开"}${title}`} accessibilityState={{ expanded }} onPress={onToggle} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, marginBottom: 6, opacity: pressed ? 0.6 : 1 })}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "收起" : "展开"}${/^[A-Za-z]/.test(title) ? " " : ""}${title}`} accessibilityState={{ expanded }} onPress={onToggle} hitSlop={6} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingHorizontal: 6, opacity: pressed ? 0.6 : 1 })}>
           {heading}
-          {control(<Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={16} color={colors.label} />)}
+          {control(<Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={13} color={colors.secondaryLabel} weight="semibold" />)}
         </Pressable>
       ) : (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, marginBottom: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingHorizontal: 6 }}>
           {heading}
-          {onAdd ? <Pressable accessibilityRole="button" accessibilityLabel="添加电脑" onPress={onAdd} hitSlop={4} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
-            {control(<Icon sf="plus" md="add" size={22} color={colors.label} />)}
+          {onAdd ? <Pressable accessibilityRole="button" accessibilityLabel="添加电脑" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+            {control(<Icon sf="plus" md="add" size={15} color={colors.secondaryLabel} weight="semibold" />)}
           </Pressable> : null}
         </View>
       )}
-      {expanded ? children : null}
+      {expanded ? <View style={{ backgroundColor: colors.card, borderRadius: 24, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 4 }}>{children}</View> : null}
     </View>
   );
 }
@@ -393,6 +395,10 @@ export function ComputerScreen() {
   const hasComputer = useHasComputer();
   const online = status === "online";
   const platform = platformName(machine?.platform ?? "");
+  // The name the user gave it, as the home page and the device list show it; the host name says which machine that is.
+  const names = useComputerNames((state) => state.names);
+  const title = computerDisplayName(computer, names);
+  const hostname = machine?.hostname.replace(/\.local$/, "");
   const agents = [...(machine?.agents ?? [])].sort((a, b) => Number(b.installed) - Number(a.installed));
 
   return (
@@ -446,7 +452,7 @@ export function ComputerScreen() {
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
                   <Text numberOfLines={1} style={[type.headline, { color: colors.label, flex: 1, minWidth: 0 }]}>
-                    {machine ? machine.hostname.replace(/\.local$/, "") : computer.kind === "relay" ? computer.machine.name : computer.name}
+                    {title}
                   </Text>
                   <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
                 </View>
@@ -459,7 +465,7 @@ export function ComputerScreen() {
               </View>
               {machine ? (
                 <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
-                  {platform.label} · LinkShell {machine.hostVersion}
+                  {hostname && hostname !== title ? hostname : platform.label} · LinkShell {machine.hostVersion}
                 </Text>
               ) : null}
             </View>
@@ -528,7 +534,8 @@ export function ComputerScreen() {
           </View>
         )}
       </ScrollView>
-      {Platform.OS !== "ios" ? <StatusBarFade /> : null}
+      {/* Without a native bar (iOS draws one only beside a side toolbar), content would run under the clock. */}
+      {Platform.OS !== "ios" || inlineControls ? <StatusBarFade /> : null}
     </>
   );
 }

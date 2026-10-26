@@ -458,7 +458,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
 
   const filterChips = useMemo(() => {
     const chips: { key: HomeFilterMode; label: string; count?: number }[] = [{ key: "all", label: "全部" }];
-    if (waiting + failed > 0) chips.push({ key: "attention", label: "需处理", count: waiting + failed });
+    if (waiting + failed > 0) chips.push({ key: "attention", label: "待处理", count: waiting + failed });
     if (running > 0) chips.push({ key: "running", label: "进行中", count: running });
     if (pinnedCount > 0) chips.push({ key: "pinned", label: "已置顶", count: pinnedCount });
     if (terminals.length > 0) chips.push({ key: "terminals", label: "终端", count: terminals.length });
@@ -572,7 +572,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                         style={({ pressed }) => ({
                           flexDirection: "row",
                           alignItems: "center",
-                          gap: 5,
+                          gap: 4,
                           height: 32,
                           paddingHorizontal: 12,
                           borderRadius: 16,
@@ -596,9 +596,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                         {chip.count !== undefined ? (
                           <View
                             style={{
-                              minWidth: 18,
                               height: 18,
-                              paddingHorizontal: 5,
                               borderRadius: 9,
                               alignItems: "center",
                               justifyContent: "center",

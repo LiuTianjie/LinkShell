@@ -86,6 +86,9 @@ describe("folding completed agent activity", () => {
     expect(folded[1]).toMatchObject({ steps: items.slice(1, -1), open: false });
     expect(folded[2]).toMatchObject({ item: { id: "after" }, last: true });
     expect(rows(items, new Set(["steps-a0"])).filter((row) => row.type === "item").map((row) => row.item.id)).toEqual(items.map((item) => item.id));
+    // Opened, the fold's own steps are drawn inside it; the replies around it aren't.
+    const opened = rows(items, new Set(["steps-a0"])).filter((row) => row.type === "item");
+    expect(opened.map((row) => !!row.nested)).toEqual([false, ...Array.from({ length: 50 }, () => true), false]);
   });
 
   it("does not fold a completed launch while its background work is still running or paused", () => {

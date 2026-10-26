@@ -6,6 +6,7 @@ import Animated, { cubicBezier } from "react-native-reanimated";
 import { fileChanges } from "@/lib/describe";
 import { duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "../icon";
@@ -107,7 +108,7 @@ export const StepsSummary = memo(function StepsSummary({ steps, open, onToggle }
       {t.failed ? <Text style={[type.footnote, { color: colors.danger, fontWeight: "600" }]}>{t.failed} 个失败</Text> : null}
       {t.added || t.removed ? (
         <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
-          <Text style={{ color: colors.diffAddText }}>+{t.added}</Text> <Text style={{ color: colors.diffDelText }}>−{t.removed}</Text>
+          <DiffStat added={t.added} removed={t.removed} />
         </Text>
       ) : elapsed >= 2000 ? (
         <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{duration(elapsed)}</Text>

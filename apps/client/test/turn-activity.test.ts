@@ -22,7 +22,8 @@ describe("conversation activity feedback", () => {
   it("stops the work animation for disconnection, approval, queueing and errors", () => {
     const running = { ...input, session: { ...session, state: "running" as const } };
     expect(turnActivity({ ...running, online: false })).toMatchObject({ tone: "muted", animated: false });
-    expect(turnActivity({ ...running, hasPermission: true })).toMatchObject({ tone: "waiting", animated: false });
+    expect(turnActivity({ ...running, hasPermission: true })).toBeUndefined();
+    expect(turnActivity({ ...running, session: { ...running.session, state: "waiting" } })).toMatchObject({ tone: "waiting", animated: false });
     expect(turnActivity({ ...input, queued: 2 })).toMatchObject({ label: "已排队，等待 Agent 接收…", animated: false });
     expect(turnActivity({ ...input, session: { ...session, state: "error" } })).toMatchObject({ tone: "error", animated: false });
   });

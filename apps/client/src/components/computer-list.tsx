@@ -52,9 +52,12 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
                 <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                   <Text numberOfLines={2} style={[type.headline, { flex: 1, color: colors.label }]}>{name}</Text>
                   {locked ? <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} /> : null}
-                  {selected ? <Text style={[type.subhead, { color: colors.secondaryLabel }]}>当前</Text> : null}
                 </View>
-                <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>{[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}</Text>
+                {/* Which one is in use, on the status line: a tag beside the name sat off the row's centre line. */}
+                <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>
+                  {selected ? <Text style={{ color: colors.accent, fontWeight: "600" }}>当前 · </Text> : null}
+                  {[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}
+                </Text>
               </View>
             </Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={`给 ${name} 改名`}

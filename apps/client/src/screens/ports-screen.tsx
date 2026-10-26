@@ -117,7 +117,7 @@ export function PortsScreen() {
                   paddingVertical: 10,
                   paddingHorizontal: 16,
                   borderRadius: 14,
-                  backgroundColor: colors.accent,
+                  backgroundColor: colors.accentFill,
                   alignItems: "center",
                   justifyContent: "center",
                   opacity: valid ? 1 : 0.4,

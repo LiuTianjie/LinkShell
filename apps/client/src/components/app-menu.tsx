@@ -1,12 +1,12 @@
 import { MenuView, type MenuAction, type NativeActionEvent } from "@react-native-menu/menu";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { Modal, Platform, Pressable, ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, useColorScheme, View, type StyleProp, type ViewStyle } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 import { haptics } from "@/lib/haptics";
-import { colors } from "@/theme/colors";
+import { colors, palette } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";
 
@@ -37,12 +37,28 @@ export function OwnedFloatingMenu({ handle, ...props }: Omit<AppMenuProps, "shou
   return <FloatingMenu {...props} handle={handle} />;
 }
 
+/**
+ * The new-architecture MenuView always sends an image colour, 0 (clear) when
+ * none is given, and the menu tints the symbol with it: every icon came out
+ * invisible. Give each one the colour the menu would have used.
+ */
+function tinted(actions: MenuAction[], dark: boolean): MenuAction[] {
+  return actions.map((action) => ({
+    ...action,
+    ...(action.image && action.imageColor === undefined
+      ? { imageColor: action.attributes?.destructive ? (dark ? "#ff453a" : "#ff3b30") : dark ? palette.dark.label : palette.light.label }
+      : {}),
+    ...(action.subactions ? { subactions: tinted(action.subactions, dark) } : {}),
+  }));
+}
+
 export function AppMenu(props: AppMenuProps) {
+  const dark = useColorScheme() === "dark";
   if (Platform.OS === "ios") {
     return (
       <MenuView
         title={props.title}
-        actions={props.actions}
+        actions={tinted(props.actions, dark)}
         onPressAction={props.onPressAction}
         onOpenMenu={props.onOpenMenu}
         shouldOpenOnLongPress={props.shouldOpenOnLongPress ?? false}
