@@ -825,7 +825,7 @@ export class ClaudeDriver extends AcpDriver {
     let end!: () => void;
     const ended = new Promise<void>((resolve) => (end = resolve));
     // A prompt that never says anything: the session is only asked side questions.
-    const prompt = (async function* () { await ended; })();
+    const prompt = (async function* () { await ended; yield* []; })();
     const started = query({
       prompt,
       options: {
