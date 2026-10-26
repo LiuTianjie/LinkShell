@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RpcError } from "@linkshell/wire";
-import type { ContentBlock, SessionEvent, SessionSummary, SessionUpdate } from "@linkshell/wire";
+import type { ContentBlock, SessionEvent, SessionNotice, SessionSummary, SessionUpdate } from "@linkshell/wire";
 import type { AgentDriver, DiscoveredSession, DriverHost, HistoryItem } from "../src/drivers/types.js";
 import type { DriverBehavior } from "../src/drivers/behavior.js";
 import { SessionHub } from "../src/hub.js";
@@ -25,6 +25,7 @@ class FakeDriver implements AgentDriver {
   answers: { requestId: string; optionId: string }[] = [];
   sessions: DiscoveredSession[] = [{ nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 1 }];
   archives: string[] = [];
+  nativeSessionAvailability?: AgentDriver["nativeSessionAvailability"];
 
   async start(host: DriverHost) {
     this.host = host;
@@ -78,7 +79,9 @@ let summaries: SessionSummary[];
 
 function collector() {
   const events: SessionEvent[] = [];
-  return { events, subscriber: { event: (e: SessionEvent) => events.push(e) } };
+  const notices: SessionNotice[] = [];
+  const windows: number[] = [];
+  return { events, notices, windows, subscriber: { event: (e: SessionEvent) => events.push(e), notice: (notice: SessionNotice) => notices.push(notice), window: (seq: number) => windows.push(seq) } };
 }
 
 beforeEach(async () => {
@@ -131,24 +134,116 @@ describe("SessionHub", () => {
     expect(hub.getSession("fake:s1")).toMatchObject({ archived: true, state: "idle" });
   });
 
-  it("shows a history load failure and still serves cached messages; reopening retries", async () => {
+  it("keeps repeated history load failures out of execution state and history, then retries successfully", async () => {
     store.appendEvent("fake:s1", chunk("cached", "cached reply"), 1);
-    const attach = vi.spyOn(driver, "attach").mockRejectedValueOnce(new Error("unreadable history"));
+    const attach = vi.spyOn(driver, "attach")
+      .mockRejectedValueOnce(new Error("unreadable history"))
+      .mockRejectedValueOnce(new Error("unreadable history"));
     const got = collector();
     const failed = await hub.subscribe("fake:s1", 0, got.subscriber);
-    expect(got.events.map((event) => event.update)).toEqual([
-      chunk("cached", "cached reply"),
-      { sessionUpdate: "ls_status", state: "error" },
-      expect.objectContaining({ sessionUpdate: "ls_error", code: "history_unavailable", message: "读取会话消息失败：unreadable history" }),
-    ]);
-    expect(failed.session.state).toBe("error");
+    expect(got.events.map((event) => event.update)).toEqual([chunk("cached", "cached reply")]);
+    expect(got.notices).toEqual([expect.objectContaining({ severity: "warning", description: expect.stringContaining("unreadable history") })]);
+    expect(failed.session.state).toBe("idle");
     expect(failed.session.updatedAt).toBe(1);
     hub.unsubscribe("fake:s1", got.subscriber);
+    const repeated = collector();
+    const second = await hub.subscribe("fake:s1", failed.session.lastSeq, repeated.subscriber);
+    expect(second.session).toMatchObject({ state: "idle", lastSeq: failed.session.lastSeq, updatedAt: 1 });
+    expect(repeated.events).toEqual([]);
+    expect(repeated.notices).toHaveLength(1);
+    expect(store.readEvents("fake:s1", 0).map((event) => event.update)).toEqual([chunk("cached", "cached reply")]);
+    hub.unsubscribe("fake:s1", repeated.subscriber);
     driver.history = [{ itemId: "restored", updates: [chunk("restored", "restored reply")] }];
     const retry = collector();
     await hub.subscribe("fake:s1", failed.session.lastSeq, retry.subscriber);
-    expect(attach).toHaveBeenCalledTimes(2);
+    expect(attach).toHaveBeenCalledTimes(3);
     expect(retry.events.map((event) => event.update)).toContainEqual(chunk("restored", "restored reply"));
+    expect(retry.notices).toEqual([]);
+  });
+
+  it("hides confirmed missing native sessions without deleting the cache, and restores them outside discovery", async () => {
+    store.appendEvent("fake:s1", chunk("cached", "cached reply"), 1);
+    let availability: "unknown" | "missing" | "available" = "unknown";
+    driver.nativeSessionAvailability = () => availability;
+    const removed: string[] = [];
+    hub.onRemoved((id) => removed.push(id));
+    driver.sessions = [];
+    await hub.refreshDiscovery();
+    expect(hub.listSessions({}).sessions.map((session) => session.id)).toEqual(["fake:s1"]);
+    expect(removed).toEqual([]);
+
+    availability = "missing";
+    await hub.refreshDiscovery();
+    expect(hub.listSessions({ includeArchived: true }).sessions).toEqual([]);
+    expect(await hub.listProjects()).toEqual([]);
+    expect(() => hub.getSession("fake:s1")).toThrow("原始记录已不存在");
+    await expect(hub.subscribe("fake:s1", 0, collector().subscriber)).rejects.toMatchObject({ appCode: "not_found" });
+    expect(removed).toEqual(["fake:s1"]);
+    expect(store.isRemoved("fake:s1")).toBe(false);
+    expect(store.readEvents("fake:s1", 0).map((event) => event.update)).toContainEqual(chunk("cached", "cached reply"));
+    await hub.refreshDiscovery();
+    expect(removed).toEqual(["fake:s1"]);
+    const reconnectedRemovals: string[] = [];
+    hub.onRemoved((id) => reconnectedRemovals.push(id));
+    expect(reconnectedRemovals).toEqual(["fake:s1"]);
+
+    availability = "available";
+    await hub.refreshDiscovery();
+    expect(hub.listSessions({}).sessions.map((session) => session.id)).toEqual(["fake:s1"]);
+    const restored = collector();
+    await hub.subscribe("fake:s1", 0, restored.subscriber);
+    expect(restored.events.map((event) => event.update)).toContainEqual(chunk("cached", "cached reply"));
+    expect(restored.events.some((event) => event.update.sessionUpdate === "ls_error")).toBe(false);
+    const afterRestoration: string[] = [];
+    hub.onRemoved((id) => afterRestoration.push(id));
+    expect(afterRestoration).toEqual([]);
+  });
+
+  it("hides a session that disappears while opening without logging an execution failure", async () => {
+    let availability: "available" | "missing" = "available";
+    driver.nativeSessionAvailability = () => availability;
+    vi.spyOn(driver, "attach").mockImplementationOnce(async () => {
+      availability = "missing";
+      throw RpcError.app("history_unavailable", "record disappeared");
+    });
+    await expect(hub.subscribe("fake:s1", 0, collector().subscriber)).rejects.toMatchObject({ appCode: "not_found" });
+    expect(hub.listSessions({}).sessions).toEqual([]);
+    expect(store.readEvents("fake:s1", 0).some(({ update }) => update.sessionUpdate === "ls_error")).toBe(false);
+  });
+
+  it("repairs old history-only errors after restart without clearing genuine failed turns or rewriting the log", async () => {
+    store.appendEvent("fake:s1", chunk("cached", "cached reply"), 1);
+    store.upsertSession({ id: "fake:failed", agent: "fake", nativeId: "failed", cwd: "/w/app", createdAt: 1, updatedAt: 1, state: "error" });
+    store.appendEvent("fake:failed", { sessionUpdate: "ls_turn", state: "ended", stopReason: "error" }, 1);
+    store.appendEvent("fake:failed", { sessionUpdate: "ls_error", code: "agent_failed", message: "real execution failure" }, 1);
+    for (const id of ["fake:s1", "fake:failed"]) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        store.appendEvent(id, { sessionUpdate: "ls_status", state: "error" }, 1);
+        store.appendEvent(id, { sessionUpdate: "ls_error", code: "history_unavailable", message: "读取会话消息失败：unreadable history", hint: "重新打开会话可重试" }, 1);
+      }
+      store.patchSession(id, { state: "error" });
+    }
+    const original = store.readEvents("fake:s1", 0);
+    await hub.stop();
+    driver.sessions = [];
+    hub = new SessionHub(store, [driver]);
+    await hub.start({ discoveryIntervalMs: 0 });
+    expect(hub.getSession("fake:s1")).toMatchObject({ state: "offline", updatedAt: 1 });
+    expect(hub.getSession("fake:failed").state).toBe("error");
+    expect(store.readEvents("fake:s1", 0).slice(0, original.length)).toEqual(original);
+
+    const recovered = collector();
+    const resumed = await hub.subscribe("fake:s1", original.at(-1)!.seq, recovered.subscriber);
+    expect(recovered.windows).toEqual([0]);
+    expect(resumed.startSeq).toBe(0);
+    expect(recovered.events.map((event) => event.update)).toContainEqual(chunk("cached", "cached reply"));
+    expect(recovered.events.some(({ update }) => update.sessionUpdate === "ls_error" || (update.sessionUpdate === "ls_status" && update.state === "error"))).toBe(false);
+    expect(hub.history("fake:s1", hub.getSession("fake:s1").lastSeq + 1).events).toEqual(recovered.events);
+    const failed = collector();
+    await hub.subscribe("fake:failed", 0, failed.subscriber);
+    expect(failed.events.filter(({ update }) => update.sessionUpdate === "ls_error").map(({ update }) => update)).toEqual([
+      { sessionUpdate: "ls_error", code: "agent_failed", message: "real execution failure" },
+    ]);
   });
 
   it("does not report a fresh session without messages as a load failure", async () => {
@@ -156,6 +251,7 @@ describe("SessionHub", () => {
     const got = collector();
     await hub.subscribe("fake:s1", 0, got.subscriber);
     expect(got.events).toEqual([]);
+    expect(got.notices).toEqual([]);
   });
 
   it("keeps durable task status and output independent of turn completion and rejects broad cancellation", async () => {

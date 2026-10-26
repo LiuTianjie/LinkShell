@@ -7,7 +7,7 @@ import { LiveActivityRelay } from "../src/live-activities.js";
 import type { Subscriber } from "../src/hub.js";
 
 const roots: string[] = [], relays: LiveActivityRelay[] = [];
-afterEach(() => { relays.splice(0).forEach((relay) => relay.stop()); roots.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })); vi.restoreAllMocks(); });
+afterEach(() => { relays.splice(0).forEach((relay) => relay.stop()); roots.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })); vi.restoreAllMocks(); vi.useRealTimers(); });
 const first: SessionSummary = { id: "task-1", nativeId: "native-1", agent: "codex", cwd: "/test", state: "running", title: "Codex 正在检查", archived: false, createdAt: 1, updatedAt: 2, lastSeq: 1, pendingPermissions: 0 };
 
 function setup() {
@@ -17,6 +17,7 @@ function setup() {
   let sessions = [first];
   const subscribers = new Map<string, Set<Subscriber>>();
   const listeners = new Set<(summary: SessionSummary) => void>();
+  const removedListeners = new Set<(sessionId: string) => void>();
   let terminals: TerminalInfo[] = [];
   const terminalListeners = new Set<(terminal: TerminalInfo, closed: boolean) => void>();
   const hub = {
@@ -24,6 +25,7 @@ function setup() {
     async subscribe(id: string, _seq: number, subscriber: Subscriber) { const set = subscribers.get(id) ?? new Set<Subscriber>(); set.add(subscriber); subscribers.set(id, set); return { session: sessions.find((item) => item.id === id)!, startSeq: 0 }; },
     unsubscribe(id: string, subscriber: Subscriber) { subscribers.get(id)?.delete(subscriber); },
     onSummary(listener: (summary: SessionSummary) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    onRemoved(listener: (sessionId: string) => void) { removedListeners.add(listener); return () => { removedListeners.delete(listener); }; },
   };
   const request = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ accepted: true }), { status: 200 }));
   const options = { path, hub, terminals: {
@@ -36,6 +38,7 @@ function setup() {
   const body = () => JSON.parse(String(request.mock.calls.at(-1)![1]!.body));
   return { relay, hub, create, subscribers, subscription, request, body, path, advance: (ms: number) => { now += ms; },
     setSessions: (next: SessionSummary[]) => { sessions = next; for (const listener of listeners) for (const session of next) listener(session); },
+    removeSession: (sessionId: string) => { sessions = sessions.filter((session) => session.id !== sessionId); for (const listener of removedListeners) listener(sessionId); },
     setTerminal: (terminal: TerminalInfo, closed = false) => {
       terminals = [...terminals.filter((item) => item.id !== terminal.id), ...(closed ? [] : [terminal])];
       for (const listener of terminalListeners) listener(terminal, closed);
@@ -148,6 +151,29 @@ describe("Host-owned Live Activity updates", () => {
     expect(s.body().notice).toBeNull();
   });
 
+  it("immediately drops a removed session and its pending error without replacing other work", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    const other = { ...first, id: "other", nativeId: "other-native", title: "另一个任务", updatedAt: 3 };
+    s.setSessions([first, other]); s.relay.subscribe(s.subscription);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.subscribers.get(first.id)?.size).toBe(1);
+
+    s.setSessions([{ ...first, state: "error", updatedAt: 4 }, other]);
+    s.removeSession(first.id);
+    expect(s.subscribers.get(first.id)?.size).toBe(0);
+    expect(JSON.parse(readFileSync(s.path, "utf8"))[0].notices).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.request).toHaveBeenCalledTimes(2);
+    expect(s.body()).toMatchObject({ event: "update", notice: null, contentState: { title: "另一个任务", phase: "running", failedCount: 0 } });
+    expect(s.body().contentState.tasks.map((task: { id: string }) => task.id)).toEqual([other.id]);
+
+    s.removeSession(other.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.body()).toMatchObject({ event: "end", notice: null });
+    expect(JSON.parse(readFileSync(s.path, "utf8"))).toEqual([]);
+  });
+
   it("restores a pending transition and expires alerts that are no longer timely", async () => {
     const s = setup(); s.relay.subscribe({ ...s.subscription, expiresAt: Date.now() + 600_000 }); await s.relay.flush();
     s.setSessions([{ ...first, state: "error", updatedAt: 8 }]); s.relay.stop();
@@ -156,6 +182,20 @@ describe("Host-owned Live Activity updates", () => {
     s.setSessions([first]); s.setSessions([{ ...first, state: "error", updatedAt: 9 }]);
     s.advance(180_001); await restarted.flush();
     expect(s.body().notice).toBeNull();
+  });
+
+  it.each(["removed", "archived", "idle"] as const)("drops a persisted error reconciled to %s before the relay restarts", async (state) => {
+    const s = setup(); s.relay.subscribe(s.subscription); await s.relay.flush();
+    s.setSessions([{ ...first, state: "error", updatedAt: 8 }]);
+    expect(JSON.parse(readFileSync(s.path, "utf8"))[0].notices).toHaveLength(1);
+    s.relay.stop();
+
+    const other = { ...first, id: "other", nativeId: "other-native", title: "另一个任务", updatedAt: 9 };
+    s.setSessions(state === "removed" ? [other] : [other, { ...first, state: state === "idle" ? "idle" : "error", archived: state === "archived" }]);
+    const restarted = s.create(); await restarted.flush();
+    expect(s.body()).toMatchObject({ event: "update", notice: null, contentState: { title: "另一个任务", phase: "running", failedCount: 0 } });
+    expect(s.body().contentState.tasks.map((task: { id: string }) => task.id)).toEqual([other.id]);
+    expect(JSON.parse(readFileSync(s.path, "utf8"))[0].notices).toEqual([]);
   });
 
   it("announces terminal results without treating a closed terminal as a completed command", async () => {

@@ -269,6 +269,10 @@ export class SessionHub {
   }
 
   async start(options: { discoveryIntervalMs?: number } = {}): Promise<void> {
+    for (const session of this.store.errorSessions()) {
+      const state = this.store.historyFailureRecoveryState(session.id);
+      if (state && state !== session.state) this.commit(session.id, { sessionUpdate: "ls_status", state });
+    }
     for (const id of this.store.resetLiveSessions()) this.pendingQuestions.delete(id);
     await Promise.all(
       [...this.drivers.values()].map(async (driver) => {
@@ -318,7 +322,9 @@ export class SessionHub {
         archived: true, state: "idle", asyncQuestions: [],
       });
     }
-    if (driver.sessionExists) {
+    if (driver.nativeSessionAvailability) {
+      for (const session of this.store.sessionsForAgent(driver.id)) this.reconcileNativeSession(driver, session);
+    } else if (driver.sessionExists) {
       for (const session of this.store.sessionsForAgent(driver.id)) {
         const live = this.live.get(session.id);
         if (live?.turnActive || session.state === "running" || session.state === "waiting") continue;
@@ -327,6 +333,32 @@ export class SessionHub {
         }
       }
     }
+  }
+
+  private reconcileNativeSession(driver: AgentDriver, session: SessionSummary): void {
+    if (!driver.nativeSessionAvailability) return;
+    const live = this.live.get(session.id);
+    if (live?.turnActive || live?.held.length || this.desktops.has(session.id)) return;
+    const availability = driver.nativeSessionAvailability(session.nativeId, session.cwd);
+    if (availability === "missing") this.hideMissingSession(session);
+    else if (availability === "available" && this.store.isNativeMissing(session.id)) {
+      this.store.setNativeMissing(session.id, false);
+      this.emitSummary(session);
+    }
+  }
+
+  private hideMissingSession(session: SessionSummary): void {
+    if (this.store.isNativeMissing(session.id)) return;
+    this.store.setNativeMissing(session.id, true);
+    this.commit(session.id, { sessionUpdate: "ls_status", state: "offline", turnActive: false });
+    this.store.patchSession(session.id, { pendingPermissions: 0 });
+    this.store.setDriverState(session.id, "asyncQuestions", "[]");
+    this.pendingQuestions.delete(session.id);
+    const driver = this.drivers.get(session.agent);
+    driver?.watched?.(session.nativeId, false);
+    this.live.delete(session.id);
+    this.emitRemoved(session.id);
+    void driver?.detach(session.nativeId).catch((error: unknown) => this.log(`[hub] detach missing ${session.id}: ${String(error)}`));
   }
 
   async stop(): Promise<void> {
@@ -479,6 +511,7 @@ export class SessionHub {
   getSession(sessionId: string): SessionSummary {
     const summary = this.store.getSession(sessionId);
     if (!summary) throw RpcError.app("not_found", `session ${sessionId} not found`);
+    if (this.store.isNativeMissing(sessionId)) throw RpcError.app("not_found", "这个会话的原始记录已不存在，已从列表隐藏；本地缓存仍保留。");
     return this.decorate(summary);
   }
 
@@ -712,24 +745,28 @@ export class SessionHub {
     const summary = this.getSession(sessionId);
     const driver = this.drivers.get(summary.agent);
     if (driver && driver.status().installed) {
+      this.reconcileNativeSession(driver, summary);
+      this.getSession(sessionId);
       try {
         await this.ensureAttached(sessionId);
       } catch (error) {
         // Serve the log we have; not_ready sessions attach once they get a turn.
         if (!(error instanceof RpcError && error.appCode === "not_ready")) {
           this.log(`[hub] attach ${sessionId} failed: ${error instanceof Error ? error.message : String(error)}`);
-          this.commit(sessionId, { sessionUpdate: "ls_status", state: "error" });
-          this.commit(sessionId, {
-            sessionUpdate: "ls_error",
-            code: error instanceof RpcError ? error.appCode ?? "history_unavailable" : "history_unavailable",
-            message: `读取会话消息失败：${error instanceof Error ? error.message : String(error)}`,
-            hint: "重新打开会话可重试",
-          }, undefined, summary.updatedAt);
+          this.reconcileNativeSession(driver, summary);
+          this.getSession(sessionId);
+          subscriber.notice?.({ severity: "warning", title: "暂时无法读取会话历史",
+            description: `${error instanceof Error ? error.message : String(error)}\n已缓存的消息仍可查看，重新打开会话可重试。` });
         }
       }
     }
     const live = this.liveFor(sessionId);
     if (driver?.behavior.desktop === "handoff") this.lendCommands(this.getSession(sessionId));
+    // Old clients may still hold the synthetic error cards in memory; replay a clean window.
+    if (fromSeq > 0 && this.store.hasHistoryLoadErrors(sessionId)) {
+      fromSeq = 0;
+      subscriber.window?.(0);
+    }
     const lastSeq = this.store.getSession(sessionId)?.lastSeq ?? 0;
     let startSeq = fromSeq;
     const missed = fromSeq > 0 && fromSeq <= lastSeq ? this.store.sizeAfter(sessionId, fromSeq) : undefined;
@@ -746,7 +783,7 @@ export class SessionHub {
     let cursor = startSeq;
     for (;;) {
       const batch = this.store.readEvents(sessionId, cursor, 200);
-      for (const event of batch) subscriber.event(event);
+      for (const event of batch) if (!this.store.isHistoryLoadEvent(event)) subscriber.event(event);
       if (batch.length === 0) break;
       cursor = batch[batch.length - 1]!.seq;
     }
@@ -784,7 +821,7 @@ export class SessionHub {
     const upTo = beforeSeq - 1;
     if (upTo < 1) return { events: [], startSeq: 0 };
     const startSeq = this.store.pageStart(sessionId, upTo);
-    return { events: this.store.readEvents(sessionId, startSeq, PAGE.maxEvents + 1, upTo), startSeq };
+    return { events: this.store.readEvents(sessionId, startSeq, PAGE.maxEvents + 1, upTo).filter((event) => !this.store.isHistoryLoadEvent(event)), startSeq };
   }
 
   tasks(sessionId: string): BackgroundTask[] {
@@ -1104,6 +1141,8 @@ export class SessionHub {
 
   onRemoved(listener: (sessionId: string) => void): () => void {
     this.removedListeners.add(listener);
+    // A reconnecting client can retain sessions outside the first discovery page.
+    for (const id of this.store.nativeMissingSessionIds()) listener(id);
     return () => this.removedListeners.delete(listener);
   }
 
@@ -1168,6 +1207,10 @@ export class SessionHub {
     this.live.delete(sessionId);
     this.previews.forget(sessionId);
     this.store.removeSession(sessionId);
+    this.emitRemoved(sessionId);
+  }
+
+  private emitRemoved(sessionId: string): void {
     for (const listener of this.removedListeners) {
       try {
         listener(sessionId);
@@ -1375,6 +1418,14 @@ export class SessionHub {
     // Deleted in LinkShell: an agent without native delete keeps listing it.
     if (this.store.isRemoved(sessionIdFor(agent, session.nativeId))) return;
     const before = this.store.getSession(sessionIdFor(agent, session.nativeId));
+    const driver = this.drivers.get(agent);
+    const availability = driver?.nativeSessionAvailability?.(session.nativeId, session.cwd);
+    if (availability === "missing") {
+      if (before) this.reconcileNativeSession(driver!, before);
+      return;
+    }
+    const restored = availability === "available" && !!before && this.store.isNativeMissing(before.id);
+    if (restored) this.store.setNativeMissing(before!.id, false);
     if (before && session.updatedAt > before.updatedAt) {
       // Renamed just now: the session keeps its place in the list.
       const renamed = this.store.getDriverState(before.id, RENAMED);
@@ -1413,10 +1464,11 @@ export class SessionHub {
       this.pendingQuestions.set(summary.id, session.asyncQuestions);
       if (questionsChanged) this.store.setDriverState(summary.id, "asyncQuestions", JSON.stringify(session.asyncQuestions));
     }
-    if (created || changed || questionsChanged) this.emitSummary(summary);
+    if (created || changed || questionsChanged || restored) this.emitSummary(summary);
   }
 
   private ingest(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
+    if (this.store.isNativeMissing(sessionId)) return;
     if (!this.store.getSession(sessionId)) {
       this.log(`[hub] dropping update for unknown session ${sessionId}`);
       return;
@@ -1572,6 +1624,7 @@ export class SessionHub {
   }
 
   private emitSummary(stored: SessionSummary): void {
+    if (this.store.isNativeMissing(stored.id)) return;
     const summary = this.decorate(stored);
     for (const listener of this.summaryListeners) {
       try {

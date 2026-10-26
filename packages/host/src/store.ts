@@ -239,6 +239,10 @@ export interface PageBudget {
 
 export const PAGE: PageBudget = { minEvents: 120, minBytes: 384 * 1024, maxEvents: 600, maxBytes: 2 * 1024 * 1024, eventBytes: 40 * 1024 };
 
+function isHistoryLoadError(update: SessionUpdate | undefined): boolean {
+  return update?.sessionUpdate === "ls_error" && update.message.startsWith("读取会话消息失败：") && update.hint === "重新打开会话可重试";
+}
+
 /**
  * Durable host state: session summaries plus one append-only event log per
  * session. Every update a client sees gets a per-session `seq`, so a client
@@ -316,6 +320,61 @@ export class HostStore {
 
   isRemoved(id: string): boolean {
     return this.db.prepare("SELECT 1 FROM removed_sessions WHERE id = ?").get(id) !== undefined;
+  }
+
+  /** Missing native history is reversible; never use the user's deletion tombstone. */
+  setNativeMissing(id: string, missing: boolean): void {
+    if (missing) this.setDriverState(id, "native-missing", "1");
+    else this.db.prepare("DELETE FROM driver_state WHERE session_id = ? AND key = 'native-missing'").run(id);
+  }
+
+  isNativeMissing(id: string): boolean {
+    return this.getDriverState(id, "native-missing") === "1";
+  }
+
+  nativeMissingSessionIds(): string[] {
+    return this.db.prepare("SELECT session_id FROM driver_state WHERE key = 'native-missing' AND value = '1'")
+      .all().map((row) => String(row.session_id));
+  }
+
+  hasHistoryLoadErrors(id: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+      WHERE m.session_id = ? AND m.kind = 'ls_error' AND json_extract(e.body, '$.message') LIKE '读取会话消息失败：%'
+      AND json_extract(e.body, '$.hint') = '重新打开会话可重试' LIMIT 1`).get(id) !== undefined;
+  }
+
+  /** Undo only the old subscribe path's synthetic execution failure. Keep real failed turns. */
+  historyFailureRecoveryState(id: string): SessionState | undefined {
+    const rows = this.db.prepare(`
+      SELECT e.body, next.body AS following FROM event_meta m
+      JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+      LEFT JOIN events next ON next.session_id = e.session_id AND next.seq = e.seq + 1
+      WHERE m.session_id = ? AND m.kind IN ('ls_status', 'ls_turn') AND m.parent IS NULL
+      ORDER BY m.seq DESC
+    `).iterate(id);
+    let skipped = false;
+    for (const row of rows) {
+      const update = JSON.parse(String(row.body)) as SessionUpdate;
+      const next = row.following ? JSON.parse(String(row.following)) as SessionUpdate : undefined;
+      if (update.sessionUpdate === "ls_status" && update.state === "error" && isHistoryLoadError(next)) {
+        skipped = true;
+        continue;
+      }
+      if (!skipped) return undefined;
+      if (update.sessionUpdate === "ls_status") return update.state === "error" ? "error" : "offline";
+      if (update.sessionUpdate === "ls_turn") return update.state === "ended" && update.stopReason === "error" ? "error" : "offline";
+    }
+    return skipped ? "offline" : undefined;
+  }
+
+  errorSessions(): SessionSummary[] {
+    return (this.db.prepare("SELECT * FROM sessions WHERE state = 'error'").all() as unknown as SessionRow[]).map(toSummary);
+  }
+
+  /** Keep the original log and cursors intact, but stop replaying old synthetic failures. */
+  isHistoryLoadEvent(event: SessionEvent): boolean {
+    return isHistoryLoadError(event.update) || (event.update.sessionUpdate === "ls_status" && event.update.state === "error"
+      && isHistoryLoadError(this.readEvent(event.sessionId, event.seq + 1)?.update));
   }
 
   close(): void {
@@ -449,7 +508,7 @@ export class HostStore {
   }
 
   listSessions(options: { limit?: number; before?: number; includeArchived?: boolean } = {}): SessionSummary[] {
-    const where: string[] = [];
+    const where: string[] = ["NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1')"];
     const values: (number | string)[] = [];
     if (!options.includeArchived) where.push("archived = 0");
     if (options.before !== undefined) {
@@ -469,7 +528,8 @@ export class HostStore {
 
   listProjects(limit = 50): ProjectSummary[] {
     const rows = this.db
-      .prepare(`SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count FROM sessions WHERE archived = 0 GROUP BY cwd`)
+      .prepare(`SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count FROM sessions WHERE archived = 0
+        AND NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1') GROUP BY cwd`)
       .all() as { cwd: string; last_active_at: number; session_count: number }[];
     // A session in a worktree belongs to the project the worktree was made from.
     const worktrees = this.listWorktrees();

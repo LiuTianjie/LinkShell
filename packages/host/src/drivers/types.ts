@@ -167,6 +167,8 @@ export interface AgentDriver {
   archivedSessions?(): Promise<string[]>;
   /** Whether a previously discovered session still exists in the agent's native storage on disk. */
   sessionExists?(nativeId: string, cwd: string): boolean;
+  /** Missing native history can be hidden reversibly; an unreadable store is not proof of deletion. */
+  nativeSessionAvailability?(nativeId: string, cwd: string): "available" | "missing" | "unknown";
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
    * Starts live updates and returns history according to behavior.history.

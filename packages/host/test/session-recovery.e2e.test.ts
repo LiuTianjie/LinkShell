@@ -109,15 +109,17 @@ describe("session discovery and history recovery", () => {
     expect(t.events.filter(({ update }) => update.sessionUpdate === "ls_notice")).toHaveLength(1);
   });
 
-  it("reports a missing Claude transcript, keeps the cache, and imports it when it is restored", async () => {
+  it("hides a missing Claude transcript before it can be opened, then restores it with cached messages", async () => {
     const t = await setup({ claude: true });
-    const failed = await t.client.call("sessions.subscribe", { sessionId: t.id, fromSeq: 0 });
-    expect(failed.session.state).toBe("error");
-    expect(messages(t.events)).toEqual(["cached reply"]);
-    expect(t.events.some(({ update }) => update.sessionUpdate === "ls_error" && update.code === "history_unavailable")).toBe(true);
+    expect((await t.client.call("sessions.list", {})).sessions).toEqual([]);
+    await expect(t.client.call("sessions.subscribe", { sessionId: t.id, fromSeq: 0 })).rejects.toMatchObject({ appCode: "not_found" });
+    expect(t.events).toEqual([]);
     t.writeTranscript(true);
-    await t.client.call("sessions.subscribe", { sessionId: t.id, fromSeq: failed.session.lastSeq });
-    expect(messages(t.events)).toContain("old answer");
+    await t.host.hub.refreshDiscovery();
+    expect((await t.client.call("sessions.list", {})).sessions.map((session) => session.id)).toEqual([t.id]);
+    await t.client.call("sessions.subscribe", { sessionId: t.id, fromSeq: 0 });
+    expect(messages(t.events)).toEqual(["cached reply", "old question", "old answer"]);
+    expect(t.events.some(({ update }) => update.sessionUpdate === "ls_error")).toBe(false);
     expect(t.host.hub.getSession(t.id).state).toBe("idle");
   });
 

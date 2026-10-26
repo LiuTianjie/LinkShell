@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SessionEvent, SessionSummary } from "@linkshell/wire";
+import type { SessionEvent, SessionNotice, SessionSummary } from "@linkshell/wire";
 import { AcpDriver, type AcpAgentSpec } from "../src/drivers/acp/driver.js";
 import { connectHost } from "../src/rpc/client.js";
 import { startHost, type RunningHost } from "../src/host.js";
@@ -591,14 +591,17 @@ describe("generic ACP driver (fake agent)", () => {
     expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\n");
   });
 
-  it("shows a login error when cached authentication cannot load discovered history", async () => {
+  it("shows a login notice without marking execution failed when authentication cannot load history", async () => {
     const t = await setup({ FAKE_ACP_CACHED_AUTH: "1", FAKE_ACP_SIGNED_OUT: "1" }, {
       old: { cwd: "/w", title: "Old task", updatedAt: "2026-09-01T00:00:00.000Z", mode: "default", model: "fast",
         history: [{ role: "user", id: "u", text: "hi" }] },
     });
-    await t.client.call("sessions.subscribe", { sessionId: "fake:old", fromSeq: 0 });
-    expect(t.of("fake:old").find((event) => event.update.sessionUpdate === "ls_error")?.update)
-      .toMatchObject({ code: "not_logged_in", message: expect.stringContaining("Fake 未登录") });
+    const notices: SessionNotice[] = [];
+    t.client.on("session.notice", ({ notice }) => notices.push(notice));
+    const result = await t.client.call("sessions.subscribe", { sessionId: "fake:old", fromSeq: 0 });
+    expect(notices).toEqual([expect.objectContaining({ severity: "warning", description: expect.stringContaining("Fake 未登录") })]);
+    expect(t.of("fake:old").some((event) => event.update.sessionUpdate === "ls_error")).toBe(false);
+    expect(result.session.state).not.toBe("error");
     expect(readFileSync(t.authLog, "utf8")).toBe("cached_token\n");
   });
 

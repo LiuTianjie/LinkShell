@@ -15,6 +15,7 @@ import { ClaudeTasks } from "./tasks.js";
 import { ClaudeActivity } from "./activity.js";
 import {
   claudeConfigDir,
+  ClaudeTranscriptIndex,
   encodeProjectDir,
   findTranscript,
   turnEndUuid,
@@ -210,6 +211,7 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private readonly modes = new Map<string, Mode>();
+  private readonly unwrittenSessions = new Set<string>();
   private readonly desktopResumes = new Map<string, Promise<void>>();
   private readonly tails = new Map<string, TranscriptTail>();
   private readonly tasks = new Map<string, ClaudeTasks>();
@@ -236,6 +238,7 @@ export class ClaudeDriver extends AcpDriver {
   private readonly streamedTranscripts = new Map<string, { from: number; until: number }[]>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
+  private readonly transcriptIndex: ClaudeTranscriptIndex;
   private readonly busyWindowMs: number;
   private readonly holderCheckMs: number;
   private claudePath?: string;
@@ -266,6 +269,7 @@ export class ClaudeDriver extends AcpDriver {
     this.claudeCommand = claudeCommand;
     this.claudePath = claudePath;
     this.configDir = claudeConfigDir(env);
+    this.transcriptIndex = new ClaudeTranscriptIndex(this.configDir);
     this.busyWindowMs = options.busyWindowMs ?? 10 * 60_000;
     this.holderCheckMs = options.holderCheckMs ?? 3000;
     this.adapterMissing = adapterMissing;
@@ -299,15 +303,39 @@ export class ClaudeDriver extends AcpDriver {
     for (const follower of this.activity.values()) follower.stop();
     this.activity.clear();
     this.tasks.clear();
+    this.unwrittenSessions.clear();
+    this.transcriptIndex.invalidate();
     await super.stop();
+  }
+
+  nativeSessionAvailability(nativeId: string, cwd: string): "available" | "missing" | "unknown" {
+    const found = this.transcriptIndex.locate(nativeId, cwd);
+    if (found.status === "available") this.unwrittenSessions.delete(nativeId);
+    if (found.status !== "missing") return found.status;
+    return this.canAwaitTranscript(nativeId) ? "available" : "missing";
+  }
+
+  private canAwaitTranscript(nativeId: string): boolean {
+    const state = this.sessions.get(nativeId);
+    return this.unwrittenSessions.has(nativeId)
+      || !!(state?.turnActive || state?.inflight || state?.queue.length || state?.permissions.size || state?.questions.size)
+      || !!this.waiting.get(nativeId)?.length
+      || !!this.host?.desktop(this.id, nativeId)
+      || sessionHolders(this.configDir, nativeId).length > 0;
   }
 
   override async attach(nativeId: string, context: AttachContext): Promise<HistoryItem[]> {
     const state = this.stateFor(nativeId, context.cwd);
-    const path = findTranscript(this.configDir, nativeId, context.cwd);
+    this.transcriptIndex.invalidate();
+    const located = this.transcriptIndex.locate(nativeId, context.cwd);
+    const path = located.status === "available" ? located.path : undefined;
+    if (path) this.unwrittenSessions.delete(nativeId);
+    if (located.status === "unknown") {
+      throw RpcError.app("history_unavailable", "暂时无法读取这个 Claude 会话的原始记录；已缓存的消息仍可查看。");
+    }
     // New sessions write no transcript until the first message. An old unknown
     // session with no file must remain retryable instead of attaching an empty tail forever.
-    if (!path && !state.loaded && !this.modes.has(nativeId) && !this.host?.desktop(this.id, nativeId)) {
+    if (!path && !this.canAwaitTranscript(nativeId)) {
       throw RpcError.app("history_unavailable", "找不到这个 Claude 会话的原始记录，可能已被移动或删除；已缓存的消息仍可查看。");
     }
     let history: HistoryItem[] = [];
@@ -422,6 +450,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** With the questions Claudes on the computer wait on, so lists, the watch and Live Activities can answer them unopened. */
   override async listSessions(limit: number): Promise<DiscoveredSession[]> {
+    this.transcriptIndex.invalidate();
     const found = await super.listSessions(limit);
     return Promise.all(found.map(async (session) => {
       if (this.modes.get(session.nativeId) === "remote") return session;
@@ -497,6 +526,7 @@ export class ClaudeDriver extends AcpDriver {
     const config = this.sessions.get(created.nativeId)?.config;
     if (config?.length) this.template = config;
     // Born on a device: this host is the writer from the start.
+    this.unwrittenSessions.add(created.nativeId);
     this.modes.set(created.nativeId, "remote");
     this.beginTranscriptStream(created.nativeId);
     this.setWriter(created.nativeId, "remote");
@@ -505,6 +535,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** The `linkshell claude` terminal went away (the user quit the TUI). */
   desktopDetached(nativeId: string): void {
+    this.unwrittenSessions.delete(nativeId);
     if (this.modes.get(nativeId) === "desktop") this.setMode(nativeId, "idle");
   }
 
@@ -512,6 +543,7 @@ export class ClaudeDriver extends AcpDriver {
     this.tails.get(nativeId)?.stop();
     this.tails.delete(nativeId);
     await super.detach(nativeId);
+    this.unwrittenSessions.delete(nativeId);
     this.endTranscriptStream(nativeId);
   }
 
@@ -567,6 +599,7 @@ export class ClaudeDriver extends AcpDriver {
     if (transcript) await super.delete(nativeId);
     else this.sessions.delete(nativeId);
     this.modes.delete(nativeId);
+    this.unwrittenSessions.delete(nativeId);
     this.streamedTranscripts.delete(nativeId);
     this.hiddenTools.delete(nativeId);
     this.backgroundAgents.delete(nativeId);
@@ -740,6 +773,7 @@ export class ClaudeDriver extends AcpDriver {
       rest = ["--resume", id, ...rest];
     } else {
       id = randomUUID();
+      this.unwrittenSessions.add(id);
       rest = ["--session-id", id, ...rest];
     }
     if (nativeId ?? parsed.sessionId) this.setMode(id, "desktop");
@@ -802,6 +836,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Desktop activity: what the TUI (or a plain `claude`) writes to the transcript. */
   private onTranscriptLine(nativeId: string, line: string): void {
+    this.unwrittenSessions.delete(nativeId);
     this.reportedStates.delete(nativeId);
     let hidden = this.hiddenTools.get(nativeId);
     if (!hidden) this.hiddenTools.set(nativeId, (hidden = new Set()));

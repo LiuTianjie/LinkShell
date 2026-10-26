@@ -29,7 +29,7 @@ export class LiveActivityRelay {
 
   constructor(private readonly options: {
     path: string;
-    hub: Pick<SessionHub, "listSessions" | "subscribe" | "unsubscribe" | "onSummary">;
+    hub: Pick<SessionHub, "listSessions" | "subscribe" | "unsubscribe" | "onSummary" | "onRemoved">;
     terminals: Pick<TerminalManager, "list" | "onChange">;
     computerName: () => string;
     serviceUrl?: string;
@@ -59,6 +59,7 @@ export class LiveActivityRelay {
     for (const session of this.options.hub.listSessions({ limit: 200 }).sessions) this.sessions.set(session.id, session);
     for (const terminal of this.options.terminals.list()) this.terminals.set(terminal.id, terminal);
     this.stopListeners.push(this.options.hub.onSummary((session) => this.sessionChanged(session)),
+      this.options.hub.onRemoved((sessionId) => this.sessionRemoved(sessionId)),
       this.options.terminals.onChange((terminal, closed) => this.terminalChanged(terminal, closed)));
     this.heartbeat = setInterval(() => this.schedule(), 60_000);
     this.heartbeat.unref();
@@ -113,6 +114,17 @@ export class LiveActivityRelay {
       for (const row of this.registrations.values()) row.notices = row.notices?.filter((notice) => notice.task.kind !== "session" || notice.task.id !== session.id);
     }
     this.schedule();
+  }
+  private sessionRemoved(sessionId: string) {
+    this.sessions.delete(sessionId);
+    const subscriber = this.watched.get(sessionId);
+    if (subscriber) {
+      this.options.hub.unsubscribe(sessionId, subscriber);
+      this.watched.delete(sessionId);
+    }
+    for (const row of this.registrations.values()) row.notices = row.notices?.filter((notice) => notice.task.kind !== "session" || notice.task.id !== sessionId);
+    if (this.registrations.size) this.save();
+    this.schedule(0);
   }
   private terminalChanged(terminal: TerminalInfo, closed = false) {
     const before = this.terminals.get(terminal.id);
@@ -189,7 +201,16 @@ export class LiveActivityRelay {
       const terminals = this.options.terminals.list();
       const sends = [...this.registrations.values()].filter((row) => (row.retryAfter ?? 0) <= Date.now()).map(async (row) => {
         const payload = buildLiveActivitySnapshot(this.options.computerName(), sessions, terminals, true, row.computerKey);
-        row.notices = row.notices?.filter((notice) => Date.now() - notice.createdAt < 180_000);
+        row.notices = row.notices?.filter((notice) => {
+          if (Date.now() - notice.createdAt >= 180_000) return false;
+          // Discovery may reconcile removed or stale sessions before this relay starts.
+          if (notice.task.kind === "session") {
+            const session = sessions.find((session) => session.id === notice.task.id);
+            return session && !session.archived && liveActivitySessionTask(session).phase === notice.task.phase;
+          }
+          const terminal = terminals.find((terminal) => terminal.id === notice.task.id);
+          return terminal && liveActivityTerminalTask(terminal).phase === notice.task.phase;
+        });
         const notice = row.notices?.[0];
         const selected = notice?.task.kind === "session" ? sessions.find((session) => session.id === notice.task.id) : undefined;
         const buttons = selected ? liveActivityActions(selected, row.computerKey) : { actions: [], hasMoreActions: false };

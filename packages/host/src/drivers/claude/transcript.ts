@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -44,6 +44,82 @@ export function findTranscript(configDir: string, sessionId: string, cwd?: strin
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
+}
+
+type TranscriptLocation = { status: "available"; path: string } | { status: "missing" | "unknown" };
+
+function inspectTranscript(path: string): TranscriptLocation {
+  try {
+    if (!statSync(path).isFile()) return { status: "unknown" };
+    accessSync(path, constants.R_OK);
+    return { status: "available", path };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { status: code === "ENOENT" ? "missing" : "unknown" };
+  }
+}
+
+/** One directory scan serves a discovery batch, including sessions moved to another project. */
+export class ClaudeTranscriptIndex {
+  private snapshot?: { at: number; paths: Map<string, string[]>; complete: boolean };
+
+  constructor(private readonly configDir: string) {}
+
+  invalidate(): void {
+    this.snapshot = undefined;
+  }
+
+  locate(sessionId: string, cwd?: string): TranscriptLocation {
+    const direct = cwd ? join(this.configDir, "projects", encodeProjectDir(cwd), `${sessionId}.jsonl`) : undefined;
+    const first = direct ? inspectTranscript(direct) : undefined;
+    if (first?.status === "available") {
+      if (this.snapshot) {
+        const paths = this.snapshot.paths.get(sessionId) ?? [];
+        if (!paths.includes(first.path)) this.snapshot.paths.set(sessionId, [...paths, first.path]);
+      }
+      return first;
+    }
+    for (let attempt = 0; ; attempt++) {
+      const snapshot = this.scan();
+      let uncertain = first?.status === "unknown" || !snapshot.complete;
+      let moved = false;
+      for (const path of snapshot.paths.get(sessionId) ?? []) {
+        const found = path === direct ? first! : inspectTranscript(path);
+        if (found.status === "available") return found;
+        uncertain ||= found.status === "unknown";
+        moved ||= found.status === "missing";
+      }
+      // A cached location disappearing may be a move, not a deleted session.
+      if (moved && attempt === 0) { this.invalidate(); continue; }
+      return { status: uncertain ? "unknown" : "missing" };
+    }
+  }
+
+  private scan(): NonNullable<ClaudeTranscriptIndex["snapshot"]> {
+    if (this.snapshot && Date.now() - this.snapshot.at < 1000) return this.snapshot;
+    const snapshot = { at: Date.now(), paths: new Map<string, string[]>(), complete: true };
+    const projects = join(this.configDir, "projects");
+    try {
+      for (const dir of readdirSync(projects, { withFileTypes: true })) {
+        if (!dir.isDirectory() && !dir.isSymbolicLink()) continue;
+        try {
+          for (const entry of readdirSync(join(projects, dir.name), { withFileTypes: true })) {
+            if (!entry.name.endsWith(".jsonl")) continue;
+            const id = entry.name.slice(0, -6);
+            const paths = snapshot.paths.get(id) ?? [];
+            paths.push(join(projects, dir.name, entry.name));
+            snapshot.paths.set(id, paths);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") snapshot.complete = false;
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") snapshot.complete = false;
+    }
+    this.snapshot = snapshot;
+    return snapshot;
+  }
 }
 
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "NotebookRead"]);
