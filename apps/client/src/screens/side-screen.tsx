@@ -1,7 +1,7 @@
 import type { SideChat, SideMessage } from "@linkshell/wire";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -13,6 +13,7 @@ import { Markdown } from "@/components/markdown";
 import { SheetHeader } from "@/components/sheet-header";
 import { LiveDot } from "@/components/status";
 import { LinkBase } from "@/lib/links";
+import { splitQuote, takeSideQuote, useSideQuotes, withQuote } from "@/lib/side-quote";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
@@ -25,6 +26,8 @@ const NEW = "new";
 const FOLLOW_WITHIN = 48;
 /** Questions that make sense in any session, offered before the first one. */
 const SUGGESTIONS = ["刚才这一轮做了什么？", "到现在改了哪些文件？", "接下来打算怎么做？"];
+/** The same, about a passage picked in a reply. */
+const QUOTE_SUGGESTIONS = ["解释一下这段", "为什么这样做？", "这样做有什么风险？"];
 
 /** How the agent answers a side question, in a line. */
 function howItAnswers(agent: string, name: string): string {
@@ -58,6 +61,10 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
   // mid-answer lands on that conversation. A new one is asked for (NEW).
   const [sideId, setSideId] = useState<string | undefined>(initial);
   const [draft, setDraft] = useState("");
+  // A passage picked in a reply goes with the next question.
+  const [quote, setQuote] = useState<string>();
+  const input = useRef<TextInput>(null);
+  const picked = useSideQuotes((state) => state.quotes[id]);
   const [busy, setBusy] = useState(false);
   const [atEnd, setAtEnd] = useState(true);
   const following = useRef(true);
@@ -70,6 +77,14 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
   useEffect(() => {
     if (online) void actions.loadSides(id).catch(() => {});
   }, [online, actions, id]);
+  // Picked in a reply (this sheet just opened for it, or the panel was already open): a new conversation about it.
+  useEffect(() => {
+    if (picked === undefined) return;
+    setQuote(takeSideQuote(id));
+    setSideId(NEW);
+    const timer = setTimeout(() => input.current?.focus(), 350);
+    return () => clearTimeout(timer);
+  }, [picked, id]);
   // A new conversation joins the chips at the end: keep it in view, once it is laid out.
   const chipCount = useRef(0);
   const chipsGrew = () => {
@@ -101,8 +116,9 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
     if (!question || busy) return;
     setBusy(true);
     try {
-      const asked = await actions.askSide(id, question, current?.sideId);
+      const asked = await actions.askSide(id, withQuote(quote, question), current?.sideId);
       setSideId(asked.sideId);
+      setQuote(undefined);
       if (fromDraft) setDraft("");
       following.current = true;
       haptics.selection();
@@ -138,7 +154,8 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
       <KeyboardAvoidingView behavior="padding" automaticOffset style={{ flex: 1 }}>
         {/* Shown with even one open, so a new question never hides the one there is; above the scroll, so switching needs no scrolling back. */}
         {sides.length > 0 ? (
-          <View style={{ flexDirection: "row", alignItems: "center", paddingTop: 4, paddingBottom: 10 }}>
+          // iOS's sheet bar leaves room under it; Android's header sits right on the content.
+          <View style={{ flexDirection: "row", alignItems: "center", paddingTop: Platform.OS === "android" ? 14 : 4, paddingBottom: 10 }}>
             {/* Pinned ahead of the conversations, so it never scrolls out of reach. */}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 16 }}>
               <SideChip label="＋ 新的" accessibilityLabel="新的旁支" picked={!current} onPress={() => setSideId(NEW)} />
@@ -149,7 +166,7 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
               {sides.map((entry, index) => (
                 <SideChip
                   key={entry.sideId}
-                  label={entry.messages[0]?.text || `旁支 ${index + 1}`}
+                  label={chipLabel(entry.messages[0]?.text) || `旁支 ${index + 1}`}
                   picked={entry.sideId === current?.sideId}
                   running={entry.running}
                   onPress={() => setSideId(entry.sideId)}
@@ -169,7 +186,7 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
             <ScrollView
               ref={scroll}
               style={{ flex: 1 }}
-              contentContainerStyle={{ flexGrow: 1, padding: 16, paddingTop: sides.length > 0 ? 6 : 16, gap: 14 }}
+              contentContainerStyle={{ flexGrow: 1, padding: 16, paddingTop: sides.length > 0 ? 6 : Platform.OS === "android" ? 24 : 16, gap: 14 }}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
               scrollEventThrottle={32}
@@ -179,7 +196,7 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
               }}
             >
               {!current ? (
-                <Intro agentName={look.name} how={howItAnswers(session?.agent ?? "", look.name)} disabled={!online || busy} onAsk={(question) => void ask(question, false)} />
+                <Intro agentName={look.name} how={howItAnswers(session?.agent ?? "", look.name)} quoting={!!quote} disabled={!online || busy} onAsk={(question) => void ask(question, false)} />
               ) : (
                 current.messages.map((message, index) => (
                   <SideMessageView key={message.id} message={message} answering={current.running && index === current.messages.length - 1} />
@@ -200,15 +217,25 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
         {/* The keyboard covers the home indicator; a hardware keyboard (no height) does not. A panel stops above the screen's edge; its send button lines up with the conversation's. */}
         <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: embedded ? 18 : keyboardHeight > insets.bottom ? 8 : Math.max(insets.bottom, 8) + 4, gap: 6 }}>
           {!online ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 8 }]}>电脑离线，连上后才能提问。</Text> : null}
-          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, padding: 6, paddingLeft: 4, borderRadius: 26, borderCurve: "continuous", backgroundColor: colors.sheetCard }}>
+          <View style={{ padding: 6, paddingLeft: 4, borderRadius: 26, borderCurve: "continuous", backgroundColor: colors.sheetCard }}>
+          {quote ? (
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 4, paddingLeft: 10, paddingTop: 4 }}>
+              <QuoteText text={quote} lines={3} fill />
+              <Pressable onPress={() => { haptics.selection(); setQuote(undefined); }} accessibilityRole="button" accessibilityLabel="不引用这段" hitSlop={6} style={{ width: 32, height: 32, marginTop: -4, alignItems: "center", justifyContent: "center" }}>
+                <Icon sf="xmark.circle.fill" md="cancel" size={17} color={colors.tertiaryLabel} />
+              </Pressable>
+            </View>
+          ) : null}
+          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
             <TextInput
+              ref={input}
               accessibilityLabel="旁支问题"
               value={draft}
               onChangeText={setDraft}
               multiline
               maxLength={20_000}
               editable={online}
-              placeholder={current ? "接着问…" : `问 ${look.name}…`}
+              placeholder={quote ? "问问这段…" : current ? "接着问…" : `问 ${look.name}…`}
               placeholderTextColor={colors.placeholder as string}
               selectionColor={colors.accent}
               submitBehavior="newline"
@@ -220,6 +247,7 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
               <RoundButton label={current ? "接着问" : "提问"} tone="send" busy={busy} disabled={!online || !draft.trim()} onPress={() => void ask(draft, true)} />
             )}
           </View>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </>
@@ -227,15 +255,15 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
 }
 
 /** Before the first question: what a side conversation is, and a few to start with. */
-function Intro({ agentName, how, disabled, onAsk }: { agentName: string; how: string; disabled: boolean; onAsk: (question: string) => void }) {
+function Intro({ agentName, how, quoting, disabled, onAsk }: { agentName: string; how: string; quoting: boolean; disabled: boolean; onAsk: (question: string) => void }) {
   return (
     <View style={{ flex: 1, justifyContent: "flex-end", gap: 14, paddingBottom: 4 }}>
       <View style={{ gap: 4 }}>
-        <Text style={[type.headline, { color: colors.label }]}>问 {agentName} 一句，不打断会话</Text>
+        <Text style={[type.headline, { color: colors.label }]}>{quoting ? `问 ${agentName} 这一段，不打断会话` : `问 ${agentName} 一句，不打断会话`}</Text>
         <Text style={[type.subhead, { color: colors.secondaryLabel }]}>问答不进入会话。{how}</Text>
       </View>
       <View style={{ alignItems: "flex-start", gap: 8 }}>
-        {SUGGESTIONS.map((question) => (
+        {(quoting ? QUOTE_SUGGESTIONS : SUGGESTIONS).map((question) => (
           <Pressable
             key={question}
             onPress={() => { haptics.selection(); onAsk(question); }}
@@ -249,6 +277,24 @@ function Intro({ agentName, how, disabled, onAsk }: { agentName: string; how: st
           </Pressable>
         ))}
       </View>
+    </View>
+  );
+}
+
+/** A chip is named by what was asked, not by the passage it quotes. */
+function chipLabel(text: string | undefined): string {
+  if (!text) return "";
+  const { quote, question } = splitQuote(text);
+  return question || quote || "";
+}
+
+/** A passage quoted from a reply: a bar on the left, the passage in the reply's colour. */
+function QuoteText({ text, lines, fill = false }: { text: string; lines?: number; fill?: boolean }) {
+  // Fills a row (the composer's) only when told: in a bubble's column, flex would stretch it tall.
+  return (
+    <View style={{ flex: fill ? 1 : undefined, flexShrink: 1, minWidth: 0, flexDirection: "row", gap: 8 }}>
+      <View style={{ width: 3, borderRadius: 1.5, backgroundColor: colors.accent, opacity: 0.6 }} />
+      <Text selectable numberOfLines={lines} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>{text}</Text>
     </View>
   );
 }
@@ -302,9 +348,11 @@ function SideActivity({ lines, live }: { lines: string[]; live: boolean }) {
 
 function SideMessageView({ message, answering }: { message: SideMessage; answering: boolean }) {
   if (message.role === "user") {
+    const { quote, question } = splitQuote(message.text);
     return (
-      <View style={{ alignSelf: "flex-end", maxWidth: "88%", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: colors.userBubble }}>
-        <Text selectable style={[type.body, { color: colors.label }]}>{message.text}</Text>
+      <View style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: colors.userBubble }}>
+        {quote ? <QuoteText text={quote} lines={4} /> : null}
+        {question ? <Text selectable style={[type.body, { color: colors.label }]}>{question}</Text> : null}
       </View>
     );
   }

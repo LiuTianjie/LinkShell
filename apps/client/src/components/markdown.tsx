@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { Platform, useColorScheme } from "react-native";
 import { openLink, useLinkBase } from "@/lib/links";
-import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-markdown";
+import { EnrichedMarkdownText, type MarkdownStyle, type TextContextMenuItem, type TextSelectionMenuConfig } from "react-native-enriched-markdown";
 import { palette, type Palette } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 
@@ -67,15 +67,25 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
 }
 
 
+/** The selection menu in the app's language: the library's labels are English. */
+const SELECTION_MENU: TextSelectionMenuConfig = {
+  copy: { label: "复制" },
+  copyAsMarkdown: { label: "复制为 Markdown" },
+  copyImageUrl: { label: "复制图片地址", pluralLabels: { other: "复制 {count} 个图片地址" } },
+};
+
 /** Agent markdown, rendered natively; the tail fades in while it streams. */
 export const Markdown = memo(function Markdown({
   text,
   streaming = false,
   variant = "chat",
+  menu,
 }: {
   text: string;
   streaming?: boolean;
   variant?: "chat" | "thought";
+  /** Actions added to the menu of selected text, ahead of Copy. */
+  menu?: TextContextMenuItem[];
 }) {
   const dark = useColorScheme() === "dark";
   const base = useLinkBase();
@@ -91,6 +101,8 @@ export const Markdown = memo(function Markdown({
       enableTaskListItemToggle={false}
       selectionColor={dark ? palette.dark.accent : palette.light.accent}
       onLinkPress={({ url }) => openLink(url, base)}
+      contextMenuItems={menu}
+      selectionMenuConfig={SELECTION_MENU}
     />
   );
 });

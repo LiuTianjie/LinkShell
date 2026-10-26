@@ -23,7 +23,8 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
-import { TimelineFork, TimelineQuestions, TimelineSession } from "@/components/timeline/context";
+import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide } from "@/components/timeline/context";
+import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
@@ -154,6 +155,8 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
     else if (sideBeside) workspace?.show("side");
     else router.push({ pathname: "/session/[id]/side", params: sideId ? { id, side: sideId } : { id } });
   };
+  // A passage picked in a reply: a new side conversation about it.
+  const askAboutQuote = agentInfo?.capabilities.side && online ? (quote: string) => { quoteForSide(id, quote); openSide(); } : undefined;
   const commandControls = useSessionCommands(id, openSide);
   const hasDraft = useHasComposerDraft(id);
   const { computer } = useConnection();
@@ -514,6 +517,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <TimelineSession.Provider value={id}>
       <TimelineFork.Provider value={canFork ? askFork : undefined}>
       <TimelineQuestions.Provider value={questions}>
+      <TimelineSide.Provider value={askAboutQuote}>
       <Timeline
         computerPreview
         previewHeaderConsumed={headerConsumed}
@@ -528,6 +532,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onScroll={onScroll}
         earlier={earlier}
       />
+      </TimelineSide.Provider>
       </TimelineQuestions.Provider>
       </TimelineFork.Provider>
       </TimelineSession.Provider>

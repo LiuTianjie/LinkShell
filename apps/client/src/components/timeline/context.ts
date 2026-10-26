@@ -8,6 +8,13 @@ export function useTimelineSession(): string | undefined {
   return useContext(TimelineSession);
 }
 
+/** Opens a side conversation about a passage picked in a reply (set where the agent has side conversations). */
+export const TimelineSide = createContext<((quote: string) => void) | undefined>(undefined);
+
+export function useTimelineSide(): ((quote: string) => void) | undefined {
+  return useContext(TimelineSide);
+}
+
 /** Forks the session after the reply with this id (set where the session can be forked). */
 export const TimelineFork = createContext<((itemId: string) => void) | undefined>(undefined);
 

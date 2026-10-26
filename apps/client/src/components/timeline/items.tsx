@@ -1,6 +1,6 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
@@ -12,7 +12,7 @@ import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { AgentInbox } from "./agent-inbox";
-import { useTimelineFork, useTimelineQuestions } from "./context";
+import { useTimelineFork, useTimelineQuestions, useTimelineSide } from "./context";
 import { automationMessage, cleanAgentHeartbeatText, questionReplies, userMessageText } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
@@ -106,13 +106,16 @@ export const UserMessage = memo(function UserMessage({
 });
 
 export const AgentMessage = memo(function AgentMessage({ item, last = false }: { item: Of<"agent">; last?: boolean }) {
+  const side = useTimelineSide();
+  // Select a passage, then ask about it beside the conversation.
+  const menu = useMemo(() => side ? [{ text: "旁支对话", icon: "bubble.left.and.text.bubble.right", onPress: ({ text }: { text: string }) => side(text) }] : undefined, [side]);
   const { text: displayText } = cleanAgentHeartbeatText(item.text);
   const hasText = displayText.trim().length > 0;
   if (!hasText && !item.attachments?.length) return null;
   return (
     <View style={{ gap: 8 }}>
       {item.senderSessionId || item.recipientSessionId ? <Text selectable style={[type.caption, { color: colors.secondaryLabel }]}>{item.senderSessionId ?? "Agent"} → {item.recipientSessionId ?? "当前会话"}</Text> : null}
-      {hasText ? <Markdown text={displayText} streaming={item.streaming} /> : null}
+      {hasText ? <Markdown text={displayText} streaming={item.streaming} menu={menu} /> : null}
       {item.attachments?.length ? <Attachments blocks={item.attachments} /> : null}
       {item.questions?.length && !item.streaming ? <AsyncQuestions questions={item.questions} /> : null}
       {last && hasText && !item.streaming ? <ReplyActions item={{ ...item, text: displayText }} /> : null}
