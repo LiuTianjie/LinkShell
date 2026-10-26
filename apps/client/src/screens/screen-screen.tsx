@@ -1,8 +1,8 @@
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import * as Clipboard from "expo-clipboard";
 import { useKeepAwake } from "expo-keep-awake";
-import { Stack, useFocusEffect, useIsFocused } from "expo-router";
-import { useHeaderHeight } from "expo-router/react-navigation";
+import { Stack, useIsFocused, useNavigation, type NativeStackNavigationProp } from "expo-router";
+import { useHeaderHeight, type ParamListBase } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Platform, ScrollView, View } from "react-native";
@@ -37,7 +37,9 @@ export function ScreenScreen() {
   const { viewer, failure, preparing, generation, display, mode, playback, attach, detach, present: publishPresentation, inject, focus, selectDisplay, retry } = useScreenSession();
   const owner = useRef({}).current;
   const focusGeneration = useRef(0);
+  const routeActive = useRef(false);
   const anchor = useRef<View>(null);
+  const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const focused = useIsFocused();
   const [viewport, setViewport] = useState<ScreenViewport | null>(null);
   const headerHeight = useHeaderHeight();
@@ -48,12 +50,20 @@ export function ScreenScreen() {
   const [shortcuts, setShortcuts] = useState(loadScreenShortcuts);
   const relayOnly = playback === "relay";
   const measureAnchor = useCallback(() => {
+    if (!routeActive.current) return;
+    const generationAtMeasure = focusGeneration.current;
     anchor.current?.measureInWindow((x, y, width, height) => {
+      if (!routeActive.current || focusGeneration.current !== generationAtMeasure) return;
       if (width <= 0 || height <= 0) return;
       setViewport((previous) => previous?.x === x && previous.y === y && previous.width === width && previous.height === height ? previous : { x, y, width, height });
     });
   }, []);
   const [fullscreen, setFullscreen] = useState(false);
+  const clipInsets = useMemo(() => ({
+    top: fullscreen ? 0 : Math.max(insets.top, headerHeight),
+    left: fullscreen ? 0 : insets.left,
+    right: fullscreen ? 0 : insets.right,
+  }), [fullscreen, headerHeight, insets.top, insets.left, insets.right]);
   const window = useWindowDimensions();
   // Measure the picture's frame independently of the requested rotation (including folding and resizing).
   const landscape = window.width > window.height;
@@ -140,23 +150,46 @@ export function ScreenScreen() {
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
   const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(-keyboardHeight.value, 0) }));
   const routePresentation = useRef<ScreenPresentation>(null!);
-  routePresentation.current = { viewport, clipTop: fullscreen ? 0 : Math.max(insets.top, headerHeight), chrome, keyboardLift: lift, onMessage };
-  useFocusEffect(useCallback(() => {
-    attach(owner);
-    publishPresentation(owner, routePresentation.current);
-    measureAnchor();
-    return () => {
+  routePresentation.current = { viewport, clipInsets, chrome, keyboardLift: lift, onMessage };
+  useLayoutEffect(() => {
+    if (!focused) return;
+    const resume = () => {
+      if (!navigation.isFocused()) return;
+      if (!routeActive.current) {
+        routeActive.current = true;
+        attach(owner);
+        publishPresentation(owner, routePresentation.current);
+      }
+      measureAnchor();
+    };
+    const leave = () => {
+      if (!routeActive.current) return;
+      routeActive.current = false;
       focusGeneration.current += 1;
       clearTimeout(keyboardRetry.current);
       detach(owner);
+    };
+    resume();
+    // The retained receiver is outside the native stack and cannot follow its pop animation.
+    // Hide it before a JS pop, or as a native swipe starts, instead of waiting for blur.
+    const remove = navigation.addListener("beforeRemove", leave);
+    const start = navigation.addListener("transitionStart", ({ data }) => { if (data.closing) leave(); });
+    const end = navigation.addListener("transitionEnd", ({ data }) => { if (!data.closing) resume(); });
+    const cancel = navigation.addListener("gestureCancel", resume);
+    return () => {
+      remove();
+      start();
+      end();
+      cancel();
+      leave();
       void clearOrientationRequest().catch(() => {});
     };
-  }, [attach, detach, owner, measureAnchor, publishPresentation]));
+  }, [focused, navigation, attach, detach, owner, measureAnchor, publishPresentation]);
   useLayoutEffect(() => {
-    if (!focused) return;
+    if (!focused || !routeActive.current) return;
     measureAnchor();
-    publishPresentation(owner, { viewport, clipTop: fullscreen ? 0 : Math.max(insets.top, headerHeight), chrome, keyboardLift: lift, onMessage });
-  }, [focused, measureAnchor, publishPresentation, owner, viewport, fullscreen, insets.top, headerHeight, chrome, lift, onMessage]);
+    publishPresentation(owner, { viewport, clipInsets, chrome, keyboardLift: lift, onMessage });
+  }, [focused, measureAnchor, publishPresentation, owner, viewport, clipInsets, chrome, lift, onMessage]);
   const current = viewer?.displays.find((entry) => entry.index === display);
   const streamVia = viewer?.via;
 
@@ -166,7 +199,6 @@ export function ScreenScreen() {
       <LayoutProbe onMetrics={geometry.onMetrics} revision={geometry.revision} />
       {!nativeStatusBar ? <StatusBar style="light" hidden={fullscreen} animated /> : null}
       <Stack.Screen
-        listeners={{ transitionEnd: measureAnchor }}
         options={{
           title: "电脑屏幕",
           ...(nativeStatusBar ? { statusBarHidden: fullscreen, statusBarStyle: "light", statusBarAnimation: "fade" } as const : {}),

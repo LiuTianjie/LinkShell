@@ -28,7 +28,7 @@ export interface ScreenPageMessage {
 
 export interface ScreenPresentation {
   viewport: ScreenViewport | null;
-  clipTop: number;
+  clipInsets: { top: number; left: number; right: number };
   chrome: string;
   keyboardLift: ComponentProps<typeof Animated.View>["style"];
   onMessage(message: ScreenPageMessage, generation: number): void;
@@ -308,7 +308,9 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     setOrigin((previous) => previous.x === x && previous.y === y ? previous : { x, y });
   }), []);
   const viewport = presentation?.viewport;
-  const clipTop = Math.min(viewport?.height ?? 0, Math.max(0, presentation?.clipTop ?? 0));
+  const clipTop = Math.min(viewport?.height ?? 0, Math.max(0, presentation?.clipInsets.top ?? 0));
+  const clipLeft = Math.min(viewport?.width ?? 0, Math.max(0, presentation?.clipInsets.left ?? 0));
+  const clipRight = Math.min((viewport?.width ?? 0) - clipLeft, Math.max(0, presentation?.clipInsets.right ?? 0));
   const visible = active && viewport !== null && viewport !== undefined && !failure;
   const preparing = preparingGeneration === snapshot.generation;
   const value = useMemo<ScreenSessionContextValue>(() => ({ viewer, failure, preparing, generation: snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry }), [viewer, failure, preparing, snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry]);
@@ -316,13 +318,15 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   return <ScreenSessionContext value={value}>
     <View ref={root} collapsable={false} onLayout={measureRoot} style={{ flex: 1 }}>
       {children}
+      {/* Duo can place navigation controls at either side. Leave those regions visible and touchable. */}
       {viewer ? <View
         pointerEvents={visible ? "auto" : "none"}
         accessibilityElementsHidden={!visible}
         importantForAccessibility={visible ? "auto" : "no-hide-descendants"}
-        style={{ position: "absolute", left: (viewport?.x ?? 0) - origin.x, top: (viewport?.y ?? 0) - origin.y + clipTop, width: viewport?.width ?? 1, height: Math.max(1, (viewport?.height ?? 1) - clipTop), overflow: "hidden", opacity: visible ? 1 : 0 }}
+        style={{ position: "absolute", left: (viewport?.x ?? 0) - origin.x + clipLeft, top: (viewport?.y ?? 0) - origin.y + clipTop, width: Math.max(1, (viewport?.width ?? 1) - clipLeft - clipRight), height: Math.max(1, (viewport?.height ?? 1) - clipTop), overflow: "hidden", opacity: visible ? 1 : 0 }}
       >
-        <Animated.View style={[{ position: "absolute", left: 0, top: -clipTop, width: viewport?.width ?? 1, height: viewport?.height ?? 1, backgroundColor: "#000000" }, presentation?.keyboardLift]}>
+        {/* Keep the receiver's full frame so clipping never changes video or pointer coordinates. */}
+        <Animated.View style={[{ position: "absolute", left: -clipLeft, top: -clipTop, width: viewport?.width ?? 1, height: viewport?.height ?? 1, backgroundColor: "#000000" }, presentation?.keyboardLift]}>
           <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} web={web} onMessage={onMessage} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} />
           {visible && readyGeneration !== viewer.generation ? <View style={{ position: "absolute", inset: 0, backgroundColor: "#08090e" }}>
             <ScreenConnectionLoading key={viewer.generation} preparing onRetry={retry} top={clipTop} bottom={0} />
