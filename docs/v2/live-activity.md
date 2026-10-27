@@ -19,6 +19,8 @@
 
 锁屏卡片、灵动岛展开、紧凑和最小样式都读取统一的展示状态。系统的 `ActivityViewContext.isStale` 会覆盖缓存的 phase，因此即使 App 已被挂起、不再同步，也不会把过期内容继续画成绿色运行状态。
 
+iOS 27 的窄宽灵动岛（如 iPhone Duo 的竖向布局）通过 `isDynamicIslandLimitedInWidth` 自适应：紧凑区域中的主 Agent 头像与状态图标使用相同的居中容器，不带左右单侧补白；不显示叠放头像、`+N` 或状态数量，完整 Agent 和任务数量仍通过 VoiceOver 提供。普通宽度继续保留叠放与计数。该适配需要使用 Xcode 27 / Swift 6.4 或更新版本构建；旧编译器和旧系统保留原紧凑展示。
+
 iOS 17 及以上在状态变化时替换状态符号，运行活动的副标题变化时触发一次轻量脉冲。头像按稳定标识移动约 0.35 秒，标题与正文约 0.3 秒淡入淡出；减少动态效果或息屏显示时停用这些动效。按照 [WidgetKit 动画规则](https://developer.apple.com/documentation/widgetkit/animating-data-updates-in-widgets-and-live-activities)，动画由数据更新驱动，单次不超过 2 秒，不使用持续循环动画。
 
 ## 选项与详情
@@ -41,6 +43,7 @@ iOS 可以挂起后台 JS，手机定时器、WebSocket 重连和 Background Fet
 
 ## 验证与交付
 
+- 2026-10-27：使用生产 Widget 源码构建独立原生预览包，通过 StupidMirror 操作 iOS 27.1 的临时 iPhone Duo 模拟器；单 Agent / 单任务、3 个 Agent / 123 个任务，以及折叠外屏和展开内屏的紧凑图标均同轴居中。客户端 lint、typecheck 与原生预览包构建通过；未运行测试用例，未验证真机或远程推送链路。
 - 叠放头像、按钮、溢出和切换动效使用生产 SwiftUI 视图在独立 iPhone Air / iOS 26.5 模拟器中渲染。它们是原生视图预览，不等同于系统锁屏 App Intent 点击或完整 App 的远程交互验证。
 - 聚合与选项测试覆盖最近进展排序、时间相同的稳定顺序、终端数量、选项变化、过期和跨电脑请求。原生队列检查覆盖冷启动、重复消费、过期和有界存储。
 - Host 与服务测试使用本地 HTTP 和模拟 APNs，覆盖手机断开后订阅保留、Host 重启、退避后的最新快照、授权隔离、撤销竞态、乱序、结束、JWT 签名和 4 KB 大小限制。生产 APNs 使用占位活动 token 返回预期的 `BadDeviceToken`，已排除 Provider 鉴权失败；这不证明真实设备收到或显示了更新。

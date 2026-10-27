@@ -231,6 +231,7 @@ struct AgentStackView: View {
   let state: LinkShellAttentionAttributes.ContentState
   var size: CGFloat = 26
   var limit: Int = 3
+  var showsOverflow = true
   @Environment(\\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -245,7 +246,7 @@ struct AgentStackView: View {
           .zIndex(Double(limit - index))
           .transition(.opacity)
       }
-      if agents.count > limit {
+      if showsOverflow && agents.count > limit {
         Text("+\\(agents.count - limit)")
           .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
           .foregroundColor(.white.opacity(0.9))

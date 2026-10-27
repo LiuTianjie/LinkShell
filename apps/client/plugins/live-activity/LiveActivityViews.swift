@@ -235,6 +235,33 @@ struct ActivityAdaptiveBannerView: View {
 }
 
 @available(iOS 16.2, *)
+struct CompactIslandRegion<Content: View>: View {
+  @ViewBuilder let content: (Bool) -> Content
+
+  var body: some View {
+    #if compiler(>=6.4)
+    if #available(iOS 27.0, *) {
+      WidthAwareCompactIslandRegion(content: content)
+    } else {
+      content(false)
+    }
+    #else
+    content(false)
+    #endif
+  }
+}
+
+#if compiler(>=6.4)
+@available(iOS 27.0, *)
+private struct WidthAwareCompactIslandRegion<Content: View>: View {
+  @Environment(\.isDynamicIslandLimitedInWidth) private var isWidthLimited
+  @ViewBuilder let content: (Bool) -> Content
+
+  var body: some View { content(isWidthLimited) }
+}
+#endif
+
+@available(iOS 16.2, *)
 struct LinkShellAttentionWidget: Widget {
   var body: some WidgetConfiguration {
     let configuration = ActivityConfiguration(for: LinkShellAttentionAttributes.self) { context in
@@ -280,9 +307,17 @@ struct LinkShellAttentionWidget: Widget {
           .padding(.top, 4)
         }
       } compactLeading: {
-        AgentStackView(state: state, size: 20, limit: 2).padding(.leading, 2)
+        CompactIslandRegion { isWidthLimited in
+          AgentStackView(state: state, size: 20, limit: isWidthLimited ? 1 : 2, showsOverflow: !isWidthLimited)
+            .padding(.leading, isWidthLimited ? 0 : 2)
+            .frame(width: isWidthLimited ? 24 : nil, height: 24)
+        }
       } compactTrailing: {
-        StatusIndicatorView(state: state, size: 22).padding(.trailing, 2)
+        CompactIslandRegion { isWidthLimited in
+          StatusIndicatorView(state: state, size: 22, showsCount: !isWidthLimited)
+            .padding(.trailing, isWidthLimited ? 0 : 2)
+            .frame(width: isWidthLimited ? 24 : nil, height: 24)
+        }
       } minimal: {
         StatusIndicatorView(state: state, size: 22, showsCount: false)
       }
