@@ -44,9 +44,9 @@ LinkShell.app/Contents/
 3. 本机管理从 SwiftUI 移进网页（`apps/web/src/live/Management*.tsx`）。
 4. 流式回复：照 Codex 的自适应缓冲放字（`smooth-text.ts`），Markdown 按块解析，只重解析最后一块，新块淡入。
 5. 桌面配色换成 Codex 的令牌（`theme.ts` 的 `nativeDesktopColors`）。
+6. 布局与组件质感（规则见 `apps/web/DESIGN.md` 的桌面版一节）：半透明侧栏、46px 工具栏、实心主面板、30px 侧栏行、浮动输入框、新建会话页、统一 diff（按文件分组的变更面板）、检查器标签页、侧栏收起与边缘唤出、Shiki 代码高亮（Codex 的 codex-light / codex-dark 配色）。
 
 ## 待做
 
-- 布局与组件质感（`desktop.css`）：通顶半透明侧栏、46px 工具栏、主区单一实心面板、30px 侧栏行、22px 浮动输入框、768px 对话列、Motion 驱动的侧栏收起。
 - Windows：同一个 Electron 壳替换 WebView2 工作台（`apps/windows` 的屏幕 helper 与安装器保留）。
 - 发布：双架构 DMG（现在只打了 arm64）、公证、Sparkle 源、旧版升级迁移。
