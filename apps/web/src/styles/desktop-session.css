@@ -10,7 +10,7 @@ html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; a
 html[data-desktop] .desktop-main .session-heading-context { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
 html[data-desktop] .desktop-main .session-heading-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
 html[data-desktop] .desktop-main .session-title { gap: 8px; min-width: 0; }
-html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 13px; font-weight: 590; letter-spacing: -.005em; line-height: 18px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 14px; font-weight: 500; letter-spacing: -.005em; line-height: 18px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .session-subtitle { flex: none; gap: 6px; margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .desktop-main .session-subtitle .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
 html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),

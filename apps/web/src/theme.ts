@@ -74,8 +74,9 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   "placeholder": ["#1a1c1f73", "#ffffff66"],
   "separator": ["#1a1c1f14", "#ffffff14"],
   "separatorStrong": ["#1a1c1f1f", "#ffffff29"],
-  "fill": ["#1a1c1f0d", "#ffffff0d"],
-  "fillStrong": ["#1a1c1f1a", "#ffffff14"],
+  // Codex's ghost hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
+  "fill": ["#1a1c1f0d", "#ffffff14"],
+  "fillStrong": ["#1a1c1f1f", "#ffffff29"],
   "accent": ["#1a1c1f", "#ffffff"],
   "accentHover": ["#303030", "#ededed"],
   "accentSoft": ["#1a1c1f0d", "#ffffff0d"],
