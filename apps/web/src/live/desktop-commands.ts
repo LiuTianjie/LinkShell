@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isWindowsDesktop } from "./desktop";
+import { parseManagePage, type ManagePage } from "./management-model";
 
 /** Commands that cross components: the shell, the open session and LinkShell.app's top bar all send them. */
 export const DESKTOP_COMMAND_EVENT = "linkshell-desktop-command";
@@ -9,15 +10,22 @@ export type DesktopCommand =
   | { command: "palette" }
   | { command: "new-session"; cwd?: string }
   | { command: "toggle-sidebar" }
-  | { command: "inspector"; panel?: InspectorPanel };
+  | { command: "inspector"; panel?: InspectorPanel }
+  | { command: "manage"; page?: ManagePage }
+  | { command: "workspace" };
 
 const inspectorPanels: readonly string[] = ["changes", "files", "terminal", "tasks", "preview", "settings"];
 
 /** The native bridge sends untyped JSON; only these shapes are acted on. */
 export function desktopCommand(value: unknown): DesktopCommand | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const { command, cwd, panel } = value as Record<string, unknown>;
-  if (command === "palette" || command === "toggle-sidebar") return { command };
+  const { command, cwd, panel, page } = value as Record<string, unknown>;
+  if (command === "palette" || command === "toggle-sidebar" || command === "workspace") return { command };
+  if (command === "manage") {
+    // The menu bar names pages by their title ("更新"); an unknown page opens the overview.
+    const known = parseManagePage(page);
+    return known ? { command, page: known } : { command };
+  }
   if (command === "new-session")
     return typeof cwd === "string" && cwd ? { command, cwd } : { command };
   if (command === "inspector")
@@ -57,6 +65,11 @@ export const desktopShortcuts = {
   nextSession: { key: "]", shift: true, label: "下一个会话" },
 } as const;
 export type DesktopShortcut = (typeof desktopShortcuts)[keyof typeof desktopShortcuts];
+/** The window's two views. Kept apart from the table: the shortcut sheet lists them on their own. */
+export const desktopModeShortcuts = {
+  workspace: { key: "1", label: "工作台" },
+  manage: { key: "2", label: "本机管理" },
+} as const;
 
 /** ⌘ on the Mac, Ctrl on Windows. */
 export function shortcutText(shortcut: { key: string; alt?: boolean; shift?: boolean }): string {

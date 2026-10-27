@@ -341,8 +341,14 @@
     color: var(--label);
     overflow-wrap: anywhere;
   }
-  .markdown > :first-child { margin-top: 0; }
-  .markdown > :last-child { margin-bottom: 0; }
+  .markdown > :first-child,
+  .markdown > .markdown-block:first-child > :first-child { margin-top: 0; }
+  .markdown > :last-child,
+  .markdown > .markdown-block:last-child > :last-child { margin-bottom: 0; }
+  /* A streaming reply is parsed a block at a time; each new block fades in as it appears. */
+  .markdown-block[data-enter] { animation: markdown-block-enter 150ms cubic-bezier(.37, .55, .86, .88) both; }
+  @keyframes markdown-block-enter { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .markdown-block[data-enter] { animation: none; } }
   .markdown p { margin: 0 0 12px; }
   .markdown h1,
   .markdown h2,

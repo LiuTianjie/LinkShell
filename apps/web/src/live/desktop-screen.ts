@@ -9,6 +9,8 @@ export interface NativeScreenEvent {
   error?: string;
 }
 export function postNativeScreen(id: string, type: string, payload: Record<string, unknown> = {}): boolean {
+  const electron = (window as Window & { linkshellDesktop?: { postMessage(value: unknown): void; shell?: string } }).linkshellDesktop;
+  if (electron?.shell === "electron") { electron.postMessage({ action: "screen", id, type, ...payload }); return true; }
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
   }).webkit?.messageHandlers?.linkshellDesktop;

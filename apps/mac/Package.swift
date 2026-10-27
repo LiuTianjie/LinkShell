@@ -7,6 +7,12 @@ let package = Package(
   name: "LinkShell",
   // 13.0 is what the WebRTC binary itself was built for (LC_BUILD_VERSION minos 13.0).
   platforms: [.macOS(.v13)],
+  products: [
+    .executable(name: "LinkShell", targets: ["LinkShell"]),
+    // The window's native half (apps/desktop loads it into Electron): permissions, the login
+    // item and Sparkle. Never WebRTC: Chromium's own libwebrtc shares its class names.
+    .library(name: "LinkShellNative", type: .dynamic, targets: ["LinkShellNative"]),
+  ],
   targets: [
     .executableTarget(
       name: "LinkShell",
@@ -15,6 +21,17 @@ let package = Package(
       linkerSettings: [
         // Where the framework is inside the app: Contents/Frameworks.
         .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+      ]
+    ),
+    .target(name: "LinkShellNativeShim", path: "Sources/LinkShellNativeShim"),
+    .target(
+      name: "LinkShellNative",
+      dependencies: ["Sparkle", "LinkShellNativeShim"],
+      path: "Sources/LinkShellNative",
+      linkerSettings: [
+        // Node-API resolves against the Electron process that loads the module.
+        .unsafeFlags(["-Xlinker", "-undefined", "-Xlinker", "dynamic_lookup",
+                      "-Xlinker", "-rpath", "-Xlinker", "@loader_path"]),
       ]
     ),
     // What can be proved with no screen and no network (`swift test`, part of `pnpm check`).

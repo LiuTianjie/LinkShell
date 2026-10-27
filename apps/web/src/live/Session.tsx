@@ -8,6 +8,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { CSSProperties, ReactNode } from "react";
 import { AsyncQuestions } from "./AsyncQuestions";
+import { composerHeightRef } from "./composer-height";
 import {
   InputGroup,
   InputGroupAddon,
@@ -963,7 +964,7 @@ export function Session({
                 <Terminal key={terminal} id={terminal} />
               </div>
             )}
-            <div className="composer-wrap">
+            <div className="composer-wrap" ref={composerHeightRef}>
               <ErrorNotice error={job.error} />
               <ErrorNotice error={sendJob.error} />
               <ErrorNotice error={attachmentError} />

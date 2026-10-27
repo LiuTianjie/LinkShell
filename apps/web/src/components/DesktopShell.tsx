@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import {
@@ -15,6 +15,7 @@ import {
   Laptop,
   MessageSquare,
   Monitor,
+  PanelLeft,
   Moon,
   Plus,
   RefreshCw,
@@ -25,13 +26,25 @@ import {
   Terminal,
   type LucideIcon,
   Lock,
+  Settings2,
 } from "lucide-react";
 import appMark from "../../../client/assets/mark.png";
 import { engine, type Computer, type Connection } from "../live/engine";
 import { baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import { DESKTOP_LOCAL, isWindowsDesktop, openDesktopManagement, setDesktopAppearance, setDesktopContentFocus } from "../live/desktop";
 import {
+  DESKTOP_LOCAL,
+  isElectronDesktop,
+  isWindowsDesktop,
+  openDesktopManagement,
+  reportDesktopWorkspace,
+  setDesktopAppearance,
+  setDesktopContentFocus,
+} from "../live/desktop";
+import { newVersion, management, startManagement } from "../live/management-store";
+import { isManageView, manageView, type ManagePage } from "../live/management-model";
+import {
+  desktopModeShortcuts,
   desktopShortcuts,
   keysBelongToContent,
   matchesShortcut,
@@ -68,6 +81,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import "../styles/desktop.css";
 import "../styles/desktop-components.css";
+import "../styles/management.css";
 
 type Appearance = "system" | "light" | "dark";
 type NavigationItem = { id: string; title: string; icon: LucideIcon };
@@ -133,6 +147,32 @@ function useDesktopAppearance() {
     setDesktopAppearance(value);
   };
   return [appearance, chooseAppearance] as const;
+}
+
+/**
+ * Whether the Electron window is translucent (vibrancy on: focused, below 4K, not turned off);
+ * the sidebar shows the desktop through it only then. Also full screen, where there is no
+ * traffic-light row to leave room for.
+ */
+function useWindowSurface() {
+  useEffect(() => {
+    if (!isElectronDesktop) return;
+    const root = document.documentElement;
+    root.dataset.surface = "translucent";
+    const surface = (event: Event) => {
+      root.dataset.surface = (event as CustomEvent<{ translucent?: boolean }>).detail?.translucent ? "translucent" : "opaque";
+    };
+    const window_ = (event: Event) => {
+      if ((event as CustomEvent<{ fullscreen?: boolean }>).detail?.fullscreen) root.dataset.fullscreen = "";
+      else delete root.dataset.fullscreen;
+    };
+    window.addEventListener("linkshell-desktop-surface", surface);
+    window.addEventListener("linkshell-desktop-window", window_);
+    return () => {
+      window.removeEventListener("linkshell-desktop-surface", surface);
+      window.removeEventListener("linkshell-desktop-window", window_);
+    };
+  }, []);
 }
 
 function ComputerPicker({
@@ -400,22 +440,45 @@ function DesktopNavigation({
     : navigationItems.some((item) => item.id === view) ? view : "";
   return (
     <Sidebar className="desktop-sidebar" collapsible="none">
-      <SidebarHeader className="desktop-sidebar-header">
-        <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
-        <div className="desktop-sidebar-actions">
-          <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
-            <SquarePen size={16} aria-hidden />
-            <span>新建会话</span>
-            <kbd>{shortcutText(desktopShortcuts.newSession)}</kbd>
-          </button>
+      {isElectronDesktop && (
+        // The window's title row: the traffic lights sit at its left, it drags the window.
+        <div className="desktop-titlebar desktop-sidebar-titlebar">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" className="desktop-search" aria-label="搜索与命令" onClick={openPalette}>
-                <Search size={15} />
+              <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
+                <PanelLeft size={16} strokeWidth={1.6} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>隐藏侧栏 · {shortcutText(desktopShortcuts.toggleSidebar)}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="desktop-titlebar-button" aria-label="搜索与命令" onClick={openPalette}>
+                <Search size={16} strokeWidth={1.6} />
               </button>
             </TooltipTrigger>
             <TooltipContent>搜索与命令 · {shortcutText(desktopShortcuts.palette)}</TooltipContent>
           </Tooltip>
+        </div>
+      )}
+      <SidebarHeader className="desktop-sidebar-header">
+        <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
+        <div className="desktop-sidebar-actions">
+          <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
+            <SquarePen size={16} strokeWidth={1.6} aria-hidden />
+            <span>新建会话</span>
+            <kbd>{shortcutText(desktopShortcuts.newSession)}</kbd>
+          </button>
+          {!isElectronDesktop && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="desktop-search" aria-label="搜索与命令" onClick={openPalette}>
+                  <Search size={15} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>搜索与命令 · {shortcutText(desktopShortcuts.palette)}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </SidebarHeader>
       <SidebarContent className="desktop-navigation">
@@ -437,6 +500,7 @@ function DesktopNavigation({
         </nav>
         {state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} />}
       </SidebarContent>
+      {isElectronDesktop && <ManageEntry active={isManageView(view)} open={() => go(manageView())} />}
       <SidebarFooter className="desktop-sidebar-footer">
         <Button variant="ghost" className="desktop-account" onClick={connect} aria-label="连接设置与账号">
           <CircleUserRound size={17} strokeWidth={1.5} /><span>{state.account ?? "登录或配对电脑"}</span>
@@ -466,6 +530,22 @@ function DesktopNavigation({
         </DropdownMenu>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+/** This Mac's own service: below the working set, since it is rarely the job. */
+function ManageEntry({ active, open }: { active: boolean; open: () => void }) {
+  const update = useStore(management, newVersion);
+  const problem = useStore(management, (state) => !!state.problem);
+  return (
+    <nav className="desktop-places desktop-manage-entry" aria-label="本机">
+      <button type="button" className="desktop-place" data-active={active || undefined} aria-current={active ? "page" : undefined} onClick={open}>
+        <Settings2 size={16} strokeWidth={1.6} aria-hidden />
+        <span>本机管理</span>
+        {(update || problem) && <span className="desktop-manage-dot" data-tone={problem ? "warning" : undefined} aria-label={problem ? "本机服务需要处理" : "有新版本"} />}
+        <kbd>⌘2</kbd>
+      </button>
+    </nav>
   );
 }
 
@@ -538,6 +618,7 @@ function WindowsTopBar({ openPalette }: { openPalette: () => void }) {
 
 export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   const [appearance, setAppearance] = useDesktopAppearance();
+  useWindowSurface();
   const [palette, setPalette] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => readLocal("desktopSidebarHidden", false));
   const screenKey = screenComputerKey(props.view);
@@ -545,9 +626,20 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     try { saveLocal("desktopSidebarHidden", !hidden); } catch { /* A preference, not state. */ }
     return !hidden;
   });
+  const managing = isManageView(props.view);
+  // Where ⌘1 returns to: the workspace view that was up before management opened.
+  const lastWorkspace = useRef(managing ? "home" : props.view);
+  if (!managing) lastWorkspace.current = props.view;
+  const openManagement = (page?: ManagePage) => props.navigate(manageView(page));
+  const openWorkspace = () => { if (managing) props.navigate(lastWorkspace.current); };
+  useEffect(() => { if (isElectronDesktop) startManagement(); }, []);
+  // The window tracks which of its two views is up (the tray and menu bar say so).
+  useEffect(() => { if (isElectronDesktop && !managing) reportDesktopWorkspace(); }, [managing]);
   useDesktopCommand((command) => {
     if (command.command === "palette") setPalette(true);
     else if (command.command === "toggle-sidebar") toggleSidebar();
+    else if (command.command === "manage" && isElectronDesktop) openManagement(command.page);
+    else if (command.command === "workspace" && isElectronDesktop) openWorkspace();
   });
   useEffect(() => {
     const step = (direction: 1 | -1) => {
@@ -568,6 +660,10 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
       else if (matchesShortcut(event, desktopShortcuts.back)) act(() => history.back());
       else if (matchesShortcut(event, desktopShortcuts.forward)) act(() => history.forward());
       else if (isWindowsDesktop && event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "2") act(openDesktopManagement);
+      // The Electron menu holds ⌘1/⌘2 too; these keep them working wherever the menu does not
+      // see the key first. Both routes end in the same command.
+      else if (isElectronDesktop && matchesShortcut(event, desktopModeShortcuts.workspace)) act(() => sendDesktopCommand({ command: "workspace" }));
+      else if (isElectronDesktop && matchesShortcut(event, desktopModeShortcuts.manage)) act(() => sendDesktopCommand({ command: "manage" }));
     };
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
@@ -621,15 +717,27 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     };
   }, []);
   return (
-    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined}>
+    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-shell={isElectronDesktop ? "electron" : undefined}>
       <a className="skip-navigation" href="#workspace-content" onClick={(event) => {
         event.preventDefault();
         document.getElementById("workspace-content")?.focus();
       }}>跳到内容</a>
       {isWindowsDesktop && <WindowsTopBar openPalette={() => setPalette(true)} />}
       <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": "264px" } as CSSProperties}>
-        {!sidebarHidden && (
+        {isElectronDesktop ? (
+          // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.
+          <div className="desktop-sidebar-slot" inert={sidebarHidden || undefined}>
+            <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
+          </div>
+        ) : !sidebarHidden && (
           <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
+        )}
+        {isElectronDesktop && sidebarHidden && (
+          <div className="desktop-titlebar desktop-floating-titlebar">
+            <button type="button" className="desktop-titlebar-button" aria-label="显示侧栏" onClick={toggleSidebar}>
+              <PanelLeft size={16} strokeWidth={1.6} />
+            </button>
+          </div>
         )}
         <main className="main desktop-main" id="workspace-content" tabIndex={-1} data-screen={screenKey ? "detail" : undefined}>
           {children}

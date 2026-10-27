@@ -1,9 +1,16 @@
 import type { Identity } from "@linkshell/wire";
 import type { Computer } from "./engine";
 
+interface ElectronBridge { postMessage(value: unknown): void; shell: "electron"; platform: string }
+const electron = typeof window !== "undefined"
+  ? (window as Window & { linkshellDesktop?: ElectronBridge }).linkshellDesktop
+  : undefined;
+
 export const isDesktop =
   typeof window !== "undefined" && window.__LINKSHELL_CONFIG__?.desktop === true;
 export const isWindowsDesktop = isDesktop && window.__LINKSHELL_CONFIG__?.desktopPlatform === "win32";
+/** The Electron window draws its own title bar row: the page leaves room for the traffic lights and owns local management. */
+export const isElectronDesktop = isDesktop && electron?.shell === "electron";
 export const DESKTOP_LOCAL = "desktop:local";
 export const DESKTOP_VISIBILITY_EVENT = "linkshell-desktop-visibility";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
@@ -173,7 +180,25 @@ export function desktopHostSocket(): WebSocket {
   return new WebSocket(url);
 }
 
-function nativeCommand(message: { action: "manage" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean }): boolean {
+export function postDesktopMessage(message: Record<string, unknown>): boolean {
+  if (!isDesktop) return false;
+  if (electron) { electron.postMessage(message); return true; }
+  if (isWindowsDesktop) {
+    const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
+    if (!webview) return false;
+    webview.postMessage(message);
+    return true;
+  }
+  const handler = (window as Window & {
+    webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
+  }).webkit?.messageHandlers?.linkshellDesktop;
+  if (!handler) return false;
+  handler.postMessage(message);
+  return true;
+}
+
+function nativeCommand(message: { action: "manage" } | { action: "workspace" } |{ action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean }): boolean {
+  if (electron) return postDesktopMessage(message);
   if (isWindowsDesktop) {
     const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
     if (!webview) return false;
@@ -188,6 +213,31 @@ function nativeCommand(message: { action: "manage" } | { action: "external"; url
   return true;
 }
 
+const DESKTOP_REPLY_EVENT = "linkshell-desktop-reply";
+const replies = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+if (typeof window !== "undefined") {
+  window.addEventListener(DESKTOP_REPLY_EVENT, (event) => {
+    const { id, result, error } = ((event as CustomEvent).detail ?? {}) as { id?: string; result?: unknown; error?: string };
+    const waiting = id ? replies.get(id) : undefined;
+    if (!waiting || !id) return;
+    replies.delete(id);
+    clearTimeout(waiting.timer);
+    if (error) waiting.reject(new Error(error)); else waiting.resolve(result);
+  });
+}
+
+/** This Mac's service, through the Electron window (`linkshell desktop` underneath). */
+export function desktopInvoke<T>(method: string, params: Record<string, unknown> = {}, timeout = 130_000): Promise<T> {
+  if (!electron) return Promise.reject(new Error("本机管理需要 LinkShell 桌面版"));
+  const id = crypto.randomUUID();
+  return new Promise<T>((resolve, reject) => {
+    // The longest action (sign-in) has its own, longer limit on the native side.
+    const timer = setTimeout(() => { replies.delete(id); reject(new Error("操作超时，请重试")); }, method === "login" ? 400_000 : timeout);
+    replies.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+    electron.postMessage({ action: "invoke", id, method, params });
+  });
+}
+
 /** Asks the Mac window to go full screen for the native remote screen; the answer arrives as `DESKTOP_FULLSCREEN_EVENT`. */
 export function setDesktopScreenFullScreen(enabled: boolean): boolean {
   return nativeCommand({ action: "screenFullScreen", enabled });
@@ -195,7 +245,18 @@ export function setDesktopScreenFullScreen(enabled: boolean): boolean {
 export const DESKTOP_FULLSCREEN_EVENT = "linkshell-desktop-fullscreen";
 
 export function openDesktopManagement(): void {
+  // In Electron, management is a page of this window: the shell navigates on the same command
+  // the menu bar sends (desktop-commands.ts), without a round trip through the main process.
+  if (isElectronDesktop) {
+    window.dispatchEvent(new CustomEvent("linkshell-desktop-command", { detail: { command: "manage" } }));
+    return;
+  }
   if (!nativeCommand({ action: "manage" })) reportDesktopError("请通过 LinkShell 菜单打开本机服务");
+}
+
+/** Tells the Electron window the workspace is showing again (it tracks which view is up). */
+export function reportDesktopWorkspace(): void {
+  if (isElectronDesktop) nativeCommand({ action: "workspace" });
 }
 
 export function setDesktopAppearance(value: "system" | "light" | "dark"): void {

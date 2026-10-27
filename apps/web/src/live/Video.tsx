@@ -33,7 +33,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { isDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
+import { isDesktop, isElectronDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { DesktopScreen } from "./DesktopScreen";
 import {
@@ -302,7 +302,8 @@ export interface ScreenProps {
 
 export function Screen(props: ScreenProps) {
   const visible = useDesktopVisibility();
-  return isDesktop && !isWindowsDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
+  // The WKWebView shell draws the picture natively; Chromium (Electron, WebView2) decodes it itself.
+  return isDesktop && !isWindowsDesktop && !isElectronDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
 }
 
 function BrowserScreen({

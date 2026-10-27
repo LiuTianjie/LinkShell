@@ -15,12 +15,14 @@ import {
   memo,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
-import Markdown, { defaultUrlTransform } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
+import { markdownBlocks, useSmoothText } from "./smooth-text";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
@@ -177,48 +179,72 @@ function CodeBlock({ children }: { children: ReactNode }) {
     </div>
   );
 }
-export function RichText({ text }: { text: string }) {
+function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   const navigation = useContext(TimelineNavigation);
+  const target = href && fileTarget(href, navigation?.cwd);
+  return (
+    <a
+      href={href}
+      target={target ? undefined : "_blank"}
+      rel="noreferrer"
+      onClick={(event) => {
+        if (target && navigation) {
+          event.preventDefault();
+          navigation.open(target.path, target.line);
+        }
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+// Stable, so a block whose text didn't change is not parsed again when its message re-renders.
+const markdownPlugins = [remarkGfm];
+const markdownURL = (url: string) => (url.startsWith("file://") ? url : defaultUrlTransform(url));
+const markdownComponents: Components = {
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
+  img: ({ src, alt }) => (
+    <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer">
+      {alt || "查看图片"} ↗
+    </a>
+  ),
+};
+
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  return (
+    <Markdown remarkPlugins={markdownPlugins} urlTransform={markdownURL} components={markdownComponents}>
+      {text}
+    </Markdown>
+  );
+});
+
+export function RichText({ text }: { text: string }) {
   return (
     <div className="markdown">
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        urlTransform={(url) =>
-          url.startsWith("file://") ? url : defaultUrlTransform(url)
-        }
-        components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          a: ({ href, children }) => {
-            const target = href && fileTarget(href, navigation?.cwd);
-            return (
-              <a
-                href={href}
-                target={target ? undefined : "_blank"}
-                rel="noreferrer"
-                onClick={(event) => {
-                  if (target && navigation) {
-                    event.preventDefault();
-                    navigation.open(target.path, target.line);
-                  }
-                }}
-              >
-                {children}
-              </a>
-            );
-          },
-          img: ({ src, alt }) => (
-            <a
-              href={typeof src === "string" ? src : undefined}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {alt || "查看图片"} ↗
-            </a>
-          ),
-        }}
-      >
-        {text}
-      </Markdown>
+      <MarkdownBlock text={text} />
+    </div>
+  );
+}
+
+/**
+ * A reply as it streams: released smoothly (useSmoothText), and parsed a block at a time so
+ * only the block still growing is parsed again. A block fades in as it first appears.
+ */
+export function StreamingText({ text, streaming }: { text: string; streaming: boolean }) {
+  const shown = useSmoothText(text, streaming);
+  const blocks = useMemo(() => markdownBlocks(shown), [shown]);
+  // What was already there when this mounted (history, a reopened session) doesn't fade in;
+  // the fade is a CSS animation, so each new block plays it once, as it is created.
+  const [present] = useState(() => (streaming ? markdownBlocks(text).length - 1 : Number.POSITIVE_INFINITY));
+  return (
+    <div className="markdown">
+      {blocks.map((block, index) => (
+        <div key={index} className="markdown-block" data-enter={index > present || undefined}>
+          <MarkdownBlock text={block} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -736,7 +762,7 @@ export const TimelineEntry = memo(function TimelineEntry({
                   <span>{online ? "正在回复…" : "等待会话恢复…"}</span>
                 </div>
               )}
-              <RichText text={item.text} />
+              <StreamingText text={item.text} streaming={item.streaming} />
               {showAsyncQuestions && item.questions && !item.streaming && (
                 <AsyncQuestions
                   questions={item.questions}
@@ -775,7 +801,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           return (
             <details className="thought-block" key={item.id}>
               <summary>{item.streaming ? "正在思考…" : "思考过程"}</summary>
-              <RichText text={item.text} />
+              <StreamingText text={item.text} streaming={item.streaming} />
             </details>
           );
         if (item.kind === "notice" || item.kind === "error") {

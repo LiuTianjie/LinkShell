@@ -18,6 +18,12 @@ it("acts only on the command shapes the shell understands", async () => {
   expect(desktopCommand({ command: "new-session", cwd: 4 })).toEqual({ command: "new-session" });
   expect(desktopCommand({ command: "inspector", panel: "terminal" })).toEqual({ command: "inspector", panel: "terminal" });
   expect(desktopCommand({ command: "inspector", panel: "anything" })).toEqual({ command: "inspector" });
+  expect(desktopCommand({ command: "workspace" })).toEqual({ command: "workspace" });
+  expect(desktopCommand({ command: "manage" })).toEqual({ command: "manage" });
+  // The menu bar names pages by title; ids work too, anything else opens the overview.
+  expect(desktopCommand({ command: "manage", page: "更新" })).toEqual({ command: "manage", page: "updates" });
+  expect(desktopCommand({ command: "manage", page: "usage" })).toEqual({ command: "manage", page: "usage" });
+  expect(desktopCommand({ command: "manage", page: "../etc" })).toEqual({ command: "manage" });
   expect(desktopCommand({ command: "eval" })).toBeUndefined();
   expect(desktopCommand("palette")).toBeUndefined();
   expect(desktopCommand(null)).toBeUndefined();

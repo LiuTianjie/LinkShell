@@ -81,12 +81,18 @@ import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { Projects } from "./live/Projects";
-import { isDesktop, openDesktopManagement } from "./live/desktop";
+import { isDesktop, isElectronDesktop, openDesktopManagement } from "./live/desktop";
+import { Management } from "./live/Management";
+import { isManageView, managePage, manageView } from "./live/management-model";
 import { useDesktopCommand } from "./live/desktop-commands";
 import { useDesktopVisibility } from "./live/desktop-visibility";
 
 export function App() {
   return <LiveApp />;
+}
+/** Local management exists only in the Electron window; elsewhere a saved "manage" view opens the overview. */
+function viewable(view: string): string {
+  return isManageView(view) && !isElectronDesktop ? "home" : view;
 }
 function LiveApp() {
   const workspaceVisible = useDesktopVisibility();
@@ -94,18 +100,20 @@ function LiveApp() {
   const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
   const [connect, setConnect] = useState(false);
-  const [view, setView] = useState(
-    () =>
+  const [view, setView] = useState(() =>
+    viewable(
       new URLSearchParams(location.hash.slice(1)).get("view") ??
-      readLocal("lastView", "home"),
+        readLocal("lastView", "home"),
+    ),
   );
   useEffect(() => {
     void engine.start();
   }, []);
   useEffect(() => {
     const change = () => {
-      const next =
-        new URLSearchParams(location.hash.slice(1)).get("view") ?? "home";
+      const next = viewable(
+        new URLSearchParams(location.hash.slice(1)).get("view") ?? "home",
+      );
       if (next === view) return;
       // Keep the editor mounted while the user decides whether to leave.
       history.replaceState(null, "", `#${new URLSearchParams({ view })}`);
@@ -182,7 +190,9 @@ function LiveApp() {
           />
         )}
       </ScreenSessionSlot>
-      {state.locked ? (
+      {isElectronDesktop && isManageView(view) ? (
+        <Management page={managePage(view)} navigate={(page) => navigate(manageView(page))} />
+      ) : state.locked ? (
         <div className="welcome-live">
           <h1>工作台已在另一个标签页打开</h1>
           <p className="muted">

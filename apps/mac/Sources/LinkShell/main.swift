@@ -62,6 +62,8 @@ if Launch.has("--setup") {
 }
 
 if Launch.has("--dashboard") || Launch.has("--dashboard-preview") || (Launch.arguments.isEmpty && getppid() == 1) {
+  // The window is Electron's, in this same bundle (same id, same signature): this process becomes it.
+  if !Launch.has("--dashboard-preview") { DesktopShell.exec() }
   MainActor.assumeIsolated { Desktop.run() }
 }
 
