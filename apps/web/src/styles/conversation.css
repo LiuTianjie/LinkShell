@@ -57,23 +57,23 @@
     gap: 2px;
     flex-shrink: 0;
   }
-  .session-actions [data-slot="button"] svg {
+  .session-actions [data-button] svg {
     width: 15px;
     height: 15px;
   }
   /* The toolbar button whose panel is open reads as selected (neutral fill). */
-  .session-actions [data-slot="button"][data-active] {
+  .session-actions [data-button][data-active] {
     background: var(--sidebarAccent);
     color: var(--label);
   }
   @media (max-width: 860px) {
     /* Keep the labelled panel buttons icon-only when the bar gets tight. */
-    .session-actions [data-slot="button"][data-size="sm"] {
+    .session-actions [data-button][data-size="sm"] {
       font-size: 0;
       padding-inline: 7px;
       gap: 0;
     }
-    .session-actions [data-slot="button"][data-size="sm"] svg {
+    .session-actions [data-button][data-size="sm"] svg {
       margin: 0;
     }
   }
@@ -187,6 +187,7 @@
     font-size: 14px;
     line-height: 1.7;
   }
+  .user-bubble { min-width: 0; }
   .user-message .question-reply + .question-reply {
     margin-top: 12px;
     padding-top: 12px;
@@ -223,14 +224,14 @@
   }
   .live-timeline > .assistant-message:last-of-type .message-actions { opacity: 1; }
   @media (hover: none) { .message-actions { opacity: 1; } }
-  .message-actions [data-slot="button"] {
+  .message-actions [data-button] {
     height: 22px;
     min-height: 22px;
     padding-inline: 6px;
     font-size: 12px;
   }
   /* Copy and fork are icons alone; the name shows on hover. */
-  .message-actions [data-slot="button"][data-size="icon-sm"] {
+  .message-actions [data-button][data-size="icon-sm"] {
     width: 24px;
     height: 24px;
     min-height: 24px;
@@ -238,11 +239,11 @@
     border-radius: 7px;
     color: var(--tertiaryLabel);
   }
-  .message-actions [data-slot="button"][data-size="icon-sm"]:hover {
+  .message-actions [data-button][data-size="icon-sm"]:hover {
     color: var(--label);
     background: var(--fillStrong);
   }
-  .message-actions [data-slot="button"][data-size="icon-sm"] svg {
+  .message-actions [data-button][data-size="icon-sm"] svg {
     width: 14px;
     height: 14px;
   }

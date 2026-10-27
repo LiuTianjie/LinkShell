@@ -1,0 +1,94 @@
+/* The desktop's resource pages: files, port previews and worktrees (Codex's file tree and lists). */
+
+/* ── Files ───────────────────────────────────────────────────────────────── */
+/* On the 文件 page the toolbar is the page's: back and up, where you are, then search, refresh and
+   the two things to do. The entries follow in one group; the count closes the list. */
+html[data-desktop] .page-header .resource-toolbar-nav { display: flex; flex: none; gap: 2px; margin-right: 2px; }
+html[data-desktop] .page-header .resource-toolbar-path { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .page-header .resource-search { flex: none; }
+html[data-desktop] .page-header .resource-search .page-search { width: 240px; }
+
+/* In the inspector: one 32 px bar (up, the folder's name, search, refresh, a menu), as a panel's
+   file tree; search opens under it when asked for. */
+html[data-desktop] .desktop-main .resource-toolbar { display: flex; flex: none; align-items: center; gap: 2px; height: 32px; }
+html[data-desktop] .desktop-main .resource-toolbar-name { flex: 1; min-width: 0; margin-left: 4px; overflow: hidden; color: var(--label); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .resource-toolbar [aria-pressed="true"] { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-search { margin-top: 6px; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-search .page-search { width: 100%; height: 28px; }
+html[data-desktop] .desktop-main .file-browser[data-layout] { gap: 8px; }
+html[data-desktop] .desktop-main :is(.resource-toolbar, .resource-toolbar-nav) [data-button][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main :is(.resource-toolbar, .resource-toolbar-nav) [data-button][data-size="icon"]:hover:not(:disabled) { color: var(--label); }
+
+/* Elsewhere (pickers, web): where you are on one row, search on the next, then the count. */
+html[data-desktop] .desktop-main .resource-browser-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+html[data-desktop] .desktop-main .resource-location-bar { gap: 2px; height: 32px; }
+html[data-desktop] .desktop-main .resource-location-bar [data-button][data-size="icon"] { box-shadow: none; background: transparent; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .resource-location-bar [data-button][data-size="icon"]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .resource-location { display: flex; align-items: baseline; gap: 8px; margin-left: 6px; }
+html[data-desktop] .desktop-main .resource-location strong { flex: none; max-width: 40%; font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .resource-location span { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-browser-controls > form { min-width: 0; }
+html[data-desktop] .desktop-main .resource-browser-controls [data-slot="field-group"],
+html[data-desktop] .desktop-main .resource-browser-controls [data-slot="field"] { gap: 0; }
+html[data-desktop] .desktop-main .resource-directory-summary { min-height: 24px; padding: 0 4px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-hidden-toggle { color: var(--secondaryLabel); font-size: 12px; font-weight: 400; }
+html[data-desktop] .desktop-main .resource-picker-footer { padding-top: 10px; border-top: var(--hairline) solid var(--separator); }
+
+/* Entries: 32 px rows, the file tree's; a search result shows its path under its name. */
+html[data-desktop] .desktop-main .resource-entry-list:not(:empty) { padding: 4px; }
+html[data-desktop] .desktop-main .resource-entry { height: 32px; min-height: 32px; padding: 0 10px; gap: 8px; border: 0; border-radius: 10px; font-size: 13px; }
+html[data-desktop] .desktop-main .resource-entry:has(.resource-entry-path) { height: 44px; min-height: 44px; }
+html[data-desktop] .desktop-main .resource-entry:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .resource-entry[aria-current] { background: var(--fill); }
+html[data-desktop] .desktop-main .resource-entry > svg { width: 16px; height: 16px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .resource-entry-name { font-size: 13px; font-weight: 430; }
+html[data-desktop] .desktop-main .resource-entry-size { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-list-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-top: 4px; padding: 0 12px; color: var(--tertiaryLabel); font-size: 12px; }
+/* In a narrow inspector the tree's rows are a little tighter and need no group frame. */
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-entry-list:not(:empty) { padding: 0; box-shadow: none; background: transparent; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-entry { height: 28px; min-height: 28px; padding: 0 8px; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-entry + .resource-entry::before { display: none; }
+
+/* A file opened beside the list: its reader or editor in a soft well. */
+html[data-desktop] .desktop-main :is(.resource-reader-tools, .resource-editor-actions, .resource-preview-toolbar) { gap: 6px; }
+html[data-desktop] .desktop-main .resource-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main :is(.resource-caption, .resource-files-footer) { color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .resource-chip { border-radius: 999px; background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main :is(.file-reader, .resource-markdown, .resource-image-stage, .resource-edit-preview) { border: 0; border-radius: var(--radius-well); background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .resource-file-title { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main .resource-editor-status { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main :is(.cm-editor, .resource-markdown pre) { font-family: var(--mono); font-size: 12px; }
+
+/* ── Port previews ───────────────────────────────────────────────────────── */
+/* The connect bar, then the services in one group that grows with them, then the preview. */
+html[data-desktop] .desktop-main .resource-port-connect { gap: 8px; padding: 10px 12px; border-radius: 12px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .resource-port-connect-copy { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-port-form { border-radius: 999px; }
+html[data-desktop] .desktop-main .resource-services { max-height: none; overflow: visible; }
+html[data-desktop] .desktop-main .resource-service-list { max-height: none; overflow: visible; }
+html[data-desktop] .desktop-main .resource-service { min-height: 44px; padding: 0 12px; background: transparent; font-size: 13px; }
+html[data-desktop] .desktop-main .resource-service:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .resource-service-main strong { font-weight: 500; }
+html[data-desktop] .desktop-main .resource-service .resource-chip { font-family: var(--mono); }
+html[data-desktop] .desktop-main .resource-service [data-slot="badge"] { font-family: var(--mono); }
+html[data-desktop] .desktop-main .port-preview-tab-bar { gap: 4px; padding-bottom: 8px; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .port-preview-tab[data-active], html[data-desktop] .desktop-main .port-preview-tab[aria-selected="true"] { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .resource-preview-address { border: 0; border-radius: 999px; background: var(--fill); font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .port-frame { border: var(--hairline) solid var(--separator); border-radius: var(--radius-well); overflow: hidden; }
+
+/* ── Worktrees ───────────────────────────────────────────────────────────── */
+/* The base list draws a rule above itself; in the group's frame (or when empty) it must not. */
+html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
+html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
+html[data-desktop] .desktop-main .worktree-entry + .worktree-entry::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: var(--hairline); background: var(--separator); }
+html[data-desktop] .desktop-main .worktree-entry:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .worktree-info strong { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .worktree-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); font-size: 12px; }
+
+/* ── Small things shared by these pages ──────────────────────────────────── */
+html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 4px; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .screen-list { background: rgb(255 255 255 / .02); }
+html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; }

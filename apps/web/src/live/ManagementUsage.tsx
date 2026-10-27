@@ -63,7 +63,8 @@ export function ManagementUsage() {
         <Tabs value={agent} onValueChange={setAgent}>
           <TabsList variant="line" aria-label="Agent">
             <TabsTrigger value="all">全部</TabsTrigger>
-            {agents.map((entry) => (
+            {/* Agents with nothing recorded (not installed, or never used) are named in the footnote instead. */}
+            {agents.filter((entry) => entry.status !== "no_data" || entry.id === agent).map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id} title={entry.label}>
                 <AgentMark agent={entry.id} />{entry.label}
               </TabsTrigger>

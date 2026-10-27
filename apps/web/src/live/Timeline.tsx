@@ -739,11 +739,15 @@ export const TimelineEntry = memo(function TimelineEntry({
         if (item.kind === "user")
           return (
             <article className="user-message" key={item.id}>
-              <UserBlocks
-                blocks={item.blocks}
-                sessionId={sessionId}
-                onFile={onFile}
-              />
+              {/* The words in their own box, so the desktop can hang the time and actions under
+                  the bubble instead of inside it. */}
+              <div className="user-bubble">
+                <UserBlocks
+                  blocks={item.blocks}
+                  sessionId={sessionId}
+                  onFile={onFile}
+                />
+              </div>
               {item.failed && (
                 <div className="failed-message-actions">
                   <span className="form-error">发送失败，草稿仍在</span>
@@ -942,6 +946,14 @@ export const TimelineEntry = memo(function TimelineEntry({
                 )}
               </span>
               <strong title={item.title}>{item.title}</strong>
+              {(() => {
+                // A command the agent described in words (Claude's Bash) shows beside the words,
+                // in the code face: the description is prose, only the command is code.
+                const command = item.toolKind === "execute" && typeof (item.rawInput as { command?: unknown })?.command === "string"
+                  ? ((item.rawInput as { command: string }).command).split("\n")[0]!.trim()
+                  : undefined;
+                return command && command !== item.title ? <code className="tool-command" title={command}>{command}</code> : null;
+              })()}
               {(() => {
                 // Only show meta when it adds something: the MCP server, a
                 // sub-agent's state, or a non-success outcome. A plain

@@ -107,7 +107,7 @@ export function NewSessionPage({
                   <ChevronDown className="new-session-caret" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" sideOffset={8} className="new-session-menu">
+              <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
                 <DropdownMenuLabel>Agent</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={agent} onValueChange={setAgent}>
                   {(machine?.agents ?? []).map((entry) => (
@@ -134,7 +134,7 @@ export function NewSessionPage({
                   <ChevronDown className="new-session-caret" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" sideOffset={8} className="new-session-menu">
+              <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
                 <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
                 {projects.slice(0, 8).map((entry) => (
                   <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>

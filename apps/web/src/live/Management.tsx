@@ -168,6 +168,7 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
               detail={page === "overview" ? `本机服务${facts.service} · 网关${facts.gateway}` : subtitles[page] || undefined}
               actions={<>
                 {state.busy && <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在处理" />}
+                {page === "log" && <LogActions />}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" disabled={state.busy} aria-label="服务操作"><Ellipsis />本机服务</Button>
@@ -485,15 +486,21 @@ function Password({ facts, confirm }: { facts: Facts; confirm: (action: Confirm)
   );
 }
 
+/** The log page's toolbar actions: read again, and show the file. */
+function LogActions() {
+  return (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => void readLog()}><RefreshCw />刷新</Button>
+      <Button variant="ghost" size="sm" onClick={() => void desktopInvoke("revealLog")}><FolderOpen />在 Finder 中显示</Button>
+    </>
+  );
+}
+
 function Log({ facts }: { facts: Facts }) {
   return (
     <>
-      <div className="desktop-page-actions management-log-actions">
-        <Button variant="outline" onClick={() => void readLog()}><RefreshCw />刷新日志</Button>
-        <Button variant="ghost" onClick={() => void desktopInvoke("revealLog")}><FolderOpen />在 Finder 中显示</Button>
-        <span className="management-hint management-mono management-selectable">{facts.home}/host.log</span>
-      </div>
       <pre className="management-log" tabIndex={0}>{facts.state.log || "正在读取…"}</pre>
+      <p className="management-hint management-mono management-selectable">{facts.home}/host.log</p>
     </>
   );
 }
@@ -522,21 +529,24 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
           <Row title="自动检查更新">
             <Switch checked={state.settings.autoCheck} onCheckedChange={(value) => void setDesktopSetting("autoCheck", value)} aria-label="自动检查更新" />
           </Row>
+          {/* Where things stand and what to do about it, as the version box's last row. */}
+          <div className="management-row management-update-row">
+            <span className="management-update-message management-selectable" role="status">{update.message || "尚未检查"}</span>
+            <div>
+              <Button variant={newVersion ? "ghost" : "outline"} size="sm" disabled={update.checking} onClick={() => void checkUpdates()}>
+                {update.checking ? "正在检查…" : "检查更新"}
+              </Button>
+              {newVersion && standalone && <Button size="sm" disabled={state.busy || update.checking || update.installing} onClick={installUpdate}>下载并更新 App…</Button>}
+              {newVersion && !standalone && <Button size="sm" disabled={state.busy || update.checking} onClick={() => confirm("upgrade")}>安装更新…</Button>}
+            </div>
+          </div>
         </div>
       </Group>
-      <p className="management-update-message management-selectable" role="status">{update.message}</p>
       <p className="management-hint">
         {standalone
           ? "App、内置 CLI、Host 与运行时作为整体更新。下载期间服务保持连接；仅在确认安装并重启时短暂重启服务，完成后自动恢复。"
           : "此安装通过 npm 或 Homebrew 更新（linkshell upgrade）。安装时可能重启后台服务，请先完成正在执行的任务。"}
       </p>
-      <div className="desktop-page-actions management-update-actions">
-        <Button variant={newVersion ? "outline" : "default"} disabled={update.checking} onClick={() => void checkUpdates()}>
-          {update.checking ? "正在检查…" : "检查更新"}
-        </Button>
-        {newVersion && standalone && <Button disabled={state.busy || update.checking || update.installing} onClick={installUpdate}>下载并更新 App…</Button>}
-        {newVersion && !standalone && <Button disabled={state.busy || update.checking} onClick={() => confirm("upgrade")}>安装更新…</Button>}
-      </div>
     </>
   );
 }

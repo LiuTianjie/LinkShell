@@ -434,6 +434,7 @@ export function Ports() {
         刷新
       </Button>
         </>}
+        detail={services.length ? <span>{services.length} 个服务</span> : undefined}
       />
       <div className="resource-port-connect">
         <div className="resource-port-connect-copy">
@@ -497,10 +498,12 @@ export function Ports() {
       )}
       {!!services.length && (
         <section className="resource-services" aria-label="已发现的开发服务">
-          <div className="resource-directory-summary">
-            <span>已发现 {services.length} 个服务</span>
-            <span>每 10 秒自动更新</span>
-          </div>
+          {!isDesktop && (
+            <div className="resource-directory-summary">
+              <span>已发现 {services.length} 个服务</span>
+              <span>每 10 秒自动更新</span>
+            </div>
+          )}
           <div className="resource-service-list">
             {services.map((port) => (
               <Button
@@ -706,8 +709,10 @@ export function Ports() {
           ))}
         </div>
       ) : (
-        !load.loading && (
+        // On the desktop the list of services already says what to do; the hint is for an empty page.
+        !load.loading && !(isDesktop && services.length) && (
           <EmptyState
+            icon={<Server />}
             title={services.length ? "选择一个开发服务" : "还没有发现开发服务"}
             description={
               services.length

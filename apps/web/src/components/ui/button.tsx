@@ -59,6 +59,9 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      // Kept when a Radix trigger wraps the button (`asChild` replaces `data-slot` with its own),
+      // so styles that mean "a button" can rely on it.
+      data-button=""
       className={cn(
         size === "plain"
           ? "text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-muted [&_svg]:shrink-0"

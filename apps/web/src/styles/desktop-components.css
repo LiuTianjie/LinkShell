@@ -13,7 +13,9 @@ html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
 html[data-desktop] [data-slot="switch"] { width: 32px; height: 20px; padding: 0; border: 0; background: #dfdfdf; transition: background 150ms cubic-bezier(.23, 1, .32, 1); }
 html[data-desktop] [data-slot="switch"]:hover:not(:disabled) { background: #cdcdcd; }
 html[data-desktop] [data-slot="switch"][data-state="checked"] { background: #339cff; }
-html[data-desktop][data-theme="dark"] [data-slot="switch"] { background: #8f8f8f; }
+/* Off in the dark is a dim track (a fifth of white), so on reads at once; the thumb stays white. */
+html[data-desktop][data-theme="dark"] [data-slot="switch"] { background: rgb(255 255 255 / .2); }
+html[data-desktop][data-theme="dark"] [data-slot="switch"]:hover:not(:disabled) { background: rgb(255 255 255 / .26); }
 html[data-desktop][data-theme="dark"] [data-slot="switch"][data-state="checked"] { background: #339cff; }
 html[data-desktop] [data-slot="switch-thumb"] { translate: none; width: 16px; height: 16px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
 html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transform: translateX(2px); }
@@ -31,22 +33,23 @@ html[data-desktop][data-theme="dark"] :is([data-slot="dialog-overlay"], [data-sl
    ring; an 18 px title over a 14 px line; 20 px of room. */
 html[data-desktop] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { gap: 16px; padding: 20px; border: 0; border-radius: 30px; background: color-mix(in oklab, #fff 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); color: var(--label); font-size: 13px; }
 html[data-desktop][data-theme="dark"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { background: color-mix(in oklab, #282828 94%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 20px 40px -8px rgb(0 0 0 / .6); }
-html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)); border-radius: 25px; }
+/* A confirmation: 400 px, so its sentence fits on two lines (the base caps it at 320). */
+html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)); max-width: none; border-radius: 25px; }
 html[data-desktop] [data-slot="dialog-content"]:not(.command-center) { width: min(520px, calc(100vw - 48px)); max-width: none; }
 html[data-desktop] [data-slot="dialog-content"].sm\:max-w-5xl { width: min(980px, calc(100vw - 48px)); }
 html[data-desktop] :is([data-slot="dialog-header"], [data-slot="alert-dialog-header"]) { gap: 2px; padding-right: 32px; text-align: left; place-items: start; }
 html[data-desktop] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"]) { font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 28px; }
 html[data-desktop] :is([data-slot="dialog-description"], [data-slot="alert-dialog-description"]) { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; line-height: 20px; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"],
-html[data-desktop] [data-slot="dialog-content"] > button[data-slot="button"][aria-label="关闭"] { top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
+html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"]:hover { background: var(--fill); color: var(--label); }
 /* Footers are a row of pills at the bottom right, not a grey band. */
 html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; flex-direction: row; justify-content: flex-end; gap: 12px; }
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) [data-slot="button"] { min-height: 36px; padding-inline: 16px; border-radius: 999px; font-size: 13px; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) [data-button] { min-height: 36px; padding-inline: 16px; border-radius: 999px; font-size: 13px; }
 html[data-desktop] .modal-subtitle { margin-top: -10px; color: var(--secondaryLabel); font-size: 13px; }
 /* Inside a dialog, a button set on its own line keeps its own width, aligned to the end. */
-html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], form, section) > [data-slot="button"],
-html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-slot="button"] { align-self: flex-end; width: auto; min-width: 96px; }
+html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], form, section) > [data-button],
+html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-button] { align-self: flex-end; width: auto; min-width: 96px; }
 html[data-desktop] .new-session-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 /* ── Notices (Alert) ─────────────────────────────────────────────────────── */
@@ -55,7 +58,7 @@ html[data-desktop] [data-slot="alert"] { gap: 2px 10px; padding: 12px 14px; bord
 html[data-desktop] [data-slot="alert"] > svg { width: 16px; height: 16px; margin-top: 2px; color: var(--tertiaryLabel); }
 html[data-desktop] [data-slot="alert-title"] { font-size: 13px; font-weight: 600; line-height: 20px; }
 html[data-desktop] [data-slot="alert-description"] { color: var(--secondaryLabel); font-size: 12.5px; line-height: 19px; }
-html[data-desktop] [data-slot="alert-description"] [data-slot="button"] { margin-top: 8px; }
+html[data-desktop] [data-slot="alert-description"] [data-button] { margin-top: 8px; }
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] { border-color: transparent; background: var(--dangerSoft); }
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] > svg,
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] [data-slot="alert-title"] { color: var(--danger); }
@@ -115,8 +118,8 @@ html[data-desktop] [data-slot="command-input-wrapper"] [data-slot="input-group"]
 html[data-desktop] [data-slot="sheet-content"] { border-color: var(--separator); background: var(--plain); box-shadow: var(--float-shadow); }
 html[data-desktop] details > summary { cursor: pointer; }
 /* A primary repeated down a list is no longer the one primary: each row's action is a hairline pill. */
-html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-slot="button"][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
-html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
+html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
 
 /* ── Connect ─────────────────────────────────────────────────────────────── */
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs"] { gap: 0; }
@@ -125,75 +128,6 @@ html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-list"]:not([dat
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] { display: flex; flex-direction: column; gap: 14px; padding-top: 16px !important; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-slot="field-group"] { gap: 14px; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] .field-hint { margin-top: 2px; }
-
-/* ── Conversation ────────────────────────────────────────────────────────── */
-/* Who is driving a handoff session: a quiet line under the title, not a band of its own. */
-html[data-desktop] .desktop-main .handoff-bar { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 20px; border-bottom: 1px solid var(--separator); background: transparent; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .handoff-bar [data-slot="button"] { height: 24px; min-height: 24px; padding: 0 10px; border: 1px solid var(--separatorStrong); border-radius: 999px; color: var(--label); font-size: 12px; text-decoration: none; }
-html[data-desktop] .desktop-main .handoff-bar [data-slot="button"]:hover { background: var(--fill); }
-/* Tool calls read as one line each, the way an editor lists steps; opened, the output sits in a well. */
-html[data-desktop] .desktop-main .tool-record { border: 0; border-radius: 8px; background: transparent; }
-html[data-desktop] .desktop-main .tool-record + .tool-record { margin-top: 0; }
-html[data-desktop] .desktop-main .tool-record > summary { min-height: 30px; padding: 4px 8px; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .tool-record > summary:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .tool-record > summary > strong { color: var(--label); font-weight: 500; font-family: var(--mono); font-size: 12.5px; }
-html[data-desktop] .desktop-main .tool-record > summary > small { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .tool-record[open] { padding-bottom: 6px; }
-html[data-desktop] .desktop-main .tool-record[open] > summary { border-radius: 8px; background: transparent; }
-html[data-desktop] .desktop-main .tool-record[open] > :not(summary) { margin-inline: 8px; }
-html[data-desktop] .desktop-main .tool-record pre,
-html[data-desktop] .desktop-main .tool-output-text { border: 1px solid var(--separator); border-radius: 10px; background: var(--card); font-family: var(--mono); font-size: 12px; }
-html[data-desktop] .desktop-main .steps-summary { min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--secondaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .steps-summary:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .thought-block > summary { min-height: 28px; padding: 4px 8px; border-radius: 8px; color: var(--tertiaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .thought-block > summary:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .thought-block .markdown { color: var(--secondaryLabel); font-size: 13.5px; }
-/* Diffs: the path on top in the code face, before and after as two wells. */
-/* The plan: a well with the steps as a checklist. */
-html[data-desktop] .desktop-main .plan-card { padding: 14px 16px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
-html[data-desktop] .desktop-main .plan-card > strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
-html[data-desktop] .desktop-main .plan-card li { font-size: 13.5px; }
-/* What waits on you: an approval or a question is one card with an amber edge and one primary. */
-html[data-desktop] .desktop-main .approval-card,
-html[data-desktop] .desktop-main .async-questions { padding: 16px 18px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--separator)); border-radius: 14px; background: var(--plain); box-shadow: none; }
-html[data-desktop] .desktop-main .approval-heading { gap: 12px; }
-html[data-desktop] .desktop-main .approval-icon { width: 32px; height: 32px; border-radius: 50%; background: var(--waitingSoft); color: var(--warning); }
-html[data-desktop] .desktop-main .approval-card :is(h3, strong) { font-size: 14px; font-weight: 600; }
-html[data-desktop] .desktop-main .approval-card pre { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--separator); border-radius: 10px; background: var(--card); font-family: var(--mono); font-size: 12.5px; }
-html[data-desktop] .desktop-main .permission-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-html[data-desktop] .desktop-main .permission-buttons [data-slot="button"] { min-height: 30px !important; height: 30px; padding-inline: 14px; }
-html[data-desktop] .desktop-main .async-question [data-slot="field-label"] { font-size: 14px; font-weight: 600; }
-html[data-desktop] .desktop-main .async-question [data-slot="field-label"] > svg { color: var(--warning); }
-html[data-desktop] .desktop-main .async-options { gap: 8px; }
-html[data-desktop] .desktop-main .async-options button { height: 30px; padding: 0 14px; border: 1px solid var(--separatorStrong); border-radius: 999px; background: transparent; color: var(--label); font-size: 13px; }
-html[data-desktop] .desktop-main .async-options button:hover:not(:disabled) { background: var(--fill); }
-html[data-desktop] .desktop-main .async-options button.chosen { border-color: var(--accent); background: var(--accent); color: var(--primaryForeground); }
-html[data-desktop] .desktop-main .async-questions [data-slot="textarea"] { min-height: 64px; }
-html[data-desktop] .desktop-main .conversation-activity { color: var(--tertiaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main .notice-card { padding: 12px 14px; border-radius: var(--radius-well); font-size: 13px; }
-html[data-desktop] .desktop-main .notice-card.error { border-color: transparent; background: var(--dangerSoft); }
-html[data-desktop] .desktop-main .notice-card.warning { border-color: transparent; background: var(--waitingSoft); }
-html[data-desktop] .desktop-main .timeline-divider { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .timeline-divider::before,
-html[data-desktop] .desktop-main .timeline-divider::after { background: var(--separator); }
-html[data-desktop] .desktop-main .message-actions [data-slot="button"] { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .message-actions [data-slot="button"]:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .message-time { color: var(--tertiaryLabel); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .markdown :is(ul, ol) { padding-left: 1.3em; }
-html[data-desktop] .desktop-main .markdown ul { list-style: disc; }
-html[data-desktop] .desktop-main .markdown ol { list-style: decimal; }
-html[data-desktop] .desktop-main .markdown li::marker { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .markdown table { border-collapse: collapse; font-size: 13px; }
-html[data-desktop] .desktop-main .markdown :is(th, td) { padding: 6px 10px; border: 1px solid var(--separator); }
-html[data-desktop] .desktop-main .markdown th { color: var(--secondaryLabel); font-weight: 500; }
-html[data-desktop] .desktop-main .markdown blockquote { padding-left: 12px; border-left: 2px solid var(--separatorStrong); color: var(--secondaryLabel); }
-/* The composer's settings: quiet pills, the permission mode in amber only when it bypasses checks. */
-html[data-desktop] .desktop-main .composer-chip { height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--secondaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main .composer-chip:hover { background: var(--fillStrong); color: var(--label); }
-html[data-desktop] .desktop-main .message-queue { padding: 8px 12px; font-size: 12.5px; }
-html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryLabel); font-weight: 500; }
-html[data-desktop] .desktop-main .composer-progress { color: var(--tertiaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main .conversation-loading { color: var(--tertiaryLabel); }
 
 /* ── Inspector panels ────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .side-panel-content > .muted:first-child,
@@ -205,56 +139,21 @@ html[data-desktop] .desktop-main .task-output { border: 1px solid var(--separato
 html[data-desktop] .desktop-main .service-status { border: 1px solid var(--separator); border-radius: 10px; background: var(--card); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.workflow-panel, .workflow-phase, .workflow-agent) { border-color: var(--separator); border-radius: var(--radius-well); background: var(--card); }
 
-/* ── Files and the editor ────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main :is(.resource-location-bar, .resource-browser-controls, .resource-reader-tools, .resource-editor-actions, .resource-preview-toolbar) { gap: 6px; }
-html[data-desktop] .desktop-main .resource-location { min-width: 0; color: var(--label); font-size: 13px; font-weight: 500; }
-html[data-desktop] .desktop-main .resource-location small,
-html[data-desktop] .desktop-main .resource-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11.5px; }
-html[data-desktop] .desktop-main .resource-entry { min-height: 38px; padding: 0 12px; background: transparent; color: var(--label); font-size: 13px; }
-html[data-desktop] .desktop-main .resource-entry:hover { background: var(--fill); }
-html[data-desktop] .desktop-main :is(.resource-entry-size, .resource-caption, .resource-directory-summary, .resource-files-footer) { color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .resource-chip { border-radius: 999px; background: var(--fill); color: var(--secondaryLabel); font-size: 11.5px; }
-html[data-desktop] .desktop-main :is(.file-reader, .resource-markdown, .resource-image-stage, .resource-edit-preview) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
-html[data-desktop] .desktop-main .resource-file-title { font-size: 14px; font-weight: 600; }
-html[data-desktop] .desktop-main .resource-editor-status { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .cm-editor,
-html[data-desktop] .desktop-main .resource-markdown pre { font-family: var(--mono); font-size: 12.5px; }
-
 /* ── Terminals ───────────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .terminal-tab-bar { gap: 6px; padding: 0 0 8px; border-bottom: 0; }
-html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 12px !important; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--sidebarAccent); color: var(--label); }
+/* Terminal tabs as Codex's tab strip: 28 px, 10 px corners, the open one a soft tint. */
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 10px !important; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-main .terminal-tab-number { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; }
-/* The frame takes the terminal's own colour (light or dark), so it never shows as a dark rim. */
-html[data-desktop] .desktop-main :is(.terminal-live, .terminal-workspace .xterm-mount) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--code); overflow: hidden; }
+/* The terminal is the panel's own surface (desktop.css): no frame or darker block around it. */
+html[data-desktop] .desktop-main :is(.terminal-live, .terminal-workspace .xterm-mount) { border: 0; border-radius: 0; background: var(--terminal); overflow: hidden; }
 html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen .xterm-mount { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-controls { gap: 4px; }
-html[data-desktop] .desktop-main .terminal-controls [data-slot="button"] { height: 28px; min-width: 28px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
-
-/* ── Port previews ───────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .resource-service { min-height: 40px; padding: 0 12px; background: transparent; font-size: 13px; }
-html[data-desktop] .desktop-main .resource-service:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .resource-service-main strong { font-weight: 500; }
-html[data-desktop] .desktop-main .resource-service .resource-chip { font-family: var(--mono); }
-html[data-desktop] .desktop-main .resource-port-form { border-radius: 999px; }
-html[data-desktop] .desktop-main .port-preview-tab-bar { gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--separator); }
-html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: 999px; color: var(--secondaryLabel); font-size: 12.5px; }
-html[data-desktop] .desktop-main .port-preview-tab[data-active], html[data-desktop] .desktop-main .port-preview-tab[aria-selected="true"] { background: var(--sidebarAccent); color: var(--label); }
-html[data-desktop] .desktop-main .resource-preview-address { border: 1px solid var(--separator); border-radius: 999px; background: var(--card); font-family: var(--mono); font-size: 12px; }
-html[data-desktop] .desktop-main .port-frame { border: 1px solid var(--separator); border-radius: var(--radius-well); overflow: hidden; }
-
-/* ── Worktrees ───────────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: var(--radius-row); background: transparent; }
-html[data-desktop] .desktop-main .worktree-entry + .worktree-entry::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); }
-html[data-desktop] .desktop-main .worktree-entry:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .worktree-info strong { font-family: var(--mono); font-size: 13px; font-weight: 500; }
-html[data-desktop] .desktop-main .worktree-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11.5px; }
-html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .terminal-controls [data-button] { height: 28px; min-width: 28px; border-radius: 10px; font-family: var(--mono); font-size: 12px; }
 
 /* ── Computers and agents ────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .computers-section .list-row-static [data-slot="button"][data-size="sm"] { height: 26px; padding-inline: 10px; font-size: 12px; }
-html[data-desktop] .desktop-main .computers-section .list-row-static [data-slot="button"][data-variant="ghost"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .computers-section .list-row-static [data-button][data-variant="ghost"] { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .computers-section .list-row-static > svg { color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) { padding: 4px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
 html[data-desktop] .desktop-main .acp-section + .acp-section { margin-top: 12px; }
@@ -275,15 +174,15 @@ html[data-desktop] .desktop-main .screen-connecting-steps { color: var(--tertiar
 /* ── Focus ───────────────────────────────────────────────────────────────── */
 /* One focus mark everywhere: a 2 pt ring that follows the control's own shape. Text fields show
    focus by their edge instead, so typing never sits inside a white frame. */
-html[data-desktop] [data-slot="button"]:focus-visible,
+html[data-desktop] [data-button]:focus-visible,
 html[data-desktop] [role="tab"]:focus-visible,
 html[data-desktop] [role="menuitem"]:focus-visible { box-shadow: none; outline: 2px solid color-mix(in srgb, var(--label) 55%, transparent); outline-offset: 2px; }
 html[data-desktop] :is(input, textarea, select, [cmdk-input]):focus-visible { outline: none; box-shadow: none; }
 html[data-desktop] [data-slot="input-group"]:has(:focus-visible) { box-shadow: none; }
 /* A dialog's own action sits at the end of the dialog, at its own width. */
-html[data-desktop] [data-slot="dialog-content"] > :is([data-slot="button"], div > [data-slot="button"]:only-child) { justify-self: end; width: auto; min-width: 96px; }
-/* An empty panel says so inside a dashed well, like every other empty state. */
-html[data-desktop] .desktop-main .side-panel-content > p:only-child { padding: 32px 20px; border: 1px dashed var(--separatorStrong); border-radius: var(--radius-well); text-align: center; line-height: 1.6; }
+html[data-desktop] [data-slot="dialog-content"] > :is([data-button], div > [data-button]:only-child) { justify-self: end; width: auto; min-width: 96px; }
+/* An empty panel says so in quiet words in its middle, as every other empty state: no frame. */
+html[data-desktop] .desktop-main .side-panel-content > p:only-child { margin: auto; max-width: 280px; padding: 40px 16px; color: var(--tertiaryLabel); font-size: 13px; text-align: center; line-height: 1.55; }
 html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) { width: 100%; max-width: none; box-sizing: border-box; }
 
 /* Skeletons, as Codex's: a 10 % tint with a band of light crossing it every three seconds. */

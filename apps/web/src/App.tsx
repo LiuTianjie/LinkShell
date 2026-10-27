@@ -44,7 +44,7 @@ import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
 import { engine } from "./live/engine";
 import { ComputerName } from "./live/ComputerName";
-import { AccessPasswordSettings, AccessUnlock, LockMark } from "./live/Access";
+import { AccessPasswordSettings, AccessPasswordSummary, AccessUnlock, LockMark } from "./live/Access";
 import {
   computerName,
   computerOption,
@@ -240,7 +240,7 @@ function LiveApp() {
             {state.ready
               ? deployment === "self-hosted"
                 ? "配对电脑"
-                : "登录或配对电脑"
+                : "连接电脑"
               : "正在准备设备身份…"}
           </Button>
           {isDesktop && (
@@ -344,12 +344,13 @@ function Workspace({
             />
           )}
           {view === "computers" && (
-            <Computers connect={connect} selectComputer={selectComputer} />
+            <Computers connect={connect} selectComputer={selectComputer} navigate={navigate} />
           )}
           {view === "files" && (
             <>
-              <PageHeader title="文件" />
-              <Files />
+              {/* On the desktop the browser's own toolbar is the page's: where you are and what to do. */}
+              {!isDesktop && <PageHeader title="文件" />}
+              <Files page />
             </>
           )}
           {view === "terminals" && (
@@ -759,6 +760,15 @@ function Home({
               <Plus data-icon="inline-start" />
               新建会话
             </Button>
+          ) : nextBefore !== undefined ? (
+            // Nothing loaded yet but more on the computer: the way on is part of the empty state.
+            <Button
+              variant="outline"
+              disabled={job.busy || archive.loading || state.status !== "online"}
+              onClick={() => void job.run(() => actions.loadArchived(nextBefore))}
+            >
+              {job.busy ? "正在加载…" : "加载更早的会话"}
+            </Button>
           ) : !isDesktop ? (
             <Button variant="outline" onClick={() => navigate("home")}>
               返回会话概览
@@ -766,7 +776,7 @@ function Home({
           ) : null}
         </EmptyState>
       )}
-      {nextBefore !== undefined && (
+      {nextBefore !== undefined && !(loaded && !loadError && !sessions.length && archived && !query && filter === "all") && (
         <button
           type="button"
           className="list-row-more"
@@ -1011,9 +1021,11 @@ function NewSession({
 function Computers({
   connect,
   selectComputer,
+  navigate,
 }: {
   connect: () => void;
   selectComputer: (computer: Computer) => void;
+  navigate: (view: string) => void;
 }) {
   const dialogs = useDialogs();
   const state = useStore(engine.state);
@@ -1037,7 +1049,7 @@ function Computers({
         <PageHeader
           title="电脑与 Agent"
           detail={`${state.computers.length} 台电脑`}
-          actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />添加电脑</Button>}
+          actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />连接电脑</Button>}
         />
       ) : (
         <div className="flex items-center justify-between gap-4">
@@ -1063,11 +1075,13 @@ function Computers({
               <Icon name="computer" />
               <div className="min-w-0 flex-1">
                 <div
-                  className="truncate font-medium"
+                  className="computer-row-name flex min-w-0 items-center gap-1 font-medium"
                   title={computerName(computer, names)}
                 >
-                  {computerName(computer, names)}
+                  <span className="truncate">{computerName(computer, names)}</span>
                   <LockMark locked={computer.machine.locked} />
+                  {/* On the desktop renaming is a pencil beside the name it changes, shown on hover. */}
+                  {isDesktop && <ComputerName computer={computer} iconOnly />}
                 </div>
                 <div
                   className="truncate text-xs text-[var(--tertiaryLabel)]"
@@ -1083,7 +1097,7 @@ function Computers({
                 label={computer.machine.online ? "在线" : "离线"}
               />
               <div className="flex shrink-0 items-center gap-1">
-                <ComputerName computer={computer} iconOnly={isDesktop} />
+                {!isDesktop && <ComputerName computer={computer} />}
                 {current && isDesktop ? (
                   <span className="computer-current">当前</span>
                 ) : (
@@ -1117,10 +1131,17 @@ function Computers({
         })}
       </div>
       {state.connection?.computer.key === "desktop:local" && (
-        <div className="computers-section">
-          {heading("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。")}
-          <AccessPasswordSettings />
-        </div>
+        isElectronDesktop ? (
+          // The app has a page of its own for this (本机管理 → 访问密码): here its state and the way there.
+          <div className="computers-section">
+            <AccessPasswordSummary open={() => navigate(manageView("password"))} />
+          </div>
+        ) : (
+          <div className="computers-section">
+            {heading("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。")}
+            <AccessPasswordSettings />
+          </div>
+        )
       )}
       <div className="computers-section">
         {heading(

@@ -75,7 +75,7 @@ export function ComputerPreview({ sessionId }: { sessionId: string }) {
     />
   ) : (
     <p className="text-[13px] text-muted-foreground">
-      等待 Agent 的电脑操作画面。当前会话没有画面时，此处保持等待。
+      Agent 操作电脑时，画面会显示在这里。
     </p>
   );
 }

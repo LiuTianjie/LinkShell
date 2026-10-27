@@ -18,7 +18,7 @@ html[data-desktop] {
   --radius-panel: 12px;
   --radius-well: 10px;
   --radius-row: 10px;
-  --radius-control: 8px;
+  --radius-control: 10px;
   --gutter: 8px;
   --hairline: 1px;
   --toolbar: 46px;
@@ -115,8 +115,8 @@ html[data-desktop] .windows-desktop-header { display: flex; flex: none; align-it
 html[data-desktop] .windows-desktop-brand { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 html[data-desktop] .windows-desktop-brand img { width: 22px; height: 22px; border-radius: 6px; }
 html[data-desktop] .windows-desktop-modes { display: flex; gap: 2px; height: 30px; padding: 2px; border-radius: var(--radius-control); background: var(--fill); }
-html[data-desktop] .windows-desktop-modes [data-slot="button"] { height: 26px; padding: 0 12px; border-radius: 6px; color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
-html[data-desktop] .windows-desktop-modes [data-slot="button"][aria-current="page"] { background: var(--plain); color: var(--label); }
+html[data-desktop] .windows-desktop-modes [data-button] { height: 26px; padding: 0 12px; border-radius: 6px; color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
+html[data-desktop] .windows-desktop-modes [data-button][aria-current="page"] { background: var(--plain); color: var(--label); }
 html[data-desktop] .desktop-top-search { display: flex; align-items: center; gap: 8px; width: min(420px, 40vw); height: 30px; margin: 0 auto; padding: 0 12px; border: var(--hairline) solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--plain); color: var(--tertiaryLabel); font: inherit; font-size: 13px; }
 html[data-desktop] .desktop-top-search kbd { margin-left: auto; }
 html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) :is(.windows-desktop-header, .desktop-status-bar) { display: none; }
@@ -243,57 +243,59 @@ html[data-desktop] .desktop-account > svg { width: 16px; height: 16px; }
 html[data-desktop] .desktop-sidebar-footer { flex: none; flex-direction: row; align-items: center; gap: 2px; padding: 6px 8px 8px; border-top: 0; }
 html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 32px; padding: 0 8px; gap: 8px; border-radius: var(--radius-row); color: var(--label); font-size: 14px; font-weight: 430; }
 html[data-desktop] .desktop-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-sidebar-footer > [data-slot="button"][data-size="icon"] { width: 30px; height: 30px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-sidebar-footer > [data-button][data-size="icon"] { width: 30px; height: 30px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electron"]) .desktop-sidebar { display: none; }
 
 /* ── Controls ────────────────────────────────────────────────────────────── */
 /* The one primary per screen: ink. Everything else is quiet until hovered. */
-html[data-desktop] [data-slot="button"] { font-weight: 500; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
+html[data-desktop] [data-button] { font-weight: 500; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
 /* Codex's variants: primary is ink (hover: ink at 80 %); secondary a 5 % tint of ink (10 % on
    hover); outline a hairline; ghost nothing until hovered. */
-html[data-desktop] [data-slot="button"][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accent); box-shadow: none; color: var(--primaryForeground); }
-html[data-desktop] [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); }
-html[data-desktop] [data-slot="button"][data-variant="default"]:active:not(:disabled) { opacity: .8; }
-html[data-desktop] [data-slot="button"][data-variant="default"]:disabled { background: var(--accent); color: var(--primaryForeground); opacity: .4; }
-html[data-desktop] [data-slot="button"][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
-html[data-desktop] [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) { background: var(--fillStrong); }
-html[data-desktop] [data-slot="button"][data-variant="outline"] { border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
-html[data-desktop] [data-slot="button"][data-variant="outline"]:hover:not(:disabled) { background: var(--fill); }
-html[data-desktop] [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active:not(:disabled) { opacity: .8; }
-html[data-desktop] [data-slot="button"][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
-html[data-desktop] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
-html[data-desktop] [data-slot="button"][data-variant="ghost"][data-state="open"] { background: var(--fill); }
-html[data-desktop] [data-slot="button"][data-variant="ghost"]:active:not(:disabled) { background: var(--fillStrong); }
-html[data-desktop] [data-slot="button"][data-variant="destructive"] { border-radius: var(--radius-control); box-shadow: none; }
-html[data-desktop] [data-slot="button"]:disabled { cursor: default; }
+html[data-desktop] [data-button][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accent); box-shadow: none; color: var(--primaryForeground); }
+html[data-desktop] [data-button][data-variant="default"]:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); }
+html[data-desktop] [data-button][data-variant="default"]:active:not(:disabled) { opacity: .8; }
+html[data-desktop] [data-button][data-variant="default"]:disabled { background: var(--accent); color: var(--primaryForeground); opacity: .4; }
+html[data-desktop] [data-button][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
+html[data-desktop] [data-button][data-variant="secondary"]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] [data-button][data-variant="outline"] { border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
+html[data-desktop] [data-button][data-variant="outline"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active:not(:disabled) { opacity: .8; }
+html[data-desktop] [data-button][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
+html[data-desktop] [data-button][data-variant="ghost"]:hover:not(:disabled),
+html[data-desktop] [data-button][data-variant="ghost"][data-state="open"] { background: var(--fill); }
+html[data-desktop] [data-button][data-variant="ghost"]:active:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] [data-button][data-variant="destructive"] { border-radius: var(--radius-control); box-shadow: none; }
+html[data-desktop] [data-button]:disabled { cursor: default; }
 /* Disabled controls fade, as Codex's (40 %), instead of turning grey. */
-html[data-desktop] [data-slot="button"]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4; }
+html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4; }
 /* Interactive things keep the arrow, as in a native app. */
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, a.desktop-place) { cursor: default; }
-/* Sizes: 28 px buttons in toolbars and rows, 32 px where a form ends, 24 px icons beside text. */
-html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 32px; padding-inline: 12px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
-html[data-desktop] .desktop-main [data-slot="button"] svg:not([class*="size-"]) { width: 16px; height: 16px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] svg:not([class*="size-"]),
-html[data-desktop] .desktop-main [data-slot="button"][data-size="xs"] svg:not([class*="size-"]) { width: 14px; height: 14px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="plain"] { text-align: left; justify-content: flex-start; }
-html[data-desktop] .desktop-main [data-slot="button"][data-active] { background: var(--sidebarAccent); color: var(--label); }
+/* Sizes, Codex's: every button is 28 px with a 10 px corner (toolbars, rows, cards, empty
+   states); `lg` (32 px) is for the one action that ends a form; dialogs have their own pills. */
+html[data-desktop] .desktop-main [data-button]:is([data-size="default"], [data-size="sm"]):not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-button][data-size="lg"] { height: 32px; padding-inline: 12px; gap: 6px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-button][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
+html[data-desktop] .desktop-main [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
+html[data-desktop] .desktop-main [data-button] svg:not([class*="size-"]) { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main [data-button][data-size="sm"] svg:not([class*="size-"]),
+html[data-desktop] .desktop-main [data-button][data-size="xs"] svg:not([class*="size-"]) { width: 14px; height: 14px; }
+html[data-desktop] .desktop-main [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
+html[data-desktop] .desktop-main [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
 
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
 html[data-desktop] .desktop-main [data-slot="select-trigger"],
 html[data-desktop] .desktop-main input[data-slot="input"],
-html[data-desktop] [data-slot="dialog-content"] input[data-slot="input"] { height: 30px; border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); font-size: 13px; }
+html[data-desktop] [data-slot="dialog-content"] input[data-slot="input"] { height: 32px; border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); font-size: 13px; }
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer):focus-within,
 html[data-desktop] .desktop-main [data-slot="select-trigger"]:focus-visible,
 html[data-desktop] :is(.desktop-main, [data-slot="dialog-content"]) input[data-slot="input"]:focus-visible { background: var(--plain); box-shadow: inset 0 0 0 1px var(--focus, var(--link)); outline: none; }
 html[data-desktop] [data-slot="textarea"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 
 /* Segmented filters: a recessed track; the current one is a raised plain step. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 30px; min-height: 30px; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--segment-track); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 26px; padding-inline: 10px; border: 0; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background var(--transition), color var(--transition); }
+/* 28 px, the height of the buttons and selects beside them. */
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--segment-track); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 1px 4px -1px rgb(0 0 0 / .2); }
@@ -368,9 +370,8 @@ html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-s
 html[data-desktop] .desktop-main :is(.live-overview, .screens-page, .management-content) { --page-inline: max(24px, calc((100cqw - 880px) / 2)); }
 html[data-desktop] .desktop-main .live-overview,
 html[data-desktop] .desktop-main .screens-page,
-html[data-desktop] .desktop-main .management-content { padding: 0 var(--page-inline) 40px; scroll-padding-top: var(--toolbar); }
-html[data-desktop] .desktop-main .screens-page { --page-inline: max(24px, calc((100cqw - 1120px) / 2)); }
-html[data-desktop] .page-header { position: sticky; top: 0; z-index: 4; display: flex; flex: none; align-items: center; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); margin: 0 calc(-1 * var(--page-inline, 24px)) 8px; padding: 0 8px 0 max(var(--page-inline, 24px), var(--titlebar-inset, 0px)); background: var(--plain); box-shadow: 0 var(--hairline) 0 transparent; transition: box-shadow 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .management-content { padding: 0 var(--page-inline) 40px; scroll-padding-top: var(--toolbar); scrollbar-gutter: stable; }
+html[data-desktop] .page-header { position: sticky; top: 0; z-index: 4; display: flex; flex: none; align-items: center; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); margin: 0 calc(-1 * var(--page-inline, 24px)) 8px; padding: 0 var(--page-inline, 24px) 0 max(var(--page-inline, 24px), var(--titlebar-inset, 0px)); background: var(--plain); box-shadow: 0 var(--hairline) 0 transparent; transition: box-shadow 150ms var(--ease-out); }
 html[data-desktop] .page-header[data-scrolled] { box-shadow: 0 var(--hairline) 0 var(--separator); }
 html[data-desktop] .page-header-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
 html[data-desktop] .page-header h1 { flex: none; overflow: hidden; color: var(--label); font-size: 14px; font-weight: 500; letter-spacing: -.005em; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
@@ -378,10 +379,10 @@ html[data-desktop] .page-header-detail { min-width: 0; overflow: hidden; color: 
 html[data-desktop] .page-header-detail > span + span::before { content: "·"; margin: 0 6px; color: var(--quaternaryLabel); }
 html[data-desktop] .page-header-detail > span[data-tone="waiting"] { color: var(--warning); }
 html[data-desktop] .page-header-actions { display: flex; flex: none; align-items: center; gap: 4px; }
-html[data-desktop] .page-header-actions > [data-slot="button"][data-variant="default"] { margin-left: 4px; }
-html[data-desktop] :is(.page-header-actions, .session-actions) > [data-slot="button"][data-variant="ghost"],
-html[data-desktop] :is(.page-header-actions, .session-actions) > * > [data-slot="button"][data-variant="ghost"] { border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); font-weight: 430; }
-html[data-desktop] :is(.page-header-actions, .session-actions) [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) { color: var(--label); }
+html[data-desktop] .page-header-actions > [data-button][data-variant="default"] { margin-left: 4px; }
+html[data-desktop] :is(.page-header-actions, .session-actions) > [data-button][data-variant="ghost"],
+html[data-desktop] :is(.page-header-actions, .session-actions) > * > [data-button][data-variant="ghost"] { border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); font-weight: 430; }
+html[data-desktop] :is(.page-header-actions, .session-actions) [data-button][data-variant="ghost"]:hover:not(:disabled) { color: var(--label); }
 html[data-desktop] .page-header-actions { gap: 6px; }
 html[data-desktop] .desktop-root[data-shell="electron"] .page-header { -webkit-app-region: drag; app-region: drag; }
 html[data-desktop] .desktop-root[data-shell="electron"] .page-header :is(button, a, input, select, [role="button"], [role="tab"], [role="combobox"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
@@ -409,6 +410,7 @@ html[data-desktop] .desktop-main [data-slot="tabs"],
 html[data-desktop] .desktop-main [data-slot="tabs-list"] { flex-shrink: 0; }
 html[data-desktop] .desktop-main .session-search { flex: 1; width: 100%; max-width: 320px; }
 html[data-desktop] .desktop-main .session-overview-tools { flex: 1; justify-content: flex-end; }
+html[data-desktop] .desktop-main :is(.session-overview-tools, .page-header) [data-slot="select-trigger"] { height: 28px; }
 
 /* Lists: rows straight on the panel, as Codex's thread lists. A row is two lines (what, then
    where and how it is going), divided by hairlines that step aside for the row under the
@@ -452,12 +454,17 @@ html[data-desktop] .desktop-main :is(.computers-section, .worktree-list:not(:emp
 html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 4px; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
 html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: rgb(255 255 255 / .02); }
-html[data-desktop] .desktop-main .computers-section-heading { padding: 10px 10px 6px; }
 html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
 html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--label); font-size: 14px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .computers-section .list-row { padding: 0 10px; }
-html[data-desktop] .desktop-main .computers-section .list-row + .list-row::before { left: 10px; right: 10px; }
+html[data-desktop] .desktop-main .computers-section-heading { padding: 12px 12px 6px; }
+html[data-desktop] .desktop-main .computers-section .list-row { padding: 0 12px; }
+html[data-desktop] .desktop-main .computers-section .list-row + .list-row::before { left: 12px; right: 12px; }
+/* The rename pencil beside a computer's name: there when the row is hovered or it has focus. */
+html[data-desktop] .desktop-main :is(.computer-row-name, .screen-row) [title="给电脑命名"] { width: 20px; height: 20px; border-radius: 6px; color: var(--tertiaryLabel); opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-main :is(.list-row:hover, .screen-row:hover) [title="给电脑命名"],
+html[data-desktop] .desktop-main [title="给电脑命名"]:is(:focus-visible, [data-state="open"]) { opacity: 1; }
+html[data-desktop] .desktop-main [title="给电脑命名"] svg { width: 13px; height: 13px; }
 html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 18px minmax(120px, 180px) minmax(80px, 120px) minmax(160px, 1fr); gap: 12px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
 html[data-desktop] .desktop-main .computer-agent-label { font-size: 13px; font-weight: 510; }
@@ -501,14 +508,15 @@ html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
 html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--separator); pointer-events: none; }
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover::before,
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover + :is(.resource-entry, .resource-service)::before { opacity: 0; }
-html[data-desktop] .desktop-main .screen-row { position: relative; height: 60px; min-height: 60px; margin: 0; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; transition: background var(--transition); }
-html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--separator); }
+/* Screens: rows in the group like any other list; the current computer is marked by its badge,
+   not a second tinted box inside the group. */
+html[data-desktop] .desktop-main .screen-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; min-height: 60px; margin: 0; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .screen-row:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--sidebarAccent); }
 html[data-desktop] .desktop-main .screen-row:hover::before,
-html[data-desktop] .desktop-main .screen-row[data-current]::before,
-html[data-desktop] .desktop-main :is(.screen-row:hover, .screen-row[data-current]) + .screen-row::before { opacity: 0; }
-html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--plain); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .screen-row:hover + .screen-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 18px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .screen-row [data-slot="badge"] { height: 18px; padding-inline: 6px; border-radius: 6px; font-size: 11px; }
 /* Inside a group an empty state is just its words. */
 html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-sessions) [data-slot="empty"] { margin: 0; padding: 24px; border: 0; background: transparent; }
 
@@ -594,39 +602,6 @@ html[data-desktop] .desktop-native-screen.screen-fullscreen .screen-stage { flex
 html[data-desktop]:has(.windows-desktop-header) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
 html[data-desktop]:has(.windows-desktop-header) :is(h1, .session-title h1) { letter-spacing: 0; }
 
-/* Files: where you are and how to move on one row; search, the count and hidden files on the
-   next; then the entries in one group, 32 px rows as Codex's file tree; uploads at the foot. */
-html[data-desktop] .desktop-main .resource-browser-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-html[data-desktop] .desktop-main .resource-location-bar { gap: 2px; height: 32px; }
-html[data-desktop] .desktop-main .resource-location-bar [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: 8px; box-shadow: none; background: transparent; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .resource-location-bar [data-slot="button"][data-size="icon"]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .resource-location { display: flex; align-items: baseline; gap: 8px; margin-left: 6px; }
-html[data-desktop] .desktop-main .resource-location strong { flex: none; max-width: 40%; font-size: 13px; font-weight: 500; }
-html[data-desktop] .desktop-main .resource-location span { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .resource-browser-controls > form { min-width: 0; }
-html[data-desktop] .desktop-main .resource-browser-controls [data-slot="field-group"],
-html[data-desktop] .desktop-main .resource-browser-controls [data-slot="field"] { gap: 0; }
-html[data-desktop] .desktop-main .resource-directory-summary { min-height: 24px; padding: 0 4px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .resource-hidden-toggle { color: var(--secondaryLabel); font-size: 12px; font-weight: 400; }
-html[data-desktop] .desktop-main .resource-entry-list:not(:empty) { padding: 4px; }
-html[data-desktop] .desktop-main .resource-entry { height: 32px; min-height: 32px; padding: 0 10px; gap: 8px; border: 0; border-radius: 8px; font-size: 13px; }
-html[data-desktop] .desktop-main .resource-entry:has(.resource-entry-path) { height: 44px; min-height: 44px; }
-html[data-desktop] .desktop-main .resource-entry:hover { background: var(--fill); }
-html[data-desktop] .desktop-main .resource-entry[aria-current] { background: var(--fill); }
-html[data-desktop] .desktop-main .resource-entry > svg { width: 16px; height: 16px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .resource-entry-name { font-size: 13px; font-weight: 430; }
-html[data-desktop] .desktop-main .resource-entry-size { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main :is(.resource-files-footer, .resource-picker-footer) { padding-top: 10px; border-top: 1px solid var(--separator); }
-/* Ports: the connect bar, then the services in one group that grows with them (no box in a box). */
-html[data-desktop] .desktop-main .resource-port-connect { gap: 8px; padding: 10px 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .resource-port-connect-copy { color: var(--tertiaryLabel); font-size: 12px; }
-/* One scroller: the group of services, capped so the live preview keeps the rest of the page. */
-html[data-desktop] .desktop-main .resource-services { max-height: 260px; overflow: auto; overscroll-behavior: contain; }
-html[data-desktop] .desktop-main .resource-service-list { max-height: none; overflow: visible; }
-html[data-desktop] .desktop-main .resource-service { min-height: 44px; padding: 0 10px; }
-html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 4px; border-radius: 16px; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; }
 
 /* Peek: the hidden sidebar brought out over the page by the pointer at the left edge. */
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { position: relative; }

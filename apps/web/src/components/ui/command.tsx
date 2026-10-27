@@ -49,7 +49,8 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          // Not `!important`: the dialog's own corner rule must be able to override it.
+          "top-1/3 translate-y-0 overflow-hidden rounded-xl p-0",
           className,
         )}
         showCloseButton={showCloseButton}

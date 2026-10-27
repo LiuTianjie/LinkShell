@@ -145,8 +145,8 @@ export function CommandCenter({
                   <CommandShortcut>{connection?.computer.key === computer.key ? "当前" : computer.machine.online ? "在线" : "离线"}</CommandShortcut>
                 </CommandItem>
               ))}
-              <CommandItem value="连接另一台电脑 pair add computer" onSelect={() => run(connect)}>
-                <Plus />连接另一台电脑
+              <CommandItem value="连接电脑 pair add computer 配对 登录" onSelect={() => run(connect)}>
+                <Plus />连接电脑
               </CommandItem>
             </CommandGroup>
             <CommandGroup heading="外观">

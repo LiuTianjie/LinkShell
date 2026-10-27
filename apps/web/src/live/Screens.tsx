@@ -106,6 +106,7 @@ export function Screens({
         <div className="screen-list">
           {!found && (
             <EmptyState
+              icon={<Search />}
               title="没有找到这台电脑"
               description="试试电脑名称、系统名称或设备编号。"
             >
@@ -125,6 +126,7 @@ export function Screens({
         </div>
       ) : (
         <EmptyState
+          icon={<Icon name="computer" size={18} />}
           title="还没有连接的电脑"
           description="连接电脑后，可以在这里打开它们的屏幕。"
         >

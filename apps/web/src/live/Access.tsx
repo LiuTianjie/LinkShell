@@ -62,6 +62,28 @@ export function AccessUnlock({ name }: { name: string }) {
   );
 }
 
+/** Whether this computer has a password, one row, and the way to the page that changes it. */
+export function AccessPasswordSummary({ open }: { open: () => void }) {
+  const { link } = useConnection();
+  const status = useLoad(() => link.call("access.status", {}), [link], 0);
+  if (status.error && /unknown method|no handler/.test(message(status.error))) return null;
+  const enabled = status.value?.password ?? false;
+  return (
+    <div className="access-settings list-row list-row-static">
+      <span className="access-settings-mark" data-enabled={enabled || undefined} aria-hidden>
+        {enabled ? <Lock size={16} /> : <LockOpen size={16} />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">访问密码</div>
+        <p className="text-xs text-[var(--tertiaryLabel)]">
+          {!status.value ? "正在读取…" : enabled ? "已开启，其他设备打开这台电脑前要先输入密码" : "未设置"}
+        </p>
+      </div>
+      <Button variant="ghost" size="sm" onClick={open}>{enabled ? "管理" : "设置"}</Button>
+    </div>
+  );
+}
+
 /** The current computer's own password; only offered on that computer (the host refuses it remotely). */
 export function AccessPasswordSettings() {
   const { link } = useConnection();

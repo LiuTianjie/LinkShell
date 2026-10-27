@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { fileBase64 } from "./Files";
 import { readLocal, saveLocal } from "./storage";
-import { DESKTOP_FULLSCREEN_EVENT, isWindowsDesktop, setDesktopScreenFullScreen } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, isDesktop, isWindowsDesktop, setDesktopScreenFullScreen } from "./desktop";
 import { replayTerminal, writeTerminal } from "./terminal-replay";
 import { useDialogs } from "@/components/Dialogs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -992,12 +992,13 @@ export function Terminals({
     <section className="terminals-page">
       <PageHeader
         title="终端"
-        actions={<>
-      <Button size="sm" disabled={!online} onClick={openCreate}>
-        <Plus data-icon="inline-start" />
-        新建终端
-      </Button>
-        </>}
+        // With no terminal yet the empty state below carries the one button.
+        actions={terminals?.length ? (
+          <Button size="sm" disabled={!online} onClick={openCreate}>
+            <Plus data-icon="inline-start" />
+            新建终端
+          </Button>
+        ) : undefined}
       />
       {!terminals && online && <LoadState loading={load.loading} />}
       {!terminals && !online && (
@@ -1123,8 +1124,11 @@ export function Terminals({
         </Tabs>
       ) : online && !load.loading && !load.error ? (
         <EmptyState
+          icon={<TerminalSquare />}
           title="一个随时能回来的终端"
-          description="Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"
+          description={isDesktop
+            ? "Shell 持续运行在当前电脑。关闭窗口后，也能回来继续查看输出和执行命令。"
+            : "Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"}
         >
           <Button disabled={!online} onClick={openCreate}>
             <Plus data-icon="inline-start" />

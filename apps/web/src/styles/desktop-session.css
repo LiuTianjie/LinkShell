@@ -18,8 +18,8 @@ html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; ov
 html[data-desktop] .desktop-main .session-directory { color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .branch-chip { padding: 0 6px; border-radius: 6px; background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; line-height: 18px; }
 html[data-desktop] .desktop-main .session-actions { display: flex; align-items: center; gap: 0; padding: 0; }
-html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"]:hover { color: var(--label); }
+html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"]:hover { color: var(--label); }
 html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 6px; background: var(--separator); }
 /* Who holds the session: a quiet line under the title, not a second bar. */
 html[data-desktop] .desktop-main .handoff-bar { flex: none; margin: 0 12px 4px; padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
@@ -65,12 +65,19 @@ html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; paddin
 html[data-desktop] .desktop-main .markdown pre { border: 0; border-radius: 16px; background: var(--fill); box-shadow: none; font-size: 12px; line-height: 20px; contain: content; }
 
 /* The reader's own messages: a quiet bubble at the right, at most 70 % of the column. */
-html[data-desktop] .desktop-main .user-message { max-width: 70%; margin-left: auto; padding: 10px 16px; border-radius: 22px; background: var(--userBubble); box-shadow: none; }
+/* The message is a column at the right; the bubble is its words. The time and actions hang in
+   the gap under the bubble and show with the pointer, so a bubble is only as tall as its text. */
+html[data-desktop] .desktop-main .user-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; width: auto; max-width: none; margin-left: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+html[data-desktop] .desktop-main .user-bubble { max-width: 70%; padding: 10px 16px; border-radius: 22px; background: var(--userBubble); color: var(--label); }
 html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.625; }
 html[data-desktop] .desktop-main .user-message .markdown p:last-child { margin-bottom: 0; }
+html[data-desktop] .desktop-main .user-message > .message-actions { position: absolute; top: 100%; right: 4px; z-index: 1; margin-top: 2px; }
+html[data-desktop] .desktop-main .user-message > .failed-message-actions { margin-top: 4px; }
 html[data-desktop] .desktop-main .message-actions { gap: 2px; margin-top: 6px; }
-html[data-desktop] .desktop-main .message-actions [data-slot="button"][data-size="icon-sm"] { width: 26px; height: 26px; border-radius: 8px; }
-html[data-desktop] .desktop-main .message-actions [data-slot="button"][data-size="icon-sm"] svg { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main .message-actions [data-button] { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .message-actions [data-button]:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .message-actions [data-button][data-size="icon-sm"] { width: 26px; height: 26px; border-radius: 8px; }
+html[data-desktop] .desktop-main .message-actions [data-button][data-size="icon-sm"] svg { width: 16px; height: 16px; }
 html[data-desktop] .desktop-main .message-author { gap: 8px; margin-bottom: 6px; color: var(--tertiaryLabel); font-size: 13px; }
 
 /* Working rows: no box, one line of text. The summary at 60 % of the ink (all of it on hover),
@@ -81,7 +88,9 @@ html[data-desktop] .desktop-main .tool-record > summary { display: flex; align-i
 html[data-desktop] .desktop-main .tool-record > summary:hover { background: transparent; color: var(--label); }
 html[data-desktop] .desktop-main .tool-record[open] > summary { margin: 0; border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .tool-record > summary > strong { flex: 0 1 auto; color: inherit; font-family: inherit; font-size: 14px; font-weight: 400; }
-html[data-desktop] .desktop-main .tool-record > summary > small { color: color-mix(in oklab, var(--label) 40%, transparent); font-size: 13px; }
+html[data-desktop] .desktop-main .tool-record > summary > small { flex: none; color: color-mix(in oklab, var(--label) 40%, transparent); font-size: 13px; }
+html[data-desktop] .desktop-main .tool-record > summary > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .tool-record > summary > .tool-command { flex: 0 1000 auto; min-width: 0; overflow: hidden; padding: 0; background: none; color: color-mix(in oklab, var(--label) 40%, transparent); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .tool-state { width: 16px; height: 16px; color: inherit; opacity: .6; }
 html[data-desktop] .desktop-main .tool-state svg { width: 16px; height: 16px; stroke-width: 1.8; }
 html[data-desktop] .desktop-main .tool-record.completed > summary > .tool-state { color: inherit; }
@@ -133,20 +142,43 @@ html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; bord
 html[data-desktop] .desktop-main .diff-block { overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .diff-block > summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--label); font-size: 13px; font-weight: 510; }
 
-/* Approval: a raised card, 24 px corners, pill buttons in a row along its foot. */
-html[data-desktop] .desktop-main .approval-card { padding: 16px 16px 12px; border: 0; border-radius: 24px; background: var(--cardRaised); box-shadow: var(--composer-shadow), inset 0 0 0 1px var(--separator); }
-html[data-desktop][data-theme="dark"] .desktop-main .approval-card { background: #212121; }
+html[data-desktop] .desktop-main .plan-card { padding: 14px 16px; }
+html[data-desktop] .desktop-main .plan-card > strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
+html[data-desktop] .desktop-main .plan-card li { font-size: 14px; }
+html[data-desktop] .desktop-main .notice-card { padding: 12px 14px; font-size: 13px; }
+html[data-desktop] .desktop-main .notice-card.error { background: var(--dangerSoft); box-shadow: none; }
+html[data-desktop] .desktop-main .notice-card.warning { background: var(--waitingSoft); box-shadow: none; }
+html[data-desktop] .desktop-main .timeline-divider { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .timeline-divider::before,
+html[data-desktop] .desktop-main .timeline-divider::after { background: var(--separator); }
+html[data-desktop] .desktop-main .message-time { color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .markdown ul { list-style: disc; }
+html[data-desktop] .desktop-main .markdown ol { list-style: decimal; }
+html[data-desktop] .desktop-main .conversation-loading { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .composer-progress { color: var(--tertiaryLabel); font-size: 12px; }
+
+/* What waits on you (an approval, an agent's questions): a raised card, 24 px corners, pill
+   buttons in a row along its foot. */
+html[data-desktop] .desktop-main :is(.approval-card, .async-questions) { padding: 16px 16px 12px; border: 0; border-radius: 24px; background: var(--cardRaised); box-shadow: var(--composer-shadow), inset 0 0 0 1px var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main :is(.approval-card, .async-questions) { background: #212121; }
+html[data-desktop] .desktop-main .async-question [data-slot="field-label"] { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main .async-question [data-slot="field-label"] > svg { color: var(--warning); }
+html[data-desktop] .desktop-main .async-options { gap: 8px; }
+html[data-desktop] .desktop-main .async-options button { height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--fill); color: var(--label); font-size: 13px; }
+html[data-desktop] .desktop-main .async-options button:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main .async-options button.chosen { background: var(--accent); color: var(--primaryForeground); }
+html[data-desktop] .desktop-main .async-questions [data-slot="textarea"] { min-height: 64px; }
 html[data-desktop] .desktop-main .approval-heading strong { font-size: 14px; font-weight: 590; }
 html[data-desktop] .desktop-main .approval-heading span { color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-icon { width: 28px; height: 28px; border-radius: 50%; background: var(--waitingSoft); color: var(--warning); }
 html[data-desktop] .desktop-main .approval-card pre { border-radius: 12px; background: var(--fill); font-size: 12px; }
 html[data-desktop] .desktop-main .permission-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 8px; }
-html[data-desktop] .desktop-main .permission-buttons [data-slot="button"] { min-height: 28px !important; height: auto; padding: 4px 14px; border-radius: 999px; font-size: 13px; }
+html[data-desktop] .desktop-main .permission-buttons [data-button] { min-height: 28px !important; height: auto; padding: 4px 14px; border-radius: 999px; font-size: 13px; }
 
 /* Back to the newest message: a 32 px round button just above the composer, faded in and out. */
 html[data-desktop] .desktop-main .conversation-jump { bottom: calc(var(--composer-height, 120px) + 8px); }
-html[data-desktop] .desktop-main .conversation-jump [data-slot="button"] { width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .conversation-jump [data-slot="button"]:hover { background: var(--plain); color: var(--label); }
+html[data-desktop] .desktop-main .conversation-jump [data-button] { width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .conversation-jump [data-button]:hover { background: var(--plain); color: var(--label); }
 
 /* The composer floats at the foot of the conversation, 16 px from the edge, over a fade. */
 /* As wide as the reading column above it, so the two edges line up. */
@@ -162,17 +194,17 @@ html[data-desktop][data-theme="dark"] .desktop-main .composer textarea::placehol
 html[data-desktop] .desktop-main .composer-toolbar { gap: 5px; padding: 0 8px 8px; }
 html[data-desktop] .desktop-main .composer-toolbar > div { gap: 2px; }
 /* Its controls are pills: quiet text until hovered, the send button an ink circle. */
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"] { height: 28px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 28px; }
+html[data-desktop] .desktop-main .composer-toolbar [data-button] { height: 28px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .composer-toolbar [data-button]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .composer-toolbar [data-button][data-size="icon"]:not(.send-button) { width: 28px; }
 html[data-desktop] .desktop-main .composer-chip { max-width: 220px; padding-inline: 8px; gap: 4px; }
 html[data-desktop] .desktop-main .composer-chip svg { width: 14px; height: 14px; }
 html[data-desktop] .desktop-main .composer-chip-caret { opacity: .6; }
 html[data-desktop] .desktop-main .composer-chip[data-risky] { color: var(--warning); }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); color: var(--plain); }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button:disabled { background: var(--accent); color: var(--plain); opacity: .5; }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button svg { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main .composer [data-button].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
+html[data-desktop] .desktop-main .composer [data-button].send-button:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); color: var(--plain); }
+html[data-desktop] .desktop-main .composer [data-button].send-button:disabled { background: var(--accent); color: var(--plain); opacity: .5; }
+html[data-desktop] .desktop-main .composer [data-button].send-button svg { width: 16px; height: 16px; }
 html[data-desktop] .desktop-main .context-ring { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 6px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .composer-place { display: none; }
@@ -180,7 +212,8 @@ html[data-desktop] .composer-chip-menu { min-width: 280px; }
 html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 html[data-desktop] .command-option-name strong { font-weight: 590; }
 html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .message-queue { border: var(--hairline) solid var(--separator); border-radius: 14px; background: var(--plain); box-shadow: var(--composer-shadow); }
+html[data-desktop] .desktop-main .message-queue { padding: 8px 12px; border: var(--hairline) solid var(--separator); border-radius: 14px; background: var(--plain); box-shadow: var(--composer-shadow); font-size: 13px; }
+html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryLabel); font-weight: 500; }
 
 /* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
 html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
@@ -192,7 +225,7 @@ html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fil
 html[data-desktop] .inspector-tabs > button[data-transient] { margin-left: 6px; }
 html[data-desktop] .inspector-tabs > button[data-transient]::before { content: ""; display: inline-block; width: var(--hairline); height: 14px; margin: 0 10px 0 -10px; vertical-align: -2px; background: var(--separator); }
 html[data-desktop] .inspector-tabs-spacer { flex: 1; }
-html[data-desktop] .inspector-tabs [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
+html[data-desktop] .inspector-tabs [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
 html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
 html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
 html[data-desktop] .inspector-resizer:hover::after,
@@ -201,8 +234,8 @@ html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--
 html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-main .side-panel-content { padding: 12px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
 /* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
-html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"] { background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
-html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main .side-panel-content [data-button][data-variant="default"] { background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
+html[data-desktop] .desktop-main .side-panel-content [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-family: var(--mono); }
 @media (max-width: 1100px) {
   /* A narrow window keeps the conversation readable: the inspector floats over it. */
@@ -214,7 +247,7 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
 html[data-desktop] .desktop-main > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
 html[data-desktop] .new-session-stage { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(680px, calc(100% - 48px)); margin: auto; padding: 48px 0 18vh; }
 html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label); font-size: 24px; font-weight: 590; letter-spacing: -.02em; line-height: 30px; text-align: center; }
-html[data-desktop] .new-session-composer { display: flex; flex-direction: column; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow), 0 0 0 1px var(--separator); transition: box-shadow 200ms var(--ease-out); }
+html[data-desktop] .new-session-composer { display: flex; flex-direction: column; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
 html[data-desktop][data-theme="dark"] .new-session-composer { background: #303030; }
 html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
 html[data-desktop] .new-session-composer textarea { min-height: 76px; max-height: 40vh; padding: 14px 16px 6px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 20px; resize: none; outline: none; field-sizing: content; }
@@ -229,9 +262,9 @@ html[data-desktop] .new-session-pill > span { min-width: 0; overflow: hidden; te
 html[data-desktop] .new-session-pill svg { flex: none; width: 14px; height: 14px; }
 html[data-desktop] .new-session-pill .agent-mark { width: 16px; height: 16px; border-radius: 4px; }
 html[data-desktop] .new-session-caret { opacity: .6; }
-html[data-desktop] .new-session-composer [data-slot="button"].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
-html[data-desktop] .new-session-composer [data-slot="button"].send-button:disabled { opacity: .5; }
-html[data-desktop] .new-session-composer [data-slot="button"].send-button svg { width: 16px; height: 16px; }
+html[data-desktop] .new-session-composer [data-button].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
+html[data-desktop] .new-session-composer [data-button].send-button:disabled { opacity: .5; }
+html[data-desktop] .new-session-composer [data-button].send-button svg { width: 16px; height: 16px; }
 html[data-desktop] .new-session-menu { min-width: 240px; max-width: 360px; }
 html[data-desktop] .new-session-option { display: grid; min-width: 0; }
 html[data-desktop] .new-session-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -242,6 +275,8 @@ html[data-desktop] .new-session-hint { color: var(--tertiaryLabel); font-size: 1
 html[data-desktop] .new-session-hint code { padding: 0 4px; border-radius: 4px; background: var(--fill); font-family: var(--mono); font-size: 11px; }
 /* The sidebar's 新建会话 shows where you are. */
 html[data-desktop] .desktop-root:has(.new-session-page) .desktop-new-session { background: var(--sidebarAccent); }
+/* The page is drawn over the view it was opened from; that view is not where you are. */
+html[data-desktop] .desktop-root:has(.new-session-page) :is(.tree-session, .desktop-place, .desktop-nav-item)[data-active]:not(.desktop-new-session) { background: transparent; font-weight: inherit; }
 
 /* The toolbar's left half gives way first: its chips shorten, then show only their icon, so
    nothing ever sits on the send button (an open inspector leaves the composer ~540 px). */
@@ -270,8 +305,9 @@ html[data-desktop] .desktop-main .live-timeline > .assistant-message:has(+ .user
 html[data-desktop] .desktop-main .live-timeline > .assistant-message:last-child > .message-actions { position: static; opacity: 1; }
 
 /* The session title row: 28 px icons with 10 px corners, as the toolbars; who holds a handed-off session as a pill. */
-html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: 10px; }
-html[data-desktop] .desktop-main .session-handoff { height: 24px; margin-right: 6px; padding-inline: 10px; border-radius: 999px; font-size: 12px; }
+html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: 10px; }
+html[data-desktop] .desktop-main .session-actions { gap: 6px; }
+html[data-desktop] .desktop-main .session-actions .session-handoff[data-button] { height: 28px; margin-right: 2px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
 
 /* The inspector slides in from the right on Codex's panel spring; the conversation gives way with it. */
 html[data-desktop] .desktop-main .live-side-panel { animation: inspector-in 420ms var(--ease-spring) both; }

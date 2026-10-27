@@ -68,6 +68,7 @@ import {
   Plug,
   Blocks,
   SquareTerminal,
+  Ellipsis,
   GitFork,
   PencilLine,
   Archive,
@@ -709,7 +710,7 @@ export function Session({
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" aria-label="更多会话操作">
-                      •••
+                      <Ellipsis />
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
@@ -753,9 +754,12 @@ export function Session({
                       <Blocks />应用与连接器
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onSelect={() => setTerminals(true)}>
-                    <SquareTerminal />终端
-                  </DropdownMenuItem>
+                  {/* The desktop's title row already has the terminal, one click away. */}
+                  {!isDesktop && (
+                    <DropdownMenuItem onSelect={() => setTerminals(true)}>
+                      <SquareTerminal />终端
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>

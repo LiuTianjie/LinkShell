@@ -29,9 +29,21 @@ import {
   LoaderCircle,
   RefreshCw,
   Search,
+  Upload,
   WrapText,
   X,
+  Ellipsis,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { PageHeader } from "@/components/PageHeader";
+import { isDesktop } from "./desktop";
 import type { MethodResult } from "@linkshell/wire";
 import { cn } from "@/lib/utils";
 import {
@@ -346,13 +358,18 @@ export function Files({
   onPick,
   onDirtyChange,
   directoriesOnly = false,
+  page = false,
 }: {
   start?: string;
   onPick?: (path: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
   directoriesOnly?: boolean;
+  /** The 文件 page itself (it has a toolbar), rather than a panel or a picker. */
+  page?: boolean;
 }) {
   const dialogs = useDialogs();
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [searching, setSearching] = useState(false);
   const { link } = useConnection();
   const [path, setPath] = useState(start);
   const [hidden, setHidden] = useState(false);
@@ -421,14 +438,241 @@ export function Files({
     setFileLine(line);
     if (!next) requestAnimationFrame(() => lastFileButton.current?.focus());
   }
+  const changeable = !job.busy && !!loaded.value && !loaded.loading && !submitted;
+  function uploadFiles(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    const dir = loaded.value?.path;
+    if (!dir || !files.length) return;
+    setNotice("");
+    void job.run(async () => {
+      for (const candidate of files)
+        if (candidate.size > 30_000_000)
+          throw new Error(`${candidate.name} 超过 30 MB，尚未上传任何文件。`);
+      let done = 0;
+      try {
+        for (const candidate of files) {
+          setUpload({ done, total: files.length, name: candidate.name });
+          await link.call(
+            "fs.upload",
+            { dir, name: candidate.name, data: await fileBase64(candidate) },
+            180000,
+          );
+          done++;
+        }
+        setNotice(`已上传 ${done} 个文件。同名文件已自动编号，原文件不会被覆盖。`);
+      } catch (error) {
+        throw new Error(
+          `${done ? `已上传 ${done} / ${files.length} 个文件。` : ""}${messageOf(error)}`,
+          { cause: error },
+        );
+      } finally {
+        setUpload(undefined);
+        if (done) loaded.reload();
+      }
+    });
+  }
+  async function makeDirectory() {
+    const parent = loaded.value?.path;
+    const name = await dialogs.prompt("新目录名称");
+    if (!parent || !name?.trim()) return;
+    void job.run(async () => {
+      const value = name.trim();
+      if (value === "." || value === ".." || /[/\\\0]/.test(value) || value.length > 255)
+        throw new Error("请输入有效的目录名称，不要包含斜杠，最多 255 个字符。");
+      await link.call("fs.mkdir", { parent, name: value });
+      setNotice(`已创建目录“${value}”`);
+      loaded.reload();
+    });
+  }
+  async function goTo() {
+    const next = await dialogs.prompt("输入要打开的目录路径", loaded.value?.path ?? path ?? "", "打开目录");
+    if (next?.trim()) void navigate(next.trim());
+  }
+  function submitSearch() {
+    if (!query.trim()) return;
+    setSubmitted(query.trim());
+    if (submitted === query.trim()) search.reload();
+  }
+  const clearSearch = () => {
+    setQuery("");
+    setSubmitted("");
+  };
+  const summary = submitted
+    ? `“${submitted}”的目录结果`
+    : `${entries.length}${loaded.value?.truncated ? "+" : ""} 个${directoriesOnly ? "目录" : "项目"}`;
+  // The desktop puts where you are and what you can do in one toolbar row, as Codex's file pages:
+  // the page's own toolbar, or in the inspector a compact bar with the rest in a menu.
+  const desktopLayout = isDesktop && !directoriesOnly;
+  const upward = (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={job.busy || loaded.loading}
+        title="主目录"
+        aria-label="前往主目录"
+        onClick={() => void navigate()}
+      >
+        <Home />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={job.busy || !loaded.value?.parent}
+        title="上一级目录"
+        aria-label="前往上一级目录"
+        onClick={() => void navigate(loaded.value?.parent)}
+      >
+        <ArrowUp />
+      </Button>
+    </>
+  );
+  const refresh = (
+    <Button
+      variant="ghost"
+      size="icon"
+      disabled={active.loading || job.busy}
+      title="刷新目录"
+      aria-label="刷新目录"
+      onClick={active.reload}
+    >
+      <RefreshCw />
+    </Button>
+  );
+  const searchField = (
+    <form
+      className="resource-search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitSearch();
+      }}
+    >
+      <InputGroup className="page-search">
+        <InputGroupAddon>
+          <Search aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label="搜索电脑上的目录"
+          placeholder="搜索目录"
+          maxLength={200}
+          autoFocus={!page}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            if (!event.target.value) setSubmitted("");
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            clearSearch();
+            if (!page) setSearching(false);
+          }}
+        />
+        {query && (
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton size="icon-xs" title="清空搜索" aria-label="清空搜索" onClick={clearSearch}>
+              <X />
+            </InputGroupButton>
+          </InputGroupAddon>
+        )}
+      </InputGroup>
+    </form>
+  );
+  const uploadInput = (
+    <input
+      ref={uploadRef}
+      type="file"
+      multiple
+      hidden
+      tabIndex={-1}
+      onChange={(event) => {
+        const list = event.target.files;
+        uploadFiles(list);
+        event.target.value = "";
+      }}
+    />
+  );
+  const chooseUpload = () => {
+    if (!uploadRef.current) return;
+    // Selecting the same file again must still trigger a failed upload's retry.
+    uploadRef.current.value = "";
+    uploadRef.current.click();
+  };
+  const hiddenToggle = (
+    <Label className="resource-hidden-toggle">
+      <Checkbox checked={hidden} onCheckedChange={(checked) => setHidden(checked === true)} />
+      显示隐藏项目
+    </Label>
+  );
   return (
     <section
       className={cn(
         "file-browser resource-files",
         file && "resource-has-preview",
       )}
+      data-layout={desktopLayout ? (page ? "page" : "panel") : undefined}
       aria-label={directoriesOnly ? "选择目录" : "文件浏览器"}
     >
+      {desktopLayout && uploadInput}
+      {desktopLayout && page && (
+        <PageHeader
+          leading={<span className="resource-toolbar-nav">{upward}</span>}
+          title={<span title={currentPath}>{baseName(currentPath) || "根目录"}</span>}
+          detail={<span className="resource-toolbar-path" title={currentPath}>{currentPath}</span>}
+          actions={<>
+            {searchField}
+            <Button variant="ghost" size="icon" title="前往目录" aria-label="前往目录" disabled={job.busy} onClick={() => void goTo()}>
+              <FolderOpen />
+            </Button>
+            {refresh}
+            <Button variant="ghost" size="sm" disabled={!changeable} onClick={() => void makeDirectory()}>
+              <FolderPlus data-icon="inline-start" />新建目录
+            </Button>
+            <Button size="sm" disabled={!changeable} title="单个文件最大 30 MB" onClick={chooseUpload}>
+              <Upload data-icon="inline-start" />上传文件
+            </Button>
+          </>}
+        />
+      )}
+      {desktopLayout && !page && (
+        <>
+          <div className="resource-toolbar">
+            {upward}
+            <span className="resource-toolbar-name" title={currentPath}>{baseName(currentPath) || "根目录"}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="搜索目录"
+              aria-label="搜索目录"
+              aria-pressed={searching}
+              onClick={() => {
+                if (searching) clearSearch();
+                setSearching(!searching);
+              }}
+            >
+              <Search />
+            </Button>
+            {refresh}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" title="更多" aria-label="更多文件操作">
+                  <Ellipsis />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={!changeable} onSelect={chooseUpload}><Upload />上传文件</DropdownMenuItem>
+                <DropdownMenuItem disabled={!changeable} onSelect={() => void makeDirectory()}><FolderPlus />新建目录</DropdownMenuItem>
+                <DropdownMenuItem disabled={job.busy} onSelect={() => void goTo()}><FolderOpen />前往目录…</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem checked={hidden} onCheckedChange={(checked) => setHidden(checked === true)}>
+                  显示隐藏项目
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          {searching && searchField}
+        </>
+      )}
+      {!desktopLayout && (
       <div className="resource-browser-controls">
         <div className="resource-location-bar">
           <Button
@@ -461,35 +705,16 @@ export function Files({
             title="前往目录"
             aria-label="前往目录"
             disabled={job.busy}
-            onClick={async () => {
-              const next = await dialogs.prompt(
-                "输入要打开的目录路径",
-                loaded.value?.path ?? path ?? "",
-                "打开目录",
-              );
-              if (next?.trim()) void navigate(next.trim());
-            }}
+            onClick={() => void goTo()}
           >
             <FolderOpen />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={active.loading || job.busy}
-            title="刷新目录"
-            aria-label="刷新目录"
-            onClick={active.reload}
-          >
-            <RefreshCw />
-          </Button>
+          {refresh}
         </div>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (query.trim()) {
-              setSubmitted(query.trim());
-              if (submitted === query.trim()) search.reload();
-            }
+            submitSearch();
           }}
         >
           <FieldGroup>
@@ -509,10 +734,7 @@ export function Files({
                     if (!event.target.value) setSubmitted("");
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setQuery("");
-                      setSubmitted("");
-                    }
+                    if (event.key === "Escape") clearSearch();
                   }}
                 />
                 <InputGroupAddon align="inline-end">
@@ -521,10 +743,7 @@ export function Files({
                       size="icon-xs"
                       title="清空搜索"
                       aria-label="清空搜索"
-                      onClick={() => {
-                        setQuery("");
-                        setSubmitted("");
-                      }}
+                      onClick={clearSearch}
                     >
                       <X />
                     </InputGroupButton>
@@ -542,33 +761,17 @@ export function Files({
           </FieldGroup>
         </form>
         <div className="resource-directory-summary">
-          <span>
-            {submitted
-              ? `“${submitted}”的目录结果`
-              : `${entries.length}${loaded.value?.truncated ? "+" : ""} 个${directoriesOnly ? "目录" : "项目"}`}
-          </span>
+          <span>{summary}</span>
           {submitted ? (
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => {
-                setSubmitted("");
-                setQuery("");
-              }}
-            >
+            <Button variant="link" size="sm" onClick={clearSearch}>
               返回当前目录
             </Button>
           ) : (
-            <Label className="resource-hidden-toggle">
-              <Checkbox
-                checked={hidden}
-                onCheckedChange={(checked) => setHidden(checked === true)}
-              />
-              显示隐藏项目
-            </Label>
+            hiddenToggle
           )}
         </div>
       </div>
+      )}
       {directoriesOnly ? (
         <div className="resource-picker-footer">
           <p className="resource-path" title={currentPath}>
@@ -583,88 +786,21 @@ export function Files({
             选择此目录
           </Button>
         </div>
-      ) : (
+      ) : desktopLayout ? null : (
         <div className="resource-files-footer">
           <div className="resource-inline-actions">
             <FilePicker
               multiple
-              disabled={
-                job.busy || !loaded.value || loaded.loading || !!submitted
-              }
+              disabled={!changeable}
               onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
+                const list = event.target.files;
+                uploadFiles(list);
                 event.target.value = "";
-                const dir = loaded.value?.path;
-                if (!dir || !files.length) return;
-                setNotice("");
-                void job.run(async () => {
-                  for (const candidate of files)
-                    if (candidate.size > 30_000_000)
-                      throw new Error(
-                        `${candidate.name} 超过 30 MB，尚未上传任何文件。`,
-                      );
-                  let done = 0;
-                  try {
-                    for (const candidate of files) {
-                      setUpload({
-                        done,
-                        total: files.length,
-                        name: candidate.name,
-                      });
-                      await link.call(
-                        "fs.upload",
-                        {
-                          dir,
-                          name: candidate.name,
-                          data: await fileBase64(candidate),
-                        },
-                        180000,
-                      );
-                      done++;
-                    }
-                    setNotice(
-                      `已上传 ${done} 个文件。同名文件已自动编号，原文件不会被覆盖。`,
-                    );
-                  } catch (error) {
-                    throw new Error(
-                      `${done ? `已上传 ${done} / ${files.length} 个文件。` : ""}${messageOf(error)}`,
-                      { cause: error },
-                    );
-                  } finally {
-                    setUpload(undefined);
-                    if (done) loaded.reload();
-                  }
-                });
               }}
             >
               上传文件
             </FilePicker>
-            <Button
-              variant="outline"
-              disabled={
-                job.busy || !loaded.value || loaded.loading || !!submitted
-              }
-              onClick={async () => {
-                const parent = loaded.value?.path;
-                const name = await dialogs.prompt("新目录名称");
-                if (!parent || !name?.trim()) return;
-                void job.run(async () => {
-                  const value = name.trim();
-                  if (
-                    value === "." ||
-                    value === ".." ||
-                    /[/\\\0]/.test(value) ||
-                    value.length > 255
-                  )
-                    throw new Error(
-                      "请输入有效的目录名称，不要包含斜杠，最多 255 个字符。",
-                    );
-                  await link.call("fs.mkdir", { parent, name: value });
-                  setNotice(`已创建目录“${value}”`);
-                  loaded.reload();
-                });
-              }}
-            >
+            <Button variant="outline" disabled={!changeable} onClick={() => void makeDirectory()}>
               <FolderPlus data-icon="inline-start" />
               新建目录
             </Button>
@@ -797,6 +933,14 @@ export function Files({
                         : "上传文件或新建目录，开始整理这个位置。"
                   }
                 />
+              )}
+              {desktopLayout && entries.length > 0 && (
+                <p className="resource-list-foot">
+                  <span>{summary}</span>
+                  {submitted ? (
+                    <Button variant="link" size="sm" onClick={clearSearch}>返回当前目录</Button>
+                  ) : page ? hiddenToggle : null}
+                </p>
               )}
               {active.value?.truncated && (
                 <p className="resource-caption resource-results-note">

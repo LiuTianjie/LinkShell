@@ -219,11 +219,11 @@
   .console-context-actions {
     gap: 4px;
   }
-  .console-context [data-slot="button"][data-size="icon"] {
+  .console-context [data-button][data-size="icon"] {
     width: 28px;
     height: 28px;
   }
-  .console-context [data-slot="button"][data-size="sm"] {
+  .console-context [data-button][data-size="sm"] {
     height: 28px;
     margin-left: 4px;
     font-size: 12px;
@@ -385,13 +385,13 @@
     background: transparent;
     font-size: 13px;
   }
-  .console-main [data-slot="button"][data-size="default"] {
+  .console-main [data-button][data-size="default"] {
     height: 28px;
     padding-inline: 10px;
     border-radius: 6px;
     font-size: 13px;
   }
-  .console-main [data-slot="button"][data-size="icon"] {
+  .console-main [data-button][data-size="icon"] {
     width: 28px;
     height: 28px;
     border-radius: 6px;

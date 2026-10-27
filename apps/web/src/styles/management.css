@@ -39,7 +39,7 @@ html[data-desktop] .management-content { flex: 1; min-width: 0; overflow-y: auto
 html[data-desktop] .management-page { display: flex; flex-direction: column; gap: 32px; max-width: 768px; margin: 0 auto; }
 html[data-desktop] .management-page > .page-header { margin-bottom: -8px; }
 html[data-desktop] .management-problem [data-slot="alert-description"] { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-html[data-desktop] .management-problem [data-slot="alert-description"] [data-slot="button"] { margin-top: 0; }
+html[data-desktop] .management-problem [data-slot="alert-description"] [data-button] { margin-top: 0; }
 
 /* Text the user may copy (errors, paths, addresses). */
 html[data-desktop] .management-selectable { user-select: text; overflow-wrap: anywhere; }
@@ -66,10 +66,12 @@ html[data-desktop] .management-status { display: inline-flex; align-items: cente
 html[data-desktop] .management-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--quaternaryLabel); }
 html[data-desktop] .management-status[data-tone="success"] > span { background: var(--success); }
 html[data-desktop] .management-status[data-tone="warning"] > span { background: var(--warning); }
-html[data-desktop] .management-empty { display: grid; gap: 4px; padding: 16px 0; font-size: 12px; color: var(--tertiaryLabel); }
-html[data-desktop] .management-empty strong { color: var(--label); font-size: 13px; font-weight: 510; }
-html[data-desktop] .management-activity { display: flex; align-items: center; gap: 16px; min-height: 36px; font-size: 13px; }
-html[data-desktop] .management-activity + .management-activity { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
+/* An empty group says so in its middle, as Codex's empty cards: 40 px of air, quiet words. */
+html[data-desktop] .management-empty { display: grid; justify-items: center; gap: 4px; padding: 40px 24px; color: var(--tertiaryLabel); font-size: 12px; text-align: center; }
+html[data-desktop] .management-empty strong { color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
+/* Activity rows sit 16 px in from the box, as every other row in it. */
+html[data-desktop] .management-activity { position: relative; display: flex; align-items: center; gap: 16px; min-height: 40px; padding: 0 16px; font-size: 13px; }
+html[data-desktop] .management-activity + .management-activity::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
 html[data-desktop] .management-activity time { flex: none; width: 44px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
 html[data-desktop] .management-activity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .management-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--fill); color: var(--secondaryLabel); font-size: 13px; }
@@ -131,9 +133,9 @@ html[data-desktop] :is(.management-password-form, .management-panel > .managemen
 html[data-desktop] .management-password-form { display: flex; flex-direction: column; gap: 8px; max-width: 308px; }
 
 /* Log and updates. */
-html[data-desktop] .management-log-actions { justify-content: flex-start; }
-html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 220px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
-html[data-desktop] .management-update-message { font-size: 13px; font-weight: 510; }
+html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 180px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
+html[data-desktop] .management-row.management-update-row > span { flex: 1; max-width: none; overflow: hidden; color: var(--secondaryLabel); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .management-row.management-update-row > div { flex: none; overflow: visible; }
 html[data-desktop] .management-update-actions { justify-content: flex-start; }
 
 /* Usage. */
@@ -150,7 +152,8 @@ html[data-desktop] .management-section-head > :last-child { margin-left: auto; }
 html[data-desktop] .management-section-head small { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-chart { display: flex; align-items: stretch; gap: 4px; height: 128px; }
 html[data-desktop] .management-chart-day { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; }
-html[data-desktop] .management-chart-bar { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 2px 2px; background: var(--label); opacity: .85; transition: opacity var(--transition), height 300ms var(--ease-out); }
+/* Bars in the state blue: ink bars read as a block of black in the light theme. */
+html[data-desktop] .management-chart-bar { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 2px 2px; background: var(--running); opacity: .7; transition: opacity var(--transition), height 300ms var(--ease-out); }
 html[data-desktop] .management-chart-day:hover .management-chart-bar { opacity: 1; }
 html[data-desktop] .management-chart-day[data-dimmed] .management-chart-bar { opacity: .2; }
 html[data-desktop] .management-chart-day small { height: 15px; overflow: hidden; color: var(--tertiaryLabel); font-size: 11px; line-height: 15px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }

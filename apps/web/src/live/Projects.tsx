@@ -174,6 +174,7 @@ export function Projects({
       </div>
       {state.sessionsLoaded && !projects.length && (
         <EmptyState
+          icon={needle ? <Search /> : <Folder />}
           title={needle ? "没有找到项目" : "还没有项目"}
           description={needle ? "试试项目名称、目录路径或会话标题。" : "在一个工作目录里新建会话，项目会出现在这里。"}
         >

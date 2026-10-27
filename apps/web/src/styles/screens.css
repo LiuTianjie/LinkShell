@@ -75,7 +75,7 @@
     gap: 8px;
     flex-shrink: 0;
   }
-.screen-idle-actions > [data-slot="button"]:not([data-size="icon"]) {
+.screen-idle-actions > [data-button]:not([data-size="icon"]) {
     min-width: 92px;
   }
 .screen-idle [role="alert"],

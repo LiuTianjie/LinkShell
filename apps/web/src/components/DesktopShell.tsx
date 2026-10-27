@@ -83,6 +83,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import "../styles/desktop.css";
 import "../styles/desktop-session.css";
 import "../styles/desktop-components.css";
+import "../styles/desktop-resources.css";
 import "../styles/management.css";
 
 type Appearance = "system" | "light" | "dark";
@@ -230,7 +231,7 @@ function ComputerPicker({
         <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void refresh(); }} disabled={refreshing}>
           <RefreshCw className={refreshing ? "animate-spin" : undefined} />{refreshing ? "正在刷新…" : "刷新电脑列表"}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={connect}><Plus />连接另一台电脑</DropdownMenuItem>
+        <DropdownMenuItem onSelect={connect}><Plus />连接电脑</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -562,7 +563,7 @@ function DesktopNavigation({
       </>)}
       <SidebarFooter className="desktop-sidebar-footer">
         <Button variant="ghost" className="desktop-account" onClick={connect} aria-label="连接设置与账号">
-          <CircleUserRound size={17} strokeWidth={1.5} /><span>{state.account ?? "登录或配对电脑"}</span>
+          <CircleUserRound size={17} strokeWidth={1.5} /><span>{state.account ?? "登录"}</span>
         </Button>
         <DropdownMenu>
           <Tooltip>
