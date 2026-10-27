@@ -132,8 +132,6 @@ html[data-desktop] .desktop-main .conversation-activity > svg { width: 16px; hei
 html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; border-radius: 16px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop] .desktop-main .diff-block { overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .diff-block > summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--label); font-size: 13px; font-weight: 510; }
-html[data-desktop] .desktop-main .diff-block pre,
-html[data-desktop] .desktop-main .diff-block code { font-size: 12px; line-height: 1.8; }
 
 /* Approval: a raised card, 24 px corners, pill buttons in a row along its foot. */
 html[data-desktop] .desktop-main .approval-card { padding: 16px 16px 12px; border: 0; border-radius: 24px; background: var(--cardRaised); box-shadow: var(--composer-shadow), inset 0 0 0 1px var(--separator); }
@@ -244,3 +242,33 @@ html[data-desktop] .new-session-hint { color: var(--tertiaryLabel); font-size: 1
 html[data-desktop] .new-session-hint code { padding: 0 4px; border-radius: 4px; background: var(--fill); font-family: var(--mono); font-size: 11px; }
 /* The sidebar's 新建会话 shows where you are. */
 html[data-desktop] .desktop-root:has(.new-session-page) .desktop-new-session { background: var(--sidebarAccent); }
+
+/* The toolbar's left half gives way first: its chips shorten, then show only their icon, so
+   nothing ever sits on the send button (an open inspector leaves the composer ~540 px). */
+html[data-desktop] .desktop-main .composer { container-type: inline-size; container-name: composer; }
+html[data-desktop] .desktop-main .composer-toolbar { flex-wrap: nowrap; min-width: 0; }
+html[data-desktop] .desktop-main .composer-toolbar > div:first-child { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .composer-toolbar > div:last-child { display: flex; flex: none; align-items: center; }
+html[data-desktop] .desktop-main .composer-chip { flex: 0 1 auto; min-width: 0; }
+html[data-desktop] .desktop-main .composer-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container composer (max-width: 560px) {
+  html[data-desktop] .desktop-main .composer-chip { flex: none; }
+  html[data-desktop] .desktop-main .composer-chip > span,
+  html[data-desktop] .desktop-main .composer-chip-caret,
+  html[data-desktop] .desktop-main .context-ring > span { display: none; }
+}
+@container composer (max-width: 420px) {
+  html[data-desktop] .desktop-main .composer-toolbar [aria-label="打开命令面板"] { display: none; }
+}
+
+/* A reply's copy and fork: under the last reply of a turn they keep a line of their own; under
+   the others they float in the gap below it and show with the pointer, so the column has no
+   empty line after every reply. */
+html[data-desktop] .desktop-main .assistant-message { position: relative; }
+html[data-desktop] .desktop-main .live-timeline > .assistant-message:not(:last-of-type) > .message-actions { position: absolute; top: 100%; left: 0; z-index: 1; margin-top: -2px; }
+html[data-desktop] .desktop-main .live-timeline > .assistant-message:has(+ .user-message) > .message-actions,
+html[data-desktop] .desktop-main .live-timeline > .assistant-message:last-child > .message-actions { position: static; opacity: 1; }
+
+/* The session title row: 28 px icons with 10 px corners, as the toolbars; who holds a handed-off session as a pill. */
+html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: 10px; }
+html[data-desktop] .desktop-main .session-handoff { height: 24px; margin-right: 6px; padding-inline: 10px; border-radius: 999px; font-size: 12px; }

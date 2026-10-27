@@ -429,9 +429,9 @@ export function Ports() {
       <PageHeader
         title="端口预览"
         actions={<>
-      <Button variant="outline" disabled={load.loading} onClick={load.reload}>
-        <RefreshCw data-icon="inline-start" />
-        刷新服务
+      <Button variant="ghost" size="sm" disabled={load.loading} onClick={load.reload}>
+        <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
+        刷新
       </Button>
         </>}
       />

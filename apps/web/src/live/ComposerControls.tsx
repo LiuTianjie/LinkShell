@@ -25,6 +25,36 @@ const ICONS: Partial<Record<SessionConfigOption["category"], ReactNode>> = {
  * each a menu of its values, the way Codex and Claude's desktop apps put them under the prompt.
  * Everything else stays in the settings panel.
  */
+/**
+ * Agents name their modes, models and efforts in English. The common ones read in Chinese here;
+ * anything else is shown as the agent says it.
+ */
+const VALUE_NAMES: Record<string, string> = {
+  "default": "默认",
+  "default (recommended)": "默认（推荐）",
+  "bypass permissions": "免确认",
+  "bypasspermissions": "免确认",
+  "accept edits": "自动接受编辑",
+  "acceptedits": "自动接受编辑",
+  "plan": "计划模式",
+  "plan mode": "计划模式",
+  "read only": "只读",
+  "read-only": "只读",
+  "auto": "自动",
+  "full access": "完全访问",
+  "full-access": "完全访问",
+  "ask": "每次询问",
+  "minimal": "最少",
+  "low": "低",
+  "medium": "中",
+  "high": "高",
+  "xhigh": "很高",
+  "max": "最高",
+};
+export function valueName(name: string): string {
+  return VALUE_NAMES[name.trim().toLowerCase()] ?? name;
+}
+
 export function ComposerConfig({
   session,
   config,
@@ -59,7 +89,7 @@ export function ComposerConfig({
                 title={`${option.name}：${current?.name ?? option.current}`}
               >
                 {ICONS[option.category]}
-                <span>{current?.name ?? option.current}</span>
+                <span>{valueName(current?.name ?? option.current)}</span>
                 <ChevronDown className="composer-chip-caret" />
               </Button>
             </DropdownMenuTrigger>
@@ -72,7 +102,7 @@ export function ComposerConfig({
                 {option.values.map((value) => (
                   <DropdownMenuRadioItem key={value.value} value={value.value}>
                     <span className="composer-chip-option">
-                      <span>{value.group ? `${value.group} · ${value.name}` : value.name}</span>
+                      <span>{value.group ? `${value.group} · ${valueName(value.name)}` : valueName(value.name)}</span>
                       {value.description && <small>{value.description}</small>}
                     </span>
                   </DropdownMenuRadioItem>

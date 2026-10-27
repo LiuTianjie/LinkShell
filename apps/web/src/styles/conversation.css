@@ -719,68 +719,71 @@
     border-color: color-mix(in srgb, var(--link) 40%, var(--separator));
   }
 
-  /* ---- Diff ---- */
+  /* ---- Diff: a unified diff, numbered, what went and what came tinted ---- */
   .diff-block {
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
     background: var(--code);
   }
   .diff-block > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     cursor: pointer;
     min-height: 36px;
-    padding: 8px 12px;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--secondaryLabel);
-    overflow-wrap: anywhere;
-  }
-  .diff-block[open] > summary { border-bottom: 1px solid var(--separator); }
-  .diff-block > pre {
-    margin: 0;
-    padding: 10px 0;
-    max-height: 460px;
-    overflow: auto;
-    white-space: pre;
-    font-size: 12px;
-    line-height: 1.65;
-    color: var(--codeText);
-  }
-  .diff-add-line,
-  .diff-remove-line {
-    display: inline-block;
-    min-width: 100%;
     padding: 0 12px;
-  }
-  .diff-add-line { background: var(--diffAdd); color: var(--diffAddText); }
-  .diff-remove-line { background: var(--diffDel); color: var(--diffDelText); }
-  .before-after {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--separator);
-  }
-  .before-after > div {
-    min-width: 0;
-    background: var(--code);
-  }
-  .before-after small {
-    display: block;
-    padding: 7px 12px;
-    color: var(--secondaryLabel);
-    font-size: 11px;
-    background: var(--card);
-  }
-  .before-after pre {
-    margin: 0;
-    padding: 12px;
-    max-height: 420px;
-    overflow: auto;
-    white-space: pre;
     font-size: 12px;
-    line-height: 1.7;
-    color: var(--codeText);
+    color: var(--secondaryLabel);
+    list-style: none;
   }
+  .diff-block > summary::-webkit-details-marker { display: none; }
+  .diff-block[open] > summary { border-bottom: 1px solid var(--separator); }
+  .diff-path { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+  .diff-stat { flex: none; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .diff-stat .diff-add { color: var(--diffAddText); }
+  .diff-stat .diff-del { color: var(--diffDelText); }
+  .diff-view {
+    max-height: 480px;
+    overflow: auto;
+    padding: 4px 0;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--codeText);
+    contain: content;
+  }
+  .diff-line {
+    display: grid;
+    grid-template-columns: 4ch 4ch 2ch max-content;
+    gap: 0 8px;
+    min-width: 100%;
+    width: max-content;
+    padding: 0 12px 0 8px;
+  }
+  .diff-line[data-kind="add"] { background: var(--diffAdd); }
+  .diff-line[data-kind="del"] { background: var(--diffDel); }
+  .diff-line[data-kind="add"] :is(.diff-sign, code) { color: var(--diffAddText); }
+  .diff-line[data-kind="del"] :is(.diff-sign, code) { color: var(--diffDelText); }
+  .diff-number { color: var(--quaternaryLabel); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
+  .diff-sign { text-align: center; user-select: none; }
+  .diff-line code { padding: 0; background: none; font: inherit; white-space: pre; }
+  .diff-skip { padding: 2px 12px 2px calc(8ch + 24px); color: var(--tertiaryLabel); font-family: inherit; font-size: 11px; background: var(--fill); user-select: none; }
+
+  /* The inspector's changes: totals, then a row a file that opens to its diff. */
+  .changes { display: flex; flex-direction: column; gap: 10px; }
+  .changes-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px; font-size: 13px; }
+  .changes-head strong { font-weight: 590; }
+  .changes-files { border: 1px solid var(--separator); border-radius: 12px; overflow: hidden; }
+  .changes-file + .changes-file { border-top: 1px solid var(--separator); }
+  .changes-file-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 12px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+  .changes-file-row:hover { background: var(--fill); }
+  .changes-chevron { flex: none; width: 14px; height: 14px; color: var(--tertiaryLabel); transition: transform 200ms cubic-bezier(.23, 1, .32, 1); }
+  .changes-file[data-open] .changes-chevron { transform: rotate(90deg); }
+  .changes-file-name { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .changes-file-name small { color: var(--tertiaryLabel); font-size: inherit; }
+  .changes-file .diff-view { max-height: 60vh; border-top: 1px solid var(--separator); background: var(--code); }
+  .changes-note, .changes-empty { color: var(--tertiaryLabel); font-size: 12px; }
 
   /* ---- Plan card ---- */
   .plan-card {
@@ -1538,7 +1541,6 @@
     .message-queue > div { flex-wrap: wrap; }
     .message-queue > div > span { min-width: 100%; }
     .context-ring > span { display: none; }
-    .before-after { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) {
     .conversation { scroll-behavior: auto; }

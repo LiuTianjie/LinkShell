@@ -386,7 +386,7 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
       <section className="tree-section" aria-label="项目">
         <h2 className="tree-heading">
           <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => navigate("projects")}>
-            项目<span>{groups.length || ""}</span>
+            项目
           </button>
           <Tooltip>
             <TooltipTrigger asChild>

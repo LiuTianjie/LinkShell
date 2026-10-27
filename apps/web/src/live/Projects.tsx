@@ -147,7 +147,9 @@ export function Projects({
                       <span className="project-session-detail">
                         {session.activity?.title ?? session.preview ?? ""}
                       </span>
-                      <StatusText state={sessionNeedsAttention(session) ? "waiting" : session.state} />
+                      {sessionNeedsAttention(session) || session.state !== "idle" ? (
+                        <StatusText state={sessionNeedsAttention(session) ? "waiting" : session.state} />
+                      ) : <span />}
                       <time dateTime={new Date(session.updatedAt).toISOString()}>{sessionTime(session.updatedAt)}</time>
                     </button>
                   ))}

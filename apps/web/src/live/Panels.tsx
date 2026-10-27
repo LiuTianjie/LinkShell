@@ -14,11 +14,12 @@ import {
   CommandEmpty,
 } from "@/components/ui/command";
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { subagentKey, type SessionView } from "@linkshell/client-core";
 import type {
   GoalChange,
   SessionSummary,
+  ToolCallContent,
   Workflow as WorkflowData,
 } from "@linkshell/wire";
 import {
@@ -39,9 +40,10 @@ import {
   useJob,
   useLoad,
 } from "./common";
-import { Diff, Timeline } from "./Timeline";
+import { DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
+import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
-import { GitBranch, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, GitBranch, RefreshCw, Trash2 } from "lucide-react";
 
 export function Commands({
   commands,
@@ -194,27 +196,74 @@ export function Settings({
     </div>
   );
 }
+type FileChange = Extract<ToolCallContent, { type: "diff" | "patch" }>;
+
+/**
+ * What the session changed, one row a file, as Codex's turn changes: a file edited several times
+ * shows from what it was before the first edit to what it is after the last (when the agent
+ * reported whole texts), or each patch in turn.
+ */
 export function Changes({ view }: { view?: SessionView }) {
-  const changes =
-    view?.items.flatMap((item) =>
-      item.kind === "tool" && item.status !== "failed"
-        ? item.content.filter(
-            (content) => content.type === "diff" || content.type === "patch",
-          )
-        : [],
-    ) ?? [];
+  const cwd = useContext(TimelineNavigation)?.cwd;
+  const files = useMemo(() => {
+    const byPath = new Map<string, { path: string; lines: DiffLine[]; first?: string; last?: string; patches: DiffLine[][] }>();
+    for (const item of view?.items ?? []) {
+      if (item.kind !== "tool" || item.status === "failed") continue;
+      for (const content of item.content) {
+        if (content.type !== "diff" && content.type !== "patch") continue;
+        const change = content as FileChange;
+        const path = change.type === "patch" && change.movePath ? change.movePath : change.path;
+        const entry = byPath.get(path) ?? { path, lines: [], patches: [] };
+        if (change.type === "diff") {
+          if (entry.first === undefined) entry.first = change.oldText ?? "";
+          entry.last = change.newText;
+        } else entry.patches.push(changeLines(change));
+        byPath.set(path, entry);
+      }
+    }
+    return [...byPath.values()].map((entry) => {
+      const lines = entry.last !== undefined ? diffLines(entry.first ?? "", entry.last) : entry.patches.flat();
+      return { path: entry.path, lines, stat: diffStat(lines) };
+    });
+  }, [view?.items]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const total = files.reduce((sum, file) => ({ added: sum.added + file.stat.added, removed: sum.removed + file.stat.removed }), { added: 0, removed: 0 });
+  const shown = (path: string) =>
+    cwd && path.startsWith(`${cwd.replace(/\/$/, "")}/`) ? path.slice(cwd.replace(/\/$/, "").length + 1) : path;
+  if (!files.length)
+    return <p className="changes-empty">这个会话还没有报告文件变更。加载更早的历史可以看到之前的改动。</p>;
   return (
-    <section>
-      <p className="muted">
-        来自已加载的会话记录；加载更早历史可查看更多变更。
-      </p>
-      {changes.map(
-        (change, index) =>
-          (change.type === "diff" || change.type === "patch") && (
-            <Diff key={index} change={change} />
-          ),
-      )}
-      {!changes.length && <p className="muted">当前没有已报告的文件变更。</p>}
+    <section className="changes">
+      <header className="changes-head">
+        <strong>{files.length} 个文件已更改</strong>
+        <span className="diff-stat"><span className="diff-add">+{total.added}</span> <span className="diff-del">−{total.removed}</span></span>
+      </header>
+      <div className="changes-files">
+        {files.map((file) => {
+          const expanded = open[file.path] ?? files.length === 1;
+          const slash = shown(file.path).lastIndexOf("/");
+          return (
+            <div className="changes-file" key={file.path} data-open={expanded || undefined}>
+              <button
+                type="button"
+                className="changes-file-row"
+                aria-expanded={expanded}
+                title={file.path}
+                onClick={() => setOpen((state) => ({ ...state, [file.path]: !expanded }))}
+              >
+                <ChevronRight className="changes-chevron" aria-hidden />
+                <span className="changes-file-name">
+                  {slash >= 0 && <small>{shown(file.path).slice(0, slash + 1)}</small>}
+                  {shown(file.path).slice(slash + 1)}
+                </span>
+                <span className="diff-stat"><span className="diff-add">+{file.stat.added}</span> <span className="diff-del">−{file.stat.removed}</span></span>
+              </button>
+              {expanded && <DiffView lines={file.lines} />}
+            </div>
+          );
+        })}
+      </div>
+      <p className="changes-note">来自已加载的会话记录</p>
     </section>
   );
 }
@@ -791,7 +840,7 @@ export function Worktrees() {
         title="工作目录与分支"
         actions={<>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         disabled={!online || loaded.loading || job.busy}
         onClick={loaded.reload}

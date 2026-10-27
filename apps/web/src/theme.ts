@@ -77,7 +77,8 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   // Codex's ghost hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
   "fill": ["#1a1c1f0d", "#ffffff14"],
   "fillStrong": ["#1a1c1f1f", "#ffffff29"],
-  "accent": ["#1a1c1f", "#ffffff"],
+  // The filled control is the text's own colour, its label the surface's (Codex's primary-solid).
+  "accent": ["#1a1c1f", "#dfdfdf"],
   "accentHover": ["#303030", "#ededed"],
   "accentSoft": ["#1a1c1f0d", "#ffffff0d"],
   "primaryForeground": ["#ffffff", "#0d0d0d"],

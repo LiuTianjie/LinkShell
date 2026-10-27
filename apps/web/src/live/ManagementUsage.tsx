@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { UsageReport } from "@linkshell/wire";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentMark } from "./common";
 import { desktopInvoke } from "./desktop";
@@ -78,6 +79,21 @@ export function ManagementUsage() {
         </Tabs>
       </div>
       {error && <p className="management-note" data-tone="warning" role="alert">{error}</p>}
+      {/* Reading the logs can take seconds: the page's shape stands in until the numbers arrive. */}
+      {!report && !error && (
+        <div className="management-usage-skeleton" role="status" aria-label="正在读取用量">
+          <div className="management-facts">
+            {[0, 1, 2, 3].map((key) => (
+              <div className="management-fact" key={key}>
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-6 w-24" />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="h-[180px] w-full rounded-2xl" />
+          <Skeleton className="h-[140px] w-full rounded-2xl" />
+        </div>
+      )}
       {report && (
         <>
           {empty && <p className="management-hint">所选范围暂无可用数据；未上报用量不等于零消耗。</p>}

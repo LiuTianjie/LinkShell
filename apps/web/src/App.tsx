@@ -441,11 +441,14 @@ function SessionTable({
                 {project}
               </span>
               <span className="list-row-status">
-                <StatusText
-                  state={
-                    sessionNeedsAttention(session) ? "waiting" : session.state
-                  }
-                />
+                {/* A finished session is the normal state, not news: on the desktop only the others say so. */}
+                {(!isDesktop || sessionNeedsAttention(session) || session.state !== "idle") && (
+                  <StatusText
+                    state={
+                      sessionNeedsAttention(session) ? "waiting" : session.state
+                    }
+                  />
+                )}
               </span>
               {session.permission && (
                 <Button
@@ -579,7 +582,6 @@ function Home({
         <OverviewHeading
           archived={archived}
           sessions={Object.values(state.sessions).filter((session) => !session.archived)}
-          hostname={state.machine?.hostname}
           online={state.status === "online"}
           create={create}
           navigate={navigate}
@@ -610,7 +612,7 @@ function Home({
         </Button>
       </div>}
       <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={filter} onValueChange={setFilter}>
+        <Tabs value={filter} onValueChange={setFilter} hidden={archived && isDesktop}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
               { id: "all", name: "全部会话" },
@@ -643,24 +645,27 @@ function Home({
               { value: "title", label: "会话名称" },
             ]}
           />
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="刷新会话列表"
-            title="刷新会话列表"
-            disabled={job.busy || archive.loading || state.status !== "online"}
-            onClick={() => {
-              job.clear();
-              if (archived) archive.reload();
-              else void job.run(() => actions.refresh());
-            }}
-          >
-            <RefreshCw
-              className={
-                job.busy || archive.loading ? "animate-spin" : undefined
-              }
-            />
-          </Button>
+          {/* The live list follows the computer by itself; only the archive is read on request. */}
+          {(!isDesktop || archived) && (
+            <Button
+              variant={isDesktop ? "ghost" : "outline"}
+              size="icon"
+              aria-label="刷新会话列表"
+              title="刷新会话列表"
+              disabled={job.busy || archive.loading || state.status !== "online"}
+              onClick={() => {
+                job.clear();
+                if (archived) archive.reload();
+                else void job.run(() => actions.refresh());
+              }}
+            >
+              <RefreshCw
+                className={
+                  job.busy || archive.loading ? "animate-spin" : undefined
+                }
+              />
+            </Button>
+          )}
         </div>
       </div>
       <ErrorNotice error={loadError ?? job.error} />
@@ -732,15 +737,17 @@ function Home({
             query || filter !== "all"
               ? "没有找到会话"
               : archived
-                ? nextBefore !== undefined
-                  ? "当前记录中暂无归档，可继续加载更早会话"
-                  : "暂无已归档会话"
+                ? "没有已归档的会话"
                 : "开始第一个任务"
           }
           description={
             query || filter !== "all"
               ? "换一个关键词，或调整上方筛选条件。"
-              : "会话保存在当前电脑，手机、桌面与网页共享同一份记录。"
+              : archived
+                ? nextBefore !== undefined
+                  ? "已载入的记录里没有，可以继续加载更早的会话。"
+                  : "归档的会话不在侧栏和列表里显示，记录仍保存在电脑上。"
+                : "会话保存在当前电脑，手机、桌面与网页共享同一份记录。"
           }
         >
           {query || filter !== "all" ? (
@@ -752,11 +759,11 @@ function Home({
               <Plus data-icon="inline-start" />
               新建会话
             </Button>
-          ) : (
+          ) : !isDesktop ? (
             <Button variant="outline" onClick={() => navigate("home")}>
               返回会话概览
             </Button>
-          )}
+          ) : null}
         </EmptyState>
       )}
       {nextBefore !== undefined && (
@@ -1066,7 +1073,9 @@ function Computers({
                   className="truncate text-xs text-[var(--tertiaryLabel)]"
                   title={computer.gateway}
                 >
-                  {computer.machine.name} · {computerIdentity(computer)}
+                  {/* The machine's own name only when it was renamed here, else it says the same twice. */}
+                  {computerName(computer, names) !== computer.machine.name && `${computer.machine.name} · `}
+                  {computerIdentity(computer)}
                 </div>
               </div>
               <StatusText
@@ -1074,15 +1083,19 @@ function Computers({
                 label={computer.machine.online ? "在线" : "离线"}
               />
               <div className="flex shrink-0 items-center gap-1">
-                <ComputerName computer={computer} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={current}
-                  onClick={() => selectComputer(computer)}
-                >
-                  {current ? "当前电脑" : "切换"}
-                </Button>
+                <ComputerName computer={computer} iconOnly={isDesktop} />
+                {current && isDesktop ? (
+                  <span className="computer-current">当前</span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={current}
+                    onClick={() => selectComputer(computer)}
+                  >
+                    {current ? "当前电脑" : "切换"}
+                  </Button>
+                )}
                 {computer.key !== "desktop:local" && <Button
                   variant="ghost"
                   size="sm"
@@ -1199,7 +1212,6 @@ function Computers({
 function OverviewHeading({
   archived,
   sessions,
-  hostname,
   online,
   create,
   navigate,
@@ -1207,7 +1219,6 @@ function OverviewHeading({
 }: {
   archived: boolean;
   sessions: SessionSummary[];
-  hostname?: string;
   online: boolean;
   create: () => void;
   navigate: (id: string) => void;
@@ -1218,18 +1229,18 @@ function OverviewHeading({
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime()).length;
-  const name = (hostname ?? "这台电脑").replace(/\.local$/, "");
+  // Only what is so: the computer is named in the sidebar, an empty count says nothing.
   const facts = [
-    waiting ? `${waiting} 项在等你` : "没有等你处理的事",
+    waiting ? `${waiting} 项在等你` : undefined,
     running ? `${running} 个在跑` : undefined,
-    `今天 ${today} 个会话`,
+    today ? `今天 ${today} 个` : undefined,
   ].filter(Boolean);
   return (
     <PageHeader
       title={archived ? "已归档会话" : "会话"}
       detail={archived
         ? "不在侧栏显示，记录仍在电脑上"
-        : <><span>{name}</span>{facts.map((fact, index) => (
+        : <>{facts.map((fact, index) => (
             <span key={index} data-tone={index === 0 && waiting ? "waiting" : undefined}>{fact}</span>
           ))}</>}
       actions={<>

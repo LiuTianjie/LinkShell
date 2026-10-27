@@ -15,7 +15,7 @@ html[data-desktop] [data-slot="switch"]:hover:not(:disabled) { background: #cdcd
 html[data-desktop] [data-slot="switch"][data-state="checked"] { background: #339cff; }
 html[data-desktop][data-theme="dark"] [data-slot="switch"] { background: #8f8f8f; }
 html[data-desktop][data-theme="dark"] [data-slot="switch"][data-state="checked"] { background: #339cff; }
-html[data-desktop] [data-slot="switch-thumb"] { width: 16px; height: 16px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
+html[data-desktop] [data-slot="switch-thumb"] { translate: none; width: 16px; height: 16px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
 html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transform: translateX(2px); }
 html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: #fff; transform: translateX(14px); }
 /* Segmented controls: a grey track 2 px deep, the chosen option a white thumb that casts a little. */
@@ -149,14 +149,6 @@ html[data-desktop] .desktop-main .thought-block > summary { min-height: 28px; pa
 html[data-desktop] .desktop-main .thought-block > summary:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .thought-block .markdown { color: var(--secondaryLabel); font-size: 13.5px; }
 /* Diffs: the path on top in the code face, before and after as two wells. */
-html[data-desktop] .desktop-main .diff-block { border-radius: 10px; }
-html[data-desktop] .desktop-main .diff-block > summary { min-height: 34px; padding: 8px 12px; color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; }
-html[data-desktop] .desktop-main .diff-block[open] > summary { border-bottom-color: var(--separator); }
-html[data-desktop] .desktop-main .diff-block > pre,
-html[data-desktop] .desktop-main .before-after pre { font-family: var(--mono); font-size: 12px; line-height: 1.65; }
-html[data-desktop] .desktop-main .before-after { gap: 0; }
-html[data-desktop] .desktop-main .before-after > div + div { border-left: 1px solid var(--separator); }
-html[data-desktop] .desktop-main .before-after small { padding: 8px 12px 0; color: var(--tertiaryLabel); font-size: 11.5px; }
 /* The plan: a well with the steps as a checklist. */
 html[data-desktop] .desktop-main .plan-card { padding: 14px 16px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
 html[data-desktop] .desktop-main .plan-card > strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
@@ -293,3 +285,10 @@ html[data-desktop] [data-slot="dialog-content"] > :is([data-slot="button"], div 
 /* An empty panel says so inside a dashed well, like every other empty state. */
 html[data-desktop] .desktop-main .side-panel-content > p:only-child { padding: 32px 20px; border: 1px dashed var(--separatorStrong); border-radius: var(--radius-well); text-align: center; line-height: 1.6; }
 html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) { width: 100%; max-width: none; box-sizing: border-box; }
+
+/* Skeletons, as Codex's: a 10 % tint with a band of light crossing it every three seconds. */
+html[data-desktop] [data-slot="skeleton"] { border-radius: 6px; background: linear-gradient(90deg, color-mix(in oklab, var(--label) 8%, transparent) 0 40%, color-mix(in oklab, var(--label) 14%, transparent) 50%, color-mix(in oklab, var(--label) 8%, transparent) 60% 100%) 0 0 / 300% 100%; animation: skeleton-sweep 3s linear infinite; }
+@keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { html[data-desktop] [data-slot="skeleton"] { animation: none; } }
+html[data-desktop] .management-usage-skeleton { display: flex; flex-direction: column; gap: 16px; }
+html[data-desktop] .management-usage-skeleton .management-fact { gap: 10px; }

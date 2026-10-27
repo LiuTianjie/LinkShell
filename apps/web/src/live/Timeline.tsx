@@ -10,6 +10,7 @@ import {
 import { Download, X } from "lucide-react";
 import {
   Children,
+  Fragment,
   isValidElement,
   createContext,
   memo,
@@ -23,6 +24,7 @@ import {
 import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
+import { diffLines, diffStat, hunks, parsePatch, type DiffLine } from "./line-diff";
 import { isDesktop } from "./desktop";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
@@ -515,6 +517,35 @@ export function Blocks({
     </>
   );
 }
+/** A change's lines, whatever form the agent reported it in (before and after, or a patch). */
+export function changeLines(change: Extract<ToolCallContent, { type: "diff" | "patch" }>): DiffLine[] {
+  return change.type === "diff" ? diffLines(change.oldText ?? "", change.newText) : parsePatch(change.diff);
+}
+
+/** A file's change as a unified diff: numbered lines, what went and what came tinted, the
+    unchanged stretches between folded to a line. */
+export function DiffView({ lines }: { lines: DiffLine[] }) {
+  const parts = useMemo(() => hunks(lines), [lines]);
+  return (
+    <div className="diff-view" role="table" aria-label="差异">
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {part.skipped > 0 && <div className="diff-skip" role="row">{part.skipped} 行未改动</div>}
+          {part.lines.map((line, at) => (
+            <div key={at} className="diff-line" data-kind={line.kind} role="row">
+              <span className="diff-number" aria-hidden>{line.old ?? ""}</span>
+              <span className="diff-number" aria-hidden>{line.new ?? ""}</span>
+              <span className="diff-sign" aria-hidden>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}</span>
+              <code>{line.text || " "}</code>
+            </div>
+          ))}
+        </Fragment>
+      ))}
+      {!parts.length && <div className="diff-skip">没有内容变化</div>}
+    </div>
+  );
+}
+
 export function Diff({
   change,
 }: {
@@ -524,49 +555,21 @@ export function Diff({
   const cwd = useContext(TimelineNavigation)?.cwd;
   const shown = (path: string) =>
     cwd && path.startsWith(`${cwd.replace(/\/$/, "")}/`) ? path.slice(cwd.replace(/\/$/, "").length + 1) : path;
-  if (change.type === "diff")
-    return (
-      <details className="diff-block" open>
-        <summary title={change.path}>{shown(change.path)}</summary>
-        <div className="before-after">
-          <div>
-            <small>修改前</small>
-            <pre tabIndex={0} aria-label="修改前">
-              {change.oldText ?? "（新文件）"}
-            </pre>
-          </div>
-          <div>
-            <small>修改后</small>
-            <pre tabIndex={0} aria-label="修改后">
-              {change.newText}
-            </pre>
-          </div>
-        </div>
-      </details>
-    );
+  const lines = useMemo(() => changeLines(change), [change]);
+  const stat = diffStat(lines);
+  const title = change.type === "patch" && change.movePath ? `${change.path} → ${change.movePath}` : change.path;
   return (
     <details className="diff-block" open>
-      <summary title={change.movePath ? `${change.path} → ${change.movePath}` : change.path}>
-        {shown(change.path)}
-        {change.movePath ? ` → ${shown(change.movePath)}` : ""}
+      <summary title={title}>
+        <span className="diff-path">
+          {shown(change.path)}
+          {change.type === "patch" && change.movePath ? ` → ${shown(change.movePath)}` : ""}
+        </span>
+        <span className="diff-stat">
+          <span className="diff-add">+{stat.added}</span> <span className="diff-del">−{stat.removed}</span>
+        </span>
       </summary>
-      <pre tabIndex={0} aria-label={`${change.path} 的差异`}>
-        {change.diff.split("\n").map((line, index) => (
-          <span
-            key={index}
-            className={
-              line.startsWith("+")
-                ? "diff-add-line"
-                : line.startsWith("-")
-                  ? "diff-remove-line"
-                  : ""
-            }
-          >
-            {line}
-            {"\n"}
-          </span>
-        ))}
-      </pre>
+      <DiffView lines={lines} />
     </details>
   );
 }

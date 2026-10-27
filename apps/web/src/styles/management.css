@@ -87,7 +87,7 @@ html[data-desktop] .management-fact > strong[data-tone="warning"] { color: var(-
 html[data-desktop] .management-fact > strong[data-tone="muted"] { color: var(--secondaryLabel); }
 html[data-desktop] .management-fact > strong small { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; letter-spacing: 0; }
 html[data-desktop] .management-fact > p { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-html[data-desktop] .management-fact-action { margin-top: 4px; align-self: flex-start; }
+html[data-desktop] .management-fact-action { margin-top: auto; padding-top: 4px; align-self: flex-start; }
 @container desktop-workspace (max-width: 720px) {
   html[data-desktop] .management-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   html[data-desktop] .management-fact:nth-child(3) { box-shadow: none; }
@@ -132,13 +132,14 @@ html[data-desktop] .management-password-form { display: flex; flex-direction: co
 
 /* Log and updates. */
 html[data-desktop] .management-log-actions { justify-content: flex-start; }
-html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 220px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 220px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
 html[data-desktop] .management-update-message { font-size: 13px; font-weight: 510; }
 html[data-desktop] .management-update-actions { justify-content: flex-start; }
 
 /* Usage. */
 html[data-desktop] .management-usage { display: flex; flex-direction: column; gap: 16px; }
-html[data-desktop] .management-usage-filters { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+html[data-desktop] .management-usage-filters { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+html[data-desktop] .management-usage-filters > [data-slot="tabs"]:last-child { align-self: flex-start; }
 html[data-desktop] .management-usage-filters > [data-slot="tabs"]:first-child { min-width: 0; overflow-x: auto; }
 html[data-desktop] .management-usage-filters [data-slot="tabs-trigger"] .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
 html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }

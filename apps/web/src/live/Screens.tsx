@@ -58,49 +58,36 @@ export function Screens({
       computer.machine.id,
     ].some((value) => value.toLocaleLowerCase().includes(search));
   const found = computers.filter(matches).length;
+  const searchField = (
+    <InputGroup className="page-search">
+      <InputGroupAddon>
+        <Search />
+      </InputGroupAddon>
+      <InputGroupInput
+        aria-label="搜索电脑"
+        placeholder="搜索名称或设备编号"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {query && (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton aria-label="清除搜索" size="icon-xs" onClick={() => setQuery("")}>
+            <X />
+          </InputGroupButton>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
+  );
   return (
     <div className="screens-page">
       <PageHeader
         title="远程桌面"
-        detail={`${computers.length} 台电脑`}
-        actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />连接电脑</Button>}
+        detail={ready ? <><span>{computers.length} 台电脑</span><span>{online} 台在线</span></> : undefined}
+        actions={<>
+          {searchField}
+          <Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />连接电脑</Button>
+        </>}
       />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <h2 className="text-xs font-semibold text-muted-foreground">
-            {search ? "搜索结果" : "所有电脑"}{" "}
-            <span className="tabular-nums">
-              {search ? found : computers.length}
-            </span>
-          </h2>
-          <span className="inline-flex items-center gap-1.5">
-            <StatusDot on={!!online} />
-            {online} 台在线
-          </span>
-        </div>
-        <InputGroup className="w-full sm:w-[240px]">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="搜索电脑"
-            placeholder="搜索名称或设备编号"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {query && (
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton
-                aria-label="清除搜索"
-                size="icon-xs"
-                onClick={() => setQuery("")}
-              >
-                <X />
-              </InputGroupButton>
-            </InputGroupAddon>
-          )}
-        </InputGroup>
-      </div>
       {!ready ? (
         <div
           className="flex flex-col border-y border-border"
@@ -116,7 +103,7 @@ export function Screens({
           <span className="sr-only">正在加载电脑…</span>
         </div>
       ) : computers.length ? (
-        <div className="flex flex-col border-t border-border">
+        <div className="screen-list">
           {!found && (
             <EmptyState
               title="没有找到这台电脑"
@@ -145,13 +132,10 @@ export function Screens({
         </EmptyState>
       )}
       {!!computers.length && (
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <LockKeyhole size={13} />
-            端到端加密连接
-          </span>
-          <span>点击名称旁的铅笔，为电脑起个好认的名字</span>
-        </div>
+        <p className="screen-note">
+          <LockKeyhole size={13} aria-hidden />
+          画面与操作端到端加密，网关只转发密文
+        </p>
       )}
     </div>
   );

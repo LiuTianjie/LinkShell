@@ -570,6 +570,29 @@ export function Session({
             </div>
           </div>
           <div className="session-actions">
+            {isDesktop && agent?.tier === "handoff" && (
+              // Who holds the session, in its title row: one pill that takes it over or gives it back.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    className="session-handoff"
+                    disabled={!canInteract || job.busy}
+                    onClick={() =>
+                      void job.run(() =>
+                        session.driver === "remote" ? actions.release(session.id) : actions.takeover(session.id),
+                      )
+                    }
+                  >
+                    {session.driver === "remote" ? "交回电脑" : "接管"}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  当前由{session.driver === "desktop" ? "电脑端" : session.driver === "remote" ? "这里" : "空闲会话"}控制
+                </TooltipContent>
+              </Tooltip>
+            )}
             {isDesktop ? (
               <>
                 {/* The two tools reached for mid-task; the rest are the inspector's tabs. */}
@@ -809,7 +832,7 @@ export function Session({
             </DropdownMenu>
           </div>
         </div>
-        {agent?.tier === "handoff" && (
+        {agent?.tier === "handoff" && !isDesktop && (
           <div className="handoff-bar">
             <span>
               当前由
