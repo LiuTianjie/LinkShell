@@ -763,8 +763,9 @@
   }
   .diff-line[data-kind="add"] { background: var(--diffAdd); }
   .diff-line[data-kind="del"] { background: var(--diffDel); }
-  .diff-line[data-kind="add"] :is(.diff-sign, code) { color: var(--diffAddText); }
-  .diff-line[data-kind="del"] :is(.diff-sign, code) { color: var(--diffDelText); }
+  /* The tint says added or removed; the code itself keeps its own (syntax) colours, as Codex's. */
+  .diff-line[data-kind="add"] .diff-sign { color: var(--diffAddText); }
+  .diff-line[data-kind="del"] .diff-sign { color: var(--diffDelText); }
   .diff-number { color: var(--quaternaryLabel); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
   .diff-sign { text-align: center; user-select: none; }
   .diff-line code { padding: 0; background: none; font: inherit; white-space: pre; }

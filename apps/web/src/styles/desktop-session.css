@@ -197,7 +197,7 @@ html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 1
 html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
 html[data-desktop] .inspector-resizer:hover::after,
 html[data-desktop] .inspector-resizer:focus-visible::after,
-html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--focus, var(--link)); }
+html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--separatorStrong); }
 html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-main .side-panel-content { padding: 12px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
 /* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
@@ -272,3 +272,8 @@ html[data-desktop] .desktop-main .live-timeline > .assistant-message:last-child 
 /* The session title row: 28 px icons with 10 px corners, as the toolbars; who holds a handed-off session as a pill. */
 html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: 10px; }
 html[data-desktop] .desktop-main .session-handoff { height: 24px; margin-right: 6px; padding-inline: 10px; border-radius: 999px; font-size: 12px; }
+
+/* The inspector slides in from the right on Codex's panel spring; the conversation gives way with it. */
+html[data-desktop] .desktop-main .live-side-panel { animation: inspector-in 420ms var(--ease-spring) both; }
+@keyframes inspector-in { from { opacity: 0; transform: translateX(24px); } }
+@media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .live-side-panel { animation: none; } }

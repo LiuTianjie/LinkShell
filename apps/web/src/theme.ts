@@ -41,9 +41,28 @@ const desktopColors: Record<string, [string, string]> = {
   danger: ["#c03e48", "#f08891"],
 };
 const variables = (index: 0 | 1) =>
-  Object.entries({ ...brandColors, ...desktopColors })
+  Object.entries({ ...brandColors, ...desktopColors, ...codeColors })
     .map(([name, pair]) => `--${name}: ${pair[index]};`)
     .join("\n");
+
+// Syntax colours (Codex's codex-light / codex-dark), read by the highlighter's CSS-variable theme
+// in highlight-engine.ts; text the grammar doesn't colour keeps the block's own colour.
+const codeColors: Record<string, [string, string]> = {
+  "code-foreground": ["currentColor", "currentColor"],
+  "code-background": ["transparent", "transparent"],
+  "code-token-keyword": ["#ab4f7a", "#f8a6c8"],
+  "code-token-string": ["#3a843f", "#83d197"],
+  "code-token-string-expression": ["#3a843f", "#83d197"],
+  "code-token-function": ["#1f4e94", "#63a8f8"],
+  "code-token-constant": ["#ac4f23", "#f1a275"],
+  "code-token-parameter": ["#643cae", "#b897f4"],
+  "code-token-comment": ["#1a1c1f80", "#ffffff73"],
+  "code-token-punctuation": ["currentColor", "currentColor"],
+  "code-token-link": ["#1f4e94", "#63a8f8"],
+  "code-token-inserted": ["#3a843f", "#83d197"],
+  "code-token-deleted": ["#c0271f", "#f8a6a3"],
+  "code-token-changed": ["#ac4f23", "#f1a275"],
+};
 
 export const themeStyles = `
   :root { ${variables(0)} color-scheme: light; }
@@ -100,6 +119,8 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   "userBubble": ["#1a1c1f0d", "#ffffff0d"],
   "code": ["#f9f9f9", "#131313"],
   "codeText": ["#1a1c1f", "#dfdfdf"],
+  // The terminal is the panel itself, as Codex's: no darker block inside it.
+  "terminal": ["#ffffff", "#181818"],
   "diffAdd": ["#00a24026", "#40c9773b"],
   "diffDel": ["#e02e2a26", "#fa423e3b"],
   "diffAddText": ["#3a843f", "#83d197"],
@@ -115,7 +136,7 @@ export function applyDesktopTheme(theme: "light" | "dark"): void {
   root.dataset.theme = theme;
   // Native appearance changes must update the same resolved tokens on every
   // control and portal; a second CSS palette must not retain light values.
-  for (const [name, values] of Object.entries({ ...brandColors, ...desktopColors, ...nativeDesktopColors })) {
+  for (const [name, values] of Object.entries({ ...brandColors, ...desktopColors, ...codeColors, ...nativeDesktopColors })) {
     root.style.setProperty(`--${name}`, values[index]);
   }
   root.style.colorScheme = theme;

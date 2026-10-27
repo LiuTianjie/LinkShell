@@ -680,6 +680,22 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   useWindowSurface();
   const [palette, setPalette] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => readLocal("desktopSidebarHidden", false));
+  // With the sidebar hidden, the pointer at the window's left edge brings it out over the page
+  // (Codex's peek); leaving it puts it away again.
+  const [peek, setPeek] = useState(false);
+  useEffect(() => {
+    if (!isElectronDesktop || !sidebarHidden) { setPeek(false); return; }
+    let leave: ReturnType<typeof setTimeout> | undefined;
+    const move = (event: PointerEvent) => {
+      if (keysBelongToContent()) return;
+      const inside = (event.target as Element | null)?.closest?.(".desktop-sidebar-slot");
+      if (event.clientX <= 6 && event.clientY > 46) { clearTimeout(leave); setPeek(true); }
+      else if (inside) clearTimeout(leave);
+      else { clearTimeout(leave); leave = setTimeout(() => setPeek(false), 180); }
+    };
+    window.addEventListener("pointermove", move, { passive: true });
+    return () => { window.removeEventListener("pointermove", move); clearTimeout(leave); };
+  }, [sidebarHidden]);
   const screenKey = screenComputerKey(props.view);
   const toggleSidebar = () => setSidebarHidden((hidden) => {
     try { saveLocal("desktopSidebarHidden", !hidden); } catch { /* A preference, not state. */ }
@@ -776,7 +792,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     };
   }, []);
   return (
-    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-shell={isElectronDesktop ? "electron" : undefined}>
+    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined}>
       <a className="skip-navigation" href="#workspace-content" onClick={(event) => {
         event.preventDefault();
         document.getElementById("workspace-content")?.focus();
@@ -785,7 +801,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
       <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": "264px" } as CSSProperties}>
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.
-          <div className="desktop-sidebar-slot" inert={sidebarHidden || undefined}>
+          <div className="desktop-sidebar-slot" inert={(sidebarHidden && !peek) || undefined}>
             <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
           </div>
         ) : !sidebarHidden && (

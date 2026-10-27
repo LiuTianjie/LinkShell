@@ -258,7 +258,7 @@ export function Changes({ view }: { view?: SessionView }) {
                 </span>
                 <span className="diff-stat"><span className="diff-add">+{file.stat.added}</span> <span className="diff-del">−{file.stat.removed}</span></span>
               </button>
-              {expanded && <DiffView lines={file.lines} />}
+              {expanded && <DiffView lines={file.lines} path={file.path} />}
             </div>
           );
         })}

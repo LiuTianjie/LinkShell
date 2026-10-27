@@ -26,6 +26,7 @@ import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
 import { diffLines, diffStat, hunks, parsePatch, type DiffLine } from "./line-diff";
 import { isDesktop } from "./desktop";
+import { grammarForPath, useHighlight, type HighlightToken } from "./highlight";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
@@ -128,13 +129,33 @@ export const TimelineNavigation = createContext<{
   open: (path: string, line?: number) => void;
 } | null>(null);
 
+/** Whether code blocks below may be highlighted: off for the block of a reply still streaming. */
+const HighlightCode = createContext(true);
+
+/** The text of a node react-markdown made: strings, possibly nested in elements. */
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement(node)) return nodeText((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
+/** Highlighted lines, joined as the source was so copying and selecting give back the same text. */
+export function TokenLines({ tokens }: { tokens: HighlightToken[][] }) {
+  return tokens.map((line, index) => (
+    <Fragment key={index}>
+      {index > 0 && "\n"}
+      {line.map((token, at) => (token.color ? <span key={at} style={{ color: token.color }}>{token.content}</span> : token.content))}
+    </Fragment>
+  ));
+}
+
 function CodeBlock({ children }: { children: ReactNode }) {
   const element = Children.toArray(children).find(isValidElement);
-  const language =
-    element &&
-    (element.props as { className?: string }).className?.match(
-      /language-([\w+-]+)/,
-    )?.[1];
+  const className = element && (element.props as { className?: string }).className;
+  const language = className?.match(/language-([\w+-]+)/)?.[1];
+  const source = useMemo(() => nodeText(element).replace(/\n$/, ""), [element]);
+  const tokens = useHighlight(source, language, useContext(HighlightCode));
   const code = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
   const job = useJob();
@@ -176,7 +197,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
         tabIndex={0}
         aria-label={language ? language + " 代码" : "代码"}
       >
-        {children}
+        {tokens ? <code className={className} data-highlighted><TokenLines tokens={tokens} /></code> : children}
       </pre>
       <ErrorNotice
         error={job.error ? "无法访问剪贴板，请选中代码后复制。" : undefined}
@@ -247,7 +268,10 @@ export function StreamingText({ text, streaming }: { text: string; streaming: bo
     <div className="markdown">
       {blocks.map((block, index) => (
         <div key={index} className="markdown-block" data-enter={index > present || undefined}>
-          <MarkdownBlock text={block} />
+          {/* The last block may still be growing: its code is coloured once the reply moves past it. */}
+          <HighlightCode.Provider value={!streaming || index < blocks.length - 1}>
+            <MarkdownBlock text={block} />
+          </HighlightCode.Provider>
         </div>
       ))}
     </div>
@@ -524,8 +548,28 @@ export function changeLines(change: Extract<ToolCallContent, { type: "diff" | "p
 
 /** A file's change as a unified diff: numbered lines, what went and what came tinted, the
     unchanged stretches between folded to a line. */
-export function DiffView({ lines }: { lines: DiffLine[] }) {
+export function DiffView({ lines, path }: { lines: DiffLine[]; path?: string }) {
   const parts = useMemo(() => hunks(lines), [lines]);
+  // Each side is highlighted as one text, so a line inside a string or comment that began
+  // earlier is coloured as it is in the file; each line then takes its tokens from its side.
+  const language = path ? grammarForPath(path) : undefined;
+  const sides = useMemo(() => {
+    const before: string[] = [], after: string[] = [];
+    // Where each line sits in its side's text: removed lines in the old, the rest in the new.
+    const at = lines.map((line) => {
+      if (line.kind === "del") return before.push(line.text) - 1;
+      if (line.kind === "same") before.push(line.text);
+      return after.push(line.text) - 1;
+    });
+    return { before: before.join("\n"), after: after.join("\n"), at };
+  }, [lines]);
+  const oldTokens = useHighlight(sides.before, language);
+  const newTokens = useHighlight(sides.after, language);
+  const index = useMemo(() => new Map(lines.map((line, at) => [line, at])), [lines]);
+  const tokensOf = (line: DiffLine) => {
+    const tokens = line.kind === "del" ? oldTokens : newTokens;
+    return tokens?.[sides.at[index.get(line)!]!];
+  };
   return (
     <div className="diff-view" role="table" aria-label="差异">
       {parts.map((part, index) => (
@@ -536,7 +580,7 @@ export function DiffView({ lines }: { lines: DiffLine[] }) {
               <span className="diff-number" aria-hidden>{line.old ?? ""}</span>
               <span className="diff-number" aria-hidden>{line.new ?? ""}</span>
               <span className="diff-sign" aria-hidden>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}</span>
-              <code>{line.text || " "}</code>
+              <code>{line.text ? <DiffCode text={line.text} tokens={tokensOf(line)} /> : " "}</code>
             </div>
           ))}
         </Fragment>
@@ -544,6 +588,12 @@ export function DiffView({ lines }: { lines: DiffLine[] }) {
       {!parts.length && <div className="diff-skip">没有内容变化</div>}
     </div>
   );
+}
+
+function DiffCode({ text, tokens }: { text: string; tokens?: HighlightToken[] }) {
+  // Tokens that don't spell the line (a grammar that skipped a pattern) would show the wrong text.
+  if (!tokens || tokens.map((token) => token.content).join("") !== text) return text;
+  return tokens.map((token, at) => (token.color ? <span key={at} style={{ color: token.color }}>{token.content}</span> : token.content));
 }
 
 export function Diff({
@@ -569,7 +619,7 @@ export function Diff({
           <span className="diff-add">+{stat.added}</span> <span className="diff-del">−{stat.removed}</span>
         </span>
       </summary>
-      <DiffView lines={lines} />
+      <DiffView lines={lines} path={change.type === "patch" && change.movePath ? change.movePath : change.path} />
     </details>
   );
 }

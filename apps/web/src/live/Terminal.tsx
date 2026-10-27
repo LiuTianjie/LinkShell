@@ -245,7 +245,8 @@ export function Terminal({
     };
     const syncTheme = () => {
       const styles = getComputedStyle(document.documentElement);
-      const bg = styles.getPropertyValue("--code").trim();
+      // The desktop draws its terminal on the panel's own surface (--terminal); elsewhere on --code.
+      const bg = (styles.getPropertyValue("--terminal") || styles.getPropertyValue("--code")).trim();
       const fg = styles.getPropertyValue("--codeText").trim();
       const accent = styles.getPropertyValue("--accent").trim();
       term.options.theme = {
