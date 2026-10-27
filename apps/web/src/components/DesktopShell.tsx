@@ -8,7 +8,6 @@ import {
   ChevronRight,
   CircleUserRound,
   File,
-  Folder,
   GitBranch,
   Globe,
   Keyboard,
@@ -24,6 +23,7 @@ import {
   Sun,
   SunMoon,
   Terminal,
+  Wrench,
   type LucideIcon,
   Lock,
   Settings2,
@@ -42,7 +42,8 @@ import {
   setDesktopContentFocus,
 } from "../live/desktop";
 import { newVersion, management, startManagement } from "../live/management-store";
-import { isManageView, manageView, type ManagePage } from "../live/management-model";
+import { isManageView, managePage, manageView, type ManagePage } from "../live/management-model";
+import { ManagementNav } from "../live/Management";
 import {
   desktopModeShortcuts,
   desktopShortcuts,
@@ -80,19 +81,23 @@ import {
 } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import "../styles/desktop.css";
+import "../styles/desktop-session.css";
 import "../styles/desktop-components.css";
 import "../styles/management.css";
 
 type Appearance = "system" | "light" | "dark";
 type NavigationItem = { id: string; title: string; icon: LucideIcon };
 
-// Places first, then the tools that act on the chosen computer. "电脑" and "已归档" are a
-// click further away (the computer menu, the session list, ⌘K): they are rarely the job.
+// The sidebar is mostly the working set (what waits on you, projects and their sessions), as in
+// Codex. Above it, the three places people go to; the computer's other tools fold away under
+// 工具. Projects open from the tree's own heading; 电脑 and 已归档 from the computer menu, the
+// session list or ⌘K.
 const navigationItems: NavigationItem[] = [
   { id: "home", title: "会话", icon: MessageSquare },
-  { id: "projects", title: "项目", icon: Folder },
   { id: "screen", title: "远程桌面", icon: Monitor },
   { id: "terminals", title: "终端", icon: Terminal },
+];
+const toolItems: NavigationItem[] = [
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },
   { id: "worktrees", title: "Worktree", icon: GitBranch },
@@ -202,6 +207,13 @@ function ComputerPicker({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="desktop-computer-menu" side="bottom" align="start" sideOffset={6}>
+        {/* The Electron window has no status line: how this computer is reached lives here. */}
+        {isElectronDesktop && state.connection && (
+          <>
+            <ConnectionSummary connection={state.connection} />
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuLabel>切换电脑</DropdownMenuLabel>
         {state.computers.map((computer) => (
           <DropdownMenuItem key={computer.key} onSelect={() => selectComputer(computer)}>
@@ -224,11 +236,34 @@ function ComputerPicker({
   );
 }
 
+/** The current computer's connection: its state, the route, the Host's version and whether it is behind. */
+function ConnectionSummary({ connection }: { connection: Connection }) {
+  const status = useStore(connection.store, (state) => state.status);
+  const detail = useStore(connection.store, (state) => state.statusDetail);
+  const machine = useStore(connection.store, (state) => state.machine);
+  let route = "本机 Host";
+  if (connection.computer.key !== DESKTOP_LOCAL) {
+    try { route = `经 ${new URL(connection.computer.gateway).host}`; } catch { route = "经网关"; }
+  }
+  const behind = machine && (machine.protocol ?? 0) < HOST_PROTOCOL;
+  return (
+    <div className="desktop-connection-summary">
+      <span><span className="desktop-presence" data-online={status === "online" || undefined} />{status === "online" ? route : detail ?? connectionLabel(status)}</span>
+      {machine?.hostVersion && <span className="desktop-status-meta">Host {machine.hostVersion}</span>}
+      {behind && <span data-tone="waiting">电脑上的 LinkShell 较旧，部分功能不可用</span>}
+    </div>
+  );
+}
+
 function PickerCopy({ name, detail, online }: { name: string; detail: string; online: boolean }) {
+  // In the Electron window one line, as Codex's workspace switcher: the name, its state on hover.
   return (
     <>
       <span className="desktop-presence" data-online={online || undefined} />
-      <span className="desktop-computer-copy"><strong>{name}</strong><span>{detail}</span></span>
+      <span className="desktop-computer-copy" title={isElectronDesktop ? detail : undefined}>
+        <strong>{name}</strong>
+        {!isElectronDesktop && <span>{detail}</span>}
+      </span>
     </>
   );
 }
@@ -350,7 +385,9 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
       )}
       <section className="tree-section" aria-label="项目">
         <h2 className="tree-heading">
-          项目<span>{groups.length || ""}</span>
+          <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => navigate("projects")}>
+            项目<span>{groups.length || ""}</span>
+          </button>
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="tree-heading-action" aria-label="新建会话" onClick={() => sendDesktopCommand({ command: "new-session" })}>
@@ -434,10 +471,33 @@ function DesktopNavigation({
   const state = useStore(engine.state);
   const { setOpenMobile } = useSidebar();
   const go = (id: string) => { navigate(id); setOpenMobile(false); };
+  // Management takes the sidebar for its own pages, as Codex's settings do.
+  const managing = isElectronDesktop && isManageView(view);
   const activeView = screenComputerKey(view)
     ? "screen"
     : view === "archive" ? "home"
-    : navigationItems.some((item) => item.id === view) ? view : "";
+    : [...navigationItems, ...toolItems].some((item) => item.id === view) ? view : "";
+  // The tools stay open while one of them is showing, and otherwise as the reader left them.
+  const [toolsOpen, setToolsOpen] = useState(() => readLocal("desktopToolsOpen", false));
+  const showTools = toolsOpen || toolItems.some((item) => item.id === activeView);
+  const toggleTools = () => setToolsOpen((open) => {
+    try { saveLocal("desktopToolsOpen", !open); } catch { /* A preference, not state. */ }
+    return !open;
+  });
+  const place = (item: NavigationItem) => (
+    <button
+      type="button"
+      key={item.id}
+      className="desktop-place"
+      data-active={activeView === item.id || undefined}
+      aria-current={activeView === item.id ? "page" : undefined}
+      onClick={() => go(item.id)}
+    >
+      <item.icon size={16} strokeWidth={1.6} aria-hidden />
+      <span>{item.title}</span>
+      {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
+    </button>
+  );
   return (
     <Sidebar className="desktop-sidebar" collapsible="none">
       {isElectronDesktop && (
@@ -461,7 +521,7 @@ function DesktopNavigation({
           </Tooltip>
         </div>
       )}
-      <SidebarHeader className="desktop-sidebar-header">
+      <SidebarHeader className="desktop-sidebar-header" hidden={managing}>
         <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
         <div className="desktop-sidebar-actions">
           <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
@@ -481,26 +541,25 @@ function DesktopNavigation({
           )}
         </div>
       </SidebarHeader>
+      {managing ? (
+        <SidebarContent className="desktop-navigation">
+          <ManagementNav page={managePage(view)} navigate={(page) => go(manageView(page))} back={() => sendDesktopCommand({ command: "workspace" })} />
+        </SidebarContent>
+      ) : (<>
       <SidebarContent className="desktop-navigation">
         <nav className="desktop-places" aria-label="工作台">
-          {navigationItems.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className="desktop-place"
-              data-active={activeView === item.id || undefined}
-              aria-current={activeView === item.id ? "page" : undefined}
-              onClick={() => go(item.id)}
-            >
-              <item.icon size={16} strokeWidth={1.6} aria-hidden />
-              <span>{item.title}</span>
-              {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
-            </button>
-          ))}
+          {navigationItems.map(place)}
+          <button type="button" className="desktop-place desktop-place-group" aria-expanded={showTools} onClick={toggleTools}>
+            <Wrench size={16} strokeWidth={1.6} aria-hidden />
+            <span>工具</span>
+            <ChevronRight className="desktop-place-chevron" size={13} aria-hidden />
+          </button>
+          {showTools && <div className="desktop-places-nested">{toolItems.map(place)}</div>}
         </nav>
         {state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} />}
       </SidebarContent>
-      {isElectronDesktop && <ManageEntry active={isManageView(view)} open={() => go(manageView())} />}
+      {isElectronDesktop && <ManageEntry active={false} open={() => go(manageView())} />}
+      </>)}
       <SidebarFooter className="desktop-sidebar-footer">
         <Button variant="ghost" className="desktop-account" onClick={connect} aria-label="连接设置与账号">
           <CircleUserRound size={17} strokeWidth={1.5} /><span>{state.account ?? "登录或配对电脑"}</span>

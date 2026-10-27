@@ -215,10 +215,14 @@
     height: 24px;
     min-height: 24px;
     margin-top: 6px;
-    opacity: 0.72;
+    /* Shown on the message under the pointer (and the last reply), so reading isn't broken by
+       a row of icons after every paragraph. The slot keeps its height either way. */
+    opacity: 0;
     white-space: nowrap;
-    transition: opacity var(--transition);
+    transition: opacity 150ms cubic-bezier(.23, 1, .32, 1);
   }
+  .live-timeline > .assistant-message:last-of-type .message-actions { opacity: 1; }
+  @media (hover: none) { .message-actions { opacity: 1; } }
   .message-actions [data-slot="button"] {
     height: 22px;
     min-height: 22px;
@@ -1150,6 +1154,8 @@
     box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
     white-space: nowrap;
   }
+  .conversation-jump { transition: opacity 150ms cubic-bezier(.23, 1, .32, 1), transform 150ms cubic-bezier(.23, 1, .32, 1); }
+  .conversation-jump[data-hidden] { opacity: 0; transform: translateX(-50%) translateY(4px); pointer-events: none; }
   .message-queue {
     padding: 10px 12px;
     border-radius: 10px;

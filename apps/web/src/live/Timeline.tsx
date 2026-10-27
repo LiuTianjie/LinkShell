@@ -23,6 +23,7 @@ import {
 import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
+import { isDesktop } from "./desktop";
 import { fileTarget } from "./file-target";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
@@ -146,9 +147,11 @@ function CodeBlock({ children }: { children: ReactNode }) {
         <span>{language ?? "代码"}</span>
         <Button
           variant="ghost"
-          size="sm"
+          size={isDesktop ? "icon-sm" : "sm"}
+          className="code-copy"
           disabled={job.busy}
           aria-label={copied ? "代码已复制" : "复制代码"}
+          title={copied ? "已复制" : "复制代码"}
           onClick={() =>
             void job.run(async () => {
               await navigator.clipboard.writeText(
@@ -163,7 +166,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           ) : (
             <Copy data-icon="inline-start" />
           )}
-          {copied ? "已复制" : "复制"}
+          {!isDesktop && (copied ? "已复制" : "复制")}
         </Button>
       </div>
       <pre
@@ -910,6 +913,7 @@ export const TimelineEntry = memo(function TimelineEntry({
                           : null;
                 return meta ? <small>{meta}</small> : null;
               })()}
+              <ChevronRight className="tool-record-chevron" aria-hidden />
             </summary>
             {item.detail?.type === "subagent" &&
             item.detail.canCancel &&

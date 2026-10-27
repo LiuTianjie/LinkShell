@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -425,18 +426,15 @@ export function Ports() {
   };
   return (
     <section className="ports-page resource-ports">
-      <div className="page-heading">
-        <div>
-          <h1>端口预览</h1>
-          <p className="muted">
-            在这里打开电脑上的开发服务，实时查看项目进展。
-          </p>
-        </div>
-        <Button variant="outline" disabled={load.loading} onClick={load.reload}>
-          <RefreshCw data-icon="inline-start" />
-          刷新服务
-        </Button>
-      </div>
+      <PageHeader
+        title="端口预览"
+        actions={<>
+      <Button variant="outline" disabled={load.loading} onClick={load.reload}>
+        <RefreshCw data-icon="inline-start" />
+        刷新服务
+      </Button>
+        </>}
+      />
       <div className="resource-port-connect">
         <div className="resource-port-connect-copy">
           <ShieldCheck aria-hidden="true" />

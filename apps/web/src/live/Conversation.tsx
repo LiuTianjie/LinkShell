@@ -4,6 +4,7 @@ import { ArrowDown, LoaderCircle } from "lucide-react";
 import { foldStepRuns, type SessionView, type Step } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
 import { StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
+import { isDesktop } from "./desktop";
 
 /** A folded-steps row with a stable toggle, so it is memoizable like the message entries. */
 const StepsRow = memo(function StepsRow({
@@ -276,14 +277,20 @@ export function Conversation({
           <div className="conversation-footer">{footer}</div>
         </div>
       </div>
-      {!isAtBottom && (
-        <div className="conversation-jump">
-          <Button variant="outline" size="sm" onClick={() => void scrollToBottom("instant")}>
-            <ArrowDown data-icon="inline-start" />
-            回到最新消息
-          </Button>
-        </div>
-      )}
+      {/* Always mounted, so it fades in and out instead of popping. */}
+      <div className="conversation-jump" data-hidden={isAtBottom || undefined} aria-hidden={isAtBottom || undefined}>
+        <Button
+          variant="outline"
+          size={isDesktop ? "icon" : "sm"}
+          tabIndex={isAtBottom ? -1 : undefined}
+          aria-label="回到最新消息"
+          title="回到最新消息"
+          onClick={() => void scrollToBottom("smooth")}
+        >
+          <ArrowDown data-icon="inline-start" />
+          {!isDesktop && "回到最新消息"}
+        </Button>
+      </div>
     </div>
   );
 }

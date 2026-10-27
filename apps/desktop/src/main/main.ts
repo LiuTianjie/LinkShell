@@ -67,7 +67,8 @@ function updateWindowSurface() {
   const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true;
   window.setVibrancy(translucent ? "menu" : null);
   const dark = nativeTheme.shouldUseDarkColors;
-  window.setBackgroundColor(translucent ? "#00000000" : dark ? "#000000" : "#f9f9f9");
+  // The page's own ground where vibrancy is off (theme.ts `background`).
+  window.setBackgroundColor(translucent ? "#00000000" : dark ? "#1d1d1d" : "#f3f3f3");
   send("linkshell-desktop-surface", { translucent });
 }
 

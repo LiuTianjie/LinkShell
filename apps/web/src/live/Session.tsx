@@ -126,14 +126,15 @@ type Panel =
   | "terminal"
   | null;
 
-// The desktop inspector's own tabs; goal, MCP and apps join them only while open.
+// The desktop inspector's tools beside a conversation, as Codex keeps them: what changed, the
+// files, a terminal and the computer's preview. Tasks join while the session has some running
+// or done; settings, goal, side, MCP and apps are opened from elsewhere (the composer's chips,
+// the ••• menu) and show as a tab only while open.
 const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] = [
   { id: "changes", title: "变更" },
   { id: "files", title: "文件" },
   { id: "terminal", title: "终端" },
-  { id: "tasks", title: "任务" },
   { id: "preview", title: "预览" },
-  { id: "settings", title: "设置" },
 ];
 const panelTitles: Record<Exclude<Panel, null | "commands">, string> = {
   settings: "会话设置",
@@ -161,6 +162,7 @@ export function Session({
   const job = useJob();
   const sendJob = useJob();
   const view = useClient((state) => state.views[session.id]);
+  const hasTasks = useClient((state) => Object.keys(state.tasks[session.id] ?? {}).length > 0 || Object.keys(state.workflows[session.id] ?? {}).length > 0);
   const ready = useClient((state) => state.ready[session.id]);
   const online = useClient((state) => state.status === "online");
   const canInteract = online && !!ready;
@@ -544,7 +546,8 @@ export function Session({
             <div className={isDesktop ? "session-heading-copy" : undefined}>
               <div className="session-title">
                 <h1 title={titleOf(session)}>{titleOf(session)}</h1>
-                <Badge state={session.state} />
+                {/* On the desktop the state shows in the sidebar and the conversation's own working line. */}
+                {!isDesktop && <Badge state={session.state} />}
               </div>
               <div className="session-subtitle">
                 <AgentMark agent={session.agent} size={isDesktop ? "sm" : "md"} />
@@ -569,11 +572,10 @@ export function Session({
           <div className="session-actions">
             {isDesktop ? (
               <>
+                {/* The two tools reached for mid-task; the rest are the inspector's tabs. */}
                 {([
                   ["changes", "branch", "变更"],
-                  ["files", "folder", "文件"],
                   ["terminal", "terminal", `终端 · ${shortcutText(desktopShortcuts.terminal)}`],
-                  ["preview", "computer", "电脑操作预览"],
                 ] as const).map(([id, icon, label]) => (
                   <Tooltip key={id}>
                     <TooltipTrigger asChild>
@@ -583,7 +585,7 @@ export function Session({
                         aria-label={label}
                         aria-pressed={panel === id}
                         data-active={panel === id || undefined}
-                        onClick={() => id === "files" && panel !== "files" ? void changeFile() : toggleInspector(id)}
+                        onClick={() => toggleInspector(id)}
                       >
                         <Icon name={icon} />
                       </Button>
@@ -694,14 +696,14 @@ export function Session({
                 {isDesktop && (
                   <>
                     <DropdownMenuGroup>
-                      <DropdownMenuItem onSelect={() => void setPanel("tasks")}>
-                        <Icon name="server" />任务
+                      <DropdownMenuItem onSelect={() => void setPanel("settings")}>
+                        <Icon name="settings" />会话设置
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => void setPanel("commands")}>
                         <Icon name="terminal" />会话命令
                       </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void setPanel("settings")}>
-                        <Icon name="settings" />模型与权限
+                      <DropdownMenuItem onSelect={() => void setPanel("tasks")}>
+                        <Icon name="server" />后台任务
                       </DropdownMenuItem>
                     </DropdownMenuGroup>
                     <DropdownMenuSeparator />
@@ -1400,6 +1402,7 @@ export function Session({
               choose={(next) => void (next === "files" ? changeFile() : setPanel(next))}
               width={inspectorWidth}
               resize={setInspectorWidth}
+              hasTasks={hasTasks}
             >
               <div className="side-panel-content">
                 {panel === "settings" && (
@@ -1549,6 +1552,7 @@ function ConversationPanel({
   choose,
   width,
   resize,
+  hasTasks,
 }: {
   title: string;
   close: () => void;
@@ -1557,6 +1561,8 @@ function ConversationPanel({
   choose?: (panel: Exclude<Panel, null | "commands">) => void;
   width?: number;
   resize?: (width: number) => void;
+  /** The session has background tasks or sub-agents: their tab is shown. */
+  hasTasks?: boolean;
 }) {
   const compact = useIsMobile(991);
   const panelElement = useRef<HTMLElement>(null);
@@ -1619,18 +1625,23 @@ function ConversationPanel({
         <>
           {resize && width && <InspectorResizer width={width} resize={resize} />}
           <div className="inspector-tabs" role="tablist" aria-label="检查器">
-            {[...inspectorTabs, ...(inspectorTabs.some((tab) => tab.id === panel) ? [] : [{ id: panel, title: title }])].map((tab) => (
-              <button
-                type="button"
-                role="tab"
-                key={tab.id}
-                aria-selected={tab.id === panel}
-                data-active={tab.id === panel || undefined}
-                onClick={() => choose(tab.id)}
-              >
-                {tab.title}
-              </button>
-            ))}
+            {(() => {
+              const tabs = [...inspectorTabs, ...(hasTasks ? [{ id: "tasks" as const, title: "任务" }] : [])];
+              const open = tabs.some((tab) => tab.id === panel) ? undefined : { id: panel, title };
+              return [...tabs, ...(open ? [open] : [])].map((tab) => (
+                <button
+                  type="button"
+                  role="tab"
+                  key={tab.id}
+                  aria-selected={tab.id === panel}
+                  data-active={tab.id === panel || undefined}
+                  data-transient={tab === open || undefined}
+                  onClick={() => choose(tab.id)}
+                >
+                  {tab.title}
+                </button>
+              ));
+            })()}
             <span className="inspector-tabs-spacer" />
             {closeButton}
           </div>

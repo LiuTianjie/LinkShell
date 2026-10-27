@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useEffect, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { UsageReport } from "@linkshell/wire";
@@ -47,18 +48,16 @@ export function ManagementUsage() {
 
   return (
     <div className="management-usage">
-      <div className="desktop-page-title">
-        <div>
-          <h1>用量统计</h1>
-          <p>这台电脑的 Token 用量与模型分布</p>
-        </div>
-        <div className="desktop-page-actions">
+      <PageHeader
+        title="用量统计"
+        detail="这台电脑的 Token 与模型分布"
+        actions={<>
           {loading && <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在读取" />}
-          <Button variant="outline" disabled={loading} onClick={() => setRevision((value) => value + 1)}>
-            <RefreshCw />立即同步
+          <Button variant="ghost" size="sm" disabled={loading} onClick={() => setRevision((value) => value + 1)}>
+            <RefreshCw />同步
           </Button>
-        </div>
-      </div>
+        </>}
+      />
       <div className="management-usage-filters">
         <Tabs value={agent} onValueChange={setAgent}>
           <TabsList variant="line" aria-label="Agent">

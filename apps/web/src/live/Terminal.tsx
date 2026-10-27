@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { FilePicker } from "@/components/FilePicker";
 import { Files } from "./Files";
 import {
@@ -988,16 +989,15 @@ export function Terminals({
   }
   return (
     <section className="terminals-page">
-      <div className="page-heading">
-        <div>
-          <h1>终端</h1>
-          <p className="muted">在电脑上运行，在这里继续。</p>
-        </div>
-        <Button size="sm" disabled={!online} onClick={openCreate}>
-          <Plus data-icon="inline-start" />
-          新建终端
-        </Button>
-      </div>
+      <PageHeader
+        title="终端"
+        actions={<>
+      <Button size="sm" disabled={!online} onClick={openCreate}>
+        <Plus data-icon="inline-start" />
+        新建终端
+      </Button>
+        </>}
+      />
       {!terminals && online && <LoadState loading={load.loading} />}
       {!terminals && !online && (
         <Alert role="status">

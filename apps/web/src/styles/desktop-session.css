@@ -1,0 +1,246 @@
+/* The desktop session: its title row, the conversation, the floating composer and the
+   inspector beside it. Part of the system set out in desktop.css. */
+
+/* ── Session ─────────────────────────────────────────────────────────────── */
+html[data-desktop] .desktop-main .session-page { background: transparent; }
+html[data-desktop] .desktop-main .live-session .session-layout { display: flex; gap: var(--gutter); min-height: 0; }
+html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* The session's title row is the toolbar: 46 px, no rule under it; the conversation scrolls beneath. */
+html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; align-items: center; flex-wrap: nowrap; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); padding: 0 8px 0 max(16px, var(--titlebar-inset, 0px)); border-bottom: 0; background: transparent; backdrop-filter: none; }
+html[data-desktop] .desktop-main .session-heading-context { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
+html[data-desktop] .desktop-main .session-heading-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
+html[data-desktop] .desktop-main .session-title { gap: 8px; min-width: 0; }
+html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 13px; font-weight: 590; letter-spacing: -.005em; line-height: 18px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .session-subtitle { flex: none; gap: 6px; margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .session-subtitle .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
+html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),
+html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; padding: 0; }
+html[data-desktop] .desktop-main .session-directory { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .branch-chip { padding: 0 6px; border-radius: 6px; background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; line-height: 18px; }
+html[data-desktop] .desktop-main .session-actions { display: flex; align-items: center; gap: 0; padding: 0; }
+html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"]:hover { color: var(--label); }
+html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 6px; background: var(--separator); }
+/* Who holds the session: a quiet line under the title, not a second bar. */
+html[data-desktop] .desktop-main .handoff-bar { flex: none; margin: 0 12px 4px; padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); }
+
+/* Reading column: 48 rem centred, 32 px from the toolbar. The composer floats over the end of
+   it, so the column leaves room for it (Session measures its height). Values from Codex's
+   thread (docs/design/codex-reference.md): 14 px / 1.625 text, 16 px between turns, 4 px
+   between working rows. */
+html[data-desktop] .desktop-main .conversation { scrollbar-gutter: stable both-edges; scroll-padding-bottom: calc(var(--composer-height, 120px) + 16px); }
+html[data-desktop] .desktop-main .conversation-content { padding: 32px max(24px, calc((100% - 768px) / 2)) calc(var(--composer-height, 120px) + 24px); }
+html[data-desktop] .desktop-main .live-timeline > :is(article, section, .notice-card, [data-slot="alert"]) { margin-bottom: 16px; }
+html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) { margin-bottom: 4px; }
+html[data-desktop] .desktop-main .live-timeline > :is(.assistant-message, .user-message) + :is(.tool-record, .steps-summary, .thought-block),
+html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) + :is(.assistant-message, .user-message) { margin-top: 16px; }
+
+/* Markdown: headings 1.5 / 1.25 / 1.125 of the text, four steps of a quarter-size above. */
+html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14px; line-height: 1.625; letter-spacing: 0; }
+html[data-desktop] .desktop-main .markdown p { margin: 0 0 14px; }
+html[data-desktop] .desktop-main .markdown :is(h1, h2, h3, h4) { margin: 14px 0 8px; font-weight: 590; letter-spacing: -.01em; line-height: 1.35; }
+html[data-desktop] .desktop-main .markdown h1 { font-size: 21px; }
+html[data-desktop] .desktop-main .markdown h2 { font-size: 17.5px; }
+html[data-desktop] .desktop-main .markdown h3 { font-size: 15.75px; }
+html[data-desktop] .desktop-main .markdown h4 { font-size: 14px; }
+html[data-desktop] .desktop-main .markdown :is(ul, ol) { margin: 0 0 14px; padding-left: 22px; }
+html[data-desktop] .desktop-main .markdown li + li { margin-top: 4px; }
+html[data-desktop] .desktop-main .markdown li::marker { color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .markdown blockquote { margin: 0 0 14px; padding: 0 0 0 14px; border-left: 3.5px solid var(--separatorStrong); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .markdown hr { margin: 20px 0; border: 0; border-top: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .markdown table { width: 100%; margin: 0 0 14px; border-collapse: collapse; font-size: 13px; }
+html[data-desktop] .desktop-main .markdown th { padding: 6px 10px; border-bottom: 1px solid var(--separatorStrong); font-weight: 590; text-align: left; }
+html[data-desktop] .desktop-main .markdown td { padding: 6px 10px; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .markdown a { color: var(--link); text-decoration: none; }
+html[data-desktop] .desktop-main .markdown a:hover { text-decoration: underline; text-underline-offset: 2px; }
+html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 6px; border-radius: 6px; background: color-mix(in oklab, var(--label) 6%, transparent); font-family: var(--mono); font-size: .92em; box-shadow: none; }
+/* Code blocks: a soft tile, the language and a round copy button in a 40 px header. */
+html[data-desktop] .desktop-main .markdown .code-surface { margin: 0 0 16px; overflow: hidden; border-radius: 16px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); contain: content; }
+html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 6px 0 16px; border: 0; background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .markdown .code-copy { width: 24px; height: 24px; border-radius: 50%; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .markdown .code-copy:hover { color: var(--label); }
+html[data-desktop] .desktop-main .markdown .code-copy svg { width: 14px; height: 14px; }
+html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; padding: 0 16px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; }
+html[data-desktop] .desktop-main .markdown pre { border: 0; border-radius: 16px; background: var(--fill); box-shadow: none; font-size: 12px; line-height: 20px; contain: content; }
+
+/* The reader's own messages: a quiet bubble at the right, at most 70 % of the column. */
+html[data-desktop] .desktop-main .user-message { max-width: 70%; margin-left: auto; padding: 10px 16px; border-radius: 22px; background: var(--userBubble); box-shadow: none; }
+html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.625; }
+html[data-desktop] .desktop-main .user-message .markdown p:last-child { margin-bottom: 0; }
+html[data-desktop] .desktop-main .message-actions { gap: 2px; margin-top: 6px; }
+html[data-desktop] .desktop-main .message-actions [data-slot="button"][data-size="icon-sm"] { width: 26px; height: 26px; border-radius: 8px; }
+html[data-desktop] .desktop-main .message-actions [data-slot="button"][data-size="icon-sm"] svg { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main .message-author { gap: 8px; margin-bottom: 6px; color: var(--tertiaryLabel); font-size: 13px; }
+
+/* Working rows: no box, one line of text. The summary at 60 % of the ink (all of it on hover),
+   the command or file at 40 %; the chevron only shows on hover and turns as it opens. */
+html[data-desktop] .desktop-main .tool-record { border: 0; border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .tool-record[open] { border: 0; background: transparent; }
+html[data-desktop] .desktop-main .tool-record > summary { display: flex; align-items: center; gap: 6px; min-height: 26px; margin: 0; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .tool-record > summary:hover { background: transparent; color: var(--label); }
+html[data-desktop] .desktop-main .tool-record[open] > summary { margin: 0; border: 0; border-radius: 0; }
+html[data-desktop] .desktop-main .tool-record > summary > strong { flex: 0 1 auto; color: inherit; font-family: inherit; font-size: 14px; font-weight: 400; }
+html[data-desktop] .desktop-main .tool-record > summary > small { color: color-mix(in oklab, var(--label) 40%, transparent); font-size: 13px; }
+html[data-desktop] .desktop-main .tool-state { width: 16px; height: 16px; color: inherit; opacity: .6; }
+html[data-desktop] .desktop-main .tool-state svg { width: 16px; height: 16px; stroke-width: 1.8; }
+html[data-desktop] .desktop-main .tool-record.completed > summary > .tool-state { color: inherit; }
+html[data-desktop] .desktop-main .tool-record.failed > summary > .tool-state { color: var(--danger); opacity: 1; }
+html[data-desktop] .desktop-main .tool-record.in_progress .tool-state { color: var(--running); opacity: 1; }
+html[data-desktop] .desktop-main .tool-state-spinner { animation: spin 2s steps(60) infinite; }
+html[data-desktop] .desktop-main .tool-record-chevron { flex: none; width: 14px; height: 14px; margin-left: -2px; opacity: 0; transition: opacity 150ms var(--ease-out), transform 300ms cubic-bezier(.19, 1, .22, 1); }
+html[data-desktop] .desktop-main .tool-record > summary:hover .tool-record-chevron,
+html[data-desktop] .desktop-main .tool-record > summary:focus-visible .tool-record-chevron { opacity: 1; }
+html[data-desktop] .desktop-main .tool-record[open] .tool-record-chevron { opacity: 1; transform: rotate(90deg); }
+/* Opened: the body in a soft tile under the row; output shows its end, fading at the edges. */
+html[data-desktop] .desktop-main .tool-record[open] > :not(summary) { margin: 6px 0 10px 22px; }
+html[data-desktop] .desktop-main .tool-record pre { max-height: 144px; margin: 0; padding: 8px 12px; border: 0; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); color: var(--secondaryLabel); font-size: 12px; line-height: 1.6; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
+html[data-desktop] .desktop-main .tool-record:not([open]) > :not(summary) { display: none; }
+@supports (interpolate-size: allow-keywords) {
+  html[data-desktop] .desktop-main .tool-record { interpolate-size: allow-keywords; }
+  html[data-desktop] .desktop-main .tool-record::details-content { height: 0; opacity: 0; overflow: clip; transition: height 300ms cubic-bezier(.19, 1, .22, 1), opacity 300ms cubic-bezier(.19, 1, .22, 1), content-visibility 300ms allow-discrete; }
+  html[data-desktop] .desktop-main .tool-record[open]::details-content { height: auto; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .tool-record::details-content { transition: none; } }
+
+/* A folded run of steps: the same quiet line. */
+html[data-desktop] .desktop-main .steps-summary { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font: inherit; font-size: 14px; cursor: pointer; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .steps-summary:hover { background: transparent; color: var(--label); }
+html[data-desktop] .desktop-main .steps-summary-icon { width: 16px; height: 16px; opacity: .6; }
+html[data-desktop] .desktop-main .steps-summary-chevron { width: 14px; height: 14px; opacity: 0; transition: opacity 150ms var(--ease-out), transform 300ms cubic-bezier(.19, 1, .22, 1); }
+html[data-desktop] .desktop-main .steps-summary:hover .steps-summary-chevron,
+html[data-desktop] .desktop-main .steps-summary[aria-expanded="true"] .steps-summary-chevron { opacity: 1; }
+html[data-desktop] .desktop-main .steps-summary-diff { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .steps-summary-diff .diff-add { color: var(--diffAddText); }
+html[data-desktop] .desktop-main .steps-summary-diff .diff-del { color: var(--diffDelText); }
+
+/* Thinking: the same row; the thought itself at 60 %, at most 140 px. */
+html[data-desktop] .desktop-main .thought-block { border: 0; background: transparent; }
+html[data-desktop] .desktop-main .thought-block > summary { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; cursor: pointer; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .thought-block > summary:hover { color: var(--label); }
+html[data-desktop] .desktop-main .thought-block[open] > .markdown { max-height: 140px; margin: 4px 0 8px; padding: 0 0 0 14px; overflow-y: auto; border-left: 1px solid var(--separator); color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 13px; }
+/* "Working…": the text shimmers, a band of light crossing it every two seconds. */
+html[data-desktop] .desktop-main :is(.conversation-activity span, .thought-block:not([open]) > summary[data-streaming], .message-author[role="status"] span) { background: linear-gradient(90deg, color-mix(in oklab, var(--label) 45%, transparent) 0 40%, var(--label) 50%, color-mix(in oklab, var(--label) 45%, transparent) 60% 100%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: text-shimmer 2s steps(48) infinite; }
+@keyframes text-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  html[data-desktop] .desktop-main :is(.conversation-activity span, .message-author[role="status"] span) { animation: none; background: none; color: var(--secondaryLabel); }
+}
+html[data-desktop] .desktop-main .conversation-activity { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--secondaryLabel); font-size: 14px; }
+html[data-desktop] .desktop-main .conversation-activity > svg { width: 16px; height: 16px; opacity: .6; animation: spin 2s steps(60) infinite; }
+
+/* Diffs: 12 px mono at 1.8, rows tinted by what changed. */
+html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; border-radius: 16px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .diff-block { overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
+html[data-desktop] .desktop-main .diff-block > summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--label); font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .diff-block pre,
+html[data-desktop] .desktop-main .diff-block code { font-size: 12px; line-height: 1.8; }
+
+/* Approval: a raised card, 24 px corners, pill buttons in a row along its foot. */
+html[data-desktop] .desktop-main .approval-card { padding: 16px 16px 12px; border: 0; border-radius: 24px; background: var(--cardRaised); box-shadow: var(--composer-shadow), inset 0 0 0 1px var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .approval-card { background: #212121; }
+html[data-desktop] .desktop-main .approval-heading strong { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main .approval-heading span { color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .approval-icon { width: 28px; height: 28px; border-radius: 50%; background: var(--waitingSoft); color: var(--warning); }
+html[data-desktop] .desktop-main .approval-card pre { border-radius: 12px; background: var(--fill); font-size: 12px; }
+html[data-desktop] .desktop-main .permission-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 8px; }
+html[data-desktop] .desktop-main .permission-buttons [data-slot="button"] { min-height: 28px !important; height: auto; padding: 4px 14px; border-radius: 999px; font-size: 13px; }
+
+/* Back to the newest message: a 32 px round button just above the composer, faded in and out. */
+html[data-desktop] .desktop-main .conversation-jump { bottom: calc(var(--composer-height, 120px) + 8px); }
+html[data-desktop] .desktop-main .conversation-jump [data-slot="button"] { width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .conversation-jump [data-slot="button"]:hover { background: var(--plain); color: var(--label); }
+
+/* The composer floats at the foot of the conversation, 16 px from the edge, over a fade. */
+/* As wide as the reading column above it, so the two edges line up. */
+html[data-desktop] .desktop-main .composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; padding: 24px max(24px, calc((100% - 768px) / 2)) 16px; border: 0; background: linear-gradient(to bottom, transparent, var(--plain) 24px); pointer-events: none; }
+html[data-desktop] .desktop-main .composer-wrap > * { pointer-events: auto; }
+html[data-desktop] .desktop-main .composer { height: auto; min-height: 44px; border: 0; border-radius: 22px; background: var(--plain); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
+/* Dark: a step lighter than the panel it floats on, as Codex's (#363636 measured on #181818). */
+html[data-desktop][data-theme="dark"] .desktop-main .composer { background: #303030; }
+html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
+html[data-desktop] .desktop-main .composer textarea { min-height: 44px; padding: 12px 14px 4px; font-size: 14px; line-height: 20px; }
+html[data-desktop] .desktop-main .composer textarea::placeholder { color: color-mix(in oklab, var(--tertiaryLabel) 50%, transparent); }
+html[data-desktop][data-theme="dark"] .desktop-main .composer textarea::placeholder { color: rgb(255 255 255 / .32); }
+html[data-desktop] .desktop-main .composer-toolbar { gap: 5px; padding: 0 8px 8px; }
+html[data-desktop] .desktop-main .composer-toolbar > div { gap: 2px; }
+/* Its controls are pills: quiet text until hovered, the send button an ink circle. */
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"] { height: 28px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 28px; }
+html[data-desktop] .desktop-main .composer-chip { max-width: 220px; padding-inline: 8px; gap: 4px; }
+html[data-desktop] .desktop-main .composer-chip svg { width: 14px; height: 14px; }
+html[data-desktop] .desktop-main .composer-chip-caret { opacity: .6; }
+html[data-desktop] .desktop-main .composer-chip[data-risky] { color: var(--warning); }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); color: var(--plain); }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button:disabled { background: var(--accent); color: var(--plain); opacity: .5; }
+html[data-desktop] .desktop-main .composer [data-slot="button"].send-button svg { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main .context-ring { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 6px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .composer-place { display: none; }
+html[data-desktop] .composer-chip-menu { min-width: 280px; }
+html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+html[data-desktop] .command-option-name strong { font-weight: 590; }
+html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .message-queue { border: var(--hairline) solid var(--separator); border-radius: 14px; background: var(--plain); box-shadow: var(--composer-shadow); }
+
+/* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
+html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
+html[data-desktop] .inspector-tabs { display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; border-bottom: var(--hairline) solid var(--separator); overflow-x: auto; }
+html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: pointer; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fill); color: var(--label); }
+/* Opened from elsewhere (settings, goal, side, MCP): set apart from the standing tools. */
+html[data-desktop] .inspector-tabs > button[data-transient] { margin-left: 6px; }
+html[data-desktop] .inspector-tabs > button[data-transient]::before { content: ""; display: inline-block; width: var(--hairline); height: 14px; margin: 0 10px 0 -10px; vertical-align: -2px; background: var(--separator); }
+html[data-desktop] .inspector-tabs-spacer { flex: 1; }
+html[data-desktop] .inspector-tabs [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
+html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
+html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .inspector-resizer:hover::after,
+html[data-desktop] .inspector-resizer:focus-visible::after,
+html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--focus, var(--link)); }
+html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
+html[data-desktop] .desktop-main .side-panel-content { padding: 12px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
+/* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
+html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"] { background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
+html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-family: var(--mono); }
+@media (max-width: 1100px) {
+  /* A narrow window keeps the conversation readable: the inspector floats over it. */
+  html[data-desktop] .desktop-main .live-side-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; max-width: calc(100% - 40px); box-shadow: var(--float-shadow); }
+  html[data-desktop] .inspector-resizer { left: -4px; }
+}
+
+/* A new session: an empty conversation with the composer in its middle, as Codex starts a thread. */
+html[data-desktop] .desktop-main > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
+html[data-desktop] .new-session-stage { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(680px, calc(100% - 48px)); margin: auto; padding: 48px 0 18vh; }
+html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label); font-size: 24px; font-weight: 590; letter-spacing: -.02em; line-height: 30px; text-align: center; }
+html[data-desktop] .new-session-composer { display: flex; flex-direction: column; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow), 0 0 0 1px var(--separator); transition: box-shadow 200ms var(--ease-out); }
+html[data-desktop][data-theme="dark"] .new-session-composer { background: #303030; }
+html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
+html[data-desktop] .new-session-composer textarea { min-height: 76px; max-height: 40vh; padding: 14px 16px 6px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 20px; resize: none; outline: none; field-sizing: content; }
+html[data-desktop] .new-session-composer textarea::placeholder { color: color-mix(in oklab, var(--tertiaryLabel) 50%, transparent); }
+html[data-desktop] .new-session-bar { display: flex; align-items: center; gap: 2px; padding: 0 8px 8px; }
+html[data-desktop] .new-session-spacer { flex: 1; }
+html[data-desktop] .new-session-pill { max-width: 220px; height: 28px; padding-inline: 8px; gap: 5px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .new-session-pill:hover:not(:disabled),
+html[data-desktop] .new-session-pill[data-state="open"] { background: var(--fill); color: var(--label); }
+html[data-desktop] .new-session-pill[data-active] { color: var(--running); }
+html[data-desktop] .new-session-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .new-session-pill svg { flex: none; width: 14px; height: 14px; }
+html[data-desktop] .new-session-pill .agent-mark { width: 16px; height: 16px; border-radius: 4px; }
+html[data-desktop] .new-session-caret { opacity: .6; }
+html[data-desktop] .new-session-composer [data-slot="button"].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
+html[data-desktop] .new-session-composer [data-slot="button"].send-button:disabled { opacity: .5; }
+html[data-desktop] .new-session-composer [data-slot="button"].send-button svg { width: 16px; height: 16px; }
+html[data-desktop] .new-session-menu { min-width: 240px; max-width: 360px; }
+html[data-desktop] .new-session-option { display: grid; min-width: 0; }
+html[data-desktop] .new-session-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .new-session-option small { overflow: hidden; color: var(--tertiaryLabel); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .new-session-menu-empty { padding: 6px 8px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .new-session-note { color: var(--warning); font-size: 12px; text-align: center; }
+html[data-desktop] .new-session-hint { color: var(--tertiaryLabel); font-size: 12px; text-align: center; }
+html[data-desktop] .new-session-hint code { padding: 0 4px; border-radius: 4px; background: var(--fill); font-family: var(--mono); font-size: 11px; }
+/* The sidebar's 新建会话 shows where you are. */
+html[data-desktop] .desktop-root:has(.new-session-page) .desktop-new-session { background: var(--sidebarAccent); }

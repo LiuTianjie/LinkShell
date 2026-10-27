@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -786,23 +787,20 @@ export function Worktrees() {
   const loaded = useLoad(() => actions.listWorktrees(), [store]);
   return (
     <section className="worktrees-page">
-      <div className="page-heading">
-        <div>
-          <h1>工作目录与分支</h1>
-          <p className="muted">
-            查看会话的独立工作目录，管理分支与未提交改动。
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!online || loaded.loading || job.busy}
-          onClick={loaded.reload}
-        >
-          <RefreshCw data-icon="inline-start" />
-          刷新
-        </Button>
-      </div>
+      <PageHeader
+        title="工作目录与分支"
+        actions={<>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!online || loaded.loading || job.busy}
+        onClick={loaded.reload}
+      >
+        <RefreshCw data-icon="inline-start" />
+        刷新
+      </Button>
+        </>}
+      />
       <LoadState {...loaded} />
       <ErrorNotice error={job.error} />
       {!online && (

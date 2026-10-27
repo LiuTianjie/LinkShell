@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,18 +60,11 @@ export function Screens({
   const found = computers.filter(matches).length;
   return (
     <div className="screens-page">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold">远程桌面</h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            连接你的电脑，继续手边的工作。
-          </p>
-        </div>
-        <Button onClick={connect}>
-          <Icon name="plus" data-icon="inline-start" />
-          连接电脑
-        </Button>
-      </div>
+      <PageHeader
+        title="远程桌面"
+        detail={`${computers.length} 台电脑`}
+        actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />连接电脑</Button>}
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <h2 className="text-xs font-semibold text-muted-foreground">

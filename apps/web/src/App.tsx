@@ -35,8 +35,10 @@ import { Button } from "@/components/ui/button";
 import { deployment } from "./config";
 import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "./components/Choice";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
+import { PageHeader } from "./components/PageHeader";
+import { NewSessionPage } from "./live/NewSessionPage";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
@@ -286,8 +288,15 @@ function Workspace({
   const engineState = useStore(engine.state);
   const names = useStore(computerNames.store);
   useDesktopCommand((command) => {
-    if (command.command === "new-session" && state.status === "online") setCreate(command.cwd ?? null);
+    // The desktop's new-session page also opens while offline: the draft waits for the computer.
+    if (command.command === "new-session" && (isDesktop || state.status === "online")) setCreate(command.cwd ?? null);
   });
+  // Going anywhere else leaves the new-session page.
+  const [shownView, setShownView] = useState(view);
+  if (shownView !== view) {
+    setShownView(view);
+    if (isDesktop) setCreate(undefined);
+  }
   if (state.status === "locked") {
     const computer = engineState.connection?.computer;
     return <AccessUnlock name={computer ? computerName(computer, names) : "这台电脑"} />;
@@ -306,7 +315,17 @@ function Workspace({
           </Button>
         </div>
       )}
-      {session ? (
+      {isDesktop && create !== undefined ? (
+        <NewSessionPage
+          key={create ?? ""}
+          initialDirectory={create ?? undefined}
+          cancel={() => setCreate(undefined)}
+          created={(session) => {
+            setCreate(undefined);
+            navigate(session.id);
+          }}
+        />
+      ) : session ? (
         <Session key={session.id} session={session} navigate={navigate} />
       ) : (
         <div className="overview live-overview">
@@ -329,14 +348,7 @@ function Workspace({
           )}
           {view === "files" && (
             <>
-              <div className="page-heading">
-                <div>
-                  <h1>文件</h1>
-                  <p className="muted">
-                    浏览电脑上的文件，查看内容或继续编辑。
-                  </p>
-                </div>
-              </div>
+              <PageHeader title="文件" />
               <Files />
             </>
           )}
@@ -360,7 +372,7 @@ function Workspace({
           )}
         </div>
       )}
-      {create !== undefined && (
+      {!isDesktop && create !== undefined && (
         <NewSession
           initialDirectory={create ?? undefined}
           close={() => setCreate(undefined)}
@@ -571,6 +583,7 @@ function Home({
           online={state.status === "online"}
           create={create}
           navigate={navigate}
+          search={searchField}
         />
       )}
       {!isDesktop && <div className="session-overview-heading flex items-center justify-between gap-4">
@@ -618,7 +631,7 @@ function Home({
           </TabsList>
         </Tabs>
         <div className="session-overview-tools flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
-          {searchField}
+          {!isDesktop && searchField}
           <Choice
             className="w-[130px]"
             label="会话排序"
@@ -1012,19 +1025,27 @@ function Computers({
     </div>
   );
   return (
-    <section className="flex min-w-0 flex-col gap-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">电脑</h1>
-          <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
-            管理已连接的电脑、Agent 和配对设备。
-          </p>
+    <section className="computers-page flex min-w-0 flex-col gap-6">
+      {isDesktop ? (
+        <PageHeader
+          title="电脑与 Agent"
+          detail={`${state.computers.length} 台电脑`}
+          actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />添加电脑</Button>}
+        />
+      ) : (
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold">电脑</h1>
+            <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
+              管理已连接的电脑、Agent 和配对设备。
+            </p>
+          </div>
+          <Button onClick={connect}>
+            <Icon name="plus" data-icon="inline-start" />
+            添加电脑
+          </Button>
         </div>
-        <Button onClick={connect}>
-          <Icon name="plus" data-icon="inline-start" />
-          添加电脑
-        </Button>
-      </div>
+      )}
       <ErrorNotice error={job.error} />
       <div className="computers-section">
         {heading("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。")}
@@ -1182,6 +1203,7 @@ function OverviewHeading({
   online,
   create,
   navigate,
+  search,
 }: {
   archived: boolean;
   sessions: SessionSummary[];
@@ -1189,6 +1211,7 @@ function OverviewHeading({
   online: boolean;
   create: () => void;
   navigate: (id: string) => void;
+  search: ReactNode;
 }) {
   const running = sessions.filter((session) => sessionGroup(session) === "running").length;
   const waiting = sessions.filter(sessionNeedsAttention).length;
@@ -1202,29 +1225,26 @@ function OverviewHeading({
     `今天 ${today} 个会话`,
   ].filter(Boolean);
   return (
-    <header className="desktop-page-title">
-      <div>
-        <h1>{archived ? "已归档会话" : "会话"}</h1>
-        <p>
-          {archived
-            ? "归档的会话不再出现在列表和侧栏里，记录仍保存在电脑上。"
-            : <><span>{name}</span>{facts.map((fact, index) => (
-                <span key={index} data-tone={index === 0 && waiting ? "waiting" : undefined}>{fact}</span>
-              ))}</>}
-        </p>
-      </div>
-      <div className="desktop-page-actions">
+    <PageHeader
+      title={archived ? "已归档会话" : "会话"}
+      detail={archived
+        ? "不在侧栏显示，记录仍在电脑上"
+        : <><span>{name}</span>{facts.map((fact, index) => (
+            <span key={index} data-tone={index === 0 && waiting ? "waiting" : undefined}>{fact}</span>
+          ))}</>}
+      actions={<>
+        {search}
         <Button variant="ghost" size="sm" onClick={() => navigate(archived ? "home" : "archive")}>
           {archived ? <ArrowLeft data-icon="inline-start" /> : <Archive data-icon="inline-start" />}
           {archived ? "返回会话" : "已归档"}
         </Button>
         {!archived && (
-          <Button variant="default" disabled={!online} onClick={create}>
+          <Button variant="default" size="sm" disabled={!online} onClick={create}>
             <Icon name="plus" />
             新建会话
           </Button>
         )}
-      </div>
-    </header>
+      </>}
+    />
   );
 }

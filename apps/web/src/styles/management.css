@@ -1,35 +1,43 @@
-/* 本机管理: this Mac's service, inside the Electron window's main panel.
-   A sub-navigation column on the left, the page on the right. Groups are a small title and
-   rows on a well; nothing nests a well inside a well. Desktop shell only. */
+/* 本机管理: this Mac's service, in the Electron window. Like Codex's settings, its pages take
+   the sidebar and the main panel shows one page: a toolbar, then groups. A group is a small
+   title and its rows in one rounded box with hairlines between them; nothing nests a box in a
+   box. Desktop shell only. */
 
 /* The sidebar's way in, just above its footer. */
-html[data-desktop] .desktop-manage-entry { flex: none; padding: 6px 10px; }
-html[data-desktop] .desktop-manage-entry kbd { flex: none; }
+html[data-desktop] .desktop-manage-entry { flex: none; padding: 4px 8px; }
+html[data-desktop] .desktop-manage-entry kbd { flex: none; opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-manage-entry .desktop-place:hover kbd { opacity: 1; }
 html[data-desktop] .desktop-manage-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--running); }
 html[data-desktop] .desktop-manage-dot[data-tone="warning"] { background: var(--warning); }
 
-html[data-desktop] .desktop-main > .management { display: flex; flex: 1; min-height: 0; }
-html[data-desktop] .management-nav { display: flex; flex: none; flex-direction: column; gap: 2px; width: 200px; padding: 12px 10px; border-right: 1px solid var(--separator); overflow-y: auto; }
-html[data-desktop] .management-machine { display: flex; align-items: center; gap: 10px; height: 46px; margin-bottom: 6px; padding: 0 10px; }
+/* The pages, in the sidebar. */
+html[data-desktop] .management-nav { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 8px; }
+html[data-desktop] .management-back { margin-bottom: 10px; color: var(--secondaryLabel); }
+html[data-desktop] .management-back kbd { margin-left: auto; opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .management-back:hover kbd { opacity: 1; }
+html[data-desktop] .management-machine { display: flex; align-items: center; gap: 10px; height: 40px; margin-bottom: 4px; padding: 0 10px; }
 html[data-desktop] .management-machine > .desktop-presence { margin-inline: 4.5px; }
 html[data-desktop] .management-machine > div { display: grid; min-width: 0; }
 html[data-desktop] .management-machine strong,
 html[data-desktop] .management-machine span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-machine strong { font-size: 13px; font-weight: 600; line-height: 19px; }
-html[data-desktop] .management-machine span { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-html[data-desktop] .management-nav-item { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background var(--transition), color var(--transition); }
-html[data-desktop] .management-nav-item > svg { flex: none; color: var(--tertiaryLabel); }
+html[data-desktop] .management-machine strong { font-size: 13px; font-weight: 590; line-height: 18px; }
+html[data-desktop] .management-machine span { color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
+html[data-desktop] .management-nav-item { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background var(--transition); }
+html[data-desktop] .management-nav-item > svg { flex: none; color: var(--secondaryLabel); }
 html[data-desktop] .management-nav-item > span:first-of-type { flex: 1; }
-html[data-desktop] .management-nav-item:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .management-nav-item[data-active] { background: var(--sidebarAccent); color: var(--label); font-weight: 500; }
+html[data-desktop] .management-nav-item:hover { background: var(--fill); }
+html[data-desktop] .management-nav-item:active { background: var(--fillStrong); }
+html[data-desktop] .management-nav-item[data-active] { background: var(--sidebarAccent); font-weight: 510; }
 html[data-desktop] .management-nav-item[data-active] > svg { color: var(--label); }
-html[data-desktop] .management-nav-item[data-gap] { margin-top: auto; }
+html[data-desktop] .management-nav-item[data-gap] { margin-top: 12px; }
 html[data-desktop] .management-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--running); }
-html[data-desktop] .management-nav-foot { display: grid; gap: 2px; margin-top: 10px; padding: 8px 10px 0; border-top: 1px solid var(--separator); color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-nav-foot { display: grid; gap: 2px; margin-top: 16px; padding: 0 10px; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
 
-html[data-desktop] .management-content { flex: 1; min-width: 0; overflow-y: auto; }
-html[data-desktop] .management-page { display: flex; flex-direction: column; gap: 18px; max-width: 880px; margin: 0 auto; padding: 22px 28px 32px; }
-html[data-desktop] .management-page > .desktop-page-title { margin: 0; }
+/* The page. */
+html[data-desktop] .desktop-main > .management { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+html[data-desktop] .management-content { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; }
+html[data-desktop] .management-page { display: flex; flex-direction: column; gap: 24px; }
+html[data-desktop] .management-page > .page-header { margin-bottom: -8px; }
 html[data-desktop] .management-problem [data-slot="alert-description"] { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 html[data-desktop] .management-problem [data-slot="alert-description"] [data-slot="button"] { margin-top: 0; }
 
@@ -37,57 +45,60 @@ html[data-desktop] .management-problem [data-slot="alert-description"] [data-slo
 html[data-desktop] .management-selectable { user-select: text; overflow-wrap: anywhere; }
 html[data-desktop] .management-mono { font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .management-muted { color: var(--secondaryLabel); }
-html[data-desktop] .management-hint { color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .management-hint { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .management-note { display: flex; align-items: center; gap: 6px; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .management-note[data-tone="warning"] { color: var(--warning); }
-html[data-desktop] .management-note[data-tone="success"] { color: var(--running); }
+html[data-desktop] .management-note[data-tone="success"] { color: var(--success); }
 
-/* Groups: a label, then rows on one well. */
+/* Groups: a title, then rows in one box. */
 html[data-desktop] .management-group { display: flex; flex-direction: column; gap: 8px; }
-html[data-desktop] .management-group-title { display: flex; align-items: center; justify-content: space-between; margin: 0; padding: 0 2px; color: var(--secondaryLabel); font-size: 12px; font-weight: 600; }
-html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-weight: 400; }
-html[data-desktop] :is(.management-rows, .management-panel, .management-account, .management-pairing) { border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
+html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; padding: 0 2px; color: var(--label); font-size: 13px; font-weight: 590; }
+html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
+html[data-desktop] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { border: 0; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { background: rgb(255 255 255 / .03); }
 html[data-desktop] .management-rows { padding: 0 14px; }
-html[data-desktop] .management-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 13px; }
-html[data-desktop] .management-row + .management-row { border-top: 1px solid var(--separator); }
-html[data-desktop] .management-row > span { flex: none; max-width: 50%; }
-html[data-desktop] .management-row > div { display: flex; justify-content: flex-end; min-width: 0; overflow: hidden; text-align: right; }
+html[data-desktop] .management-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 8px 0; font-size: 13px; }
+html[data-desktop] .management-row + .management-row { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
+html[data-desktop] .management-row > span { flex: none; max-width: 50%; color: var(--label); }
+html[data-desktop] .management-row > div { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; overflow: hidden; text-align: right; }
 html[data-desktop] .management-row > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .management-status { display: inline-flex; align-items: center; gap: 7px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .management-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--quaternaryLabel); }
-html[data-desktop] .management-status[data-tone="success"] > span { background: var(--running); }
+html[data-desktop] .management-status[data-tone="success"] > span { background: var(--success); }
 html[data-desktop] .management-status[data-tone="warning"] > span { background: var(--warning); }
 html[data-desktop] .management-empty { display: grid; gap: 4px; padding: 16px 0; font-size: 12px; color: var(--tertiaryLabel); }
-html[data-desktop] .management-empty strong { color: var(--label); font-size: 13px; font-weight: 500; }
-html[data-desktop] .management-activity { display: flex; align-items: center; gap: 16px; min-height: 38px; font-size: 13px; }
-html[data-desktop] .management-activity + .management-activity { border-top: 1px solid var(--separator); }
+html[data-desktop] .management-empty strong { color: var(--label); font-size: 13px; font-weight: 510; }
+html[data-desktop] .management-activity { display: flex; align-items: center; gap: 16px; min-height: 36px; font-size: 13px; }
+html[data-desktop] .management-activity + .management-activity { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
 html[data-desktop] .management-activity time { flex: none; width: 44px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
 html[data-desktop] .management-activity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .management-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--fill); color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .management-banner[data-tone="warning"] { background: var(--waitingSoft); }
 html[data-desktop] .management-banner[data-tone="warning"] > span { color: var(--warning); }
 
-/* Facts: one divided well, a label, the value as type, why, and the fix when there is one. */
-html[data-desktop] .management-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
-html[data-desktop] .management-fact { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px; }
-html[data-desktop] .management-fact + .management-fact { border-left: 1px solid var(--separator); }
-html[data-desktop] .management-fact > span { color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .management-fact > strong { display: flex; align-items: baseline; gap: 4px; overflow: hidden; font-size: 20px; font-weight: 500; letter-spacing: -.02em; line-height: 26px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Facts: four numbers in one box, a label, the value as type, why, and the fix when there is one. */
+html[data-desktop] .management-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .management-facts { background: rgb(255 255 255 / .03); }
+html[data-desktop] .management-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 14px 16px; }
+html[data-desktop] .management-fact + .management-fact { box-shadow: calc(-1 * var(--hairline)) 0 0 var(--separator); }
+html[data-desktop] .management-fact > span { color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .management-fact > strong { display: flex; align-items: baseline; gap: 4px; overflow: hidden; font-size: 18px; font-weight: 590; letter-spacing: -.02em; line-height: 24px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 html[data-desktop] .management-fact > strong[data-tone="warning"] { color: var(--warning); }
 html[data-desktop] .management-fact > strong[data-tone="muted"] { color: var(--secondaryLabel); }
 html[data-desktop] .management-fact > strong small { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; letter-spacing: 0; }
 html[data-desktop] .management-fact > p { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-html[data-desktop] .management-fact-action { margin-top: 2px; }
-@container desktop-workspace (max-width: 820px) {
+html[data-desktop] .management-fact-action { margin-top: 4px; align-self: flex-start; }
+@container desktop-workspace (max-width: 720px) {
   html[data-desktop] .management-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  html[data-desktop] .management-fact:nth-child(3) { border-left: 0; }
-  html[data-desktop] .management-fact:nth-child(n + 3) { border-top: 1px solid var(--separator); }
+  html[data-desktop] .management-fact:nth-child(3) { box-shadow: none; }
+  html[data-desktop] .management-fact:nth-child(n + 3) { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
 }
 
 /* Account and membership. */
 html[data-desktop] .management-account { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 html[data-desktop] .management-account-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-html[data-desktop] .management-account-head h2 { font-size: 14px; font-weight: 600; }
-html[data-desktop] .management-account-head p { margin-top: 3px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .management-account-head h2 { font-size: 13px; font-weight: 590; }
+html[data-desktop] .management-account-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-membership { display: flex; flex-direction: column; gap: 8px; }
 html[data-desktop] .management-membership-line { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 html[data-desktop] .management-inline-form { display: flex; gap: 8px; max-width: 420px; }
@@ -95,68 +106,66 @@ html[data-desktop] .management-inline-form input { flex: 1; }
 html[data-desktop] .management-account-gateway { display: flex; align-items: center; gap: 10px; color: var(--secondaryLabel); font-size: 12px; }
 
 /* Pairing. */
-html[data-desktop] .management-pairing { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
-html[data-desktop] .management-pairing-head { display: flex; align-items: center; gap: 14px; }
+html[data-desktop] .management-pairing { display: flex; flex-direction: column; gap: 16px; padding: 18px; }
+html[data-desktop] .management-pairing-head { display: flex; align-items: center; gap: 12px; }
 html[data-desktop] .management-pairing-head > div { flex: 1; min-width: 0; }
-html[data-desktop] .management-pairing-head h2 { font-size: 14px; font-weight: 600; }
-html[data-desktop] .management-pairing-head p { margin-top: 2px; color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .management-pairing-icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] .management-pairing-head h2 { font-size: 13px; font-weight: 590; }
+html[data-desktop] .management-pairing-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .management-pairing-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--plain); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); }
 html[data-desktop] .management-pairing-offer { display: flex; align-items: center; gap: 24px; }
 /* Scanners read dark on light whatever the theme, so the code keeps its own light tile. */
-html[data-desktop] .management-qr { flex: none; width: 156px; height: 156px; border-radius: 10px; background: var(--primaryForeground); fill: var(--accent); }
-html[data-desktop][data-theme="dark"] .management-qr { background: var(--label); fill: var(--plain); }
-html[data-desktop] .management-qr-expired { display: grid; flex: none; place-items: center; width: 156px; height: 156px; border: 1px dashed var(--separatorStrong); border-radius: 10px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .management-qr { flex: none; width: 156px; height: 156px; padding: 8px; border-radius: 12px; background: #fff; fill: #1a1c1f; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .management-qr-expired { display: grid; flex: none; place-items: center; width: 156px; height: 156px; border-radius: 12px; background: var(--plain); box-shadow: inset 0 0 0 1px var(--separator); color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-pairing-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .management-pairing-copy strong { color: var(--label); font-size: 14px; font-weight: 500; }
-html[data-desktop] .management-pairing-code { color: var(--label); font-family: var(--mono); font-size: 26px; font-weight: 600; letter-spacing: .16em; user-select: text; }
+html[data-desktop] .management-pairing-copy strong { color: var(--label); font-size: 13px; font-weight: 510; }
+html[data-desktop] .management-pairing-code { color: var(--label); font-family: var(--mono); font-size: 24px; font-weight: 590; letter-spacing: .16em; user-select: text; }
 
 /* Password. */
 html[data-desktop] .management-panel { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
 html[data-desktop] .management-password-head { display: flex; align-items: flex-start; gap: 12px; }
-html[data-desktop] .management-password-head > svg { flex: none; margin-top: 2px; }
+html[data-desktop] .management-password-head > svg { flex: none; margin-top: 1px; color: var(--secondaryLabel); }
 html[data-desktop] .management-password-head > div:nth-child(2) { flex: 1; min-width: 0; }
-html[data-desktop] .management-password-head strong { font-size: 13px; font-weight: 500; }
-html[data-desktop] .management-password-head p { margin-top: 3px; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .management-password-head strong { font-size: 13px; font-weight: 510; }
+html[data-desktop] .management-password-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] :is(.management-password-form, .management-panel > .management-note) { padding-left: 28px; }
 html[data-desktop] .management-password-form { display: flex; flex-direction: column; gap: 8px; max-width: 308px; }
 
 /* Log and updates. */
 html[data-desktop] .management-log-actions { justify-content: flex-start; }
-html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 300px); margin: 0; padding: 14px; overflow: auto; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--code); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-html[data-desktop] .management-update-message { font-size: 13px; font-weight: 600; }
+html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 220px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+html[data-desktop] .management-update-message { font-size: 13px; font-weight: 510; }
 html[data-desktop] .management-update-actions { justify-content: flex-start; }
 
 /* Usage. */
-html[data-desktop] .management-usage { display: flex; flex-direction: column; gap: 14px; }
-html[data-desktop] .management-usage > .desktop-page-title { margin: 0; }
+html[data-desktop] .management-usage { display: flex; flex-direction: column; gap: 16px; }
 html[data-desktop] .management-usage-filters { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 html[data-desktop] .management-usage-filters > [data-slot="tabs"]:first-child { min-width: 0; overflow-x: auto; }
 html[data-desktop] .management-usage-filters [data-slot="tabs-trigger"] .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
-html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
+html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
 html[data-desktop] .management-section-head { display: flex; align-items: center; gap: 8px; }
-html[data-desktop] .management-section-head h2 { font-size: 13px; font-weight: 600; }
-html[data-desktop] .management-section-head > span { color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .management-section-head h2 { font-size: 13px; font-weight: 590; }
+html[data-desktop] .management-section-head > span { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-section-head > :last-child { margin-left: auto; }
 html[data-desktop] .management-section-head small { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-chart { display: flex; align-items: stretch; gap: 3px; height: 120px; }
+html[data-desktop] .management-chart { display: flex; align-items: stretch; gap: 4px; height: 128px; }
 html[data-desktop] .management-chart-day { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; }
-html[data-desktop] .management-chart-bar { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--running); opacity: .85; transition: opacity var(--transition); }
-html[data-desktop] .management-chart-day[data-dimmed] .management-chart-bar { opacity: .35; }
+html[data-desktop] .management-chart-bar { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 2px 2px; background: var(--label); opacity: .85; transition: opacity var(--transition), height 300ms var(--ease-out); }
+html[data-desktop] .management-chart-day:hover .management-chart-bar { opacity: 1; }
+html[data-desktop] .management-chart-day[data-dimmed] .management-chart-bar { opacity: .2; }
 html[data-desktop] .management-chart-day small { height: 15px; overflow: hidden; color: var(--tertiaryLabel); font-size: 11px; line-height: 15px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-chart-foot { display: flex; justify-content: space-between; gap: 12px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .management-chart-foot { display: flex; justify-content: space-between; gap: 12px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-table-wrap { overflow-x: auto; }
 html[data-desktop] .management-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-table th { height: 32px; color: var(--secondaryLabel); font-weight: 500; text-align: right; white-space: nowrap; }
-html[data-desktop] .management-table td { height: 36px; border-top: 1px solid var(--separator); text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table th { height: 30px; color: var(--tertiaryLabel); font-weight: 510; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table td { height: 36px; box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator) inset; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table tr:first-child td { box-shadow: none; }
 html[data-desktop] .management-table :is(th, td) { padding: 0 6px; }
 html[data-desktop] .management-table :is(th, td):nth-child(-n + 2) { text-align: left; }
 html[data-desktop] .management-table td:nth-child(2) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 html[data-desktop] .management-agent { display: inline-flex; align-items: center; gap: 8px; }
-html[data-desktop] .management-footnotes { display: grid; gap: 4px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .management-footnotes { display: grid; gap: 4px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .management-footnotes [data-tone="warning"] { color: var(--warning); }
 
-@container desktop-workspace (max-width: 700px) {
-  html[data-desktop] .management-nav { width: 168px; }
-  html[data-desktop] .management-page { padding-inline: 20px; }
+@container desktop-workspace (max-width: 640px) {
   html[data-desktop] .management-pairing-offer { flex-direction: column; align-items: flex-start; }
 }

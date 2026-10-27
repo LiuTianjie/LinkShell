@@ -69,10 +69,17 @@ html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width:
 html[data-desktop][data-surface="opaque"] .desktop-sidebar,
 html[data-desktop]:not([data-surface]) .desktop-sidebar { background: var(--background); }
 html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: transparent; }
+/* The sidebar scrolls without a bar (it is narrow, and the rows say where you are). */
+html[data-desktop] .desktop-sidebar [data-sidebar="content"] { scrollbar-width: none; }
+html[data-desktop] .desktop-sidebar [data-sidebar="content"]::-webkit-scrollbar { width: 0; height: 0; }
+/* A panel's scrollbar stays inside its rounded corners. */
+html[data-desktop] .desktop-main *::-webkit-scrollbar-track { margin-block: 10px; }
 html[data-desktop] .desktop-main,
 html[data-desktop] .desktop-main .session-main,
 html[data-desktop] .desktop-main .live-side-panel { border: var(--hairline) solid var(--separator); border-radius: var(--radius-panel); background: var(--plain); }
-html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; margin: var(--gutter) 0 0; overflow: hidden; outline: none; container-type: inline-size; container-name: desktop-workspace; }
+/* Its height comes from the row it is in (the body minus its own top gutter), never 100 %:
+   with a margin above, 100 % would push its foot (the composer) out of the window. */
+html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; align-self: stretch; min-width: 0; min-height: 0; margin: var(--gutter) 0 0; overflow: hidden; outline: none; container-type: inline-size; container-name: desktop-workspace; }
 html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) { container-type: normal; }
 /* Beside a session the main area is only a frame: the conversation and the inspector are the panels. */
 html[data-desktop] .desktop-main:has(> .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
@@ -84,12 +91,17 @@ html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overf
 html[data-desktop] .desktop-sidebar-slot { flex: none; width: 264px; height: 100%; overflow: hidden; transition: width 300ms var(--ease-spring), opacity 200ms var(--ease-out); }
 html[data-desktop] .desktop-sidebar-slot > .desktop-sidebar { width: 264px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"] .desktop-sidebar-slot { width: 0; opacity: 0; }
+/* Without the sidebar the main panel reaches the window's top; its own title row keeps clear of
+   the traffic lights and the button that brings the sidebar back (Codex does the same). */
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { padding-left: var(--gutter); }
-html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { margin-top: var(--toolbar); }
+html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 112px; }
+html[data-desktop][data-fullscreen] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 44px; }
 html[data-desktop] .desktop-titlebar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; height: var(--toolbar); padding: 0 10px 0 82px; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html[data-desktop][data-fullscreen] .desktop-titlebar { padding-left: 12px; }
 html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -webkit-app-region: no-drag; app-region: no-drag; }
-html[data-desktop] .desktop-floating-titlebar { position: absolute; top: 0; left: 0; z-index: 5; justify-content: flex-start; }
+/* Beside the traffic lights, over the main panel's title row (which leaves it room). */
+html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
+html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
 html[data-desktop] .desktop-titlebar-button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: pointer; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStrong); }
@@ -141,7 +153,12 @@ html[data-desktop] .desktop-computer-copy { display: grid; flex: 1; gap: 0; min-
 html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 590; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-copy > span { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-picker > svg { flex: none; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-computer-picker { height: 30px; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-computer-copy strong { font-size: 13px; font-weight: 510; }
 html[data-desktop] .desktop-computer-menu { min-width: 244px; max-width: min(340px, calc(100vw - 32px)); }
+html[data-desktop] .desktop-connection-summary { display: grid; gap: 2px; padding: 6px 8px 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .desktop-connection-summary > span:first-child { display: flex; align-items: center; gap: 7px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-connection-summary [data-tone="waiting"] { color: var(--warning); }
 html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 11px; }
 html[data-desktop] .desktop-menu-empty { max-width: 230px; padding: 10px; color: var(--secondaryLabel); font-size: 12px; }
@@ -165,6 +182,17 @@ html[data-desktop] .desktop-place:hover { background: var(--fill); }
 html[data-desktop] .desktop-place:active { background: var(--fillStrong); }
 html[data-desktop] .desktop-place[data-active] { background: var(--sidebarAccent); font-weight: 510; }
 html[data-desktop] .desktop-place[data-active] > svg { color: var(--label); }
+html[data-desktop] .desktop-place-group { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-place-chevron { flex: none; color: var(--tertiaryLabel); transition: transform 200ms var(--ease-out); }
+html[data-desktop] .desktop-place-group[aria-expanded="true"] .desktop-place-chevron { transform: rotate(90deg); }
+html[data-desktop] .desktop-places-nested { display: grid; gap: 1px; animation: nested-in 200ms var(--ease-out); }
+html[data-desktop] .desktop-places-nested .desktop-place { padding-left: 36px; }
+html[data-desktop] .desktop-places-nested .desktop-place > svg { width: 14px; height: 14px; }
+@keyframes nested-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-places-nested { animation: none; } }
+html[data-desktop] .tree-heading-link { display: inline-flex; align-items: center; gap: 6px; height: 22px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-heading-link > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-heading-link:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-nav-badge { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 11px; font-weight: 590; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* The working set: what waits on you, then projects and their sessions. */
@@ -222,22 +250,31 @@ html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electro
 /* ── Controls ────────────────────────────────────────────────────────────── */
 /* The one primary per screen: ink. Everything else is quiet until hovered. */
 html[data-desktop] [data-slot="button"] { font-weight: 510; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
+/* Codex's variants: primary is ink (hover: ink at 80 %); secondary a 5 % tint of ink (10 % on
+   hover); outline a hairline; ghost nothing until hovered. */
 html[data-desktop] [data-slot="button"][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accent); box-shadow: none; color: var(--primaryForeground); }
-html[data-desktop] [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--accentHover); }
-html[data-desktop] [data-slot="button"][data-variant="default"]:active:not(:disabled) { opacity: .88; }
+html[data-desktop] [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); }
+html[data-desktop] [data-slot="button"][data-variant="default"]:active:not(:disabled) { opacity: .8; }
 html[data-desktop] [data-slot="button"][data-variant="default"]:disabled { background: var(--fillStrong); color: var(--tertiaryLabel); opacity: 1; }
-/* Secondary: a tint of ink with a hairline. */
-html[data-desktop] [data-slot="button"][data-variant="outline"],
-html[data-desktop] [data-slot="button"][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
-html[data-desktop] [data-slot="button"][data-variant="outline"]:hover:not(:disabled),
+html[data-desktop] [data-slot="button"][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
 html[data-desktop] [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] [data-slot="button"][data-variant="outline"] { border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
+html[data-desktop] [data-slot="button"][data-variant="outline"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active:not(:disabled) { opacity: .8; }
 html[data-desktop] [data-slot="button"][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
-html[data-desktop] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
+html[data-desktop] [data-slot="button"][data-variant="ghost"][data-state="open"] { background: var(--fill); }
 html[data-desktop] [data-slot="button"][data-variant="ghost"]:active:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] [data-slot="button"][data-variant="destructive"] { border-radius: var(--radius-control); box-shadow: none; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 30px; padding-inline: 12px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] { height: 28px; padding-inline: 10px; font-size: 13px; }
+html[data-desktop] [data-slot="button"]:disabled { cursor: default; }
+/* Sizes: 28 px buttons in toolbars and rows, 32 px where a form ends, 24 px icons beside text. */
+html[data-desktop] .desktop-main [data-slot="button"][data-size="default"]:not(.resource-entry):not(.resource-service) { height: 32px; padding-inline: 12px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
 html[data-desktop] .desktop-main [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
+html[data-desktop] .desktop-main [data-slot="button"] svg:not([class*="size-"]) { width: 16px; height: 16px; }
+html[data-desktop] .desktop-main [data-slot="button"][data-size="sm"] svg:not([class*="size-"]),
+html[data-desktop] .desktop-main [data-slot="button"][data-size="xs"] svg:not([class*="size-"]) { width: 14px; height: 14px; }
 html[data-desktop] .desktop-main [data-slot="button"][data-size="plain"] { text-align: left; justify-content: flex-start; }
 html[data-desktop] .desktop-main [data-slot="button"][data-active] { background: var(--sidebarAccent); color: var(--label); }
 
@@ -251,11 +288,11 @@ html[data-desktop] :is(.desktop-main, [data-slot="dialog-content"]) input[data-s
 html[data-desktop] [data-slot="textarea"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 
 /* Segmented filters: a recessed track; the current one is a raised plain step. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 30px; min-height: 30px; gap: 0; padding: 2px; border: 0; border-radius: var(--radius-control); background: var(--fill); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 26px; padding-inline: 10px; border: 0; border-radius: 6px; color: var(--secondaryLabel); font-size: 13px; font-weight: 510; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 30px; min-height: 30px; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--segment-track); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { height: 26px; padding-inline: 10px; border: 0; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--plain); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separator), 0 1px 2px -1px rgb(0 0 0 / .08); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 1px 4px -1px rgb(0 0 0 / .2); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
 
 /* Status marks: a hue on a tint of itself, a finished session stays grey. */
@@ -272,7 +309,6 @@ html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"],
 html[data-desktop] [data-slot="popover-content"],
 html[data-desktop] [data-slot="context-menu-content"] { border: 0; border-radius: 12px; background: var(--sheet); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: var(--float-shadow); color: var(--label); }
-html[data-desktop] [data-slot="tooltip-content"] { border: 0; border-radius: 8px; background: var(--cardRaised); box-shadow: var(--float-shadow); color: var(--label); font-size: 12px; }
 html[data-desktop] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"])[data-state="open"] { animation: float-in 160ms cubic-bezier(.19, 1, .22, 1); }
 html[data-desktop] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"])[data-state="closed"] { animation: float-out 100ms cubic-bezier(.8, 0, .4, 1) forwards; }
 @keyframes float-in { from { opacity: 0; transform: scale(.97); } }
@@ -297,7 +333,8 @@ html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-me
 html[data-desktop] [data-slot="dropdown-menu-label"] { color: var(--tertiaryLabel); font-size: 12px; font-weight: 510; }
 html[data-desktop] [data-slot="dropdown-menu-separator"] { margin: 4px 6px; background: var(--separator); }
 html[data-desktop] [data-slot="dialog-content"] { border: 0; border-radius: 16px; background: var(--plain); box-shadow: var(--float-shadow), 0 24px 64px rgb(0 0 0 / .24); padding: 24px; }
-html[data-desktop] [data-slot="dialog-overlay"] { background: rgb(0 0 0 / .24); backdrop-filter: none; }
+html[data-desktop] [data-slot="dialog-overlay"] { background: rgb(0 0 0 / .18); backdrop-filter: none; }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-overlay"] { background: rgb(0 0 0 / .4); }
 html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 
 /* ⌘K */
@@ -325,47 +362,69 @@ html[data-desktop] .shortcut-sheet dl > div { display: flex; align-items: center
 html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-size: 12px; }
 
 /* ── Pages ───────────────────────────────────────────────────────────────── */
+/* A page is its toolbar (PageHeader) over content in a column: 880 px for lists and settings,
+   wider for grids. The toolbar spans the panel and stays as the content scrolls under it. */
+html[data-desktop] .desktop-main { --page-inline: max(24px, calc((100% - 880px) / 2)); }
 html[data-desktop] .desktop-main .live-overview,
-html[data-desktop] .desktop-main .screens-page { padding: 22px max(28px, calc((100% - 1120px) / 2)) 32px; }
+html[data-desktop] .desktop-main .screens-page,
+html[data-desktop] .desktop-main .management-content { padding: 0 var(--page-inline) 40px; scroll-padding-top: var(--toolbar); }
+html[data-desktop] .desktop-main .screens-page { --page-inline: max(24px, calc((100% - 1120px) / 2)); }
+html[data-desktop] .page-header { position: sticky; top: 0; z-index: 4; display: flex; flex: none; align-items: center; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); margin: 0 calc(-1 * var(--page-inline, 24px)) 8px; padding: 0 8px 0 max(var(--page-inline, 24px), var(--titlebar-inset, 0px)); background: var(--plain); box-shadow: 0 var(--hairline) 0 transparent; transition: box-shadow 150ms var(--ease-out); }
+html[data-desktop] .page-header[data-scrolled] { box-shadow: 0 var(--hairline) 0 var(--separator); }
+html[data-desktop] .page-header-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
+html[data-desktop] .page-header h1 { flex: none; overflow: hidden; color: var(--label); font-size: 13px; font-weight: 590; letter-spacing: -.005em; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .page-header-detail { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .page-header-detail > span + span::before { content: "·"; margin: 0 6px; color: var(--quaternaryLabel); }
+html[data-desktop] .page-header-detail > span[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .page-header-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+html[data-desktop] .page-header-actions > [data-slot="button"][data-variant="default"] { margin-left: 4px; }
+html[data-desktop] .desktop-root[data-shell="electron"] .page-header { -webkit-app-region: drag; app-region: drag; }
+html[data-desktop] .desktop-root[data-shell="electron"] .page-header :is(button, a, input, select, [role="button"], [role="tab"], [role="combobox"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
+/* A search field in a toolbar: quiet until used. */
+html[data-desktop] .page-header :is(.page-search, .session-search) { width: 220px; max-width: 32vw; height: 28px; }
+html[data-desktop] .page-header :is(.page-search, .session-search) input { font-size: 13px; }
+/* The inspector shows a page's content without its toolbar (its own tabs are the toolbar). */
+html[data-desktop] .desktop-main .side-panel-content .page-header { position: static; height: auto; min-height: 0; margin: 0 0 10px; padding: 0; background: transparent; box-shadow: none; }
+html[data-desktop] .desktop-main .side-panel-content .page-header-copy { display: none; }
+html[data-desktop] .desktop-main .side-panel-content .page-header-actions { margin-left: auto; }
+/* Older page headings, until each page has its PageHeader. */
 html[data-desktop] .desktop-page-title,
-html[data-desktop] .desktop-main .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; margin: 0 0 18px; padding: 0; border: 0; }
+html[data-desktop] .desktop-main .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--toolbar); margin: 0 0 8px; padding: 0; border: 0; }
 html[data-desktop] .desktop-page-title h1,
-html[data-desktop] .desktop-main .page-heading h1,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child h1,
-html[data-desktop] .desktop-main .screens-page > div:first-child h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 28px; }
+html[data-desktop] .desktop-main .page-heading h1 { font-size: 13px; font-weight: 590; line-height: 18px; }
 html[data-desktop] .desktop-page-title p,
-html[data-desktop] .desktop-main .page-heading p,
-html[data-desktop] .desktop-main .live-overview > section > div:first-child p,
-html[data-desktop] .desktop-main .screens-page > div:first-child p { margin-top: 2px; color: var(--secondaryLabel); font-size: 13px; line-height: 20px; }
-html[data-desktop] .desktop-page-title p > span + span::before { content: "·"; margin: 0 7px; color: var(--quaternaryLabel); }
+html[data-desktop] .desktop-main .page-heading p { margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-page-title p > span + span::before { content: "·"; margin: 0 6px; color: var(--quaternaryLabel); }
 html[data-desktop] .desktop-page-title p > span[data-tone="waiting"] { color: var(--warning); }
-html[data-desktop] .desktop-page-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+html[data-desktop] .desktop-page-actions { display: flex; flex: none; align-items: center; gap: 4px; }
 html[data-desktop] .desktop-main .session-overview { gap: 16px; }
 html[data-desktop] .desktop-main .session-overview > *,
 html[data-desktop] .desktop-main .session-overview-filters,
 html[data-desktop] .desktop-main [data-slot="tabs"],
 html[data-desktop] .desktop-main [data-slot="tabs-list"] { flex-shrink: 0; }
-html[data-desktop] .desktop-main .session-overview > .desktop-page-title { margin-bottom: 2px; }
 html[data-desktop] .desktop-main .session-search { flex: 1; width: 100%; max-width: 320px; }
 html[data-desktop] .desktop-main .session-overview-tools { flex: 1; justify-content: flex-end; }
 
-/* Lists: rows on the panel, divided by inset rules; a group is a label and its rows. */
-html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0; padding: 0 12px 4px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
+/* Lists: rows straight on the panel, as Codex's thread lists. A row is two lines (what, then
+   where and how it is going), divided by hairlines that step aside for the row under the
+   pointer. A group is a small title and its rows. */
+html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: baseline; gap: 6px; min-height: 28px; margin: 0; padding: 4px 12px; color: var(--label); font-size: 13px; font-weight: 590; }
 html[data-desktop] .desktop-main .session-group { overflow: visible; margin-inline: -12px; border: 0; border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .session-group + .session-group { margin-top: 8px; }
 html[data-desktop] .desktop-main .session-overview > :is(.list-row-more, [role="status"]) { margin-inline: -12px; }
-html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title,
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title > span { color: var(--warning); }
-html[data-desktop] .desktop-main .list-row { position: relative; height: 48px; min-height: 48px; padding: 0 12px; border: 0; border-radius: var(--radius-row); }
-html[data-desktop] .desktop-main .list-row + .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--warning); }
+html[data-desktop] .desktop-main .list-row { position: relative; height: 44px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-row); transition: background var(--transition); }
+html[data-desktop] .desktop-main .list-row + .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: var(--hairline); background: var(--separator); pointer-events: none; transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .list-row:hover::before,
 html[data-desktop] .desktop-main .list-row:hover + .list-row::before { opacity: 0; }
 html[data-desktop] .desktop-main .list-row:not(.list-row-static):hover { background: var(--fill); }
-html[data-desktop] .desktop-main .list-row-static:has(.truncate + .truncate) { height: 58px; min-height: 58px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 20px minmax(0, 1fr) 84px 72px; grid-template-rows: 20px 18px; height: 60px; min-height: 60px; padding: 10px 12px; column-gap: 14px; row-gap: 2px; align-content: center; align-items: center; cursor: pointer; }
+html[data-desktop] .desktop-main .list-row:not(.list-row-static):active { background: var(--fillStrong); }
+html[data-desktop] .desktop-main .list-row-static:has(.truncate + .truncate) { height: 56px; min-height: 56px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 64px; grid-template-rows: 18px 18px; height: 56px; min-height: 56px; padding: 9px 12px; column-gap: 12px; row-gap: 2px; align-content: center; align-items: center; cursor: pointer; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > * { margin-left: 0; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-child { grid-row: 1 / 3; grid-column: 1; align-self: start; padding-top: 1px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--label); font-size: 13.5px; font-weight: 500; line-height: 20px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-title { grid-row: 1; grid-column: 2; display: block; width: 100%; max-width: 100%; height: 18px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--label); font-size: 13px; font-weight: 510; line-height: 18px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; }
 html[data-desktop] .desktop-main .list-row-detail { grid-row: 2; grid-column: 2; max-width: 100%; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-meta { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
@@ -373,158 +432,94 @@ html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-p
 html[data-desktop] .desktop-main .list-row:has(> button:not(.list-row-title)) > .list-row-project { grid-column: 3; max-width: 120px; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: auto; justify-self: end; color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-status { grid-row: 1; grid-column: 3; justify-self: end; white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-status > span { font-size: 12px; line-height: 20px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 22px; min-height: 22px; justify-self: end; padding: 0 10px; border: 0; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 12px; white-space: nowrap; }
-html[data-desktop] .desktop-main .list-row-more { border: 0; border-radius: var(--radius-row); color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .list-row-more:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .list-row-status > span { font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button:not(.list-row-title) { grid-row: 2; grid-column: 4; height: 20px; min-height: 20px; justify-self: end; padding: 0 8px; border: 0; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 12px; font-weight: 510; white-space: nowrap; }
+html[data-desktop] .desktop-main .list-row-more { display: block; width: 100%; height: 32px; margin-top: 4px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; cursor: pointer; }
+html[data-desktop] .desktop-main .list-row-more:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .list-skeleton { height: 56px; padding: 18px 12px; }
 
 /* Agent marks are the agents' own logos: media in a row, small and on their own tile. */
 html[data-desktop] .agent-mark { width: 18px; height: 18px; border-radius: 5px; box-shadow: none; }
 html[data-desktop] .agent-mark[data-size="md"] { width: 22px; height: 22px; border-radius: 6px; }
 
-/* Wells: a step inside the panel that holds a group of rows. */
-html[data-desktop] .desktop-main :is(.computers-section, .project-card, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
-html[data-desktop] .desktop-main .screens-page > .border-t,
-html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 4px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
-html[data-desktop] .desktop-main .computers-section-heading { padding: 10px 12px 6px; }
+/* Groups: rows in one soft box with hairlines between them (the same box as 本机管理's). */
+html[data-desktop] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
+html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 4px; border: 0; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
+html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: rgb(255 255 255 / .03); }
+html[data-desktop] .desktop-main .computers-section-heading { padding: 10px 10px 6px; }
 html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
-html[data-desktop] .desktop-main .computers-section + .computers-section { margin-top: -8px; }
-html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--label); font-size: 13px; font-weight: 590; letter-spacing: 0; text-transform: none; }
 html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 22px minmax(140px, 190px) minmax(90px, 130px) minmax(180px, 1fr); gap: 14px; align-items: center; }
+html[data-desktop] .desktop-main .computers-section .list-row { padding: 0 10px; }
+html[data-desktop] .desktop-main .computers-section .list-row + .list-row::before { left: 10px; right: 10px; }
+html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 18px minmax(120px, 180px) minmax(80px, 120px) minmax(160px, 1fr); gap: 12px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
-html[data-desktop] .desktop-main .computer-agent-version { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .computer-agent-label { font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .computer-agent-version { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.computer-agent-label, .computer-agent-version, .computer-agent-auth) { width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .project-card { padding: 10px 4px 4px; }
-html[data-desktop] .desktop-main .project-card + .project-card { margin-top: 8px; }
-html[data-desktop] .desktop-main .project-card :is(code, .font-mono),
-html[data-desktop] .desktop-main .project-card [title^="/"] { font-family: var(--mono); font-size: 12px; }
+
+/* Projects: each project a heading row (its folder, path, branch and count), its sessions under it. */
+html[data-desktop] .desktop-main .project-list { display: flex; flex-direction: column; gap: 20px; }
+html[data-desktop] .desktop-main .project-group { display: flex; flex-direction: column; }
+html[data-desktop] .desktop-main .project-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px 0 2px; }
+html[data-desktop] .desktop-main .project-icon { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .project-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
+html[data-desktop] .desktop-main .project-copy h2 { flex: none; max-width: 50%; overflow: hidden; color: var(--label); font-size: 13px; font-weight: 590; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-copy p { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-meta { display: flex; flex: none; align-items: center; gap: 12px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .project-branch { display: inline-flex; align-items: center; gap: 4px; max-width: 160px; overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-branch svg { flex: none; width: 12px; height: 12px; }
+html[data-desktop] .desktop-main .project-new { opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-main .project-group:hover .project-new,
+html[data-desktop] .desktop-main .project-new:focus-visible { opacity: 1; }
+html[data-desktop] .desktop-main .project-sessions { display: flex; flex-direction: column; padding: 4px; border-radius: 12px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .project-sessions { background: rgb(255 255 255 / .03); }
+html[data-desktop] .desktop-main .project-session { position: relative; display: grid; grid-template-columns: 18px minmax(120px, max-content) minmax(0, 1fr) auto 56px; align-items: center; gap: 12px; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background var(--transition); }
+html[data-desktop] .desktop-main .project-session + .project-session::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
+html[data-desktop] .desktop-main .project-session:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .project-session:hover::before,
+html[data-desktop] .desktop-main .project-session:hover + .project-session::before { opacity: 0; }
+html[data-desktop] .desktop-main .project-session-title { max-width: 320px; overflow: hidden; font-weight: 510; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-session-detail { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-session time { justify-self: end; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-main .project-more { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 12px; cursor: pointer; }
+html[data-desktop] .desktop-main .project-more:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .project-more svg { width: 14px; height: 14px; transition: transform 200ms var(--ease-out); }
+html[data-desktop] .desktop-main .project-more svg[data-open] { transform: rotate(180deg); }
+html[data-desktop] .desktop-main .project-empty { padding: 4px 28px 0; color: var(--tertiaryLabel); font-size: 12px; }
+
+/* Resource lists (files, ports, worktrees) share the group's row. */
 html[data-desktop] .desktop-main .resource-entry,
-html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: var(--radius-row); }
+html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: 8px; }
 html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
-html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); pointer-events: none; }
+html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--separator); pointer-events: none; }
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover::before,
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover + :is(.resource-entry, .resource-service)::before { opacity: 0; }
 html[data-desktop] .desktop-main .resource-services { max-height: 300px; overflow: visible; }
 html[data-desktop] .desktop-main .resource-service-list { max-height: 280px; overflow: auto; }
-html[data-desktop] .desktop-main .screen-row { position: relative; height: 64px; min-height: 64px; margin: 0; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; }
-html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--separator); }
+html[data-desktop] .desktop-main .screen-row { position: relative; height: 60px; min-height: 60px; margin: 0; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: var(--hairline); background: var(--separator); }
+html[data-desktop] .desktop-main .screen-row:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .screen-row[data-current] { background: var(--sidebarAccent); }
 html[data-desktop] .desktop-main .screen-row:hover::before,
 html[data-desktop] .desktop-main .screen-row[data-current]::before,
 html[data-desktop] .desktop-main :is(.screen-row:hover, .screen-row[data-current]) + .screen-row::before { opacity: 0; }
-html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--fill); }
-html[data-desktop] .desktop-main .screens-page > .border-t { border-top: 1px solid var(--separator); }
-/* Inside a well an empty state is just its words. */
-html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-card) [data-slot="empty"] { margin: 0; padding: 24px; border: 0; background: transparent; }
+html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--plain); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+/* Inside a group an empty state is just its words. */
+html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-sessions) [data-slot="empty"] { margin: 0; padding: 24px; border: 0; background: transparent; }
 
-/* Empty, loading and welcome states. */
-html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 4px; padding: 44px 24px; border: 1px dashed var(--separatorStrong); border-radius: var(--radius-well); background: transparent; }
-html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 15px; font-weight: 600; }
-html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 380px; color: var(--secondaryLabel); font-size: 13px; line-height: 1.6; }
-html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 40px; height: 40px; border-radius: 50%; background: var(--fill); color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .welcome-live { max-width: 520px; gap: 16px; margin: auto; padding: 36px; }
-html[data-desktop] .desktop-main .welcome-live img { width: 64px; height: 64px; border-radius: 16px; }
-html[data-desktop] .desktop-main .welcome-live h1 { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
-html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 10px 10px 0; border: 0; border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); font-size: 12.5px; }
+/* Empty, loading and welcome states: quiet, centred, no frame. */
+html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 24px; padding: 40px 24px; border: 0; border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 360px; color: var(--tertiaryLabel); font-size: 13px; line-height: 1.55; }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 36px; height: 36px; border-radius: 10px; background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] svg { width: 18px; height: 18px; }
+html[data-desktop] .desktop-main .welcome-live { max-width: 480px; gap: 14px; margin: auto; padding: 36px; }
+html[data-desktop] .desktop-main .welcome-live img { width: 56px; height: 56px; border-radius: 14px; }
+html[data-desktop] .desktop-main .welcome-live h1 { font-size: 20px; font-weight: 590; letter-spacing: -.02em; }
+html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 8px 8px 0; padding: 8px 12px; border: 0; border-radius: 10px; background: var(--waitingSoft); color: var(--warning); font-size: 13px; }
 html[data-desktop] .desktop-main:has(> .session-page) > .connection-banner { margin: 0 0 var(--gutter); }
-
-/* ── Session ─────────────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .session-page { background: transparent; }
-html[data-desktop] .desktop-main .live-session .session-layout { display: flex; gap: var(--gutter); min-height: 0; }
-html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-/* The session's title row is the toolbar: 46 px, no rule under it; the conversation scrolls beneath. */
-html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; align-items: center; flex-wrap: nowrap; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); padding: 0 8px 0 16px; border-bottom: 0; background: transparent; backdrop-filter: none; }
-html[data-desktop] .desktop-main .session-heading-context { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
-html[data-desktop] .desktop-main .session-heading-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
-html[data-desktop] .desktop-main .session-title { gap: 8px; min-width: 0; }
-html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 13px; font-weight: 590; letter-spacing: -.005em; line-height: 18px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .session-subtitle { flex: none; gap: 6px; margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
-html[data-desktop] .desktop-main .session-subtitle .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
-html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),
-html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; padding: 0; }
-html[data-desktop] .desktop-main .session-directory { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .branch-chip { padding: 0 6px; border-radius: 6px; background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; line-height: 18px; }
-html[data-desktop] .desktop-main .session-actions { display: flex; align-items: center; gap: 0; padding: 0; }
-html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"] { color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .session-actions [data-slot="button"][data-size="icon"]:hover { color: var(--label); }
-html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 6px; background: var(--separator); }
-html[data-desktop] .desktop-main .handoff-bar { flex: none; padding: 7px 16px; border-bottom: var(--hairline) solid var(--separator); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); }
-
-/* Reading column: 48 rem centred, 32 px from the toolbar, 16 px between items. The composer
-   floats over the end of it, so the column leaves room for it (Session measures its height). */
-html[data-desktop] .desktop-main .conversation { scrollbar-gutter: stable both-edges; scroll-padding-bottom: calc(var(--composer-height, 120px) + 16px); }
-html[data-desktop] .desktop-main .conversation-content { padding: 32px max(24px, calc((100% - 768px) / 2)) calc(var(--composer-height, 120px) + 24px); }
-html[data-desktop] .desktop-main .live-timeline > :is(article, section, .notice-card, [data-slot="alert"]) { margin-bottom: 16px; }
-html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14px; line-height: 1.6; letter-spacing: 0; }
-html[data-desktop] .desktop-main .markdown p { margin: 0 0 12px; }
-html[data-desktop] .desktop-main .markdown h1 { font-size: 18px; font-weight: 600; }
-html[data-desktop] .desktop-main .markdown h2 { font-size: 16px; font-weight: 600; }
-html[data-desktop] .desktop-main .markdown h3 { font-size: 14px; font-weight: 600; }
-html[data-desktop] .desktop-main .markdown a { color: var(--link); text-decoration: none; }
-html[data-desktop] .desktop-main .markdown a:hover { text-decoration: underline; text-underline-offset: 2px; }
-html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 4px; border-radius: 4px; background: var(--fill); font-family: var(--mono); font-size: 12px; box-shadow: none; }
-html[data-desktop] .desktop-main .markdown pre { border: var(--hairline) solid var(--separator); border-radius: var(--radius-well); background: var(--code); box-shadow: none; font-size: 12px; line-height: 1.6; contain: content; }
-/* The reader's own messages: a quiet bubble at the right, at most two thirds of the column. */
-html[data-desktop] .desktop-main .user-message { max-width: min(560px, 80%); margin-left: auto; padding: 8px 14px; border-radius: 18px; background: var(--userBubble); box-shadow: none; }
-html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.55; }
-html[data-desktop] .desktop-main :is(.tool-record, .plan-card, .notice-card, .diff-block) { border: var(--hairline) solid var(--separator); border-radius: var(--radius-well); background: transparent; }
-html[data-desktop] .desktop-main .tool-record > summary { min-height: 28px; padding: 4px 8px; color: var(--secondaryLabel); font-size: 13px; transition: color var(--transition); }
-html[data-desktop] .desktop-main .tool-record > summary:hover { color: var(--label); }
-html[data-desktop] .desktop-main .tool-record[open] > summary { border-radius: var(--radius-well) var(--radius-well) 0 0; }
-html[data-desktop] .desktop-main .approval-card { padding: 16px; border: var(--hairline) solid color-mix(in srgb, var(--warning) 40%, var(--separator)); border-radius: 14px; background: var(--plain); box-shadow: var(--composer-shadow); }
-html[data-desktop] .desktop-main .approval-icon { width: 32px; height: 32px; border-radius: 50%; }
-html[data-desktop] .desktop-main .conversation-jump { bottom: calc(var(--composer-height, 120px) + 12px); transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out); }
-html[data-desktop] .desktop-main .conversation-jump button { height: 28px; padding-inline: 12px; border: 0; border-radius: 999px; background: var(--sheet); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--float-shadow); font-size: 13px; }
-
-/* The composer floats at the foot of the conversation, 16 px from the edge, over a fade. */
-html[data-desktop] .desktop-main .composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; padding: 24px max(16px, calc((100% - 800px) / 2)) 16px; border: 0; background: linear-gradient(to bottom, transparent, var(--plain) 24px); pointer-events: none; }
-html[data-desktop] .desktop-main .composer-wrap > * { pointer-events: auto; }
-html[data-desktop] .desktop-main .composer { height: auto; min-height: 44px; border: 0; border-radius: 22px; background: var(--plain); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
-html[data-desktop][data-theme="dark"] .desktop-main .composer { background: var(--cardRaised); }
-html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
-html[data-desktop] .desktop-main .composer textarea { min-height: 44px; padding: 12px 16px 4px; font-size: 14px; line-height: 1.55; }
-html[data-desktop] .desktop-main .composer-toolbar { padding: 2px 8px 8px; }
-html[data-desktop] .desktop-main .composer-toolbar > div:first-child { gap: 0; }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button) { width: 28px; height: 28px; border-radius: 999px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .composer-toolbar [data-slot="button"][data-size="icon"]:not(.send-button):hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .composer [data-slot="button"].send-button { width: 28px; height: 28px; border-radius: 50%; }
-html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 6px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .composer-place { display: none; }
-html[data-desktop] .composer-chip-menu { min-width: 280px; }
-html[data-desktop] .desktop-main .composer-chip { max-width: 220px; border-radius: 999px; }
-html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-html[data-desktop] .command-option-name strong { font-weight: 590; }
-html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .message-queue { border: var(--hairline) solid var(--separator); border-radius: 14px; background: var(--plain); box-shadow: var(--composer-shadow); }
-
-/* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
-html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
-html[data-desktop] .inspector-tabs { display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; border-bottom: var(--hairline) solid var(--separator); overflow-x: auto; }
-html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: pointer; transition: background var(--transition), color var(--transition); }
-html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fill); color: var(--label); }
-html[data-desktop] .inspector-tabs-spacer { flex: 1; }
-html[data-desktop] .inspector-tabs [data-slot="button"][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
-html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
-html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
-html[data-desktop] .inspector-resizer:hover::after,
-html[data-desktop] .inspector-resizer:focus-visible::after,
-html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--focus, var(--link)); }
-html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
-html[data-desktop] .desktop-main .side-panel-content { padding: 12px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
-html[data-desktop] .desktop-main .side-panel-content .terminals-page > .page-heading { min-height: 0; margin-bottom: 10px; justify-content: flex-end; }
-html[data-desktop] .desktop-main .side-panel-content .terminals-page > .page-heading > div { display: none; }
-/* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
-html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"] { background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
-html[data-desktop] .desktop-main .side-panel-content [data-slot="button"][data-variant="default"]:hover:not(:disabled) { background: var(--fillStrong); }
-html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-family: var(--mono); }
-@media (max-width: 1100px) {
-  /* A narrow window keeps the conversation readable: the inspector floats over it. */
-  html[data-desktop] .desktop-main .live-side-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; max-width: calc(100% - 40px); box-shadow: var(--float-shadow); }
-  html[data-desktop] .inspector-resizer { left: -4px; }
-}
 
 /* ── Tool pages ──────────────────────────────────────────────────────────── */
 /* The terminal below is already a framed well, so the tab bar is bare: no rule above or below,

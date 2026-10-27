@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { PageHeader } from "../components/PageHeader";
 import { useStore } from "zustand";
 import {
+  ArrowLeft,
   ChartColumn,
   CircleAlert,
   CircleArrowDown,
@@ -95,12 +97,12 @@ const confirmCopy: Record<Confirm, { title: string; detail: string; action: stri
 };
 const subtitles: Record<ManagePage, string> = {
   overview: "",
-  devices: "扫描二维码配对手机，或管理已配对的设备",
-  password: "其他设备打开这台电脑前，要先输入这台电脑的密码",
+  devices: "",
+  password: "",
   usage: "这台电脑的 Token 用量与模型分布",
-  log: "Host 最近 64 KB 日志 · 每 5 秒刷新",
-  updates: "检查版本与管理现有安装",
-  settings: "本机权限、启动项与应用偏好",
+  log: "最近 64 KB · 每 5 秒刷新",
+  updates: "",
+  settings: "",
 };
 
 /** Derived facts every page reads, computed once per render. */
@@ -158,50 +160,17 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
 
   return (
     <div className="management">
-      <nav className="management-nav" aria-label="本机管理">
-        <div className="management-machine">
-          <span className="desktop-presence" data-online={facts.healthy || undefined} aria-hidden />
-          <div>
-            <strong>{machine ?? "这台 Mac"}</strong>
-            <span>本机服务{facts.service}</span>
-          </div>
-        </div>
-        {MANAGE_PAGES.map((id, index) => {
-          const Icon = pageIcons[id];
-          return (
-            <button
-              type="button"
-              key={id}
-              className="management-nav-item"
-              data-active={page === id || undefined}
-              data-gap={index === 5 || undefined}
-              aria-current={page === id ? "page" : undefined}
-              onClick={() => navigate(id)}
-            >
-              <Icon size={16} strokeWidth={1.6} aria-hidden />
-              <span>{managePageTitles[id]}</span>
-              {id === "updates" && facts.newVersion && <span className="management-dot" aria-label="有新版本" />}
-            </button>
-          );
-        })}
-        <p className="management-nav-foot">
-          服务{facts.service} · 网关{facts.gateway}
-          {state.snapshot?.machine?.hostVersion && <span className="management-mono">Host {state.snapshot.machine.hostVersion}</span>}
-        </p>
-      </nav>
       <div className="management-content">
         <div className="management-page">
           {page !== "usage" && (
-            <div className="desktop-page-title">
-              <div>
-                <h1>{page === "overview" ? "这台 Mac" : managePageTitles[page]}</h1>
-                <p>{page === "overview" ? (facts.healthy ? "LinkShell 后台服务正在运行，随时可从手机或工作台连接" : `本机服务${facts.service}`) : subtitles[page]}</p>
-              </div>
-              <div className="desktop-page-actions">
+            <PageHeader
+              title={page === "overview" ? (machine ?? "这台 Mac") : managePageTitles[page]}
+              detail={page === "overview" ? `本机服务${facts.service} · 网关${facts.gateway}` : subtitles[page] || undefined}
+              actions={<>
                 {state.busy && <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在处理" />}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={state.busy} aria-label="服务操作"><Ellipsis />本机服务</Button>
+                    <Button variant="ghost" size="sm" disabled={state.busy} aria-label="服务操作"><Ellipsis />本机服务</Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onSelect={refreshManagement}><RefreshCw />刷新状态</DropdownMenuItem>
@@ -211,8 +180,8 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
                     <DropdownMenuItem disabled={!facts.healthy} onSelect={() => setConfirm("stop")}>停止服务…</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
-            </div>
+              </>}
+            />
           )}
           {state.problem && (
             <Alert variant="warning" className="management-problem">
@@ -634,5 +603,52 @@ function SettingsPage({ facts }: { facts: Facts }) {
         </Group>
       )}
     </>
+  );
+}
+
+/**
+ * Management's pages, in the window's sidebar while management is open (as Codex's settings
+ * take the sidebar), so the content has the whole main panel.
+ */
+export function ManagementNav({ page, navigate, back }: { page: ManagePage; navigate: (page: ManagePage) => void; back: () => void }) {
+  const facts = useFacts();
+  const machine = facts.state.snapshot?.machine?.hostname.replace(/\.local$/, "");
+  return (
+    <nav className="management-nav" aria-label="本机管理">
+      <button type="button" className="desktop-place management-back" onClick={back}>
+        <ArrowLeft size={16} strokeWidth={1.6} aria-hidden />
+        <span>返回工作台</span>
+        <kbd>⌘1</kbd>
+      </button>
+      <div className="management-machine">
+        <span className="desktop-presence" data-online={facts.healthy || undefined} aria-hidden />
+        <div>
+          <strong>{machine ?? "这台 Mac"}</strong>
+          <span>本机服务{facts.service}</span>
+        </div>
+      </div>
+      {MANAGE_PAGES.map((id, index) => {
+        const Icon = pageIcons[id];
+        return (
+          <button
+            type="button"
+            key={id}
+            className="management-nav-item"
+            data-active={page === id || undefined}
+            data-gap={index === 5 || undefined}
+            aria-current={page === id ? "page" : undefined}
+            onClick={() => navigate(id)}
+          >
+            <Icon size={16} strokeWidth={1.6} aria-hidden />
+            <span>{managePageTitles[id]}</span>
+            {id === "updates" && facts.newVersion && <span className="management-dot" aria-label="有新版本" />}
+          </button>
+        );
+      })}
+      <p className="management-nav-foot">
+        服务{facts.service} · 网关{facts.gateway}
+        {facts.state.snapshot?.machine?.hostVersion && <span className="management-mono">Host {facts.state.snapshot.machine.hostVersion}</span>}
+      </p>
+    </nav>
   );
 }

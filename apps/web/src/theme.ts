@@ -58,7 +58,7 @@ export const themeStyles = `
 const nativeDesktopColors: Record<string, [string, string]> = {
   // The window's ground where vibrancy is off (unfocused, 4K, "opaque window"); the sidebar is
   // see-through over it, the main surface is not.
-  "background": ["#f9f9f9", "#000000"],
+  "background": ["#f3f3f3", "#1d1d1d"],
   "plain": ["#ffffff", "#181818"],
   "sidebarBackground": ["#ededed66", "#21212166"],
   "card": ["#ffffff", "#181818"],
