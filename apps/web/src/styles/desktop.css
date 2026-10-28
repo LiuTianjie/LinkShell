@@ -229,7 +229,7 @@ html[data-desktop] .tree-heading-action { display: grid; place-items: center; wi
 html[data-desktop] .tree-section:hover .tree-heading-action,
 html[data-desktop] .tree-heading-action:focus-visible { opacity: 1; }
 html[data-desktop] .tree-heading-action:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .tree-note { padding: 4px 10px 8px 36px; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; }
+html[data-desktop] .tree-note { padding: 4px 10px 8px 36px; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; text-wrap: pretty; }
 html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; }
 html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 30px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .tree-project-toggle > svg { flex: none; margin-inline: 1.5px; color: var(--tertiaryLabel); transition: transform 200ms var(--ease-out); }
@@ -713,10 +713,11 @@ html[data-desktop] .desktop-native-screen.screen-fullscreen .screen-stage { flex
 
 /* Windows: Segoe UI and Microsoft YaHei are already set tight. There are no traffic lights at the
    left; the system's caption buttons sit over the window's top right (titleBarOverlay), so the
-   title row that reaches that corner leaves them room, as the window controls overlay reports it. */
+   title row that reaches that corner leaves them room (as the window controls overlay reports it)
+   and a little air before them. */
 html[data-desktop]:has(.desktop-root[data-platform="windows"]) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
 html[data-desktop] .desktop-root[data-platform="windows"] :is(h1, .session-title h1) { letter-spacing: 0; }
-html[data-desktop] .desktop-root[data-platform="windows"] { --caption-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px))); }
+html[data-desktop] .desktop-root[data-platform="windows"] { --caption-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 12px); }
 html[data-desktop][data-fullscreen] .desktop-root[data-platform="windows"] { --caption-inset: 0px; }
 html[data-desktop] .desktop-root[data-platform="windows"] .desktop-titlebar { padding-left: 12px; }
 html[data-desktop] .desktop-root[data-platform="windows"] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
