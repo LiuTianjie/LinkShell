@@ -2,7 +2,15 @@ import { contextBridge, ipcRenderer } from "electron";
 
 // The same messages the WKWebView and WebView2 shells take: `{action, …}` in, DOM events out.
 // The main process accepts them only from the trusted origin's main frame.
+//
+// The page runs in its own world (contextIsolation), so nothing set on `window` here is visible to
+// it: the window's state reaches the page through the bridge below and as the same DOM events.
 const boot = ipcRenderer.sendSync("linkshell:boot") as { appearance: string; visible: boolean; platform: string; zoom?: number } | undefined;
+
+let appearance = boot?.appearance;
+let visible = boot?.visible !== false;
+type Flush = () => Promise<{ saved: boolean; pending: number }>;
+let flush: Flush | undefined;
 
 contextBridge.exposeInMainWorld("linkshellDesktop", {
   postMessage(message: unknown) {
@@ -12,26 +20,26 @@ contextBridge.exposeInMainWorld("linkshellDesktop", {
   /** Electron draws the window: the page can leave room for the traffic lights. */
   shell: "electron",
   platform: boot?.platform ?? process.platform,
+  /** The window's appearance setting now (system, light or dark), for a page that mounts later. */
+  appearance: () => appearance,
+  /** Whether the window is on screen now. */
+  visible: () => visible,
+  /** The page's save barrier: what the main process waits for before the window goes. */
+  setFlush(next: unknown) {
+    flush = typeof next === "function" ? (next as Flush) : undefined;
+  },
 });
-
-if (boot) {
-  // Before first paint, so the page never flashes the other theme or a hidden state.
-  (window as unknown as Record<string, unknown>).__LINKSHELL_DESKTOP_APPEARANCE__ = boot.appearance;
-  (window as unknown as Record<string, unknown>).__LINKSHELL_DESKTOP_VISIBLE__ = boot.visible;
-  (window as unknown as Record<string, unknown>).__LINKSHELL_DESKTOP_SHELL__ = "electron";
-}
 
 ipcRenderer.on("linkshell:event", (_event, name: unknown, detail: unknown) => {
   if (typeof name !== "string" || !name.startsWith("linkshell-")) return;
-  if (name === "linkshell-desktop-visibility") (window as unknown as Record<string, unknown>).__LINKSHELL_DESKTOP_VISIBLE__ = (detail as { visible?: boolean })?.visible !== false;
-  if (name === "linkshell-desktop-appearance") (window as unknown as Record<string, unknown>).__LINKSHELL_DESKTOP_APPEARANCE__ = (detail as { appearance?: string })?.appearance;
+  if (name === "linkshell-desktop-visibility") visible = (detail as { visible?: boolean })?.visible !== false;
+  if (name === "linkshell-desktop-appearance") appearance = (detail as { appearance?: string })?.appearance ?? appearance;
   window.dispatchEvent(new CustomEvent(name, { detail }));
 });
 
 ipcRenderer.on("linkshell:flush", async (_event, nonce: unknown) => {
-  const flush = (window as unknown as { __LINKSHELL_DESKTOP_FLUSH__?: () => Promise<{ saved: boolean; pending: number }> }).__LINKSHELL_DESKTOP_FLUSH__;
   let result = { saved: true, pending: 0 };
-  try { if (typeof flush === "function") result = await flush(); }
+  try { if (flush) result = await flush(); }
   catch { result = { saved: false, pending: 1 }; }
   ipcRenderer.send("linkshell:flushed", nonce, result);
 });

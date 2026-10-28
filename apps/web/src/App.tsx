@@ -715,9 +715,12 @@ function Home({
                 : group === "running"
                   ? "进行中"
                   : "最近会话"}
-              <span className="font-normal text-[var(--tertiaryLabel)]">
-                {shown.length}
-              </span>
+              {/* The filter tabs already count the whole list; a heading counts only a part of it. */}
+              {!(isDesktop && shown.length === sessions.length) && (
+                <span className="font-normal text-[var(--tertiaryLabel)]">
+                  {shown.length}
+                </span>
+              )}
             </h2>
             <SessionTable sessions={shown} navigate={navigate} />
           </div>
@@ -1131,12 +1134,8 @@ function Computers({
         })}
       </div>
       {state.connection?.computer.key === "desktop:local" && (
-        isElectronDesktop ? (
-          // The app has a page of its own for this (本机管理 → 访问密码): here its state and the way there.
-          <div className="computers-section">
-            <AccessPasswordSummary open={() => navigate(manageView("password"))} />
-          </div>
-        ) : (
+        // The app shows this Mac's password beside its devices, as links to 本机管理.
+        isElectronDesktop ? null : (
           <div className="computers-section">
             {heading("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。")}
             <AccessPasswordSettings />
@@ -1176,6 +1175,24 @@ function Computers({
           </div>
         ))}
       </div>
+      {isElectronDesktop && state.connection?.computer.key === "desktop:local" ? (
+        // This Mac's phones and password have their own pages (本机管理 → 设备 / 访问密码): here their
+        // state and the way there.
+        <div className="computers-section">
+          {heading("这台 Mac 的访问")}
+          <AccessPasswordSummary open={() => navigate(manageView("password"))} />
+          <div className="list-row list-row-static">
+            <MonitorSmartphone className="text-[var(--tertiaryLabel)]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">配对设备</div>
+              <p className="text-xs text-[var(--tertiaryLabel)]">
+                {gateway.value ? `${gateway.value.devices.length} 台设备` : "正在读取…"}
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate(manageView("devices"))}>管理</Button>
+          </div>
+        </div>
+      ) : (
       <div className="computers-section">
         {heading("配对设备", "撤销后，该设备需要重新配对才能连接。")}
         <LoadState {...gateway} />
@@ -1224,6 +1241,7 @@ function Computers({
           </div>
         ))}
       </div>
+      )}
       <AcpManager />
     </section>
   );

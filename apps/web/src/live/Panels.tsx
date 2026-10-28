@@ -256,7 +256,10 @@ export function Changes({ view }: { view?: SessionView }) {
                   {slash >= 0 && <small>{shown(file.path).slice(0, slash + 1)}</small>}
                   {shown(file.path).slice(slash + 1)}
                 </span>
-                <span className="diff-stat"><span className="diff-add">+{file.stat.added}</span> <span className="diff-del">−{file.stat.removed}</span></span>
+                {/* A file whose lines didn't change (a move, a mode change) has no count to show. */}
+                {(file.stat.added > 0 || file.stat.removed > 0) && (
+                  <span className="diff-stat"><span className="diff-add">+{file.stat.added}</span> <span className="diff-del">−{file.stat.removed}</span></span>
+                )}
               </button>
               {expanded && <DiffView lines={file.lines} path={file.path} />}
             </div>

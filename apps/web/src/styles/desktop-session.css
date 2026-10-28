@@ -31,14 +31,19 @@ html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--r
    between working rows. */
 html[data-desktop] .desktop-main .conversation { scrollbar-gutter: stable both-edges; scroll-padding-bottom: calc(var(--composer-height, 120px) + 16px); }
 html[data-desktop] .desktop-main .conversation-content { padding: 32px max(24px, calc((100% - 768px) / 2)) calc(var(--composer-height, 120px) + 24px); }
-html[data-desktop] .desktop-main .live-timeline > :is(article, section, .notice-card, [data-slot="alert"]) { margin-bottom: 16px; }
-html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) { margin-bottom: 4px; }
-html[data-desktop] .desktop-main .live-timeline > :is(.assistant-message, .user-message) + :is(.tool-record, .steps-summary, .thought-block),
-html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) + :is(.assistant-message, .user-message) { margin-top: 16px; }
+/* The space between two entries is set once, on the second (the timeline is a flex column, so
+   margins add up instead of collapsing): 16 px between turns and blocks, 4 px between working rows. */
+html[data-desktop] .desktop-main .live-timeline > * { margin-top: 0; margin-bottom: 0; }
+html[data-desktop] .desktop-main .live-timeline > * + * { margin-top: 16px; }
+html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) + :is(.tool-record, .steps-summary, .thought-block) { margin-top: 4px; }
+html[data-desktop] .desktop-main .live-timeline > .user-message + * { margin-top: 24px; }
 
 /* Markdown: headings 1.5 / 1.25 / 1.125 of the text, four steps of a quarter-size above. */
 html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14px; line-height: 1.625; letter-spacing: 0; }
 html[data-desktop] .desktop-main .markdown p { margin: 0 0 14px; }
+/* The reply's last block ends the reply: the space after it is the timeline's to give. */
+html[data-desktop] .desktop-main .markdown > :last-child,
+html[data-desktop] .desktop-main .markdown > .markdown-block:last-child > :last-child { margin-bottom: 0; }
 html[data-desktop] .desktop-main .markdown :is(h1, h2, h3, h4) { margin: 14px 0 8px; font-weight: 590; letter-spacing: -.01em; line-height: 1.35; }
 html[data-desktop] .desktop-main .markdown h1 { font-size: 21px; }
 html[data-desktop] .desktop-main .markdown h2 { font-size: 17.5px; }
@@ -55,13 +60,18 @@ html[data-desktop] .desktop-main .markdown td { padding: 6px 10px; border-bottom
 html[data-desktop] .desktop-main .markdown a { color: var(--link); text-decoration: none; }
 html[data-desktop] .desktop-main .markdown a:hover { text-decoration: underline; text-underline-offset: 2px; }
 html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 6px; border-radius: 6px; background: color-mix(in oklab, var(--label) 6%, transparent); font-family: var(--mono); font-size: .92em; box-shadow: none; }
-/* Code blocks: a soft tile, the language and a round copy button in a 40 px header. */
-html[data-desktop] .desktop-main .markdown .code-surface { margin: 0 0 16px; overflow: hidden; border-radius: 16px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--separator); contain: content; }
-html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 6px 0 16px; border: 0; background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
-html[data-desktop] .desktop-main .markdown .code-copy { width: 24px; height: 24px; border-radius: 50%; color: var(--tertiaryLabel); }
+/* Code blocks, Codex's: the panel's surface barely tinted (2 % of the ink, 3 % of white in the
+   dark), a subtle edge, 20 px corners; the language in the text face in a 48 px header with a
+   20 px round copy button; the source 12 / 20 in the code face. */
+html[data-desktop] .desktop-main .markdown .code-surface { margin: 18px 0; overflow: hidden; border-radius: 20px; background: color-mix(in oklab, var(--label) 2%, var(--plain)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 5%, transparent); contain: content; }
+html[data-desktop][data-theme="dark"] .desktop-main .markdown .code-surface { background: color-mix(in oklab, #fff 3%, var(--plain)); }
+html[data-desktop] .desktop-main .markdown .code-surface:first-child { margin-top: 0; }
+html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 6px 6px 6px 20px; border: 0; background: transparent; color: var(--label); font-family: inherit; font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .markdown .code-toolbar > span { font-family: inherit; }
+html[data-desktop] .desktop-main .markdown .code-copy[data-button] { width: 20px; height: 20px; border-radius: 50%; color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .markdown .code-copy:hover { color: var(--label); }
 html[data-desktop] .desktop-main .markdown .code-copy svg { width: 14px; height: 14px; }
-html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; padding: 0 16px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; }
+html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; padding: 0 20px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; }
 html[data-desktop] .desktop-main .markdown pre { border: 0; border-radius: 16px; background: var(--fill); box-shadow: none; font-size: 12px; line-height: 20px; contain: content; }
 
 /* The reader's own messages: a quiet bubble at the right, at most 70 % of the column. */
@@ -69,7 +79,9 @@ html[data-desktop] .desktop-main .markdown pre { border: 0; border-radius: 16px;
    the gap under the bubble and show with the pointer, so a bubble is only as tall as its text. */
 html[data-desktop] .desktop-main .user-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; width: auto; max-width: none; margin-left: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 html[data-desktop] .desktop-main .user-bubble { max-width: 70%; padding: 10px 16px; border-radius: 22px; background: var(--userBubble); color: var(--label); }
-html[data-desktop] .desktop-main .user-message .markdown { font-size: 14px; line-height: 1.625; }
+/* The reader's words at the conversation's own size (14 / 1.625), as the replies. */
+html[data-desktop] .desktop-main .user-bubble,
+html[data-desktop] .desktop-main .user-bubble :is(.markdown, .markdown p, .question-reply p) { font-size: 14px; line-height: 1.625; }
 html[data-desktop] .desktop-main .user-message .markdown p:last-child { margin-bottom: 0; }
 html[data-desktop] .desktop-main .user-message > .message-actions { position: absolute; top: 100%; right: 4px; z-index: 1; margin-top: 2px; }
 html[data-desktop] .desktop-main .user-message > .failed-message-actions { margin-top: 4px; }
@@ -84,7 +96,7 @@ html[data-desktop] .desktop-main .message-author { gap: 8px; margin-bottom: 6px;
    the command or file at 40 %; the chevron only shows on hover and turns as it opens. */
 html[data-desktop] .desktop-main .tool-record { border: 0; border-radius: 0; background: transparent; }
 html[data-desktop] .desktop-main .tool-record[open] { border: 0; background: transparent; }
-html[data-desktop] .desktop-main .tool-record > summary { display: flex; align-items: center; gap: 6px; min-height: 26px; margin: 0; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .tool-record > summary { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: fit-content; max-width: 100%; min-height: 26px; margin: 0; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
 html[data-desktop] .desktop-main .tool-record > summary:hover { background: transparent; color: var(--label); }
 html[data-desktop] .desktop-main .tool-record[open] > summary { margin: 0; border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .tool-record > summary > strong { flex: 0 1 auto; color: inherit; font-family: inherit; font-size: 14px; font-weight: 400; }
@@ -113,19 +125,24 @@ html[data-desktop] .desktop-main .tool-record:not([open]) > :not(summary) { disp
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .tool-record::details-content { transition: none; } }
 
 /* A folded run of steps: the same quiet line. */
-html[data-desktop] .desktop-main .steps-summary { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font: inherit; font-size: 14px; cursor: pointer; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .steps-summary { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font: inherit; font-size: 14px; cursor: default; transition: color 150ms var(--ease-out); }
 html[data-desktop] .desktop-main .steps-summary:hover { background: transparent; color: var(--label); }
 html[data-desktop] .desktop-main .steps-summary-icon { width: 16px; height: 16px; opacity: .6; }
 html[data-desktop] .desktop-main .steps-summary-chevron { width: 14px; height: 14px; opacity: 0; transition: opacity 150ms var(--ease-out), transform 300ms cubic-bezier(.19, 1, .22, 1); }
 html[data-desktop] .desktop-main .steps-summary:hover .steps-summary-chevron,
 html[data-desktop] .desktop-main .steps-summary[aria-expanded="true"] .steps-summary-chevron { opacity: 1; }
-html[data-desktop] .desktop-main .steps-summary-diff { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The row reads left to right as Codex's: what ran, how many failed, what changed, the chevron
+   right after them, nothing pushed to the far edge. */
+html[data-desktop] .desktop-main .steps-summary { max-width: 100%; }
+html[data-desktop] .desktop-main .steps-summary-label { flex: 0 1 auto; }
+html[data-desktop] .desktop-main .steps-summary-failed { color: var(--danger); font-size: 13px; font-weight: 400; }
+html[data-desktop] .desktop-main .steps-summary-diff { font-family: var(--mono); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-add { color: var(--diffAddText); }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-del { color: var(--diffDelText); }
 
 /* Thinking: the same row; the thought itself at 60 %, at most 140 px. */
 html[data-desktop] .desktop-main .thought-block { border: 0; background: transparent; }
-html[data-desktop] .desktop-main .thought-block > summary { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; cursor: pointer; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .thought-block > summary { display: flex; width: fit-content; align-items: center; gap: 6px; min-height: 26px; padding: 2px 0; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; cursor: default; transition: color 150ms var(--ease-out); }
 html[data-desktop] .desktop-main .thought-block > summary:hover { color: var(--label); }
 html[data-desktop] .desktop-main .thought-block[open] > .markdown { max-height: 140px; margin: 4px 0 8px; padding: 0 0 0 14px; overflow-y: auto; border-left: 1px solid var(--separator); color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 13px; }
 /* "Working…": the text shimmers, a band of light crossing it every two seconds. */
@@ -218,9 +235,12 @@ html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryL
 /* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
 html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
 html[data-desktop] .inspector-tabs { display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; border-bottom: var(--hairline) solid var(--separator); overflow-x: auto; }
-html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: pointer; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fill); color: var(--label); }
+/* The open tab, as Codex's tab strip: a raised step with a hairline and a small shadow in the
+   light; in the dark a tint (a shadow doesn't read there). */
+html[data-desktop] .inspector-tabs > button[data-active] { background: var(--plain); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong), 0 1px 2px rgb(0 0 0 / .06); color: var(--label); }
+html[data-desktop][data-theme="dark"] .inspector-tabs > button[data-active] { background: var(--fill); box-shadow: none; }
 /* Opened from elsewhere (settings, goal, side, MCP): set apart from the standing tools. */
 html[data-desktop] .inspector-tabs > button[data-transient] { margin-left: 6px; }
 html[data-desktop] .inspector-tabs > button[data-transient]::before { content: ""; display: inline-block; width: var(--hairline); height: 14px; margin: 0 10px 0 -10px; vertical-align: -2px; background: var(--separator); }

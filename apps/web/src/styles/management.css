@@ -22,7 +22,7 @@ html[data-desktop] .management-machine strong,
 html[data-desktop] .management-machine span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .management-machine strong { font-size: 13px; font-weight: 590; line-height: 18px; }
 html[data-desktop] .management-machine span { color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
-html[data-desktop] .management-nav-item { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background var(--transition); }
+html[data-desktop] .management-nav-item { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .management-nav-item > svg { flex: none; color: var(--secondaryLabel); }
 html[data-desktop] .management-nav-item > span:first-of-type { flex: 1; }
 html[data-desktop] .management-nav-item:hover { background: var(--fill); }
@@ -31,7 +31,6 @@ html[data-desktop] .management-nav-item[data-active] { background: var(--sidebar
 html[data-desktop] .management-nav-item[data-active] > svg { color: var(--label); }
 html[data-desktop] .management-nav-item[data-gap] { margin-top: 12px; }
 html[data-desktop] .management-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--running); }
-html[data-desktop] .management-nav-foot { display: grid; gap: 2px; margin-top: 16px; padding: 0 10px; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
 
 /* The page. */
 html[data-desktop] .desktop-main > .management { display: flex; flex: 1; flex-direction: column; min-height: 0; }
@@ -52,7 +51,8 @@ html[data-desktop] .management-note[data-tone="success"] { color: var(--success)
 
 /* Groups: a title, then rows in one box. */
 html[data-desktop] .management-group { display: flex; flex-direction: column; gap: 8px; }
-html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; padding: 0 4px; color: var(--label); font-size: 14px; font-weight: 500; }
+/* Codex's settings section titles: 13 / 500 in the secondary ink, above their box. */
+html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; padding: 0 4px; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
 html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
 html[data-desktop] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
 html[data-desktop][data-theme="dark"] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { background: rgb(255 255 255 / .02); }
@@ -62,6 +62,11 @@ html[data-desktop] .management-row + .management-row::before { content: ""; posi
 html[data-desktop] .management-row > span { flex: none; max-width: 50%; color: var(--label); font-weight: 500; }
 html[data-desktop] .management-row > div { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; overflow: hidden; text-align: right; }
 html[data-desktop] .management-row > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Explanations read as a two-column list: a 160 px label, then the sentence from the left. */
+html[data-desktop] .management-rows[data-layout="facts"] .management-row { justify-content: flex-start; gap: 16px; }
+html[data-desktop] .management-rows[data-layout="facts"] .management-row > span { width: 160px; max-width: none; color: var(--secondaryLabel); font-weight: 400; }
+html[data-desktop] .management-rows[data-layout="facts"] .management-row > div { flex: 1; justify-content: flex-start; text-align: left; }
+html[data-desktop] .management-rows[data-layout="facts"] .management-row > div > span { white-space: normal; }
 html[data-desktop] .management-status { display: inline-flex; align-items: center; gap: 7px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .management-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--quaternaryLabel); }
 html[data-desktop] .management-status[data-tone="success"] > span { background: var(--success); }
@@ -133,15 +138,19 @@ html[data-desktop] :is(.management-password-form, .management-panel > .managemen
 html[data-desktop] .management-password-form { display: flex; flex-direction: column; gap: 8px; max-width: 308px; }
 
 /* Log and updates. */
-html[data-desktop] .management-log { min-height: 240px; max-height: calc(100dvh - 180px); margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
+/* The log is the page: it fills the panel below the toolbar and scrolls itself. */
+html[data-desktop] .management-page:has(> .management-log) { height: 100%; }
+html[data-desktop] .management-content:has(.management-log) { overflow: hidden; padding-bottom: 24px; }
+html[data-desktop] .management-log { flex: 1; min-height: 240px; max-height: none; margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
 html[data-desktop] .management-row.management-update-row > span { flex: 1; max-width: none; overflow: hidden; color: var(--secondaryLabel); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .management-row.management-update-row > div { flex: none; overflow: visible; }
 html[data-desktop] .management-update-actions { justify-content: flex-start; }
 
 /* Usage. */
 html[data-desktop] .management-usage { display: flex; flex-direction: column; gap: 16px; }
-html[data-desktop] .management-usage-filters { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
-html[data-desktop] .management-usage-filters > [data-slot="tabs"]:last-child { align-self: flex-start; }
+/* One row: which agent at the left, which days at the right. */
+html[data-desktop] .management-usage-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+html[data-desktop] .management-usage-filters > [data-slot="tabs"]:last-child { flex: none; }
 html[data-desktop] .management-usage-filters > [data-slot="tabs"]:first-child { min-width: 0; overflow-x: auto; }
 html[data-desktop] .management-usage-filters [data-slot="tabs-trigger"] .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
 html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }

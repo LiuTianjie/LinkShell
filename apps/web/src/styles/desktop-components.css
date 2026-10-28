@@ -22,7 +22,7 @@ html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transfor
 html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: #fff; transform: translateX(14px); }
 /* Segmented controls: a grey track 2 px deep, the chosen option a white thumb that casts a little. */
 html[data-desktop] [data-slot="tabs-list"] { --segment-track: #ededed; --segment-thumb: #fff; }
-html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: rgb(255 255 255 / .06); --segment-thumb: #414141; }
+html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: rgb(255 255 255 / .06); --segment-thumb: #303030; }
 /* Badges: 4 px corners, semibold, 18 px tall. */
 html[data-desktop] [data-slot="badge"] { height: 18px; padding-inline: 6px; border-radius: 4px; font-size: 11.5px; font-weight: 590; }
 
@@ -41,11 +41,13 @@ html[data-desktop] :is([data-slot="dialog-header"], [data-slot="alert-dialog-hea
 html[data-desktop] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"]) { font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 28px; }
 html[data-desktop] :is([data-slot="dialog-description"], [data-slot="alert-dialog-description"]) { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; line-height: 20px; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"],
-html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
+html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 14px; right: 14px; display: grid; place-items: center; width: 36px; height: 36px; min-width: 0; border-radius: 50%; color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"]:hover { background: var(--fill); color: var(--label); }
 /* Footers are a row of pills at the bottom right, not a grey band. */
 html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; flex-direction: row; justify-content: flex-end; gap: 12px; }
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) [data-button] { min-height: 36px; padding-inline: 16px; border-radius: 999px; font-size: 13px; }
+/* Codex's dialog buttons: at least 36 px, 16 px in, 14 px text, round ends; 8 px between. */
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { gap: 8px; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"], [data-slot="dialog-content"] .dialog-actions) [data-button] { height: auto; min-height: 36px; padding-inline: 16px; border-radius: 999px; font-size: 14px; }
 html[data-desktop] .modal-subtitle { margin-top: -10px; color: var(--secondaryLabel); font-size: 13px; }
 /* Inside a dialog, a button set on its own line keeps its own width, aligned to the end. */
 html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], form, section) > [data-button],
@@ -96,7 +98,7 @@ html[data-desktop] [data-slot="checkbox"] { width: 16px; height: 16px; border: 1
 html[data-desktop] [data-slot="checkbox"][data-state="checked"] { border-color: var(--accent); background: var(--accent); color: var(--primaryForeground); }
 html[data-desktop] [data-slot="radio-group-item"] { width: 16px; height: 16px; border: 1px solid var(--separatorStrong); background: var(--card); box-shadow: none; }
 html[data-desktop] [data-slot="radio-group-item"][data-state="checked"] { border-color: var(--accent); background: var(--accent); }
-html[data-desktop] .choice-option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border: 1px solid var(--separator); border-radius: var(--radius-control); background: var(--card); font-size: 13px; font-weight: 400; cursor: pointer; }
+html[data-desktop] .choice-option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border: 1px solid var(--separator); border-radius: var(--radius-control); background: var(--card); font-size: 13px; font-weight: 400; cursor: default; }
 html[data-desktop] .choice-option:has([data-state="checked"]) { border-color: var(--separatorStrong); background: var(--sidebarAccent); }
 html[data-desktop] .choice-option + .choice-option { margin-top: 6px; }
 html[data-desktop] [data-slot="separator"] { background: var(--separator); }
@@ -116,7 +118,7 @@ html[data-desktop] [data-slot="command-item"] { min-height: 32px; border-radius:
 html[data-desktop] [data-slot="command-item"][data-selected="true"] { background: var(--sidebarAccent); }
 html[data-desktop] [data-slot="command-input-wrapper"] [data-slot="input-group"] { border-color: var(--separator) !important; background: var(--card) !important; }
 html[data-desktop] [data-slot="sheet-content"] { border-color: var(--separator); background: var(--plain); box-shadow: var(--float-shadow); }
-html[data-desktop] details > summary { cursor: pointer; }
+html[data-desktop] details > summary { cursor: default; }
 /* A primary repeated down a list is no longer the one primary: each row's action is a hairline pill. */
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
@@ -155,12 +157,6 @@ html[data-desktop] .desktop-main .terminal-controls [data-button] { height: 28px
 /* ── Computers and agents ────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .computers-section .list-row-static [data-button][data-variant="ghost"] { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .computers-section .list-row-static > svg { color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) { padding: 4px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); }
-html[data-desktop] .desktop-main .acp-section + .acp-section { margin-top: 12px; }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) > :is(h2, h3) { padding: 10px 12px 2px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) > p { padding: 0 12px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) details > summary { padding: 10px 12px; color: var(--secondaryLabel); font-size: 13px; list-style: none; }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) details > summary::-webkit-details-marker { display: none; }
 
 /* ── Remote desktop ──────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .screen-row [data-slot="badge"] { height: 18px; padding-inline: 7px; }
@@ -180,10 +176,9 @@ html[data-desktop] [role="menuitem"]:focus-visible { box-shadow: none; outline: 
 html[data-desktop] :is(input, textarea, select, [cmdk-input]):focus-visible { outline: none; box-shadow: none; }
 html[data-desktop] [data-slot="input-group"]:has(:focus-visible) { box-shadow: none; }
 /* A dialog's own action sits at the end of the dialog, at its own width. */
-html[data-desktop] [data-slot="dialog-content"] > :is([data-button], div > [data-button]:only-child) { justify-self: end; width: auto; min-width: 96px; }
+html[data-desktop] [data-slot="dialog-content"] > :is([data-button]:not([data-slot="dialog-close"]), div > [data-button]:only-child) { justify-self: end; width: auto; min-width: 96px; }
 /* An empty panel says so in quiet words in its middle, as every other empty state: no frame. */
 html[data-desktop] .desktop-main .side-panel-content > p:only-child { margin: auto; max-width: 280px; padding: 40px 16px; color: var(--tertiaryLabel); font-size: 13px; text-align: center; line-height: 1.55; }
-html[data-desktop] .desktop-main :is(.acp-settings, .acp-section) { width: 100%; max-width: none; box-sizing: border-box; }
 
 /* Skeletons, as Codex's: a 10 % tint with a band of light crossing it every three seconds. */
 html[data-desktop] [data-slot="skeleton"] { border-radius: 6px; background: linear-gradient(90deg, color-mix(in oklab, var(--label) 8%, transparent) 0 40%, color-mix(in oklab, var(--label) 14%, transparent) 50%, color-mix(in oklab, var(--label) 8%, transparent) 60% 100%) 0 0 / 300% 100%; animation: skeleton-sweep 3s linear infinite; }

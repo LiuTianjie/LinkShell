@@ -23,7 +23,6 @@ import {
   Sun,
   SunMoon,
   Terminal,
-  Wrench,
   type LucideIcon,
   Lock,
   Settings2,
@@ -38,7 +37,6 @@ import {
   isWindowsDesktop,
   openDesktopManagement,
   reportDesktopWorkspace,
-  setDesktopAppearance,
   setDesktopContentFocus,
 } from "../live/desktop";
 import { newVersion, management, startManagement } from "../live/management-store";
@@ -57,7 +55,7 @@ import { screenComputerKey } from "../live/screen-route";
 import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
 import { compactTime } from "../live/session-time";
 import { readLocal, saveLocal } from "../live/storage";
-import { applyDesktopTheme } from "../theme";
+import { useApplyDesktopAppearance, useDesktopAppearance, type Appearance } from "../live/desktop-appearance";
 import type { ConsoleShellProps } from "./ConsoleShell";
 import { CommandCenter } from "./CommandCenter";
 import { Button } from "./ui/button";
@@ -86,7 +84,6 @@ import "../styles/desktop-components.css";
 import "../styles/desktop-resources.css";
 import "../styles/management.css";
 
-type Appearance = "system" | "light" | "dark";
 type NavigationItem = { id: string; title: string; icon: LucideIcon };
 
 // The sidebar is mostly the working set (what waits on you, projects and their sessions), as in
@@ -96,9 +93,10 @@ type NavigationItem = { id: string; title: string; icon: LucideIcon };
 const navigationItems: NavigationItem[] = [
   { id: "home", title: "会话", icon: MessageSquare },
   { id: "screen", title: "远程桌面", icon: Monitor },
-  { id: "terminals", title: "终端", icon: Terminal },
 ];
+// The computer's own tools; a session reaches its terminal and files from its inspector (⌘J).
 const toolItems: NavigationItem[] = [
+  { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },
   { id: "worktrees", title: "Worktree", icon: GitBranch },
@@ -117,43 +115,6 @@ function sessionTone(session: SessionSummary): "waiting" | "running" | "error" |
   return undefined;
 }
 
-function isAppearance(value: unknown): value is Appearance {
-  return value === "system" || value === "light" || value === "dark";
-}
-
-function useDesktopAppearance() {
-  const [appearance, setAppearance] = useState<Appearance>(() => {
-    const native = (window as Window & { __LINKSHELL_DESKTOP_APPEARANCE__?: unknown })
-      .__LINKSHELL_DESKTOP_APPEARANCE__;
-    if (isAppearance(native)) return native;
-    const saved = readLocal<string>("desktopAppearance", "system");
-    return isAppearance(saved) ? saved : "system";
-  });
-  useEffect(() => {
-    const receive = (event: Event) => {
-      const value = (event as CustomEvent<{ appearance?: unknown }>).detail?.appearance;
-      if (isAppearance(value)) setAppearance(value);
-    };
-    window.addEventListener("linkshell-desktop-appearance", receive);
-    return () => window.removeEventListener("linkshell-desktop-appearance", receive);
-  }, []);
-  useEffect(() => {
-    const system = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => {
-      applyDesktopTheme(appearance === "system" ? (system.matches ? "dark" : "light") : appearance);
-    };
-    update();
-    saveLocal("desktopAppearance", appearance);
-    system.addEventListener("change", update);
-    return () => system.removeEventListener("change", update);
-  }, [appearance]);
-  const chooseAppearance = (value: Appearance) => {
-    setAppearance(value);
-    // Only an explicit UI choice writes back; native notifications never echo.
-    setDesktopAppearance(value);
-  };
-  return [appearance, chooseAppearance] as const;
-}
 
 /**
  * Whether the Electron window is translucent (vibrancy on: focused, below 4K, not turned off);
@@ -550,10 +511,10 @@ function DesktopNavigation({
       <SidebarContent className="desktop-navigation">
         <nav className="desktop-places" aria-label="工作台">
           {navigationItems.map(place)}
+          {/* A folding group, as the project rows below: the chevron leads, where an icon would be. */}
           <button type="button" className="desktop-place desktop-place-group" aria-expanded={showTools} onClick={toggleTools}>
-            <Wrench size={16} strokeWidth={1.6} aria-hidden />
-            <span>工具</span>
             <ChevronRight className="desktop-place-chevron" size={13} aria-hidden />
+            <span>工具</span>
           </button>
           {showTools && <div className="desktop-places-nested">{toolItems.map(place)}</div>}
         </nav>
@@ -678,6 +639,7 @@ function WindowsTopBar({ openPalette }: { openPalette: () => void }) {
 
 export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   const [appearance, setAppearance] = useDesktopAppearance();
+  useApplyDesktopAppearance(appearance);
   useWindowSurface();
   const [palette, setPalette] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => readLocal("desktopSidebarHidden", false));

@@ -1,10 +1,33 @@
 import type { Identity } from "@linkshell/wire";
 import type { Computer } from "./engine";
 
-interface ElectronBridge { postMessage(value: unknown): void; shell: "electron"; platform: string }
+interface ElectronBridge {
+  postMessage(value: unknown): void;
+  shell: "electron";
+  platform: string;
+  appearance?(): string | undefined;
+  visible?(): boolean;
+  setFlush?(flush: () => Promise<{ saved: boolean; pending: number }>): void;
+}
 const electron = typeof window !== "undefined"
   ? (window as Window & { linkshellDesktop?: ElectronBridge }).linkshellDesktop
   : undefined;
+
+/**
+ * The window's appearance setting as the shell knows it: the Electron bridge, else what the
+ * WKWebView / WebView2 shells put on `window` before the page ran.
+ */
+export function shellAppearance(): string | undefined {
+  if (electron?.appearance) return electron.appearance();
+  const value = (window as Window & { __LINKSHELL_DESKTOP_APPEARANCE__?: unknown }).__LINKSHELL_DESKTOP_APPEARANCE__;
+  return typeof value === "string" ? value : undefined;
+}
+
+/** Whether the shell's window is on screen (true when the shell doesn't say). */
+export function shellVisible(): boolean {
+  if (electron?.visible) return electron.visible();
+  return (window as Window & { __LINKSHELL_DESKTOP_VISIBLE__?: boolean }).__LINKSHELL_DESKTOP_VISIBLE__ !== false;
+}
 
 export const isDesktop =
   typeof window !== "undefined" && window.__LINKSHELL_CONFIG__?.desktop === true;
@@ -77,7 +100,10 @@ export async function bootstrapDesktop(): Promise<void> {
     }
     bootstrap = await desktopRequest<DesktopBootstrap>("/desktop/bootstrap");
     document.documentElement.dataset.desktop = "true";
+    // The other shells call this global; Electron's preload can't see the page's globals, so it
+    // is handed over through the bridge as well.
     (window as Window & { __LINKSHELL_DESKTOP_FLUSH__?: typeof flushDesktopStorage }).__LINKSHELL_DESKTOP_FLUSH__ = flushDesktopStorage;
+    electron?.setFlush?.(flushDesktopStorage);
   })().finally(() => { booting = undefined; });
   return booting;
 }

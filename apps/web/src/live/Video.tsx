@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { ComputerPreviewSubscription } from "@linkshell/client-core";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import {
+  EmptyState,
   ErrorNotice,
   LoadState,
   messageOf,
@@ -74,9 +75,11 @@ export function ComputerPreview({ sessionId }: { sessionId: string }) {
       alt="Agent 当前电脑操作画面"
     />
   ) : (
-    <p className="text-[13px] text-muted-foreground">
-      Agent 操作电脑时，画面会显示在这里。
-    </p>
+    <EmptyState
+      icon={<Monitor />}
+      title="还没有操作画面"
+      description="Agent 操作电脑时，画面会显示在这里。"
+    />
   );
 }
 

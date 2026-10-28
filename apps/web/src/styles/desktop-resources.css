@@ -35,8 +35,8 @@ html[data-desktop] .desktop-main .resource-hidden-toggle { color: var(--secondar
 html[data-desktop] .desktop-main .resource-picker-footer { padding-top: 10px; border-top: var(--hairline) solid var(--separator); }
 
 /* Entries: 32 px rows, the file tree's; a search result shows its path under its name. */
-html[data-desktop] .desktop-main .resource-entry-list:not(:empty) { padding: 4px; }
-html[data-desktop] .desktop-main .resource-entry { height: 32px; min-height: 32px; padding: 0 10px; gap: 8px; border: 0; border-radius: 10px; font-size: 13px; }
+html[data-desktop] .desktop-main .resource-entry-list:not(:empty) { padding: 0; }
+html[data-desktop] .desktop-main .resource-entry { height: 32px; min-height: 32px; padding: 0 12px; gap: 8px; border: 0; border-radius: 0; font-size: 13px; }
 html[data-desktop] .desktop-main .resource-entry:has(.resource-entry-path) { height: 44px; min-height: 44px; }
 html[data-desktop] .desktop-main .resource-entry:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .resource-entry[aria-current] { background: var(--fill); }
@@ -61,15 +61,22 @@ html[data-desktop] .desktop-main :is(.cm-editor, .resource-markdown pre) { font-
 
 /* ── Port previews ───────────────────────────────────────────────────────── */
 /* The connect bar, then the services in one group that grows with them, then the preview. */
-html[data-desktop] .desktop-main .resource-port-connect { gap: 8px; padding: 10px 12px; border-radius: 12px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop] .desktop-main .resource-port-connect-copy { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .resource-port-form { border-radius: 999px; }
+/* Opening a port by number is a row like the others: what it is at the left, the field at the right
+   (no card around a tinted field around a button). */
+html[data-desktop] .desktop-main .resource-port-connect { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 8px 0 16px; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .resource-port-connect-copy { display: flex; align-items: center; gap: 8px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .resource-port-connect-copy svg { width: 16px; height: 16px; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .resource-port-form { flex: none; width: 260px; }
+html[data-desktop] .desktop-main .resource-port-form [data-slot="input-group"] { height: 32px; padding-right: 2px; }
+html[data-desktop] .desktop-main .resource-port-form [data-slot="input-group"] [data-button] { height: 28px; padding-inline: 10px; border-radius: 8px; font-size: 13px; }
 html[data-desktop] .desktop-main .resource-services { max-height: none; overflow: visible; }
 html[data-desktop] .desktop-main .resource-service-list { max-height: none; overflow: visible; }
 html[data-desktop] .desktop-main .resource-service { min-height: 44px; padding: 0 12px; background: transparent; font-size: 13px; }
 html[data-desktop] .desktop-main .resource-service:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .resource-service-main strong { font-weight: 500; }
 html[data-desktop] .desktop-main .resource-service .resource-chip { font-family: var(--mono); }
+/* A row's port number or 项目 mark is a fact at the end of it, quiet text, not a box per row. */
+html[data-desktop] .desktop-main :is(.resource-service, .resource-entry) [data-slot="badge"] { height: auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .desktop-main .resource-service [data-slot="badge"] { font-family: var(--mono); }
 html[data-desktop] .desktop-main .port-preview-tab-bar { gap: 4px; padding-bottom: 8px; border-bottom: var(--hairline) solid var(--separator); }
 html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
@@ -81,14 +88,36 @@ html[data-desktop] .desktop-main .port-frame { border: var(--hairline) solid var
 /* The base list draws a rule above itself; in the group's frame (or when empty) it must not. */
 html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
 html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
-html[data-desktop] .desktop-main .worktree-entry + .worktree-entry::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: var(--hairline); background: var(--separator); }
+html[data-desktop] .desktop-main .worktree-entry + .worktree-entry::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
 html[data-desktop] .desktop-main .worktree-entry:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .worktree-info strong { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .worktree-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); font-size: 12px; }
 
+/* ── ACP connections (电脑与 Agent) ─────────────────────────────────────── */
+/* The same group as the page's other sections: its heading 12 px in, then rows; the agent picker
+   is a 28 px control at the right of its row, not a full-width field. */
+html[data-desktop] .desktop-main .acp-settings { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .acp-settings { background: rgb(255 255 255 / .02); }
+html[data-desktop] .desktop-main .acp-settings-heading { padding: 12px 12px 6px; }
+html[data-desktop] .desktop-main .acp-settings-heading h3 { color: var(--label); font-size: 14px; font-weight: 500; }
+html[data-desktop] .desktop-main .acp-settings-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .acp-agent-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 8px 0 12px; }
+html[data-desktop] .desktop-main .acp-agent-field [data-slot="field-label"] { flex: none; font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .acp-agent-field [data-slot="select-trigger"] { width: 220px; height: 28px; }
+html[data-desktop] .desktop-main .acp-settings > :is(form, .acp-section, details, [data-slot="alert"]) { margin: 0; }
+html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details) { position: relative; }
+html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details)::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
+html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) { gap: 12px; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
+html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) > :is(h3, h4) { color: var(--label); font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .acp-settings details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 12px; color: var(--label); font-size: 13px; font-weight: 510; list-style: none; transition: background var(--transition); }
+html[data-desktop] .desktop-main .acp-settings details > summary:hover { background: var(--fill); }
+html[data-desktop] .desktop-main .acp-settings details > summary::-webkit-details-marker { display: none; }
+html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 12px 12px; }
+html[data-desktop] .desktop-main .acp-settings p.muted { color: var(--tertiaryLabel); font-size: 12px; }
+
 /* ── Small things shared by these pages ──────────────────────────────────── */
 html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 4px; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 0; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main .screen-list { background: rgb(255 255 255 / .02); }
 html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; }

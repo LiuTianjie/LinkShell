@@ -153,7 +153,8 @@ export function Dialogs({ children }: { children: ReactNode }) {
                 <FieldGroup>
                   {request.kind === "prompt" && (
                     <Field>
-                      <FieldLabel htmlFor="dialog-value">
+                      {/* The title already says what to type; the label is for screen readers. */}
+                      <FieldLabel htmlFor="dialog-value" className="sr-only">
                         {request.text}
                       </FieldLabel>
                       <Input
@@ -165,7 +166,7 @@ export function Dialogs({ children }: { children: ReactNode }) {
                       />
                     </Field>
                   )}
-                  <div className="flex justify-end gap-2">
+                  <div className="dialog-actions flex justify-end gap-2">
                     <Button
                       variant="outline"
                       type="button"

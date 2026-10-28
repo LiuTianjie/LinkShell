@@ -41,7 +41,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { desktopInvoke, openDesktopExternal, setDesktopAppearance } from "./desktop";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { desktopInvoke, openDesktopExternal } from "./desktop";
+import { useDesktopAppearance, type Appearance } from "./desktop-appearance";
 import {
   accountAction,
   cancelLogin,
@@ -82,7 +84,6 @@ import { ManagementUsage } from "./ManagementUsage";
 import "../styles/management.css";
 
 type Confirm = "stop" | "restart" | "logout" | "connect-gateway" | "remove-password" | "upgrade";
-type Appearance = "system" | "light" | "dark";
 
 const pageIcons: Record<ManagePage, LucideIcon> = {
   overview: House, devices: Smartphone, password: Lock, usage: ChartColumn, log: ScrollText, updates: CircleArrowDown, settings: Settings,
@@ -123,19 +124,6 @@ function useFacts() {
 }
 type Facts = ReturnType<typeof useFacts>;
 
-function useAppearance(): [Appearance, (value: Appearance) => void] {
-  const read = (): Appearance => {
-    const value = (window as Window & { __LINKSHELL_DESKTOP_APPEARANCE__?: unknown }).__LINKSHELL_DESKTOP_APPEARANCE__;
-    return value === "light" || value === "dark" || value === "system" ? value : "dark";
-  };
-  const [appearance, setAppearance] = useState(read);
-  useEffect(() => {
-    const receive = () => setAppearance(read());
-    window.addEventListener("linkshell-desktop-appearance", receive);
-    return () => window.removeEventListener("linkshell-desktop-appearance", receive);
-  }, []);
-  return [appearance, (value) => { setAppearance(value); setDesktopAppearance(value); }];
-}
 
 /** 本机管理: LinkShell.app's native dashboard, now a page of the Electron window. */
 export function Management({ page, navigate }: { page: ManagePage; navigate: (page: ManagePage) => void }) {
@@ -156,7 +144,6 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
     else if (action === "upgrade") void upgradeInstall();
     else void serviceAction(action);
   };
-  const machine = state.snapshot?.machine?.hostname.replace(/\.local$/, "");
 
   return (
     <div className="management">
@@ -164,15 +151,23 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
         <div className="management-page">
           {page !== "usage" && (
             <PageHeader
-              title={page === "overview" ? (machine ?? "这台 Mac") : managePageTitles[page]}
-              detail={page === "overview" ? `本机服务${facts.service} · 网关${facts.gateway}` : subtitles[page] || undefined}
+              // The sidebar already names the Mac; the toolbar names the page, its facts beside it.
+              title={managePageTitles[page]}
+              detail={page === "overview"
+                ? `本机服务${facts.service} · 网关${facts.gateway}${state.snapshot?.machine?.hostVersion ? ` · Host ${state.snapshot.machine.hostVersion}` : ""}`
+                : page === "log" ? `${subtitles.log} · ${facts.home}/host.log` : subtitles[page] || undefined}
               actions={<>
                 {state.busy && <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在处理" />}
                 {page === "log" && <LogActions />}
                 <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" disabled={state.busy} aria-label="服务操作"><Ellipsis />本机服务</Button>
-                  </DropdownMenuTrigger>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" disabled={state.busy} aria-label="本机服务操作"><Ellipsis /></Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>本机服务</TooltipContent>
+                  </Tooltip>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onSelect={refreshManagement}><RefreshCw />刷新状态</DropdownMenuItem>
                     <DropdownMenuSeparator />
@@ -473,7 +468,7 @@ function Password({ facts, confirm }: { facts: Facts; confirm: (action: Confirm)
         </div>
       </Group>
       <Group title="怎么生效">
-        <div className="management-rows">
+        <div className="management-rows" data-layout="facts">
           <Row title="其他设备"><span className="management-muted">手机、网页和其他电脑上，这台电脑会带一把锁</span></Row>
           <Row title="打开时"><span className="management-muted">先输入密码；输错 5 次要等 5 分钟</span></Row>
           <Row title="记住多久"><span className="management-muted">同一台设备解锁后 7 天内不用再输</span></Row>
@@ -497,12 +492,8 @@ function LogActions() {
 }
 
 function Log({ facts }: { facts: Facts }) {
-  return (
-    <>
-      <pre className="management-log" tabIndex={0}>{facts.state.log || "正在读取…"}</pre>
-      <p className="management-hint management-mono management-selectable">{facts.home}/host.log</p>
-    </>
-  );
+  // The file's path is in the toolbar; the log takes the rest of the page.
+  return <pre className="management-log" tabIndex={0}>{facts.state.log || "正在读取…"}</pre>;
 }
 
 function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) => void }) {
@@ -553,7 +544,7 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
 
 function SettingsPage({ facts }: { facts: Facts }) {
   const { state, standalone } = facts;
-  const [appearance, setAppearance] = useAppearance();
+  const [appearance, setAppearance] = useDesktopAppearance();
   const permissions = state.permissions;
   const granted = (value: boolean) => (!permissions.known ? "未知" : value ? "已授权" : "未授权");
   return (
@@ -655,10 +646,6 @@ export function ManagementNav({ page, navigate, back }: { page: ManagePage; navi
           </button>
         );
       })}
-      <p className="management-nav-foot">
-        服务{facts.service} · 网关{facts.gateway}
-        {facts.state.snapshot?.machine?.hostVersion && <span className="management-mono">Host {facts.state.snapshot.machine.hostVersion}</span>}
-      </p>
     </nav>
   );
 }

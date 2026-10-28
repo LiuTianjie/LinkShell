@@ -667,12 +667,14 @@ export function AcpManager() {
   const disabled = !online || job.busy;
   return (
     <section className="acp-settings min-w-0">
-      <h3>ACP 连接与工具</h3>
-      <p className="muted">
-        管理 Agent 的登录、工具权限和自定义连接。配置保存在当前电脑上。
-      </p>
+      <div className="acp-settings-heading">
+        <h3>ACP 连接与工具</h3>
+        <p className="muted">
+          管理 Agent 的登录、工具权限和自定义连接。配置保存在当前电脑上。
+        </p>
+      </div>
       {!online && <OfflineNotice />}
-      <Field>
+      <Field className="acp-agent-field" orientation="horizontal">
         <FieldLabel htmlFor={`${id}-agent`}>选择 Agent</FieldLabel>
         <Choice
           id={`${id}-agent`}
