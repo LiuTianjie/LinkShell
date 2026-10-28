@@ -373,6 +373,6 @@ Windows 当前按未签名方式发布，无需等待 Authenticode 证书。发�
 
 1. `apps/windows/package.json` 与 CLI 版本保持一致，避免安装器显示版本与内置运行环境不一致。
 2. 对已推送的发布 tag 运行 `gh workflow run windows.yml --ref cli-vX.Y.Z`，确认该次运行的提交与发布提交一致，全部 CI 步骤通过。
-3. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json` 和内置 CLI 的版本。
+3. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json`、`resources/app/package.json` 和内置 CLI 的版本。界面有改动时看一眼 `LinkShell-Windows-window-shots` 的三张截图（深色、浅色、本机管理）：打包 smoke 真实启动了 Electron 窗口，但只检查 DOM，看不出排版。
 4. 将这四个文件上传到 `desktop-vX.Y.Z` Release，保留已有 Mac DMG，桌面 Release 仍使用 `--latest=false`，带 APK 的移动版继续作为 latest。
 5. 核对远端文件大小和摘要、实际下载可用性后，清理本轮下载、解压及构建临时目录，保留最终制品与校验记录。原生 ARM64、自动安装更新、手机真机与公网屏幕性能不属于 CI 构建证明。

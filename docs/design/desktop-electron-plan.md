@@ -48,5 +48,5 @@ LinkShell.app/Contents/
 
 ## 待做
 
-- Windows：同一个 Electron 壳替换 WebView2 工作台（`apps/windows` 的屏幕 helper 与安装器保留）。
+- ~~Windows：同一个 Electron 壳替换 WebView2 工作台~~：0.10.75 起 `LinkShell.exe` 就是这个 Electron（`apps/windows/scripts/electron.mjs` 组装，图标和版本信息由固定校验的 electron/rcedit 写入），屏幕 helper 与安装器保留；WPF / WebView2 窗口已删除。打包 smoke 在 Windows CI 上启动它并经调试端口检查工作台和桥，另存三张桌面截图（artifact `LinkShell-Windows-window-shots`）。
 - ~~发布：双架构 DMG、公证、Sparkle 源~~：`build-standalone.mjs` 每个架构都调用 `package.mjs` 装进 Electron（x64 的 Electron 由 `electron-dist.mjs` 下载校验），随后公证、生成 Sparkle 源，与原有流程相同。旧版（WKWebView）经 Sparkle 升级到 Electron 版：同一 bundle id 和签名，数据在 `~/.linkshell`，权限沿用。
