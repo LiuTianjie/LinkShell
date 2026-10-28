@@ -322,6 +322,7 @@ const handlers = {
   "session/resume": (params) => {
     requireOpenArgs(params);
     requireAuth();
+    if (process.env.FAKE_ACP_RESUME_LOG) appendFileSync(process.env.FAKE_ACP_RESUME_LOG, `${JSON.stringify(params._meta?.claudeCode?.options?.env ?? null)}\n`);
     if (claudeDir) {
       if (!existsSync(transcriptPath(params.sessionId, params.cwd) ?? "")) throw { code: -32002, message: `No conversation found with session ID: ${params.sessionId}` };
       sessions[params.sessionId] ??= { cwd: params.cwd, title: null, updatedAt: new Date().toISOString(), mode: "default", model: "fast", history: [] };
