@@ -32,7 +32,7 @@ describe("readUserText", () => {
 
   it("reads Claude's shell mode as a command and its output", () => {
     const view = readUserText("<bash-input>npm run sync:duo</bash-input><bash-stdout>&gt; ok\n</bash-stdout><bash-stderr></bash-stderr>");
-    expect(view.shell).toEqual({ command: "npm run sync:duo", stdout: "&gt; ok", stderr: undefined });
+    expect(view.shell).toEqual({ command: "npm run sync:duo", stdout: "> ok", stderr: undefined });
     expect(view.text).toBe("");
   });
 
@@ -64,5 +64,16 @@ describe("readUserText", () => {
   it("names Codex's modes", () => {
     const view = readUserText("## Code review guidelines:\nBe strict.\n\n## My request:\nreview it");
     expect(view).toMatchObject({ text: "review it", context: [{ kind: "review", label: "审查模式" }] });
+  });
+  it("shows a shell's output as it was printed, though Claude stores it escaped", () => {
+    // As in a real transcript: npm's "> script" lines, written as "&gt;".
+    const view = readUserText("<bash-input>npm run sync:duo</bash-input><bash-stdout>&gt; itool-tech@1.1.0 sync:duo\n&gt; node a.mjs &amp;&amp; echo &lt;ok&gt; &amp;gt;</bash-stdout><bash-stderr></bash-stderr>");
+    expect(view.shell).toEqual({ command: "npm run sync:duo", stdout: "> itool-tech@1.1.0 sync:duo\n> node a.mjs && echo <ok> &gt;", stderr: undefined });
+    expect(readUserText("<local-command-stdout>a &lt; b</local-command-stdout>").output).toBe("a < b");
+  });
+  it("reads a Codex mention of another thread as its title", () => {
+    expect(readUserText("&#x20;[修复闪退并优化 UI 和翻译](codex://threads/01a18119-2439-7653-a137-79214eed158d)继续完成这个").text).toBe("「修复闪退并优化 UI 和翻译」继续完成这个");
+    // Other links and a person's own entities stay as written.
+    expect(readUserText("see [docs](https://example.com) &amp; more").text).toBe("see [docs](https://example.com) &amp; more");
   });
 });

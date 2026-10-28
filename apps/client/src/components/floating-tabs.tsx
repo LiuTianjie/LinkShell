@@ -17,6 +17,12 @@ export const TAB_BAR_HEIGHT = 64;
 const SIDE_MARGIN = 24;
 const GAP_BELOW = 10;
 
+/**
+ * iOS's native tab bar above the home indicator. A list that doesn't let the system inset it
+ * (contentInsetAdjustmentBehavior "never") leaves this, plus the safe area, itself.
+ */
+export const IOS_TAB_BAR_HEIGHT = 49;
+
 /** Space scroll views should leave under their content for the floating bar. */
 export function useFloatingTabInset(): number {
   const insets = useSafeAreaInsets();

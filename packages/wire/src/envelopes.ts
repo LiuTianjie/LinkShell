@@ -194,6 +194,27 @@ function codexContext(text: string, images: number): { text: string; context: Us
   return { text: request, context };
 }
 
+// Claude writes a shell's output into its transcript with <, > and & escaped.
+const ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: "\"", apos: "'" };
+function unescapeHtml(value: string): string {
+  // One pass: "&amp;gt;" is the text "&gt;", not ">".
+  return value.replace(/&(lt|gt|amp|quot|apos|#\d{1,7}|#x[0-9a-f]{1,6});/gi, (whole, name: string) => {
+    const key = name.toLowerCase();
+    const code = key.startsWith("#x") ? parseInt(key.slice(2), 16) : key.startsWith("#") ? Number(key.slice(1)) : undefined;
+    if (code === undefined) return ENTITIES[key] ?? whole;
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  });
+}
+
+/**
+ * Codex Desktop writes a mention of another of its threads as a Markdown link to
+ * codex://threads/<id>, with the space before it as "&#x20;": read as the thread's title.
+ */
+function threadMentions(text: string): string {
+  const read = text.replace(/&#(?:x20|32);/gi, " ").replace(/\[([^\]\n]+)\]\(codex:\/\/threads\/[\w-]+\)/g, "「$1」");
+  return read === text ? text : read.trim();
+}
+
 /**
  * How to show a person's message: its words, what came with it, or the one event it is. `images`
  * is how many pictures the message carries besides its text, so an envelope naming them doesn't
@@ -228,7 +249,7 @@ export function readUserText(raw: string, { images = 0 }: { images?: number } = 
   }
 
   if (/^<bash-(?:input|stdout|stderr)>/.test(text)) {
-    const clean = (value?: string) => value?.replace(ANSI, "").replace(/\n+$/, "") || undefined;
+    const clean = (value?: string) => (value === undefined ? undefined : unescapeHtml(value).replace(ANSI, "").replace(/\n+$/, "")) || undefined;
     const command = clean(tagText(text, "bash-input"))?.trim();
     const stdout = clean(tagText(text, "bash-stdout"));
     const stderr = clean(tagText(text, "bash-stderr"));
@@ -236,11 +257,11 @@ export function readUserText(raw: string, { images = 0 }: { images?: number } = 
     return view({ shell: { command, stdout, stderr }, text: rest, hidden: !command && !stdout && !stderr && !rest });
   }
   if (/^<local-command-(?:stdout|stderr)>/.test(text)) {
-    const output = [tagText(text, "local-command-stdout"), tagText(text, "local-command-stderr")]
+    const raw = [tagText(text, "local-command-stdout"), tagText(text, "local-command-stderr")]
       .filter((part): part is string => !!part?.trim())
       .join("\n")
-      .replace(ANSI, "")
-      .trim();
+      .replace(ANSI, "");
+    const output = unescapeHtml(raw).trim();
     // /model's confirmation: the Claude app doesn't show the switch as a line either.
     return view({ output: output || undefined, hidden: !output || /^Set model to\b/.test(output) });
   }
@@ -250,7 +271,8 @@ export function readUserText(raw: string, { images = 0 }: { images?: number } = 
   const codex = codexContext(text, images);
   if (codex) {
     context.push(...codex.context);
-    return view({ text: codex.text, hidden: !codex.text && images === 0 && context.length === 0 });
+    const words = threadMentions(codex.text);
+    return view({ text: words, hidden: !words && images === 0 && context.length === 0 });
   }
-  return view({ text });
+  return view({ text: threadMentions(text) });
 }

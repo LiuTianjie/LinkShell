@@ -33,7 +33,7 @@ import {
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
-import { useFloatingTabInset } from "@/components/floating-tabs";
+import { IOS_TAB_BAR_HEIGHT, useFloatingTabInset } from "@/components/floating-tabs";
 import { NEW_SESSION } from "@/components/new-session-action";
 import { PageSearch } from "@/components/page-header";
 import { SessionContent } from "./session-screen";
@@ -536,7 +536,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingHorizontal: compact ? 12 : 16,
-          paddingBottom: 32 + tabInset,
+          // The system doesn't inset this list ("never" above), so on iOS its end clears the tab bar here.
+          paddingBottom: 32 + (Platform.OS === "ios" ? insets.bottom + IOS_TAB_BAR_HEIGHT : tabInset),
           ...(padCenteredEmpty ? { maxWidth: 480, width: "100%", alignSelf: "center" } : {}),
         }}
         style={{ flex: 1, backgroundColor: colors.background }}
