@@ -10,7 +10,9 @@
 //   Contents/Resources/app/             this package's compiled main and preload
 //   Contents/Resources/Workspace/       the web workspace (from build-app.mjs)
 //
-//   node scripts/package.mjs [--app <LinkShell.app from apps/mac/build-app.mjs>] [--out <dir>]
+//   node scripts/package.mjs [--app <LinkShell.app from apps/mac/build-app.mjs>] [--out <dir>] [--electron <Electron.app>]
+//
+// --electron: another architecture's Electron (scripts/electron-dist.mjs); the installed one by default.
 //
 // Run apps/mac's build first (pnpm --filter @linkshell/mac build). The input is copied, never changed.
 import { execFileSync } from "node:child_process";
@@ -40,7 +42,7 @@ const plist = (file) => ({
 if (process.platform !== "darwin") throw new Error("LinkShell.app is packaged on macOS");
 if (!existsSync(join(source, "Contents/MacOS/LinkShell"))) throw new Error(`Build apps/mac first: ${source} is missing`);
 // require("electron") is the path of Electron.app/Contents/MacOS/Electron.
-const electron = dirname(dirname(dirname(createRequire(import.meta.url)("electron"))));
+const electron = resolve(option("--electron", dirname(dirname(dirname(createRequire(import.meta.url)("electron"))))));
 if (!existsSync(electron)) throw new Error(`Electron is not installed: ${electron}`);
 
 // The workspace is rebuilt here, so a change to apps/web needs no Swift rebuild.

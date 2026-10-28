@@ -1,29 +1,29 @@
 # LinkShell Windows 桌面版
 
-Windows 桌面端复用现有 Host / Gateway / 手机协议，提供与 macOS 0.10.49 相同的工作台，以及原生本机管理和系统托盘。内置 Node、CLI、Host、工作台资源与屏幕组件；Agent 仍由用户自行安装并登录。
+Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS 是同一个 Electron 应用（`apps/desktop`）：工作台、本机管理和系统托盘。内置 Node、CLI、Host、工作台资源与屏幕组件；Agent 仍由用户自行安装并登录。
 
 安装包沿用 macOS 的运行时精简规则：保留 Claude SDK 和 ACP 适配器，排除不会使用的内置 Claude 程序，继续调用用户已安装的 Claude。打包同时清理 ARM64 终端文件、调试符号、类型声明、source map 和 node-pty 构建源码，并覆盖复用暂存目录的情况；x64 终端运行库、可执行 JS、许可证与可替换的 FFmpeg DLL 保留。包内 smoke 验证外部 Agent 调用与真实 ConPTY 进程。
 
 ## 桌面体验
 
-默认打开“工作台”，与“本机管理”共享 232 点侧栏和 104 点品牌区。工作台由 WebView2 加载随安装包附带的同一套 Web UI，管理页使用原生 WPF；均支持深色、浅色与跟随系统。Ctrl+1 / Ctrl+2 切换模式，控制远程屏幕时按键交给远程电脑。主题保存在数据目录的 `desktop-preferences.json`，不修改 Windows 的系统外观。
+默认打开“工作台”。窗口是 Electron 44，重命名为 `LinkShell.exe`，加载随安装包附带的同一套 Web UI；本机管理是窗口里的页面，与 Mac 相同。Ctrl+1 / Ctrl+2 切换，控制远程屏幕时按键交给远程电脑。标题栏由页面绘制，右上角是系统的最小化、最大化和关闭按钮。支持深色、浅色与跟随系统，不修改 Windows 的系统外观。
 
 - 工作台支持本机和其他电脑的对话、继续会话、审批、问题回答、项目、终端、文件、Worktree 和多标签端口预览。本机通过命名管道连接，无需账号、Pro 或网关；远程电脑沿用账号和配对流程。
 - 管理页切换保留工作台实例和草稿。退出或重连前等待草稿与设置写入 `desktop-client.json`，保存失败时可返回重试，或明确选择丢弃。退出只结束界面所属的工作台进程，保留后台 Host。
 - Windows 工作台通过 Chromium WebRTC 视频接收和 GPU 合成显示远程屏幕，输入沿用独立 DataChannel；兼容画面仍可通过中继接收。离开屏幕、进入管理、隐藏或最小化会销毁屏幕连接并释放输入，返回重新连接。此接收路径没有实现 macOS 的 VideoToolbox / Metal 原生接收器，也不保证硬件解码、120 fps 或弱网性能。
-- 工作台仅向可信主页面开放原生管理、外观和外部链接接口；屏幕 iframe 保持不透明隔离，端口预览保持独立 origin，不向它们开放原生桥、账号或客户端存储。WebView2 使用独立 InPrivate 会话，下载经 Windows 保存对话框确认。
+- 工作台仅向可信主页面开放原生管理、外观和外部链接接口；屏幕 iframe 保持不透明隔离，端口预览保持独立 origin，不向它们开放原生桥、账号或客户端存储。下载经 Windows 保存对话框确认。
 
-- 管理侧栏包含总览、设备、用量统计、日志、更新和设置。启动、停止、重启与刷新位于右上角“服务操作”；停止和重启前会说明影响。
+- 本机管理包含总览、设备、访问密码、用量统计、日志、更新和设置，与 Mac 相同。设置页可开关登录时启动和远程屏幕，并可复制内置 `linkshell.cmd` 的路径。
 - 总览与设备页可生成二维码、六位配对码和有效期。新设备出现后提示配对成功，过期后需要重新生成。
 - 会话与审批统一在工作台完成；管理总览和托盘保留会话概况和工作台入口。账号页支持会员刷新与 Pro 激活码兑换，激活码仅经 stdin 传给 CLI。
 - 用量统计提供全部 / Agent 筛选、今天 / 7 天 / 30 天、Token 等指标、每日趋势和模型明细。无数据不显示为“零消耗”。
-- 日志页读取 Host 最近 64 KB，可选择复制。更新页检查 GitHub 上的 Windows 稳定版安装包，下载与安装由用户操作；未接入 Mac 的 Sparkle 自动更新。
-- 点击系统托盘图标显示服务、网关、在线设备与会话概况，并提供常用页面入口。再次启动同一安装会唤回已有窗口。
+- 日志页读取 Host 最近 64 KB，可选择复制。更新页检查 GitHub 上的 Windows 安装包（测试版通道包含预发布），安装包在浏览器中下载，退出 LinkShell 后运行；未接入 Mac 的 Sparkle 自动更新。
+- 关闭窗口后 LinkShell 留在任务栏通知区域：单击图标打开窗口，右键菜单可打开本机管理或退出界面。再次启动同一安装会唤回已有窗口。
 
 ## 系统与安装
 
-- Windows 10 1809 或更新版本、Windows 11，x64；需要 .NET Framework 4.8 和 Microsoft Edge WebView2 Evergreen Runtime。缺少 Runtime 时工作台提供安装 / 修复入口，本机管理仍可使用。ARM64 尚未提供原生安装包。
-- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`，生成 `artifacts/LinkShell-Setup-<版本>-windows-x64.exe` 与 ZIP 便携包。此实现尚未发布到下载站。
+- Windows 10 1809 或更新版本、Windows 11，x64；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。ARM64 尚未提供原生安装包。
+- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`，生成 `artifacts/LinkShell-Setup-<版本>-windows-x64.exe` 与 ZIP 便携包。
 - 安装器仅安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`，创建开始菜单入口，不需要管理员权限。当前 Windows 发布包不进行 Authenticode 签名，可能显示“未知发布者”或 SmartScreen 提示；请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
@@ -59,7 +59,7 @@ JPEG 兼容路径的正常发送窗口最多保留两帧待确认，查看器绘
 
 ## 开发与验证
 
-工作台原生 QA 使用隔离数据目录、真实 Host 与 WebView2，加上标注的 Codex fixture，验证命名管道发现、会话历史、草稿持久化、可见性、侧栏尺寸、iframe 原生桥隔离和保存确认。不加 `--native` 仅验证原生 URL/下载策略。设置 `LINKSHELL_WORKSPACE_QA_SCREEN=1` 可额外检查实际本机屏幕视频及隐藏重连，需要交互桌面和 FFmpeg 运行时。这些验证不涵盖生产登录、真实激活码或公网性能。
+打包时的 smoke（`scripts/smoke.mjs`，`build:standalone` 自动运行）在隔离数据目录启动真实 Host 和打包目录中的 `LinkShell.exe`，经调试端口确认工作台以 Windows 布局加载、页面与主进程的桥能往返，并检查 exe 的名称与版本信息。它不涵盖生产登录、真实激活码或公网性能。
 
 ```powershell
 corepack pnpm install --frozen-lockfile
@@ -67,13 +67,11 @@ corepack pnpm build
 corepack pnpm typecheck
 corepack pnpm --filter @linkshell/host exec vitest run test/windows.test.ts test/windows-viewer.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts
 corepack pnpm --filter @linkshell/windows test
-node apps/windows/scripts/workspace-qa.mjs --native
+corepack pnpm --filter @linkshell/desktop test
 corepack pnpm --filter @linkshell/windows build:standalone
 ```
 
-使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。原生部分使用 Windows 自带 .NET Framework C# 编译器构建。`node apps/windows/scripts/build.mjs --qa` 生成只用于开发的 `LinkShell.QA.exe`，将数据与 Agent 日志目录隔离到 `apps/windows/build/qa-*`；另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
-
-同一命令还生成 `LinkShell.Preview.exe`，使用明确标注的示例数据检查深浅色、二维码、会话详情、用量图表和托盘面板。它不启动 Host，示例二维码不可用于配对；预览程序与示例数据不会进入生产 EXE 或安装包。Agent 图标从手机端同一份品牌资源生成，使用与 Mac 一致的深浅色处理。
+使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件和安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
 
 已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。
 

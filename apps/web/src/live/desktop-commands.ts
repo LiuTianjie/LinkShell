@@ -39,6 +39,28 @@ export function sendDesktopCommand(command: DesktopCommand): void {
   window.dispatchEvent(new CustomEvent(DESKTOP_COMMAND_EVENT, { detail: command }));
 }
 
+/**
+ * A new session asked for while no workspace that opens one is showing (本机管理, the remote
+ * screen): nobody hears it there, so it waits for the workspace to mount and open its page.
+ */
+let deferredNewSession: { cwd?: string } | undefined;
+let newSessionTargets = 0;
+export function deferNewSession(cwd?: string): void { deferredNewSession = { cwd }; }
+/** Whether a mounted workspace opens new sessions itself. */
+export const opensNewSessions = () => newSessionTargets > 0;
+/** The workspace that opens the new-session page says so while it is mounted. */
+export function useNewSessionTarget(): void {
+  useEffect(() => {
+    newSessionTargets++;
+    return () => { newSessionTargets--; };
+  }, []);
+}
+export function takeDeferredNewSession(): { cwd?: string } | undefined {
+  const waiting = deferredNewSession;
+  deferredNewSession = undefined;
+  return waiting;
+}
+
 export function useDesktopCommand(handle: (command: DesktopCommand) => void): void {
   const latest = useRef(handle);
   latest.current = handle;

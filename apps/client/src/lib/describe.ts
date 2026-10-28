@@ -1,9 +1,7 @@
-import { toolVerb, cleanToolTitle, tidyCommand } from "@linkshell/wire";
 export { toolVerb, cleanToolTitle, tidyCommand, activityText, permissionChoices, sessionTitle, plainPreview, needsUserInput, needsAttention, type PermissionChoice } from "@linkshell/wire";
-import type { ToolCallContent, ToolDetail, ToolKind } from "@linkshell/wire";
-import type { TimelineItem } from "@linkshell/client-core";
+import type { ToolCallContent, ToolKind } from "@linkshell/wire";
+import { changeStat, toolCommand, toolLabel, toolLabelParts, type TimelineItem, type ToolAction } from "@linkshell/client-core";
 import type { IconProps } from "@/components/icon";
-import { baseName } from "./format";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 type Glyph = Pick<IconProps, "sf" | "md">;
@@ -21,24 +19,8 @@ export const toolGlyph: Record<ToolKind, Glyph> = {
   other: { sf: "wrench.and.screwdriver", md: "build" },
 };
 
-function str(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
 export function commandOf(item: Pick<ToolItem, "rawInput" | "title">): string | undefined {
-  const input = record(item.rawInput);
-  const command = input.command ?? input.cmd;
-  if (Array.isArray(command)) {
-    const parts = command.filter((part): part is string => typeof part === "string");
-    // ["bash", "-lc", "npm test"] → "npm test"
-    if (parts.length === 3 && /(^|\/)(ba|z|)sh$/.test(parts[0]!) && parts[1]!.startsWith("-")) return parts[2];
-    return parts.join(" ");
-  }
-  return str(command);
+  return toolCommand(item);
 }
 
 export interface FileChange {
@@ -107,23 +89,20 @@ export function fileChanges(content: ToolCallContent[]): FileChange[] {
   for (const entry of content) {
     if (entry.type === "diff") {
       const lines = lineDiff(entry.oldText ?? "", entry.newText);
-      changes.push({
-        path: entry.path,
-        kind: entry.oldText == null ? "add" : "update",
-        added: lines.filter((l) => l[0] === "+").length,
-        removed: lines.filter((l) => l[0] === "-").length,
-        lines,
-      });
+      // Counted by the shared diff, so the numbers are the ones the computer shows.
+      const stat = changeStat(entry);
+      changes.push({ path: entry.path, kind: entry.oldText == null ? "add" : "update", added: stat.added, removed: stat.removed, lines });
     } else if (entry.type === "patch") {
       const lines = entry.diff
         .split("\n")
         .filter((line) => !line.startsWith("---") && !line.startsWith("+++") && !line.startsWith("diff --git") && !line.startsWith("index "))
         .map((line) => (line.startsWith("@@") ? "@@" : line));
+      const stat = changeStat(entry);
       changes.push({
         path: entry.movePath ?? entry.path,
         kind: entry.change,
-        added: lines.filter((l) => l[0] === "+").length,
-        removed: lines.filter((l) => l[0] === "-").length,
+        added: stat.added,
+        removed: stat.removed,
         lines: lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines,
       });
     }
@@ -132,96 +111,58 @@ export function fileChanges(content: ToolCallContent[]): FileChange[] {
 }
 
 export interface ToolDescription {
+  /** The verb with what follows it ("已读取 ", "已搜索网页："), as the computer words it. */
   verb: string;
   /** The object of the verb: a file name, command or query. */
   subject: string;
+  /** "（失败）", "（已停止）": how it ended, when not well. */
+  suffix?: string;
   /** Show `subject` in the monospace face. */
   code: boolean;
   glyph: Glyph;
   changes: FileChange[];
+  /** Said after the row: "12 处匹配", "用时 3 秒". */
+  note?: string;
 }
 
-export function describeTool(item: ToolItem): ToolDescription {
-  const glyph = toolGlyph[item.toolKind];
-  const changes = fileChanges(item.content);
-  const input = record(item.rawInput);
-  // Richer detail when the host knows it; the same for every agent.
-  if (item.detail) return describeDetail(item.detail, changes, input);
-  switch (item.toolKind) {
-    case "execute": {
-      const command = tidyCommand(commandOf(item) ?? cleanToolTitle(item.title));
-      return { verb: "运行", subject: command, code: true, glyph, changes };
-    }
-    case "edit":
-    case "delete":
-    case "move": {
-      const path = changes[0]?.path ?? str(input.file_path) ?? str(input.path) ?? item.locations?.[0]?.path;
-      const verb = changes[0]?.kind === "add" ? "创建" : changes[0]?.kind === "delete" ? "删除" : toolVerb[item.toolKind];
-      const subject = changes.length > 1 ? `${changes.length} 个文件` : path ? baseName(path) : cleanToolTitle(item.title);
-      return { verb, subject, code: false, glyph, changes };
-    }
-    case "read": {
-      const path = str(input.file_path) ?? str(input.path) ?? item.locations?.[0]?.path;
-      return { verb: "读取", subject: path ? baseName(path) : cleanToolTitle(item.title), code: false, glyph, changes };
-    }
-    case "search": {
-      const query = str(input.pattern) ?? str(input.query);
-      return { verb: "搜索", subject: query ? `“${query}”` : cleanToolTitle(item.title), code: false, glyph, changes };
-    }
-    case "fetch": {
-      const url = str(input.url);
-      return { verb: "获取", subject: url ? url.replace(/^https?:\/\//, "") : cleanToolTitle(item.title), code: false, glyph, changes };
-    }
-    default:
-      return { verb: item.toolKind === "think" ? "思考" : "", subject: item.title, code: false, glyph, changes };
-  }
-}
-
-const subagentVerb: Record<Extract<ToolDetail, { type: "subagent" }>["action"], string> = {
-  spawn: "子 Agent",
-  message: "发给子 Agent",
-  wait: "等待子 Agent",
-  stop: "停止子 Agent",
-  resume: "恢复子 Agent",
-  list: "查看子 Agent",
+const actionGlyph: Partial<Record<ToolAction, Glyph>> = {
+  list: { sf: "folder", md: "folder" },
+  find: { sf: "doc.text.magnifyingglass", md: "find_in_page" },
+  create: { sf: "doc.badge.plus", md: "note_add" },
+  memory: { sf: "brain", md: "psychology" },
+  web_search: { sf: "globe", md: "travel_explore" },
+  agent: { sf: "square.stack.3d.up", md: "layers" },
+  workflow: { sf: "square.stack.3d.up", md: "layers" },
+  agent_message: { sf: "square.stack.3d.up", md: "layers" },
+  agent_wait: { sf: "square.stack.3d.up", md: "layers" },
+  agent_stop: { sf: "square.stack.3d.up", md: "layers" },
+  agent_resume: { sf: "square.stack.3d.up", md: "layers" },
+  agent_list: { sf: "square.stack.3d.up", md: "layers" },
+  skill: { sf: "wand.and.stars", md: "auto_fix_high" },
+  mcp: { sf: "puzzlepiece.extension", md: "extension" },
+  todo: { sf: "checklist", md: "checklist" },
+  plan: { sf: "list.bullet.rectangle", md: "assignment" },
+  question: { sf: "questionmark.bubble", md: "help" },
+  send_file: { sf: "paperplane", md: "send" },
+  image: { sf: "photo", md: "image" },
+  review: { sf: "eye", md: "rate_review" },
+  start_session: { sf: "plus.bubble", md: "add_comment" },
+  session_message: { sf: "bubble.left.and.bubble.right", md: "forum" },
+  compaction: { sf: "arrow.down.right.and.arrow.up.left", md: "compress" },
 };
 
-function describeDetail(detail: ToolDetail, changes: FileChange[], input: Record<string, unknown> = {}): ToolDescription {
-  switch (detail.type) {
-    case "mcp": {
-      if ((detail.server === "codex_app" || detail.server === "codex_apps") && detail.tool === "automation_update") {
-        const mode = str(input.mode);
-        const status = str(input.status);
-        const verb =
-          mode === "create"
-            ? "创建定时任务"
-            : mode === "delete"
-              ? "删除定时任务"
-              : mode === "view"
-                ? "查看定时任务"
-                : status === "PAUSED"
-                  ? "暂停定时任务"
-                  : status === "ACTIVE"
-                    ? "启用定时任务"
-                    : "更新定时任务";
-        const subject = str(input.name) ?? str(input.id) ?? "";
-        return { verb, subject, code: false, glyph: { sf: "clock.arrow.circlepath", md: "schedule" }, changes };
-      }
-      return { verb: detail.server.replace(/[_-]/g, " "), subject: detail.tool.replace(/_/g, " "), code: false, glyph: { sf: "puzzlepiece.extension", md: "extension" }, changes };
-    }
-    case "subagent":
-      return { verb: detail.workflow ? "工作流" : subagentVerb[detail.action], subject: detail.task ?? "", code: false, glyph: { sf: "square.stack.3d.up", md: "layers" }, changes };
-    case "skill":
-      return { verb: "使用技能", subject: detail.name, code: false, glyph: { sf: "wand.and.stars", md: "auto_fix_high" }, changes };
-    case "web_search":
-      return { verb: "搜索网页", subject: detail.query ? `“${detail.query}”` : "", code: false, glyph: { sf: "globe", md: "travel_explore" }, changes };
-    case "image_generation":
-      return { verb: "生成图片", subject: detail.prompt ?? "", code: false, glyph: { sf: "photo", md: "image" }, changes };
-    case "compaction":
-      return { verb: "", subject: "压缩了上下文", code: false, glyph: { sf: "arrow.down.right.and.arrow.up.left", md: "compress" }, changes };
-    case "question":
-      return { verb: "提问", subject: detail.more ? `${detail.text}（还有 ${detail.more} 个）` : detail.text, code: false, glyph: { sf: "questionmark.bubble", md: "help" }, changes };
-    case "review":
-      return { verb: "", subject: detail.phase === "started" ? "开始代码审查" : "代码审查完成", code: false, glyph: { sf: "eye", md: "rate_review" }, changes };
-  }
+/** A call's row as the computer words it (`toolLabel`, shared by every client). */
+export function describeTool(item: ToolItem): ToolDescription {
+  const label = toolLabel(item);
+  const parts = toolLabelParts(label);
+  const automation = item.detail?.type === "mcp" && (item.detail.server === "codex_app" || item.detail.server === "codex_apps") && item.detail.tool === "automation_update";
+  return {
+    verb: parts.verb,
+    subject: parts.subject ?? "",
+    suffix: parts.suffix,
+    code: label.style === "code",
+    glyph: automation ? { sf: "clock.arrow.circlepath", md: "schedule" } : actionGlyph[label.action] ?? toolGlyph[item.toolKind],
+    changes: fileChanges(item.content),
+    note: label.note,
+  };
 }

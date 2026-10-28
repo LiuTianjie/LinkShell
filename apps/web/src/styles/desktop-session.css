@@ -4,14 +4,26 @@
 /* ── Session ─────────────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .session-page { background: transparent; }
 html[data-desktop] .desktop-main .live-session .session-layout { display: flex; gap: var(--gutter); min-height: 0; }
-html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: clip; }
 /* The session's title row is the toolbar: 46 px, no rule under it; the conversation scrolls beneath. */
 html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; align-items: center; flex-wrap: nowrap; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); padding: 0 8px 0 max(16px, var(--titlebar-inset, 0px)); border-bottom: 0; background: transparent; backdrop-filter: none; }
+/* The title row gets its hairline once the conversation has scrolled under it, as every page's
+   toolbar does: a named scroll timeline, shared up to .session-main so its sibling can follow it.
+   The inspector's tab row follows its own content the same way. */
+@keyframes toolbar-scrolled { from { box-shadow: 0 var(--hairline) 0 transparent; } to { box-shadow: 0 var(--hairline) 0 var(--separator); } }
+html[data-desktop] .desktop-main .session-main { timeline-scope: --conversation; }
+html[data-desktop] .desktop-main .session-main .conversation { scroll-timeline: --conversation block; }
+html[data-desktop] .desktop-main .session-heading { position: relative; z-index: 2; animation: toolbar-scrolled linear both; animation-timeline: --conversation; animation-range: 0 12px; }
+html[data-desktop] .desktop-main .live-side-panel { timeline-scope: --inspector; }
+html[data-desktop] .desktop-main .live-side-panel .side-panel-content { scroll-timeline: --inspector block; }
 html[data-desktop] .desktop-main .session-heading-context { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
 html[data-desktop] .desktop-main .session-heading-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
-html[data-desktop] .desktop-main .session-title { gap: 8px; min-width: 0; }
+/* Narrow (the inspector open): the agent · folder line gives way before the title, then goes. */
+html[data-desktop] .desktop-main .session-heading-context { container: session-heading / inline-size; }
+html[data-desktop] .desktop-main .session-title { flex: 0 1 auto; gap: 8px; min-width: 6em; }
 html[data-desktop] .desktop-main .session-title h1 { overflow: hidden; font-size: 14px; font-weight: 500; letter-spacing: -.005em; line-height: 18px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .session-subtitle { flex: none; gap: 6px; margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .session-subtitle { flex: 0 1000 auto; gap: 6px; min-width: 0; margin-top: 0; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; white-space: nowrap; }
+@container session-heading (max-width: 420px) { html[data-desktop] .desktop-main .session-subtitle { display: none; } }
 html[data-desktop] .desktop-main .session-subtitle .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
 html[data-desktop] .desktop-main .session-subtitle > span:nth-child(2),
 html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; overflow: visible; max-width: none; padding: 0; }
@@ -98,6 +110,9 @@ html[data-desktop] .desktop-main .user-bubble :is(.markdown, .markdown p, .quest
 html[data-desktop] .desktop-main .user-message .markdown p:last-child { margin-bottom: 0; }
 html[data-desktop] .desktop-main .user-message > .message-actions { position: absolute; top: 100%; right: 4px; z-index: 1; margin-top: 2px; }
 html[data-desktop] .desktop-main .user-message > .failed-message-actions { margin-top: 4px; }
+html[data-desktop] .desktop-main .user-context { max-width: 70%; }
+html[data-desktop] .desktop-main :is(.user-shell-command, .user-shell-output) { border-radius: 16px; }
+html[data-desktop] .desktop-main .user-shell { max-width: 70%; }
 html[data-desktop] .desktop-main .message-actions { gap: 2px; margin-top: 6px; }
 html[data-desktop] .desktop-main .message-actions [data-button] { color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .message-actions [data-button]:hover { background: var(--fill); color: var(--label); }
@@ -111,6 +126,9 @@ html[data-desktop] .desktop-main .tool-record { border: 0; border-radius: 0; bac
 html[data-desktop] .desktop-main .tool-record[open] { border: 0; background: transparent; }
 html[data-desktop] .desktop-main .tool-record > summary { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: fit-content; max-width: 100%; min-height: 26px; margin: 0; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
 html[data-desktop] .desktop-main .tool-record > summary:hover { background: transparent; color: var(--label); }
+/* An app call's way to its page: a small secondary pill at the end of its row. */
+html[data-desktop] .desktop-main .tool-app-open { flex: none; height: 22px; margin-left: 4px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--fill); color: var(--label); font: inherit; font-size: 12px; font-weight: 510; line-height: 22px; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-main .tool-app-open:hover { background: var(--fillStrong); }
 html[data-desktop] .desktop-main .tool-record[open] > summary { margin: 0; border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .tool-record > summary > strong { flex: 0 1 auto; color: inherit; font-family: inherit; font-size: 14px; font-weight: 400; }
 html[data-desktop] .desktop-main .tool-record > summary > small { flex: none; color: color-mix(in oklab, var(--label) 40%, transparent); font-size: 13px; }
@@ -148,7 +166,7 @@ html[data-desktop] .desktop-main .steps-summary[aria-expanded="true"] .steps-sum
    right after them, nothing pushed to the far edge. */
 html[data-desktop] .desktop-main .steps-summary { max-width: 100%; }
 html[data-desktop] .desktop-main .steps-summary-label { flex: 0 1 auto; }
-html[data-desktop] .desktop-main .steps-summary-failed { color: var(--danger); font-size: 13px; font-weight: 400; }
+html[data-desktop] .desktop-main .steps-summary-failed { margin-left: -6px; color: var(--danger); font-size: 14px; font-weight: 400; }
 html[data-desktop] .desktop-main .steps-summary-diff { font-family: var(--mono); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-add { color: var(--diffAddText); }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-del { color: var(--diffDelText); }
@@ -199,13 +217,27 @@ html[data-desktop] .desktop-main .composer-progress { color: var(--tertiaryLabel
    buttons in a row along its foot. */
 html[data-desktop] .desktop-main :is(.approval-card, .async-questions) { padding: 16px 16px 12px; border: 0; border-radius: 24px; background: var(--cardRaised); box-shadow: var(--composer-shadow), inset 0 0 0 1px var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main :is(.approval-card, .async-questions) { background: #212121; }
-html[data-desktop] .desktop-main .async-question [data-slot="field-label"] { font-size: 14px; font-weight: 590; }
-html[data-desktop] .desktop-main .async-question [data-slot="field-label"] > svg { color: var(--warning); }
+/* What follows the conversation (questions, approvals, how it's going, notices) keeps the
+   timeline's rhythm: 16 px from it and between each. */
+html[data-desktop] .desktop-main .conversation-footer:not(:empty) { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+html[data-desktop] .desktop-main .conversation-footer > :is(.async-questions:empty, :empty) { display: none; }
+/* An agent's question, as Codex's: the question, its answers as 28 px pills, a one-line answer box
+   that grows, and the actions at the right of the foot — 16 px in, 12 px between. */
+html[data-desktop] .desktop-main .async-questions { gap: 0; padding: 16px; }
+html[data-desktop] .desktop-main .async-question + .async-question { margin-top: 16px; padding-top: 16px; border-top: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .async-question [data-slot="field-group"],
+html[data-desktop] .desktop-main .async-question [data-slot="field"] { gap: 12px; }
+html[data-desktop] .desktop-main .async-question [data-slot="field-label"] { gap: 8px; color: var(--label); font-size: 14px; font-weight: 500; line-height: 20px; }
+html[data-desktop] .desktop-main .async-question [data-slot="field-label"] > svg { width: 16px; height: 16px; margin-top: 2px; color: var(--warning); }
 html[data-desktop] .desktop-main .async-options { gap: 8px; }
-html[data-desktop] .desktop-main .async-options button { height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--fill); color: var(--label); font-size: 13px; }
-html[data-desktop] .desktop-main .async-options button:hover:not(:disabled) { background: var(--fillStrong); }
-html[data-desktop] .desktop-main .async-options button.chosen { background: var(--accent); color: var(--primaryForeground); }
-html[data-desktop] .desktop-main .async-questions [data-slot="textarea"] { min-height: 64px; }
+html[data-desktop] .desktop-main .async-options .async-option[data-button] { height: auto; min-height: 28px; padding: 4px 12px; border: 0; border-radius: 999px; background: var(--fill); box-shadow: none; color: var(--label); font-size: 13px; font-weight: 400; line-height: 20px; }
+html[data-desktop] .desktop-main .async-options .async-option[data-button]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main .async-options .async-option[aria-pressed="true"] { background: var(--accent); color: var(--primaryForeground); opacity: 1; }
+html[data-desktop] .desktop-main .async-answer-input[data-slot="textarea"] { min-height: 36px; max-height: 160px; padding: 7px 12px; border-radius: 12px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); font-size: 14px; line-height: 20px; resize: none; field-sizing: content; }
+html[data-desktop] .desktop-main .async-answer-input[data-slot="textarea"]:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 35%, transparent); }
+html[data-desktop] .desktop-main .async-actions { display: flex; justify-content: flex-end; gap: 8px; }
+html[data-desktop] .desktop-main .async-actions [data-button] { height: 28px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
+html[data-desktop] .desktop-main .async-answer { color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-heading strong { font-size: 14px; font-weight: 590; }
 html[data-desktop] .desktop-main .approval-heading span { color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-icon { width: 28px; height: 28px; border-radius: 50%; background: var(--waitingSoft); color: var(--warning); }
@@ -243,6 +275,12 @@ html[data-desktop] .desktop-main .composer [data-button].send-button { width: 28
 html[data-desktop] .desktop-main .composer [data-button].send-button:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); color: var(--plain); }
 html[data-desktop] .desktop-main .composer [data-button].send-button:disabled { background: var(--accent); color: var(--plain); opacity: .5; }
 html[data-desktop] .desktop-main .composer [data-button].send-button svg { width: 16px; height: 16px; }
+/* Stop, as Codex draws it: the send button's ink disc with a small solid square. */
+html[data-desktop] .desktop-main .composer .composer-stop-glyph { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+html[data-desktop] .desktop-main .composer [data-button].composer-stop:disabled { opacity: .5; }
+html[data-desktop] .desktop-main .composer [data-button].composer-stop-small { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .composer [data-button].composer-stop-small .composer-stop-glyph { width: 9px; height: 9px; }
+html[data-desktop] .desktop-main .composer [data-button].composer-steer { height: 28px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
 html[data-desktop] .desktop-main .context-ring { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .composer-caption { justify-content: center; padding-top: 6px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .composer-place { display: none; }
@@ -255,17 +293,40 @@ html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryL
 
 /* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
 html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
-html[data-desktop] .inspector-tabs { display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; border-bottom: var(--hairline) solid var(--separator); overflow-x: auto; }
+html[data-desktop] .inspector-tabs { position: relative; z-index: 2; display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; overflow-x: auto; animation: toolbar-scrolled linear both; animation-timeline: --inspector; animation-range: 0 12px; }
 html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
 /* The open tab, as Codex's tab strip: a raised step with a hairline and a small shadow in the
    light; in the dark a tint (a shadow doesn't read there). */
-html[data-desktop] .inspector-tabs > button[data-active] { background: var(--plain); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong), 0 1px 2px rgb(0 0 0 / .06); color: var(--label); }
-html[data-desktop][data-theme="dark"] .inspector-tabs > button[data-active] { background: var(--fill); box-shadow: none; }
+html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fill); box-shadow: none; color: var(--label); }
 /* Opened from elsewhere (settings, goal, side, MCP): set apart from the standing tools. */
 html[data-desktop] .inspector-tabs > button[data-transient] { margin-left: 6px; }
 html[data-desktop] .inspector-tabs > button[data-transient]::before { content: ""; display: inline-block; width: var(--hairline); height: 14px; margin: 0 10px 0 -10px; vertical-align: -2px; background: var(--separator); }
 html[data-desktop] .inspector-tabs-spacer { flex: 1; }
+/* An MCP App's tab: the tools' look, its × appearing on hover or while it's open; the apps sit
+   after a hairline from the tools, and the + that opens one follows them. */
+html[data-desktop] .inspector-app-tab { position: relative; display: inline-flex; flex: none; align-items: center; height: 28px; max-width: 180px; border-radius: var(--radius-control); color: var(--secondaryLabel); transition: background var(--transition), color var(--transition); }
+html[data-desktop] .inspector-tabs > button[role="tab"] + .inspector-app-tab { margin-left: 6px; }
+html[data-desktop] .inspector-tabs > button[role="tab"] + .inspector-app-tab::before { content: ""; position: absolute; left: -4px; width: var(--hairline); height: 14px; background: var(--separator); }
+html[data-desktop] .inspector-app-tab > button[role="tab"] { min-width: 0; height: 28px; padding: 0 26px 0 10px; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 510; cursor: default; }
+html[data-desktop] .inspector-app-tab > button[role="tab"] > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .inspector-app-tab:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .inspector-app-tab[data-active] { background: var(--fill); color: var(--label); }
+html[data-desktop] .inspector-app-close { position: absolute; right: 4px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition), background var(--transition); }
+html[data-desktop] .inspector-app-close svg { width: 12px; height: 12px; }
+html[data-desktop] .inspector-app-tab:is(:hover, :focus-within, [data-active]) .inspector-app-close { opacity: 1; }
+html[data-desktop] .inspector-app-close:hover { background: var(--fillStrong); color: var(--label); }
+html[data-desktop] .inspector-tabs .inspector-add[data-button] { flex: none; margin-left: 2px; color: var(--tertiaryLabel); }
+html[data-desktop] .inspector-tabs .inspector-add[data-button]:hover { color: var(--label); }
+html[data-desktop] .inspector-add-menu { min-width: 200px; }
+/* The app is the panel: its page edge to edge under the tab row, nothing scrolling around it. */
+html[data-desktop] .desktop-main .side-panel-content:has(> .mcp-app:not([hidden])) { display: flex; flex-direction: column; padding: 0; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .desktop-main .side-panel-content:has(> .mcp-app:not([hidden])) > :not(.mcp-app) { display: none; }
+html[data-desktop] .mcp-app { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+html[data-desktop] .mcp-app[hidden] { display: none; }
+html[data-desktop] .mcp-app-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: transparent; color-scheme: normal; }
+html[data-desktop] .mcp-app-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .mcp-app-state svg { width: 18px; height: 18px; }
 html[data-desktop] .inspector-tabs [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
 html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
 /* In the Mac window the inspector is docked on a hairline: the handle is centred on it, full height. */
@@ -275,7 +336,7 @@ html[data-desktop] .inspector-resizer:hover::after,
 html[data-desktop] .inspector-resizer:focus-visible::after,
 html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--separatorStrong); }
 html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
-html[data-desktop] .desktop-main .side-panel-content { padding: 12px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
+html[data-desktop] .desktop-main .side-panel-content { padding: 16px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
 /* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
 html[data-desktop] .desktop-main .side-panel-content [data-button][data-variant="default"] { background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
 html[data-desktop] .desktop-main .side-panel-content [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fillStrong); }
@@ -305,6 +366,7 @@ html[data-desktop] .new-session-pill[data-state="open"] { background: var(--fill
 html[data-desktop] .new-session-pill[data-active] { color: var(--running); }
 html[data-desktop] .new-session-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .new-session-pill svg { flex: none; width: 14px; height: 14px; }
+html[data-desktop] .new-session-pill-static { display: inline-flex; align-items: center; cursor: default; }
 html[data-desktop] .new-session-pill .agent-mark { width: 16px; height: 16px; border-radius: 4px; }
 html[data-desktop] .new-session-caret { opacity: .6; }
 html[data-desktop] .new-session-composer [data-button].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
@@ -352,9 +414,35 @@ html[data-desktop] .desktop-main .live-timeline > .assistant-message:last-child 
 /* The session title row: 28 px icons with 10 px corners, as the toolbars; who holds a handed-off session as a pill. */
 html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: 10px; }
 html[data-desktop] .desktop-main .session-actions { gap: 6px; }
-html[data-desktop] .desktop-main .session-actions .session-handoff[data-button] { height: 28px; margin-right: 2px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
+html[data-desktop] .desktop-main .session-actions .session-handoff[data-button] { height: 28px; margin-right: 2px; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
 
 /* The inspector slides in from the right on Codex's panel spring; the conversation gives way with it. */
 html[data-desktop] .desktop-main .live-side-panel { animation: inspector-in 420ms var(--ease-spring) both; }
 @keyframes inspector-in { from { opacity: 0; transform: translateX(24px); } }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .live-side-panel { animation: none; } }
+/* A changed file: its name whole, its folder shortened from the left (…/src/) when the row is narrow. */
+html[data-desktop] .desktop-main .changes-file-name { display: flex; min-width: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .changes-file-name > small { flex: 0 1000 auto; min-width: 2ch; overflow: hidden; direction: rtl; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .changes-file-name > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Tool rows worded as the Claude app words them: the same quiet 60 % line, its file opening from
+   the row; a row with nothing to open is the same line without the chevron. */
+html[data-desktop] .desktop-main .tool-record > .tool-summary { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; min-height: 26px; padding: 2px 0; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
+html[data-desktop] .desktop-main .tool-record > .tool-summary:hover { color: var(--label); }
+html[data-desktop] .desktop-main .tool-record > :is(summary, .tool-summary) > .tool-label { flex: 0 1 auto; min-width: 0; overflow: hidden; color: inherit; font-size: 14px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .tool-label :is(.tool-subject, .tool-file, .tool-subject-code) { color: inherit; }
+html[data-desktop] .desktop-main .tool-label .tool-file { cursor: default; }
+html[data-desktop] .desktop-main .tool-label .tool-file:hover { color: var(--label); text-decoration: underline; text-underline-offset: 3px; }
+html[data-desktop] .desktop-main .tool-record > :is(summary, .tool-summary) > .tool-suffix { margin-left: -6px; font-size: 14px; }
+html[data-desktop] .desktop-main .tool-label .tool-subject-code { padding: 0; background: none; font-family: var(--mono); font-size: 12.5px; }
+html[data-desktop] .desktop-main .tool-record > :is(summary, .tool-summary) > :is(.tool-note, .diff-stat) { flex: none; color: color-mix(in oklab, var(--label) 40%, transparent); font-size: 13px; }
+html[data-desktop] .desktop-main .tool-record > :is(summary, .tool-summary) > .diff-stat { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .tool-record .tool-terminal > pre { -webkit-mask-image: none; mask-image: none; box-shadow: none; }
+html[data-desktop] .desktop-main .tool-record .tool-terminal { overflow: hidden; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--separator); background: var(--fill); }
+html[data-desktop] .desktop-main .tool-record .tool-terminal > pre { border-radius: 0; background: transparent; }
+html[data-desktop] .desktop-main .tool-record .tool-terminal-command { color: var(--label); }
+html[data-desktop] .desktop-main .tool-record .tool-terminal > .tool-output-text { max-height: 240px; overflow: auto; }
+html[data-desktop] .desktop-main .tool-terminal-exit { align-self: flex-end; margin: 0; padding: 0 12px 6px; color: var(--danger); font-size: 12px; }
+html[data-desktop] .desktop-main .tool-terminal-exit[data-ok] { color: color-mix(in oklab, var(--label) 40%, transparent); }
+html[data-desktop] .desktop-main .wrap-up-card { border-radius: var(--radius-well, 12px); }
+html[data-desktop] .desktop-main .session-card { border-radius: var(--radius-well, 12px); font-size: 14px; }

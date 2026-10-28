@@ -38,9 +38,12 @@ import {
 } from "./computer-names";
 
 export function Screens({
+  live = true,
   connect,
   open,
 }: {
+  /** False while the window is hidden: the page stays, its screen connections are let go. */
+  live?: boolean;
   connect: () => void;
   open: (computer: Computer) => void;
 }) {
@@ -89,18 +92,20 @@ export function Screens({
         </>}
       />
       {!ready ? (
-        <div
-          className="flex flex-col border-y border-border"
-          role="status"
-          aria-label="正在加载电脑"
-        >
+        <div className="screen-list screen-list-loading" role="status" aria-label="正在加载电脑">
           {[0, 1].map((key) => (
-            <div key={key} className="flex h-14 items-center gap-3 px-1">
-              <Skeleton className="size-4" />
-              <Skeleton className="h-4 w-40" />
+            <div key={key} className="screen-row screen-row-skeleton">
+              <div className="flex min-w-0 items-center gap-3">
+                <Skeleton className="size-4" />
+                <Skeleton className="h-4 w-40" />
+              </div>
             </div>
           ))}
-          <span className="sr-only">正在加载电脑…</span>
+          {/* Only a wait that is noticeable gets words; a quick one is just the rows filling in. */}
+          <p className="screen-list-wait">
+            <LoaderCircle className="animate-spin" aria-hidden />
+            正在读取电脑…
+          </p>
         </div>
       ) : computers.length ? (
         <div className="screen-list">
@@ -119,6 +124,7 @@ export function Screens({
             <ScreenCard
               key={computer.key}
               computer={computer}
+              live={live}
               hidden={!matches(computer)}
               open={() => open(computer)}
             />
@@ -145,10 +151,12 @@ export function Screens({
 
 function ScreenCard({
   computer,
+  live,
   hidden,
   open,
 }: {
   computer: Computer;
+  live: boolean;
   hidden: boolean;
   open: () => void;
 }) {
@@ -158,7 +166,7 @@ function ScreenCard({
   );
   const names = useStore(computerNames.store);
   const name = computerName(computer, names);
-  const { connection, error, retry } = useScreenConnection(computer);
+  const { connection, error, retry } = useScreenConnection(live ? computer : undefined);
   return (
     <section
       className={cn(
@@ -213,15 +221,19 @@ function ScreenCard({
               <strong>
                 {error
                   ? "暂时无法连接"
-                  : computer.machine.online
-                    ? "正在连接电脑…"
-                    : "电脑离线"}
+                  : !computer.machine.online
+                    ? "电脑离线"
+                    : live
+                      ? "正在连接电脑…"
+                      : "画面已暂停"}
               </strong>
               <span title={error}>
                 {error ??
-                  (computer.machine.online
-                    ? "正在建立加密连接"
-                    : "电脑开机并运行 LinkShell 后即可连接")}
+                  (!computer.machine.online
+                    ? "电脑开机并运行 LinkShell 后即可连接"
+                    : live
+                      ? "正在建立加密连接"
+                      : "窗口回到前台后继续")}
               </span>
             </div>
           </div>

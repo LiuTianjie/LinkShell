@@ -583,21 +583,40 @@
     border: 0;
     background: #ffffff;
   }
+/* Over the frame until the service answers, or in its place when it can't be reached. */
 .resource-preview-loading {
     position: absolute;
     inset: 0;
+    z-index: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    padding: 24px;
     color: var(--secondaryLabel);
     font-size: 13px;
+    text-align: center;
     background: var(--plain);
   }
 .resource-preview-loading > svg {
-    width: 16px;
-    height: 16px;
-    animation: spin 1s linear infinite;
+    width: 20px;
+    height: 20px;
+    color: var(--tertiaryLabel);
+  }
+.resource-preview-loading > strong {
+    color: var(--label);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+.resource-preview-loading > p {
+    max-width: 360px;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+.resource-preview-loading > [data-button] {
+    margin-top: 4px;
   }
 .resource-preview-note {
     flex-shrink: 0;

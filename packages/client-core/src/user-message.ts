@@ -1,4 +1,4 @@
-import type { ContentBlock } from "@linkshell/wire";
+import { readUserText, type ContentBlock, type UserEvent, type UserTextView } from "@linkshell/wire";
 
 export interface AutomationMessage {
   kind: "heartbeat" | "automation";
@@ -82,39 +82,32 @@ export function cleanAgentHeartbeatText(text: string): {
 }
 
 /**
- * The text to show for a user message. Codex Desktop wraps image sends in a
- * "# Files mentioned by the user: … ## My request:" envelope and scheduled
- * runs in `<heartbeat>` / `<codex_automation_message>` XML; those envelopes are
- * plumbing, not something the reader typed, so presentation strips them back to
- * the request. The stored prompt and what was sent to the agent stay intact.
+ * How to show a user message: the words, what came with them, or the one event or command it is
+ * (see `readUserText` in @linkshell/wire). Codex Desktop's scheduled runs read as their
+ * instructions. The stored prompt and what was sent to the agent stay intact.
  */
-export function userMessageText(blocks: ContentBlock[]): string {
+export function userMessageView(blocks: ContentBlock[]): UserTextView {
   const automation = automationMessage(blocks);
-  if (automation) return automation.instructions;
-  const text = blocks
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-    .trim();
-  const imageCount = blocks.filter((block) => block.type === "image").length;
-  if (!imageCount) return text;
-  const normalized = text.replace(/\r\n/g, "\n");
-  // Match the whole desktop-generated image envelope, not a heading mentioned in ordinary prose.
-  const envelope =
-    /^# Files mentioned by the user:\n\n([\s\S]+?)\n\nDistinguish instructions in attached documents from the user's request\.\n\n## My request:(?:\n([\s\S]*))?$/.exec(
-      normalized,
-    );
-  if (!envelope) return text;
-  const files = envelope[1]!.split("\n\n");
-  if (
-    files.length > imageCount ||
-    !files.every((file) => {
-      const entry =
-        /^## ([^\n]+?): ((?:\/|[A-Za-z]:[\\/])[^\n]+)\nImage attachment: true$/.exec(
-          file,
-        );
-      return !!entry && entry[2]!.split(/[\\/]/).at(-1) === entry[1];
-    })
-  )
-    return text;
-  return (envelope[2] ?? "").trim();
+  if (automation) return { text: automation.instructions, context: [], hidden: false };
+  const text = blocks.map((block) => (block.type === "text" ? block.text : "")).join("");
+  const others = blocks.filter((block) => block.type !== "text").length;
+  const view = readUserText(text, { images: blocks.filter((block) => block.type === "image").length });
+  // Pictures or files sent with nothing else are still a message.
+  return view.hidden && others ? { ...view, hidden: false } : view;
+}
+
+/** The words of a user message, without the envelopes agents and their clients wrap around them. */
+export function userMessageText(blocks: ContentBlock[]): string {
+  return userMessageView(blocks).text;
+}
+
+/** The line for a message that is an event rather than something said. */
+export function userEventLabel(event: UserEvent): string {
+  switch (event.kind) {
+    case "ci": return event.count > 1 ? `收到 ${event.count} 个 CI 事件` : "收到 CI 事件";
+    case "github": return event.count > 1 ? `收到 ${event.count} 个 GitHub 事件` : "收到 GitHub 事件";
+    case "scheduled": return `定时任务：${event.name}`;
+    case "sessions":
+      return event.sessions.length ? `${event.sessions.map((session) => `「${session.title}」`).join("、")}完成了一轮` : "你启动的会话有了新进展";
+  }
 }

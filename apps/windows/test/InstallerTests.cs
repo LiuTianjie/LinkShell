@@ -17,7 +17,7 @@ internal static class InstallerTests {
     static Stream Payload(bool complete = true, bool traversal = false, bool longPath = false) {
         var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true)) {
-            foreach (string name in complete ? new[] { "LinkShell.exe", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" } : new[] { "standalone.json" }) {
+            foreach (string name in complete ? new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" } : new[] { "standalone.json" }) {
                 using (var writer = new StreamWriter(zip.CreateEntry("./" + name).Open())) writer.Write("new");
             }
             using (var output = zip.CreateEntry("runtime/large.bin").Open()) output.Write(new byte[2 * 1024 * 1024], 0, 2 * 1024 * 1024);

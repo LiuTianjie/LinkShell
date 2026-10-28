@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { native, type NativeModule } from "./native.js";
@@ -20,6 +20,12 @@ const settings = new Map<string, unknown>();
 // Codex's window: the toolbar row is 46px; the traffic lights sit centred on its 44px chrome.
 const TOOLBAR = 44;
 const TRAFFIC_LIGHTS = { x: 16, y: Math.round((TOOLBAR - 14) / 2) };
+const MAC = process.platform === "darwin";
+const WINDOWS = process.platform === "win32";
+/** The page's own ground where the window is not translucent (theme.ts `background`). */
+const ground = () => (nativeTheme.shouldUseDarkColors ? "#1d1d1d" : "#f3f3f3");
+/** Windows draws its caption buttons over the page's toolbar row, in the page's ink. */
+const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: TOOLBAR });
 
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -61,14 +67,19 @@ function applyAppearance() {
 /** Vibrancy only while it is worth it: focused, and below 4K, where the blur costs frames. */
 function updateWindowSurface() {
   if (!window) return;
+  if (!MAC) {
+    // No vibrancy off the Mac: the page paints its own ground, and the caption buttons follow the theme.
+    window.setBackgroundColor(ground());
+    if (WINDOWS) window.setTitleBarOverlay(overlay());
+    send("linkshell-desktop-surface", { translucent: false });
+    return;
+  }
   const bounds = window.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const physical = bounds.width * display.scaleFactor * bounds.height * display.scaleFactor;
   const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true;
   window.setVibrancy(translucent ? "menu" : null);
-  const dark = nativeTheme.shouldUseDarkColors;
-  // The page's own ground where vibrancy is off (theme.ts `background`).
-  window.setBackgroundColor(translucent ? "#00000000" : dark ? "#1d1d1d" : "#f3f3f3");
+  window.setBackgroundColor(translucent ? "#00000000" : ground());
   send("linkshell-desktop-surface", { translucent });
 }
 
@@ -94,11 +105,9 @@ function createWindow() {
     minWidth: 940,
     minHeight: 640,
     show: false,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: TRAFFIC_LIGHTS,
-    vibrancy: "menu",
-    visualEffectState: "followWindow",
-    backgroundColor: "#00000000",
+    ...(MAC
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: TRAFFIC_LIGHTS, vibrancy: "menu" as const, visualEffectState: "followWindow" as const, backgroundColor: "#00000000" }
+      : { titleBarStyle: "hidden" as const, titleBarOverlay: overlay(), backgroundColor: ground(), icon: join(app.getAppPath(), "assets/icon.png") }),
     acceptFirstMouse: true,
     fullscreenable: true,
     webPreferences: {
@@ -116,11 +125,16 @@ function createWindow() {
   });
   const web = window.webContents;
   guard(web);
-  window.on("focus", updateWindowSurface);
+  window.on("focus", () => {
+    // Unhidden after ⌘H the window may not get "show": focus is the sure sign it is on screen again.
+    if (!visible && window?.isVisible() && !window.isMinimized()) setVisible(true);
+    updateWindowSurface();
+  });
   window.on("blur", updateWindowSurface);
   window.on("resize", updateWindowSurface);
   window.on("moved", updateWindowSurface);
-  window.on("ready-to-show", () => { if (!quitting) showWindow(); });
+  // Started at sign-in: the window waits in the tray until it is asked for.
+  window.on("ready-to-show", () => { if (!quitting && !launch.hidden) showWindow(); });
   window.on("show", () => setVisible(!window!.isMinimized()));
   window.on("hide", () => setVisible(false));
   window.on("minimize", () => setVisible(false));
@@ -128,7 +142,7 @@ function createWindow() {
   window.on("close", (event) => {
     rememberBounds();
     if (quitting) return;
-    // Closing the window leaves LinkShell in the menu bar; the Host is never stopped here.
+    // Closing the window leaves LinkShell in the menu bar (the tray on Windows); the Host is never stopped here.
     event.preventDefault();
     // A full-screen window would leave an empty Space behind when hidden.
     if (window!.isFullScreen()) { window!.once("leave-full-screen", () => window?.hide()); window!.setFullScreen(false); }
@@ -136,7 +150,11 @@ function createWindow() {
     if (process.platform === "darwin") app.dock?.hide();
   });
   window.on("enter-full-screen", () => send("linkshell-desktop-window", { fullscreen: true }));
-  window.on("leave-full-screen", () => send("linkshell-desktop-window", { fullscreen: false }));
+  window.on("leave-full-screen", () => {
+    send("linkshell-desktop-window", { fullscreen: false });
+    // Left by the window's own button or Esc: what asked for full screen leaves it too.
+    send("linkshell-desktop-fullscreen", { fullscreen: false });
+  });
   web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) pageReady = false; });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
@@ -237,6 +255,13 @@ function showWindow() {
   setVisible(true);
 }
 
+/** A sign-in finished in the browser: the person is looking at the browser, so LinkShell comes forward. */
+function cameBack<T>(result: T): T {
+  app.focus({ steal: true });
+  showWindow();
+  return result;
+}
+
 /** A command for the page; one sent before it has loaded (a second launch, --check-updates) waits for it. */
 let pendingCommand: Record<string, unknown> | undefined;
 function command(detail: Record<string, unknown>) {
@@ -271,11 +296,62 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     case "external":
       if (typeof message.url === "string" && WorkspacePolicy.externalURL(message.url)) void shell.openExternal(message.url);
       return;
-    // The page's own element full screen and focus handling are enough: nothing native sits above it.
+    // The page's own focus handling is enough: nothing native sits above it.
     case "contentFocus": return;
+    // The terminal's full screen: the window goes full screen and the page fills it; the answer
+    // comes once the window has got there.
+    case "screenFullScreen": {
+      if (!window || typeof message.enabled !== "boolean") return;
+      const enabled = message.enabled;
+      if (window.isFullScreen() === enabled) return send("linkshell-desktop-fullscreen", { fullscreen: enabled });
+      const answer = () => send("linkshell-desktop-fullscreen", { fullscreen: enabled });
+      if (enabled) window.once("enter-full-screen", answer); else window.once("leave-full-screen", answer);
+      window.setFullScreen(enabled);
+      return;
+    }
     case "invoke": return void invoke(event.sender, message);
   }
 });
+
+/**
+ * A native context menu at the pointer, as Codex's sidebar menus: the page sends the items and
+ * gets back the id of the one chosen (none when the menu is dismissed). Shortcuts are shown,
+ * not registered: the page owns its keys.
+ */
+function contextMenu(raw: unknown, at: unknown): Promise<{ id?: string }> {
+  return new Promise((resolve) => {
+    let count = 0;
+    const build = (items: unknown, depth: number): MenuItemConstructorOptions[] =>
+      (Array.isArray(items) ? items : []).flatMap((item): MenuItemConstructorOptions[] => {
+        if (!item || typeof item !== "object" || ++count > 80) return [];
+        const entry = item as Record<string, unknown>;
+        if (entry.type === "separator") return [{ type: "separator" }];
+        const label = typeof entry.label === "string" ? entry.label.slice(0, 120).replaceAll("&", "&&") : "";
+        if (!label) return [];
+        const enabled = entry.enabled !== false;
+        const accelerator = typeof entry.accelerator === "string" ? entry.accelerator : undefined;
+        if (Array.isArray(entry.submenu) && depth < 2) return [{ label, enabled, submenu: build(entry.submenu, depth + 1) }];
+        const id = typeof entry.id === "string" ? entry.id : undefined;
+        return [{
+          label,
+          enabled: enabled && !!id,
+          ...(typeof entry.checked === "boolean" ? { type: "checkbox" as const, checked: entry.checked } : {}),
+          ...(accelerator ? { accelerator, registerAccelerator: false } : {}),
+          click: () => resolve({ id }),
+        }];
+      });
+    const template = build(raw, 0);
+    if (!template.length || !window) return resolve({});
+    // At the point that was right-clicked (the page's own coordinates, scaled by its zoom), so a
+    // menu opened from the keyboard or a script still lands on its row, not wherever the pointer is.
+    const point = at && typeof at === "object" ? (at as { x?: unknown; y?: unknown }) : {};
+    const zoom = window.webContents.getZoomFactor();
+    const position = typeof point.x === "number" && typeof point.y === "number" && Number.isFinite(point.x) && Number.isFinite(point.y)
+      ? { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) } : {};
+    // A click arrives after the menu reports it closed; wait a moment before calling it dismissed.
+    Menu.buildFromTemplate(template).popup({ window, ...position, callback: () => setTimeout(() => resolve({}), 100) });
+  });
+}
 
 /** Management requests: each answered once, by id, through the same event channel. */
 async function invoke(sender: WebContents, message: Record<string, unknown>) {
@@ -296,14 +372,19 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "snapshot": return management.snapshot();
     case "startup": return management.startup();
     case "action": return management.action(String(params.name ?? ""), params.input);
-    case "login": return management.signIn();
+    case "login": return cameBack(await management.signIn());
+    case "loginPassword": return management.signInWithPassword(params.email, params.password);
+    case "loginOAuth": {
+      const provider = params.provider;
+      return cameBack(await management.signInWithProvider(provider, (url) => send("linkshell-desktop-login", { provider, url })));
+    }
     case "cancelLogin": management.cancelSignIn(); return {};
     case "usage": return management.usage(Number(params.days), String(params.agent ?? "all"));
     case "log": return { text: await management.log(runtime.home), path: join(runtime.home, "host.log") };
     case "revealLog": shell.showItemInFolder(join(runtime.home, "host.log")); return {};
     // An npm or Homebrew install updates itself (`linkshell upgrade`); a standalone app uses Sparkle.
     case "upgrade": {
-      if (runtime.standalone) { nativeModule?.updaterInstall(); return {}; }
+      if (runtime.standalone) { if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {}; }
       await management.exec(["upgrade"], 240_000).catch(() => { throw new Error("更新未完成，请在终端运行 linkshell upgrade 查看详情。"); });
       return { message: "更新完成。重新打开 LinkShell 可加载新版界面。" };
     }
@@ -311,17 +392,38 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       version: app.getVersion(), electron: process.versions.electron, standalone: runtime.standalone,
       bundle: runtime.bundle, home: runtime.home, info: await management.standaloneInfo(),
     };
-    case "permissions": return nativeModule?.permissions() ?? { recording: false, control: false, unavailable: true };
+    // Windows asks no permission to capture or control an unlocked desktop; the person can still
+    // turn remote screen off, which LinkShell.Screen.exe checks before every capture.
+    case "permissions": {
+      if (!WINDOWS) return nativeModule?.permissions() ?? { recording: false, control: false, unavailable: true };
+      const sharing = !existsSync(screenDisabled());
+      return { recording: sharing, control: sharing, notNeeded: true, sharing };
+    }
+    case "setScreenSharing": {
+      if (!WINDOWS) throw new Error("不支持的操作");
+      if (params.enabled === true) rmSync(screenDisabled(), { force: true });
+      else { mkdirSync(runtime.home, { recursive: true }); writeFileSync(screenDisabled(), "disabled\n"); }
+      return { sharing: params.enabled === true };
+    }
     case "openSetup": return openSetup();
-    case "loginItem": return nativeModule?.loginItem() ?? { enabled: app.getLoginItemSettings().openAtLogin, approval: false };
+    case "loginItem": return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? app.getLoginItemSettings().openAtLogin, approval: false };
     case "setLoginItem": {
       const enabled = params.enabled === true;
       if (nativeModule) { const failed = nativeModule.setLoginItem(enabled); if (failed) throw new Error(`无法修改开机启动：${failed}`); }
+      // The same Run entry the earlier Windows app wrote, so an upgrade keeps the choice.
+      else if (WINDOWS) app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: ["--hidden"], name: "LinkShell" });
       else app.setLoginItemSettings({ openAtLogin: enabled });
-      return nativeModule?.loginItem() ?? { enabled, approval: false };
+      return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? enabled, approval: false };
     }
     case "openLoginItems": nativeModule?.openLoginItems(); return {};
     case "installCommand": return { path: await installCommand() };
+    // Windows ships linkshell.cmd beside the app and never edits PATH: the path is what to hand out.
+    case "copyCommandPath": {
+      if (!runtime.folder) throw new Error("当前不是 Windows 安装");
+      const path = join(runtime.folder, "linkshell.cmd");
+      clipboard.writeText(path);
+      return { path };
+    }
     case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable" };
     case "setSetting": {
       const key = String(params.key ?? "");
@@ -333,8 +435,15 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       return {};
     }
     case "checkUpdates": return checkUpdates();
-    case "installUpdate": nativeModule?.updaterInstall(); return {};
+    case "installUpdate": if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {};
     case "retry": void retry(); return {};
+    case "contextMenu": return contextMenu(params.items, params.at);
+    case "reveal": {
+      const path = typeof params.path === "string" ? params.path : "";
+      if (!isAbsolute(path) || !existsSync(path)) throw new Error("这个位置已经不在了");
+      shell.showItemInFolder(path);
+      return {};
+    }
     default: throw new Error("不支持的操作");
   }
 }
@@ -391,6 +500,7 @@ app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });
 // ── Native pieces ─────────────────────────────────────────────────────────────────────────
 
 function openSetup() {
+  if (WINDOWS) throw new Error("Windows 不需要单独授权屏幕录制和控制");
   const helper = runtime.bundle;
   if (!helper) throw new Error("开发模式下请从 apps/mac 构建的 LinkShell.app 打开权限引导");
   // The system opens it, so the permissions it shows are LinkShell's, not this process's.
@@ -398,7 +508,11 @@ function openSetup() {
   return {};
 }
 
+/** The file LinkShell.Screen.exe refuses to capture beside (the earlier Windows app's switch). */
+function screenDisabled() { return join(runtime.home, "windows-screen-disabled"); }
+
 async function installCommand(): Promise<string> {
+  if (runtime.folder) throw new Error(`可直接使用安装目录中的 ${join(runtime.folder, "linkshell.cmd")}`);
   if (!runtime.standalone || !runtime.bundle) throw new Error("当前不是独立 App 安装");
   const { mkdir, readlink, symlink, lstat } = await import("node:fs/promises");
   const directory = join(app.getPath("home"), ".local/bin");
@@ -415,15 +529,76 @@ async function installCommand(): Promise<string> {
   return link;
 }
 
+/** Whether Windows will start LinkShell at sign-in, by its Run entry; undefined elsewhere. */
+function windowsLoginItem(): boolean | undefined {
+  if (!WINDOWS) return undefined;
+  const settings = app.getLoginItemSettings({ path: process.execPath, args: ["--hidden"] });
+  return settings.launchItems?.some((item) => item.name === "LinkShell" && item.enabled) ?? settings.openAtLogin;
+}
+
+const newer = (a: string, b: string) => {
+  const parts = (value: string) => value.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let index = 0; index < Math.max(x.length, y.length); index++) if ((x[index] ?? 0) !== (y[index] ?? 0)) return (x[index] ?? 0) > (y[index] ?? 0);
+  return false;
+};
+
+/**
+ * Windows has no Sparkle: the newest desktop release with a Windows installer is found on GitHub,
+ * and the person downloads and runs it (the installer keeps the Host, identity and pairings).
+ */
+let windowsInstaller: string | undefined;
+async function checkWindowsUpdate() {
+  const update = (detail: Record<string, unknown>) => send("linkshell-desktop-update", detail);
+  update({ name: "checking", message: "正在查找 Windows 版本…" });
+  try {
+    const response = await net.fetch("https://api.github.com/repos/LiuTianjie/LinkShell/releases?per_page=30", { headers: { accept: "application/vnd.github+json" } });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const releases = (await response.json()) as { tag_name?: string; draft?: boolean; prerelease?: boolean; assets?: { name?: string; browser_download_url?: string }[] }[];
+    const beta = settings.get("updateChannel") === "beta";
+    const installer = (release: (typeof releases)[number]) => release.assets?.find((asset) => /^LinkShell-Setup-.+-windows-x64\.exe$/.test(asset.name ?? ""));
+    const release = releases.find((entry) => !entry.draft && (beta || !entry.prerelease) && /^desktop-v/.test(entry.tag_name ?? "") && installer(entry));
+    const url = release && installer(release)?.browser_download_url;
+    if (!release || !url) { windowsInstaller = undefined; update({ name: "current", message: "尚无已发布的 Windows 安装包" }); return; }
+    if (!url.startsWith("https://github.com/LiuTianjie/LinkShell/releases/download/")) throw new Error("发布下载地址无效");
+    const version = release.tag_name!.replace(/^desktop-v/, "");
+    if (newer(version, app.getVersion())) {
+      windowsInstaller = url;
+      update({ name: "available", version, message: `有新版本 ${version}，下载安装包后退出 LinkShell 再运行` });
+    } else {
+      windowsInstaller = undefined;
+      update({ name: "current", message: "当前已是最新版本" });
+    }
+  } catch (error) {
+    update({ name: "message", message: `检查失败：${error instanceof Error ? error.message : String(error)}` });
+  } finally {
+    update({ name: "finished" });
+  }
+}
+
+function downloadWindowsUpdate() {
+  if (!windowsInstaller) throw new Error("请先检查更新");
+  void shell.openExternal(windowsInstaller);
+  send("linkshell-desktop-update", { name: "message", message: "已在浏览器中下载安装包；下载完成后从托盘退出 LinkShell，再运行安装包" });
+  return {};
+}
+
 let lastUpdateCheck = 0;
 function checkUpdates() {
   lastUpdateCheck = Date.now();
+  if (WINDOWS && runtime.standalone) { void checkWindowsUpdate(); return { started: true }; }
   if (!nativeModule || !runtime.standalone) return { started: false };
   nativeModule.updaterCheck();
   return { started: true };
 }
 
 function startUpdater() {
+  if (WINDOWS && runtime.standalone) {
+    setInterval(() => {
+      if (settings.get("autoCheck") !== false && Date.now() - lastUpdateCheck > 6 * 3600_000) checkUpdates();
+    }, 60_000).unref();
+    return;
+  }
   if (!nativeModule || !runtime.standalone) return;
   nativeModule.updaterStart({
     event: (name, detail) => {
@@ -452,6 +627,9 @@ function updateTray() {
 }
 
 function installMenu() {
+  // Windows has no menu bar: the page owns its shortcuts there (desktop-commands.ts), and
+  // Chromium's own (reload, developer tools) stay out of a shipped window.
+  if (!MAC) { Menu.setApplicationMenu(null); return; }
   const template: MenuItemConstructorOptions[] = [
     { label: "LinkShell", submenu: [
       { label: "关于 LinkShell", role: "about" },
@@ -515,12 +693,20 @@ async function ready() {
   nativeTheme.themeSource = appearance();
   nativeModule = native(runtime.bundle, app.getAppPath());
   installMenu();
-  const iconPath = join(app.getAppPath(), "assets/trayTemplate.png");
+  // From a checkout the Dock would show Electron's icon; a bundle has ours (AppIcon.icns, same picture).
+  if (process.platform === "darwin" && !runtime.bundle) {
+    const dockIcon = join(app.getAppPath(), "../mac/assets/icon.png");
+    if (existsSync(dockIcon)) app.dock?.setIcon(dockIcon);
+  }
+  // A template the menu bar tints on the Mac; the coloured mark in Windows' notification area.
+  const iconPath = join(app.getAppPath(), MAC ? "assets/trayTemplate.png" : "assets/tray.png");
   if (existsSync(iconPath)) {
     const icon = nativeImage.createFromPath(iconPath);
-    icon.setTemplateImage(true);
+    if (MAC) icon.setTemplateImage(true);
     tray = new Tray(icon);
     tray.setToolTip("LinkShell");
+    // Windows opens an app from its tray icon with a click; the menu is on the right button.
+    if (!MAC) tray.on("click", () => showWindow());
     updateTray();
   }
   createWindow();

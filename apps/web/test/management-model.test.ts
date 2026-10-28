@@ -7,9 +7,11 @@ import {
   manageView,
   membershipOf,
   newerVersion,
+  parseHostLog,
   passwordProblem,
   redemptionProblem,
   serviceLabel,
+  splitPath,
 } from "../src/live/management-model";
 
 it("routes management pages through one view id", () => {
@@ -59,4 +61,30 @@ it("compares versions numerically and shortens large numbers", () => {
   expect(newerVersion("1.0", "1.0.0")).toBe(false);
   expect(compactNumber(999)).toBe("999");
   expect(compactNumber(12_800_000)).toBe("12.8M");
+});
+
+it("reads the Host's log as stamped entries, a trace kept with its line", () => {
+  const log = [
+    "t] Codex: v0.162.1",
+    "2026-10-28T09:37:13.279Z [host] Claude: v2.1.308",
+    "2026-10-28T09:38:35.164Z [rpc] agents.models failed: TypeError",
+    "    at HostRpcServer.dispatch (server.js:518:26)",
+    "2026-10-28T09:38:36.000Z no source",
+    "",
+  ].join("\n");
+  expect(parseHostLog(log)).toEqual([
+    { at: Date.parse("2026-10-28T09:37:13.279Z"), tag: "host", text: "Claude: v2.1.308" },
+    { at: Date.parse("2026-10-28T09:38:35.164Z"), tag: "rpc", text: "agents.models failed: TypeError\n    at HostRpcServer.dispatch (server.js:518:26)" },
+    { at: Date.parse("2026-10-28T09:38:36.000Z"), tag: undefined, text: "no source" },
+  ]);
+  // A message without stamps (no log yet, a read error) is shown as it is.
+  expect(parseHostLog("暂无日志。")).toEqual([{ text: "暂无日志。" }]);
+});
+
+it("keeps a path's last component whole when it is cut in the middle", () => {
+  expect(splitPath("/Users/me/.linkshell/host.log")).toEqual(["/Users/me/.linkshell", "/host.log"]);
+  expect(splitPath("/tmp/linkshell-electron-home")).toEqual(["/tmp", "/linkshell-electron-home"]);
+  const long = `/a/${"x".repeat(40)}`;
+  expect(splitPath(long).join("")).toBe(long);
+  expect(splitPath(long)[1]).toHaveLength(16);
 });

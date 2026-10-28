@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS driver_state (
   value TEXT NOT NULL,
   PRIMARY KEY (session_id, key)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS agent_state (
+  agent TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (agent, key)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS client_messages (
   session_id TEXT NOT NULL,
   client_message_id TEXT NOT NULL,
@@ -802,6 +808,23 @@ export class HostStore {
         "INSERT INTO driver_state (session_id, key, value) VALUES (?, ?, ?) ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value",
       )
       .run(sessionId, key, value);
+  }
+
+  /** Small values a driver keeps for the agent as a whole across restarts (what it last said its models were). */
+  getAgentState(agent: string, key: string): string | undefined {
+    const row = this.db.prepare("SELECT value FROM agent_state WHERE agent = ? AND key = ?").get(agent, key) as { value: string } | undefined;
+    return row?.value;
+  }
+
+  setAgentState(agent: string, key: string, value: string): void {
+    this.db
+      .prepare("INSERT INTO agent_state (agent, key, value) VALUES (?, ?, ?) ON CONFLICT (agent, key) DO UPDATE SET value = excluded.value")
+      .run(agent, key, value);
+  }
+
+  /** Forgets what was kept for an agent: another agent may come to have its id. */
+  clearAgentState(agent: string): void {
+    this.db.prepare("DELETE FROM agent_state WHERE agent = ?").run(agent);
   }
 
   releaseClientMessage(sessionId: string, clientMessageId: string): void {

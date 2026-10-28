@@ -118,15 +118,31 @@ export function effective(settings: CodexSettings, overrides: CodexOverrides, mo
   return { model, info, effort, permissions };
 }
 
+/** The models to choose from while `current` is in use: hidden ones only when it is one, and `current` even if Codex doesn't list it. */
+function modelValues(models: CodexModel[], current: string | undefined): { value: string; name: string; description?: string }[] {
+  const visible = models.filter((m) => !m.hidden || m.model === current);
+  if (!current || visible.length === 0) return [];
+  const values = visible.map((m) => ({ value: m.model, name: m.displayName || m.model, description: m.description || undefined }));
+  if (!values.some((v) => v.value === current)) values.unshift({ value: current, name: current, description: undefined });
+  return values;
+}
+
+/**
+ * What a new thread can be started on (`agents.models`): the same list a
+ * thread's model option shows, and `configured` (config.toml's model) or else
+ * Codex's default as the one `thread/start` without a model would use.
+ */
+export function newThreadModels(models: CodexModel[], configured: string | undefined): { models: { value: string; name: string; description?: string }[]; current?: string } {
+  const { model } = effective({ model: configured }, {}, models);
+  const values = modelValues(models, model);
+  return values.length > 0 ? { models: values, current: model } : { models: [] };
+}
+
 export function configOptions(settings: CodexSettings, overrides: CodexOverrides, models: CodexModel[]): SessionConfigOption[] {
   const { model, info, effort, permissions } = effective(settings, overrides, models);
   const options: SessionConfigOption[] = [];
-  const visible = models.filter((m) => !m.hidden || m.model === model);
-  if (model && visible.length > 0) {
-    const values = visible.map((m) => ({ value: m.model, name: m.displayName || m.model, description: m.description || undefined }));
-    if (!values.some((v) => v.value === model)) values.unshift({ value: model, name: model, description: undefined });
-    options.push({ id: "model", name: "Model", category: "model", current: model, values });
-  }
+  const values = modelValues(models, model);
+  if (model && values.length > 0) options.push({ id: "model", name: "Model", category: "model", current: model, values });
   const efforts = info?.supportedReasoningEfforts ?? [];
   if (effort && efforts.length > 1) {
     options.push({

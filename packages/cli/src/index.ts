@@ -30,7 +30,8 @@ program.command("app")
 
 program.command("desktop", { hidden: true })
   .option("--action <action>", "snapshot, start, stop or restart", "snapshot")
-  .action(async (options) => { const { runDesktop } = await import("./commands/desktop.js"); await runDesktop(pkg.version, options.action); });
+  .option("--provider <provider>", "github or google, for --action login-oauth")
+  .action(async (options) => { const { runDesktop } = await import("./commands/desktop.js"); await runDesktop(pkg.version, options.action, process.stdin, { provider: options.provider }); });
 
 program.command("desktop-workspace", { hidden: true })
   .requiredOption("--assets <directory>", "Absolute path to the bundled workspace assets")

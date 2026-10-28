@@ -17,6 +17,8 @@ import type {
   ToolKind,
 } from "@linkshell/wire";
 import { agentInboxMessages, type AgentInboxMessage } from "./agent-messages.js";
+import { userMessageView } from "./user-message.js";
+import { reconnectOf } from "./errors.js";
 
 // Turns a session's event log into what the UI renders. Pure and immutable:
 // each event returns a new view, and only the items it touched are new objects,
@@ -115,6 +117,11 @@ export interface SessionView {
   items: TimelineItem[];
   /** id → index into items. */
   index: Record<string, number>;
+  /**
+   * The last item of each finished turn, by id: where a turn ended, which nothing on screen marks
+   * when it simply finished. A message sent while the agent works doesn't end its turn.
+   */
+  turnBreaks?: string[];
   permissions: PendingPermission[];
   config: SessionConfigOption[];
   commands: { name: string; description: string; hint?: string }[];
@@ -123,6 +130,8 @@ export interface SessionView {
   usage?: Omit<Extract<SessionUpdate, { sessionUpdate: "usage_update" }>, "sessionUpdate">;
   state: SessionState;
   turnActive: boolean;
+  /** When the running turn started, as its `ls_turn` said: the live row counts from it. */
+  turnStartedAt?: number;
   driver?: SessionDriver;
   title?: string;
   /** Latest plan item id in the current turn (plans update in place). */
@@ -245,6 +254,34 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
 }
 
 /** Workflow agents can themselves contain agents; ids are session-wide. */
+/**
+ * Where a plan is shown: at the end of its turn, as the Claude app and Codex keep it — its latest
+ * state under everything the turn has done so far, moving down as the turn goes on and updated in
+ * place — rather than where it was first written. A finished turn's plan stays at that turn's end,
+ * above its "turn ended" line. The same array comes back when nothing moves.
+ */
+export function plansAtTurnEnd(items: TimelineItem[], turnBreaks?: readonly string[]): TimelineItem[] {
+  if (!items.some((item) => item.kind === "plan")) return items;
+  const ends = new Set(turnBreaks);
+  // An agent that never says where its turns end: each message of the person's starts one.
+  const byMessage = ends.size === 0;
+  const out: TimelineItem[] = [];
+  let held: TimelineItem[] = [];
+  const flush = () => { out.push(...held); held = []; };
+  for (const item of items) {
+    if (item.kind === "plan") {
+      held.push(item);
+      if (ends.has(item.id)) flush();
+      continue;
+    }
+    if (held.length && (item.kind === "turn-end" || (byMessage && item.kind === "user"))) flush();
+    out.push(item);
+    if (held.length && ends.has(item.id)) flush();
+  }
+  flush();
+  return out.every((item, index) => item === items[index]) ? items : out;
+}
+
 export function findTool(view: SessionView, id: string): Extract<TimelineItem, { kind: "tool" }> | undefined {
   const own = get(view, id, "tool");
   if (own) return own;
@@ -274,7 +311,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       const at = existing?.ts ?? ts;
       if (role === "user") {
         const content = update.append && existing?.kind === "user" ? [...existing.blocks, ...blocks] : blocks;
-        return upsert(view, { kind: "user", id, blocks: mergeText(content), agentMessages: agentInboxMessages(content), ts: at });
+        return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(content), agentMessages: agentInboxMessages(content), ts: at });
       }
       if (role === "thought") return upsert(view, { kind: "thought", id, text: (update.append && existing?.kind === "thought" ? existing.text : "") + text, streaming: view.turnActive, ts: at });
       return upsert(view, { kind: "agent", id, text: (update.append && existing?.kind === "agent" ? existing.text : "") + text,
@@ -287,7 +324,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       const existing = get(view, id, "user");
       // The host's copy confirms (and replaces) an optimistic one with the same id.
       const blocks = existing && !existing.pending ? [...existing.blocks, update.content] : [update.content];
-      return upsert(view, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts });
+      return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts });
     }
     case "agent_message_chunk": {
       const existing = get(view, update.messageId, "agent");
@@ -397,7 +434,8 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       return { ...view, usage: { ...view.usage, usedTokens: update.usedTokens ?? view.usage?.usedTokens, contextWindow: update.contextWindow ?? view.usage?.contextWindow,
         cost: update.cost === undefined ? view.usage?.cost : update.cost, tokens: update.tokens ?? view.usage?.tokens } };
     case "ls_turn":
-      if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: undefined };
+      // A message sent while the agent works starts no new turn: the clock keeps the first start.
+      if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: undefined, turnStartedAt: view.turnActive ? view.turnStartedAt ?? ts : ts };
       {
         const settled = settleAll(view, ts);
         const ended: SessionView = {
@@ -406,10 +444,12 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
           state: settled.permissions.some((permission) => permission.childSessionId) ? "waiting" : update.stopReason === "error" ? "error" : "idle",
           permissions: settled.permissions.filter((permission) => permission.childSessionId),
         };
+        const last = ended.items.at(-1)?.id;
+        const marked = last && ended.turnBreaks?.at(-1) !== last ? { ...ended, turnBreaks: [...(ended.turnBreaks ?? []), last] } : ended;
         // A normal end is implied; limits and refusals must remain visible.
         return update.stopReason && update.stopReason !== "end_turn"
-          ? upsert(ended, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts })
-          : ended;
+          ? upsert(marked, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts })
+          : marked;
       }
     case "ls_status": {
       const turnActive = update.turnActive ?? (update.state === "running" || update.state === "waiting");
@@ -468,8 +508,12 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
     }
     case "ls_error":
       return upsert(settleStreaming(view, ts), { kind: "error", id: `error-${key}`, code: update.code, message: update.message, hint: update.hint, ts });
-    case "ls_notice":
-      return upsert(view, { kind: "notice", id: `notice-${key}`, level: update.level, title: update.title, detail: update.detail, ts });
+    case "ls_notice": {
+      // An agent retrying its connection reports each attempt; the latest replaces the one before.
+      const last = view.items.at(-1);
+      const id = last?.kind === "notice" && reconnectOf(update.title) && reconnectOf(last.title) ? last.id : `notice-${key}`;
+      return upsert(view, { kind: "notice", id, level: update.level, title: update.title, detail: update.detail, ts });
+    }
     default:
       return view;
   }
@@ -518,6 +562,15 @@ export function startWindow(view: SessionView, startSeq: number): SessionView {
 
 /** Titles the reducer gives a tool call it only saw the end of. */
 const STUB_TITLES = new Set(["Tool", "Sub-agent"]);
+
+/**
+ * A user message only the agent was meant to read (a reminder, a model switch) gets no item: it
+ * would show as nothing, yet still split the run of steps around it.
+ */
+function upsertUser(view: SessionView, existing: TimelineItem | undefined, item: Extract<TimelineItem, { kind: "user" }>): SessionView {
+  if (!existing && !item.agentMessages && userMessageView(item.blocks).hidden) return view;
+  return upsert(view, item);
+}
 
 /** One item seen in two pages: `earlier` has how it began, `later` how it went on. */
 function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
@@ -579,7 +632,10 @@ export function prependEvents(view: SessionView, events: SessionEvent[], startSe
   for (const event of events) earlier = applyUpdate(earlier, event.update, event.ts, String(event.seq));
   // Whatever was still streaming where the page ends is continued by the later items, or was cut off.
   earlier = settleAll(earlier, events[events.length - 1]?.ts ?? 0);
-  return { ...joinViews(earlier, view), startSeq };
+  const joined = joinViews(earlier, view);
+  // A turn still running that began in this page: its start is here.
+  const turnStartedAt = view.turnStartedAt ?? (view.turnActive && earlier.turnActive ? earlier.turnStartedAt : undefined);
+  return { ...joined, startSeq, ...(turnStartedAt !== undefined ? { turnStartedAt } : {}) };
 }
 
 /**

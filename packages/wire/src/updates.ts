@@ -21,8 +21,22 @@ export type ToolCallLocation = z.infer<typeof toolCallLocationSchema>;
  * Host drivers fill it from each agent's own tool names; clients render it the
  * same way for every agent and fall back to `title` + `kind` without it.
  */
+export const mcpAppDisplayModeSchema = z.enum(["inline", "fullscreen"]);
+
 export const toolDetailSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("mcp"), server: z.string(), tool: z.string() }),
+  z.object({
+    type: z.literal("mcp"),
+    server: z.string(),
+    tool: z.string(),
+    /**
+     * The tool has a page of its own (an MCP App), which `mcp.resource` reads.
+     * Codex sessions only. It may arrive in a later `tool_call_update` than the
+     * call's card, when the host had to look the tool up first. `connector`:
+     * the Codex connector (server `codex_apps`) the page belongs to, which
+     * `mcp.call` needs for that server.
+     */
+    app: z.object({ resourceUri: z.string(), displayMode: mcpAppDisplayModeSchema.optional(), connector: z.string().optional() }).optional(),
+  }),
   z.object({
     type: z.literal("subagent"),
     /** spawn starts a sub-agent (its work nests under this call); the rest talk to one. */

@@ -2,6 +2,7 @@ import accountConfig from "../../config/account.json";
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync, getRandomBytes } from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import { create } from "zustand";
+import { accountErrorMessage, oauthErrorCode, tokenErrorCode } from "@linkshell/client-core";
 import { deleteSecret, readSecret, writeSecret } from "./secure";
 
 // The iTool account (Supabase auth, shared with iTool and `linkshell login`).
@@ -57,7 +58,10 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
   if (!response.ok) {
     const message = String(json.error_description ?? json.msg ?? json.message ?? "登录失败");
     const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(json.error_code ?? json.error));
-    throw new AuthRefused(/invalid login credentials/i.test(message) ? "邮箱或密码不对" : /email not confirmed/i.test(message) ? "邮箱还没有验证，请先查收验证邮件" : message, final);
+    // The desktop describes the same refusals with the same table (client-core account-errors).
+    const grant = path.includes("grant_type=pkce") ? "pkce" : path.includes("grant_type=refresh_token") ? "refresh_token" : "password";
+    const code = tokenErrorCode(response.status, json, grant);
+    throw new AuthRefused(code === "unknown" ? message : accountErrorMessage(code), final);
   }
   const user = json.user as { id: string; email?: string };
   return {
@@ -86,10 +90,9 @@ function redirectParams(url: string): URLSearchParams {
   return params;
 }
 
-function oauthError(message: string): string {
-  if (/same email|already registered|linking/i.test(message)) return "这个邮箱已经用另一种方式注册过，请用原来的方式登录";
-  if (/provider is not enabled|unsupported provider/i.test(message)) return "这种登录方式暂时不可用";
-  return message;
+function oauthError(params: URLSearchParams, fallback: string): string {
+  const code = oauthErrorCode({ error: params.get("error"), errorCode: params.get("error_code"), description: params.get("error_description") });
+  return code === "unknown" ? fallback : accountErrorMessage(code);
 }
 
 // PKCE: the code that comes back through the URL scheme is useless without the
@@ -108,7 +111,7 @@ async function oauth(provider: OAuthProvider): Promise<AccountSession | undefine
   if (result.type !== "success") return undefined;
   const params = redirectParams(result.url);
   const failure = params.get("error_description") ?? params.get("error");
-  if (failure) throw new Error(oauthError(failure));
+  if (failure) throw new Error(oauthError(params, failure));
   const code = params.get("code");
   if (!code) throw new Error("登录没有完成，请再试一次");
   return auth("token?grant_type=pkce", { auth_code: code, code_verifier: verifier });

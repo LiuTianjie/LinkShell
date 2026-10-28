@@ -2,7 +2,7 @@ import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, re
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { sessionGoalSchema, type ContentBlock, type PlanEntry, type SessionUpdate, type ToolCallContent, type ToolDetail, type ToolKind } from "@linkshell/wire";
+import { readUserText, sessionGoalSchema, stripHiddenContext, type ContentBlock, type PlanEntry, type SessionUpdate, type ToolCallContent, type ToolDetail, type ToolKind } from "@linkshell/wire";
 import { inlineImage } from "../images.js";
 import { nestUnder } from "../nesting.js";
 import { ClaudeChildIndex, ownedFile } from "./children.js";
@@ -297,6 +297,8 @@ function slashCommand(text: string): string | undefined {
   if (!name) return undefined;
   const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim();
   const command = name.startsWith("/") ? name : `/${name}`;
+  // As in the Claude app: a model switch and a compaction show as what they did, not as a message.
+  if (command === "/model" || command === "/compact") return "";
   return args ? `${command} ${args}` : command;
 }
 
@@ -361,16 +363,21 @@ function compaction(line: Json): SessionUpdate[] {
   ];
 }
 
-function isNoise(text: string): boolean {
-  const trimmed = text.trimStart();
-  return (
-    trimmed.startsWith("<command-") ||
-    trimmed.startsWith("<local-command-") ||
-    trimmed.startsWith("<task-notification>") ||
-    trimmed.startsWith("<system-reminder>") ||
-    trimmed.startsWith("[Request interrupted by user")
-  );
+/**
+ * What of a user block to keep: the text without what Claude added for itself (reminders, IDE
+ * state, caveats), wherever in the block it is; nothing when that was all of it. Mail from other
+ * sessions and agents stays: it is a message of its own.
+ */
+function keptText(text: string): string | undefined {
+  const kept = stripHiddenContext(text, { keepPeers: true });
+  if (!kept || kept.startsWith("[Request interrupted by user")) return undefined;
+  if (/^<(?:command-|task-notification>)/.test(kept)) return undefined;
+  const peer = /<(?:cross-session-message|teammate-message|agent-message)\b/.test(kept);
+  return peer || !readUserText(kept).hidden ? kept : undefined;
 }
+
+/** A shell command from the prompt (`!`) or a local command's output: in Claude's context, but not answered. */
+const unanswered = (text: string) => /^<(?:bash-(?:input|stdout|stderr)|local-command-(?:stdout|stderr))>/.test(text);
 
 /**
  * A message the user typed while Claude was working. Claude folds it into the
@@ -388,16 +395,20 @@ function queuedPrompt(line: Json, agents?: Set<string>): TranscriptLineResult {
     return notification ? { updates: [...notification, { sessionUpdate: "ls_turn", state: "started" }], ts } : { updates: [] };
   }
   if (attachment.commandMode !== undefined && attachment.commandMode !== "prompt") return { updates: [] };
-  if (obj(attachment.origin)?.kind !== undefined && obj(attachment.origin)?.kind !== "human") return { updates: [] };
+  // Typed by the person, or mail from another session or a sub-agent handing back its report.
+  const origin = obj(attachment.origin)?.kind;
+  if (origin !== undefined && origin !== "human" && origin !== "peer") return { updates: [] };
   const messageId = str(attachment.source_uuid) ?? str(line.uuid);
   const prompt = attachment.prompt;
   const blocks: ContentBlock[] = [];
   if (typeof prompt === "string") {
-    if (prompt.trim()) blocks.push({ type: "text", text: prompt });
+    const text = keptText(prompt);
+    if (text) blocks.push({ type: "text", text });
   } else if (Array.isArray(prompt)) {
     for (const raw of prompt) {
       const block = obj(raw);
-      if (block?.type === "text" && str(block.text)) blocks.push({ type: "text", text: str(block.text)! });
+      const text = block?.type === "text" ? keptText(str(block.text) ?? "") : undefined;
+      if (text) blocks.push({ type: "text", text });
       if (block?.type === "image") {
         const source = obj(block.source);
         const image = inlineImage(str(source?.data), str(source?.media_type));
@@ -489,9 +500,11 @@ export function transcriptLine(
           continue;
         }
         const command = slashCommand(block.text);
-        if (command) {
-          updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content: { type: "text", text: command } });
-          userText = true;
+        if (command !== undefined) {
+          if (command) {
+            updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content: { type: "text", text: command } });
+            userText = true;
+          }
           continue;
         }
         if (block.text.trimStart().startsWith("[Request interrupted by user")) {
@@ -499,9 +512,10 @@ export function transcriptLine(
           updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "cancelled" });
           continue;
         }
-        if (isNoise(block.text)) continue;
-        updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content: { type: "text", text: block.text } });
-        userText = true;
+        const text = keptText(block.text);
+        if (!text) continue;
+        updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content: { type: "text", text } });
+        if (!unanswered(text)) userText = true;
       } else if (block.type === "image") {
         const source = obj(block.source);
         const content: ContentBlock = inlineImage(str(source?.data), str(source?.media_type)) ?? { type: "image", mimeType: str(source?.media_type) ?? "image/*" };
@@ -535,7 +549,15 @@ export function transcriptLine(
   }
 
   const messageId = str(message.id) ?? str(line.uuid) ?? "";
-  for (const rawBlock of Array.isArray(message.content) ? message.content : []) {
+  // A request that failed is written as a reply of Claude's own (model "<synthetic>"): it is the
+  // error, not something the model said, and goes out as one with Claude's code for it.
+  const apiError = line.isApiErrorMessage === true;
+  if (apiError) {
+    const said = (Array.isArray(message.content) ? message.content : []).map((raw) => str(obj(raw)?.text) ?? "").join("").trim();
+    const code = str(line.error);
+    if (said) updates.push({ sessionUpdate: "ls_error", code: !code || code === "unknown" ? "api_error" : code, message: said });
+  }
+  for (const rawBlock of apiError ? [] : Array.isArray(message.content) ? message.content : []) {
     const block = obj(rawBlock);
     if (!block) continue;
     if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
@@ -559,6 +581,8 @@ export function transcriptLine(
         sessionUpdate: "tool_call",
         toolCallId: str(block.id)!,
         title,
+        // Claude's own name for the tool: Grep and Glob, Write and Edit share a kind.
+        name: str(block.name),
         kind,
         detail,
         status: "in_progress",

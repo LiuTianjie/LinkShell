@@ -221,3 +221,26 @@ describe("tool detail", () => {
     expect((other as Record<string, unknown>).detail).toBeUndefined();
   });
 });
+
+describe("what clients word a call and an error by", () => {
+  it("Claude: the tool's own name, from the transcript and from the ACP adapter", () => {
+    const line = JSON.stringify({ type: "assistant", uuid: "u1", message: { id: "m1", content: [{ type: "tool_use", id: "g1", name: "Glob", input: { pattern: "**/*.ts" } }] } });
+    expect(toolCall(transcriptLine(line).updates)).toMatchObject({ name: "Glob", kind: "search" });
+    const acp = normalizeAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "w1", title: "Write a.ts", kind: "edit", status: "pending", _meta: { claudeCode: { toolName: "Write" } } });
+    expect(acp).toMatchObject({ name: "Write" });
+  });
+
+  it("Claude: a failed request written as its reply is an error with Claude's code", () => {
+    const line = JSON.stringify({ type: "assistant", uuid: "u2", isApiErrorMessage: true, error: "rate_limit", apiErrorStatus: 429, message: { id: "m2", model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text: "You've hit your session limit · resets 5am" }] } });
+    const updates = transcriptLine(line).updates;
+    expect(updates).toContainEqual({ sessionUpdate: "ls_error", code: "rate_limit", message: "You've hit your session limit · resets 5am" });
+    expect(updates.some((update) => update.sessionUpdate === "agent_message_chunk")).toBe(false);
+    const unknown = JSON.stringify({ type: "assistant", uuid: "u3", isApiErrorMessage: true, error: "unknown", message: { id: "m3", content: [{ type: "text", text: "API Error: 400 bad" }] } });
+    expect(transcriptLine(unknown).updates[0]).toMatchObject({ sessionUpdate: "ls_error", code: "api_error" });
+  });
+
+  it("Codex: the file a read names, resolved against the command's directory", () => {
+    const read = itemToHistory({ type: "commandExecution", id: "r1", cwd: "/w", command: "/bin/zsh -lc 'cat src/a.ts'", status: "completed", commandActions: [{ type: "read", command: "cat src/a.ts", name: "a.ts", path: "src/a.ts" }] });
+    expect(toolCall(read?.updates)?.rawInput).toEqual({ command: "cat src/a.ts", cwd: "/w", path: "/w/src/a.ts" });
+  });
+});

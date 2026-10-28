@@ -51,7 +51,7 @@ namespace LinkShell.Windows {
                         Extract(zip, scratch, total, progress, token);
                     }
                 }
-                foreach (string file in new[] { "LinkShell.exe", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
+                foreach (string file in new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
                     if (!File.Exists(IOPath(Path.Combine(scratch, file)))) throw new InvalidDataException("安装包不完整，缺少 " + file + "。请重新下载安装包。");
                 }
                 token.ThrowIfCancellationRequested();

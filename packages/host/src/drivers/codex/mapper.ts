@@ -11,6 +11,7 @@ import type {
   StopReason,
   ToolCallContent,
   ToolCallStatus,
+  ToolDetail,
 } from "@linkshell/wire";
 import { imageFromPath, inlineImage } from "../images.js";
 import { QUESTION_OPTIONS, formContent, formQuestions } from "../../questions.js";
@@ -33,6 +34,8 @@ export interface CodexThread {
   status?: { type: string; activeFlags?: string[] };
   /** The thread's file on disk, when the server says where it is. */
   path?: string | null;
+  /** The thread this one was forked from (Codex's own fork, wherever it was made). */
+  forkedFromId?: string | null;
   turns?: CodexTurn[];
 }
 
@@ -40,7 +43,7 @@ export interface CodexTurn {
   id: string;
   items: Json[];
   status: "completed" | "interrupted" | "failed" | "inProgress";
-  error?: { message: string; additionalDetails?: string | null } | null;
+  error?: { message: string; additionalDetails?: string | null; codexErrorInfo?: unknown } | null;
   startedAt?: number | null;
   completedAt?: number | null;
 }
@@ -113,6 +116,7 @@ export function threadToDiscovered(thread: CodexThread): DiscoveredSession {
     createdAt: thread.createdAt * 1000,
     updatedAt: thread.updatedAt * 1000,
     state: threadStateOf(thread.status),
+    forkedFrom: thread.forkedFromId ?? undefined,
   };
 }
 
@@ -226,6 +230,122 @@ function mcpOutput(item: Json): ToolCallContent[] {
   return texts.length > 0 ? [{ type: "content", content: { type: "text", text: texts.join("\n") } }, ...out] : out;
 }
 
+// ── MCP Apps ─────────────────────────────────────────────────────────
+
+/** What `mcpServerStatus/list` says of a tool, as far as its page goes. */
+export interface McpToolDescriptor {
+  name: string;
+  title?: string;
+  description?: string;
+  _meta?: Json;
+}
+
+/**
+ * The descriptor of the tool an `mcpToolCall` item called, when the driver
+ * knows it: an item doesn't always say which page its tool has (older Codex,
+ * older history).
+ */
+export type McpToolLookup = (item: Json) => McpToolDescriptor | undefined;
+
+export type McpPage = NonNullable<Extract<ToolDetail, { type: "mcp" }>["app"]>;
+
+/** Only `ui://` resources are pages; Codex's `internal://` templates are its own UI. */
+export const isPageUri = (uri: string | undefined): uri is string => typeof uri === "string" && uri.startsWith("ui://");
+
+const displayModeOf = (value: unknown): McpPage["displayMode"] => (value === "inline" || value === "fullscreen" ? value : undefined);
+
+/** The page named in a tool's or a result's metadata, read the way Codex reads it. */
+function metaPageUri(meta: Json | undefined): string | undefined {
+  const uri = str(obj(meta?.ui)?.resourceUri) ?? str(meta?.["ui/resourceUri"]) ?? str(meta?.["openai/outputTemplate"]);
+  return isPageUri(uri) ? uri : undefined;
+}
+
+/** The connector a `codex_apps` tool belongs to. */
+export function connectorOf(meta: Json | undefined): string | undefined {
+  return str(meta?.connector_id) ?? str(obj(meta?._codex_apps)?.connector_id);
+}
+
+function page(resourceUri: string, displayMode: McpPage["displayMode"], connector: string | undefined): McpPage {
+  return { resourceUri, ...(displayMode ? { displayMode } : {}), ...(connector ? { connector } : {}) };
+}
+
+/** A tool's page from its descriptor alone. */
+export function descriptorPage(meta: Json | undefined): McpPage | undefined {
+  const resourceUri = metaPageUri(meta);
+  return resourceUri ? page(resourceUri, displayModeOf(obj(meta?.["openai/ui"])?.preferredModelDisplayMode), connectorOf(meta)) : undefined;
+}
+
+/** The page an item names by itself, without its tool's descriptor. */
+function itemPageUri(item: Json): string | undefined {
+  return [str(obj(item.appContext)?.resourceUri), str(obj(item.mcpAppUi)?.resourceUri)].find(isPageUri);
+}
+
+/**
+ * The page an MCP tool call has, looked for where Codex looks: the call's app
+ * context, the descriptor captured with the call (`mcpAppUi`), the tool's
+ * descriptor, the result's metadata, then the legacy field. The first `ui://`
+ * one wins.
+ */
+export function mcpPage(item: Json, lookup?: McpToolLookup): McpPage | undefined {
+  const meta = lookup?.(item)?._meta;
+  const legacy = str(item.mcpAppResourceUri);
+  const resourceUri = itemPageUri(item) ?? metaPageUri(meta) ?? metaPageUri(obj(obj(item.result)?._meta)) ?? (isPageUri(legacy) ? legacy : undefined);
+  if (!resourceUri) return undefined;
+  const displayMode = displayModeOf(obj(item.mcpAppUi)?.preferredModelDisplayMode) ?? displayModeOf(obj(meta?.["openai/ui"])?.preferredModelDisplayMode);
+  return page(resourceUri, displayMode, str(obj(item.appContext)?.connectorId) ?? connectorOf(meta));
+}
+
+/** Whether an item names its page itself, so its tool needn't be looked up for it. */
+export function itemHasPage(item: Json): boolean {
+  return itemPageUri(item) !== undefined || metaPageUri(obj(obj(item.result)?._meta)) !== undefined || isPageUri(str(item.mcpAppResourceUri));
+}
+
+/** Above this, a result's structured content or metadata is left out of `rawOutput`; the card's own content is unaffected. */
+const MAX_RAW_JSON = 256 * 1024;
+/** Inline pictures and files above this are left out of `rawOutput`: the card's content already has the pictures, and the log would keep them twice. */
+const MAX_RAW_BINARY = 16 * 1024;
+
+const jsonSize = (value: unknown): number => JSON.stringify(value)?.length ?? 0;
+
+/**
+ * An MCP result as Codex returned it, for a page that shows its tool's result
+ * (`ui/notifications/tool-result`). `truncated`: something above the limits was
+ * left out (an entry's `omitted`: its data).
+ */
+function mcpRawOutput(result: Json): Record<string, unknown> {
+  let truncated = false;
+  const content = arr(result.content).map((raw) => {
+    const entry = obj(raw);
+    if (!entry) return raw;
+    if (typeof entry.data === "string" && entry.data.length > MAX_RAW_BINARY) {
+      truncated = true;
+      const { data: _data, ...rest } = entry;
+      return { ...rest, omitted: true };
+    }
+    const resource = obj(entry.resource);
+    if (typeof resource?.blob === "string" && resource.blob.length > MAX_RAW_BINARY) {
+      truncated = true;
+      const { blob: _blob, ...rest } = resource;
+      return { ...entry, resource: { ...rest, omitted: true } };
+    }
+    return raw;
+  });
+  const out: Record<string, unknown> = { content };
+  for (const key of ["structuredContent", "_meta"] as const) {
+    if (result[key] == null) continue;
+    if (jsonSize(result[key]) <= MAX_RAW_JSON) out[key] = result[key];
+    else truncated = true;
+  }
+  if (result.isError === true) out.isError = true;
+  if (truncated) out.truncated = true;
+  return out;
+}
+
+function mcpDetail(item: Json, lookup: McpToolLookup | undefined): Extract<ToolDetail, { type: "mcp" }> {
+  const app = mcpPage(item, lookup);
+  return { type: "mcp", server: str(item.server) ?? "mcp", tool: str(item.tool) ?? "tool", ...(app ? { app } : {}) };
+}
+
 /** Dynamic tools return input-shaped blocks, unlike an MCP result's content. */
 function dynamicOutput(item: Json): ToolCallContent[] {
   if (!Array.isArray(item.contentItems)) return mcpOutput(item);
@@ -247,19 +367,25 @@ export function unwrapShell(command: string): string {
   return unwrapShellCommand(command);
 }
 
-/** A readable title and kind for a command, from Codex's own parse of it. */
-function describeCommand(item: Json): { title: string; kind: "read" | "search" | "execute" } {
+/**
+ * A readable title and kind for a command, from Codex's own parse of it, with the file or query
+ * it is about (the file resolved against the command's directory, so a client can open it).
+ */
+function describeCommand(item: Json): { title: string; kind: "read" | "search" | "execute"; path?: string; query?: string } {
   const actions = arr(item.commandActions).map(obj).filter((action): action is Json => Boolean(action));
   const command = unwrapShell(str(item.command) ?? "");
   if (actions.length === 1) {
     const action = actions[0]!;
+    const named = str(action.path);
+    const cwd = str(item.cwd);
+    const path = named && cwd && !named.startsWith("/") ? `${cwd.replace(/\/$/, "")}/${named}` : named;
     switch (action.type) {
       case "read":
-        return { title: `Read ${str(action.name) ?? str(action.path) ?? command}`, kind: "read" };
+        return { title: `Read ${str(action.name) ?? named ?? command}`, kind: "read", path };
       case "listFiles":
-        return { title: `List ${str(action.path) ?? "files"}`, kind: "read" };
+        return { title: `List ${named ?? "files"}`, kind: "read", path };
       case "search":
-        return { title: `Search ${str(action.query) ? `“${str(action.query)}”` : ""}${str(action.path) ? ` in ${str(action.path)}` : ""}`.trim(), kind: "search" };
+        return { title: `Search ${str(action.query) ? `“${str(action.query)}”` : ""}${named ? ` in ${named}` : ""}`.trim(), kind: "search", path, query: str(action.query) };
       default:
         break;
     }
@@ -291,19 +417,19 @@ export function spawnedThreads(item: unknown): string[] {
 }
 
 /** Updates that open a tool-like item. Returns undefined for non-tool items. */
-export function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "tool_call" }> | undefined {
+export function toolStart(item: Json, lookup?: McpToolLookup): Extract<SessionUpdate, { sessionUpdate: "tool_call" }> | undefined {
   const id = str(item.id);
   if (!id) return undefined;
   const base = { sessionUpdate: "tool_call" as const, toolCallId: id };
   switch (item.type) {
     case "commandExecution": {
-      const { title, kind } = describeCommand(item);
+      const { title, kind, path, query } = describeCommand(item);
       return {
         ...base,
         title,
         kind,
         status: commandStatus(item.status),
-        rawInput: { command: unwrapShell(str(item.command) ?? ""), cwd: item.cwd },
+        rawInput: { command: unwrapShell(str(item.command) ?? ""), cwd: item.cwd, ...(path ? { path } : {}), ...(query ? { query } : {}) },
       };
     }
     case "fileChange": {
@@ -317,7 +443,7 @@ export function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "
         kind: "other",
         status: commandStatus(item.status),
         rawInput: item.arguments,
-        detail: { type: "mcp", server: str(item.server) ?? "mcp", tool: str(item.tool) ?? "tool" },
+        detail: mcpDetail(item, lookup),
       };
     case "dynamicToolCall":
       return {
@@ -402,6 +528,7 @@ export function toolStart(item: Json): Extract<SessionUpdate, { sessionUpdate: "
 function toolFinish(
   item: Json,
   options: { includeOutput: boolean },
+  lookup?: McpToolLookup,
 ): Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> | undefined {
   const id = str(item.id);
   if (!id) return undefined;
@@ -423,6 +550,11 @@ function toolFinish(
       const content = mcpOutput(item);
       if (content.length > 0) update.content = content;
       if (item.error || obj(item.result)?.isError === true) update.status = "failed";
+      const result = obj(item.result);
+      if (result) update.rawOutput = mcpRawOutput(result);
+      // The result's metadata can name a page the call's card didn't have.
+      const detail = mcpDetail(item, lookup);
+      if (detail.app) update.detail = detail;
       break;
     }
     case "dynamicToolCall": {
@@ -444,7 +576,7 @@ function toolFinish(
 }
 
 /** One native item as complete history. */
-export function itemToHistory(raw: Json): HistoryItem | undefined {
+export function itemToHistory(raw: Json, lookup?: McpToolLookup): HistoryItem | undefined {
   const id = str(raw.id);
   if (!id) return undefined;
   switch (raw.type) {
@@ -484,15 +616,15 @@ export function itemToHistory(raw: Json): HistoryItem | undefined {
       };
     }
     default: {
-      const start = toolStart(raw);
+      const start = toolStart(raw, lookup);
       if (!start) return undefined;
-      const finish = toolFinish(raw, { includeOutput: true });
+      const finish = toolFinish(raw, { includeOutput: true }, lookup);
       return { itemId: id, updates: finish ? [start, finish] : [start] };
     }
   }
 }
 
-export function threadToHistory(thread: CodexThread): HistoryItem[] {
+export function threadToHistory(thread: CodexThread, lookup?: McpToolLookup): HistoryItem[] {
   const history: HistoryItem[] = [];
   for (const turn of thread.turns ?? []) {
     // Codex reports turn times in seconds.
@@ -505,7 +637,7 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
       if (isReviewPrompt(item, reviewing)) continue;
       // Still running (a command in a turn under way): history is what has finished.
       if (item.status === "inProgress" && turnUnderWay(turn)) continue;
-      const entry = itemToHistory(item);
+      const entry = itemToHistory(item, lookup);
       if (entry) history.push(ts === undefined ? entry : { ...entry, ts });
     }
     if (turn.status === "failed" && turn.error?.message) {
@@ -514,7 +646,7 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
         updates: [
           {
             sessionUpdate: "ls_error",
-            code: "turn_failed",
+            code: errorInfoCode(turn.error.codexErrorInfo) ?? "turn_failed",
             message: turn.error.message,
             hint: turn.error.additionalDetails ?? undefined,
           },
@@ -526,14 +658,14 @@ export function threadToHistory(thread: CodexThread): HistoryItem[] {
 }
 
 /** A spawn returning says nothing about whether its agent is still working. */
-export function subagentHistory(thread: CodexThread): HistoryItem[] {
+export function subagentHistory(thread: CodexThread, lookup?: McpToolLookup): HistoryItem[] {
   return (thread.turns ?? []).flatMap((turn) => {
     const ts = (value: number | null | undefined) => value == null ? undefined : value < 1e12 ? value * 1000 : value;
     const history: HistoryItem[] = [{
       itemId: `turn-start:${turn.id}`,
       ts: ts(turn.startedAt),
       updates: [{ sessionUpdate: "ls_turn", state: "started", turnId: turn.id }],
-    }, ...threadToHistory({ ...thread, turns: [turn] })];
+    }, ...threadToHistory({ ...thread, turns: [turn] }, lookup)];
     if (!turnUnderWay(turn)) history.push({
       itemId: `turn-end:${turn.id}`,
       ts: ts(turn.completedAt),
@@ -553,19 +685,45 @@ function planEntries(plan: unknown): PlanEntry[] {
   });
 }
 
+/** Codex's error info as LinkShell's error codes (the kinds a client words an API failure by). */
+const ERROR_CODES: Record<string, string> = {
+  serverOverloaded: "overloaded",
+  rateLimitExceeded: "rate_limit",
+  usageLimitExceeded: "usage_limit_exceeded",
+  internalServerError: "server_error",
+  unauthorized: "unauthorized",
+  badRequest: "bad_request",
+  contextWindowExceeded: "context_window_exceeded",
+};
+
+function errorInfoCode(info: unknown): string | undefined {
+  if (typeof info === "string") return ERROR_CODES[info];
+  // { httpConnectionFailed: { httpStatusCode } } and the like: the status says which.
+  const variant = obj(info) && Object.values(obj(info)!)[0];
+  const status = num(obj(variant)?.httpStatusCode);
+  if (status === undefined) return undefined;
+  if (status === 429) return "rate_limit";
+  if (status === 529 || status === 503) return "overloaded";
+  if (status === 401 || status === 403) return "unauthorized";
+  if (status >= 500) return "server_error";
+  return status >= 400 ? "bad_request" : undefined;
+}
+
 /** Items that are text someone wrote; the rest are tools of some kind. */
 const MESSAGE_ITEMS = new Set(["userMessage", "agentMessage", "plan", "reasoning"]);
 
-/** Maps one app-server notification to session updates. */
+/** Maps one app-server notification to session updates. `lookupFor`: each thread's MCP tool lookup (see `McpToolLookup`). */
 export function mapNotification(
   method: string,
   rawParams: unknown,
   stateOf: (threadId: string) => CodexThreadState,
+  lookupFor?: (threadId: string) => McpToolLookup | undefined,
 ): MappedUpdate[] {
   const params = obj(rawParams);
   const threadId = str(params?.threadId);
   if (!params || !threadId) return [];
   const state = stateOf(threadId);
+  const lookup = lookupFor?.(threadId);
   const out = (update: SessionUpdate, itemId?: string): MappedUpdate => ({ threadId, update, itemId });
   /** False for a message that was already being written when the thread was joined. */
   const fromItsStart = (itemId: string): boolean => !state.midTurn || state.begun?.has(itemId) === true;
@@ -602,7 +760,7 @@ export function mapNotification(
           out(
             {
               sessionUpdate: "ls_error",
-              code: "turn_failed",
+              code: errorInfoCode(turn.error.codexErrorInfo) ?? "turn_failed",
               message: turn.error.message,
               hint: turn.error.additionalDetails ?? undefined,
             },
@@ -632,12 +790,19 @@ export function mapNotification(
     case "turn/plan/updated":
       return [out({ sessionUpdate: "plan", entries: planEntries(params.plan) })];
     case "error": {
-      if (params.willRetry === true) return [];
       const error = obj(params.error);
+      // A retry ("Reconnecting... 2/5") keeps the turn going: a warning, which clients fold into one
+      // line counting up. The cause stays with it, for a client to tell a busy server from a lost line.
+      if (params.willRetry === true) {
+        const title = str(error?.message);
+        if (!title) return [];
+        const cause = [errorInfoCode(error?.codexErrorInfo), str(error?.additionalDetails)].filter(Boolean).join(": ");
+        return [out({ sessionUpdate: "ls_notice", level: "warning", title, ...(cause ? { detail: cause } : {}) })];
+      }
       return [
         out({
           sessionUpdate: "ls_error",
-          code: "agent_error",
+          code: errorInfoCode(error?.codexErrorInfo) ?? "agent_error",
           message: str(error?.message) ?? "Codex reported an error",
           hint: str(error?.additionalDetails) ?? undefined,
         }),
@@ -693,7 +858,7 @@ export function mapNotification(
           out(update, index === history.updates.length - 1 ? history.itemId : undefined),
         );
       }
-      const start = toolStart(item);
+      const start = toolStart(item, lookup);
       return start ? [out(start)] : [];
     }
     case "item/completed": {
@@ -706,7 +871,7 @@ export function mapNotification(
         // a turn that is over): the whole item, as history would have it.
         if (item.type === "enteredReviewMode") state.reviewing = true;
         else if (item.type === "exitedReviewMode") state.reviewing = false;
-        const whole = isReviewPrompt(item, state.reviewing) ? undefined : itemToHistory(item);
+        const whole = isReviewPrompt(item, state.reviewing) ? undefined : itemToHistory(item, lookup);
         return whole ? whole.updates.map((update, index) => out(update, index === whole.updates.length - 1 ? itemId : undefined)) : [];
       }
       switch (item.type) {
@@ -724,7 +889,7 @@ export function mapNotification(
           return [out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "thought" }, itemId)];
         default: {
           if (item.type === "exitedReviewMode") state.reviewing = false;
-          const finish = toolFinish(item, { includeOutput: false });
+          const finish = toolFinish(item, { includeOutput: false }, lookup);
           return finish ? [out(finish, itemId)] : [];
         }
       }

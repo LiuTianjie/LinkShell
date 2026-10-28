@@ -22,18 +22,24 @@ beforeEach(() => vi.resetModules());
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("native workspace bootstrap", () => {
-  it("routes Windows management, appearance and external actions through WebView2", async () => {
+  it("routes Windows management in the page and appearance and external actions through the Electron bridge", async () => {
     environment();
     const postMessage = vi.fn();
-    Object.assign(window, { __LINKSHELL_CONFIG__: { desktop: true, desktopPlatform: "win32" }, chrome: { webview: { postMessage } } });
+    Object.assign(window, { __LINKSHELL_CONFIG__: { desktop: true, desktopPlatform: "win32" }, linkshellDesktop: { shell: "electron", platform: "win32", postMessage } });
     const desktop = await import("../src/live/desktop");
     expect(desktop.isWindowsDesktop).toBe(true);
+    expect(desktop.isElectronDesktop).toBe(true);
+    expect(desktop.THIS_COMPUTER).toBe("这台电脑");
+    expect(desktop.THIS_COMPUTER_SPACED).toBe("这台电脑");
+    const commands: unknown[] = [];
+    window.addEventListener("linkshell-desktop-command", (event) => commands.push((event as CustomEvent).detail));
     desktop.openDesktopManagement();
     desktop.setDesktopAppearance("light");
     desktop.openDesktopExternal("https://github.com/LiuTianjie/LinkShell");
     desktop.openDesktopExternal("file:///private");
+    expect(commands).toEqual([{ command: "manage" }]);
     expect(postMessage.mock.calls.map(([message]) => message)).toEqual([
-      { action: "manage" }, { action: "appearance", value: "light" }, { action: "external", url: "https://github.com/LiuTianjie/LinkShell" },
+      { action: "appearance", value: "light" }, { action: "external", url: "https://github.com/LiuTianjie/LinkShell" },
     ]);
   });
   it("removes the launch capability while retaining navigation and keeps the native identity across reloads", async () => {

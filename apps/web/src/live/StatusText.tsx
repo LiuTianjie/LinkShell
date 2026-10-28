@@ -9,7 +9,10 @@ const tone = (state: string) =>
         ? "var(--running)"
         : ["idle", "completed", "complete"].includes(state)
           ? "var(--idle, var(--success))"
-          : "var(--tertiaryLabel)";
+          // Reachable, signed in: the one state that is good news is green (a finished session is not).
+          : state === "online"
+            ? "var(--success)"
+            : "var(--tertiaryLabel)";
 
 /** Dot + text status; the colour comes only from semantic variables. */
 export function StatusText({

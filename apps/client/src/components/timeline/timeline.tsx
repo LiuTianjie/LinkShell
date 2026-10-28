@@ -151,6 +151,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   // Only auto-scroll to end when the tail item changes or a turn starts — never
   // when toggling a StepsSummary ("运行 X 条命令") or prepending earlier history.
   const tailItem = visibleItems[visibleItems.length - 1];
+  const lastId = tailItem?.id;
   const tailSignature = useMemo(() => {
     if (!tailItem) return "";
     if (tailItem.kind === "agent" || tailItem.kind === "thought") {
@@ -291,7 +292,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
           content = <PlanCard item={item} active={turnActive && item.id === planId} />;
           break;
         case "notice":
-          content = <Notice item={item} />;
+          content = <Notice item={item} live={turnActive && item.id === lastId} />;
           break;
         case "error":
           content = <ErrorCard item={item} />;
@@ -316,7 +317,7 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
       }
       return <View style={{ paddingHorizontal: 16, paddingTop: row.gap }}>{content}</View>;
     },
-    [onFailedMessage, planId, turnActive, toggle],
+    [onFailedMessage, planId, turnActive, toggle, lastId],
   );
 
   return (

@@ -1,4 +1,4 @@
-import { sessionGroup, sessionNeedsAttention } from "./live/session-list";
+import { sessionGroup, sessionNeedsAttention, sessionPreview } from "./live/session-list";
 import { sessionTime } from "./live/session-time";
 import { StatusText } from "./live/StatusText";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -38,6 +38,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
 import { NewSessionPage } from "./live/NewSessionPage";
+import { modelName, modelToCreate, useAgentModels } from "./live/agent-models";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
@@ -55,6 +56,7 @@ import {
   AgentMark,
   EmptyState,
   ErrorNotice,
+  LoadMore,
   LoadState,
   Modal,
   Runtime,
@@ -82,10 +84,10 @@ import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { Projects } from "./live/Projects";
-import { isDesktop, isElectronDesktop, openDesktopManagement } from "./live/desktop";
+import { isDesktop, isElectronDesktop, openDesktopManagement, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./live/desktop";
 import { Management } from "./live/Management";
 import { isManageView, managePage, manageView } from "./live/management-model";
-import { useDesktopCommand } from "./live/desktop-commands";
+import { takeDeferredNewSession, useDesktopCommand, useNewSessionTarget } from "./live/desktop-commands";
 import { useDesktopVisibility } from "./live/desktop-visibility";
 
 export function App() {
@@ -203,8 +205,9 @@ function LiveApp() {
             在此标签页继续
           </Button>
         </div>
-      ) : view === "screen" ? workspaceVisible && (
+      ) : view === "screen" ? (
         <Screens
+          live={workspaceVisible}
           connect={() => setConnect(true)}
           open={(computer) => {
             engine.select(computer);
@@ -227,7 +230,7 @@ function LiveApp() {
           <h1>连接你的电脑</h1>
           <p className="muted">
             {isDesktop
-              ? "在这台 Mac 上，继续每一台电脑的工作。"
+              ? `在${THIS_COMPUTER_SPACED}上，继续每一台电脑的工作。`
               : "会话在电脑上运行，网页让你继续对话、审批和操作。"}
           </p>
           {!isDesktop && <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>}
@@ -244,7 +247,7 @@ function LiveApp() {
           </Button>
           {isDesktop && (
             <Button variant="ghost" onClick={() => openDesktopManagement()}>
-              管理这台 Mac
+              管理{THIS_COMPUTER}
             </Button>
           )}
           <p className="muted">
@@ -281,7 +284,12 @@ function Workspace({
   selectComputer: (computer: Computer) => void;
 }) {
   const state = useClient((state) => state);
-  const [create, setCreate] = useState<string | null>();
+  useNewSessionTarget();
+  // Asked for from 本机管理 or the remote screen, before this workspace was showing to hear it.
+  const [create, setCreate] = useState<string | null | undefined>(() => {
+    const waiting = isDesktop ? takeDeferredNewSession() : undefined;
+    return waiting ? waiting.cwd ?? null : undefined;
+  });
   const [terminal, setTerminal] = useState<string>();
   const session = state.sessions[view];
   const engineState = useStore(engine.state);
@@ -388,9 +396,12 @@ function Workspace({
 function SessionTable({
   sessions,
   navigate,
+  group,
 }: {
   sessions: SessionSummary[];
   navigate: (id: string) => void;
+  /** The group the rows are under: a row doesn't repeat what its heading says. */
+  group?: string;
 }) {
   const [permissionId, setPermissionId] = useState<string>();
   const permissionSession = sessions.find(
@@ -420,35 +431,33 @@ function SessionTable({
               <span title={session.agent} className="flex shrink-0">
                 <AgentMark agent={session.agent} />
               </span>
-              <Button
-                variant="ghost"
-                size="plain"
-                className="list-row-title"
-                title={titleOf(session)}
-                onClick={() => navigate(session.id)}
-              >
-                {titleOf(session)}
-              </Button>
-              <span className="list-row-detail">
-                {session.activity?.title ??
-                  session.preview ??
-                  "打开会话继续工作"}
+              {/* The project follows the title, so every preview has the row's whole width to run in. */}
+              <span className="list-row-heading">
+                <Button
+                  variant="ghost"
+                  size="plain"
+                  className="list-row-title"
+                  title={titleOf(session)}
+                  onClick={() => navigate(session.id)}
+                >
+                  {titleOf(session)}
+                </Button>
+                <span
+                  className="list-row-meta list-row-project"
+                  title={session.worktree?.source ?? session.cwd}
+                >
+                  {project}
+                </span>
               </span>
-              <span
-                className="list-row-meta list-row-project max-w-32 truncate"
-                title={session.worktree?.source ?? session.cwd}
-              >
-                {project}
-              </span>
+              <span className="list-row-detail">{sessionPreview(session)}</span>
               <span className="list-row-status">
-                {/* A finished session is the normal state, not news: on the desktop only the others say so. */}
-                {(!isDesktop || sessionNeedsAttention(session) || session.state !== "idle") && (
-                  <StatusText
-                    state={
-                      sessionNeedsAttention(session) ? "waiting" : session.state
-                    }
-                  />
-                )}
+                {/* A finished session is the normal state, not news, and a row under 进行中 or 需要你
+                    is already said to be: on the desktop only the others say so. */}
+                {(() => {
+                  const status = sessionNeedsAttention(session) ? "waiting" : session.state;
+                  const said = status === "idle" || (group === "running" && status === "running") || (group === "waiting" && status === "waiting");
+                  return !isDesktop || !said ? <StatusText state={status} /> : null;
+                })()}
               </span>
               {session.permission && (
                 <Button
@@ -558,6 +567,40 @@ function Home({
     setFilter("all");
   };
   const pending = allSessions.filter(sessionNeedsAttention).length;
+  const sortChoice = (
+    <Choice
+      className="w-[130px]"
+      label="会话排序"
+      value={sort}
+      onValueChange={setSort}
+      options={[
+        { value: "updated", label: "最近更新" },
+        { value: "created", label: "创建时间" },
+        { value: "title", label: "会话名称" },
+      ]}
+    />
+  );
+  const refreshButton = (
+    <Button
+      variant={isDesktop ? "ghost" : "outline"}
+      size="icon"
+      className="list-refresh"
+      aria-label="刷新会话列表"
+      title="刷新会话列表"
+      disabled={job.busy || archive.loading || state.status !== "online"}
+      onClick={() => {
+        job.clear();
+        if (archived) archive.reload();
+        else void job.run(() => actions.refresh());
+      }}
+    >
+      <RefreshCw
+        className={
+          job.busy || archive.loading ? "animate-spin" : undefined
+        }
+      />
+    </Button>
+  );
   const searchField = (
     <InputGroup className="session-search w-full max-w-72">
       <InputGroupAddon><Icon name="search" /></InputGroupAddon>
@@ -582,6 +625,7 @@ function Home({
         <OverviewHeading
           archived={archived}
           sessions={Object.values(state.sessions).filter((session) => !session.archived)}
+          more={state.sessionsNextBefore !== undefined}
           online={state.status === "online"}
           create={create}
           navigate={navigate}
@@ -612,7 +656,8 @@ function Home({
         </Button>
       </div>}
       {/* An empty archive has nothing to sort: its empty state is the page. */}
-      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3" hidden={isDesktop && archived && loaded && !sessions.length && !query}>
+      {/* The desktop's archive has one group: its sort and refresh sit in that group's heading. */}
+      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3" hidden={isDesktop && archived}>
         <Tabs value={filter} onValueChange={setFilter} hidden={archived && isDesktop}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
@@ -624,7 +669,8 @@ function Home({
             ].map((item) => (
               <TabsTrigger key={item.id} value={item.id}>
                 {item.name}
-                {!archived && counts[item.id] !== undefined && (
+                {/* On the desktop the groups below are counted; the filters only filter. */}
+                {!isDesktop && !archived && counts[item.id] !== undefined && (
                   <span className="text-[var(--tertiaryLabel)] tabular-nums">
                     {counts[item.id]}
                   </span>
@@ -635,38 +681,9 @@ function Home({
         </Tabs>
         <div className="session-overview-tools flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
           {!isDesktop && searchField}
-          <Choice
-            className="w-[130px]"
-            label="会话排序"
-            value={sort}
-            onValueChange={setSort}
-            options={[
-              { value: "updated", label: "最近更新" },
-              { value: "created", label: "创建时间" },
-              { value: "title", label: "会话名称" },
-            ]}
-          />
+          {sortChoice}
           {/* The live list follows the computer by itself; only the archive is read on request. */}
-          {(!isDesktop || archived) && (
-            <Button
-              variant={isDesktop ? "ghost" : "outline"}
-              size="icon"
-              aria-label="刷新会话列表"
-              title="刷新会话列表"
-              disabled={job.busy || archive.loading || state.status !== "online"}
-              onClick={() => {
-                job.clear();
-                if (archived) archive.reload();
-                else void job.run(() => actions.refresh());
-              }}
-            >
-              <RefreshCw
-                className={
-                  job.busy || archive.loading ? "animate-spin" : undefined
-                }
-              />
-            </Button>
-          )}
+          {!isDesktop && refreshButton}
         </div>
       </div>
       <ErrorNotice error={loadError ?? job.error} />
@@ -703,26 +720,32 @@ function Home({
           </Button>
         </div>
       )}
-      {["waiting", "running", "recent"].map((group) => {
-        const shown = sessions.filter(
-          (session) => sessionGroup(session) === group,
+      {(isDesktop && archived ? ["archived"] : ["waiting", "running", "recent"]).map((group) => {
+        const shown = group === "archived"
+          ? sessions
+          : sessions.filter((session) => sessionGroup(session) === group);
+        // Older records are recent ones: while the computer has more, that count is a floor.
+        const floor = nextBefore !== undefined && (group === "recent" || group === "archived");
+        const heading = (
+          <h2 className="list-section-title">
+            {({ waiting: "需要你", running: "进行中", recent: "最近会话", archived: "已归档" } as Record<string, string>)[group]}
+            <span className="font-normal text-[var(--tertiaryLabel)]">
+              {shown.length}{floor ? "+" : ""}
+            </span>
+          </h2>
         );
         return shown.length ? (
           <div className="session-group" data-session-group={group} key={group}>
-            <h2 className="list-section-title">
-              {group === "waiting"
-                ? "需要你"
-                : group === "running"
-                  ? "进行中"
-                  : "最近会话"}
-              {/* The filter tabs already count the whole list; a heading counts only a part of it. */}
-              {!(isDesktop && shown.length === sessions.length) && (
-                <span className="font-normal text-[var(--tertiaryLabel)]">
-                  {shown.length}
-                </span>
-              )}
-            </h2>
-            <SessionTable sessions={shown} navigate={navigate} />
+            {group === "archived" ? (
+              <div className="list-section-heading">
+                {heading}
+                <div className="list-section-actions">
+                  {sortChoice}
+                  {refreshButton}
+                </div>
+              </div>
+            ) : heading}
+            <SessionTable sessions={shown} navigate={navigate} group={group} />
           </div>
         ) : null;
       })}
@@ -780,9 +803,8 @@ function Home({
         </EmptyState>
       )}
       {nextBefore !== undefined && !(loaded && !loadError && !sessions.length && archived && !query && filter === "all") && (
-        <button
-          type="button"
-          className="list-row-more"
+        // On the desktop the way on is a quiet button under the list, not a row that reads as one.
+        <LoadMore
           disabled={job.busy || archive.loading || state.status !== "online"}
           onClick={() =>
             void job.run(() =>
@@ -793,7 +815,7 @@ function Home({
           }
         >
           {job.busy ? "正在加载…" : "加载更早的会话"}
-        </button>
+        </LoadMore>
       )}
     </section>
   );
@@ -828,6 +850,8 @@ function NewSession({
   const [prompt, setPrompt] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
+  // Picked per agent: another agent starts from its own default.
+  const [picked, setPicked] = useState<{ agent: string; model: string }>();
   const [gitPath, setGitPath] = useState(cwd);
   useEffect(() => {
     setWorktree(false);
@@ -846,6 +870,12 @@ function NewSession({
     !selectedAgent.problem &&
     selectedAgent.auth?.state !== "missing" &&
     selectedAgent.tier !== "terminal";
+  // Asked about the directory once typing pauses, like git.
+  const models = useAgentModels(agent, gitPath, online && usable);
+  const model = modelToCreate(
+    models,
+    picked?.agent === agent ? picked.model : undefined,
+  );
 
   return (
     <Modal
@@ -887,6 +917,8 @@ function NewSession({
                   agent,
                   cwd: cwd.trim(),
                   worktree: worktree && !!git.value && gitPath === cwd,
+                  // Untouched, the agent picks as it always does: nothing is pinned.
+                  model,
                   prompt: prompt.trim()
                     ? [{ type: "text", text: prompt.trim() }]
                     : undefined,
@@ -944,6 +976,29 @@ function NewSession({
                 </FieldDescription>
               )}
             </Field>
+            {!!models?.models.length && (
+              <Field data-disabled={job.busy}>
+                <FieldLabel htmlFor="new-session-model">模型</FieldLabel>
+                <Choice
+                  id="new-session-model"
+                  label="模型"
+                  placeholder="默认模型"
+                  value={model ?? models.current ?? ""}
+                  disabled={job.busy}
+                  onValueChange={(value) => setPicked({ agent, model: value })}
+                  options={models.models.map((entry) => {
+                    const name = modelName(entry);
+                    return {
+                      value: entry.value,
+                      label:
+                        entry.value === models.current && !name.startsWith("默认")
+                          ? `${name} · 默认`
+                          : name,
+                    };
+                  })}
+                />
+              </Field>
+            )}
             <Field data-disabled={job.busy}>
               <FieldLabel htmlFor="new-session-cwd">工作目录</FieldLabel>
               <div className="new-session-directory">
@@ -1099,7 +1154,7 @@ function Computers({
                 </div>
               </div>
               <StatusText
-                state={computer.machine.online ? "idle" : "offline"}
+                state={computer.machine.online ? "online" : "offline"}
                 label={computer.machine.online ? "在线" : "离线"}
               />
               <div className="flex shrink-0 items-center gap-1">
@@ -1142,40 +1197,44 @@ function Computers({
       )}
       {section("当前电脑的 Agent", `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}${machine && (machine.protocol ?? 0) < HOST_PROTOCOL ? "（比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell）" : ""}`, <>
         {!machine && <LoadState loading />}
-        {machine?.agents.map((agent) => (
-          <div className="list-row list-row-static computer-agent-row" key={agent.id}>
-            <AgentMark agent={agent.id} />
-            <span className="computer-agent-label w-32 shrink-0 font-medium" title={agent.label}>{agent.label}</span>
-            <span className="computer-agent-version w-28 shrink-0 text-xs text-[var(--secondaryLabel)]" title={agent.version}>
-              {agent.installed ? (agent.version ?? "已安装") : "未安装"}
-            </span>
-            <span className="computer-agent-auth min-w-0 flex-1 truncate text-xs text-[var(--secondaryLabel)]" title={agent.problem ?? agent.auth?.hint}>
-              {agent.auth?.state === "ok"
-                ? agent.id === "codex"
-                  ? "使用电脑认证配置"
-                  : "已登录"
-                : agent.auth?.state === "missing"
-                  ? "需要登录"
-                  : agent.id === "codex"
-                    ? "使用电脑认证配置"
-                    : "登录状态未知"}
-              {(agent.problem || agent.auth?.hint) && (
-                <span className="text-[var(--tertiaryLabel)]">
-                  {" · "}
-                  {agent.problem ?? agent.auth?.hint}
-                </span>
-              )}
-            </span>
-          </div>
-        ))}
+        {machine?.agents.map((agent) => {
+          // What it is and which version at the left; how it stands, as a dot and its word, at the
+          // right. One that isn't installed is only its name (there is nothing to do about it here).
+          const auth = agent.id === "codex" && agent.auth?.state !== "missing"
+            ? "使用电脑认证配置"
+            : agent.auth?.state === "ok"
+              ? "已登录"
+              : agent.auth?.state === "missing"
+                ? "需要登录"
+                : "登录状态未知";
+          return (
+            <div className="list-row list-row-static computer-agent-row" data-installed={agent.installed || undefined} key={agent.id}>
+              <AgentMark agent={agent.id} />
+              <span className="computer-agent-name">
+                <span className="computer-agent-label" title={agent.label}>{agent.label}</span>
+                {agent.installed && (
+                  <span className="computer-agent-version" title={agent.version}>{agent.version ?? "已安装"}</span>
+                )}
+              </span>
+              <span className="computer-agent-auth" title={[agent.problem, agent.auth?.hint].filter(Boolean).join(" · ") || undefined}>
+                {agent.installed ? (
+                  <StatusText
+                    state={agent.problem ? "error" : agent.auth?.state === "ok" && agent.id !== "codex" ? "online" : agent.auth?.state === "missing" ? "waiting" : "unknown"}
+                    label={agent.problem ?? auth}
+                  />
+                ) : "未安装"}
+              </span>
+            </div>
+          );
+        })}
       </>)}
       {isElectronDesktop && state.connection?.computer.key === "desktop:local" ? (
         // This Mac's phones and password have their own pages (本机管理 → 设备 / 访问密码): here their
         // state and the way there.
-        section("这台 Mac 的访问", undefined, <>
+        section(`${THIS_COMPUTER_SPACED}的访问`, undefined, <>
           <AccessPasswordSummary open={() => navigate(manageView("password"))} />
           <div className="list-row list-row-static">
-            {/* The same 28 px tile as the password row above, so the two labels line up. */}
+            {/* The same mark as the password row above, so the two labels line up. */}
             <span className="access-settings-mark" aria-hidden><MonitorSmartphone size={16} /></span>
             <div className="min-w-0 flex-1">
               <div className="font-medium">配对设备</div>
@@ -1183,7 +1242,7 @@ function Computers({
                 {gateway.value ? `${gateway.value.devices.length} 台设备` : "正在读取…"}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate(manageView("devices"))}>管理</Button>
+            <Button variant="secondary" size="sm" onClick={() => navigate(manageView("devices"))}>管理</Button>
           </div>
         </>)
       ) : (
@@ -1208,7 +1267,7 @@ function Computers({
               {device.name}
             </strong>
             <StatusText
-              state={device.online ? "idle" : "offline"}
+              state={device.online ? "online" : "offline"}
               label={device.online ? "在线" : "离线"}
             />
             <Button
@@ -1244,6 +1303,7 @@ function Computers({
 function OverviewHeading({
   archived,
   sessions,
+  more,
   online,
   create,
   navigate,
@@ -1251,30 +1311,29 @@ function OverviewHeading({
 }: {
   archived: boolean;
   sessions: SessionSummary[];
+  /** The computer has older sessions than those read so far. */
+  more: boolean;
   online: boolean;
   create: () => void;
   navigate: (id: string) => void;
   search: ReactNode;
 }) {
-  const running = sessions.filter((session) => sessionGroup(session) === "running").length;
-  const waiting = sessions.filter(sessionNeedsAttention).length;
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime()).length;
-  // Only what is so: the computer is named in the sidebar, an empty count says nothing.
+  // Only what is so, and said once: what waits on you and what runs head their own groups below;
+  // the computer is named in the sidebar; an empty count says nothing; a count of what has been
+  // read so far, while the computer has more, is a floor.
   const facts = [
-    waiting ? `${waiting} 项在等你` : undefined,
-    running ? `${running} 个在跑` : undefined,
-    today ? `今天 ${today} 个` : undefined,
+    sessions.length ? `${sessions.length}${more ? "+" : ""} 个会话` : undefined,
+    today ? `今天更新 ${today} 个` : undefined,
   ].filter(Boolean);
   return (
     <PageHeader
       title={archived ? "已归档会话" : "会话"}
       detail={archived
         ? "不在侧栏显示，记录仍在电脑上"
-        : <>{facts.map((fact, index) => (
-            <span key={index} data-tone={index === 0 && waiting ? "waiting" : undefined}>{fact}</span>
-          ))}</>}
+        : <>{facts.map((fact, index) => <span key={index}>{fact}</span>)}</>}
       actions={<>
         {search}
         <Button variant="ghost" size="sm" onClick={() => navigate(archived ? "home" : "archive")}>

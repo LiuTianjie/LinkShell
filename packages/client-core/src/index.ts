@@ -1,5 +1,9 @@
 export * from "./timeline.js";
 export * from "./steps.js";
+export * from "./tool-labels.js";
+export * from "./errors.js";
+export * from "./activity.js";
+export * from "./line-diff.js";
 export * from "./user-message.js";
 export * from "./agent-messages.js";
 export * from "./host-link.js";
@@ -11,5 +15,6 @@ export * from "./pairing.js";
 export * from "./streams.js";
 export * from "./computer-preview.js";
 export * from "./pro-membership.js";
+export * from "./account-errors.js";
 
 export * from "./tasks.js";

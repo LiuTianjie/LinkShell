@@ -27,18 +27,12 @@ import {
   Lock,
   Settings2,
 } from "lucide-react";
-import appMark from "../../../client/assets/mark.png";
+// The app icon without its white tile: beside the traffic lights a tile would glare in dark mode.
+import appGlyph from "../assets/mark-glyph.png";
 import { engine, type Computer, type Connection } from "../live/engine";
 import { baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import {
-  DESKTOP_LOCAL,
-  isElectronDesktop,
-  isWindowsDesktop,
-  openDesktopManagement,
-  reportDesktopWorkspace,
-  setDesktopContentFocus,
-} from "../live/desktop";
+import { DESKTOP_LOCAL, isElectronDesktop, isWindowsDesktop, reportDesktopWorkspace, setDesktopContentFocus, THIS_COMPUTER } from "../live/desktop";
 import { newVersion, management, startManagement } from "../live/management-store";
 import { isManageView, managePage, manageView, type ManagePage } from "../live/management-model";
 import { ManagementNav } from "../live/Management";
@@ -50,6 +44,8 @@ import {
   sendDesktopCommand,
   shortcutText,
   useDesktopCommand,
+  deferNewSession,
+  opensNewSessions,
 } from "../live/desktop-commands";
 import { screenComputerKey } from "../live/screen-route";
 import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
@@ -58,6 +54,8 @@ import { readLocal, saveLocal } from "../live/storage";
 import { useApplyDesktopAppearance, useDesktopAppearance, type Appearance } from "../live/desktop-appearance";
 import type { ConsoleShellProps } from "./ConsoleShell";
 import { CommandCenter } from "./CommandCenter";
+import { useDialogs } from "./Dialogs";
+import { openProjectMenu, openSessionMenu } from "./sidebar-menus";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -88,15 +86,12 @@ import "../styles/management.css";
 type NavigationItem = { id: string; title: string; icon: LucideIcon };
 
 // The sidebar is mostly the working set (what waits on you, projects and their sessions), as in
-// Codex. Above it, the three places people go to; the computer's other tools fold away under
-// 工具. Projects open from the tree's own heading; 电脑 and 已归档 from the computer menu, the
-// session list or ⌘K.
+// Codex. Above it, every place on this computer in one flat list: a fold would only add a click.
+// Projects open from the tree's own heading; 电脑 and 已归档 from the computer menu, the session
+// list or ⌘K.
 const navigationItems: NavigationItem[] = [
   { id: "home", title: "会话", icon: MessageSquare },
   { id: "screen", title: "远程桌面", icon: Monitor },
-];
-// The computer's own tools; a session reaches its terminal and files from its inspector (⌘J).
-const toolItems: NavigationItem[] = [
   { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },
@@ -165,7 +160,7 @@ function ComputerPicker({
           {selected && state.connection?.computer.key === selected.key
             ? <PickerFacts computer={selected} connection={state.connection} name={computerName(selected, names)} />
             : <PickerCopy name={selected ? computerName(selected, names) : "选择电脑"} online={!!selected?.machine.online}
-                detail={selected ? `${selected.key === DESKTOP_LOCAL ? "这台 Mac" : "远程电脑"} · ${selected.machine.online ? "在线" : "离线"}` : "登录账号或使用配对码"} />}
+                detail={selected ? `${selected.key === DESKTOP_LOCAL ? THIS_COMPUTER : "远程电脑"} · ${selected.machine.online ? "在线" : "离线"}` : "登录账号或使用配对码"} />}
           <ChevronDown size={14} aria-hidden />
         </button>
       </DropdownMenuTrigger>
@@ -237,7 +232,7 @@ function PickerFacts({ computer, connection, name }: { computer: Computer; conne
     <PickerCopy
       name={name}
       online={status === "online"}
-      detail={`${computer.key === DESKTOP_LOCAL ? "这台 Mac" : "远程电脑"} · ${connectionLabel(status)}`}
+      detail={`${computer.key === DESKTOP_LOCAL ? THIS_COMPUTER : "远程电脑"} · ${connectionLabel(status)}`}
     />
   );
 }
@@ -254,11 +249,22 @@ function SessionRow({
   active,
   navigate,
   project,
+  menuOpen,
+  openMenu,
+  child,
+  fold,
 }: {
   session: SessionSummary;
   active: boolean;
   navigate: (view: string) => void;
   project?: string;
+  /** Its right-click menu is showing: the row stays marked, as a native list's does. */
+  menuOpen?: boolean;
+  openMenu?: (at: { x: number; y: number }) => void;
+  /** Started from or forked off the row above it (its family's root): drawn under it. */
+  child?: boolean;
+  /** It has such sessions under it: they fold away behind its chevron (or ← / →). */
+  fold?: { open: boolean; toggle: () => void };
 }) {
   const tone = sessionTone(session);
   return (
@@ -267,13 +273,29 @@ function SessionRow({
       className="tree-session"
       data-session-id={session.id}
       data-active={active || undefined}
+      data-menu-open={menuOpen || undefined}
+      data-child={child || undefined}
       aria-current={active ? "page" : undefined}
+      aria-expanded={fold ? fold.open : undefined}
       title={`${titleOf(session)}${tone === "waiting" ? " · 需要你" : tone === "running" ? " · 进行中" : tone === "error" ? " · 出错" : ""}`}
       onClick={() => navigate(session.id)}
+      onKeyDown={fold && ((event) => {
+        if ((event.key === "ArrowLeft" && fold.open) || (event.key === "ArrowRight" && !fold.open)) { event.preventDefault(); fold.toggle(); }
+      })}
+      onContextMenu={openMenu && ((event) => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }); })}
     >
       <span className="tree-state" data-tone={tone} aria-hidden />
       <span className="tree-title">
-        <span>{titleOf(session)}</span>
+        <span className={fold ? "tree-name" : undefined}>
+          {fold ? <span>{titleOf(session)}</span> : titleOf(session)}
+          {fold && (
+            // Inside the row so it reads as part of the title, as the Claude app draws it; it folds
+            // without opening the session.
+            <span className="tree-fold" aria-hidden onClick={(event) => { event.stopPropagation(); fold.toggle(); }}>
+              <ChevronDown size={12} />
+            </span>
+          )}
+        </span>
         {project && <small>{project}</small>}
       </span>
       <time dateTime={new Date(session.updatedAt).toISOString()}>{compactTime(session.updatedAt)}</time>
@@ -282,6 +304,37 @@ function SessionRow({
 }
 
 interface ProjectGroup { key: string; name: string; sessions: SessionSummary[]; latest: number; running: number }
+interface Family { root: SessionSummary; children: SessionSummary[]; latest: number }
+
+/**
+ * A project's sessions as the Claude app's sidebar nests them: each with the sessions started from
+ * it or forked off it, flattened under the oldest ancestor still in the list (an archived parent
+ * lets its children stand alone), the family placed by its newest activity.
+ */
+function families(sessions: SessionSummary[]): Family[] {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const rootOf = (session: SessionSummary) => {
+    const seen = new Set([session.id]);
+    let current = session;
+    for (;;) {
+      const up = current.parentId ?? current.forkedFrom;
+      const parent = up ? byId.get(up) : undefined;
+      if (!parent || seen.has(parent.id)) return current;
+      seen.add(parent.id);
+      current = parent;
+    }
+  };
+  const byRoot = new Map<string, Family>();
+  for (const session of sessions) {
+    const root = rootOf(session);
+    const family = byRoot.get(root.id) ?? { root, children: [], latest: 0 };
+    if (session !== root) family.children.push(session);
+    family.latest = Math.max(family.latest, session.updatedAt);
+    byRoot.set(root.id, family);
+  }
+  for (const family of byRoot.values()) family.children.sort((a, b) => b.updatedAt - a.updatedAt);
+  return [...byRoot.values()].sort((a, b) => b.latest - a.latest);
+}
 
 /** The sidebar's working set: what waits on you, then each project with its recent sessions. */
 function SessionTree({ connection, view, navigate }: { connection: Connection; view: string; navigate: (view: string) => void }) {
@@ -296,6 +349,13 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
   const storageKey = `desktopTree.${connection.computer.key}`;
   const [open, setOpen] = useState<Record<string, boolean>>(() => readLocal(storageKey, {}));
   const [more, setMore] = useState<Record<string, boolean>>({});
+  const foldKey = `desktopTreeFolded.${connection.computer.key}`;
+  const [folded, setFolded] = useState<Record<string, boolean>>(() => readLocal(foldKey, {}));
+  const toggleFold = (id: string) => {
+    const next = { ...folded, [id]: !folded[id] };
+    setFolded(next);
+    try { saveLocal(foldKey, next); } catch { /* The tree still works without storage. */ }
+  };
   const [allProjects, setAllProjects] = useState(false);
   const { waiting, groups } = useMemo(() => {
     const live = Object.values(sessions).filter((session) => !session.archived);
@@ -330,6 +390,11 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
     try { saveLocal(storageKey, next); } catch { /* The tree still works without storage. */ }
   };
   const shown = allProjects ? groups : groups.slice(0, PROJECTS_SHOWN);
+  const dialogs = useDialogs();
+  const [menuFor, setMenuFor] = useState<string>();
+  const withMenu = (key: string, open: (at: { x: number; y: number }) => Promise<void>) =>
+    isElectronDesktop ? (at: { x: number; y: number }) => { setMenuFor(key); void open(at).finally(() => setMenuFor(undefined)); } : undefined;
+  const sessionMenu = (session: SessionSummary) => withMenu(session.id, (at) => openSessionMenu(session, { connection, dialogs, navigate, at }));
   return (
     <>
       {waiting.length > 0 && (
@@ -342,6 +407,8 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
               active={view === session.id}
               navigate={navigate}
               project={baseName(session.worktree?.source ?? session.cwd)}
+              menuOpen={menuFor === session.id}
+              openMenu={sessionMenu(session)}
             />
           ))}
         </section>
@@ -364,10 +431,18 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
         {loaded && !groups.length && <p className="tree-note">还没有会话。按 {shortcutText(desktopShortcuts.newSession)} 开始第一个任务。</p>}
         {shown.map((group, index) => {
           const expanded = isOpen(group, index);
-          const list = more[group.key] ? group.sessions.slice(0, 40) : group.sessions.slice(0, SESSIONS_SHOWN);
+          const all = families(group.sessions);
+          const list = more[group.key] ? all.slice(0, 40) : all.slice(0, SESSIONS_SHOWN);
           return (
             <div className="tree-project" key={group.key}>
-              <div className="tree-project-row">
+              <div
+                className="tree-project-row"
+                data-menu-open={menuFor === `project:${group.key}` || undefined}
+                onContextMenu={isElectronDesktop ? (event) => {
+                  event.preventDefault();
+                  withMenu(`project:${group.key}`, (at) => openProjectMenu(group, { connection, dialogs, navigate, at }))?.({ x: event.clientX, y: event.clientY });
+                } : undefined}
+              >
                 <button
                   type="button"
                   className="tree-project-toggle"
@@ -391,16 +466,34 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
               </div>
               {expanded && (
                 <div className="tree-sessions">
-                  {list.map((session) => (
-                    <SessionRow key={session.id} session={session} active={view === session.id} navigate={navigate} />
-                  ))}
-                  {group.sessions.length > SESSIONS_SHOWN && (
+                  {list.map(({ root, children }) => {
+                    const open = !folded[root.id];
+                    return [root, ...(open ? children : [])].map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        active={view === session.id}
+                        navigate={navigate}
+                        menuOpen={menuFor === session.id}
+                        openMenu={sessionMenu(session)}
+                        child={session !== root}
+                        fold={session === root && children.length ? { open, toggle: () => toggleFold(root.id) } : undefined}
+                      />
+                    ));
+                  })}
+                  {all.length > SESSIONS_SHOWN && (
                     <button
                       type="button"
                       className="tree-more"
                       onClick={() => setMore((state) => ({ ...state, [group.key]: !state[group.key] }))}
                     >
-                      {more[group.key] ? "收起" : `显示其余 ${Math.min(group.sessions.length, 40) - SESSIONS_SHOWN} 个`}
+                      {more[group.key] ? "收起" : `显示其余 ${Math.min(all.length, 40) - SESSIONS_SHOWN} 个`}
+                    </button>
+                  )}
+                  {/* The sidebar stops at 40; the project's page has them all. */}
+                  {more[group.key] && all.length > 40 && (
+                    <button type="button" className="tree-more" onClick={() => navigate("projects")}>
+                      在项目中查看全部 {all.length} 个
                     </button>
                   )}
                 </div>
@@ -439,14 +532,7 @@ function DesktopNavigation({
   const activeView = screenComputerKey(view)
     ? "screen"
     : view === "archive" ? "home"
-    : [...navigationItems, ...toolItems].some((item) => item.id === view) ? view : "";
-  // The tools stay open while one of them is showing, and otherwise as the reader left them.
-  const [toolsOpen, setToolsOpen] = useState(() => readLocal("desktopToolsOpen", false));
-  const showTools = toolsOpen || toolItems.some((item) => item.id === activeView);
-  const toggleTools = () => setToolsOpen((open) => {
-    try { saveLocal("desktopToolsOpen", !open); } catch { /* A preference, not state. */ }
-    return !open;
-  });
+    : navigationItems.some((item) => item.id === view) ? view : "";
   const place = (item: NavigationItem) => (
     <button
       type="button"
@@ -456,7 +542,7 @@ function DesktopNavigation({
       aria-current={activeView === item.id ? "page" : undefined}
       onClick={() => go(item.id)}
     >
-      <item.icon size={16} strokeWidth={1.6} aria-hidden />
+      <item.icon size={16} strokeWidth={1.65} aria-hidden />
       <span>{item.title}</span>
       {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
     </button>
@@ -467,11 +553,11 @@ function DesktopNavigation({
         // The window's title row: the traffic lights sit at its left, it drags the window.
         <div className="desktop-titlebar desktop-sidebar-titlebar">
           {/* Ours, in the title row beside the traffic lights: the app's mark and name. */}
-          <span className="desktop-brand" aria-hidden><img src={appMark} alt="" draggable={false} /><span>LinkShell</span></span>
+          <span className="desktop-brand" aria-hidden><img src={appGlyph} alt="" draggable={false} /><span>LinkShell</span></span>
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
-                <PanelLeft size={16} strokeWidth={1.6} />
+                <PanelLeft size={16} strokeWidth={1.65} />
               </button>
             </TooltipTrigger>
             <TooltipContent>隐藏侧栏 · {shortcutText(desktopShortcuts.toggleSidebar)}</TooltipContent>
@@ -479,7 +565,7 @@ function DesktopNavigation({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="搜索与命令" onClick={openPalette}>
-                <Search size={16} strokeWidth={1.6} />
+                <Search size={16} strokeWidth={1.65} />
               </button>
             </TooltipTrigger>
             <TooltipContent>搜索与命令 · {shortcutText(desktopShortcuts.palette)}</TooltipContent>
@@ -490,7 +576,7 @@ function DesktopNavigation({
         <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
         <div className="desktop-sidebar-actions">
           <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
-            <SquarePen size={16} strokeWidth={1.6} aria-hidden />
+            <SquarePen size={16} strokeWidth={1.65} aria-hidden />
             <span>新建会话</span>
             <kbd>{shortcutText(desktopShortcuts.newSession)}</kbd>
           </button>
@@ -514,12 +600,6 @@ function DesktopNavigation({
       <SidebarContent className="desktop-navigation">
         <nav className="desktop-places" aria-label="工作台">
           {navigationItems.map(place)}
-          {/* A folding group, as the project rows below: the chevron leads, where an icon would be. */}
-          <button type="button" className="desktop-place desktop-place-group" aria-expanded={showTools} onClick={toggleTools}>
-            <ChevronRight className="desktop-place-chevron" size={13} aria-hidden />
-            <span>工具</span>
-          </button>
-          {showTools && <div className="desktop-places-nested">{toolItems.map(place)}</div>}
         </nav>
         {state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} />}
       </SidebarContent>
@@ -527,7 +607,7 @@ function DesktopNavigation({
       </>)}
       <SidebarFooter className="desktop-sidebar-footer">
         <Button variant="ghost" className="desktop-account" onClick={connect} aria-label="连接设置与账号">
-          <CircleUserRound size={17} strokeWidth={1.5} /><span>{state.account ?? "登录"}</span>
+          <CircleUserRound size={16} /><span>{state.account ?? "登录"}</span>
         </Button>
         <DropdownMenu>
           <Tooltip>
@@ -564,7 +644,7 @@ function ManageEntry({ active, open }: { active: boolean; open: () => void }) {
   return (
     <nav className="desktop-places desktop-manage-entry" aria-label="本机">
       <button type="button" className="desktop-place" data-active={active || undefined} aria-current={active ? "page" : undefined} onClick={open}>
-        <Settings2 size={16} strokeWidth={1.6} aria-hidden />
+        <Settings2 size={16} strokeWidth={1.65} aria-hidden />
         <span>本机管理</span>
         {(update || problem) && <span className="desktop-manage-dot" data-tone={problem ? "warning" : undefined} aria-label={problem ? "本机服务需要处理" : "有新版本"} />}
         <kbd>⌘2</kbd>
@@ -624,22 +704,6 @@ function ConnectionFacts({ connection, name, navigate }: { connection: Connectio
   );
 }
 
-/** Windows has no native top bar, so the page draws the same one. */
-function WindowsTopBar({ openPalette }: { openPalette: () => void }) {
-  return (
-    <header className="windows-desktop-header">
-      <div className="windows-desktop-brand"><img src={appMark} alt="" /><strong>LinkShell</strong></div>
-      <div className="windows-desktop-modes" aria-label="桌面模式">
-        <Button variant="secondary" aria-current="page" title="Ctrl+1">工作台</Button>
-        <Button variant="ghost" onClick={openDesktopManagement} title="Ctrl+2">本机管理</Button>
-      </div>
-      <button type="button" className="desktop-top-search" onClick={openPalette}>
-        <Search size={14} aria-hidden /><span>搜索会话、项目和命令</span><kbd>{shortcutText(desktopShortcuts.palette)}</kbd>
-      </button>
-    </header>
-  );
-}
-
 export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   const [appearance, setAppearance] = useDesktopAppearance();
   useApplyDesktopAppearance(appearance);
@@ -681,6 +745,10 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     else if (command.command === "toggle-sidebar") toggleSidebar();
     else if (command.command === "manage" && isElectronDesktop) openManagement(command.page);
     else if (command.command === "workspace" && isElectronDesktop) openWorkspace();
+    else if (command.command === "new-session" && !opensNewSessions()) {
+      deferNewSession(command.cwd);
+      props.navigate(managing ? lastWorkspace.current : "home");
+    }
   });
   useEffect(() => {
     const step = (direction: 1 | -1) => {
@@ -700,9 +768,8 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
       else if (matchesShortcut(event, desktopShortcuts.nextSession)) act(() => step(1));
       else if (matchesShortcut(event, desktopShortcuts.back)) act(() => history.back());
       else if (matchesShortcut(event, desktopShortcuts.forward)) act(() => history.forward());
-      else if (isWindowsDesktop && event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "2") act(openDesktopManagement);
-      // The Electron menu holds ⌘1/⌘2 too; these keep them working wherever the menu does not
-      // see the key first. Both routes end in the same command.
+      // The Mac's menu holds ⌘1/⌘2 too; these keep them working wherever the menu does not see the
+      // key first, and are the only route on Windows, which has no menu. Both end in the same command.
       else if (isElectronDesktop && matchesShortcut(event, desktopModeShortcuts.workspace)) act(() => sendDesktopCommand({ command: "workspace" }));
       else if (isElectronDesktop && matchesShortcut(event, desktopModeShortcuts.manage)) act(() => sendDesktopCommand({ command: "manage" }));
     };
@@ -758,12 +825,11 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     };
   }, []);
   return (
-    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined}>
+    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined} data-platform={isWindowsDesktop ? "windows" : undefined}>
       <a className="skip-navigation" href="#workspace-content" onClick={(event) => {
         event.preventDefault();
         document.getElementById("workspace-content")?.focus();
       }}>跳到内容</a>
-      {isWindowsDesktop && <WindowsTopBar openPalette={() => setPalette(true)} />}
       <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": "264px" } as CSSProperties}>
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.
@@ -781,7 +847,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         {isElectronDesktop && sidebarHidden && (
           <div className="desktop-floating-titlebar">
             <button type="button" className="desktop-titlebar-button" aria-label="显示侧栏" title="显示侧栏" onClick={toggleSidebar}>
-              <PanelLeft size={16} strokeWidth={1.6} />
+              <PanelLeft size={16} strokeWidth={1.65} />
             </button>
           </div>
         )}

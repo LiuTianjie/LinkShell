@@ -254,6 +254,25 @@ export const sessionSummarySchema = z.object({
    * (the project the session belongs to).
    */
   worktree: z.object({ branch: z.string(), source: z.string() }).optional(),
+  /**
+   * The LinkShell session that started this one (e.g. a Claude desktop
+   * session's start_session or hand-off): the sidebar nests it there. Set
+   * only when this host has that session too. Absent from older hosts.
+   */
+  parentId: z.string().optional(),
+  /**
+   * The LinkShell session this one was forked from (made here with
+   * `sessions.fork`, or recorded by the agent), when this host has it. Kept
+   * apart from `parentId`: a fork is a copy, not something that session
+   * started, so whether it nests is the list's choice.
+   */
+  forkedFrom: z.string().optional(),
+  /**
+   * The id an app of the agent's knows the session by (the Claude desktop
+   * app's `local_…`): mail between its sessions names the sender by it, so a
+   * client can open the sender. Absent from older hosts.
+   */
+  appId: z.string().optional(),
   /** Live only, for sessions that started sub-agents: how many, and how many are working now (`sessions.subagents` lists them). */
   subagents: z.object({ total: z.number().int(), running: z.number().int() }).optional(),
   /** Live only, for sessions that left commands running: how many, and how many still run (`sessions.tasks` lists them). */

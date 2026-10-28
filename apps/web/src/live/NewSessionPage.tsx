@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, SessionSummary } from "@linkshell/wire";
-import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch, LoaderCircle } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Cpu, FolderOpen, GitBranch, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,6 +15,7 @@ import {
 import { Modal } from "./common";
 import { AgentMark, ErrorNotice, useActions, useClient, useConnection, useJob, useLoad } from "./common";
 import { AgentInteractions } from "./Acp";
+import { modelName, modelToCreate, useAgentModels } from "./agent-models";
 import { Files } from "./Files";
 import { useStore } from "zustand";
 import { engine } from "./engine";
@@ -25,8 +26,8 @@ const usableAgent = (entry: AgentInfo) =>
 
 /**
  * A new session on the desktop, as Codex starts a thread: an empty conversation with the
- * composer in the middle. What is chosen before writing (the agent, where it works, its own
- * worktree) are the composer's pills; Enter starts it.
+ * composer in the middle. What is chosen before writing (the agent, its model, where it works,
+ * its own worktree) are the composer's pills; Enter starts it.
  */
 export function NewSessionPage({
   initialDirectory,
@@ -50,6 +51,8 @@ export function NewSessionPage({
   const [prompt, setPrompt] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
+  // Picked per agent: choosing another agent starts from that agent's own default.
+  const [picked, setPicked] = useState<{ agent: string; model: string }>();
   const input = useRef<HTMLTextAreaElement>(null);
   // The agent list arrives after the page: choose the first usable one once it does.
   useEffect(() => {
@@ -60,6 +63,9 @@ export function NewSessionPage({
   const selected = machine?.agents.find((entry) => entry.id === agent);
   const usable = !!selected && usableAgent(selected);
   const ready = online && usable && !!cwd.trim() && !job.busy;
+  const models = useAgentModels(agent, cwd, online && usable);
+  const model = modelToCreate(models, picked?.agent === agent ? picked.model : undefined);
+  const shownModel = models?.models.find((entry) => entry.value === (model ?? models.current));
   const project = projects.find((entry) => entry.cwd === cwd);
   const place = project?.name ?? (cwd.split(/[\\/]/).filter(Boolean).pop() || cwd || "选择目录");
   const computer = engineState.connection?.computer;
@@ -70,6 +76,8 @@ export function NewSessionPage({
         agent,
         cwd: cwd.trim(),
         worktree: worktree && !!git.value,
+        // Untouched, the agent picks as it always does (its config, its default): nothing is pinned.
+        model,
         prompt: prompt.trim() ? [{ type: "text", text: prompt.trim() }] : undefined,
       })),
     );
@@ -126,6 +134,42 @@ export function NewSessionPage({
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            {models && !models.models.length && !models.unavailable && (
+              // ACP agents name their models only to a session: none was opened here yet to ask.
+              <span className="new-session-pill new-session-pill-static" title="在这台电脑上用过一次这个 Agent 后，这里就能选模型">
+                <Cpu />
+                <span>默认模型</span>
+              </span>
+            )}
+            {!!models?.models.length && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} title={shownModel ? `模型：${shownModel.name}` : "模型"} aria-label="选择模型">
+                    <Cpu />
+                    <span>{shownModel ? modelName(shownModel) : "默认模型"}</span>
+                    <ChevronDown className="new-session-caret" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
+                  <DropdownMenuLabel>模型</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ agent, model: value })}>
+                    {models.models.map((entry) => {
+                      const name = modelName(entry);
+                      // Claude's own default already reads 默认（推荐）.
+                      const note = [entry.value === models.current && !name.startsWith("默认") ? "默认" : undefined, entry.description].filter(Boolean).join(" · ");
+                      return (
+                        <DropdownMenuRadioItem key={entry.value} value={entry.value}>
+                          <span className="new-session-option">
+                            <span>{name}</span>
+                            {note && <small>{note}</small>}
+                          </span>
+                        </DropdownMenuRadioItem>
+                      );
+                    })}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">

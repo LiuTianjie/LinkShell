@@ -195,7 +195,13 @@ describe("codex mapper", () => {
       sessionUpdate: "ls_permission_resolved",
       requestId: "7",
     });
-    expect(map("error", { threadId: "t", turnId: "u", willRetry: true, error: { message: "blip" } })).toEqual([]);
+    // A retry keeps the turn going: a warning clients fold into one counting line.
+    expect(map("error", { threadId: "t", turnId: "u", willRetry: true, error: { message: "Reconnecting... 2/5", codexErrorInfo: "serverOverloaded", additionalDetails: "at capacity" } }).map((entry) => entry.update)).toEqual([
+      { sessionUpdate: "ls_notice", level: "warning", title: "Reconnecting... 2/5", detail: "overloaded: at capacity" },
+    ]);
+    expect(map("error", { threadId: "t", turnId: "u", willRetry: false, error: { message: "exceeded retry limit", codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } } } }).map((entry) => entry.update)).toEqual([
+      { sessionUpdate: "ls_error", code: "rate_limit", message: "exceeded retry limit", hint: undefined },
+    ]);
   });
 
   it("converts thread history and discovery metadata", () => {

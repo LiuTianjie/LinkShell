@@ -3,6 +3,7 @@ import { desktopSnapshot, runDesktop } from "../src/commands/desktop.js";
 import { ensureHostRunning, withRunningHost } from "../src/commands/host.js";
 import { loadAuth } from "../src/auth.js";
 import { runLogin } from "../src/commands/login.js";
+import { loginWithOAuth, loginWithPassword, openInBrowser } from "../src/commands/sign-in.js";
 import { followAccountGateway, joinGatewayAfterLogin } from "../src/commands/host.js";
 import { readPid, stopDaemonAndWait } from "../src/utils/daemon.js";
 import { cachedMembership, redeemDesktopPro, refreshMembership } from "../src/pro-membership.js";
@@ -12,6 +13,7 @@ import { Readable } from "node:stream";
 vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn() }));
 vi.mock("../src/pro-membership.js", () => ({ cachedMembership: vi.fn(), redeemDesktopPro: vi.fn(), refreshMembership: vi.fn() }));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
+vi.mock("../src/commands/sign-in.js", () => ({ loginWithPassword: vi.fn(), loginWithOAuth: vi.fn(), openInBrowser: vi.fn(), OAUTH_PROVIDERS: ["github", "google"] }));
 vi.mock("../src/commands/host.js", () => ({ followAccountGateway: vi.fn(), joinGatewayAfterLogin: vi.fn(), refreshGateway: vi.fn(), readHostConfig: vi.fn(), writeHostConfig: vi.fn(), ensureHostRunning: vi.fn(), withRunningHost: vi.fn(), silenceSqliteWarning: vi.fn() }));
 vi.mock("../src/utils/daemon.js", () => ({ linkshellDir: () => "/isolated", readPid: vi.fn(), readHostOwner: vi.fn(), readHostLaunch: () => ({}), stopDaemonAndWait: vi.fn() }));
 beforeEach(() => {
@@ -136,6 +138,37 @@ describe("native desktop snapshots", () => {
     expect(joinGatewayAfterLogin).toHaveBeenCalledWith("pro");
     expect(String(out.mock.calls[0][0])).not.toContain("secret");
   });
+  it("signs in with the email and password given on stdin, and never prints them", async () => {
+    vi.mocked(loginWithPassword).mockResolvedValue({ success: true, plan: "free", email: "me@example.com", userId: "u1", accessToken: "secret" });
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "login-password", Readable.from([JSON.stringify({ email: "me@example.com", password: "hunter2-secret" })]));
+    expect(loginWithPassword).toHaveBeenCalledWith({ email: "me@example.com", password: "hunter2-secret" });
+    expect(joinGatewayAfterLogin).toHaveBeenCalledWith("free");
+    expect(out.mock.calls.join("")).not.toMatch(/hunter2|secret/);
+    vi.mocked(loginWithPassword).mockClear();
+    out.mockClear();
+    await runDesktop("1.0.0", "login-password", Readable.from(['{"email":"me@example.com"}']));
+    expect(loginWithPassword).not.toHaveBeenCalled();
+    expect(JSON.parse(String(out.mock.calls[0]![0])).error).toBe("请输入邮箱和密码。");
+    expect(process.exitCode).toBe(1);
+  });
+  it("prints the provider's link before the result of a GitHub or Google sign-in", async () => {
+    vi.mocked(loginWithOAuth).mockImplementation(async ({ open }) => {
+      await open?.("https://example.supabase.co/auth/v1/authorize?provider=google");
+      return { success: true, plan: "pro", email: "me@example.com", userId: "u1", accessToken: "secret" };
+    });
+    vi.mocked(withRunningHost).mockResolvedValue(undefined);
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "login-oauth", Readable.from([]), { provider: "google" });
+    const lines = out.mock.calls.map(([chunk]) => JSON.parse(String(chunk)));
+    expect(lines[0]).toEqual({ event: "authorize", provider: "google", url: "https://example.supabase.co/auth/v1/authorize?provider=google" });
+    expect(lines.at(-1)).toMatchObject({ schema: 1, status: "stopped" });
+    expect(openInBrowser).toHaveBeenCalledWith("https://example.supabase.co/auth/v1/authorize?provider=google");
+    expect(joinGatewayAfterLogin).toHaveBeenCalledWith("pro");
+    out.mockClear();
+    await runDesktop("1.0.0", "login-oauth", Readable.from([]), { provider: "gitlab" });
+    expect(JSON.parse(String(out.mock.calls[0]![0])).error).toBe("不支持的登录方式");
+  });
   it("does not start a stopped host or invent healthy sections", async () => {
     vi.mocked(withRunningHost).mockResolvedValue(undefined);
     vi.mocked(readPid).mockReturnValue(null);
@@ -168,5 +201,19 @@ describe("native desktop snapshots", () => {
     expect(stopDaemonAndWait).not.toHaveBeenCalled();
     expect(ensureHostRunning).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("the gateway the window chose", () => {
+  it("keeps off and an address of one's own, and refuses what isn't a gateway", async () => {
+    const { gatewayChoice } = await import("../src/commands/desktop.js");
+    expect(gatewayChoice("off")).toBe("off");
+    expect(gatewayChoice(" wss://gw.example.com/ ")).toBe("wss://gw.example.com");
+    expect(gatewayChoice("https://gw.example.com:8787")).toBe("https://gw.example.com:8787");
+    expect(gatewayChoice("ws://192.168.1.5:8787")).toBe("ws://192.168.1.5:8787");
+    expect(() => gatewayChoice("")).toThrow("请输入网关地址");
+    expect(() => gatewayChoice("gw.example.com")).toThrow("格式不正确");
+    expect(() => gatewayChoice("ftp://gw.example.com")).toThrow("wss://");
+    expect(() => gatewayChoice("wss://me:secret@gw.example.com")).toThrow("用户名或密码");
   });
 });

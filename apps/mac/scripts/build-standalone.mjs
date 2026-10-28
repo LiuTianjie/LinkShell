@@ -121,6 +121,23 @@ try {
   sign(join(app, 'Contents/MacOS/linkshell-cli'));
   sign(app);
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', '--verbose=2', app]);
+  // The window: this architecture's Electron goes into the same bundle (one id, one signature, the
+  // permissions stay granted), and the bundle is signed again whole (apps/desktop/scripts/package.mjs).
+  {
+    const desktop = join(root, 'apps/desktop');
+    const electron = capture('node', [join(desktop, 'scripts/electron-dist.mjs'), arch]);
+    const packaged = join(scratch, 'packaged');
+    run('node', [join(desktop, 'scripts/package.mjs'), '--app', app, '--out', packaged, '--electron', electron], {
+      cwd: desktop, env: { ...process.env, LINKSHELL_SIGN_IDENTITY: identity, LINKSHELL_REQUIRE_SIGNED: '1' },
+    });
+    rmSync(app, { recursive: true });
+    renameSync(join(packaged, 'LinkShell.app'), app);
+    walk(join(app, 'Contents'), (file, stat) => {
+      if (stat.isSymbolicLink() || !isMachO(file)) return;
+      if (!capture('/usr/bin/lipo', ['-archs', file]).split(/\s+/).includes(machineArch)) throw new Error(`Missing ${machineArch}: ${file}`);
+    });
+    run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', '--verbose=2', app]);
+  }
   const profile = process.env.LINKSHELL_NOTARY_PROFILE;
   const zip = join(scratch, `LinkShell-${version}-${arch}-notarize.zip`);
   const zipApp = () => { rmSync(zip, { force: true }); run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip]); };

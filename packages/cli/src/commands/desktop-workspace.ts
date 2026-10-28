@@ -9,7 +9,9 @@ import WebSocket, { WebSocketServer } from "ws";
 import { localWebSocket } from "@linkshell/host/local-transport";
 import { isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
 import { getValidToken, loadAuth } from "../auth.js";
-import { runLogin } from "./login.js";
+import { runLogin, type LoginResult } from "./login.js";
+import { loginWithOAuth, loginWithPassword, openInBrowser } from "./sign-in.js";
+import { LoginError } from "./login-error.js";
 import { runLogout } from "./logout.js";
 import { followAccountGateway, refreshGateway, silenceSqliteWarning } from "./host.js";
 import { DesktopClientState, validStorageKey } from "./desktop-workspace-state.js";
@@ -66,6 +68,38 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
     if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   } catch { /* Request contents may contain private drafts; never echo them. */ }
   throw new HttpError(400, "无效的 JSON 请求");
+}
+
+/** POST bodies that may be empty: an empty body is `{}` (what older pages send). */
+async function optionalBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+  if (request.headers["content-type"] === undefined && !Number(request.headers["content-length"] ?? 0) && !request.headers["transfer-encoding"]) {
+    request.resume();
+    return {};
+  }
+  return body(request);
+}
+
+type LoginMethod = "web" | "password" | "github" | "google";
+const LOGIN_METHODS: readonly LoginMethod[] = ["web", "password", "github", "google"];
+
+interface LoginRequest { method: LoginMethod; email?: string; password?: string }
+
+function loginRequest(input: Record<string, unknown>): LoginRequest {
+  const method = input.method ?? "web";
+  if (typeof method !== "string" || !LOGIN_METHODS.includes(method as LoginMethod)) throw new HttpError(400, "不支持的登录方式");
+  if (method !== "password") return { method: method as LoginMethod };
+  const { email, password } = input;
+  if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) throw new HttpError(400, "请输入邮箱和密码。");
+  if (email.length > 320 || password.length > 1024) throw new HttpError(400, "登录信息过长，请检查邮箱和密码");
+  return { method: "password", email, password };
+}
+
+interface PendingLogin {
+  method: LoginMethod;
+  abort: AbortController;
+  result: Promise<LoginResult | null>;
+  /** The provider's authorize URL, once the loopback is listening (GitHub / Google only). */
+  url?: string;
 }
 
 async function loadAssets(directory: string): Promise<Map<string, Buffer>> {
@@ -219,8 +253,20 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
   let workspaceHost = "";
   let previewOrigin = "";
   let previewHost = "";
-  let login: Promise<Awaited<ReturnType<typeof runLogin>>> | undefined;
-  let loginAbort: AbortController | undefined;
+  let login: PendingLogin | undefined;
+  const startLogin = (request: LoginRequest): PendingLogin => {
+    // One sign-in at a time: choosing another way ends the one still waiting on the browser.
+    login?.abort.abort();
+    const abort = new AbortController();
+    const pending: PendingLogin = { method: request.method, abort, result: Promise.resolve(null) };
+    const signal = abort.signal;
+    pending.result = (request.method === "web" ? runLogin({ signal })
+      : request.method === "password" ? loginWithPassword({ email: request.email!, password: request.password!, signal })
+      : loginWithOAuth({ provider: request.method, signal, open: (url) => { pending.url = url; openInBrowser(url); } }))
+      .finally(() => { if (login === pending) login = undefined; });
+    login = pending;
+    return pending;
+  };
   let stopping: Promise<void> | undefined;
   const peers = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PROXY_BYTES });
   const upstreams = new Set<WebSocket>();
@@ -261,18 +307,30 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           json(response, 200, { ok: true }); return;
         }
         if (request.method === "POST" && path === "/desktop/login") {
-          if (!login) {
-            loginAbort = new AbortController();
-            login = runLogin({ signal: loginAbort.signal }).finally(() => { login = undefined; loginAbort = undefined; });
+          const wanted = loginRequest(await optionalBody(request));
+          // A page that reloaded while the browser was open rejoins the same sign-in.
+          const pending = login && login.method === wanted.method && wanted.method !== "password" ? login : startLogin(wanted);
+          let result: LoginResult | null;
+          try { result = await pending.result; }
+          catch (error) {
+            // Only our own messages reach the page; anything else may name paths or tokens.
+            throw new HttpError(409, error instanceof LoginError ? error.message : "登录未完成，请重试");
           }
-          const result = await login;
-          if (!result?.success) throw new HttpError(409, "登录未完成，请重试");
+          if (!result?.success) throw new HttpError(409, pending.abort.signal.aborted ? "已取消登录。" : "登录未完成，请重试");
           await accountChanged(result.plan);
           json(response, 200, await account(accountAbort.signal)); return;
         }
+        if (request.method === "GET" && path === "/desktop/login") {
+          json(response, 200, { pending: login ? { method: login.method, ...(login.url ? { url: login.url } : {}) } : null }); return;
+        }
+        if (request.method === "DELETE" && path === "/desktop/login") {
+          login?.abort.abort();
+          json(response, 200, {}); return;
+        }
         if (request.method === "POST" && path === "/desktop/logout") {
-          loginAbort?.abort();
-          await login;
+          const pending = login;
+          pending?.abort.abort();
+          await pending?.result.catch(() => undefined);
           await runLogout();
           await accountChanged();
           json(response, 200, {}); return;
@@ -328,7 +386,7 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
     stop() {
       return stopping ??= (async () => {
         accountAbort.abort();
-        loginAbort?.abort();
+        login?.abort.abort();
         for (const client of peers.clients) client.terminate();
         for (const upstream of upstreams) upstream.terminate();
         for (const socket of sockets) socket.destroy();

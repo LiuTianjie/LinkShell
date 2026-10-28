@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-native.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test test/",
+    "test": "tsc -p tsconfig.json && node --test \"test/*.test.mjs\"",
     "start": "node scripts/dev.mjs",
     "package": "node scripts/package.mjs"
   },

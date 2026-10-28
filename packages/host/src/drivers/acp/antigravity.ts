@@ -1777,6 +1777,18 @@ export class AntigravityDriver extends AcpDriver {
     }
   }
 
+  /**
+   * With the desktop app: its model list (one call to its running language
+   * server, cached) and the model a new conversation gets, chosen as
+   * createSession chooses it. Through ACP: what the latest session was told.
+   */
+  override async listModels(): Promise<{ models: { value: string; name: string; description?: string }[]; current?: string }> {
+    if (!this.desktopMode) return super.listModels();
+    const models = await this.loadDesktopModels();
+    if (models.length === 0) return { models: [] };
+    return { models, current: (await this.resolveSessionModel("", models))?.value };
+  }
+
   private async loadDesktopModels(): Promise<{ value: string; name: string; description?: string }[]> {
     // New models ship with app updates; a running host picks them up within ten minutes.
     if (this.desktopModelsCache?.models.length && Date.now() - this.desktopModelsCache.at < 10 * 60_000) return this.desktopModelsCache.models;

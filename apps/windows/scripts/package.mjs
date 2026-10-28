@@ -5,7 +5,7 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInstaller } from './installer.mjs';
 import { ensureMedia } from './media-runtime.mjs';
-import { webview2Files } from './webview2.mjs';
+import { assembleElectron } from './electron.mjs';
 import { isRuntimeDependency, isRuntimePath, pruneRuntime } from './prune-runtime.mjs';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
@@ -29,6 +29,7 @@ const pnpm = process.env.npm_execpath;
 if (!pnpm || !/pnpm\.(?:c?js)$/.test(pnpm)) throw new Error('Run through pnpm: pnpm --filter @linkshell/windows build:standalone');
 run(process.execPath, [join(app, 'scripts/build.mjs')]);
 run(process.execPath, [pnpm, '--filter', '@linkshell/web', 'build']);
+run(process.execPath, [pnpm, '--filter', '@linkshell/desktop', 'exec', 'tsc', '-p', 'tsconfig.json']);
 mkdirSync(runtime, { recursive: true });
 // Deploy the locked production graph. The portable copy replaces junctions with real files.
 const deployed = join(scratch, 'deployed');
@@ -102,8 +103,10 @@ if (!existsSync(nodeLicense)) {
   writeFileSync(nodeLicense, license);
 }
 cpSync(nodeLicense, join(runtime, 'NODE-LICENSE.txt'));
-for (const file of ['LinkShell.exe', 'LinkShell.Screen.exe']) cpSync(join(app, 'build', file), join(bundle, file));
-for (const file of webview2Files) cpSync(join(app, 'build', file), join(bundle, file));
+cpSync(join(app, 'build/LinkShell.Screen.exe'), join(bundle, 'LinkShell.Screen.exe'));
+// A reused staging directory may still hold the earlier WebView2 window's loader.
+for (const file of ['Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.Wpf.dll', 'WebView2Loader.dll', 'WEBVIEW2-LICENSE.txt', 'WEBVIEW2-NOTICE.txt']) rmSync(join(bundle, file), { force: true });
+await assembleElectron(bundle, version);
 // Delete only the owned staged assets so an upgrade never carries stale web bundles.
 const workspaceAssets = join(bundle, 'workspace');
 rmSync(workspaceAssets, { recursive: true, force: true });

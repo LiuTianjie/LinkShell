@@ -1,31 +1,29 @@
-import { workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { isHiddenItem, isMarker, isStep, MIN_FOLD, type Step, type TimelineItem } from "@linkshell/client-core";
 import { clockTime } from "./format";
 
-export type Step = Extract<TimelineItem, { kind: "tool" | "thought" }>;
+export type { Step };
 
 export type Row =
   | { type: "item"; key: string; item: TimelineItem; gap: number; /** The agent's reply that ends its turn. */ last?: boolean; /** A step of an opened fold: drawn inside it. */ nested?: boolean }
   | { type: "steps"; key: string; steps: Step[]; open: boolean; gap: number }
   | { type: "time"; key: string; label: string };
 
-/** Fewest finished steps in a row that fold into one summary line. */
-const MIN_FOLD = 3;
-
 const TIME_GAP = 15 * 60_000;
 
 export function visible(item: TimelineItem): boolean {
+  // Thinking shows in the live row while it lasts, not as a row; the plan card shows what its calls changed.
+  if (isHiddenItem(item)) return false;
   if (item.kind === "agent") return item.text.trim().length > 0 || !!item.attachments?.length;
-  // Codex often reports reasoning without a summary: nothing to show.
-  if (item.kind === "thought") return item.streaming || item.text.trim().length > 0;
   if (item.kind === "turn-end") return item.stopReason !== "end_turn";
   return true;
 }
 
 type Rhythm = TimelineItem["kind"] | "card";
 
-/** Sub-agent cards space like cards, not like one-line tool rows; a thought is a step like a tool call. */
+/** Sub-agent cards and markers space like cards, not like one-line tool rows; a thought is a step like a tool call. */
 function rhythmOf(item: TimelineItem): Rhythm {
   if (item.kind === "thought") return "tool";
+  if (item.kind === "tool" && isMarker(item)) return "card";
   return item.kind === "tool" && item.detail?.type === "subagent" && item.detail.action === "spawn" ? "card" : item.kind;
 }
 
@@ -39,24 +37,6 @@ function gapBetween(previous: Rhythm | undefined, next: Rhythm): number {
   if (next === "tool" || previous === "tool") return 10;
   if (next === "permission-result" || previous === "permission-result") return 6;
   return 12;
-}
-
-/** Finished tool calls and thoughts: the agent's working steps between messages. */
-function isStep(item: TimelineItem): item is Step {
-  if (item.kind === "thought") return !item.streaming;
-  if (item.kind !== "tool") return false;
-  // Screenshots and generated images are results worth seeing, not plumbing.
-  if (item.content.some((entry) => entry.type === "content" && entry.content.type === "image")) return false;
-  if (item.detail?.type === "subagent" && item.detail.action === "spawn") {
-    // A launch returning does not mean the background agent has finished.
-    const workflow = item.detail.workflow;
-    if (workflow) return !!workflow.state && !workflowIsLive(workflow);
-    const state = item.detail.state;
-    if (state) return state === "completed" || state === "failed" || state === "stopped";
-    // Without an explicit outcome, keep the agent visible even if its launch returned.
-    return false;
-  }
-  return item.status === "completed" || item.status === "failed";
 }
 
 /**

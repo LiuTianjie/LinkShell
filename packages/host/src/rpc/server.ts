@@ -27,6 +27,7 @@ import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 import type { LiveActivityRelay } from "../live-activities.js";
 import type { AccessControl } from "../access.js";
+import { mcpHandlers } from "./mcp.js";
 
 // How a development client names this machine: loopback, or the Android emulator's alias for its host's loopback.
 const DEVELOPMENT_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "10.0.2.2"]);
@@ -156,6 +157,7 @@ export class HostRpcServer {
       },
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
+      "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
       "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),
       "git.info": async (params: P<"git.info">) => ({ git: await hub.gitInfo(params.path) }),
@@ -374,6 +376,7 @@ export class HostRpcServer {
         this.adoptDesktop(params.sessionId, context);
         return launch;
       },
+      ...mcpHandlers(hub),
     };
   }
 

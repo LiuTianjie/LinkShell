@@ -14,7 +14,7 @@ import {
   InputGroupButton,
 } from "@/components/ui/input-group";
 import { useDialogs } from "@/components/Dialogs";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -27,6 +27,7 @@ import {
   FolderOpen,
   Home,
   LoaderCircle,
+  FolderTree,
   RefreshCw,
   Search,
   Upload,
@@ -43,6 +44,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/PageHeader";
+import { ColumnResizer } from "@/components/ColumnResizer";
+import { readLocal, saveLocal } from "./storage";
 import { isDesktop } from "./desktop";
 import type { MethodResult } from "@linkshell/wire";
 import { cn } from "@/lib/utils";
@@ -397,6 +400,16 @@ export function Files({
   const [file, setFile] = useState<string>();
   const [fileLine, setFileLine] = useState<number>();
   const [dirty, setDirty] = useState(false);
+  // The 文件 page's list column, as an editor's side bar: it folds away beside an open file and
+  // its edge drags; both are kept.
+  const [listFolded, setListFolded] = useState(() => readLocal("desktopFilesListFolded", false));
+  const [listWidth, setListWidth] = useState(() => readLocal("desktopFilesListWidth", 300));
+  const keep = <T,>(key: string, set: (value: T) => void) => (value: T) => {
+    set(value);
+    try { saveLocal(key, value); } catch { /* A preference, not state. */ }
+  };
+  const foldList = keep("desktopFilesListFolded", setListFolded);
+  const sizeList = keep("desktopFilesListWidth", setListWidth);
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
@@ -631,12 +644,32 @@ export function Files({
         file && "resource-has-preview",
       )}
       data-layout={desktopLayout ? (page ? "page" : "panel") : undefined}
+      data-list-folded={(desktopLayout && page && !!file && listFolded) || undefined}
+      style={desktopLayout && page ? ({ "--files-list-width": `${listWidth}px` } as CSSProperties) : undefined}
       aria-label={directoriesOnly ? "选择目录" : "文件浏览器"}
     >
       {desktopLayout && uploadInput}
       {desktopLayout && page && (
         <PageHeader
-          leading={<span className="resource-toolbar-nav">{upward}</span>}
+          leading={<span className="resource-toolbar-nav">
+            {/* Its place is kept while no file is open, so the title doesn't move when one is. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="files-list-toggle"
+              data-unused={!file || undefined}
+              aria-hidden={!file || undefined}
+              tabIndex={file ? undefined : -1}
+              disabled={!file}
+              aria-pressed={!listFolded}
+              title={listFolded ? "显示文件列表" : "隐藏文件列表"}
+              aria-label={listFolded ? "显示文件列表" : "隐藏文件列表"}
+              onClick={() => foldList(!listFolded)}
+            >
+              <FolderTree />
+            </Button>
+            {upward}
+          </span>}
           title={<span title={currentPath}>{baseName(currentPath) || "根目录"}</span>}
           detail={<span className="resource-toolbar-path" title={currentPath}>{currentPath}</span>}
           actions={<>
@@ -972,6 +1005,26 @@ export function Files({
             </>
           )}
         </div>
+        {desktopLayout && page && !(file && listFolded) && (
+          <ColumnResizer
+            className="files-list-resizer"
+            label="调整文件列表宽度"
+            width={listWidth}
+            clamp={(value) => Math.round(Math.min(Math.max(value, 200), Math.max(200, Math.min(560, window.innerWidth * 0.45))))}
+            side="end"
+            target=".file-browser"
+            variable="--files-list-width"
+            resize={sizeList}
+            initial={300}
+          />
+        )}
+        {desktopLayout && page && !file && (
+          // The file's side of the page, before one is chosen: the layout doesn't move when one is.
+          <div className="file-preview-empty">
+            <File aria-hidden="true" />
+            <span>选择一个文件查看内容</span>
+          </div>
+        )}
         {file && (
           <TimelineNavigation.Provider
             value={{

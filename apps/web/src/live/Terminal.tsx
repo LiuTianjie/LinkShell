@@ -41,10 +41,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { fileBase64 } from "./Files";
 import { readLocal, saveLocal } from "./storage";
-import { DESKTOP_FULLSCREEN_EVENT, isDesktop, isWindowsDesktop, setDesktopScreenFullScreen } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, isDesktop, setDesktopScreenFullScreen } from "./desktop";
 import { replayTerminal, writeTerminal } from "./terminal-replay";
 import { useDialogs } from "@/components/Dialogs";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -72,6 +73,7 @@ export function Terminal({
   active = true,
   extraActions,
   menuActions,
+  actionsSlot,
 }: {
   id: string;
   active?: boolean;
@@ -79,6 +81,8 @@ export function Terminal({
   extraActions?: ReactNode;
   /** The desktop's items at the end of the terminal's menu (close it). */
   menuActions?: ReactNode;
+  /** Where the desktop puts this terminal's actions: the end of its tab row. */
+  actionsSlot?: HTMLElement | null;
 }) {
   const { link } = useConnection();
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -113,8 +117,8 @@ export function Terminal({
   const uploadJob = useJob();
   const fontRef = useRef(fontSize);
   fontRef.current = fontSize;
-  // Full screen like the remote screen's: on the Mac the window goes full screen and the terminal
-  // fills it; elsewhere it fills the window. Esc stays with the terminal (vim, less, …).
+  // Full screen like the remote screen's: in the desktop app the window goes full screen and the
+  // terminal fills it; in a browser it fills the page. Esc stays with the terminal (vim, less, …).
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenRef = useRef(false);
   fullscreenRef.current = fullscreen;
@@ -122,7 +126,7 @@ export function Terminal({
   const fullscreenRequest = useCallback((enabled: boolean) => {
     if (!enabled && !ownsFullscreen.current && !fullscreenRef.current) return;
     ownsFullscreen.current = enabled;
-    const native = !isWindowsDesktop && setDesktopScreenFullScreen(enabled);
+    const native = setDesktopScreenFullScreen(enabled);
     if (!native) {
       ownsFullscreen.current = false;
       setFullscreen(enabled);
@@ -205,8 +209,10 @@ export function Terminal({
   useEffect(() => {
     if (!mount.current) return;
     const term = new Xterm({
+      // Prompt themes draw their glyphs from a Nerd Font's private-use area: the symbol fonts (and
+      // the patched faces people install) come before the generic family, else they show as tofu.
       fontFamily:
-        '"Berkeley Mono", "SF Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace',
+        '"Berkeley Mono", "SF Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Symbols Nerd Font Mono", "Symbols Nerd Font", "MesloLGS NF", "MesloLGS Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "FiraCode Nerd Font Mono", "Hack Nerd Font Mono", "FiraCode Nerd Font", "JetBrainsMono Nerd Font", monospace',
       fontSize: fontRef.current,
       lineHeight: 1.3,
       letterSpacing: 0,
@@ -557,6 +563,9 @@ export function Terminal({
     }
   }, [fontSize, active, link, id, restoring, restoreFailed]);
 
+  // Full screen hides the tab row, so there the actions stay in the terminal itself.
+  const inRow = !!actionsSlot && active && !fullscreen;
+  const inSlot = (node: ReactNode) => (inRow ? createPortal(node, actionsSlot!) : node);
   return (
     <div
       className={cn("terminal-live", fullscreen && "terminal-fullscreen")}
@@ -596,7 +605,11 @@ export function Terminal({
         // (in a menu), its state shows only when it isn't simply connected, and the way back to
         // the newest output appears when the view has left it.
         <>
-          <div className="terminal-actions">
+          {/* Rendered into the tab row (a portal), so they sit at its end whatever is positioned
+              around this terminal; without a row (another page embeds it, or full screen) they
+              stay here. A hidden tab's terminal keeps them in itself, out of sight. */}
+          {inSlot(
+          <div className="terminal-actions" data-in-row={inRow || undefined}>
             {(!onlineStatus || restoring || restoreFailed || ended) && (
               <span className="terminal-connection" role="status">
                 {onlineStatus && restoring ? <LoaderCircle className="animate-spin" size={13} /> : <span className={canInput ? "online-dot" : "offline-dot"} aria-hidden="true" />}
@@ -637,7 +650,8 @@ export function Terminal({
                 startUpload(files);
               }}
             />
-          </div>
+          </div>,
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -988,6 +1002,8 @@ export function Terminals({
   const [command, setCommand] = useState("");
   const [visited, setVisited] = useState<string[]>(selected ? [selected] : []);
   const tabList = useRef<HTMLDivElement>(null);
+  // State, not a ref: the terminals render into it once it exists.
+  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
   const pendingSelection = useRef<string | undefined>(undefined);
   const online = useClient((state) => state.status === "online");
   const terminals = useMemo(
@@ -1232,6 +1248,8 @@ export function Terminals({
                 <X />
               </Button>
             )}
+            {/* The open terminal's own actions land here (Terminal renders them into it). */}
+            {isDesktop && <div className="terminal-tab-actions" ref={setActionsSlot} />}
           </div>
           {mounted.map((id) => (
             <TabsContent
@@ -1248,6 +1266,7 @@ export function Terminals({
               <Terminal
                 id={id}
                 active={id === selected}
+                actionsSlot={isDesktop ? actionsSlot : undefined}
                 extraActions={newButton}
                 menuActions={
                   <>

@@ -18,6 +18,8 @@ import type {
   PendingPermissionSummary,
   EditorRequest,
   EditorResult,
+  MethodParams,
+  MethodResult,
 } from "@linkshell/wire";
 import type { PreviewInput } from "../computer-preview.js";
 import type { DriverBehavior } from "./behavior.js";
@@ -35,6 +37,18 @@ export interface DiscoveredSession {
   /** When supplied, the agent's own archive state is authoritative. */
   archived?: boolean;
   asyncQuestions?: AsyncQuestion[];
+  /** The native id of the session (of the same agent) this one was forked from, when the agent records it. Kept by the host once seen. */
+  forkedFrom?: string;
+}
+
+/** Where a session came from, as native ids of the same agent, most likely first (the host takes the first it has). */
+export interface SessionLineage {
+  /** The session that started this one. */
+  parent?: string[];
+  /** The session this one was forked from. */
+  forkedFrom?: string[];
+  /** The id an app of the agent's knows the session by (the Claude app's `local_…`). */
+  appId?: string;
 }
 
 /**
@@ -97,12 +111,16 @@ export interface DriverHost {
   queue(agent: string, nativeId: string, items: QueuedMessage[]): void;
   /** The agent deleted a session itself (e.g. from its own UI). */
   removed(agent: string, nativeId: string): void;
+  /** What `lineage` or `appArchive` says of these sessions changed (the agent's records did): the host takes it in and tells clients. */
+  nativeRecordsChanged?(agent: string, nativeIds: string[]): void;
   /** The background tasks the host has on record for the session (from `ls_task` updates), to reconcile with what the agent says now. */
   tasks(agent: string, nativeId: string): BackgroundTask[];
   /** The terminal currently driving a handoff session, if any. */
   desktop(agent: string, nativeId: string): DesktopController | undefined;
   /** Durable per-session values for the driver (survive host restarts). */
   state(agent: string, nativeId: string): { get(key: string): string | undefined; set(key: string, value: string): void };
+  /** Durable values for the agent as a whole, not one session (survive host restarts). */
+  agentState?(agent: string): { get(key: string): string | undefined; set(key: string, value: string): void };
   log(message: string): void;
 }
 
@@ -157,6 +175,13 @@ export interface LaunchSpec {
   env?: Record<string, string>;
 }
 
+/** A session's MCP Apps, by the session's native id (see `mcp.*` in the wire). */
+export interface McpAppsSupport {
+  apps(nativeId: string): Promise<MethodResult<"mcp.apps">["apps"]>;
+  resource(nativeId: string, request: Omit<MethodParams<"mcp.resource">, "sessionId">): Promise<MethodResult<"mcp.resource">>;
+  call(nativeId: string, request: Omit<MethodParams<"mcp.call">, "sessionId">): Promise<MethodResult<"mcp.call">>;
+}
+
 export interface AgentDriver {
   readonly id: string;
   readonly label: string;
@@ -177,6 +202,8 @@ export interface AgentDriver {
   authenticate?(methodId?: string, logout?: boolean): Promise<{ terminalId?: string }>;
   respondInteraction?(requestId: string, response: { optionId?: string; answers?: QuestionAnswer[] }): Promise<void>;
   providers?(operation: "list" | "set" | "disable", config?: { providerId: string; apiType?: string; baseUrl?: string; headers?: Record<string, string> }): Promise<AcpProvider[]>;
+  /** MCP tools with pages of their own (`mcp.*`); only Codex offers them. */
+  readonly mcpApps?: McpAppsSupport;
 
   listSessions(limit: number): Promise<DiscoveredSession[]>;
   /** Native archives, including sessions that disappeared from recent discovery. Never implies deletion. */
@@ -185,6 +212,26 @@ export interface AgentDriver {
   sessionExists?(nativeId: string, cwd: string): boolean;
   /** Missing native history can be hidden reversibly; an unreadable store is not proof of deletion. */
   nativeSessionAvailability?(nativeId: string, cwd: string): "available" | "missing" | "unknown";
+  /**
+   * Where a session came from, by records the agent keeps outside the
+   * session (the Claude desktop app's). Asked for every summary sent, so it
+   * answers from memory; `nativeRecordsChanged` says when an answer changes.
+   */
+  lineage?(nativeId: string): SessionLineage | undefined;
+  /**
+   * Whether an app of the agent's that LinkShell can only read (the Claude
+   * desktop app) has the session archived, and the latest time it can have
+   * changed. Undefined when that app doesn't have the session, or isn't read
+   * yet. From memory, like `lineage`; the host merges it with its own flag.
+   */
+  appArchive?(nativeId: string): { archived: boolean; at: number } | undefined;
+  /**
+   * The models a new session could start on, and the one it starts on when
+   * `createSession` is given none (`cwd`: where it would work). Only what the
+   * driver can say without starting a session or a turn; absent, or an empty
+   * list, where it can't.
+   */
+  listModels?(cwd?: string): Promise<MethodResult<"agents.models">>;
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
    * Starts live updates and returns history according to behavior.history.

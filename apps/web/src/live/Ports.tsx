@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { httpStreamRequest } from "./http-stream";
-import { useEffect, useId, useReducer, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   ErrorNotice,
   EmptyState,
@@ -66,7 +66,9 @@ function previewOrigin() {
 export function PortPreview({ port, retry }: { port: number; retry(): void }) {
   const { streams } = useConnection();
   const ref = useRef<HTMLIFrameElement>(null);
+  // An HTTP error page still loads and is shown under a notice; a failed connection has no page.
   const [error, setError] = useState<string>();
+  const [failure, setFailure] = useState<string>();
   const [waiting, setWaiting] = useState(true);
   const [slow, setSlow] = useState(false);
   const [channel] = useState(() => crypto.randomUUID());
@@ -82,7 +84,7 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
       if (!alive || id !== rootRequest) return;
       clearTimeout(timeout);
       setWaiting(false);
-      if (reason) setError(reason);
+      if (reason) setFailure(reason);
     };
     const sockets = new Map<
       string,
@@ -205,7 +207,8 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
             finish(message.id);
           })
           .catch((error) => {
-            finish(message.id, `无法连接端口 ${port}：${messageOf(error)}`);
+            // The state's title names the address; its line says why.
+            finish(message.id, messageOf(error));
             abort.abort();
             reply({ type: "http-error", id: message.id, error: String(error) });
           })
@@ -307,7 +310,7 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
     );
   return (
     <div className="resource-preview-body">
-      {error && (
+      {error && !failure && (
         <Alert variant="destructive">
           <CircleAlert />
           <AlertTitle>预览遇到问题</AlertTitle>
@@ -321,19 +324,24 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
           </AlertDescription>
         </Alert>
       )}
-      {waiting && !error && (
-        <div className="resource-preview-loading" role="status">
-          <LoaderCircle className="animate-spin" />
-          <div>
-            <strong>{slow ? "连接时间较长" : "正在连接开发服务…"}</strong>
-            <p>
-              {slow
-                ? "请确认电脑上的服务仍在运行，也可以重新连接。"
-                : `正在请求电脑上的 127.0.0.1:${port}`}
+      {/* Until the service answers, the frame is the panel's own surface, never a blank page. */}
+      {(waiting || failure) && (
+        <div className="resource-preview-loading" role="status" data-failed={failure ? "" : undefined}>
+          {failure ? <CircleAlert aria-hidden /> : <LoaderCircle className="animate-spin" aria-hidden />}
+          <strong>
+            {failure
+              ? `无法连接 127.0.0.1:${port}`
+              : slow
+                ? "连接时间较长"
+                : `正在连接 127.0.0.1:${port}`}
+          </strong>
+          {(failure || slow) && (
+            <p title={failure}>
+              {failure ?? "请确认电脑上的服务仍在运行，也可以重新连接。"}
             </p>
-          </div>
-          {slow && (
-            <Button variant="outline" size="sm" onClick={retry}>
+          )}
+          {(failure || slow) && (
+            <Button variant="secondary" size="sm" onClick={retry}>
               重试
             </Button>
           )}
@@ -358,7 +366,7 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
         }
         onError={() => {
           setWaiting(false);
-          setError("隔离预览页面加载失败，请检查预览域名配置");
+          setFailure("隔离预览页面加载失败，请检查预览域名配置");
         }}
       />
     </div>
@@ -386,6 +394,10 @@ export function Ports() {
     (a, b) => Number(b.http) - Number(a.http) || a.port - b.port,
   );
   const current = services.find((entry) => entry.port === selected);
+  // On the desktop an open preview is the page, as a browser: the list of services makes way for
+  // it (it moves into the new-tab menu) instead of pushing it below the fold.
+  const browsing = isDesktop && selected !== undefined;
+  const unopened = services.filter((entry) => !tabs.some((tab) => tab.port === entry.port));
   function open(port: number) {
     dispatch({ type: "open", port, multiple: isDesktop });
     setManual(String(port));
@@ -424,32 +436,55 @@ export function Ports() {
   const retry = (port = selected) => {
     if (port !== undefined) dispatch({ type: "refresh", port });
   };
+  const openManual = (event: FormEvent) => {
+    event.preventDefault();
+    const port = Number(manual);
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) open(port);
+  };
   return (
-    <section className="ports-page resource-ports">
+    <section className="ports-page resource-ports" data-browsing={browsing || undefined}>
       <PageHeader
         title="端口预览"
         actions={<>
+      {/* On the desktop a port is typed in the toolbar, as an address; an open preview has its own new tab. */}
+      {isDesktop && !browsing && (
+        <form className="port-toolbar-form" onSubmit={openManual}>
+          <InputGroup className="port-toolbar-field">
+            <InputGroupInput
+              ref={manualField}
+              aria-label="预览端口"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="65535"
+              step="1"
+              value={manual}
+              onChange={(event) => setManual(event.target.value)}
+              required
+              placeholder="端口，如 3000"
+            />
+          </InputGroup>
+          <Button type="submit" variant="secondary" size="sm" disabled={!manual}>
+            打开
+          </Button>
+        </form>
+      )}
       <Button variant="ghost" size="sm" disabled={load.loading} onClick={load.reload}>
         <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
         刷新
       </Button>
         </>}
-        detail={services.length ? <span>{services.length} 个服务</span> : undefined}
+        detail={services.length || isDesktop ? <>
+          {!!services.length && <span>{services.length} 个服务</span>}
+          {isDesktop && <span>加密连接</span>}
+        </> : undefined}
       />
-      <div className="resource-port-connect">
+      {!browsing && !isDesktop && <div className="resource-port-connect">
         <div className="resource-port-connect-copy">
           <ShieldCheck aria-hidden="true" />
           <span>电脑本地服务 · 加密连接</span>
         </div>
-        <form
-          className="resource-port-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const port = Number(manual);
-            if (Number.isInteger(port) && port >= 1 && port <= 65535)
-              open(port);
-          }}
-        >
+        <form className="resource-port-form" onSubmit={openManual}>
           <FieldGroup>
             <Field>
               <FieldLabel className="sr-only">端口号</FieldLabel>
@@ -484,9 +519,9 @@ export function Ports() {
             </Field>
           </FieldGroup>
         </form>
-      </div>
-      <LoadState {...load} />
-      {load.error && (
+      </div>}
+      {!browsing && <LoadState {...load} />}
+      {!browsing && load.error && (
         <div className="resource-retry">
           <span className="resource-caption">
             服务发现失败，仍可输入端口手动打开。
@@ -496,7 +531,7 @@ export function Ports() {
           </Button>
         </div>
       )}
-      {!!services.length && (
+      {!browsing && !!services.length && (
         <section className="resource-services" aria-label="已发现的开发服务">
           {!isDesktop && (
             <div className="resource-directory-summary">
@@ -590,7 +625,7 @@ export function Ports() {
                     <Plus />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="end" className="w-64">
+                <PopoverContent align="end" className="port-new-tab w-72">
                   <form onSubmit={(event) => {
                     event.preventDefault();
                     const port = Number(newPort);
@@ -623,6 +658,24 @@ export function Ports() {
                       </Field>
                     </FieldGroup>
                   </form>
+                  {!!unopened.length && (
+                    <div className="port-new-tab-services" role="group" aria-label="已发现的开发服务">
+                      <span>已发现的服务</span>
+                      {unopened.map((entry) => (
+                        <button
+                          type="button"
+                          key={entry.port}
+                          className="port-new-tab-service"
+                          title={[entry.title ?? entry.process, entry.cwd].filter(Boolean).join(" · ")}
+                          onClick={() => open(entry.port)}
+                        >
+                          <Globe aria-hidden="true" />
+                          <span>{entry.title || entry.process || "开发服务"}</span>
+                          <small>{entry.port}</small>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </PopoverContent>
               </Popover>
             </div>

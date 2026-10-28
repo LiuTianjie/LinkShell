@@ -14,11 +14,14 @@ import { startDesktopWorkspace, type DesktopWorkspace } from "../src/commands/de
 import { DesktopClientState } from "../src/commands/desktop-workspace-state.js";
 import { getValidToken, loadAuth } from "../src/auth.js";
 import { runLogin } from "../src/commands/login.js";
+import { loginWithOAuth, loginWithPassword, openInBrowser } from "../src/commands/sign-in.js";
+import { LoginError } from "../src/commands/login-error.js";
 import { runLogout } from "../src/commands/logout.js";
 import { refreshGateway } from "../src/commands/host.js";
 
 vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn(), getValidToken: vi.fn() }));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
+vi.mock("../src/commands/sign-in.js", () => ({ loginWithPassword: vi.fn(), loginWithOAuth: vi.fn(), openInBrowser: vi.fn() }));
 vi.mock("../src/commands/logout.js", () => ({ runLogout: vi.fn() }));
 vi.mock("../src/commands/host.js", () => ({ silenceSqliteWarning: vi.fn(), refreshGateway: vi.fn(), followAccountGateway: vi.fn() }));
 
@@ -205,6 +208,51 @@ describe("native desktop workspace service", () => {
     expect((await fetch(`${server.origin}/desktop/logout`, { method: "POST", headers: server.headers })).status).toBe(200);
     expect(runLogout).toHaveBeenCalledOnce();
     expect((await readdir(home)).sort()).toEqual(["desktop-client.json"]);
+  });
+
+  it("signs in with a password from the request body and shows only its own refusals", async () => {
+    vi.mocked(loadAuth).mockReturnValue({ userId: "u1", email: "me@example.com", accessToken: "access-current", refreshToken: "refresh-private", expiresAt: 1 });
+    vi.mocked(getValidToken).mockResolvedValue("access-current");
+    const server = await workspace();
+    const post = (value: unknown) => fetch(`${server.origin}/desktop/login`, { method: "POST", headers: { ...server.headers, "content-type": "application/json" }, body: JSON.stringify(value) });
+    vi.mocked(loginWithPassword).mockResolvedValue({ success: true, userId: "u1", email: "me@example.com", accessToken: "access-current", plan: "free" });
+    const signedIn = await post({ method: "password", email: "me@example.com", password: "pw" });
+    expect(signedIn.status).toBe(200);
+    expect(await signedIn.json()).toEqual({ userId: "u1", email: "me@example.com", accessToken: "access-current" });
+    expect(loginWithPassword).toHaveBeenCalledWith({ email: "me@example.com", password: "pw", signal: expect.any(AbortSignal) });
+    expect(runLogin).not.toHaveBeenCalled();
+
+    vi.mocked(loginWithPassword).mockRejectedValue(new LoginError("invalid_credentials"));
+    const refused = await post({ method: "password", email: "me@example.com", password: "wrong" });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toContain("邮箱或密码不正确");
+    vi.mocked(loginWithPassword).mockRejectedValue(new Error("EACCES /Users/me/.linkshell/auth.json"));
+    expect(await (await post({ method: "password", email: "me@example.com", password: "pw" })).json()).toEqual({ error: "登录未完成，请重试" });
+
+    expect((await post({ method: "password", email: "me@example.com" })).status).toBe(400);
+    expect((await post({ method: "gitlab" })).status).toBe(400);
+  });
+
+  it("shares a provider sign-in's link while it waits, and cancels it on request", async () => {
+    const server = await workspace();
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => { started = resolve; });
+    vi.mocked(loginWithOAuth).mockImplementation(({ signal, open }) => new Promise((_resolve, reject) => {
+      void open?.("https://example.supabase.co/auth/v1/authorize?provider=github");
+      started();
+      signal!.addEventListener("abort", () => reject(new LoginError("cancelled")), { once: true });
+    }));
+    const pending = fetch(`${server.origin}/desktop/login`, { method: "POST", headers: { ...server.headers, "content-type": "application/json" }, body: JSON.stringify({ method: "github" }) });
+    await waiting;
+    expect(openInBrowser).toHaveBeenCalledWith("https://example.supabase.co/auth/v1/authorize?provider=github");
+    const state = await (await fetch(`${server.origin}/desktop/login`, { headers: server.headers })).json();
+    expect(state).toEqual({ pending: { method: "github", url: "https://example.supabase.co/auth/v1/authorize?provider=github" } });
+    expect((await fetch(`${server.origin}/desktop/login`, { method: "DELETE", headers: server.headers })).status).toBe(200);
+    const cancelled = await pending;
+    expect(cancelled.status).toBe(409);
+    expect((await cancelled.json()).error).toBe("已取消登录。");
+    expect(await (await fetch(`${server.origin}/desktop/login`, { headers: server.headers })).json()).toEqual({ pending: null });
+    expect(vi.mocked(loginWithOAuth).mock.calls[0]![0]).toMatchObject({ provider: "github" });
   });
 
   it("reports a session the server ended as signed out, and has the host leave the account", async () => {

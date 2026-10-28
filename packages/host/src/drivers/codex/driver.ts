@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { archivedThreadIds } from "./archives.js";
 import { codexPreview } from "./computer-preview.js";
-import { ABANDON, RpcError, questionReplies, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState, type SessionUpdate } from "@linkshell/wire";
+import { ABANDON, RpcError, questionReplies, type ToolDetail, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
 import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
@@ -29,9 +29,10 @@ import {
   type CodexThreadState,
 } from "./mapper.js";
 import { nestHistory, nestUnder } from "../nesting.js";
-import { configOptions, effective, settingsFrom, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
+import { configOptions, effective, newThreadModels, settingsFrom, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
 import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop, updateSettingsThroughDesktop } from "./desktop-ipc.js";
+import { CodexMcpApps } from "./mcp-apps.js";
 
 export interface CodexDriverOptions {
   socketPath: string;
@@ -296,6 +297,12 @@ export class CodexDriver implements AgentDriver {
   private readonly confirmStartMs: number;
   private readonly sharedSocketPath?: string;
   private readonly desktopBusPath?: string;
+  readonly mcpApps = new CodexMcpApps({
+    request: (method, params, threadId) => (threadId ? this.rpcFor(threadId, method, params) : this.rpc(method, params)),
+    reach: (threadId) => (this.observed.has(threadId) ? "held" : this.attached.has(threadId) ? "joined" : "unloaded"),
+    lateDetail: (threadId, toolCallId, detail) => this.lateDetail(threadId, toolCallId, detail),
+    log: (message) => this.host?.log(message),
+  });
 
   constructor(private readonly options: CodexDriverOptions) {
     this.restartDelay = options.restartDelayMs ?? 1000;
@@ -337,6 +344,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   async stop(): Promise<void> {
+    this.mcpApps.stop();
     if (this.attentionTimer) clearInterval(this.attentionTimer);
     this.attentionTimer = undefined;
     for (const timer of this.taskPolls.values()) clearTimeout(timer);
@@ -487,7 +495,7 @@ export class CodexDriver implements AgentDriver {
         // Archives remain readable; opening history must not unarchive or resume the agent.
         const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId: nativeId, includeTurns: true });
         this.host?.sessionSeen(this.id, { ...threadToDiscovered(thread), archived: true, state: "idle", asyncQuestions: [] });
-        const history = await this.withSubAgents(nativeId, thread, threadToHistory(thread));
+        const history = await this.withSubAgents(nativeId, thread, threadToHistory(thread, this.mcpApps.lookup(nativeId)));
         this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle" });
         return history;
       }
@@ -501,7 +509,7 @@ export class CodexDriver implements AgentDriver {
       return this.observe(nativeId);
     }
     this.stopObserving(nativeId);
-    const history = await this.withSubAgents(nativeId, joined.thread, threadToHistory(joined.thread));
+    const history = await this.withSubAgents(nativeId, joined.thread, threadToHistory(joined.thread, this.mcpApps.lookup(nativeId)));
     this.goLive(nativeId, joined);
     this.reportHeld(nativeId, false);
     void this.announceConfig(nativeId);
@@ -583,7 +591,7 @@ export class CodexDriver implements AgentDriver {
     const read = new Set((thread.turns ?? []).flatMap((turn) => turn.items.map((item) => item.id)));
     for (const item of underWay) {
       // A command still running: its card. (Its output so far was missed, so the whole of it comes when it finishes.)
-      const start = read.has(item.id) ? undefined : toolStart(item);
+      const start = read.has(item.id) ? undefined : toolStart(item, this.mcpApps.lookup(threadId));
       if (start) this.host?.update(this.id, threadId, start);
     }
     const held = this.joining.get(threadId) ?? [];
@@ -604,7 +612,7 @@ export class CodexDriver implements AgentDriver {
   /** Reads the thread from disk, and keeps reading while a device has it open. */
   private async observe(threadId: string): Promise<HistoryItem[]> {
     const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId, includeTurns: true });
-    const history = await this.withSubAgents(threadId, thread, threadToHistory(thread));
+    const history = await this.withSubAgents(threadId, thread, threadToHistory(thread, this.mcpApps.lookup(threadId)));
     this.stopObserving(threadId);
     const timer = setInterval(() => void this.refresh(threadId), this.observeIntervalMs);
     timer.unref?.();
@@ -651,7 +659,7 @@ export class CodexDriver implements AgentDriver {
     watch.reading = true;
     try {
       const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId, includeTurns: true });
-      const history = await this.withSubAgents(threadId, thread, threadToHistory(thread));
+      const history = await this.withSubAgents(threadId, thread, threadToHistory(thread, this.mcpApps.lookup(threadId)));
       // Joined, or let go, while it was being read.
       if (this.observed.get(threadId) !== watch) return;
       watch.stamp = stamp;
@@ -739,7 +747,7 @@ export class CodexDriver implements AgentDriver {
           throw error;
         }
         this.stopObserving(threadId);
-        for (const item of await this.withSubAgents(threadId, joined.thread, threadToHistory(joined.thread))) {
+        for (const item of await this.withSubAgents(threadId, joined.thread, threadToHistory(joined.thread, this.mcpApps.lookup(threadId)))) {
           if (!watch.seen.has(item.itemId)) this.report(threadId, item);
         }
         this.goLive(threadId, joined);
@@ -1103,7 +1111,7 @@ export class CodexDriver implements AgentDriver {
               const result = await this.rpcFor<{ thread: CodexThread }>(threadId, "thread/read", { threadId: child, includeTurns: true });
               known.path = result.thread.path ?? undefined;
               known.stamp = stamp;
-              return nestHistory(subagentHistory(result.thread), callId);
+              return nestHistory(subagentHistory(result.thread, this.mcpApps.lookup(child)), callId);
             } catch {
               // A just-started child may not have written its rollout yet.
               known.stamp = undefined;
@@ -1529,6 +1537,24 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
+  /** From the app-server the driver keeps running: its model list (cached) and the configuration a thread started in `cwd` reads. */
+  async listModels(cwd?: string): Promise<{ models: { value: string; name: string; description?: string }[]; current?: string }> {
+    const [models, configured] = await Promise.all([this.loadModels(), this.configuredModel(cwd)]);
+    return newThreadModels(models, configured);
+  }
+
+  /** The model config.toml (with the project's own layers, for `cwd`) gives a new thread; undefined: Codex's default. */
+  private async configuredModel(cwd: string | undefined): Promise<string | undefined> {
+    try {
+      const result = await this.rpc<{ config?: { model?: string | null } }>("config/read", { includeLayers: false, ...(cwd ? { cwd } : {}) });
+      return result.config?.model ?? undefined;
+    } catch (error) {
+      // Older app-servers have no config/read: the list's default is the best guess.
+      this.host?.log(`[codex] config/read failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
   private loadModels(): Promise<CodexModel[]> {
     this.models ??= this.rpc<{ data: CodexModel[] }>("model/list", { includeHidden: false })
       .then((result) => result.data)
@@ -1857,7 +1883,7 @@ export class CodexDriver implements AgentDriver {
       const frame = codexPreview((params as { item?: unknown }).item);
       if (frame) this.host?.preview?.(this.id, threadId, frame);
     }
-    for (const mapped of mapNotification(method, params, (id) => this.stateOf(id))) {
+    for (const mapped of mapNotification(method, params, (id) => this.stateOf(id), (id) => this.mcpApps.lookup(id))) {
       const update =
         from === "shared" && mapped.update.sessionUpdate === "ls_permission_resolved"
           ? { ...mapped.update, requestId: sharedRequestId(mapped.update.requestId) }
@@ -1937,6 +1963,18 @@ export class CodexDriver implements AgentDriver {
       });
       this.host?.update(this.id, request.threadId, request.update);
     });
+  }
+
+  /** A tool call's page, found only once its tool had been looked up: to the card, wherever the call's thread shows. */
+  private lateDetail(threadId: string, toolCallId: string, detail: Extract<ToolDetail, { type: "mcp" }>): void {
+    const update: SessionUpdate = { sessionUpdate: "tool_call_update", toolCallId, detail };
+    const parent = this.children.get(threadId);
+    if (parent) {
+      const nested = nestUnder(update, parent.toolCallId);
+      if (nested && this.attached.has(parent.threadId)) this.host?.update(this.id, parent.threadId, nested);
+    } else if (this.attached.has(threadId)) {
+      this.host?.update(this.id, threadId, update);
+    }
   }
 
   private rememberTitle(toolCallId: string, title: string): void {

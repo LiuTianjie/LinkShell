@@ -89,7 +89,7 @@ export function DesktopFileView({
     <section className="file-preview" aria-label={baseName(path)} aria-busy={loaded.loading}>
       <header className="file-preview-bar">
         {close && (
-          <Button variant="ghost" size="icon" onClick={close} title="返回文件列表" aria-label="返回文件列表">
+          <Button variant="ghost" size="icon" className="file-preview-back" onClick={close} title="返回文件列表" aria-label="返回文件列表">
             <ArrowLeft />
           </Button>
         )}

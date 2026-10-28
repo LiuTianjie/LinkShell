@@ -1,7 +1,8 @@
 /* 本机管理: this Mac's service, in the Electron window. Like Codex's settings, its pages take
-   the sidebar and the main panel shows one page: a toolbar, then groups. A group is a small
-   title and its rows in one rounded box with hairlines between them; nothing nests a box in a
-   box. Desktop shell only. */
+   the sidebar and the main panel shows one page: a toolbar, then groups. A group is a title, its
+   rows in one rounded box with hairlines between them, and its footnotes; nothing nests a box in
+   a box. Ink: titles in the text colour at 500, explanations at 70 %, only times and fine print
+   at 50 %. Desktop shell only. */
 
 /* The sidebar's way in, just above its footer. */
 html[data-desktop] .desktop-manage-entry { flex: none; padding: 4px 8px; }
@@ -10,25 +11,20 @@ html[data-desktop] .desktop-manage-entry .desktop-place:hover kbd { opacity: 1; 
 html[data-desktop] .desktop-manage-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--running); }
 html[data-desktop] .desktop-manage-dot[data-tone="warning"] { background: var(--warning); }
 
-/* The pages, in the sidebar. */
+/* The pages, in the sidebar: the workspace's own rows (.desktop-place), so the icon slot and the
+   text column are the same on both sides; the Mac's dot sits in that icon slot too. */
 html[data-desktop] .management-nav { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 8px; }
 html[data-desktop] .management-back { margin-bottom: 10px; color: var(--secondaryLabel); }
 html[data-desktop] .management-back kbd { margin-left: auto; opacity: 0; transition: opacity var(--transition); }
 html[data-desktop] .management-back:hover kbd { opacity: 1; }
-html[data-desktop] .management-machine { display: flex; align-items: center; gap: 10px; height: 40px; margin-bottom: 4px; padding: 0 10px; }
+html[data-desktop] .management-machine { display: flex; align-items: center; gap: 8px; height: 40px; margin-bottom: 4px; padding: 0 8px; }
 html[data-desktop] .management-machine > .desktop-presence { margin-inline: 4.5px; }
 html[data-desktop] .management-machine > div { display: grid; min-width: 0; }
 html[data-desktop] .management-machine strong,
 html[data-desktop] .management-machine span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-machine strong { font-size: 13px; font-weight: 590; line-height: 18px; }
+html[data-desktop] .management-machine strong { font-size: 14px; font-weight: 590; line-height: 18px; }
 html[data-desktop] .management-machine span { color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
-html[data-desktop] .management-nav-item { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; transition: background var(--transition); }
-html[data-desktop] .management-nav-item > svg { flex: none; color: var(--secondaryLabel); }
-html[data-desktop] .management-nav-item > span:first-of-type { flex: 1; }
-html[data-desktop] .management-nav-item:hover { background: var(--fill); }
-html[data-desktop] .management-nav-item:active { background: var(--fillStrong); }
-html[data-desktop] .management-nav-item[data-active] { background: var(--sidebarAccent); font-weight: 510; }
-html[data-desktop] .management-nav-item[data-active] > svg { color: var(--label); }
+html[data-desktop] .management-nav-item[data-active] { font-weight: 510; }
 html[data-desktop] .management-nav-item[data-gap] { margin-top: 12px; }
 html[data-desktop] .management-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--running); }
 
@@ -41,111 +37,96 @@ html[data-desktop] .management-problem [data-slot="alert-description"] { display
 html[data-desktop] .management-problem [data-slot="alert-description"] [data-button] { margin-top: 0; }
 
 /* Text the user may copy (errors, paths, addresses). */
-html[data-desktop] .management-selectable { user-select: text; overflow-wrap: anywhere; }
-html[data-desktop] .management-mono { font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .management-selectable { -webkit-user-select: text; user-select: text; overflow-wrap: anywhere; }
 html[data-desktop] .management-muted { color: var(--secondaryLabel); }
-html[data-desktop] .management-hint { color: color-mix(in oklab, var(--label) 65%, transparent); font-size: 12px; line-height: 18px; }
-html[data-desktop] .management-note { display: flex; align-items: center; gap: 6px; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
-html[data-desktop] .management-note[data-tone="warning"] { color: var(--warning); }
-html[data-desktop] .management-note[data-tone="success"] { color: var(--success); }
+/* A value on a row's right (a version, a count): the explanations' ink, figures in columns. */
+html[data-desktop] .management-value { color: var(--secondaryLabel); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+html[data-desktop] .management-chevron { flex: none; color: var(--tertiaryLabel); }
+/* A path cut in its middle: the head gives way, the last component stays. */
+html[data-desktop] .management-path { display: inline-flex; max-width: 100%; min-width: 0; vertical-align: bottom; white-space: nowrap; }
+html[data-desktop] .management-path > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .management-path > span:last-child { flex: none; }
 
-/* Groups: a title, then rows in one box. */
+/* Groups: a title flush with its box, the rows in the box, footnotes 8 px under it at the rows'
+   text. The box's edge is drawn over its rows, so a row tinted under the pointer keeps it. */
 html[data-desktop] .management-group { display: flex; flex-direction: column; gap: 8px; }
-/* Codex's settings section titles: 13 / 500 in the secondary ink, above their box. */
-html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; padding: 0 4px; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
-html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
-html[data-desktop] :is(.management-rows, .management-panel, .management-pairing, .management-section) { border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop][data-theme="dark"] :is(.management-rows, .management-panel, .management-pairing, .management-section) { background: rgb(255 255 255 / .02); }
-html[data-desktop] .management-rows { padding: 0; }
-html[data-desktop] .management-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 48px; padding: 12px 16px; font-size: 13px; }
-html[data-desktop] .management-row + .management-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 1px; background: var(--separator); }
-html[data-desktop] .management-row > span { flex: none; max-width: 50%; color: var(--label); font-weight: 500; }
-html[data-desktop] .management-row > div { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; overflow: hidden; text-align: right; }
-html[data-desktop] .management-row > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Explanations read as a two-column list: a 160 px label, then the sentence from the left. */
-html[data-desktop] .management-rows[data-layout="facts"] .management-row { justify-content: flex-start; gap: 16px; }
-html[data-desktop] .management-rows[data-layout="facts"] .management-row > span { width: 160px; max-width: none; color: var(--secondaryLabel); font-weight: 400; }
-html[data-desktop] .management-rows[data-layout="facts"] .management-row > div { flex: 1; justify-content: flex-start; text-align: left; }
-html[data-desktop] .management-rows[data-layout="facts"] .management-row > div > span { white-space: normal; }
-html[data-desktop] .management-status { display: inline-flex; align-items: center; gap: 7px; color: var(--secondaryLabel); font-size: 13px; }
-html[data-desktop] .management-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--quaternaryLabel); }
+html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 18px; }
+html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] :is(.management-rows, .management-facts, .management-section) { position: relative; border-radius: 16px; background: transparent; }
+html[data-desktop][data-theme="dark"] :is(.management-rows, .management-facts, .management-section) { background: rgb(255 255 255 / .02); }
+html[data-desktop] :is(.management-rows, .management-facts, .management-section)::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 var(--hairline) var(--separator); pointer-events: none; }
+html[data-desktop] .management-rows { overflow: clip; }
+html[data-desktop] .management-footnote { display: flex; align-items: center; gap: 6px; padding: 0 16px; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-footnote[data-tone="warning"] { color: var(--warning); }
+html[data-desktop] .management-footnote[data-tone="success"] { color: var(--success); }
+html[data-desktop] .management-footnote code { font: inherit; white-space: nowrap; }
+
+/* Rows, as Codex's settings: 12 × 16 in, 48 px for one line and 60 for two. The control column
+   gives back 2 px above and below, so a 28 px control centres in a 48 px row. */
+html[data-desktop] .management-row { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; padding: 12px 16px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; }
+html[data-desktop] .management-row + .management-row::before,
+html[data-desktop] .management-activity + .management-activity::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
+html[data-desktop] :is(.management-row, .management-activity)[data-link] { cursor: default; transition: background var(--transition); }
+html[data-desktop] :is(.management-row, .management-activity)[data-link]:hover { background: var(--fill); }
+html[data-desktop] :is(.management-row, .management-activity)[data-link]:active { background: var(--fillStrong); }
+html[data-desktop] :is(.management-row, .management-activity)[data-link]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+html[data-desktop] .management-setting-copy { display: grid; flex: 1; justify-items: start; min-width: 0; }
+html[data-desktop] .management-setting-copy > strong { max-width: 100%; overflow: hidden; color: var(--label); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .management-setting-copy > span { max-width: 100%; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .management-setting-copy [data-button][data-size="plain"] { height: auto; font-size: 12px; }
+html[data-desktop] .management-setting-control { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 24px; margin-block: -2px; }
+html[data-desktop] .management-status { display: inline-flex; align-items: center; gap: 7px; color: var(--secondaryLabel); font-size: 13px; white-space: nowrap; }
+html[data-desktop] .management-status > span { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--quaternaryLabel); }
 html[data-desktop] .management-status[data-tone="success"] > span { background: var(--success); }
 html[data-desktop] .management-status[data-tone="warning"] > span { background: var(--warning); }
-/* An empty group says so in its middle, as Codex's empty cards: 40 px of air, quiet words. */
-html[data-desktop] .management-empty { display: grid; justify-items: center; gap: 4px; padding: 40px 24px; color: var(--tertiaryLabel); font-size: 12px; text-align: center; }
-html[data-desktop] .management-empty strong { color: var(--secondaryLabel); font-size: 13px; font-weight: 510; }
-/* Activity rows sit 16 px in from the box, as every other row in it. */
-html[data-desktop] .management-activity { position: relative; display: flex; align-items: center; gap: 16px; min-height: 40px; padding: 0 16px; font-size: 13px; }
-html[data-desktop] .management-activity + .management-activity::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
-html[data-desktop] .management-activity time { flex: none; width: 44px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-activity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--fill); color: var(--secondaryLabel); font-size: 13px; }
+/* An empty group is one quiet row, at the rows' text. */
+html[data-desktop] .management-empty-row { color: var(--secondaryLabel); }
+/* Activity: 36 px lines, the time in the fine print's ink; the last line leads to the log. */
+html[data-desktop] .management-activity { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; min-height: 36px; padding: 0 16px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; }
+html[data-desktop] .management-activity time { flex: none; width: 40px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .management-activity > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .management-activity[data-link] > span { color: var(--secondaryLabel); }
+html[data-desktop] .management-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-radius: 16px; background: var(--fill); color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .management-banner[data-tone="warning"] { background: var(--waitingSoft); }
 html[data-desktop] .management-banner[data-tone="warning"] > span { color: var(--warning); }
 
-/* Facts: four numbers in one box, a label, the value as type, why, and the fix when there is one. */
-html[data-desktop] .management-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop][data-theme="dark"] .management-facts { background: rgb(255 255 255 / .02); }
-html[data-desktop] .management-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 14px 16px; }
-html[data-desktop] .management-fact + .management-fact { box-shadow: inset 1px 0 0 var(--separator); }
-html[data-desktop] .management-fact > span { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-fact > strong { display: flex; align-items: baseline; gap: 4px; overflow: hidden; font-size: 18px; font-weight: 590; letter-spacing: -.02em; line-height: 24px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-fact > strong[data-tone="warning"] { color: var(--warning); }
-html[data-desktop] .management-fact > strong[data-tone="muted"] { color: var(--secondaryLabel); }
-html[data-desktop] .management-fact > strong small { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; letter-spacing: 0; }
-html[data-desktop] .management-fact > p { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-@container desktop-workspace (max-width: 720px) {
-  html[data-desktop] .management-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  html[data-desktop] .management-fact:nth-child(3) { box-shadow: none; }
-  html[data-desktop] .management-fact:nth-child(n + 3) { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
-}
-
+/* Forms inside a row. */
 html[data-desktop] .management-inline-form { display: flex; gap: 8px; width: 280px; }
 html[data-desktop] .management-inline-form input { flex: 1; height: 28px; }
+html[data-desktop] .management-row.management-password-form { flex-direction: column; align-items: stretch; gap: 8px; max-width: 340px; }
+html[data-desktop] .management-field-note { color: var(--warning); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-form-actions { display: flex; gap: 8px; }
 
-/* Settings rows (总览, 账号): the name and a line of why at the left, the state or control at the
-   right, 12 × 16 in, as Codex's settings. */
-html[data-desktop] .management-setting { align-items: center; min-height: 56px; }
-html[data-desktop] .management-row.management-setting > .management-setting-copy { display: grid; flex: 1; gap: 2px; min-width: 0; max-width: none; }
-html[data-desktop] .management-setting-copy > strong { overflow: hidden; color: var(--label); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-setting-copy > span { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-html[data-desktop] .management-setting-copy [data-button][data-size="plain"] { height: auto; font-size: 12px; }
-html[data-desktop] .management-row.management-setting > .management-setting-control { display: flex; flex: none; align-items: center; gap: 8px; overflow: visible; }
-html[data-desktop] .management-rows > .management-note { min-height: 0; padding-block: 0 12px; }
-
-/* Pairing. */
-html[data-desktop] .management-pairing { display: flex; flex-direction: column; gap: 16px; padding: 18px; }
-html[data-desktop] .management-pairing-head { display: flex; align-items: center; gap: 12px; }
-html[data-desktop] .management-pairing-head > div { flex: 1; min-width: 0; }
-html[data-desktop] .management-pairing-head h2 { font-size: 13px; font-weight: 500; }
-html[data-desktop] .management-pairing-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-pairing-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--plain); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); }
-html[data-desktop] .management-pairing-offer { display: flex; align-items: center; gap: 24px; }
+/* Pairing: the code, under its row in the same box. */
+html[data-desktop] .management-row.management-pairing-offer { align-items: center; gap: 24px; padding-block: 16px; }
 /* Scanners read dark on light whatever the theme, so the code keeps its own light tile. */
 html[data-desktop] .management-qr { flex: none; width: 156px; height: 156px; padding: 8px; border-radius: 12px; background: #fff; fill: #1a1c1f; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop] .management-qr-expired { display: grid; flex: none; place-items: center; width: 156px; height: 156px; border-radius: 12px; background: var(--plain); box-shadow: inset 0 0 0 1px var(--separator); color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-pairing-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .management-pairing-copy strong { color: var(--label); font-size: 13px; font-weight: 510; }
-html[data-desktop] .management-pairing-code { color: var(--label); font-family: var(--mono); font-size: 24px; font-weight: 590; letter-spacing: .16em; user-select: text; }
+html[data-desktop] .management-qr-expired { display: grid; flex: none; place-items: center; width: 156px; height: 156px; border-radius: 12px; background: var(--fill); color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .management-pairing-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .management-pairing-copy strong { color: var(--label); font-size: 13px; font-weight: 500; }
+html[data-desktop] .management-pairing-code { color: var(--label); font-family: var(--mono); font-size: 24px; font-weight: 590; letter-spacing: .16em; line-height: 32px; -webkit-user-select: text; user-select: text; }
 
-/* Password. */
-html[data-desktop] .management-panel { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
-html[data-desktop] .management-password-head { display: flex; align-items: flex-start; gap: 12px; }
-html[data-desktop] .management-password-head > svg { flex: none; margin-top: 1px; color: var(--secondaryLabel); }
-html[data-desktop] .management-password-head > div:nth-child(2) { flex: 1; min-width: 0; }
-html[data-desktop] .management-password-head strong { font-size: 13px; font-weight: 510; }
-html[data-desktop] .management-password-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
-html[data-desktop] :is(.management-password-form, .management-panel > .management-note) { padding-left: 28px; }
-html[data-desktop] .management-password-form { display: flex; flex-direction: column; gap: 8px; max-width: 308px; }
-
-/* Log and updates. */
-/* The log is the page: it fills the panel below the toolbar and scrolls itself. */
-html[data-desktop] .management-page:has(> .management-log) { height: 100%; }
-html[data-desktop] .management-content:has(.management-log) { overflow: hidden; padding-bottom: 24px; }
-html[data-desktop] .management-log { flex: 1; min-height: 240px; max-height: none; margin: 0; padding: 14px 16px; overflow: auto; border: 0; border-radius: 12px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; overflow: auto; tab-size: 4; user-select: text; }
-html[data-desktop] .management-row.management-update-row > span { flex: 1; max-width: none; overflow: hidden; color: var(--secondaryLabel); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .management-row.management-update-row > div { flex: none; overflow: visible; }
-html[data-desktop] .management-update-actions { justify-content: flex-start; }
+/* The log takes the whole main area, 20 px in, below the toolbar; it scrolls inside its box, with
+   the scroll bar kept clear of the box's corners and inside its padding. */
+html[data-desktop] .desktop-main .management-content:has(> .management-page > .management-log) { --page-inline: 20px; padding-bottom: 20px; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .management-page:has(> .management-log) { height: 100%; max-width: none; }
+html[data-desktop] .management-log-detail { display: flex; gap: 6px; min-width: 0; }
+html[data-desktop] .management-log-detail > span:first-child { flex: none; }
+html[data-desktop] .management-log-detail > span:first-child::after { content: "·"; margin-left: 6px; color: var(--quaternaryLabel); }
+html[data-desktop] .management-log { position: relative; flex: 1; min-height: 160px; border-radius: 16px; background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .management-log-scroll { position: absolute; inset: 8px 0; padding: 4px 2px 4px 16px; overflow-y: auto; scrollbar-gutter: stable; color: var(--label); font-family: var(--mono); font-size: 12px; line-height: 18px; outline: none; -webkit-user-select: text; user-select: text; }
+html[data-desktop] .management-log-scroll::-webkit-scrollbar { width: 14px; }
+html[data-desktop] .management-log-scroll::-webkit-scrollbar-thumb { border: 4px solid transparent; background-clip: padding-box; }
+html[data-desktop] .management-log-line { display: flex; gap: 12px; }
+html[data-desktop] .management-log-line > time { flex: none; color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
+html[data-desktop] .management-log-tag { flex: none; min-width: 8ch; color: var(--tertiaryLabel); }
+html[data-desktop] .management-log-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+html[data-desktop] .management-log-day { padding: 12px 0 4px; color: var(--tertiaryLabel); }
+html[data-desktop] .management-log-entry:first-child .management-log-day { padding-top: 0; }
+html[data-desktop] .management-log-empty { color: var(--tertiaryLabel); }
+html[data-desktop] .management-log-jump { position: absolute; bottom: 16px; left: 50%; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--plain); box-shadow: var(--float-shadow); color: var(--label); font: inherit; font-size: 13px; transform: translateX(-50%); cursor: default; }
+html[data-desktop] .management-log-jump:hover { background: color-mix(in oklab, var(--plain), var(--label) 5%); }
+html[data-desktop] .management-log-jump:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Usage. */
 html[data-desktop] .management-usage { display: flex; flex-direction: column; gap: 16px; }
@@ -153,35 +134,73 @@ html[data-desktop] .management-usage { display: flex; flex-direction: column; ga
 html[data-desktop] .management-usage-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
 html[data-desktop] .management-usage-filters > [data-slot="tabs"]:last-child { flex: none; }
 html[data-desktop] .management-usage-filters > [data-slot="tabs"]:first-child { min-width: 0; overflow-x: auto; }
-html[data-desktop] .management-usage-filters [data-slot="tabs-trigger"] .agent-mark { width: 14px; height: 14px; border-radius: 4px; }
-html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
-html[data-desktop] .management-section-head { display: flex; align-items: center; gap: 8px; }
-html[data-desktop] .management-section-head h2 { font-size: 13px; font-weight: 500; }
-html[data-desktop] .management-section-head > span { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-section-head > :last-child { margin-left: auto; }
-html[data-desktop] .management-section-head small { color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-chart { display: flex; align-items: stretch; gap: 4px; height: 128px; }
-html[data-desktop] .management-chart-day { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; }
-/* Bars in the state blue: ink bars read as a block of black in the light theme. */
-html[data-desktop] .management-chart-bar { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 2px 2px; background: var(--running); opacity: .7; transition: opacity var(--transition), height 300ms var(--ease-out); }
-html[data-desktop] .management-chart-day:hover .management-chart-bar { opacity: 1; }
-html[data-desktop] .management-chart-day[data-dimmed] .management-chart-bar { opacity: .2; }
-html[data-desktop] .management-chart-day small { height: 15px; overflow: hidden; color: var(--tertiaryLabel); font-size: 11px; line-height: 15px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-chart-foot { display: flex; justify-content: space-between; gap: 12px; color: var(--tertiaryLabel); font-size: 12px; }
+/* Agent marks as bare glyphs: 16 px in the table, 14 px in a tab; a one-colour mark takes the ink. */
+html[data-desktop] .management-agent-glyph { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; color: var(--secondaryLabel); font-size: 11px; font-weight: 590; }
+html[data-desktop] .management-agent-glyph[data-mono] { background: var(--label); -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+html[data-desktop] [data-slot="tabs-trigger"] .management-agent-glyph { width: 14px; height: 14px; }
+html[data-desktop] .management-usage-warning { gap: 10px; }
+html[data-desktop] .management-usage-warning > span:nth-child(2) { flex: 1; min-width: 0; color: var(--label); }
+html[data-desktop] .management-usage-warning > [data-button] { margin-block: -2px; }
+html[data-desktop] .management-popover { display: grid; gap: 6px; padding: 6px 10px; color: var(--secondaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-popover ul { display: grid; gap: 2px; padding-left: 14px; list-style: disc; }
+
+/* Facts: four numbers in one box, a label and the value as type; the fine print is a tooltip. */
+html[data-desktop] .management-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+html[data-desktop] .management-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 16px; outline: none; }
+html[data-desktop] .management-fact:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+html[data-desktop] .management-fact + .management-fact { box-shadow: inset var(--hairline) 0 0 var(--separator); }
+html[data-desktop] .management-fact > span { color: var(--secondaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-fact > strong { display: flex; align-items: baseline; gap: 4px; overflow: hidden; font-size: 18px; font-weight: 590; letter-spacing: -.02em; line-height: 24px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+html[data-desktop] .management-fact > strong small { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; letter-spacing: 0; }
+@container desktop-workspace (max-width: 720px) {
+  html[data-desktop] .management-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-desktop] .management-fact:nth-child(3) { box-shadow: none; }
+  html[data-desktop] .management-fact:nth-child(n + 3) { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
+}
+
+html[data-desktop] .management-section { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; }
+html[data-desktop] .management-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+html[data-desktop] .management-section-head h2 { color: var(--label); font-size: 13px; font-weight: 500; line-height: 18px; outline: none; }
+html[data-desktop] .management-section-head h2:focus-visible { border-radius: 4px; box-shadow: 0 0 0 2px var(--focus); }
+/* The trend: bars at most 28 px wide in their day, squared at the base, which is one hairline;
+   ink at 16 %, the day under the pointer in full ink, and one value said above its bar. */
+html[data-desktop] .management-chart { display: flex; align-items: stretch; height: 136px; }
+html[data-desktop] .management-chart-day { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+html[data-desktop] .management-chart-plot { position: relative; flex: 1; margin-top: 20px; box-shadow: 0 var(--hairline) 0 var(--separator); }
+html[data-desktop] .management-chart-bar { position: absolute; right: 0; bottom: 0; left: 0; width: min(28px, calc(100% - 4px)); margin-inline: auto; border-radius: 4px 4px 0 0; background: color-mix(in oklab, var(--label) 16%, transparent); transition: background var(--transition), height 300ms var(--ease-out); }
+html[data-desktop] .management-chart-day[data-active] .management-chart-bar { background: var(--label); }
+html[data-desktop] .management-chart-value { position: absolute; left: 50%; margin-bottom: 6px; color: var(--secondaryLabel); font-size: 11px; line-height: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; transform: translateX(-50%); pointer-events: none; }
+html[data-desktop] .management-chart-day[data-active] .management-chart-value { color: var(--label); }
+html[data-desktop] .management-chart-day small { height: 14px; overflow: hidden; color: var(--tertiaryLabel); font-size: 11px; line-height: 14px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The table runs to the section's 16 px padding on both sides. */
 html[data-desktop] .management-table-wrap { overflow-x: auto; }
 html[data-desktop] .management-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .management-table th { height: 30px; color: var(--tertiaryLabel); font-weight: 510; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table th { height: 30px; color: var(--secondaryLabel); font-weight: 500; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table th [tabindex] { outline: none; }
+html[data-desktop] .management-table th [tabindex]:focus-visible { border-radius: 4px; box-shadow: 0 0 0 2px var(--focus); }
 /* A line between rows, none after the last: each row but the first draws one along its top. */
-html[data-desktop] .management-table td { height: 36px; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table td { height: 36px; color: var(--label); text-align: right; white-space: nowrap; vertical-align: middle; }
 html[data-desktop] .management-table tbody tr + tr td { box-shadow: inset 0 var(--hairline) 0 var(--separator); }
 html[data-desktop] .management-table thead th { box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--separator); }
 html[data-desktop] .management-table :is(th, td) { padding: 0 6px; }
+html[data-desktop] .management-table :is(th, td):first-child { padding-left: 0; }
+html[data-desktop] .management-table :is(th, td):last-child { padding-right: 0; }
 html[data-desktop] .management-table :is(th, td):nth-child(-n + 2) { text-align: left; }
 html[data-desktop] .management-table td:nth-child(2) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
-html[data-desktop] .management-agent { display: inline-flex; align-items: center; gap: 8px; }
-html[data-desktop] .management-footnotes { display: grid; gap: 4px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-footnotes [data-tone="warning"] { color: var(--warning); }
+html[data-desktop] .management-agent { display: flex; align-items: center; gap: 8px; height: 20px; }
 
 @container desktop-workspace (max-width: 640px) {
-  html[data-desktop] .management-pairing-offer { flex-direction: column; align-items: flex-start; }
+  html[data-desktop] .management-row.management-pairing-offer { flex-direction: column; align-items: flex-start; }
 }
+
+/* The gateway dialog: three choices as rows, the address under the one that needs it. */
+.gateway-form { display: flex; flex-direction: column; gap: 12px; }
+.gateway-form [role="radiogroup"] { display: flex; flex-direction: column; gap: 2px; }
+.gateway-option { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: default; }
+.gateway-option:hover:not([data-disabled]) { background: var(--fill); }
+.gateway-option[data-disabled] { opacity: .45; }
+.gateway-option > button { flex: none; margin-top: 2px; }
+.gateway-option > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gateway-option strong { color: var(--label); font-size: 13px; font-weight: 510; }
+.gateway-option small { color: var(--secondaryLabel); font-size: 12px; line-height: 1.45; }
+.gateway-error { margin: 0; color: var(--danger); font-size: 12px; }

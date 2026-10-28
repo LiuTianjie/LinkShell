@@ -104,3 +104,15 @@ describe("all-agent usage", () => {
     } finally { store.close(); }
   });
 });
+
+describe("model names", () => {
+  it("counts Claude's dashed and dotted ids as one model", async () => {
+    const { modelName } = await import("../src/usage.js");
+    expect(modelName("claude-opus-5-5")).toBe("claude-opus-5.5");
+    expect(modelName("claude-opus-5.5")).toBe("claude-opus-5.5");
+    expect(modelName("claude-sonnet-4-5-20250929")).toBe("claude-sonnet-4.5-20250929");
+    expect(modelName("claude-opus-5-5[1m]")).toBe("claude-opus-5.5[1m]");
+    expect(modelName("gpt-5.5")).toBe("gpt-5.5");
+    expect(modelName("claude-3-5-sonnet-20241022")).toBe("claude-3-5-sonnet-20241022");
+  });
+});

@@ -1,26 +1,44 @@
-import type { TimelineItem } from "@linkshell/client-core";
+import { presentError, reconnectLabel, reconnectOf, type TimelineItem } from "@linkshell/client-core";
+import type { UserContext } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type ComponentProps } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import { duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { mono, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
 import { GLYPH } from "./tool-call";
 import { AgentInbox } from "./agent-inbox";
 import { useTimelineFork, useTimelineQuestions, useTimelineSide, useTimelineWaiting } from "./context";
-import { automationMessage, cleanAgentHeartbeatText, questionReplies, userMessageText } from "@/lib/user-message";
+import { automationMessage, cleanAgentHeartbeatText, questionReplies, userEventLabel, userMessageView } from "@/lib/user-message";
 
 type Of<K extends TimelineItem["kind"]> = Extract<TimelineItem, { kind: K }>;
 
 const EASE_OUT = cubicBezier(0.23, 1, 0.32, 1);
 
 const LONG_MESSAGE_LINES = 8;
+
+/** What a client attached to a message, by kind (the same kinds the web shows). */
+const CONTEXT_GLYPHS: Record<UserContext["kind"], Pick<ComponentProps<typeof Icon>, "sf" | "md">> = {
+  file: { sf: "doc.text", md: "description" },
+  image: { sf: "photo", md: "image" },
+  pasted: { sf: "doc.on.clipboard", md: "content_paste" },
+  selection: { sf: "text.cursor", md: "text_select_start" },
+  comments: { sf: "text.bubble", md: "comment" },
+  checks: { sf: "exclamationmark.circle", md: "error" },
+  annotations: { sf: "highlighter", md: "ink_highlighter" },
+  browser: { sf: "globe", md: "language" },
+  review: { sf: "checklist", md: "rule" },
+  "pull-request": { sf: "arrow.triangle.pull", md: "merge_type" },
+  merge: { sf: "arrow.triangle.merge", md: "merge" },
+  history: { sf: "clock.arrow.circlepath", md: "history" },
+  other: { sf: "paperclip", md: "attach_file" },
+};
 
 export const UserMessage = memo(function UserMessage({
   item,
@@ -31,7 +49,9 @@ export const UserMessage = memo(function UserMessage({
 }) {
   const [expanded, setExpanded] = useState(false);
   const automation = automationMessage(item.blocks);
-  const raw = userMessageText(item.blocks);
+  // The words, not the envelope around them; what came with them shows as chips above the bubble.
+  const view = userMessageView(item.blocks);
+  const raw = view.text;
   const replies = questionReplies(raw);
   const text = replies ? replies.map((reply) => reply.answer || "已跳过").join("\n\n") : raw;
   const images = item.blocks.filter((block) => block.type === "image" || block.type === "audio" || block.type === "resource");
@@ -40,8 +60,39 @@ export const UserMessage = memo(function UserMessage({
   const command = /^\/[\w:.-]+/.exec(text);
   const long = text.length > 900 || text.split("\n").length > LONG_MESSAGE_LINES;
   if (item.agentMessages?.length) return <View style={{ gap: 10 }}>{item.agentMessages.map((message, index) => <AgentInbox key={`${message.sender}:${index}`} message={message} />)}</View>;
+  if (view.event) return <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center", paddingVertical: 4 }]}>{userEventLabel(view.event)}</Text>;
+  if (view.shell || view.output !== undefined) {
+    // A command run from the prompt (`!`), or what a local slash command printed: the person's, in the terminal's type.
+    const output = view.shell ? [view.shell.stdout, view.shell.stderr].filter(Boolean).join("\n") : view.output;
+    return (
+      <View style={{ alignItems: "flex-end", gap: 6 }}>
+        {view.shell?.command ? (
+          <View style={{ maxWidth: "86%", backgroundColor: colors.userBubble, borderRadius: 16, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 7 }}>
+            <Text selectable style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.label }}>
+              <Text style={{ color: colors.secondaryLabel }}>! </Text>{view.shell.command}
+            </Text>
+          </View>
+        ) : null}
+        {output ? (
+          <View style={{ maxWidth: "86%", backgroundColor: colors.inset, borderRadius: 14, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 8 }}>
+            <Text selectable numberOfLines={expanded ? undefined : LONG_MESSAGE_LINES} onPress={() => setExpanded((value) => !value)} style={{ fontFamily: mono, fontSize: 12, lineHeight: 17, color: colors.secondaryLabel }}>{output}</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <View style={{ alignItems: "flex-end", gap: 4 }}>
+      {view.context.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 6, maxWidth: "86%" }}>
+          {view.context.map((entry, index) => (
+            <View key={index} accessibilityLabel={entry.detail ? `${entry.label}，${entry.detail}` : entry.label} style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 220, paddingHorizontal: 8, height: 24, borderRadius: 8, backgroundColor: colors.inset }}>
+              <Icon sf={CONTEXT_GLYPHS[entry.kind].sf} md={CONTEXT_GLYPHS[entry.kind].md} size={11} color={colors.secondaryLabel} />
+              <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, flexShrink: 1 }]}>{entry.label}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {images.length ? <Attachments blocks={images} align="end" thumb={116} /> : null}
       {text || links.length || automation ? (
         <Pressable
@@ -363,7 +414,17 @@ function CenterPill({ icon, text, tone }: { icon: React.ReactNode; text: string;
   );
 }
 
-export const Notice = memo(function Notice({ item }: { item: Of<"notice"> }) {
+export const Notice = memo(function Notice({ item, live = false }: { item: Of<"notice">; live?: boolean }) {
+  // An agent retrying its connection: one line counting up while it tries, a record once it got through.
+  const reconnect = reconnectOf(item.title, item.detail);
+  if (reconnect)
+    return (
+      <CenterPill
+        tone={live && reconnect.busy ? "warn" : undefined}
+        icon={live ? <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.7 }], width: 12, height: 12 }} /> : <Icon sf="arrow.clockwise" md="refresh" size={13} color={colors.secondaryLabel} />}
+        text={reconnectLabel(reconnect, live)}
+      />
+    );
   return (
     <CenterPill
       tone={item.level === "warning" ? "warn" : undefined}
@@ -382,6 +443,9 @@ export const Notice = memo(function Notice({ item }: { item: Of<"notice"> }) {
 
 export const ErrorCard = memo(function ErrorCard({ item }: { item: Of<"error"> }) {
   const [copied, setCopied] = useState(false);
+  const [details, setDetails] = useState(false);
+  // What kind of failure it was, what to do, and the agent's words one tap away.
+  const shown = presentError(item);
   return (
     <View
       style={{
@@ -395,13 +459,13 @@ export const ErrorCard = memo(function ErrorCard({ item }: { item: Of<"error"> }
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
           <Icon sf="exclamationmark.octagon.fill" md="report" size={16} color={colors.danger} />
-          <Text style={[type.subhead, { color: colors.danger, fontWeight: "600" }]}>出错了</Text>
+          <Text style={[type.subhead, { color: colors.danger, fontWeight: "600", flexShrink: 1 }]}>{shown.kind ? shown.title : "出错了"}</Text>
         </View>
         <Pressable
           onPress={() => {
-            void Clipboard.setStringAsync(item.message);
+            void Clipboard.setStringAsync(shown.detail ?? item.message);
             haptics.selection();
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
@@ -415,14 +479,39 @@ export const ErrorCard = memo(function ErrorCard({ item }: { item: Of<"error"> }
           <Text style={[type.caption, { color: colors.secondaryLabel }]}>{copied ? "已复制" : "复制"}</Text>
         </Pressable>
       </View>
-      <Text selectable style={[type.subhead, { color: colors.label, lineHeight: 20 }]}>
-        {item.message}
-      </Text>
-      {item.hint ? (
-        <Text selectable style={[type.footnote, { color: colors.secondaryLabel }]}>
-          {item.hint}
-        </Text>
-      ) : null}
+      {shown.kind ? (
+        <>
+          {shown.hint ? <Text style={[type.subhead, { color: colors.label, lineHeight: 20 }]}>{shown.hint}</Text> : null}
+          <Pressable
+            onPress={() => {
+              haptics.selection();
+              setDetails((value) => !value);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: details }}
+            hitSlop={8}
+            style={{ alignSelf: "flex-start", minHeight: 28, justifyContent: "center" }}
+          >
+            <Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: "600" }]}>{details ? "收起详情" : "查看详情"}</Text>
+          </Pressable>
+          {details && shown.detail ? (
+            <Text selectable style={[type.footnote, { color: colors.secondaryLabel, fontFamily: mono }]}>
+              {shown.detail}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Text selectable style={[type.subhead, { color: colors.label, lineHeight: 20 }]}>
+            {item.message}
+          </Text>
+          {item.hint ? (
+            <Text selectable style={[type.footnote, { color: colors.secondaryLabel }]}>
+              {item.hint}
+            </Text>
+          ) : null}
+        </>
+      )}
     </View>
   );
 });

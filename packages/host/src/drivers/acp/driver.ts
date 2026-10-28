@@ -27,6 +27,9 @@ import {
   type EditorResult,
   acpProviderSchema,
   questionAnswerError,
+  methods,
+  type MethodResult,
+  type SessionConfigOption,
 } from "@linkshell/wire";
 import { AcpClientServices } from "./client-services.js";
 import { AcpUpdates, usageUpdate } from "./updates.js";
@@ -43,6 +46,7 @@ import {
   normalizeAcpUpdate,
   toAcpPrompt,
   withContext,
+  modelOption,
   toConfigOptions,
   toHistory,
   toStopReason,
@@ -206,6 +210,8 @@ export class AcpDriver implements AgentDriver {
   private readonly interactions = new Map<string, { rpcId: RpcId; parentId: RpcId; request: AcpQuestionRequest; resolve: (response: unknown) => void }>();
   private readonly children = new Map<string, Map<string, { title?: string; description?: string; canCancel: boolean; state?: unknown }>>();
   private readonly discoveredDirectories = new Map<string, string[]>();
+  /** The models the agent gave its latest session here (see listModels); read from the host's record once. */
+  private reportedModels?: MethodResult<"agents.models">;
 
   constructor(
     protected readonly spec: AcpAgentSpec,
@@ -483,6 +489,42 @@ export class AcpDriver implements AgentDriver {
     return this.id === "claude" ? { _meta: { claudeCode: { emitRawSDKMessages: [{ type: "active_goal" }] } } } : {};
   }
 
+  /**
+   * ACP agents tell their models only to a session, so a new one is offered
+   * the list the latest session opened here was given, kept for the agent
+   * across host restarts. The default is the model the latest new session
+   * started on (a resumed one runs on its own). Nothing is opened to ask:
+   * an agent that hasn't had a session here has none to offer.
+   */
+  async listModels(): Promise<MethodResult<"agents.models">> {
+    return this.knownModels() ?? { models: [] };
+  }
+
+  private knownModels(): MethodResult<"agents.models"> | undefined {
+    if (this.reportedModels) return this.reportedModels;
+    try {
+      const saved = this.host?.agentState?.(this.id).get("models");
+      if (saved) this.reportedModels = methods["agents.models"].result.parse(JSON.parse(saved));
+    } catch {
+      // Unreadable: as good as none, and the next session writes it again.
+    }
+    return this.reportedModels;
+  }
+
+  /** Keeps the model list a session was just given. `fresh`: a new session, so its model is the agent's default. */
+  protected rememberModels(config: SessionConfigOption[], fresh: boolean): void {
+    const option = modelOption(config);
+    if (!option) return;
+    const models = option.values.map(({ value, name, description, group }) => ({ value, name, ...(description ? { description } : {}), ...(group ? { group } : {}) }));
+    const previous = this.knownModels()?.current;
+    const current = fresh ? option.current : models.some((model) => model.value === previous) ? previous : undefined;
+    const next: MethodResult<"agents.models"> = { models, ...(current ? { current } : {}) };
+    const text = JSON.stringify(next);
+    if (this.reportedModels && JSON.stringify(this.reportedModels) === text) return;
+    this.reportedModels = next;
+    this.host?.agentState?.(this.id).set("models", text);
+  }
+
   async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
     await this.ensureStarted();
     if (this.connection?.capabilities.sessions === false) throw RpcError.app("not_supported", "这个 ACP Agent 不支持会话，可在文件中使用编辑建议");
@@ -498,9 +540,10 @@ export class AcpDriver implements AgentDriver {
     const state = this.stateFor(response.sessionId, options.cwd);
     state.loaded = true;
     state.config = toConfigOptions(response);
+    this.rememberModels(state.config, true);
     this.sessionCommands(state, response);
     if (options.model) {
-      await this.setConfig(response.sessionId, "model", options.model).catch((error: unknown) => {
+      await this.setConfig(response.sessionId, modelOption(state.config)?.id ?? "model", options.model).catch((error: unknown) => {
         // Still a usable session; the user should just know it isn't on the model they picked.
         (state.pendingNotices ??= []).push({
           sessionUpdate: "ls_notice", level: "warning", title: `所选模型 ${options.model} 不可用，已使用 ${this.label} 的默认模型`,
@@ -562,6 +605,7 @@ export class AcpDriver implements AgentDriver {
       throw RpcError.app("not_supported", `${this.label} 当前版本不支持恢复以往会话；已缓存的消息仍可查看。`);
     }
     state.loaded = true;
+    this.rememberModels(state.config, false);
     this.emitConfig(nativeId, state);
     this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: this.localState(nativeId), turnActive: state.turnActive });
     return history;

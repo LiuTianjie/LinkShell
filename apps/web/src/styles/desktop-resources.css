@@ -60,17 +60,18 @@ html[data-desktop] .desktop-main .resource-editor-status { color: var(--tertiary
 html[data-desktop] .desktop-main :is(.cm-editor, .resource-markdown pre) { font-family: var(--mono); font-size: 12px; }
 
 /* ── Port previews ───────────────────────────────────────────────────────── */
-/* The connect bar, then the services in one group that grows with them, then the preview. */
-/* Opening a port by number is a row like the others: what it is at the left, the field at the right
-   (no card around a tinted field around a button). */
-html[data-desktop] .desktop-main .resource-port-connect { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 8px 0 16px; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop] .desktop-main .resource-port-connect-copy { display: flex; align-items: center; gap: 8px; color: var(--secondaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .resource-port-connect-copy svg { width: 16px; height: 16px; color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main .resource-port-form { flex: none; width: 260px; }
-html[data-desktop] .desktop-main .resource-port-form [data-slot="input-group"] { height: 32px; padding-right: 2px; }
-html[data-desktop] .desktop-main .resource-port-form [data-slot="input-group"] [data-button] { height: 28px; padding-inline: 10px; border-radius: 8px; font-size: 13px; }
-html[data-desktop] .desktop-main .resource-services { max-height: none; overflow: visible; }
-html[data-desktop] .desktop-main .resource-service-list { max-height: none; overflow: visible; }
+/* A port is typed in the toolbar, as an address (a 28 px field and its button); under it the
+   services found, in one group that scrolls inside its frame. The page itself never scrolls, so
+   its toolbar is the same row whether the list or a preview is open. */
+html[data-desktop] .page-header .port-toolbar-form { display: flex; flex: none; align-items: center; gap: 6px; }
+html[data-desktop] .page-header .port-toolbar-field[data-slot="input-group"] { width: 160px; height: 28px; }
+html[data-desktop] .page-header .port-toolbar-field input { -moz-appearance: textfield; appearance: textfield; font-variant-numeric: tabular-nums; }
+html[data-desktop] .page-header .port-toolbar-field input::-webkit-inner-spin-button,
+html[data-desktop] .page-header .port-toolbar-field input::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
+html[data-desktop] .desktop-main .live-overview:has(> .ports-page) { --page-inline: 16px; padding-bottom: 16px; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .desktop-main .resource-services { flex: 0 1 auto; min-height: 0; max-height: none; overflow: visible; }
+html[data-desktop] .desktop-main .ports-page .resource-service-list { max-height: none; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+html[data-desktop] .desktop-main .ports-page .resource-service-list::-webkit-scrollbar-track { margin-block: 14px; }
 html[data-desktop] .desktop-main .resource-service { min-height: 44px; padding: 0 12px; background: transparent; font-size: 13px; }
 html[data-desktop] .desktop-main .resource-service:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .resource-service-main strong { font-weight: 500; }
@@ -78,13 +79,35 @@ html[data-desktop] .desktop-main .resource-service .resource-chip { font-family:
 /* A row's port number or 项目 mark is a fact at the end of it, quiet text, not a box per row. */
 html[data-desktop] .desktop-main :is(.resource-service, .resource-entry) [data-slot="badge"] { height: auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .desktop-main .resource-service [data-slot="badge"] { font-family: var(--mono); }
+/* An open preview is the page, as a browser: it fills the panel under the toolbar, edge to edge
+   with the toolbar's own inset, and the page doesn't scroll around it. */
+html[data-desktop] .desktop-main .ports-page[data-browsing] { gap: 0; }
+/* The new-tab menu: a port to type, then the services found and not yet open. */
+html[data-desktop] .port-new-tab { display: flex; flex-direction: column; gap: 8px; }
+html[data-desktop] .port-new-tab-services { display: flex; flex-direction: column; gap: 1px; max-height: 280px; margin: 0 -6px -6px; padding-top: 8px; overflow-y: auto; border-top: var(--hairline) solid var(--separator); }
+html[data-desktop] .port-new-tab-services > span { padding: 0 8px 4px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .port-new-tab-service { display: flex; flex: none; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; }
+html[data-desktop] .port-new-tab-service:hover { background: var(--fill); }
+html[data-desktop] .port-new-tab-service > svg { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
+html[data-desktop] .port-new-tab-service > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .port-new-tab-service > small { flex: none; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The browser: one frame (its corners clip what is inside), the tabs, the address, the page. */
+html[data-desktop] .desktop-main .ports-page .resource-preview { border: var(--hairline) solid var(--separator); border-radius: var(--radius-panel); background: var(--plain); }
 html[data-desktop] .desktop-main .port-preview-tab-bar { gap: 4px; padding-bottom: 8px; border-bottom: var(--hairline) solid var(--separator); }
+/* The tabs scroll sideways when there are many, without a bar of their own. */
+html[data-desktop] .desktop-main .port-preview-tabs { overflow-y: hidden; scrollbar-width: none; }
+html[data-desktop] .desktop-main .port-preview-tabs::-webkit-scrollbar { display: none; }
 html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .port-preview-tab[data-active], html[data-desktop] .desktop-main .port-preview-tab[aria-selected="true"] { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main .resource-preview-address { border: 0; border-radius: 999px; background: var(--fill); font-family: var(--mono); font-size: 12px; }
-html[data-desktop] .desktop-main .port-frame { border: var(--hairline) solid var(--separator); border-radius: var(--radius-well); overflow: hidden; }
+/* The address is a field across the bar, its globe inside it, as a browser's. */
+html[data-desktop] .desktop-main .resource-preview-toolbar { gap: 8px; padding: 0 6px 0 8px; background: transparent; }
+html[data-desktop] .desktop-main .resource-preview-address { flex: 1; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: color-mix(in srgb, var(--label) 5%, transparent); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-preview-address > span { overflow: hidden; color: var(--secondaryLabel); text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .port-frame { border: 0; border-radius: 0; }
 
 /* ── Worktrees ───────────────────────────────────────────────────────────── */
+/* A column, so an empty page's state can sit in the middle of the room under the toolbar. */
+html[data-desktop] .desktop-main .worktrees-page { display: flex; flex-direction: column; gap: 12px; }
 /* The base list draws a rule above itself; in the group's frame (or when empty) it must not. */
 html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
 html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
@@ -95,39 +118,56 @@ html[data-desktop] .desktop-main .worktree-path { color: var(--tertiaryLabel); f
 html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); font-size: 12px; }
 
 /* ── ACP connections (电脑与 Agent) ─────────────────────────────────────── */
-/* The same group as the page's other sections: its heading 12 px in, then rows; the agent picker
-   is a 28 px control at the right of its row, not a full-width field. */
+/* The same group as the page's other sections: its heading on the box's edge, then rows 16 px in
+   on every side; the agent picker is a 28 px control at the right of its row, not a full-width field. */
 html[data-desktop] .desktop-main .acp-settings { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main .acp-settings { background: rgb(255 255 255 / .02); }
 html[data-desktop] .desktop-main .acp-group { display: flex; flex-direction: column; gap: 8px; }
-html[data-desktop] .desktop-main .acp-settings-heading { padding: 0 4px; }
-html[data-desktop] .desktop-main .acp-settings-heading h3 { color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
-html[data-desktop] .desktop-main .acp-settings-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .acp-agent-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 8px 0 12px; }
+html[data-desktop] .desktop-main .acp-settings-heading { padding: 0; }
+html[data-desktop] .desktop-main .acp-settings-heading h3 { margin: 0; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 18px; }
+html[data-desktop] .desktop-main .acp-settings-heading p { margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+html[data-desktop] .desktop-main .acp-agent-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 16px; }
 html[data-desktop] .desktop-main .acp-agent-field [data-slot="field-label"] { flex: none; font-size: 13px; font-weight: 510; }
 html[data-desktop] .desktop-main .acp-agent-field [data-slot="select-trigger"] { width: 220px; height: 28px; }
 html[data-desktop] .desktop-main .acp-settings > :is(form, .acp-section, details, [data-slot="alert"]) { margin: 0; }
 html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details) { position: relative; }
 html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details)::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
-html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) { gap: 12px; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
+html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) { gap: 12px; padding: 16px; border: 0; border-radius: 12px; background: transparent; }
 html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) > :is(h3, h4) { color: var(--label); font-size: 13px; font-weight: 510; }
-html[data-desktop] .desktop-main .acp-settings details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 12px; color: var(--label); font-size: 13px; font-weight: 510; list-style: none; transition: background var(--transition); }
+html[data-desktop] .desktop-main .acp-settings details > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 16px; border-radius: 12px; color: var(--label); font-size: 13px; font-weight: 510; list-style: none; transition: background var(--transition); }
 html[data-desktop] .desktop-main .acp-settings details > summary:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .acp-settings details > summary::-webkit-details-marker { display: none; }
-html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 12px 12px; }
+html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 16px 16px; }
 html[data-desktop] .desktop-main .acp-settings p.muted { color: var(--tertiaryLabel); font-size: 12px; }
 
 /* ── Terminals ───────────────────────────────────────────────────────────── */
 /* One 32 px row, as Codex's terminal panel: the tabs, then (over the row's end) the open terminal's
    new / menu buttons; nothing between the row and the shell. Its state shows only when it isn't
    simply connected; the way back to the newest output floats at the foot while scrolled up. */
-html[data-desktop] .desktop-main .terminal-workspace { position: relative; }
-html[data-desktop] .desktop-main .terminal-tab-bar { height: 32px; min-height: 32px; padding: 0 76px 0 0; border-bottom: 0; }
-html[data-desktop] .desktop-main .terminal-actions { position: absolute; top: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 2px; height: 32px; }
-html[data-desktop] .desktop-main .terminal-actions [data-button][data-size="icon"] { color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .terminal-actions [data-button][data-size="icon"]:hover:not(:disabled) { color: var(--label); }
-html[data-desktop] .desktop-main .terminal-actions .terminal-connection { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
-html[data-desktop] .desktop-main .terminal-workspace:has(.terminal-session-panel.flex .terminal-connection) .terminal-tab-bar { padding-right: 180px; }
+html[data-desktop] .desktop-main .terminal-tab-bar { height: 36px; min-height: 36px; padding: 0; border-bottom: 0; }
+/* The 终端 page is its terminal, as 文件 and 端口预览 are their tools: the panel's whole width 16 px
+   in from its edges, the shell's text on the toolbar's line, and no page scroll around it. */
+html[data-desktop] .desktop-main .live-overview:has(> .terminals-page) { --page-inline: 16px; padding-bottom: 12px; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .desktop-main .live-overview > .terminals-page .terminal-session-panel > .terminal-live { padding: 8px 0 0; }
+/* Tabs name the shell in the interface's face (13 / 510), cut short with an ellipsis; the open one
+   is a tint of ink with no raised thumb, in both themes. */
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { max-width: 180px; font-family: inherit; font-weight: 510; box-shadow: none; }
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The open terminal's actions end the tab row, in its flow: the tabs shorten before they do. */
+html[data-desktop] .desktop-main .terminal-tab-actions { display: flex; flex: none; align-items: center; }
+html[data-desktop] .terminal-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+/* Outside a tab row (full screen, an embedded terminal) they make a slim row of their own, at its end. */
+html[data-desktop] .terminal-actions:not([data-in-row]) { justify-content: flex-end; height: 32px; margin: -4px -4px 0 0; }
+/* In the inspector the terminal is the panel: no padding around it, no scroll of its own, the
+   shell filling all the height under the tab row. */
+html[data-desktop] .desktop-main .side-panel-content:has(> .terminals-page) { display: flex; flex-direction: column; padding: 0 0 0 16px; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .desktop-main .side-panel-content > .terminals-page { flex: 1; gap: 0; min-height: 0; }
+html[data-desktop] .desktop-main .side-panel-content .terminal-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+html[data-desktop] .desktop-main .side-panel-content .terminal-tab-bar { padding-right: 8px; }
+html[data-desktop] .desktop-main .side-panel-content .terminal-session-panel > .terminal-live { min-height: 0; padding: 4px 0 8px 4px; }
+html[data-desktop] .terminal-actions [data-button][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .terminal-actions [data-button][data-size="icon"]:hover:not(:disabled) { color: var(--label); }
+html[data-desktop] .terminal-actions .terminal-connection { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
 html[data-desktop] .terminal-font-menu { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .terminal-font-menu > span:first-child { flex: 1; }
 html[data-desktop] .terminal-font-menu [data-button] { width: 28px; height: 28px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
@@ -144,4 +184,5 @@ html[data-desktop] .desktop-main .task-command { display: -webkit-box; overflow:
 html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 0; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main .screen-list { background: rgb(255 255 255 / .02); }
-html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; }
+/* A footnote under a group starts where the group's rows' text does. */
+html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-left: 16px; color: var(--tertiaryLabel); font-size: 12px; }

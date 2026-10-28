@@ -28,19 +28,39 @@ import { diffLines, diffStat, hunks, parsePatch, type DiffLine } from "./line-di
 import { isDesktop } from "./desktop";
 import { grammarForPath, useHighlight, type HighlightToken } from "./highlight";
 import { fileTarget } from "./file-target";
+import { messageTime } from "./session-time";
 import remarkGfm from "remark-gfm";
-import type { ContentBlock, ToolCallContent } from "@linkshell/wire";
+import type { ContentBlock, ToolCallContent, UserContext } from "@linkshell/wire";
 import {
   answeredQuestions,
+  askedQuestions,
+  compactionLabel,
+  describeFailures,
   describeSteps,
+  exitNote,
   foldStepRuns,
+  formatElapsed,
+  isQuietTool,
+  presentError,
+  proposedPlan,
+  reconnectLabel,
+  reconnectOf,
+  startedSession,
+  toolCommand,
+  toolLabel,
+  toolLabelParts,
+  toolLabelText,
+  toolOutput,
+  wrapUpOf,
+  inboxLabel,
   questionReplies,
   tallySteps,
-  userMessageText,
+  userEventLabel,
+  userMessageView,
   type Step,
   type TimelineItem,
 } from "@linkshell/client-core";
-import { ChevronRight, Layers } from "lucide-react";
+import { ChevronRight, ClipboardPaste, FileText, GitMerge, GitPullRequest, Globe, Highlighter, History, Image as ImageIcon, Layers, MessageSquareText, Paperclip, SearchCheck, TextSelect, type LucideIcon } from "lucide-react";
 import {
   AgentMark,
   ErrorNotice,
@@ -66,7 +86,7 @@ export function DiffStat({ added, removed, className = "diff-stat" }: { added: n
   );
 }
 
-/** A folded run of finished steps — "运行 5 条命令 · 读取 3 个文件", one click open. */
+/** A folded run of finished steps — "已编辑 2 个文件，已运行 5 个命令", one click open. */
 export function StepsSummary({
   steps,
   open,
@@ -77,7 +97,8 @@ export function StepsSummary({
   onToggle: () => void;
 }) {
   const t = tallySteps(steps);
-  const label = describeSteps(t) || `${steps.length} 个步骤`;
+  const label = describeSteps(t);
+  const failures = describeFailures(t);
   return (
     <button
       type="button"
@@ -87,7 +108,7 @@ export function StepsSummary({
     >
       <Layers className="steps-summary-icon" aria-hidden="true" />
       <span className="steps-summary-label">{label}</span>
-      {t.failed > 0 && <span className="steps-summary-failed">{t.failed} 个失败</span>}
+      {failures && <span className="steps-summary-failed">{failures}</span>}
       <DiffStat added={t.added} removed={t.removed} className="steps-summary-diff" />
       <ChevronRight className="steps-summary-chevron" aria-hidden="true" />
     </button>
@@ -137,6 +158,10 @@ function CopyText({
 export const TimelineNavigation = createContext<{
   cwd: string;
   open: (path: string, line?: number) => void;
+  /** Opens an MCP App call's page in the inspector (Codex sessions on the desktop). */
+  openApp?: (callId: string) => void;
+  /** The session the agent's app knows by `appId` (the Claude app's `local_…`), when this computer has it. */
+  findSession?: (appId: string) => { title: string; open: () => void } | undefined;
 } | null>(null);
 
 /** Whether code blocks below may be highlighted: off for the block of a reply still streaming. */
@@ -641,11 +666,10 @@ function UserBlocks({
   sessionId: string;
   onFile: (path: string, line?: number) => void;
 }) {
-  const text =
-    blocks.length === 1 && blocks[0]!.type === "text"
-      ? blocks[0]!.text
-      : undefined;
-  const replies = text === undefined ? undefined : questionReplies(text);
+  // The words, not the envelope around them (reminders, Codex Desktop's file and browser context):
+  // what came with them shows as chips above the bubble, pictures and files below the words.
+  const view = userMessageView(blocks);
+  const replies = questionReplies(view.text);
   if (replies)
     return (
       <>
@@ -657,23 +681,51 @@ function UserBlocks({
         ))}
       </>
     );
-  // Strip Codex Desktop's image envelope so we show what the user actually
-  // typed, then the images themselves — never the raw "# Files mentioned…" text.
-  const hasImage = blocks.some((block) => block.type === "image");
-  if (hasImage) {
-    const request = userMessageText(blocks);
-    return (
-      <>
-        {request && <RichText text={request} />}
-        {blocks.map((block, index) =>
-          block.type === "image" ? (
-            <Picture key={index} block={block} sessionId={sessionId} />
-          ) : null,
-        )}
-      </>
-    );
-  }
-  return <Blocks blocks={blocks} sessionId={sessionId} onFile={onFile} />;
+  const attached = blocks.filter((block) => block.type !== "text");
+  return (
+    <>
+      {view.text && <RichText text={view.text} />}
+      {attached.length > 0 && <Blocks blocks={attached} sessionId={sessionId} onFile={onFile} />}
+    </>
+  );
+}
+
+/** Past 20 lines (or a wall of text without breaks) a message folds, as in Codex. */
+function longMessage(text: string): boolean {
+  return text.length > 2400 || text.split("\n").length > 20;
+}
+
+const CONTEXT_ICONS: Record<UserContext["kind"], LucideIcon> = {
+  file: FileText,
+  image: ImageIcon,
+  pasted: ClipboardPaste,
+  selection: TextSelect,
+  comments: MessageSquareText,
+  checks: CircleAlert,
+  annotations: Highlighter,
+  browser: Globe,
+  review: SearchCheck,
+  "pull-request": GitPullRequest,
+  merge: GitMerge,
+  history: History,
+  other: Paperclip,
+};
+
+/** What a client attached to the message (files, a selection, the browser it had open), as Codex shows it. */
+function UserContextChips({ context }: { context: UserContext[] }) {
+  return (
+    <div className="user-context">
+      {context.map((entry, index) => {
+        const Icon = CONTEXT_ICONS[entry.kind];
+        return (
+          <span key={index} className="user-context-chip" title={entry.detail ? `${entry.label}\n${entry.detail}` : entry.label}>
+            <Icon aria-hidden />
+            <span>{entry.label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 interface EntryProps {
@@ -685,6 +737,8 @@ interface EntryProps {
   showAsyncQuestions: boolean;
   /** The whole conversation's answered async questions (Codex Desktop), for dedup. */
   answered: ReadonlyMap<string, string>;
+  /** The conversation's last item while its turn runs: a retry on it is still being tried. */
+  live?: boolean;
 }
 
 /**
@@ -700,9 +754,12 @@ export const TimelineEntry = memo(function TimelineEntry({
   onTerminal,
   showAsyncQuestions,
   answered,
+  live = false,
 }: EntryProps & { item: TimelineItem }) {
   const actions = useActions();
-  const { link } = useConnection();
+  const navigation = useContext(TimelineNavigation);
+  // A long message folds to its first lines, as Codex folds one past 20.
+  const [unfolded, setUnfolded] = useState(false);
   const job = useJob();
   const online = useSessionOnline();
   const entry = (() => {
@@ -729,33 +786,73 @@ export const TimelineEntry = memo(function TimelineEntry({
         if (item.kind === "user" && item.agentMessages?.length)
           return (
             <article key={item.id} className="agent-message">
-              {item.agentMessages.map((message, index) => (
-                <details key={`${message.sender}:${index}`}>
-                  <summary>
-                    <span className="message-label">
-                      {message.notice === "idle"
-                        ? `@${message.sender} · 本轮已结束`
-                        : `来自 @${message.sender}`}
-                    </span>
-                    {message.summary ? ` · ${message.summary}` : ""}
-                  </summary>
-                  <RichText text={message.body || "当前空闲，等待后续任务。"} />
-                </details>
-              ))}
+              {item.agentMessages.map((message, index) => {
+                // Another session's message names it by the app's id: its title now, and a way there.
+                const sender = message.sessionId ? navigation?.findSession?.(message.sessionId) : undefined;
+                return (
+                  <details key={`${message.sender}:${index}`}>
+                    <summary>
+                      <span className="message-label">{inboxLabel(message, sender?.title)}</span>
+                      {message.summary ? ` · ${message.summary}` : ""}
+                      {sender && (
+                        <button
+                          type="button"
+                          className="agent-message-open"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            sender.open();
+                          }}
+                        >
+                          打开会话
+                        </button>
+                      )}
+                    </summary>
+                    <RichText text={message.body || "当前空闲，等待后续任务。"} />
+                  </details>
+                );
+              })}
             </article>
           );
+        const said = item.kind === "user" ? userMessageView(item.blocks) : undefined;
+        if (said?.event)
+          return (
+            <p className="timeline-event" key={item.id}>
+              {userEventLabel(said.event)}
+            </p>
+          );
+        if (said?.shell || said?.output !== undefined) {
+          // A command run from the prompt (`!`), or what a local slash command printed: the
+          // person's, so on their side, in the terminal's type.
+          const output = said.shell ? [said.shell.stdout, said.shell.stderr].filter(Boolean).join("\n") : said.output;
+          return (
+            <article className="user-shell" key={item.id}>
+              {said.shell?.command && (
+                <code className="user-shell-command">
+                  <span aria-hidden>!</span> {said.shell.command}
+                </code>
+              )}
+              {output && <pre tabIndex={0} className="user-shell-output">{output}</pre>}
+            </article>
+          );
+        }
         if (item.kind === "user")
           return (
             <article className="user-message" key={item.id}>
+              {said && said.context.length > 0 && <UserContextChips context={said.context} />}
               {/* The words in their own box, so the desktop can hang the time and actions under
                   the bubble instead of inside it. */}
-              <div className="user-bubble">
+              <div className="user-bubble" data-folded={(said && longMessage(said.text) && !unfolded) || undefined}>
                 <UserBlocks
                   blocks={item.blocks}
                   sessionId={sessionId}
                   onFile={onFile}
                 />
               </div>
+              {said && longMessage(said.text) && (
+                <button type="button" className="user-fold" aria-expanded={unfolded} onClick={() => setUnfolded(!unfolded)}>
+                  {unfolded ? "收起" : "显示更多"}
+                </button>
+              )}
               {item.failed && (
                 <div className="failed-message-actions">
                   <span className="form-error">发送失败，草稿仍在</span>
@@ -783,10 +880,7 @@ export const TimelineEntry = memo(function TimelineEntry({
                   dateTime={new Date(item.ts).toISOString()}
                   title={new Date(item.ts).toLocaleString()}
                 >
-                  {new Date(item.ts).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {messageTime(item.ts)}
                   {item.pending ? " · 发送中" : ""}
                 </time>
                 {item.blocks.some(
@@ -868,23 +962,26 @@ export const TimelineEntry = memo(function TimelineEntry({
         if (item.kind === "thought")
           return (
             <details className="thought-block" key={item.id}>
-              <summary>{item.streaming ? "正在思考…" : "思考过程"}</summary>
+              <summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>
               <StreamingText text={item.text} streaming={item.streaming} />
             </details>
           );
-        if (item.kind === "notice" || item.kind === "error") {
-          const body = item.kind === "notice" ? item.detail : item.hint;
+        if (item.kind === "error") return <ErrorCard key={item.id} item={item} />;
+        if (item.kind === "notice") {
+          const reconnect = reconnectOf(item.title, item.detail);
+          if (reconnect)
+            return (
+              <p className="timeline-divider timeline-reconnect" key={item.id} role={live ? "status" : undefined}>
+                {live && <LoaderCircle className="tool-state-spinner" aria-hidden />}
+                {reconnectLabel(reconnect, live)}
+              </p>
+            );
           return (
-            <Alert
-              variant={item.kind === "error" ? "destructive" : "info"}
-              key={item.id}
-            >
-              <AlertTitle>
-                {item.kind === "notice" ? item.title : item.message}
-              </AlertTitle>
-              {body ? (
+            <Alert variant="info" key={item.id}>
+              <AlertTitle>{item.title}</AlertTitle>
+              {item.detail ? (
                 <AlertDescription>
-                  <pre>{body}</pre>
+                  <pre>{item.detail}</pre>
                 </AlertDescription>
               ) : null}
             </Alert>
@@ -934,156 +1031,14 @@ export const TimelineEntry = memo(function TimelineEntry({
             </details>
           );
         return (
-          <details className={`tool-record ${item.status}`} key={item.id}>
-            <summary>
-              <span className="tool-state" aria-hidden>
-                {item.detail?.type === "subagent" &&
-                item.detail.state === "unknown" ? (
-                  <CircleHelp />
-                ) : item.status === "completed" ? (
-                  <Check />
-                ) : item.status === "failed" ? (
-                  <CircleAlert />
-                ) : item.status === "in_progress" ? (
-                  <LoaderCircle className="tool-state-spinner" />
-                ) : (
-                  <CircleDashed />
-                )}
-              </span>
-              <strong title={item.title}>{item.title}</strong>
-              {(() => {
-                // A command the agent described in words (Claude's Bash) shows beside the words,
-                // in the code face: the description is prose, only the command is code.
-                const command = item.toolKind === "execute" && typeof (item.rawInput as { command?: unknown })?.command === "string"
-                  ? ((item.rawInput as { command: string }).command).split("\n")[0]!.trim()
-                  : undefined;
-                return command && command !== item.title ? <code className="tool-command" title={command}>{command}</code> : null;
-              })()}
-              {(() => {
-                // Only show meta when it adds something: the MCP server, a
-                // sub-agent's state, or a non-success outcome. A plain
-                // "completed" badge on every row is just noise (Desktop omits it).
-                const meta =
-                  item.detail?.type === "mcp"
-                    ? `MCP · ${item.detail.server}`
-                    : item.detail?.type === "subagent" && item.detail.state
-                      ? {
-                          pending: "待开始",
-                          running: "运行中",
-                          paused: "等待操作",
-                          completed: null,
-                          failed: "失败",
-                          stopped: "已停止",
-                          unknown: "状态未确认",
-                        }[item.detail.state]
-                      : item.status === "in_progress"
-                        ? "执行中"
-                        : item.status === "failed"
-                          ? "执行失败"
-                          : null;
-                return meta ? <small>{meta}</small> : null;
-              })()}
-              <ChevronRight className="tool-record-chevron" aria-hidden />
-            </summary>
-            {item.detail?.type === "subagent" &&
-            item.detail.canCancel &&
-            item.detail.nativeSessionId &&
-            ["running", "paused", "pending"].includes(
-              item.detail.state ?? "",
-            ) ? (
-              <Button
-                variant="outline"
-                disabled={!online || job.busy}
-                onClick={() =>
-                  void job.run(() =>
-                    link.call("sessions.cancelSubagent", {
-                      sessionId,
-                      nativeSessionId:
-                        item.detail!.type === "subagent"
-                          ? item.detail!.nativeSessionId!
-                          : "",
-                    }),
-                  )
-                }
-              >
-                停止这个子代理
-              </Button>
-            ) : null}
-            {item.detail?.type === "mcp" && (
-              <p className="muted">
-                服务：{item.detail.server} · 工具：{item.detail.tool}
-              </p>
-            )}
-            {item.output && (
-              <>
-                <CopyText text={item.output} label="复制工具输出" />
-                <pre
-                  className="tool-output-text"
-                  tabIndex={0}
-                  aria-label="工具输出"
-                >
-                  {item.output}
-                </pre>
-              </>
-            )}
-            {item.content.map((content, index) =>
-              content.type === "content" ? (
-                <Blocks
-                  key={index}
-                  blocks={[content.content]}
-                  sessionId={sessionId}
-                  onFile={onFile}
-                />
-              ) : content.type === "terminal" ? (
-                <span key={index} className="muted">
-                  Agent 终端输出{item.output ? "见上方" : "正在等待输出"}
-                </span>
-              ) : (
-                <Diff key={index} change={content} />
-              ),
-            )}
-            {item.locations?.map((location, index) => (
-              <Button
-                variant="ghost"
-                size="plain"
-                key={index}
-                className="resource-chip"
-                onClick={() => onFile(location.path, location.line)}
-              >
-                {location.path}
-                {location.line ? `:${location.line}` : ""}
-              </Button>
-            ))}
-            {item.rawInput !== undefined && (
-              <details>
-                <summary>工具参数</summary>
-                <pre tabIndex={0}>
-                  {typeof item.rawInput === "string"
-                    ? item.rawInput
-                    : JSON.stringify(item.rawInput, null, 2)}
-                </pre>
-              </details>
-            )}
-            {item.rawOutput !== undefined && (
-              <details>
-                <summary>原始结果</summary>
-                <pre tabIndex={0}>
-                  {typeof item.rawOutput === "string"
-                    ? item.rawOutput
-                    : JSON.stringify(item.rawOutput, null, 2)}
-                </pre>
-              </details>
-            )}
-            {item.sub && (
-              <Timeline
-                items={item.sub.items}
-                sessionId={sessionId}
-                agent={agent}
-                onFile={onFile}
-                onTerminal={onTerminal}
-              />
-            )}
-          </details>
+          <ToolRecord
+            key={item.id}
+            item={item}
+            sessionId={sessionId}
+            agent={agent}
+            onFile={onFile}
+            onTerminal={onTerminal}
+          />
         );
   })();
   return job.error ? (
@@ -1095,6 +1050,313 @@ export const TimelineEntry = memo(function TimelineEntry({
     entry
   );
 });
+
+type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
+
+/** An error as the Claude app shows it: what kind of failure, what to do, the agent's words one click away. */
+function ErrorCard({ item }: { item: Extract<TimelineItem, { kind: "error" }> }) {
+  const shown = presentError(item);
+  return (
+    <Alert variant="destructive" data-kind={shown.kind}>
+      <AlertTitle>{shown.title}</AlertTitle>
+      {shown.kind ? (
+        <AlertDescription>
+          {shown.hint && <p>{shown.hint}</p>}
+          {shown.detail && (
+            <details className="error-detail">
+              <summary>查看详情</summary>
+              <pre tabIndex={0}>{shown.detail}</pre>
+            </details>
+          )}
+        </AlertDescription>
+      ) : shown.hint ? (
+        <AlertDescription>
+          <pre>{shown.hint}</pre>
+        </AlertDescription>
+      ) : null}
+    </Alert>
+  );
+}
+
+function ToolState({ item }: { item: ToolItem }) {
+  return (
+    <span className="tool-state" aria-hidden>
+      {item.detail?.type === "subagent" && item.detail.state === "unknown" ? (
+        <CircleHelp />
+      ) : item.status === "completed" ? (
+        <Check />
+      ) : item.status === "failed" ? (
+        <CircleAlert />
+      ) : item.status === "in_progress" ? (
+        <LoaderCircle className="tool-state-spinner" />
+      ) : (
+        <CircleDashed />
+      )}
+    </span>
+  );
+}
+
+const SUBAGENT_STATES: Record<string, string | null> = {
+  pending: "待开始",
+  running: "运行中",
+  paused: "等待操作",
+  completed: null,
+  failed: "失败",
+  stopped: "已停止",
+  unknown: "状态未确认",
+};
+
+/** The Claude app's end-of-turn box: its recap, the question it leaves, and the answers it offered (not buttons here). */
+function WrapUpCard({ item }: { item: ToolItem }) {
+  const box = wrapUpOf(item);
+  return (
+    <section className="wrap-up-card" aria-label="已收尾">
+      <small className="wrap-up-label">已收尾</small>
+      {box.recap && <RichText text={box.recap} />}
+      {box.ask && <p className="wrap-up-ask">{box.ask}</p>}
+      {box.actions.length > 0 && (
+        <div className="wrap-up-actions">
+          {box.actions.map((label, index) => (
+            <span key={index} className="wrap-up-chip">{label}</span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const SESSION_STATES = { starting: "正在启动", started: "已启动", proposed: "已提议，等你开始", failed: "启动失败" } as const;
+
+/** A session the Claude app started from this one: opens it when this computer has it. */
+function SessionCard({ item }: { item: ToolItem }) {
+  const navigation = useContext(TimelineNavigation);
+  const started = startedSession(item);
+  const target = started.appId ? navigation?.findSession?.(started.appId) : undefined;
+  const body = (
+    <>
+      {started.state === "starting" ? <LoaderCircle className="tool-state-spinner" aria-hidden /> : <MessageSquareText aria-hidden />}
+      <span className="session-card-text">
+        <strong>{started.title}</strong>
+        <small>{SESSION_STATES[started.state]}</small>
+      </span>
+    </>
+  );
+  return target ? (
+    <button type="button" className="session-card" data-state={started.state} onClick={target.open} title={`打开「${target.title}」`}>
+      {body}
+      <ChevronRight className="session-card-chevron" aria-hidden />
+    </button>
+  ) : (
+    <div className="session-card" data-state={started.state}>{body}</div>
+  );
+}
+
+/** A command as it ran: the command, what it printed, and how it ended. */
+function CommandBody({ item, command }: { item: ToolItem; command: string }) {
+  const output = toolOutput(item);
+  const ended = exitNote(item);
+  return (
+    <div className="tool-terminal">
+      <pre className="tool-terminal-command" tabIndex={0} aria-label="命令"><span className="tool-terminal-prompt" aria-hidden>$ </span>{command}</pre>
+      {output && (
+        <>
+          <CopyText text={output} label="复制命令输出" />
+          <pre className="tool-output-text" tabIndex={0} aria-label="命令输出">{output}</pre>
+        </>
+      )}
+      {ended && <small className="tool-terminal-exit" data-ok={ended === "成功" || undefined}>{ended}</small>}
+    </div>
+  );
+}
+
+/**
+ * One tool call, worded as the Claude app words it ("已读取 foo.ts", "正在运行 npm test"); its file
+ * opens from the row. Opens to what it did: a command's run, a diff, a search's matches. Reading a
+ * file and listing a directory have nothing more to show and stay one line.
+ */
+function ToolRecord({
+  item,
+  sessionId,
+  agent,
+  onFile,
+  onTerminal,
+}: {
+  item: ToolItem;
+  sessionId: string;
+  agent: string;
+  onFile: (path: string, line?: number) => void;
+  onTerminal?: (id: string) => void;
+}) {
+  const { link } = useConnection();
+  const navigation = useContext(TimelineNavigation);
+  const job = useJob();
+  const online = useSessionOnline();
+  const label = toolLabel(item);
+  const action = label.action;
+  if (action === "compaction")
+    return (
+      <p className="timeline-divider" role={item.status === "in_progress" ? "status" : undefined}>
+        {item.status === "in_progress" && <LoaderCircle className="tool-state-spinner" aria-hidden />}
+        {compactionLabel(item)}
+      </p>
+    );
+  if (action === "chapter") return <p className="timeline-divider timeline-chapter">{label.subject ?? "新章节"}</p>;
+  if (action === "wrap_up") return <WrapUpCard item={item} />;
+  if (action === "start_session") return <SessionCard item={item} />;
+
+  const parts = toolLabelParts(label);
+  const command = action === "command" ? toolCommand(item) : undefined;
+  const plan = action === "plan" ? proposedPlan(item) : undefined;
+  const questions = action === "question" ? askedQuestions(item) : [];
+  const exploring = action === "read" || action === "list" || action === "search" || action === "find";
+  const changed = item.content.filter((entry) => entry.type === "diff" || entry.type === "patch");
+  const stat = changed.reduce(
+    (sum, change) => {
+      const lines = diffStat(changeLines(change));
+      return { added: sum.added + lines.added, removed: sum.removed + lines.removed };
+    },
+    { added: 0, removed: 0 },
+  );
+  const cancel =
+    item.detail?.type === "subagent" && item.detail.canCancel && item.detail.nativeSessionId && ["running", "paused", "pending"].includes(item.detail.state ?? "")
+      ? item.detail.nativeSessionId
+      : undefined;
+  // A search's matches are worth opening; a file read or a directory listed are not.
+  const hasBody = isQuietTool(item)
+    ? false
+    : exploring
+      ? !!toolOutput(item)
+      : !!command || !!plan || questions.length > 0 || !!cancel || !!item.output || item.content.length > 0 || !!item.locations?.length || item.rawInput !== undefined || item.rawOutput !== undefined || !!item.sub;
+  const meta = item.detail?.type === "subagent" && item.detail.state ? SUBAGENT_STATES[item.detail.state] : null;
+  const summary = (
+    <>
+      <ToolState item={item} />
+      <strong className="tool-label" title={toolLabelText(label, { note: true })}>
+        <span className="tool-verb">{parts.verb}</span>
+        {parts.subject &&
+          (label.style === "file" && label.path ? (
+            <button
+              type="button"
+              className="tool-file"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onFile(label.path!);
+              }}
+            >
+              {parts.subject}
+            </button>
+          ) : label.style === "code" ? (
+            <code className="tool-subject-code">{parts.subject}</code>
+          ) : (
+            <span className="tool-subject">{parts.subject}</span>
+          ))}
+      </strong>
+      {/* Outside the label, so a long command cut short still says it failed. */}
+      {parts.suffix && <span className="tool-suffix">{parts.suffix}</span>}
+      {label.note && <small className="tool-note">{label.note}</small>}
+      <DiffStat added={stat.added} removed={stat.removed} />
+      {meta && <small>{meta}</small>}
+      {item.detail?.type === "mcp" && item.detail.app && navigation?.openApp && (
+        // The call's page, as Codex's launcher card: open it here without unfolding the row.
+        <button
+          type="button"
+          className="tool-app-open"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            navigation.openApp?.(item.id);
+          }}
+        >
+          打开
+        </button>
+      )}
+      {hasBody && <ChevronRight className="tool-record-chevron" aria-hidden />}
+    </>
+  );
+  if (!hasBody)
+    return (
+      <div className={`tool-record tool-line ${item.status}`} data-action={action}>
+        <div className="tool-summary">{summary}</div>
+      </div>
+    );
+  return (
+    <details className={`tool-record ${item.status}`} data-action={action}>
+      <summary>{summary}</summary>
+      {cancel ? (
+        <Button
+          variant="outline"
+          disabled={!online || job.busy}
+          onClick={() => void job.run(() => link.call("sessions.cancelSubagent", { sessionId, nativeSessionId: cancel }))}
+        >
+          停止这个子代理
+        </Button>
+      ) : null}
+      {job.error && <ErrorNotice error={job.error} />}
+      {command ? (
+        <CommandBody item={item} command={command} />
+      ) : plan ? (
+        <RichText text={plan} />
+      ) : questions.length > 0 ? (
+        <>
+          <ul className="tool-questions">
+            {questions.map((question, index) => (
+              <li key={index}>
+                {question.header && <small>{question.header}{question.multiple ? "（可多选）" : ""}</small>}
+                <p>{question.question}</p>
+                {question.options.length > 0 && <p className="muted">{question.options.join(" · ")}</p>}
+              </li>
+            ))}
+          </ul>
+          {toolOutput(item) && <pre className="tool-output-text" tabIndex={0} aria-label="回答">{toolOutput(item)}</pre>}
+        </>
+      ) : exploring ? (
+        <pre className="tool-output-text" tabIndex={0} aria-label="工具输出">{toolOutput(item)}</pre>
+      ) : (
+        <>
+          {item.output && (
+            <>
+              <CopyText text={item.output} label="复制工具输出" />
+              <pre className="tool-output-text" tabIndex={0} aria-label="工具输出">
+                {item.output}
+              </pre>
+            </>
+          )}
+          {item.content.map((content, index) =>
+            content.type === "content" ? (
+              <Blocks key={index} blocks={[content.content]} sessionId={sessionId} onFile={onFile} />
+            ) : content.type === "terminal" ? (
+              <span key={index} className="muted">
+                Agent 终端输出{item.output ? "见上方" : "正在等待输出"}
+              </span>
+            ) : (
+              <Diff key={index} change={content} />
+            ),
+          )}
+          {item.locations?.map((location, index) => (
+            <Button variant="ghost" size="plain" key={index} className="resource-chip" onClick={() => onFile(location.path, location.line)}>
+              {location.path}
+              {location.line ? `:${location.line}` : ""}
+            </Button>
+          ))}
+          {item.rawInput !== undefined && (
+            <details>
+              <summary>工具参数</summary>
+              <pre tabIndex={0}>{typeof item.rawInput === "string" ? item.rawInput : JSON.stringify(item.rawInput, null, 2)}</pre>
+            </details>
+          )}
+          {item.rawOutput !== undefined && (
+            <details>
+              <summary>原始结果</summary>
+              <pre tabIndex={0}>{typeof item.rawOutput === "string" ? item.rawOutput : JSON.stringify(item.rawOutput, null, 2)}</pre>
+            </details>
+          )}
+        </>
+      )}
+      {item.sub && <Timeline items={item.sub.items} sessionId={sessionId} agent={agent} onFile={onFile} onTerminal={onTerminal} />}
+    </details>
+  );
+}
 
 /** Whole-timeline map of async questions already answered by a later message. */
 export function answeredMap(items: TimelineItem[]): Map<string, string> {

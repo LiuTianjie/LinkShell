@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { useEffect, useId, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import {
   acpAgentSettingsSchema,
   acpRemoteAgentSchema,
@@ -696,7 +697,12 @@ export function AcpManager() {
         <AcpSettings key={agent} agent={agent} />
       )}
       <details className="min-w-0">
-        <summary className="cursor-pointer">自定义 ACP 连接</summary>
+        {/* A row that opens: what it holds is said at its end, with the disclosure's chevron. */}
+        <summary className="cursor-pointer">
+          <span>自定义 ACP 连接</span>
+          <span className="acp-summary-hint">添加本地命令、HTTP 或 WebSocket</span>
+          <ChevronRight className="acp-summary-chevron" aria-hidden />
+        </summary>
         <div className="flex min-w-0 flex-col gap-4 pt-4">
           <p className="muted">
             支持本地命令、HTTP 和 WebSocket。远程认证使用

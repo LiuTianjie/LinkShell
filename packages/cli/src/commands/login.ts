@@ -1,9 +1,8 @@
 import * as http from "node:http";
 import { execFileSync } from "node:child_process";
-import { saveAuth, SUPABASE_URL, SUPABASE_ANON_KEY } from "../auth.js";
-import type { AuthTokens } from "../auth.js";
-import { cacheMembership, type DesktopMembership } from "../pro-membership.js";
-import { fetchProMembership } from "../../../client-core/src/pro-membership.js";
+import { completeLogin, type LoginResult } from "./sign-in.js";
+
+export type { LoginResult } from "./sign-in.js";
 
 const ITOOL_AUTH_URL = "https://itool.tech/en/auth/linkshell";
 
@@ -105,14 +104,6 @@ const CALLBACK_PAGE = `<!DOCTYPE html>
  * 4. iTool redirects back to localhost with Supabase tokens
  * 5. Save tokens to ~/.linkshell/auth.json
  */
-export interface LoginResult {
-  success: boolean;
-  plan: "pro" | "free";
-  email: string;
-  userId: string;
-  accessToken: string;
-}
-
 export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<LoginResult | null> {
   if (options.signal?.aborted) return null;
   process.stderr.write("\n  LinkShell Login\n\n");
@@ -121,9 +112,12 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let completion: ReturnType<typeof setTimeout> | undefined;
     let finished = false;
+    // Ends an account check still in flight, so a login that timed out or was cancelled never saves.
+    const stopped = new AbortController();
     const finish = (result: LoginResult | null) => {
       if (finished) return;
       finished = true;
+      stopped.abort();
       clearTimeout(timeout);
       clearTimeout(completion);
       options.signal?.removeEventListener("abort", abort);
@@ -154,70 +148,27 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
           return;
         }
 
-        // Fetch user info + plan
-        let userId = "";
-        let email = "";
-        let plan = "free";
-        let membership: DesktopMembership = { plan: "unknown", planExpiresAt: null };
+        let result: LoginResult;
         try {
-          const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              apikey: SUPABASE_ANON_KEY,
-            },
-            signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
-          });
-          if (userRes.ok) {
-            const user = (await userRes.json()) as {
-              id: string;
-              email?: string;
-            };
-            userId = user.id;
-            email = user.email ?? "";
-
-            const profile = await fetchProMembership({ userId, accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, signal: options.signal });
-            plan = profile.plan;
-            membership = { plan: profile.plan, planExpiresAt: profile.expiresAt ?? null };
-          }
-        } catch {}
-
-        if (finished || options.signal?.aborted) { res.destroy(); return; }
-
-        if (!userId) {
+          result = await completeLogin({ accessToken, refreshToken, expiresIn }, { signal: stopped.signal });
+        } catch {
+          if (finished || options.signal?.aborted) { res.destroy(); return; }
           res.writeHead(401);
           res.end("无法验证账号，请重新登录。");
           return;
         }
 
-        const tokens: AuthTokens = {
-          accessToken,
-          refreshToken,
-          expiresAt: Date.now() + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600) * 1000,
-          userId,
-          email,
-        };
-        saveAuth(tokens);
-        try { cacheMembership(userId, membership); } catch { /* A cache write cannot invalidate a completed login. */ }
-
         res.writeHead(200);
         res.end("ok");
 
-        const planLabel = plan === "pro" ? "\x1b[32mPro\x1b[0m" : "Free";
+        const planLabel = result.plan === "pro" ? "\x1b[32mPro\x1b[0m" : "Free";
         process.stderr.write(
-          `  \x1b[32m✓\x1b[0m Logged in as ${email || userId} (${planLabel})\n\n`,
+          `  \x1b[32m✓\x1b[0m Logged in as ${result.email || result.userId} (${planLabel})\n\n`,
         );
 
         // Left pending, the five-minute limit would keep the command alive long after the login.
         clearTimeout(timeout);
-        completion = setTimeout(() => {
-          finish({
-            success: true,
-            plan: plan as "pro" | "free",
-            email,
-            userId,
-            accessToken,
-          });
-        }, 500);
+        completion = setTimeout(() => finish(result), 500);
         return;
       }
 

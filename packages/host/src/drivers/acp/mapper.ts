@@ -109,6 +109,11 @@ export type ConfigSource = "configOptions" | "modes" | "models";
 export type SourcedConfigOption = SessionConfigOption & { source: ConfigSource };
 
 /** Reads ACP `configOptions` / `modes` / legacy `models` into LinkShell config options. */
+/** The option a session's model is chosen with: what a model given at creation sets, and what a new session can be offered. */
+export function modelOption<T extends SessionConfigOption>(options: T[]): T | undefined {
+  return options.find((option) => option.category === "model" && option.type !== "boolean" && option.values.length > 0);
+}
+
 export function toConfigOptions(response: unknown): SourcedConfigOption[] {
   const source = obj(response);
   if (!source) return [];
@@ -284,7 +289,8 @@ export function normalizeAcpUpdate(raw: unknown): SessionUpdate | undefined {
         toolCallId,
         parentToolCallId: parentOf(update),
         title: str(update.title) ?? str(update.name) ?? "Tool",
-        name: str(update.name),
+        // Claude's adapter keeps the tool's own name in its metadata.
+        name: str(update.name) ?? str(obj(obj(update._meta)?.claudeCode)?.toolName),
         kind: toolKind(update.kind),
         status: toolStatus(update.status) ?? "pending",
         rawInput: normalizeRawInput(update.rawInput),

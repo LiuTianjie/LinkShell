@@ -39,12 +39,15 @@ import {
   CommandEmpty,
 } from "@/components/ui/command";
 import { useDialogs } from "@/components/Dialogs";
+import { ColumnResizer } from "@/components/ColumnResizer";
+import { confirmAndDeleteSession } from "./session-actions";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -60,6 +63,7 @@ import {
   PanelRight,
   MessageSquare,
   MessagesSquare,
+  Square,
   Paperclip,
   Plus,
   X,
@@ -75,8 +79,9 @@ import {
   ArchiveRestore,
   Trash2,
 } from "lucide-react";
-import { shownQueue } from "@linkshell/client-core";
-import type { ContentBlock, SessionSummary } from "@linkshell/wire";
+import { reconnectLabel, reconnectOf, shownQueue } from "@linkshell/client-core";
+import type { ContentBlock, SessionSummary, ToolDetail } from "@linkshell/wire";
+import type { TimelineItem } from "@linkshell/client-core";
 import {
   commandQuery,
   matchCommands,
@@ -104,12 +109,14 @@ import { Permission } from "./Permission";
 import { AgentInteractions } from "./Acp";
 import { TimelineNavigation } from "./Timeline";
 import { Conversation } from "./Conversation";
+import { LiveActivity } from "./LiveActivity";
 import { FileView, Files, fileBase64 } from "./Files";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
+import { McpAppView, appTabId, type AppTab } from "./McpApp";
 import { isDesktop } from "./desktop";
 import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
 
@@ -125,7 +132,24 @@ type Panel =
   | "apps"
   | "preview"
   | "terminal"
+  | AppPanel
   | null;
+/** An MCP App's tab (`appTabId`). */
+type AppPanel = `app:${string}`;
+const isAppPanel = (panel: Panel): panel is AppPanel => !!panel?.startsWith("app:");
+type AppCall = Extract<TimelineItem, { kind: "tool" }> & {
+  detail: Extract<ToolDetail, { type: "mcp" }> & { app: NonNullable<Extract<ToolDetail, { type: "mcp" }>["app"]> };
+};
+const isAppCall = (item: TimelineItem): item is AppCall => item.kind === "tool" && item.detail?.type === "mcp" && !!item.detail.app;
+const callDone = (call: AppCall) => call.status === "completed" || call.status === "failed";
+/** What the page is told came back: Codex's raw result, or the failure as one. */
+function appResult(call: AppCall): unknown {
+  if (!callDone(call)) return undefined;
+  if (call.status === "failed") return { content: [{ type: "text", text: call.output || "调用失败" }], structuredContent: { error: call.output || "调用失败" }, isError: true };
+  return call.rawOutput ?? { content: [] };
+}
+const appInput = (call: AppCall) =>
+  call.rawInput && typeof call.rawInput === "object" && !Array.isArray(call.rawInput) ? (call.rawInput as Record<string, unknown>) : {};
 
 // The desktop inspector's tools beside a conversation, as Codex keeps them: what changed, the
 // files, a terminal and the computer's preview. Tasks join while the session has some running
@@ -140,7 +164,7 @@ const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] 
   { id: "terminal", title: "终端" },
   { id: "preview", title: "预览" },
 ];
-const panelTitles: Record<Exclude<Panel, null | "commands">, string> = {
+const panelTitles: Record<Exclude<Panel, null | "commands" | AppPanel>, string> = {
   settings: "会话设置",
   changes: "变更",
   files: "文件",
@@ -234,6 +258,85 @@ export function Session({
   const toggleInspector = (next?: Exclude<Panel, null | "commands">) => {
     if (next) void setPanel(panel === next ? null : next);
     else void setPanel(panel && panel !== "commands" ? null : lastPanel.current);
+  };
+  // MCP Apps (Codex): a tool's own page in the inspector. The agent's call to such a tool opens it
+  // there by itself, as Codex does; the inspector's + menu opens one by hand.
+  const [apps, setApps] = useState<AppTab[]>([]);
+  const appCalls = useMemo(() => (isDesktop ? (view?.items ?? []).filter(isAppCall) : []), [view?.items]);
+  const seenCalls = useRef<Set<string>>(undefined);
+  // Calls whose app was closed by hand: they don't open it again.
+  const closedCalls = useRef(new Set<string>());
+  useEffect(() => {
+    if (!appCalls.length && !seenCalls.current) return;
+    // What was already done when the session opened is history: it opens nothing.
+    seenCalls.current ??= new Set(appCalls.filter(callDone).map((call) => call.id));
+    const seen = seenCalls.current;
+    let next = apps;
+    let open: AppPanel | undefined;
+    for (const call of appCalls) {
+      const { server, tool, app } = call.detail;
+      const id = appTabId(server, app.resourceUri) as AppPanel;
+      const fresh = !seen.has(call.id);
+      seen.add(call.id);
+      const shown = { callId: call.id, input: appInput(call), result: appResult(call) };
+      const index = next.findIndex((tab) => tab.id === id);
+      if (index >= 0) {
+        const tab = next[index];
+        // A later call moves the open app to it; the shown call's result updates it when it lands.
+        const moves = fresh || tab.callId === call.id;
+        const changed = tab.callId !== shown.callId || JSON.stringify(tab.result) !== JSON.stringify(shown.result);
+        if (moves && changed) next = next.map((entry, at) => (at === index ? { ...entry, ...shown, launched: false } : entry));
+      } else if (fresh && !callDone(call) && app.displayMode !== "inline" && !closedCalls.current.has(call.id)) {
+        next = [...next, { id, server, tool, title: server, resourceUri: app.resourceUri, connector: app.connector, ...shown }];
+        open = id;
+      }
+    }
+    if (next !== apps) setApps(next);
+    if (open) void setPanel(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appCalls]);
+  const appCatalog = useLoad(
+    () => (isDesktop && session.agent === "codex" ? connection.link.call("mcp.apps", { sessionId: session.id }).then((result) => result.apps) : Promise.resolve([])),
+    [connection.link, session.id, session.agent],
+  );
+  const appTitle = (tab: AppTab) =>
+    appCatalog.value?.find((entry) => entry.server === tab.server && entry.resourceUri === tab.resourceUri)?.title ?? tab.title;
+  const launchApp = (entry: { server: string; tool: string; title: string; resourceUri: string; connector?: string }) => {
+    const id = appTabId(entry.server, entry.resourceUri) as AppPanel;
+    if (!apps.some((tab) => tab.id === id)) setApps((list) => [...list, { id, server: entry.server, tool: entry.tool, title: entry.title, resourceUri: entry.resourceUri, connector: entry.connector, launched: true }]);
+    void setPanel(id);
+  };
+  /** A call's page, from its row in the conversation: open again, or for the first time (inline apps). */
+  // Mail from another of the agent's sessions names it by the app's own id (the Claude app's local_…).
+  const findSession = (appId: string) => {
+    const sender = Object.values(connection.store.getState().sessions).find((candidate) => candidate.appId === appId);
+    return sender && { title: titleOf(sender), open: () => navigate(sender.id) };
+  };
+  const openAppCall = (callId: string) => {
+    const call = appCalls.find((entry) => entry.id === callId);
+    if (!call) return;
+    const { server, tool, app } = call.detail;
+    const id = appTabId(server, app.resourceUri) as AppPanel;
+    const shown = { callId: call.id, input: appInput(call), result: appResult(call), launched: false };
+    closedCalls.current.delete(call.id);
+    setApps((list) => list.some((tab) => tab.id === id)
+      ? list.map((tab) => (tab.id === id ? { ...tab, ...shown } : tab))
+      : [...list, { id, server, tool, title: server, resourceUri: app.resourceUri, connector: app.connector, ...shown }]);
+    void setPanel(id);
+  };
+  const closeApp = (id: string) => {
+    const tab = apps.find((entry) => entry.id === id);
+    if (tab?.callId) closedCalls.current.add(tab.callId);
+    const rest = apps.filter((entry) => entry.id !== id);
+    setApps(rest);
+    if (panel === id) {
+      const fallback = isAppPanel(lastPanel.current) ? undefined : lastPanel.current;
+      void setPanel((rest.at(-1)?.id as AppPanel | undefined) ?? fallback ?? null);
+    }
+  };
+  const sayFromApp = async (content: ContentBlock[]) => {
+    if (!content.length) return;
+    if ((await actions.send(session.id, content)) === "failed") throw new Error("消息发送失败，请重试");
   };
   useDesktopCommand((command) => {
     if (command.command === "inspector") {
@@ -631,8 +734,9 @@ export function Session({
                       variant="ghost"
                       size="icon"
                       aria-label="检查器"
-                      aria-pressed={!!panel && panel !== "commands"}
-                      data-active={(!!panel && panel !== "commands") || undefined}
+                      // Pressed for the inspector's other tabs only: 变更 and 终端 show their own.
+                      aria-pressed={!!panel && panel !== "commands" && panel !== "changes" && panel !== "terminal"}
+                      data-active={(!!panel && panel !== "commands" && panel !== "changes" && panel !== "terminal") || undefined}
                       onClick={() => toggleInspector()}
                     >
                       <PanelRight />
@@ -795,44 +899,7 @@ export function Session({
                     disabled={!canInteract || session.state === "running"}
                     onSelect={() =>
                       void job.run(async () => {
-                        let worktree: "keep" | "remove" | undefined;
-                        if (session.worktree) {
-                          const entries = await actions.listWorktrees();
-                          const entry = entries.find((entry) =>
-                            entry.sessions.includes(session.id),
-                          );
-                          if (
-                            entry &&
-                            entry.sessions.length === 1 &&
-                            (entry.dirty || entry.ahead > 0)
-                          ) {
-                            const choice = await dialogs.choose(
-                              `删除「${titleOf(session)}」？worktree 还有${entry.ahead ? ` ${entry.ahead} 个新提交` : ""}${entry.dirty ? " 未提交改动" : ""}。Agent 原始会话记录也会删除。`,
-                              [
-                                { value: "keep", label: "保留 worktree" },
-                                {
-                                  value: "remove",
-                                  label: "一起删除改动与分支",
-                                  destructive: true,
-                                },
-                              ],
-                            );
-                            if (!choice) return;
-                            worktree = choice as "keep" | "remove";
-                          } else if (
-                            !(await dialogs.confirm(
-                              `永久删除「${titleOf(session)}」？Agent 原始会话记录和此会话独占的干净 worktree 会一起删除。`,
-                            ))
-                          )
-                            return;
-                        } else if (
-                          !(await dialogs.confirm(
-                            `永久删除「${titleOf(session)}」？Agent 原始会话记录也可能被删除。`,
-                          ))
-                        )
-                          return;
-                        await actions.deleteSession(session.id, worktree);
-                        navigate("home");
+                        if (await confirmAndDeleteSession(session, actions, dialogs)) navigate("home");
                       })
                     }
                   >
@@ -951,16 +1018,7 @@ export function Session({
                       !["idle", "error", "offline"].includes(
                         session.state,
                       ) && (
-                        <div className="conversation-activity" role="status">
-                          <LoaderCircle aria-hidden="true" />
-                          <span>
-                            {view.permissions.length
-                              ? "等待你确认后继续"
-                              : session.asyncQuestions?.length
-                                ? "Agent 有问题需要你回答"
-                                : "Agent 正在处理任务"}
-                          </span>
-                        </div>
+                        <LiveActivity view={view} asking={!!session.asyncQuestions?.length} />
                       )}
                     {notices?.map((notice) => (
                       <section
@@ -969,7 +1027,7 @@ export function Session({
                         role="status"
                       >
                         <div className="browser-toolbar">
-                          <strong>{notice.title}</strong>
+                          <strong>{reconnectOf(notice.title, notice.description) ? reconnectLabel(reconnectOf(notice.title, notice.description)!, view.turnActive) : notice.title}</strong>
                           <Button
                             variant="link"
                             size="sm"
@@ -1347,55 +1405,56 @@ export function Session({
                         ) : null}
                       </div>
                       <div>
-                        {(view?.turnActive || session.state === "unknown") &&
-                          agent?.capabilities.interrupt && (
+                        {(() => {
+                          // As Codex: while a turn runs and nothing is typed, the send button is the
+                          // stop button; typing turns it back into send (to the queue), with 插话
+                          // beside it and stop as a small square.
+                          const running = view?.turnActive || session.state === "unknown";
+                          const canStop = running && !!agent?.capabilities.interrupt;
+                          const typed = !!draft.trim() || files.length > 0 || blocks.length > 0;
+                          const stop = (primary: boolean) => (
                             <Button
-                              variant="ghost"
+                              variant={primary ? "default" : "ghost"}
                               size="icon"
+                              className={primary ? "send-button composer-stop" : "composer-stop-small"}
                               aria-label="停止当前回合"
+                              title="停止当前回合"
                               disabled={!canInteract || job.busy}
-                              onClick={() =>
-                                void job.run(() => actions.cancel(session.id))
-                              }
+                              onClick={() => void job.run(() => actions.cancel(session.id))}
                             >
-                              <Icon name="stop" />
+                              <Square className="composer-stop-glyph" aria-hidden />
                             </Button>
-                          )}
-                        {view?.turnActive && agent?.capabilities.steer && (
-                          <Button
-                            variant="link"
-                            size="sm"
-                            disabled={!canInteract || sendJob.busy || !draft.trim()}
-                            onClick={() => void sendJob.run(() => send(true))}
-                          >
-                            插话
-                          </Button>
-                        )}
-                        <Button
-                          variant="default"
-                          size="icon"
-                          className="send-button"
-                          aria-label={
-                            view?.turnActive ? "加入发送队列" : "发送消息"
-                          }
-                          title={
-                            view?.turnActive
-                              ? "加入队列 · Enter（⌘/Ctrl Enter 立即发送）"
-                              : "发送 · Enter（Shift Enter 换行）"
-                          }
-                          disabled={
-                            !canInteract ||
-                            sendJob.busy ||
-                            (!draft.trim() && !files.length && !blocks.length)
-                          }
-                          onClick={() => void sendJob.run(() => send())}
-                        >
-                          {sendJob.busy ? (
-                            <LoaderCircle className="animate-spin" />
-                          ) : (
-                            <Icon name="send" />
-                          )}
-                        </Button>
+                          );
+                          if (canStop && !typed) return stop(true);
+                          return (
+                            <>
+                              {canStop && stop(false)}
+                              {view?.turnActive && agent?.capabilities.steer && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="composer-steer"
+                                  title="立即发送，不等这一轮结束 · ⌘/Ctrl Enter"
+                                  disabled={!canInteract || sendJob.busy || !draft.trim()}
+                                  onClick={() => void sendJob.run(() => send(true))}
+                                >
+                                  插话
+                                </Button>
+                              )}
+                              <Button
+                                variant="default"
+                                size="icon"
+                                className="send-button"
+                                aria-label={view?.turnActive ? "加入发送队列" : "发送消息"}
+                                title={view?.turnActive ? "加入队列 · Enter（⌘/Ctrl Enter 立即发送）" : "发送 · Enter（Shift Enter 换行）"}
+                                disabled={!canInteract || sendJob.busy || !typed}
+                                onClick={() => void sendJob.run(() => send())}
+                              >
+                                {sendJob.busy ? <LoaderCircle className="animate-spin" /> : <Icon name="send" />}
+                              </Button>
+                            </>
+                          );
+                        })()}
                       </div>
                     </InputGroupAddon>
                   </InputGroup>
@@ -1417,7 +1476,7 @@ export function Session({
   );
   return (
     <SessionReady.Provider value={!!ready}>
-    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile }}>
+    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile, openApp: isDesktop ? openAppCall : undefined, findSession }}>
       <div className="session-page live-session">
         {!isDesktop && top}
         <div
@@ -1433,14 +1492,39 @@ export function Session({
           {panel && panel !== "commands" && (
             <ConversationPanel
               close={() => setPanel(null)}
-              title={panelTitles[panel]}
+              title={isAppPanel(panel) ? (apps.find((tab) => tab.id === panel)?.title ?? "应用") : panelTitles[panel]}
               panel={panel}
               choose={(next) => void (next === "files" ? changeFile() : setPanel(next))}
               width={inspectorWidth}
               resize={setInspectorWidth}
               hasTasks={hasTasks}
+              apps={apps.map((tab) => ({ id: tab.id as AppPanel, title: appTitle(tab) }))}
+              closeApp={closeApp}
+              launcher={session.agent === "codex" ? (
+                <DropdownMenu onOpenChange={(open) => { if (open && appCatalog.error) appCatalog.reload(); }}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="inspector-add" aria-label="打开插件" title="打开插件">
+                      <Plus />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="inspector-add-menu">
+                    <DropdownMenuLabel>插件和 MCP</DropdownMenuLabel>
+                    {appCatalog.loading && !appCatalog.value && <DropdownMenuItem disabled>正在读取…</DropdownMenuItem>}
+                    {appCatalog.error && <DropdownMenuItem disabled>{appCatalog.error}</DropdownMenuItem>}
+                    {appCatalog.value && !appCatalog.value.length && <DropdownMenuItem disabled>没有可以在会话中打开的插件</DropdownMenuItem>}
+                    {appCatalog.value?.map((entry) => (
+                      <DropdownMenuItem key={`${entry.server}\n${entry.resourceUri}`} disabled={!canInteract} onSelect={() => launchApp(entry)}>
+                        {entry.title}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : undefined}
             >
               <div className="side-panel-content">
+                {apps.map((tab) => (
+                  <McpAppView key={tab.id} sessionId={session.id} tab={{ ...tab, title: appTitle(tab) }} hidden={panel !== tab.id} say={sayFromApp} />
+                ))}
                 {panel === "settings" && (
                   <Settings session={session} view={view} />
                 )}
@@ -1590,6 +1674,9 @@ function ConversationPanel({
   width,
   resize,
   hasTasks,
+  apps = [],
+  closeApp,
+  launcher,
 }: {
   title: string;
   close: () => void;
@@ -1600,6 +1687,11 @@ function ConversationPanel({
   resize?: (width: number) => void;
   /** The session has background tasks or sub-agents: their tab is shown. */
   hasTasks?: boolean;
+  /** Open MCP Apps: a tab each, after the tools, closed with their ×. */
+  apps?: { id: AppPanel; title: string }[];
+  closeApp?: (id: AppPanel) => void;
+  /** What the tab row's + offers (Codex's new-tab menu). */
+  launcher?: ReactNode;
 }) {
   const compact = useIsMobile(991);
   const panelElement = useRef<HTMLElement>(null);
@@ -1660,11 +1752,23 @@ function ConversationPanel({
     >
       {isDesktop && panel && choose ? (
         <>
-          {resize && width && <InspectorResizer width={width} resize={resize} />}
+          {resize && width && (
+            <ColumnResizer
+              className="inspector-resizer"
+              label="调整检查器宽度"
+              width={width}
+              clamp={(value) => Math.round(Math.min(Math.max(value, 320), Math.max(320, window.innerWidth * 0.62)))}
+              side="start"
+              target=".session-layout"
+              variable="--inspector-width"
+              resize={resize}
+              initial={440}
+            />
+          )}
           <div className="inspector-tabs" role="tablist" aria-label="检查器">
             {(() => {
               const tabs = [...inspectorTabs, ...(hasTasks ? [{ id: "tasks" as const, title: "任务" }] : [])];
-              const open = tabs.some((tab) => tab.id === panel) ? undefined : { id: panel, title };
+              const open = tabs.some((tab) => tab.id === panel) || apps.some((app) => app.id === panel) ? undefined : { id: panel, title };
               return [...tabs, ...(open ? [open] : [])].map((tab) => (
                 <button
                   type="button"
@@ -1679,6 +1783,19 @@ function ConversationPanel({
                 </button>
               ));
             })()}
+            {apps.map((app) => (
+              <span className="inspector-app-tab" key={app.id} data-active={app.id === panel || undefined}>
+                <button type="button" role="tab" aria-selected={app.id === panel} title={app.title} onClick={() => choose(app.id)}>
+                  <span>{app.title}</span>
+                </button>
+                {closeApp && (
+                  <button type="button" className="inspector-app-close" aria-label={`关闭 ${app.title}`} title={`关闭 ${app.title}`} onClick={() => closeApp(app.id)}>
+                    <X />
+                  </button>
+                )}
+              </span>
+            ))}
+            {launcher}
             <span className="inspector-tabs-spacer" />
             {closeButton}
           </div>
@@ -1694,57 +1811,3 @@ function ConversationPanel({
   );
 }
 
-/** The inspector's left edge: drag or use the arrow keys to give the diff or terminal more room. */
-function InspectorResizer({ width, resize }: { width: number; resize: (width: number) => void }) {
-  const clamp = (value: number) => Math.round(Math.min(Math.max(value, 320), Math.max(320, window.innerWidth * 0.62)));
-  return (
-    <div
-      className="inspector-resizer"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="调整检查器宽度"
-      aria-valuenow={width}
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          event.preventDefault();
-          resize(clamp(width + (event.key === "ArrowLeft" ? 24 : -24)));
-        }
-      }}
-      onPointerDown={(event) => {
-        event.preventDefault();
-        const startX = event.clientX;
-        const startWidth = width;
-        const target = event.currentTarget;
-        target.setPointerCapture(event.pointerId);
-        document.documentElement.dataset.resizing = "true";
-        // While dragging the width goes straight onto the layout, once a frame: rendering the
-        // session again for every pointer move is what made the drag trail the pointer. The
-        // width is handed to React (and saved) once, when the drag ends.
-        const layout = target.closest<HTMLElement>(".session-layout");
-        let latest = startWidth;
-        let frame = 0;
-        const move = (next: PointerEvent) => {
-          latest = clamp(startWidth + startX - next.clientX);
-          if (frame) return;
-          frame = requestAnimationFrame(() => {
-            frame = 0;
-            layout?.style.setProperty("--inspector-width", `${latest}px`);
-          });
-        };
-        const end = () => {
-          target.removeEventListener("pointermove", move);
-          target.removeEventListener("pointerup", end);
-          target.removeEventListener("pointercancel", end);
-          cancelAnimationFrame(frame);
-          delete document.documentElement.dataset.resizing;
-          resize(latest);
-        };
-        target.addEventListener("pointermove", move);
-        target.addEventListener("pointerup", end);
-        target.addEventListener("pointercancel", end);
-      }}
-      onDoubleClick={() => resize(440)}
-    />
-  );
-}

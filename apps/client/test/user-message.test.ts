@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "@linkshell/wire";
-import { questionReplies, userMessageText } from "../src/lib/user-message";
+import { questionReplies, userMessageText, userMessageView } from "../src/lib/user-message";
 
 const image: ContentBlock = { type: "image", mimeType: "image/png", uri: "linkshell-event:1" };
 const entry = "## screenshot.png: /var/folders/example/screenshot.png\nImage attachment: true";
@@ -19,12 +19,18 @@ describe("user image message presentation", () => {
     const text = envelope(request, `${entry}\n\n## second.png: C:\\Temp\\second.png`).replace("C:\\Temp\\second.png\n\nDistinguish", "C:\\Temp\\second.png\nImage attachment: true\n\nDistinguish");
     expect(userMessageText([...blocks(text.replace(/\n/g, "\r\n")), image])).toBe(request);
   });
-  it("does not hide ordinary text, quoted templates, missing images, or mixed document metadata", () => {
+  it("does not hide ordinary text or a quoted envelope", () => {
     const text = envelope("保留");
-    expect(userMessageText([{ type: "text", text }])).toBe(text.trim());
-    for (const value of ["示例：\n" + text, text.replace("Image attachment: true", "Image attachment: false"), text.replace("screenshot.png: /", "another.png: /"), "# Files mentioned by the user:\n\n## My request:\n正文"]) {
+    for (const value of ["示例：\n" + text, "我说的是 # Files mentioned by the user: 这一段", "# 计划\n\n## My request:\n不是信封"]) {
       expect(userMessageText(blocks(value))).toBe(value.trim());
     }
+  });
+  it("shows an attachment whose picture is missing as a chip, never as the envelope", () => {
+    // As Codex does: the request is what follows "## My request:", whatever came with it.
+    const text = envelope("保留");
+    expect(userMessageView([{ type: "text", text }])).toMatchObject({ text: "保留", context: [{ kind: "image", label: "screenshot.png" }] });
+    expect(userMessageView(blocks(text.replace("Image attachment: true\n", "")))).toMatchObject({ text: "保留", context: [{ kind: "file", label: "screenshot.png" }] });
+    expect(userMessageText(blocks("# Files mentioned by the user:\n\n## My request:\n正文"))).toBe("正文");
   });
   it("allows image-only messages and leaves the attachment visible", () => {
     expect(userMessageText(blocks(envelope("")))).toBe("");

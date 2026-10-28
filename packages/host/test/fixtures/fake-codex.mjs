@@ -16,6 +16,11 @@
 // elsewhere reads as interrupted, with no end time. The disk also holds each
 // thread's queue (thread/queue/add from any process): the process that has
 // the thread loaded starts what is queued when the thread is idle.
+//
+// FAKE_CODEX_MODELS=1 answers model/list (otherwise it is unknown, as the other
+// tests expect). FAKE_CODEX_CONFIG_MODEL answers config/read with that model
+// ("" for none), or with FAKE_CODEX_PROJECT_MODELS' (JSON, cwd → model) for a
+// cwd listed there; unset, config/read is unknown, as to older Codex builds.
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -401,10 +406,10 @@ const handlers = {
   }),
   "thread/loaded/list": () => ({ data: [...threads.values()].filter((t) => t.loaded).map((t) => t.meta.id), nextCursor: null }),
   "thread/start": (params, conn) => {
-    const thread = newThread(params.cwd ?? process.cwd());
+    const thread = newThread(params.cwd ?? process.cwd(), typeof params.model === "string" ? { model: params.model } : {});
     thread.subscribers.add(conn);
     broadcast("thread/started", { thread: view(thread, false) });
-    return { thread: view(thread, false), model: "fake-model", modelProvider: "fake", cwd: thread.meta.cwd };
+    return { thread: view(thread, false), model: thread.meta.model, modelProvider: "fake", cwd: thread.meta.cwd };
   },
   "thread/read": (params) => {
     const thread = threads.get(params.threadId);
@@ -596,6 +601,73 @@ const handlers = {
     return {};
   },
 };
+
+if (process.env.FAKE_CODEX_MODELS === "1") {
+  const models = [
+    { id: "gpt-big", model: "gpt-big", displayName: "GPT Big", description: "The large one", hidden: false, isDefault: true,
+      defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }] },
+    { id: "gpt-mini", model: "gpt-mini", displayName: "GPT Mini", description: "", hidden: false, isDefault: false,
+      defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] },
+    { id: "gpt-old", model: "gpt-old", displayName: "GPT Old", description: "Retired", hidden: true, isDefault: false,
+      defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] },
+  ];
+  handlers["model/list"] = (params) => ({ data: models.filter((m) => params.includeHidden || !m.hidden), nextCursor: null });
+}
+if (process.env.FAKE_CODEX_CONFIG_MODEL !== undefined) {
+  const projects = JSON.parse(process.env.FAKE_CODEX_PROJECT_MODELS ?? "{}");
+  handlers["config/read"] = (params) => ({
+    config: { model: (params.cwd && projects[params.cwd]) || process.env.FAKE_CODEX_CONFIG_MODEL || null },
+    origins: {},
+    layers: null,
+  });
+}
+
+// FAKE_CODEX_MCP (JSON: what mcpServerStatus/list lists, in one page) answers
+// the MCP App methods from it instead of the paged two-server list above:
+// plugin/installed names plugin "mirror@local" "Mirror"; resource/read and
+// tool/call answer with what they were asked (a uri with "missing" in it is an
+// unknown resource), and test/mcpCalls says which tool calls were made.
+// test/setMcp replaces the list (a plugin installed since); test/mcpLists
+// counts the reads. test/mcpToolCall plays one mcpToolCall item in a thread:
+// item/started with `started`, then item/completed with `completed`.
+if (process.env.FAKE_CODEX_MCP !== undefined) {
+  let servers = JSON.parse(process.env.FAKE_CODEX_MCP);
+  let lists = 0;
+  const toolCalls = [];
+  handlers["mcpServerStatus/list"] = () => {
+    lists++;
+    return { data: servers, nextCursor: null };
+  };
+  handlers["test/setMcp"] = (params) => {
+    servers = params.data;
+    return {};
+  };
+  handlers["test/mcpLists"] = () => ({ lists });
+  handlers["plugin/installed"] = () => ({
+    marketplaces: [{ name: "local", path: null, interface: null, plugins: [{ id: "mirror@local", name: "mirror", installed: true, enabled: true, interface: { displayName: "Mirror" } }] }],
+    marketplaceLoadErrors: [],
+  });
+  handlers["mcpServer/resource/read"] = (params) => {
+    if (params.uri.includes("missing")) throw { code: -32602, message: "Invalid params: Unknown screen resource" };
+    return {
+      contents: [{ uri: params.uri, mimeType: "text/html;profile=mcp-app", text: `<p>${params.server} ${params.threadId ?? "no thread"} ${params.connectorId ?? "no connector"}</p>`, _meta: { ui: { prefersBorder: false } } }],
+      originCallId: null,
+    };
+  };
+  handlers["mcpServer/tool/call"] = (params) => {
+    toolCalls.push(params);
+    return { content: [{ type: "text", text: `called ${params.tool}` }], structuredContent: { echo: params.arguments ?? null }, isError: false };
+  };
+  handlers["test/mcpCalls"] = () => ({ calls: toolCalls });
+  handlers["test/mcpToolCall"] = (params) => {
+    const thread = threads.get(params.threadId);
+    if (!thread) throw { code: -32600, message: `no thread ${params.threadId}` };
+    const turnId = randomUUID();
+    notifyThread(thread, "item/started", { threadId: params.threadId, turnId, item: params.started, startedAtMs: Date.now() });
+    notifyThread(thread, "item/completed", { threadId: params.threadId, turnId, item: params.completed, completedAtMs: Date.now() });
+    return {};
+  };
+}
 
 rmSync(socketPath, { force: true });
 const server = createServer();

@@ -15,7 +15,7 @@ const electron = typeof window !== "undefined"
 
 /**
  * The window's appearance setting as the shell knows it: the Electron bridge, else what the
- * WKWebView / WebView2 shells put on `window` before the page ran.
+ * Mac app's own WKWebView put on `window` before the page ran.
  */
 export function shellAppearance(): string | undefined {
   if (electron?.appearance) return electron.appearance();
@@ -34,6 +34,11 @@ export const isDesktop =
 export const isWindowsDesktop = isDesktop && window.__LINKSHELL_CONFIG__?.desktopPlatform === "win32";
 /** The Electron window draws its own title bar row: the page leaves room for the traffic lights and owns local management. */
 export const isElectronDesktop = isDesktop && electron?.shell === "electron";
+/** What the workspace calls the computer it runs on, and where that computer shows a file. */
+export const THIS_COMPUTER = isWindowsDesktop ? "这台电脑" : "这台 Mac";
+/** The same before Chinese text: "Mac" keeps a space from what follows, "电脑" doesn't. */
+export const THIS_COMPUTER_SPACED = isWindowsDesktop ? THIS_COMPUTER : `${THIS_COMPUTER} `;
+export const REVEAL_IN_FILES = isWindowsDesktop ? "在资源管理器中显示" : "在 Finder 中显示";
 export const DESKTOP_LOCAL = "desktop:local";
 export const DESKTOP_VISIBILITY_EVENT = "linkshell-desktop-visibility";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
@@ -184,11 +189,28 @@ export function desktopAccount(): Promise<DesktopAccount> {
   return request;
 }
 
-export async function desktopLogin(): Promise<void> {
-  await desktopRequest("/desktop/login", { method: "POST", signal: AbortSignal.timeout(360_000) });
+export type DesktopSignInMethod = "web" | "password" | "github" | "google";
+export type DesktopSignIn =
+  | { method: "web" | "github" | "google" }
+  | { method: "password"; email: string; password: string };
+
+/** Signs this computer in (the workspace service writes the account file); resolves once it has. */
+export async function desktopLogin(request: DesktopSignIn = { method: "web" }): Promise<void> {
+  // The browser ways wait up to five minutes for the person; the service gives up first.
+  await desktopRequest("/desktop/login", { method: "POST", body: JSON.stringify(request), signal: AbortSignal.timeout(360_000) });
   accountGeneration++;
   accountRequest = undefined;
   await desktopAccount();
+}
+
+/** The sign-in the workspace service is waiting on, with the provider's link once it has one. */
+export async function desktopLoginState(): Promise<{ method: DesktopSignInMethod; url?: string } | undefined> {
+  const { pending } = await desktopRequest<{ pending: { method: DesktopSignInMethod; url?: string } | null }>("/desktop/login", { signal: AbortSignal.timeout(5_000) });
+  return pending ?? undefined;
+}
+
+export async function cancelDesktopLogin(): Promise<void> {
+  await desktopRequest("/desktop/login", { method: "DELETE" });
 }
 
 export async function desktopLogout(): Promise<void> {
@@ -209,12 +231,6 @@ export function desktopHostSocket(): WebSocket {
 export function postDesktopMessage(message: Record<string, unknown>): boolean {
   if (!isDesktop) return false;
   if (electron) { electron.postMessage(message); return true; }
-  if (isWindowsDesktop) {
-    const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
-    if (!webview) return false;
-    webview.postMessage(message);
-    return true;
-  }
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
   }).webkit?.messageHandlers?.linkshellDesktop;
@@ -225,12 +241,6 @@ export function postDesktopMessage(message: Record<string, unknown>): boolean {
 
 function nativeCommand(message: { action: "manage" } | { action: "workspace" } |{ action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean }): boolean {
   if (electron) return postDesktopMessage(message);
-  if (isWindowsDesktop) {
-    const webview = (window as Window & { chrome?: { webview?: { postMessage(value: unknown): void } } }).chrome?.webview;
-    if (!webview) return false;
-    webview.postMessage(message);
-    return true;
-  }
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
   }).webkit?.messageHandlers?.linkshellDesktop;
@@ -264,7 +274,32 @@ export function desktopInvoke<T>(method: string, params: Record<string, unknown>
   });
 }
 
-/** Asks the Mac window to go full screen for the native remote screen; the answer arrives as `DESKTOP_FULLSCREEN_EVENT`. */
+/** One item of a native context menu: a choice (`id`), a submenu, or a separator. */
+export interface DesktopMenuItem {
+  id?: string;
+  label?: string;
+  type?: "separator";
+  enabled?: boolean;
+  checked?: boolean;
+  /** Shown beside the item, in Electron's accelerator form ("CommandOrControl+Shift+A"). */
+  accelerator?: string;
+  submenu?: DesktopMenuItem[];
+}
+
+/** A native context menu at the pointer (the Electron window only): the chosen item's id, if any. */
+export async function desktopContextMenu(items: DesktopMenuItem[], at?: { x: number; y: number }): Promise<string | undefined> {
+  if (!isElectronDesktop) return undefined;
+  // A menu can stay open as long as the person likes; its answer still finds its way back.
+  const { id } = await desktopInvoke<{ id?: string }>("contextMenu", { items, at }, 3_600_000);
+  return id;
+}
+
+/** Shows a file or folder of this computer in Finder or File Explorer. */
+export function revealOnDesktop(path: string): Promise<unknown> {
+  return desktopInvoke("reveal", { path }, 15_000);
+}
+
+/** Asks the window to go full screen (the terminal, the Mac app's native remote screen); the answer arrives as `DESKTOP_FULLSCREEN_EVENT`. */
 export function setDesktopScreenFullScreen(enabled: boolean): boolean {
   return nativeCommand({ action: "screenFullScreen", enabled });
 }

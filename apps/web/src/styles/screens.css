@@ -23,6 +23,30 @@
 .screen-row[data-current] {
     background: var(--sidebarAccent);
   }
+  /* While the computers load: rows in the list's own shape, and words only once the wait is
+     noticeable (300 ms), so a quick load doesn't flash a spinner. */
+  .screen-row-skeleton,
+  .screen-row-skeleton:hover {
+    background: transparent;
+  }
+  .screen-list-wait {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+    opacity: 0;
+    animation: screen-list-wait 150ms ease-out 300ms forwards;
+  }
+  .screen-list-wait > svg {
+    width: 14px;
+    height: 14px;
+  }
+  @keyframes screen-list-wait {
+    to { opacity: 1; }
+  }
 .screen-dot {
     width: 6px;
     height: 6px;

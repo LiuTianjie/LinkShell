@@ -144,6 +144,37 @@
     align-items: center;
     gap: 8px;
   }
+  /* The custom-connection row: its name, what it holds, the disclosure's chevron at the end. */
+.acp-settings details > summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    list-style: none;
+  }
+.acp-settings details > summary::-webkit-details-marker {
+    display: none;
+  }
+.acp-summary-hint {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+    font-weight: 400;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+.acp-summary-chevron {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--tertiaryLabel);
+    transition: transform 200ms ease;
+  }
+.acp-settings details[open] > summary .acp-summary-chevron {
+    transform: rotate(90deg);
+  }
 .protocol-asset {
     display: grid;
     gap: 8px;

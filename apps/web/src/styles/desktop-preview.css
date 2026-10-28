@@ -30,10 +30,56 @@ html[data-desktop] .desktop-main .file-preview-source-wrap .file-preview-line co
 
 html[data-desktop] .desktop-main .file-preview-more { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 4px 16px; color: var(--tertiaryLabel); font-size: 12px; }
 
-/* Opened beside the list (the 文件 page): the preview is the right column, its own surface. */
-html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview { padding-left: 16px; border-left: var(--hairline) solid var(--separator); }
+/* The 文件 page is a workspace, as an editor's: under the toolbar, the folder and the file side by
+   side, each scrolling on its own, and the page never scrolls around them, so a long file and a
+   short one scroll the same way. The file's column is there before a file is chosen. */
+html[data-desktop] .desktop-main .live-overview:has(> .file-browser[data-layout="page"]) { --page-inline: 16px; padding-bottom: 0; overflow: hidden; scrollbar-gutter: auto; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-file-layout { display: flex; flex: 1; align-items: stretch; gap: 0; min-height: 0; }
+/* The list is a side bar, as the window's own: it runs from the panel's edge to the hairline before
+   the file, with no frame of its own (the hairline is its edge); rows are the sidebar's, tinted
+   8 px in from both edges with 10 px corners, and the count sits at the column's foot. */
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-directory { display: flex; flex: none; flex-direction: column; gap: 0; width: var(--files-list-width, 300px); max-width: 50%; max-height: none; min-height: 0; margin-left: calc(-1 * var(--page-inline)); padding: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-height: 0; padding: 0 8px 8px; overflow-y: auto; overscroll-behavior: contain; border-radius: 0; background: transparent; box-shadow: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry-list > .resource-entry { flex: none; height: 30px; min-height: 30px; padding: 0 8px; border-radius: var(--radius-row); }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry-list > .resource-entry:has(.resource-entry-path) { height: 44px; min-height: 44px; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry + .resource-entry::before { display: none; }
+/* The ring of a row reached by keyboard sits inside it and follows its corners; a click shows none. */
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; box-shadow: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry:focus:not(:focus-visible) { outline: none; box-shadow: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-list-foot { flex: none; min-height: 36px; margin: 0; padding: 0 16px 4px; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-directory > :is([data-slot="empty"], [role="status"], [data-slot="alert"]) { margin-inline: 16px; }
+html[data-desktop] .desktop-main .file-browser[data-list-folded] .resource-directory { display: none; }
+html[data-desktop] .desktop-main .file-browser[data-list-folded] .file-preview { padding-left: 0; border-left: 0; }
+/* The list's edge, over the hairline between it and the file: a line shows while it's held. */
+html[data-desktop] .files-list-resizer { position: relative; z-index: 2; flex: none; width: 8px; margin: 0 -4px; cursor: col-resize; }
+html[data-desktop] .files-list-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .files-list-resizer:hover::after,
+html[data-desktop] .files-list-resizer:focus-visible::after,
+html[data-desktop][data-resizing] .files-list-resizer::after { background: var(--separatorStrong); }
+html[data-desktop] .files-list-resizer:focus-visible { outline: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] :is(.file-preview, .file-preview-empty) { flex: 1; min-width: 0; min-height: 0; padding-left: 16px; border-left: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .file-preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding-bottom: var(--toolbar); color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .file-preview-empty > svg { width: 28px; height: 28px; stroke-width: 1.4; color: var(--quaternaryLabel); }
+/* With the list beside it, the file needs no way back to it (folded or too narrow, it does). */
+html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-back { display: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-name { margin-left: 8px; }
+/* The toggle for the list keeps its place while no file is open, so the title never moves. */
+html[data-desktop] .desktop-main .files-list-toggle[data-unused] { visibility: hidden; }
+/* Reading text 24 px from the hairline and from the scroll bar's lane, which is always kept. */
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview-body { scrollbar-gutter: stable; }
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview-markdown { padding: 16px 24px 24px 8px; }
+/* Too narrow for both: the list, then the file in its place (its bar leads back). */
+@container resource-files (max-width: 640px) {
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"].resource-has-preview .resource-directory,
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"] :is(.file-preview-empty, .files-list-resizer) { display: none; }
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-directory { flex: 1; width: auto; max-width: none; margin-right: calc(-1 * var(--page-inline)); }
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview { padding-left: 0; border-left: 0; }
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-back { display: inline-flex; }
+  html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-name { margin-left: 4px; }
+}
 /* The panel itself scrolls: the bar stays at its top while the file runs on under it. */
-html[data-desktop] .desktop-main .side-panel-content .file-preview-bar { position: sticky; top: -12px; z-index: 2; margin-top: -12px; background: var(--plain); }
+html[data-desktop] .desktop-main .side-panel-content .file-preview-bar { position: sticky; top: -16px; z-index: 2; margin-top: -16px; background: var(--plain); }
 html[data-desktop] .desktop-main .side-panel-content .file-preview-body { overflow: visible; }
 html[data-desktop] .desktop-main .side-panel-content .file-preview-source { width: auto; overflow-x: auto; }
 /* In the inspector the file takes the panel: its bar replaces the list's. */

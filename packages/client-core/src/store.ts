@@ -21,6 +21,7 @@ import {
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
 import { applyTaskEvent, mergeTaskList, type TaskRecords } from "./tasks.js";
+import { reconnectOf } from "./errors.js";
 import { applyWorkflowEvent, mergeWorkflowList, type WorkflowRecords } from "./workflows.js";
 import {
   addOptimisticMessage,
@@ -127,8 +128,17 @@ export interface ClientActions {
   /** Hands a handoff session back so the desktop can pick it up again. */
   release(sessionId: string): Promise<void>;
   setConfig(sessionId: string, optionId: string, value: string): Promise<void>;
-  /** `worktree`: start in a new git worktree of the project instead of its working directory. */
-  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean }): Promise<SessionSummary>;
+  /**
+   * The models a new session of `agent` could start on, and its default
+   * (`agents.models`). Empty when the agent can't tell yet or the computer's
+   * host is too old to be asked: then there is nothing to choose.
+   */
+  agentModels(agent: string, cwd?: string): Promise<MethodResult<"agents.models">>;
+  /**
+   * `worktree`: start in a new git worktree of the project instead of its working directory.
+   * `model`: one of `agentModels`; absent, the agent's own default.
+   */
+  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean; model?: string }): Promise<SessionSummary>;
   /**
    * A new session that starts with this one's conversation (through the turn
    * of `itemId` when given), in the same directory or in a new worktree. The
@@ -819,8 +829,18 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         dropSide(sessionId, sideId);
       },
 
+      async agentModels(agent, cwd) {
+        try {
+          return await link.call("agents.models", { agent, cwd });
+        } catch (error) {
+          // A host from before this method, or an agent that isn't available: there is just nothing to pick.
+          if (error instanceof RpcError) return { models: [] };
+          throw error;
+        }
+      },
+
       async createSession(input) {
-        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree }, 60_000);
+        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: input.model }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
         get().openSession(session.id);
         if (input.prompt && input.prompt.length > 0) await get().send(session.id, input.prompt);
@@ -842,7 +862,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   });
   link.on("agent.changed", ({ agent }) => store.setState((state) => state.machine ? { machine: { ...state.machine, agents: state.machine.agents.map((entry) => entry.id === agent.id ? agent : entry) } } : {}));
   link.on("session.notice", ({ sessionId, notice }) => {
-    store.setState((state) => ({ notices: { ...state.notices, [sessionId]: [...(state.notices[sessionId] ?? []).slice(-4), { ...notice, id: newId() }] } }));
+    // Each retry of an agent's connection replaces the one before: one line counting up, not a stack.
+    const retry = reconnectOf(notice.title, notice.description);
+    store.setState((state) => {
+      const kept = (state.notices[sessionId] ?? []).filter((shown) => !retry || !reconnectOf(shown.title, shown.description));
+      return { notices: { ...state.notices, [sessionId]: [...kept.slice(-4), { ...notice, id: newId() }] } };
+    });
   });
   link.on("session.removed", ({ sessionId }) => forget(sessionId));
   link.on("session.side", ({ sessionId, side, closed }) => (closed ? dropSide(sessionId, side.sideId) : putSide(sessionId, side)));

@@ -1,12 +1,12 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { webview2Files } from './webview2.mjs';
 
 if (process.platform !== 'win32') throw new Error('Windows smoke must run on Windows');
 const bundle = resolve(process.argv[2] || 'build/LinkShell');
@@ -18,6 +18,76 @@ const home = mkdtempSync(join(tmpdir(), 'linkshell-bundle-test-'));
 const run = promisify(execFile);
 const env = { ...process.env, LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LINKSHELL_WINDOWS_HELPER: join(bundle, 'LinkShell.Screen.exe'), LINKSHELL_APP_BUNDLE: bundle };
 let host;
+
+/**
+ * The Electron window, launched as installed against this host: the workspace loads in the
+ * Windows layout and the page reaches the main process through the bridge.
+ */
+async function windowSmoke() {
+  const profile = mkdtempSync(join(tmpdir(), 'linkshell-window-test-'));
+  const child = spawn(join(bundle, 'LinkShell.exe'), [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--home', home], { env, stdio: 'ignore' });
+  // Not windowsHide: a GUI process takes it as its first ShowWindow and the window would stay hidden.
+  const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
+  const deadline = Date.now() + 60_000;
+  const wait = () => new Promise(resolve => setTimeout(resolve, 250));
+  try {
+    let port;
+    while (!port) {
+      if (Date.now() > deadline) throw new Error('The window did not open its debugging port');
+      if (child.exitCode !== null) throw new Error(`LinkShell.exe exited ${child.exitCode}`);
+      try { port = Number(readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]); } catch { await wait(); }
+    }
+    let page;
+    while (!page) {
+      if (Date.now() > deadline) throw new Error('The workspace page did not load');
+      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json().catch(() => []);
+      page = targets.find(target => target.type === 'page' && target.url.startsWith('http://127.0.0.1:'));
+      if (!page) await wait();
+    }
+    const socket = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = () => reject(new Error('Cannot reach the page')); });
+    const expression = `new Promise((resolve, reject) => {
+      const until = Date.now() + 45000;
+      const look = () => {
+        const root = document.querySelector('.desktop-root');
+        if (root) {
+          const id = 'smoke-' + Date.now();
+          window.addEventListener('linkshell-desktop-reply', (event) => {
+            if (event.detail?.id !== id) return;
+            resolve({ platform: window.linkshellDesktop?.platform, shell: root.dataset.shell, layout: root.dataset.platform, about: event.detail.result, error: event.detail.error });
+          });
+          window.linkshellDesktop.postMessage({ action: 'invoke', id, method: 'about', params: {} });
+        } else if (Date.now() > until) reject(new Error('no workspace: ' + document.body?.innerText?.slice(0, 200)));
+        else setTimeout(look, 250);
+      };
+      look();
+    })`;
+    const answer = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('The page did not answer')), 50_000);
+      socket.onmessage = ({ data }) => {
+        const message = JSON.parse(data);
+        if (message.id !== 1) return;
+        clearTimeout(timer);
+        if (message.result?.exceptionDetails) reject(new Error(message.result.exceptionDetails.exception?.description ?? 'evaluation failed'));
+        else resolve(message.result?.result?.value);
+      };
+      socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+    });
+    socket.close();
+    assert.equal(answer.platform, 'win32');
+    assert.equal(answer.shell, 'electron');
+    assert.equal(answer.layout, 'windows');
+    assert.equal(answer.error, undefined);
+    assert.equal(answer.about.standalone, true);
+    assert.equal(answer.about.version, manifest.version);
+    assert.equal(answer.about.home, home);
+  } finally {
+    if (child.exitCode === null) await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {});
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10_000))]);
+    rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+  }
+}
+
 try {
   assert.equal((await run(node, [cli, '--version'], { env, windowsHide: true })).stdout.trim(), manifest.version);
   const media = await run(join(bundle, 'media/ffmpeg.exe'), ['-hide_banner', '-version'], { windowsHide: true, timeout: 5000 });
@@ -30,7 +100,14 @@ try {
   assert.equal(snapshot.status, 'running');
   assert.equal(snapshot.source, 'standalone');
   assert.equal(snapshot.machine.platform, 'win32');
-  for (const file of [...webview2Files, 'workspace/index.html']) assert.ok(existsSync(join(bundle, file)), `Missing workspace dependency: ${file}`);
+  for (const file of ['LinkShell.exe', 'resources/app/package.json', 'resources/app/dist/main/main.js', 'resources/app/dist/preload/preload.cjs', 'resources/app/assets/tray.png', 'resources/app/assets/icon.png', 'workspace/index.html']) {
+    assert.ok(existsSync(join(bundle, file)), `Missing window file: ${file}`);
+  }
+  assert.ok(!existsSync(join(bundle, 'resources/default_app.asar')), "Electron's sample app must not ship");
+  const versionInfo = JSON.parse((await run('powershell.exe', ['-NoProfile', '-Command', `(Get-Item -LiteralPath '${join(bundle, 'LinkShell.exe').replace(/'/g, "''")}').VersionInfo | Select-Object ProductName, FileDescription, ProductVersion | ConvertTo-Json`], { windowsHide: true })).stdout);
+  assert.equal(versionInfo.ProductName, 'LinkShell');
+  assert.equal(versionInfo.FileDescription, 'LinkShell');
+  assert.equal(versionInfo.ProductVersion, manifest.version);
   const { startDesktopWorkspace } = await import(pathToFileURL(join(bundle, 'runtime/cli/dist/cli/src/commands/desktop-workspace.js')).href);
   const workspace = await startDesktopWorkspace({ home, assets: join(bundle, 'workspace') });
   try {
@@ -40,6 +117,7 @@ try {
     assert.equal(bootstrap.localComputer.machine.platform, 'win32');
     assert.match(await (await fetch(`${url.origin}/config.js`)).text(), /"desktopPlatform":"win32"/);
   } finally { await workspace.stop(); }
+  await windowSmoke();
   const hostRequire = createRequire(require.resolve('@linkshell/host'));
   const sdk = await import(pathToFileURL(hostRequire.resolve('@anthropic-ai/claude-agent-sdk')).href);
   assert.equal(typeof sdk.forkSession, 'function');
@@ -64,7 +142,7 @@ try {
     pty.onData(data => { output += data; if (output.includes('PACKAGED_PTY_READY')) pty.write('done\r'); });
     pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
   });
-  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, Claude SDK/external executable, workspace assets/sidecar, WebView2 loader and standalone identity.`);
+  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, Claude SDK/external executable, workspace assets/sidecar, the Electron window and its bridge, and standalone identity.`);
 } finally {
   let timer;
   try {

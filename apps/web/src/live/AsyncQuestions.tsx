@@ -53,7 +53,7 @@ function Question({
                 key={option}
                 type="button"
                 variant="outline"
-                className="h-auto min-h-9 whitespace-normal text-left"
+                className="async-option h-auto min-h-9 whitespace-normal text-left"
                 disabled={disabled}
                 aria-pressed={given === option}
                 onClick={() => answer(option)}
@@ -65,20 +65,25 @@ function Question({
           {!done && (
             <Textarea
               id={inputId}
-              rows={2}
+              className="async-answer-input"
+              rows={1}
               maxLength={20_000}
               value={text}
               disabled={disabled}
               placeholder={question.options.length ? "其他回答" : "输入回答"}
               onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                // Enter sends, as the composer does; Shift-Enter and a composing IME make a new line.
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && text.trim()) {
+                  event.preventDefault();
+                  answer(text.trim());
+                }
+              }}
             />
           )}
         </Field>
         {!done && (
-          <div className="async-options">
-            <Button type="submit" disabled={disabled || !text.trim()}>
-              {job.busy ? "发送中…" : "发送回答"}
-            </Button>
+          <div className="async-actions">
             <Button
               type="button"
               variant="ghost"
@@ -86,6 +91,9 @@ function Question({
               onClick={() => answer("")}
             >
               跳过
+            </Button>
+            <Button type="submit" disabled={disabled || !text.trim()}>
+              {job.busy ? "发送中…" : "发送回答"}
             </Button>
           </div>
         )}

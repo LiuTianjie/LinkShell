@@ -1,6 +1,7 @@
 import {
   RpcError,
   questionReplies,
+  readUserText,
   questionAnswerError,
   updateAsyncQuestions,
   type AsyncQuestion,
@@ -26,6 +27,7 @@ import {
   type PendingPermissionSummary,
   type EditorRequest,
   type SideChat,
+  type MethodResult,
 } from "@linkshell/wire";
 import type { AcpSettingsStore } from "./acp-settings.js";
 import type {
@@ -113,6 +115,26 @@ const RENAMED = "renamed";
 
 /** Driver-state key: the conversation a forked session's agent is still to be told, with its first message. */
 const CARRY = "carry";
+
+/** Driver-state key: the session a session was forked from (made here, or as its agent recorded it). */
+const FORKED_FROM = "forkedFrom";
+
+/**
+ * Driver-state keys, for agents with an app LinkShell only reads (`appArchive`):
+ * LinkShell's own archive choice and when it was made, and the app's state as
+ * last seen and since when.
+ */
+const LOCAL_ARCHIVE = "archive-local";
+const APP_ARCHIVE = "archive-app";
+
+/**
+ * Archived here or in the app, unless it was unarchived here after the app
+ * archived it (`local.at` 0: chosen before times were kept, so it never outranks the app).
+ */
+export function mergedArchive(local: { archived: boolean; at: number }, app: { archived: boolean; since: number } | undefined): boolean {
+  if (local.archived) return true;
+  return !!app?.archived && !(local.at > app.since);
+}
 
 /** A returning client catches up from where it was, unless it missed more than this. */
 const CATCH_UP = { events: 800, bytes: 4 * 1024 * 1024 };
@@ -247,6 +269,15 @@ export class SessionHub {
       this.emitSummary(stored);
     },
     removed: (agent, nativeId) => this.forget(sessionIdFor(agent, nativeId)),
+    nativeRecordsChanged: (agent, nativeIds) => {
+      for (const nativeId of nativeIds) {
+        const stored = this.store.getSession(sessionIdFor(agent, nativeId));
+        if (!stored) continue;
+        const merged = this.reconcileAppArchive(stored);
+        this.emitSummary(merged);
+        if (merged.archived !== stored.archived) this.announceRelated(merged.id);
+      }
+    },
     desktop: (agent, nativeId) => this.desktops.get(sessionIdFor(agent, nativeId)),
     state: (agent, nativeId) => {
       const sessionId = sessionIdFor(agent, nativeId);
@@ -255,6 +286,10 @@ export class SessionHub {
         set: (key, value) => this.store.setDriverState(sessionId, key, value),
       };
     },
+    agentState: (agent) => ({
+      get: (key) => this.store.getAgentState(agent, key),
+      set: (key, value) => this.store.setAgentState(agent, key, value),
+    }),
     log: (message) => this.log(message),
   };
 
@@ -357,6 +392,7 @@ export class SessionHub {
     else if (availability === "available" && this.store.isNativeMissing(session.id)) {
       this.store.setNativeMissing(session.id, false);
       this.emitSummary(session);
+      this.announceRelated(session.id);
     }
   }
 
@@ -371,6 +407,7 @@ export class SessionHub {
     driver?.watched?.(session.nativeId, false);
     this.live.delete(session.id);
     this.emitRemoved(session.id);
+    this.announceRelated(session.id);
     void driver?.detach(session.nativeId).catch((error: unknown) => this.log(`[hub] detach missing ${session.id}: ${String(error)}`));
   }
 
@@ -495,6 +532,8 @@ export class SessionHub {
         await existing.configureAcp?.(services.settings.settings(id));
         await existing.stop();
         this.drivers.delete(id);
+        // What the old definition's agent reported (its models) needn't hold for the new one.
+        this.store.clearAgentState(id);
       }
       if (save && driver) { services.settings.saveAgent(save); this.drivers.set(id, driver); await driver.start(this.driverHost); }
       else services.settings.removeAgent(id);
@@ -563,6 +602,12 @@ export class SessionHub {
     return this.decorate(summary);
   }
 
+  /** A session and its agent's driver, unchecked: for what one driver offers itself (`mcp.*`), which says what it needs of it. */
+  sessionDriver(sessionId: string): { session: SessionSummary; driver: AgentDriver | undefined } {
+    const session = this.getSession(sessionId);
+    return { session, driver: this.drivers.get(session.agent) };
+  }
+
   /** Adds the live-only fields (current activity, first pending permission) to a stored summary. */
   /** Marks a session that works in one of LinkShell's worktrees. */
   private withWorktree(summary: SessionSummary): SessionSummary {
@@ -586,8 +631,54 @@ export class SessionHub {
     return questions;
   }
 
+  /** Per session, the session it was forked from (null: none), read from the store once. */
+  private readonly forkOrigins = new Map<string, string | null>();
+  /** Per session, the sessions whose lineage names it: their rows change when it comes or goes. */
+  private readonly related = new Map<string, Set<string>>();
+
+  private forkOrigin(sessionId: string): string | undefined {
+    let origin = this.forkOrigins.get(sessionId);
+    if (origin === undefined) {
+      origin = this.store.getDriverState(sessionId, FORKED_FROM) ?? null;
+      this.forkOrigins.set(sessionId, origin);
+    }
+    return origin ?? undefined;
+  }
+
+  /** Where the session came from, naming only sessions this host has: a list can't nest under one it doesn't show. */
+  private withLineage(summary: SessionSummary): SessionSummary {
+    const native = this.drivers.get(summary.agent)?.lineage?.(summary.nativeId);
+    const ids = (nativeIds?: string[]) => nativeIds?.map((nativeId) => sessionIdFor(summary.agent, nativeId)) ?? [];
+    const origin = this.forkOrigin(summary.id);
+    const parentId = this.firstKnown(summary, ids(native?.parent));
+    const forkedFrom = this.firstKnown(summary, [...(origin ? [origin] : []), ...ids(native?.forkedFrom)]);
+    const appId = native?.appId;
+    if (!parentId && !forkedFrom && !appId) return summary;
+    return { ...summary, ...(parentId ? { parentId } : {}), ...(forkedFrom ? { forkedFrom } : {}), ...(appId ? { appId } : {}) };
+  }
+
+  /** As the Claude app nests: a session still in use stands alone when the one it came from is archived. */
+  private firstKnown(summary: SessionSummary, candidates: string[]): string | undefined {
+    let found: string | undefined;
+    for (const candidate of candidates) {
+      if (candidate === summary.id) continue;
+      let children = this.related.get(candidate);
+      if (!children) this.related.set(candidate, (children = new Set()));
+      children.add(summary.id);
+      if (found) continue;
+      const other = this.store.getSession(candidate);
+      if (other && !(other.archived && !summary.archived) && !this.store.isNativeMissing(candidate)) found = candidate;
+    }
+    return found;
+  }
+
+  /** The session came, went or was (un)archived: the rows that name it as parent or origin say so now. */
+  private announceRelated(sessionId: string): void {
+    for (const child of this.related.get(sessionId) ?? []) this.announce(child);
+  }
+
   private decorate(summary: SessionSummary): SessionSummary {
-    summary = { ...summary, asyncQuestions: this.questionsOf(summary.id) };
+    summary = this.withLineage({ ...summary, asyncQuestions: this.questionsOf(summary.id) });
     const live = this.live.get(summary.id);
     if (!live) return this.withWorktree(summary);
     const activity = live.turnActive ? live.activity : undefined;
@@ -628,6 +719,12 @@ export class SessionHub {
       };
     }
     return decorated;
+  }
+
+  /** What a new session of `agent` could run on (see `agents.models`): nothing from a driver that can't tell before a session exists. */
+  async agentModels(agent: string, cwd?: string): Promise<MethodResult<"agents.models">> {
+    const driver = this.requireDriver(agent);
+    return (await driver.listModels?.(cwd)) ?? { models: [] };
   }
 
   async createSession(input: {
@@ -687,7 +784,7 @@ export class SessionHub {
         });
       }
       if (!discovered) return await this.forkByReplay(summary, driver, cwd, cut);
-      this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title });
+      this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title, forkedFrom: summary.nativeId });
       return this.getSession(sessionIdFor(driver.id, discovered.nativeId));
     } catch (error) {
       if (worktree) await this.dropWorktree(worktree.path);
@@ -704,7 +801,7 @@ export class SessionHub {
     const start = this.store.pageStart(summary.id, cut);
     const events = this.store.readEvents(summary.id, start, PAGE.maxEvents + 1, cut).filter((event) => isConversation(event.update));
     const discovered = await driver.createSession({ cwd });
-    this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title });
+    this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title, forkedFrom: summary.nativeId });
     const forkId = sessionIdFor(driver.id, discovered.nativeId);
     await this.ensureAttached(forkId);
     const live = this.liveFor(forkId);
@@ -1230,9 +1327,36 @@ export class SessionHub {
     const summary = this.getSession(sessionId);
     const driver = this.drivers.get(summary.agent);
     if (driver?.archive) await driver.archive(summary.nativeId, archived);
-    const updated = this.store.patchSession(sessionId, { archived });
+    // Kept apart from the app's, with when: unarchiving here outranks an older archive there.
+    if (driver?.appArchive) this.store.setDriverState(sessionId, LOCAL_ARCHIVE, JSON.stringify({ archived, at: Date.now() }));
+    const updated = this.reconcileAppArchive(this.store.patchSession(sessionId, { archived }));
     this.emitSummary(updated);
+    this.announceRelated(sessionId);
     return this.decorate(updated);
+  }
+
+  /** Folds in the archive state of the agent's app that LinkShell only reads (see `mergedArchive`). */
+  private reconcileAppArchive(summary: SessionSummary): SessionSummary {
+    const reported = this.drivers.get(summary.agent)?.appArchive?.(summary.nativeId);
+    // Not in that app (or not read yet): the flag is LinkShell's alone, or stays as last merged.
+    if (!reported) return summary;
+    const saved = this.store.getDriverState(summary.id, APP_ARCHIVE);
+    const seen = saved ? JSON.parse(saved) as { archived: boolean; since: number } : undefined;
+    if (!seen && !reported.archived) return summary;
+    // Only a change counts as the app archiving it: the app rewrites its record for much else.
+    const app = seen?.archived === reported.archived ? seen : { archived: reported.archived, since: reported.at };
+    if (app !== seen) this.store.setDriverState(summary.id, APP_ARCHIVE, JSON.stringify(app));
+    const archived = mergedArchive(this.localArchive(summary), app);
+    return archived === summary.archived ? summary : this.store.patchSession(summary.id, { archived });
+  }
+
+  private localArchive(summary: SessionSummary): { archived: boolean; at: number } {
+    const saved = this.store.getDriverState(summary.id, LOCAL_ARCHIVE);
+    if (saved) return JSON.parse(saved) as { archived: boolean; at: number };
+    // Until the app's state is first merged in, the flag is LinkShell's own choice.
+    const local = { archived: summary.archived, at: 0 };
+    this.store.setDriverState(summary.id, LOCAL_ARCHIVE, JSON.stringify(local));
+    return local;
   }
 
   async rename(sessionId: string, title: string): Promise<SessionSummary> {
@@ -1290,7 +1414,9 @@ export class SessionHub {
     this.previews.forget(sessionId);
     this.sides.forget(sessionId);
     this.store.removeSession(sessionId);
+    this.forkOrigins.delete(sessionId);
     this.emitRemoved(sessionId);
+    this.announceRelated(sessionId);
   }
 
   private emitRemoved(sessionId: string): void {
@@ -1471,9 +1597,18 @@ export class SessionHub {
           // Items without a recorded time get the time of the one before, never "now".
           // (An agent that only says when a session last changed gives that as its creation too.)
           let ts = Math.min(summary.createdAt, history.find((item) => item.ts !== undefined)?.ts ?? summary.createdAt);
-          for (const item of history) {
+          // The log only grows at its end. A message before what it already has is one an earlier
+          // reading skipped (a reader that now shows more), not something that happened since:
+          // added now it would land at the bottom, out of place, so it is only marked as seen.
+          const logged = history.map((item) => this.store.isItemLogged(sessionId, item.itemId));
+          const lastLogged = logged.lastIndexOf(true);
+          for (const [index, item] of history.entries()) {
             ts = Math.min(Math.max(item.ts ?? ts, ts), summary.updatedAt);
-            if (this.store.isItemLogged(sessionId, item.itemId)) continue;
+            if (logged[index]) continue;
+            if (index < lastLogged && item.updates.every((update) => update.sessionUpdate === "user_message_chunk")) {
+              this.store.markItemLogged(sessionId, item.itemId);
+              continue;
+            }
             for (const update of item.updates) this.commit(sessionId, update, undefined, ts);
             this.store.markItemLogged(sessionId, item.itemId);
           }
@@ -1531,9 +1666,9 @@ export class SessionHub {
       updatedAt: session.updatedAt,
     });
     const { created } = stored;
-    const summary = session.archived !== undefined && session.archived !== stored.summary.archived
+    const summary = this.reconcileAppArchive(session.archived !== undefined && session.archived !== stored.summary.archived
       ? this.store.patchSession(stored.summary.id, { archived: session.archived })
-      : stored.summary;
+      : stored.summary);
     const changed =
       !!before &&
       (before.title !== summary.title ||
@@ -1548,7 +1683,14 @@ export class SessionHub {
       this.pendingQuestions.set(summary.id, session.asyncQuestions);
       if (questionsChanged) this.store.setDriverState(summary.id, "asyncQuestions", JSON.stringify(session.asyncQuestions));
     }
-    if (created || changed || questionsChanged || restored) this.emitSummary(summary);
+    const origin = session.forkedFrom === undefined ? undefined : sessionIdFor(agent, session.forkedFrom);
+    const forked = origin !== undefined && origin !== summary.id && origin !== this.forkOrigin(summary.id);
+    if (forked) {
+      this.store.setDriverState(summary.id, FORKED_FROM, origin);
+      this.forkOrigins.set(summary.id, origin);
+    }
+    if (created || changed || questionsChanged || restored || forked) this.emitSummary(summary);
+    if (created || restored || before?.archived !== summary.archived) this.announceRelated(summary.id);
   }
 
   private ingest(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
@@ -1615,13 +1757,14 @@ export class SessionHub {
       case "ls_message": {
         if (update.parentToolCallId || !update.content) break;
         const text = update.content.filter((block) => block.type === "text").map((block) => block.text).join("");
-        if (update.role === "user" && !before.title && text.trim()) patch.title = compact(text, TITLE_LENGTH);
+        // A title is the person's words, not the context their client or Claude wrapped around them.
+        if (update.role === "user" && !before.title && readUserText(text).text.trim()) patch.title = compact(readUserText(text).text, TITLE_LENGTH);
         if (update.role === "agent" && text.trim()) patch.preview = compact(text, PREVIEW_LENGTH);
         if (live.turnActive && update.role === "agent") setActivity({ kind: "responding" });
         break;
       }
       case "user_message_chunk": {
-        const text = update.content.type === "text" ? update.content.text : "";
+        const text = update.content.type === "text" ? readUserText(update.content.text).text : "";
         if (text && !before.title) patch.title = compact(text, TITLE_LENGTH);
         if (text && !before.preview) patch.preview = compact(text, PREVIEW_LENGTH);
         break;

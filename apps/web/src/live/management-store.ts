@@ -1,5 +1,5 @@
 import { createStore } from "zustand/vanilla";
-import { desktopInvoke, isElectronDesktop, reportDesktopError } from "./desktop";
+import { desktopInvoke, isElectronDesktop, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
 import {
   membershipOf,
   newerVersion,
@@ -22,13 +22,22 @@ export interface ManagementState {
   started: boolean;
   about?: DesktopAbout;
   settings: DesktopSettings;
-  permissions: { known: boolean; recording: boolean; control: boolean };
+  /** `sharing` is Windows' own switch for the remote screen (it asks no permission). */
+  permissions: { known: boolean; recording: boolean; control: boolean; sharing?: boolean };
   loginItem: { enabled: boolean; approval: boolean };
   loginItemMessage: string;
   activity: { at: number; text: string }[];
   signingIn: boolean;
+  /** How the sign-in under way signs in; the panel shows the matching waiting state. */
+  signInMethod?: SignInMethod;
+  /** The provider's authorize link, once the CLI's loopback listens (GitHub / Google). */
+  signInLink?: string;
+  /** Why the last sign-in failed, shown in the panel (a cancel shows nothing). */
+  signInError: string;
   accountMessage: string;
   checkingMembership: boolean;
+  /** Why the last gateway change didn't take, shown in its dialog. */
+  gatewayMessage: string;
   passwordMessage: string;
   passwordIsError: boolean;
   savingPassword: boolean;
@@ -37,10 +46,15 @@ export interface ManagementState {
   redeeming: boolean;
   commandMessage: string;
   log: string;
-  update: { checking: boolean; installing: boolean; available: boolean; version?: string; latest?: string; message: string };
+  /** `checkedAt`: when a check last finished, said beside its result. */
+  update: { checking: boolean; installing: boolean; available: boolean; version?: string; latest?: string; message: string; checkedAt?: number };
 }
 
+export type SignInMethod = "web" | "password" | "github" | "google";
+
 export const DESKTOP_UPDATE_EVENT = "linkshell-desktop-update";
+/** main.ts: the provider's link for a GitHub / Google sign-in the window is waiting on. */
+const DESKTOP_LOGIN_EVENT = "linkshell-desktop-login";
 const POLL_INTERVAL = 5_000;
 const ACCOUNT_INTERVAL = 300_000;
 
@@ -53,8 +67,10 @@ export const management = createStore<ManagementState>(() => ({
   loginItemMessage: "",
   activity: [],
   signingIn: false,
+  signInError: "",
   accountMessage: "",
   checkingMembership: false,
+  gatewayMessage: "",
   passwordMessage: "",
   passwordIsError: false,
   savingPassword: false,
@@ -110,6 +126,7 @@ export function startManagement(): void {
   if (!isElectronDesktop || get().started) return;
   set({ started: true });
   window.addEventListener(DESKTOP_UPDATE_EVENT, receiveUpdate);
+  window.addEventListener(DESKTOP_LOGIN_EVENT, receiveLoginLink);
   void Promise.all([desktopInvoke<DesktopAbout>("about"), loadSettings()]).then(([about]) => {
     set({ about });
     // Sparkle's checks run in main.ts; a CLI install compares with npm here, once per window.
@@ -169,8 +186,8 @@ export function pollManagement(): () => void {
 
 async function refreshPermissions() {
   try {
-    const value = await desktopInvoke<{ recording: boolean; control: boolean; unavailable?: boolean }>("permissions", {}, 15_000);
-    set({ permissions: { known: !value.unavailable, recording: value.recording, control: value.control } });
+    const value = await desktopInvoke<{ recording: boolean; control: boolean; unavailable?: boolean; sharing?: boolean }>("permissions", {}, 15_000);
+    set({ permissions: { known: !value.unavailable, recording: value.recording, control: value.control, sharing: value.sharing } });
   } catch { set({ permissions: { known: false, recording: false, control: false } }); }
 }
 
@@ -204,17 +221,34 @@ export function serviceAction(name: "start" | "stop" | "restart" | "recover-upda
   }, { problem: undefined });
 }
 
-export function login() {
+/** Each way ends in the same snapshot; the CLI behind main.ts writes the account file. */
+function signIn(method: SignInMethod, run: () => Promise<DesktopSnapshot>) {
   loginCancelled = false;
   return mutate(async () => {
     try {
-      applySnapshot(await desktopInvoke<DesktopSnapshot>("login"));
-      set({ accountMessage: "登录成功。手机登录同一账号后，可通过官方网关连接这台 Mac（需要 Pro）。" });
+      const next = await run();
+      if (next.error) throw new Error(next.error);
+      applySnapshot(next);
+      set({ accountMessage: `登录成功。手机登录同一账号后，可通过官方网关连接${THIS_COMPUTER}（需要 Pro）。` });
       managementEvent("账号已登录");
     } catch (error) {
-      set({ accountMessage: loginCancelled ? "已取消登录" : messageOf(error) });
-    } finally { set({ signingIn: false }); }
-  }, { signingIn: true, accountMessage: "请在浏览器中完成登录，完成后会自动返回账号状态。" });
+      set({ signInError: loginCancelled ? "" : messageOf(error) });
+    } finally { set({ signingIn: false, signInMethod: undefined, signInLink: undefined }); }
+  }, { signingIn: true, signInMethod: method, signInLink: undefined, signInError: "", accountMessage: "" });
+}
+
+/** iTool's authorization page in the browser (`linkshell login`'s flow). */
+export function login() {
+  return signIn("web", () => desktopInvoke<DesktopSnapshot>("login", {}, 400_000));
+}
+
+export function loginWithPassword(email: string, password: string) {
+  return signIn("password", () => desktopInvoke<DesktopSnapshot>("loginPassword", { email, password }, 90_000));
+}
+
+export function loginWithProvider(provider: "github" | "google") {
+  // The CLI waits five minutes for the browser; main.ts allows a little longer.
+  return signIn(provider, () => desktopInvoke<DesktopSnapshot>("loginOAuth", { provider }, 400_000));
 }
 
 export function cancelLogin() {
@@ -222,11 +256,19 @@ export function cancelLogin() {
   void desktopInvoke("cancelLogin").catch(() => undefined);
 }
 
-export function accountAction(name: "logout" | "connect-gateway") {
+export function clearSignInError() { if (get().signInError) set({ signInError: "" }); }
+
+function receiveLoginLink(event: Event) {
+  const detail = (event as CustomEvent<{ provider?: unknown; url?: unknown }>).detail ?? {};
+  const state = get();
+  if (state.signingIn && detail.provider === state.signInMethod && typeof detail.url === "string") set({ signInLink: detail.url });
+}
+
+export function accountAction(name: "logout") {
   return mutate(async () => {
     try {
       applySnapshot(await desktopInvoke<DesktopSnapshot>("action", { name }));
-      set({ accountMessage: name === "logout" ? "已退出当前电脑的账号。" : "已应用官方网关设置，请查看连接状态。" });
+      set({ accountMessage: `已退出${THIS_COMPUTER_SPACED}的账号。` });
     } catch (error) { set({ accountMessage: messageOf(error) }); }
   }, { accountMessage: "正在处理…" });
 }
@@ -264,13 +306,35 @@ export async function setAccessPassword(password: string | null): Promise<boolea
       if (next.error) throw new Error(next.error);
       applySnapshot(next);
       saved = true;
-      set({ passwordMessage: password === null ? "已移除访问密码。" : "已设置访问密码。其他设备下次打开这台电脑时需要输入。" });
+      set({ passwordMessage: password === null ? "已移除访问密码。" : `已设置访问密码。其他设备下次打开${THIS_COMPUTER_SPACED}时需要输入。` });
       managementEvent(password === null ? "访问密码已移除" : "访问密码已设置");
     } catch (error) { set({ passwordMessage: messageOf(error), passwordIsError: true }); }
     finally { set({ savingPassword: false }); }
   }, { savingPassword: true, passwordMessage: "", passwordIsError: false });
   return saved;
 }
+
+export type GatewayChoice = { kind: "official" } | { kind: "own"; url: string } | { kind: "off" };
+
+/** Where phones reach this Mac from outside its network: the official gateway, one's own, or nowhere. Resolves true when it took. */
+export async function setGateway(choice: GatewayChoice): Promise<boolean> {
+  if (get().busy) return false;
+  let saved = false;
+  await mutate(async () => {
+    try {
+      const next = choice.kind === "official"
+        ? await desktopInvoke<DesktopSnapshot>("action", { name: "connect-gateway" })
+        : await desktopInvoke<DesktopSnapshot>("action", { name: "set-gateway", input: { gateway: choice.kind === "off" ? "off" : choice.url } });
+      if (next.error) throw new Error(next.error);
+      applySnapshot(next);
+      saved = true;
+      managementEvent(choice.kind === "official" ? "已切换到官方网关" : choice.kind === "off" ? "已关闭网关" : `已切换到自建网关 ${choice.url}`);
+    } catch (error) { set({ gatewayMessage: messageOf(error) }); }
+  }, { gatewayMessage: "" });
+  return saved;
+}
+
+export function clearGatewayMessage() { set({ gatewayMessage: "" }); }
 
 export function clearPasswordMessage() { set({ passwordMessage: "", passwordIsError: false }); }
 
@@ -307,6 +371,18 @@ export async function redeemPro(code: string): Promise<boolean> {
 export async function readLog() {
   try { set({ log: (await desktopInvoke<{ text: string }>("log")).text }); }
   catch (error) { set({ log: messageOf(error) }); }
+}
+
+export async function setScreenSharing(enabled: boolean) {
+  try { await desktopInvoke("setScreenSharing", { enabled }); }
+  catch (error) { reportDesktopError(error); }
+  await refreshPermissions();
+}
+
+/** Windows: the bundled linkshell.cmd's path, on the clipboard. */
+export async function copyCommandPath() {
+  try { set({ commandMessage: `已复制：${(await desktopInvoke<{ path: string }>("copyCommandPath")).path}` }); }
+  catch (error) { set({ commandMessage: messageOf(error) }); }
 }
 
 export async function installCommand() {
@@ -351,9 +427,9 @@ export async function checkUpdates() {
     const latest = body.version;
     const current = get().snapshot?.cliVersion;
     const message = !current ? `最新稳定版 ${latest}；当前 CLI 版本未知` : newerVersion(latest, current) ? `有新版本 ${latest}` : "当前已是最新稳定版";
-    set({ update: { ...get().update, checking: false, latest, message } });
+    set({ update: { ...get().update, checking: false, latest, message, checkedAt: Date.now() } });
   } catch (error) {
-    set({ update: { ...get().update, checking: false, message: `检查失败：${messageOf(error)}` } });
+    set({ update: { ...get().update, checking: false, message: `检查失败：${messageOf(error)}`, checkedAt: Date.now() } });
   }
 }
 
@@ -384,9 +460,9 @@ function receiveUpdate(event: Event) {
   switch (detail.name) {
     case "checking": set({ update: { ...update, checking: true, message } }); break;
     case "available":
-      set({ update: { ...update, available: true, version: typeof detail.version === "string" ? detail.version : update.version, message } });
+      set({ update: { ...update, available: true, version: typeof detail.version === "string" ? detail.version : update.version, message, checkedAt: Date.now() } });
       break;
-    case "current": set({ update: { ...update, available: false, message } }); break;
+    case "current": set({ update: { ...update, available: false, message, checkedAt: Date.now() } }); break;
     case "message": set({ update: { ...update, message } }); break;
     case "installing": set({ update: { ...update, installing: true, message } }); break;
     case "finished": set({ update: { ...update, checking: false, installing: false } }); break;

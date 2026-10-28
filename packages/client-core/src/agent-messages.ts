@@ -1,7 +1,13 @@
-import type { ContentBlock } from "@linkshell/wire";
+import { stripHiddenContext, type ContentBlock } from "@linkshell/wire";
 
 export interface AgentInboxMessage {
+  /** A teammate's mail (agent teams), another session's message (the Claude app), or a sub-agent's. */
+  kind: "teammate" | "session" | "agent";
   sender: string;
+  /** The sending session's id in the agent's app (`local_…`), to find and open it. */
+  sessionId?: string;
+  /** A sub-agent handing back its final report. */
+  handBack?: boolean;
   summary?: string;
   color?: string;
   body: string;
@@ -22,25 +28,45 @@ function decodeAttribute(value: string): string {
   });
 }
 
+// A sub-agent's report as Claude frames it for itself: a preamble, then the report indented by two.
+const HAND_BACK = /^\[Subagent hand-back\][\s\S]*?The report follows:\n/;
+
+function handBackReport(body: string): string {
+  return body.replace(HAND_BACK, "").split("\n").map((line) => line.replace(/^ {2}/, "")).join("\n").trim();
+}
+
 /** Read old and live Claude inbox envelopes without rewriting persisted user-message ids. */
 export function agentInboxMessages(blocks: ContentBlock[]): AgentInboxMessage[] | undefined {
   if (blocks.some((block) => block.type !== "text")) return undefined;
-  let text = blocks.map((block) => block.type === "text" ? block.text : "").join("").trim();
+  let text = blocks.map((block) => block.type === "text" ? block.text : "").join("");
+  // What Claude adds for itself around the mail (reminders, its notice about peers) isn't part of it.
+  text = stripHiddenContext(text, { keepPeers: true }).split(PEER_NOTICE).join("").trim();
   text = text.replace(/^Another Claude session sent a message:\s*/, "");
-  if (text.endsWith(PEER_NOTICE)) text = text.slice(0, -PEER_NOTICE.length).trimEnd();
-  if (!text.startsWith("<teammate-message ")) return undefined;
+  if (!/^<(?:teammate-message|cross-session-message|agent-message)\b/.test(text)) return undefined;
   const messages: AgentInboxMessage[] = [];
-  const envelope = /<teammate-message\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/teammate-message>/g;
+  const envelope = /<(teammate-message|cross-session-message|agent-message)\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/\1>/g;
   let end = 0;
   for (const match of text.matchAll(envelope)) {
     if (text.slice(end, match.index).trim()) return undefined;
     const attrs = new Map<string, string>();
-    for (const attr of match[1]!.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    for (const attr of match[2]!.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
       attrs.set(attr[1]!, decodeAttribute(attr[2] ?? attr[3] ?? ""));
+    }
+    const body = match[3]!.trim();
+    end = match.index! + match[0].length;
+    if (match[1] === "cross-session-message") {
+      const from = attrs.get("from");
+      messages.push({ kind: "session", sender: attrs.get("name") ?? attrs.get("from-name") ?? "另一个会话", sessionId: from, body });
+      continue;
+    }
+    if (match[1] === "agent-message") {
+      const handBack = HAND_BACK.test(body);
+      messages.push({ kind: "agent", sender: handBack ? "子代理" : (attrs.get("name") ?? attrs.get("from") ?? "子代理"), handBack, body: handBack ? handBackReport(body) : body });
+      continue;
     }
     const sender = attrs.get("teammate_id");
     if (!sender?.trim()) return undefined;
-    const message: AgentInboxMessage = { sender, summary: attrs.get("summary"), color: attrs.get("color"), body: match[2]!.trim() };
+    const message: AgentInboxMessage = { kind: "teammate", sender, summary: attrs.get("summary"), color: attrs.get("color"), body };
     try {
       const payload = JSON.parse(message.body) as Record<string, unknown>;
       if (payload?.type === "idle_notification" && payload.from === sender) {
@@ -49,8 +75,14 @@ export function agentInboxMessages(blocks: ContentBlock[]): AgentInboxMessage[] 
       }
     } catch { /* Normal teammate mail is Markdown, not JSON. */ }
     messages.push(message);
-    end = match.index! + match[0].length;
   }
   // Partial, quoted, or mixed user text stays intact until the envelope is complete.
   return messages.length && !text.slice(end).trim() ? messages : undefined;
+}
+
+/** The line naming who a message is from, in the Claude app's words. */
+export function inboxLabel(message: AgentInboxMessage, title?: string): string {
+  if (message.kind === "session") return `收到的消息来自「${title ?? message.sender}」`;
+  if (message.kind === "agent") return message.handBack ? "消息来自子代理" : `消息来自 ${message.sender}`;
+  return message.notice === "idle" ? `@${message.sender} · 本轮已结束` : `来自 @${message.sender}`;
 }

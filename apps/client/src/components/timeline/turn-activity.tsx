@@ -1,3 +1,5 @@
+import { ELAPSED_FROM, formatElapsed } from "@linkshell/client-core";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
 import type { TurnActivityState } from "@/lib/turn-activity";
@@ -5,6 +7,18 @@ import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Text } from "../fixed-text";
 import { LiveDot } from "../status";
+
+/** How long the turn has run, counted on the phone: the clock needs nothing from the computer. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const elapsed = now - since;
+  if (elapsed < ELAPSED_FROM) return null;
+  return <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{formatElapsed(elapsed)}</Text>;
+}
 
 /** Lives below the latest message, outside the saved conversation. */
 export function TurnActivity({ activity, onLayout }: { activity: TurnActivityState; onLayout: () => void }) {
@@ -20,7 +34,8 @@ export function TurnActivity({ activity, onLayout }: { activity: TurnActivitySta
       style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 6, minHeight: 44 }}
     >
       <View style={{ width: 12, alignItems: "center" }}><LiveDot size={6} color={color} live={activity.animated} /></View>
-      <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>{activity.label}</Text>
+      <Text numberOfLines={2} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>{activity.label}</Text>
+      {activity.startedAt !== undefined ? <Elapsed since={activity.startedAt} /> : null}
     </Animated.View>
   );
 }

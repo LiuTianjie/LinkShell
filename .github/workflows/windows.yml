@@ -24,7 +24,7 @@ jobs:
       - run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/desktop-workspace.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
       - run: pnpm --filter @linkshell/web exec vitest run --maxWorkers=2
       - run: pnpm --filter @linkshell/web lint
-      - run: node apps/windows/scripts/workspace-qa.mjs
+      - run: pnpm --filter @linkshell/desktop test
       - run: pnpm --filter @linkshell/windows test
       - run: pnpm --filter @linkshell/windows build:standalone
       - uses: actions/upload-artifact@v4

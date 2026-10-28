@@ -1,12 +1,15 @@
-import type { TimelineItem } from "@linkshell/client-core";
+import { compactionLabel, exitNote, isQuietTool, proposedPlan, startedSession, toolAction, toolCommand, toolLabel, toolOutput, wrapUpOf, type TimelineItem } from "@linkshell/client-core";
 import type { ContentBlock } from "@linkshell/wire";
 import { memo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { router } from "expo-router";
 import { Text } from "@/components/fixed-text";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import { describeTool, type FileChange } from "@/lib/describe";
 import { baseName, duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { useClient } from "@/lib/client";
+import { Markdown } from "../markdown";
 import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
@@ -32,9 +35,14 @@ function isComputerUse(item: ToolItem): boolean {
   return /^(?:mcp__)?(?:cua_repl|computer[-_]use)(?:__|[. ·])/.test(item.title);
 }
 
+/** Calls that look at the project: their output is all there is to open. */
+const EXPLORING = new Set(["read", "list", "search", "find"]);
+
 /** Tool inputs worth showing when the row's subject doesn't already say it all. */
 function paramsOf(item: ToolItem, subject: string): [string, string][] {
   if (item.toolKind === "execute" || item.toolKind === "edit" || item.toolKind === "delete" || item.toolKind === "move") return [];
+  const action = toolAction(item);
+  if (EXPLORING.has(action) || action === "command" || action === "plan") return [];
   const input = item.rawInput;
   if (!input || typeof input !== "object" || Array.isArray(input)) return [];
   if (item.detail?.type === "question") return questionParams(input as Record<string, unknown>);
@@ -65,26 +73,10 @@ function questionParams(input: Record<string, unknown>): [string, string][] {
   });
 }
 
+/** A failed command's exit code, for the row's right edge. */
 function exitCodeOf(item: ToolItem): number | undefined {
   const raw = item.rawOutput as Record<string, unknown> | undefined;
   return raw && typeof raw.exitCode === "number" && raw.exitCode !== 0 ? raw.exitCode : undefined;
-}
-
-function outputOf(item: ToolItem): string {
-  if (item.output) return item.output;
-  const text = item.content
-    .map((entry) => (entry.type === "content" && entry.content.type === "text" ? entry.content.text : ""))
-    .filter(Boolean)
-    .join("\n");
-  if (text) return text;
-  const raw = item.rawOutput as Record<string, unknown> | string | undefined;
-  if (typeof raw === "string") return raw;
-  if (raw && typeof raw === "object") {
-    for (const key of ["output", "stdout", "aggregated_output", "formatted_output", "content"]) {
-      if (typeof raw[key] === "string" && raw[key]) return raw[key] as string;
-    }
-  }
-  return "";
 }
 
 function tail(text: string): { text: string; hidden: number } {
@@ -200,15 +192,83 @@ function StatusGlyph({ status, waiting }: { status: ToolItem["status"]; waiting:
 
 /** One tool call: a single quiet line that opens to show its output or diff. */
 export const ToolCall = memo(function ToolCall({ item }: { item: ToolItem }) {
+  const action = toolAction(item);
+  if (action === "compaction") return <Divider text={compactionLabel(item)} busy={item.status === "in_progress"} />;
+  if (action === "chapter") return <Divider text={toolLabel(item).subject ?? "新章节"} strong />;
+  if (action === "wrap_up") return <WrapUpCard item={item} />;
+  if (action === "start_session") return <SessionCard item={item} />;
   if (item.detail?.type === "subagent" && item.detail.workflow) return <WorkflowCard item={item} />;
   if (item.detail?.type === "subagent" && item.detail.action === "spawn") return <SubagentCard item={item} />;
   return <ToolRow item={item} />;
 });
 
+/** A marker in the conversation (the context compacted, a new chapter): a hairline with the words in its middle. */
+function Divider({ text, busy = false, strong = false }: { text: string; busy?: boolean; strong?: boolean }) {
+  const rule = <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 28 }} accessible accessibilityLabel={text}>
+      {rule}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, maxWidth: "80%" }}>
+        {busy ? <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.7 }], width: 12, height: 12 }} /> : null}
+        <Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: strong ? "600" : "400", flexShrink: 1, textAlign: "center" }]}>{text}</Text>
+      </View>
+      {rule}
+    </View>
+  );
+}
+
+/** The Claude app's end-of-turn box: its recap, the question it leaves, and the answers it offered (not buttons here). */
+function WrapUpCard({ item }: { item: ToolItem }) {
+  const box = wrapUpOf(item);
+  return (
+    <View style={{ backgroundColor: colors.inset, borderRadius: 16, borderCurve: "continuous", padding: 14, gap: 8 }}>
+      <Text style={[type.caption, { color: colors.tertiaryLabel, fontWeight: "600" }]}>已收尾</Text>
+      {box.recap ? <Markdown text={box.recap} /> : null}
+      {box.ask ? <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>{box.ask}</Text> : null}
+      {box.actions.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {box.actions.map((label, index) => (
+            <View key={index} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+              <Text style={[type.caption, { color: colors.secondaryLabel }]}>{label}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const SESSION_STATES = { starting: "正在启动", started: "已启动", proposed: "已提议，等你开始", failed: "启动失败" } as const;
+
+/** A session the Claude app started from this one: opens it when this computer has it. */
+function SessionCard({ item }: { item: ToolItem }) {
+  const started = startedSession(item);
+  const target = useClient((state) => (started.appId ? Object.values(state.sessions).find((session) => session.appId === started.appId) : undefined));
+  return (
+    <Pressable
+      disabled={!target}
+      onPress={() => {
+        haptics.selection();
+        if (target) router.push({ pathname: "/session/[id]", params: { id: target.id } });
+      }}
+      accessibilityRole={target ? "button" : undefined}
+      accessibilityLabel={`${started.title}，${SESSION_STATES[started.state]}`}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "flex-start", maxWidth: "100%", backgroundColor: colors.inset, borderRadius: 14, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9 }}
+    >
+      {started.state === "starting" ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : <Icon sf="plus.bubble" md="add_comment" size={14} color={colors.secondaryLabel} />}
+      <View style={{ flexShrink: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>{started.title}</Text>
+        <Text style={[type.caption, { color: started.state === "failed" ? colors.danger : colors.tertiaryLabel }]}>{SESSION_STATES[started.state]}</Text>
+      </View>
+      {target ? <Icon sf="chevron.right" md="chevron_right" size={11} color={colors.tertiaryLabel} weight="semibold" /> : null}
+    </Pressable>
+  );
+}
+
 function ToolRow({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(false);
   const described = describeTool(item);
-  const output = outputOf(item);
+  const output = toolOutput(item);
   const held = useTimelineWaiting().has(item.id);
   const running = item.status === "in_progress" || item.status === "pending";
   // Held for permission, it isn't running: no spinner, the waiting colour instead.
@@ -221,7 +281,15 @@ function ToolRow({ item }: { item: ToolItem }) {
   const params = paramsOf(item, described.subject);
   const terminal = item.content.some((entry) => entry.type === "terminal");
   const exitCode = exitCodeOf(item);
-  const hasBody = (collapsedImages && images.length > 0) || described.changes.length > 0 || !!output || links.length > 0 || params.length > 0 || (terminal && !output);
+  const action = toolAction(item);
+  const command = action === "command" ? toolCommand(item) : undefined;
+  const plan = action === "plan" ? proposedPlan(item) : undefined;
+  // Reading a file or listing a directory has nothing more to show; a search shows its matches.
+  const hasBody = isQuietTool(item)
+    ? false
+    : EXPLORING.has(action)
+      ? !!output
+      : (collapsedImages && images.length > 0) || described.changes.length > 0 || !!output || !!command || !!plan || links.length > 0 || params.length > 0 || (terminal && !output);
   const added = described.changes.reduce((sum, c) => sum + c.added, 0);
   const removed = described.changes.reduce((sum, c) => sum + c.removed, 0);
   const tone = failed ? colors.danger : waiting ? colors.waiting : running ? colors.running : colors.secondaryLabel;
@@ -236,7 +304,7 @@ function ToolRow({ item }: { item: ToolItem }) {
         }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${described.verb} ${described.subject}`}
+        accessibilityLabel={`${described.verb}${described.subject}`}
         style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28 }}
       >
         {/* A bare glyph, not a tile: a run of tool calls should read as lines, not a stack of boxes. */}
@@ -244,7 +312,7 @@ function ToolRow({ item }: { item: ToolItem }) {
           <Icon {...described.glyph} size={14} color={tone} weight="medium" />
         </View>
         <Text numberOfLines={1} style={[type.subhead, { flex: 1, color: colors.secondaryLabel }]}>
-          {described.verb ? <Text style={{ color: running ? colors.label : colors.secondaryLabel }}>{described.verb} </Text> : null}
+          {described.verb ? <Text style={{ color: running ? colors.label : colors.secondaryLabel }}>{described.verb}</Text> : null}
           <Text
             style={
               described.code
@@ -254,6 +322,7 @@ function ToolRow({ item }: { item: ToolItem }) {
           >
             {described.subject}
           </Text>
+          {described.suffix ? <Text style={{ color: colors.danger }}>{described.suffix}</Text> : null}
         </Text>
         {added || removed ? (
           <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
@@ -261,7 +330,9 @@ function ToolRow({ item }: { item: ToolItem }) {
           </Text>
         ) : exitCode !== undefined ? (
           <Text style={[type.footnote, { color: colors.danger, fontVariant: ["tabular-nums"] }]}>退出码 {exitCode}</Text>
-        ) : item.endedTs && item.endedTs - item.ts >= 2000 ? (
+        ) : described.note ? (
+          <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{described.note}</Text>
+        ) : action !== "command" && item.endedTs && item.endedTs - item.ts >= 2000 ? (
           <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{duration(item.endedTs - item.ts)}</Text>
         ) : null}
         {exitCode === undefined ? <StatusGlyph status={item.status} waiting={waiting} /> : null}
@@ -297,7 +368,9 @@ function ToolRow({ item }: { item: ToolItem }) {
               <DiffView change={change} maxLines={60} />
             </View>
           ))}
-          {output && described.changes.length === 0 ? <OutputBlock text={output} /> : null}
+          {command ? <CommandBlock item={item} command={command} output={output} /> : null}
+          {plan ? <Markdown text={plan} /> : null}
+          {output && !command && !plan && described.changes.length === 0 ? <OutputBlock text={output} /> : null}
           {terminal && !output ? (
             <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>输出在电脑的终端里</Text>
           ) : null}
@@ -320,6 +393,39 @@ function ParamsBlock({ entries, prose }: { entries: [string, string][]; prose?: 
         </View>
       ))}
     </View>
+  );
+}
+
+/** A command as it ran: the command, what it printed, and how it ended. */
+function CommandBlock({ item, command, output }: { item: ToolItem; command: string; output: string }) {
+  const ended = exitNote(item);
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", paddingVertical: 8, gap: 6 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <Text selectable style={{ fontFamily: mono, fontSize: 12, lineHeight: 18, color: colors.codeText, paddingHorizontal: 10 }}>
+            <Text style={{ color: colors.tertiaryLabel }}>$ </Text>
+            {command}
+          </Text>
+        </ScrollView>
+        {output ? <OutputLines text={output} /> : null}
+      </View>
+      {ended ? <Text style={[type.caption, { alignSelf: "flex-end", color: ended === "成功" ? colors.tertiaryLabel : colors.danger }]}>{ended}</Text> : null}
+    </View>
+  );
+}
+
+function OutputLines({ text }: { text: string }) {
+  const { text: shown, hidden } = tail(text);
+  return (
+    <>
+      {hidden ? <Text style={[type.caption, { color: colors.tertiaryLabel, paddingHorizontal: 10 }]}>前面还有 {hidden} 行</Text> : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <Text selectable style={{ fontFamily: mono, fontSize: 12, lineHeight: 18, color: colors.codeText, paddingHorizontal: 10 }}>
+          {shown}
+        </Text>
+      </ScrollView>
+    </>
   );
 }
 

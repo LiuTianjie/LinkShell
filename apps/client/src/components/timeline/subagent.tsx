@@ -33,7 +33,7 @@ export function currentActivity(children: TimelineItem[]): string | undefined {
     const child = children[i]!;
     if (child.kind === "tool") {
       const described = describeTool(child);
-      return [described.verb, described.subject].filter(Boolean).join(" ");
+      return `${described.verb}${described.subject}${described.suffix ?? ""}`;
     }
     if (child.kind === "thought" && child.streaming) return "思考中…";
     if (child.kind === "agent") return child.streaming ? "正在写回复…" : plainTail(child.text);

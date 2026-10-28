@@ -18,3 +18,5 @@ export * from "./live-activity.js";
 export * from "./watch.js";
 export * from "./usage.js";
 export * from "./side.js";
+export * from "./rpc-mcp.js";
+export * from "./envelopes.js";

@@ -1,5 +1,6 @@
 import { loadAuth } from "../auth.js";
 import { runLogin } from "./login.js";
+import { loginWithOAuth, loginWithPassword, openInBrowser, OAUTH_PROVIDERS, type OAuthProvider } from "./sign-in.js";
 import { runLogout } from "./logout.js";
 import { followAccountGateway, joinGatewayAfterLogin, readHostConfig, writeHostConfig, refreshGateway } from "./host.js";
 import { execFile, spawn } from "node:child_process";
@@ -43,6 +44,32 @@ export async function desktopSnapshot(version: string) {
 }
 
 /** The new password, as JSON on stdin (never on the command line, where `ps` shows it). */
+/**
+ * The gateway the window chose: `off`, or the address of one's own (ws, wss, http or https; the
+ * host speaks WebSocket to either). The official one is `connect-gateway`.
+ */
+export function gatewayChoice(raw: unknown): string {
+  if (raw === "off") return "off";
+  if (typeof raw !== "string" || !raw.trim() || raw.length > 2048) throw new Error("请输入网关地址");
+  let url: URL;
+  try { url = new URL(raw.trim()); } catch { throw new Error("网关地址格式不正确，例如 wss://gateway.example.com"); }
+  if (!["ws:", "wss:", "http:", "https:"].includes(url.protocol) || !url.hostname) throw new Error("网关地址需要以 wss://、ws://、https:// 或 http:// 开头");
+  if (url.username || url.password) throw new Error("网关地址里不能带用户名或密码");
+  return url.toString().replace(/\/+$/, "");
+}
+
+async function jsonInput(input: AsyncIterable<string | Buffer>): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of input) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > 8192) throw new Error("输入过长");
+    chunks.push(buffer);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) ?? {}; } catch { return {}; }
+}
+
 async function passwordInput(input: AsyncIterable<string | Buffer>): Promise<string> {
   const chunks: Buffer[] = [];
   let length = 0;
@@ -56,6 +83,25 @@ async function passwordInput(input: AsyncIterable<string | Buffer>): Promise<str
   try { password = JSON.parse(Buffer.concat(chunks).toString("utf8"))?.password; } catch { /* Never echo the input. */ }
   if (typeof password !== "string" || password.length < 4 || password.length > 128) throw new Error("密码需要 4 到 128 位");
   return password;
+}
+
+/** Email and password, as JSON on stdin like the access password: never on the command line. */
+async function credentialsInput(input: AsyncIterable<string | Buffer>): Promise<{ email: string; password: string }> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of input) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > 4096) throw new Error("登录信息过长，请检查邮箱和密码");
+    chunks.push(buffer);
+  }
+  try {
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (typeof value?.email === "string" && typeof value?.password === "string" && value.email.trim() && value.password) {
+      return { email: value.email, password: value.password };
+    }
+  } catch { /* Never echo an input that contains a password. */ }
+  throw new Error("请输入邮箱和密码。");
 }
 
 async function redemptionInput(input: AsyncIterable<string | Buffer>): Promise<{ code: string; userId: string }> {
@@ -74,7 +120,7 @@ async function redemptionInput(input: AsyncIterable<string | Buffer>): Promise<{
   throw new Error("激活码请求无效，请刷新账号后重试");
 }
 
-export async function runDesktop(version: string, action: string, input: AsyncIterable<string | Buffer> = process.stdin): Promise<void> {
+export async function runDesktop(version: string, action: string, input: AsyncIterable<string | Buffer> = process.stdin, options: { provider?: string } = {}): Promise<void> {
   silenceSqliteWarning();
   try {
     if (action === "redeem-pro") {
@@ -130,6 +176,23 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
       if (!result) throw new Error("登录未完成或已超时，请重试。");
       await joinGatewayAfterLogin(result.plan);
     }
+    else if (action === "login-password") {
+      const result = await loginWithPassword(await credentialsInput(input));
+      await joinGatewayAfterLogin(result.plan);
+    }
+    else if (action === "login-oauth") {
+      const provider = options.provider as OAuthProvider;
+      if (!OAUTH_PROVIDERS.includes(provider)) throw new Error("不支持的登录方式");
+      const result = await loginWithOAuth({
+        provider,
+        // A line before the result: the window shows the link to reopen or copy while it waits.
+        open: (url) => {
+          process.stdout.write(`${JSON.stringify({ event: "authorize", provider, url })}\n`);
+          openInBrowser(url);
+        },
+      });
+      await joinGatewayAfterLogin(result.plan);
+    }
     else if (action === "logout") await runLogout();
     else if (action === "connect-gateway") {
       if (!loadAuth()?.userId) throw new Error("请先登录账号。");
@@ -137,6 +200,13 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
       const config = readHostConfig(linkshellDir());
       delete config.gateway;
       writeHostConfig(linkshellDir(), config);
+      await ensureHostRunning();
+      await refreshGateway(15_000);
+    }
+    else if (action === "set-gateway") {
+      if (process.env.LINKSHELL_GATEWAY) throw new Error("网关由启动环境指定，请移除 LINKSHELL_GATEWAY 后重新打开 App。");
+      const gateway = gatewayChoice((await jsonInput(input)).gateway);
+      writeHostConfig(linkshellDir(), { ...readHostConfig(linkshellDir()), gateway });
       await ensureHostRunning();
       await refreshGateway(15_000);
     }

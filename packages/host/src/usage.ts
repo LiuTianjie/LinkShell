@@ -80,14 +80,23 @@ export function summarizeUsage(records: Iterable<UsageRecord>, query: UsageQuery
   for (const row of unique.values()) {
     if (row.timestamp < start.getTime() || row.timestamp > now || (query.agent !== "all" && row.agent !== query.agent)) continue;
     add(total, row); add(daily.get(dateKey(new Date(row.timestamp)))!, row);
-    const key = `${row.agent}:${row.model}`;
+    const name = modelName(row.model);
+    const key = `${row.agent}:${name}`;
     let model = models.get(key);
-    if (!model) { model = { ...group(), model: row.model, agent: row.agent }; models.set(key, model); }
+    if (!model) { model = { ...group(), model: name, agent: row.agent }; models.set(key, model); }
     add(model, row);
   }
   return { generatedAt: now, days: query.days, agent: query.agent, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     totals: total.totals, daily: [...daily].map(([date, value]) => ({ date, ...value.totals })),
     models: [...models.values()].map(value => ({ agent: value.agent, model: value.model, ...value.totals })).sort((a, b) => b.totalTokens - a.totalTokens), warnings };
+}
+
+/**
+ * One name per model: Claude's API writes `claude-opus-5-5` where its other tools write
+ * `claude-opus-5.5`, so the same model would be counted twice.
+ */
+export function modelName(model: string): string {
+  return model.replace(/^(claude-[a-z]+-\d+)-(\d)(?=$|[-[])/, "$1.$2");
 }
 
 export interface UsageEventSource {

@@ -126,3 +126,36 @@ export function compactNumber(value: number): string {
   }
   return wholeNumber(value);
 }
+
+/** One entry of the Host's log: a stamped line and the unstamped lines under it (a stack trace). */
+export interface LogEntry { at?: number; tag?: string; text: string }
+
+const LOG_LINE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (?:\[([^\]\s]{1,24})\] )?(.*)$/;
+
+/**
+ * The log as `host.log` writes it (`<ISO time> [<source>] <text>`). The window reads the file's
+ * last 64 KB, so a first line without its stamp is the tail of a cut-off entry and is dropped.
+ */
+export function parseHostLog(text: string): LogEntry[] {
+  const entries: LogEntry[] = [];
+  const lines = text.replace(/\n+$/, "").split("\n");
+  if (lines.length > 1 && !LOG_LINE.test(lines[0]!) && lines.some((line) => LOG_LINE.test(line))) lines.shift();
+  for (const line of lines) {
+    const match = LOG_LINE.exec(line);
+    const at = match ? Date.parse(match[1]!) : Number.NaN;
+    if (match && !Number.isNaN(at)) entries.push({ at, tag: match[2], text: match[3]! });
+    else if (entries.length) entries[entries.length - 1]!.text += `\n${line}`;
+    else entries.push({ text: line });
+  }
+  return entries;
+}
+
+/**
+ * A path cut for an ellipsis in its middle: the head may shrink, the last component stays whole
+ * (up to 24 characters), since that is the part that tells one path from another.
+ */
+export function splitPath(path: string): [head: string, tail: string] {
+  const slash = path.lastIndexOf("/");
+  const cut = slash > 0 && path.length - slash <= 24 ? slash : Math.max(0, path.length - 16);
+  return [path.slice(0, cut), path.slice(cut)];
+}

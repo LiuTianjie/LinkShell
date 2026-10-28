@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ArrowDown, LoaderCircle } from "lucide-react";
-import { foldStepRuns, type SessionView, type Step } from "@linkshell/client-core";
+import { foldStepRuns, plansAtTurnEnd, type SessionView, type Step } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
 import { StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
 import { isDesktop } from "./desktop";
@@ -19,7 +19,11 @@ const StepsRow = memo(function StepsRow({
   toggle: (key: string) => void;
 }) {
   return <StepsSummary steps={steps} open={open} onToggle={() => toggle(stepKey)} />;
-});
+}, (before, after) =>
+  // Every streamed chunk folds the runs again into new arrays of the same steps: only a run whose
+  // steps changed is summed up again.
+  before.stepKey === after.stepKey && before.open === after.open && before.toggle === after.toggle &&
+  before.steps.length === after.steps.length && before.steps.every((step, index) => step === after.steps[index]));
 
 /**
  * The first row element whose bottom is at or below the top of the view — the
@@ -94,7 +98,7 @@ export function Conversation({
       }),
     [],
   );
-  const rows = useMemo(() => foldStepRuns(view.items, openSteps), [view.items, openSteps]);
+  const rows = useMemo(() => foldStepRuns(plansAtTurnEnd(view.items, view.turnBreaks), openSteps), [view.items, view.turnBreaks, openSteps]);
   // Every entry gets this map; it keeps its identity until its content changes, or each streamed
   // chunk (a new items array) would re-render the whole conversation.
   const answeredRef = useRef<Map<string, string>>(new Map());
@@ -111,6 +115,7 @@ export function Conversation({
 
   // A message the reader just sent brings them to it, wherever they were reading.
   const lastItem = view.items[view.items.length - 1];
+  const lastId = lastItem?.id;
   const sentId = lastItem?.kind === "user" && lastItem.pending ? lastItem.id : undefined;
   useEffect(() => {
     if (sentId) void scrollToBottom("instant");
@@ -270,6 +275,7 @@ export function Conversation({
                   onFile={openFile}
                   onFork={fork}
                   onTerminal={terminal}
+                  live={view.turnActive && row.item.id === lastId}
                 />
               ),
             )}

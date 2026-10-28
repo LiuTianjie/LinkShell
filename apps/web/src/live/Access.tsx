@@ -79,7 +79,7 @@ export function AccessPasswordSummary({ open }: { open: () => void }) {
           {!status.value ? "正在读取…" : enabled ? "已开启，其他设备打开这台电脑前要先输入密码" : "未设置"}
         </p>
       </div>
-      <Button variant="ghost" size="sm" onClick={open}>{enabled ? "管理" : "设置"}</Button>
+      <Button variant="secondary" size="sm" onClick={open}>{enabled ? "管理" : "设置"}</Button>
     </div>
   );
 }

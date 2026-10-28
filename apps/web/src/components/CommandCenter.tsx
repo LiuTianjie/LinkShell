@@ -26,7 +26,7 @@ import { engine, type Computer } from "../live/engine";
 import { AgentMark, baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
 import { isWindowsDesktop, openDesktopManagement } from "../live/desktop";
-import { desktopShortcuts, sendDesktopCommand, shortcutText, type DesktopShortcut } from "../live/desktop-commands";
+import { desktopModeShortcuts, desktopShortcuts, sendDesktopCommand, shortcutText, type DesktopShortcut } from "../live/desktop-commands";
 import { sessionNeedsAttention } from "../live/session-list";
 import { sessionTime } from "../live/session-time";
 import {
@@ -127,11 +127,9 @@ export function CommandCenter({
                   <place.icon />{place.title}
                 </CommandItem>
               ))}
-              {!isWindowsDesktop && (
-                <CommandItem value="本机管理 management settings 设置" onSelect={() => run(openDesktopManagement)}>
-                  <Settings2 />本机管理<CommandShortcut>⌘2</CommandShortcut>
-                </CommandItem>
-              )}
+              <CommandItem value="本机管理 management settings 设置" onSelect={() => run(openDesktopManagement)}>
+                <Settings2 />本机管理<CommandShortcut>{shortcutText(desktopModeShortcuts.manage)}</CommandShortcut>
+              </CommandItem>
             </CommandGroup>
             <CommandGroup heading="电脑">
               {state.computers.map((computer) => (
@@ -167,10 +165,9 @@ export function CommandCenter({
             {Object.values(desktopShortcuts).map((shortcut) => (
               <div key={shortcut.label}><dt>{shortcut.label}</dt><dd><kbd>{shortcutText(shortcut)}</kbd></dd></div>
             ))}
-            {!isWindowsDesktop && <>
-              <div><dt>工作台</dt><dd><kbd>⌘1</kbd></dd></div>
-              <div><dt>本机管理</dt><dd><kbd>⌘2</kbd></dd></div>
-            </>}
+            {Object.values(desktopModeShortcuts).map((shortcut) => (
+              <div key={shortcut.label}><dt>{shortcut.label}</dt><dd><kbd>{shortcutText(shortcut)}</kbd></dd></div>
+            ))}
             <div><dt>发送消息</dt><dd><kbd>Enter</kbd></dd></div>
             <div><dt>换行</dt><dd><kbd>{isWindowsDesktop ? "Shift+Enter" : "⇧Enter"}</kbd></dd></div>
             <div><dt>Agent 工作时立即发送</dt><dd><kbd>{isWindowsDesktop ? "Ctrl+Enter" : "⌘Enter"}</kbd></dd></div>

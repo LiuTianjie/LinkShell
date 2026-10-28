@@ -6,13 +6,14 @@ import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, questionReplies, type AsyncQuestion, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import { AcpDriver, inOrder } from "../acp/driver.js";
-import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
+import { AcpItemTracker, modelOption, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
-import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
+import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec, SessionLineage, SideOutput, SideRequest } from "../types.js";
 import type { DriverBehavior } from "../behavior.js";
 import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
 import { ClaudeTasks } from "./tasks.js";
 import { ClaudeActivity } from "./activity.js";
+import { ClaudeAppSessions, claudeAppSessionRoots } from "./app-sessions.js";
 import {
   claudeConfigDir,
   ClaudeTranscriptIndex,
@@ -202,6 +203,8 @@ export interface ClaudeDriverOptions {
   busyWindowMs?: number;
   /** How often to check that a session driven from a device wasn't reopened on the computer. */
   holderCheckMs?: number;
+  /** Where the Claude desktop app keeps its session records; defaults to both builds' places for this user. */
+  appSessionRoots?: string[];
 }
 
 /**
@@ -248,6 +251,8 @@ export class ClaudeDriver extends AcpDriver {
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly transcriptIndex: ClaudeTranscriptIndex;
+  /** The desktop app's records: which session started, or was forked from, which, and which it has archived. */
+  private readonly appSessions: ClaudeAppSessions;
   private readonly busyWindowMs: number;
   private readonly holderCheckMs: number;
   private claudePath?: string;
@@ -279,6 +284,7 @@ export class ClaudeDriver extends AcpDriver {
     this.claudePath = claudePath;
     this.configDir = claudeConfigDir(env);
     this.transcriptIndex = new ClaudeTranscriptIndex(this.configDir);
+    this.appSessions = new ClaudeAppSessions(options.appSessionRoots ?? claudeAppSessionRoots(env), (ids) => this.host?.nativeRecordsChanged?.(this.id, ids));
     this.busyWindowMs = options.busyWindowMs ?? 10 * 60_000;
     this.holderCheckMs = options.holderCheckMs ?? 3000;
     this.adapterMissing = adapterMissing;
@@ -316,6 +322,17 @@ export class ClaudeDriver extends AcpDriver {
     this.unwrittenSessions.clear();
     this.transcriptIndex.invalidate();
     await super.stop();
+  }
+
+  /** A session id is the Claude Code one, which the desktop app's records name too. */
+  lineage(nativeId: string): SessionLineage | undefined {
+    const lineage = this.appSessions.lineage(nativeId);
+    const appId = this.appSessions.appId(nativeId);
+    return lineage || appId ? { ...lineage, ...(appId ? { appId } : {}) } : undefined;
+  }
+
+  appArchive(nativeId: string): { archived: boolean; at: number } | undefined {
+    return this.appSessions.archive(nativeId);
   }
 
   nativeSessionAvailability(nativeId: string, cwd: string): "available" | "missing" | "unknown" {
@@ -418,8 +435,10 @@ export class ClaudeDriver extends AcpDriver {
     this.reportState(nativeId, await this.discoveredState(nativeId, context.cwd));
     // (Forced: the turn just replayed as under way cleared what the hub had.)
     await this.reportQuestions(nativeId, true);
-    if (mode === "remote") this.emitConfig(nativeId, state);
-    else void this.loadTemplate(context.cwd).then(() => this.emitDesktopConfig(nativeId));
+    if (mode === "remote") {
+      this.emitConfig(nativeId, state);
+      for (const notice of state.pendingNotices?.splice(0) ?? []) this.emit(nativeId, notice);
+    } else void this.loadTemplate(context.cwd).then(() => this.emitDesktopConfig(nativeId));
     return history;
   }
 
@@ -461,6 +480,8 @@ export class ClaudeDriver extends AcpDriver {
   /** With the questions Claudes on the computer wait on, so lists, the watch and Live Activities can answer them unopened. */
   override async listSessions(limit: number): Promise<DiscoveredSession[]> {
     this.transcriptIndex.invalidate();
+    // Read first, so a session found now starts out archived if the desktop app has it so; and so the app's changes are seen with nobody looking.
+    await this.appSessions.refresh();
     const found = await super.listSessions(limit);
     return Promise.all(found.map(async (session) => {
       if (this.modes.get(session.nativeId) === "remote") return session;
@@ -494,6 +515,7 @@ export class ClaudeDriver extends AcpDriver {
       try {
         const response = await this.rpc<Record<string, unknown>>("session/new", { cwd, mcpServers: [], ...this.sessionMeta() });
         const options = toConfigOptions(response);
+        this.rememberModels(options, true);
         if (options.length > 0) this.template ??= options;
         if (typeof response.sessionId === "string" && this.acpBehavior.detach === "protocol-close") {
           void this.rpc("session/close", { sessionId: response.sessionId }).catch(() => {});
@@ -530,16 +552,32 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   override async createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession> {
-    const created = await super.createSession(options);
+    // The model is set below: until the session is this host's, setConfig
+    // would only keep the choice for later, as for a session the desktop has.
+    const created = await super.createSession({ cwd: options.cwd });
     // A new session's settings are Claude's defaults: the freshest template.
-    // (Not a resumed or changed one's: those are that session's own.)
+    // (Not a resumed or changed one's: those are that session's own. A copy,
+    // so changing this session's settings leaves the defaults alone.)
     const config = this.sessions.get(created.nativeId)?.config;
-    if (config?.length) this.template = config;
+    if (config?.length) this.template = config.map((option) => ({ ...option }));
     // Born on a device: this host is the writer from the start.
     this.unwrittenSessions.add(created.nativeId);
     this.modes.set(created.nativeId, "remote");
     this.beginTranscriptStream(created.nativeId);
     this.setWriter(created.nativeId, "remote");
+    // (Claude, like any ACP agent, names its models only to a session: listModels offers what the
+    // latest one was told, kept across restarts. Starting Claude just to ask costs a process and its MCP servers.)
+    if (options.model) {
+      await this.setConfig(created.nativeId, (config && modelOption(config)?.id) ?? "model", options.model).catch((error: unknown) => {
+        // Still a usable session; the user should just know it isn't on the model they picked (shown on attach).
+        const state = this.sessions.get(created.nativeId);
+        if (!state) return;
+        (state.pendingNotices ??= []).push({
+          sessionUpdate: "ls_notice", level: "warning", title: `所选模型 ${options.model} 不可用，已使用 ${this.label} 的默认模型`,
+          detail: error instanceof Error ? error.message.slice(0, 200) : undefined,
+        });
+      });
+    }
     return created;
   }
 
@@ -1005,6 +1043,7 @@ export class ClaudeDriver extends AcpDriver {
           throw error;
         });
       target.config = toConfigOptions(response);
+      this.rememberModels(target.config, false);
       target.loaded = true;
     }
     // The session keeps the settings it ran with on the computer, except where

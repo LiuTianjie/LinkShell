@@ -98,7 +98,8 @@ describe("folding completed agent activity", () => {
       expect(rows(shown).every((row) => row.type === "item")).toBe(true);
     }
     const live: Tool = { ...tool("live"), detail: { type: "subagent", action: "spawn" }, sub: { ...emptyView("s"), turnActive: true } };
-    expect(rows([finishedTool("a"), finishedTool("b"), live]).every((row) => row.type === "item")).toBe(true);
+    // The finished two fold; the working one stays in view after them.
+    expect(rows([finishedTool("a"), finishedTool("b"), live]).map((row) => (row.type === "steps" ? row.steps.map((step) => step.id).join() : row.type === "item" ? row.item.id : row.type))).toEqual(["a,b", "live"]);
   });
 
   it("prefers a live event's state over an older subagent list", () => {
@@ -118,12 +119,13 @@ describe("folding completed agent activity", () => {
     const workflows = ["a", "b", "c"].map((id): Tool => ({ ...tool(id), detail: { type: "subagent", action: "spawn", workflow: { state: "completed" } } }));
     expect(rows(workflows)[0]?.type).toBe("steps");
     const live: Tool = { ...tool("live"), detail: { type: "subagent", action: "spawn", workflow: { state: "stopped", agents: [{ id: "worker", title: "Worker", state: "running" }] } } };
-    expect(rows([workflows[0]!, workflows[1]!, live]).every((row) => row.type === "item")).toBe(true);
+    expect(rows([workflows[0]!, workflows[1]!, live]).at(-1)).toMatchObject({ type: "item", item: { id: "live" } });
   });
 
   it("respects pagination seams and never folds across a main-agent message", () => {
     const items = [finishedTool("a"), finishedTool("b"), finishedTool("c")];
-    expect(rows(items, new Set(), new Set(["c"])).every((row) => row.type === "item")).toBe(true);
-    expect(rows([finishedTool("a"), finishedTool("b"), agent("reply"), finishedTool("c")]).every((row) => row.type === "item")).toBe(true);
+    const shape = (built: ReturnType<typeof rows>) => built.map((row) => (row.type === "steps" ? row.steps.map((step) => step.id).join() : row.type === "item" ? row.item.id : row.type));
+    expect(shape(rows(items, new Set(), new Set(["c"])))).toEqual(["a,b", "c"]);
+    expect(shape(rows([finishedTool("a"), finishedTool("b"), agent("reply"), finishedTool("c")]))).toEqual(["a,b", "reply", "c"]);
   });
 });

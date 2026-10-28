@@ -188,6 +188,25 @@
     line-height: 1.7;
   }
   .user-bubble { min-width: 0; }
+  /* Folded: the first twenty lines, fading out, and a way to the rest. */
+  .user-bubble[data-folded] {
+    max-height: calc(20lh + 20px);
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  }
+  .user-fold {
+    display: block;
+    align-self: flex-end;
+    margin-left: auto;
+    margin-top: 4px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .user-fold:hover { color: var(--label); }
   .user-message .question-reply + .question-reply {
     margin-top: 12px;
     padding-top: 12px;
@@ -337,6 +356,82 @@
   }
   .agent-message .markdown {
     margin-top: 10px;
+  }
+  .agent-message-open {
+    margin-left: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  /* What came with a message (files, a selection, the browser that was open): chips over the words. */
+  .user-context {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .user-context-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 260px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--label) 6%, transparent);
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  .user-context-chip svg { flex: none; width: 13px; height: 13px; }
+  .user-context-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* A message that is an event (a CI run, a started session reporting back): one quiet line. */
+  .timeline-event {
+    margin: 12px 0;
+    color: var(--tertiaryLabel);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  /* A command run from the prompt (`!`) and what it printed, on the person's side. */
+  .user-shell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    max-width: 90%;
+    margin-left: auto;
+  }
+  .user-shell-command {
+    padding: 6px 12px;
+    border-radius: 12px;
+    background: var(--userBubble);
+    color: var(--label);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .user-shell-command span { color: var(--secondaryLabel); }
+  .user-shell-output {
+    max-width: 100%;
+    max-height: 240px;
+    margin: 0;
+    overflow: auto;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--label) 4%, transparent);
+    color: var(--secondaryLabel);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
   }
 
   /* ---- Markdown ---- */
@@ -568,8 +663,9 @@
     flex-shrink: 0;
     color: var(--tertiaryLabel);
   }
+  /* How many failed reads as part of the sentence; what changed and the chevron keep to the edge. */
   .steps-summary-label {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -577,19 +673,23 @@
   }
   .steps-summary-failed {
     flex-shrink: 0;
+    margin-left: -7px;
     color: var(--danger);
     font-size: 11px;
     font-weight: 600;
   }
   .steps-summary-diff {
     flex-shrink: 0;
+    margin-left: auto;
     font-size: 11px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
   .steps-summary-diff .diff-add { color: var(--diffAddText); }
   .steps-summary-diff .diff-del { color: var(--diffDelText); }
+  .steps-summary-diff + .steps-summary-chevron { margin-left: 0; }
   .steps-summary-chevron {
+    margin-left: auto;
     width: 13px;
     height: 13px;
     flex-shrink: 0;
@@ -700,6 +800,109 @@
     border-radius: 6px;
   }
   .tool-output-text:first-of-type { margin-top: 0; }
+
+  /* A row worded as the Claude app words it: the verb, then what it acted on. A row with nothing
+     to open (a file read, a directory listed) is the same line without the chevron. */
+  .tool-record > .tool-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    padding: 3px 0;
+    color: var(--secondaryLabel);
+    font-size: 13px;
+  }
+  .tool-record > :is(summary, .tool-summary) > .tool-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 400;
+    color: var(--secondaryLabel);
+  }
+  .tool-label :is(.tool-subject, .tool-file, .tool-subject-code) { color: var(--label); }
+  .tool-label .tool-file {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  .tool-label .tool-file:hover { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+  .tool-label .tool-subject-code { font-family: var(--font-mono); font-size: 12px; }
+  .tool-record > :is(summary, .tool-summary) > .tool-suffix { flex: none; margin-left: -8px; color: var(--danger); }
+  .tool-record > :is(summary, .tool-summary) > .tool-note,
+  .tool-record > :is(summary, .tool-summary) > .diff-stat {
+    flex-shrink: 0;
+    color: var(--tertiaryLabel);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .tool-record > :is(summary, .tool-summary) > .diff-stat .diff-add { color: var(--diffAddText); }
+  .tool-record > :is(summary, .tool-summary) > .diff-stat .diff-del { color: var(--diffDelText); }
+  /* A command opened: the command, what it printed, how it ended. */
+  .tool-terminal { display: flex; flex-direction: column; gap: 0; }
+  .tool-record .tool-terminal > pre { margin: 0; border-radius: 0; }
+  .tool-record .tool-terminal > pre:first-child { border-radius: 6px 6px 0 0; }
+  .tool-record .tool-terminal > pre:last-of-type { border-radius: 0 0 6px 6px; }
+  .tool-record .tool-terminal > pre:only-of-type { border-radius: 6px; }
+  .tool-record .tool-terminal-command { color: var(--label); max-height: 160px; }
+  .tool-terminal-prompt { color: var(--tertiaryLabel); user-select: none; }
+  .tool-record .tool-terminal > .tool-output-text { max-height: 280px; padding-top: 0; }
+  .tool-terminal-exit { align-self: flex-end; margin-top: 4px; color: var(--danger); font-size: 11px; }
+  .tool-terminal-exit[data-ok] { color: var(--tertiaryLabel); }
+  .tool-questions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+  .tool-questions small { color: var(--tertiaryLabel); }
+  .tool-questions p { margin: 2px 0 0; }
+
+  /* The Claude app's end-of-turn box: the recap, its question, the answers it offered. */
+  .wrap-up-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .wrap-up-label { color: var(--tertiaryLabel); font-size: 11px; }
+  .wrap-up-ask { margin: 0; color: var(--label); font-weight: 500; }
+  .wrap-up-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wrap-up-chip {
+    padding: 3px 10px;
+    border: 1px solid var(--separator);
+    border-radius: 999px;
+    color: var(--secondaryLabel);
+    font-size: 12px;
+  }
+  /* A session started from this one. */
+  .session-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: fit-content;
+    max-width: 100%;
+    margin: 2px 0;
+    padding: 8px 12px;
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    background: var(--card);
+    color: var(--secondaryLabel);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+  }
+  button.session-card { cursor: pointer; }
+  button.session-card:hover { border-color: color-mix(in srgb, var(--link) 40%, var(--separator)); }
+  .session-card > svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .session-card-text { display: grid; min-width: 0; }
+  .session-card-text > strong { overflow: hidden; color: var(--label); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+  .session-card-text > small { color: var(--tertiaryLabel); font-size: 11px; }
+  .session-card[data-state="failed"] .session-card-text > small { color: var(--danger); }
+  .timeline-divider > .tool-state-spinner { width: 12px; height: 12px; flex: none; }
+  .timeline-chapter { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
+  .error-detail > summary { cursor: pointer; color: var(--secondaryLabel); font-size: 12px; }
+  .conversation-activity-elapsed { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
 
   .resource-chip {
     display: inline-flex;
@@ -909,6 +1112,17 @@
     border-color: var(--accent);
     background: var(--accent);
     color: var(--primaryForeground);
+  }
+  .async-options button[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--primaryForeground);
+  }
+  .async-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
   .async-answer {
     display: flex;

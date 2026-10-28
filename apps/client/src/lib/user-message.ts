@@ -3,7 +3,9 @@ export {
   automationMessage,
   cleanAgentHeartbeatText,
   questionReplies,
+  userEventLabel,
   userMessageText,
+  userMessageView,
   type AutomationMessage,
   type QuestionReply,
 } from "@linkshell/client-core";

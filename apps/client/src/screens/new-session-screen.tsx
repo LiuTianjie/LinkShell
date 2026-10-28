@@ -1,4 +1,4 @@
-import type { AgentInfo } from "@linkshell/wire";
+import type { AgentInfo, MethodResult } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useState } from "react";
@@ -97,7 +97,7 @@ export function NewSessionScreen() {
   const machine = useClient((state) => state.machine);
   const projects = useClient((state) => state.projects);
   const online = useClient((state) => state.status === "online");
-  const { createSession, send } = useActions();
+  const { createSession, send, agentModels } = useActions();
 
   const agents = useMemo(() => (machine?.agents ?? []).filter((agent) => agent.installed && agent.tier !== "terminal"), [machine]);
   const [agentId, setAgentId] = useState<string | null>(() => {
@@ -138,6 +138,24 @@ export function NewSessionScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The models the agent offers a new session here, as the desktop's picker lists them.
+  const [listed, setListed] = useState<{ agent: string; models: MethodResult<"agents.models"> }>();
+  const [pickedModel, setPickedModel] = useState<{ agent: string; model: string }>();
+  const agentKey = !terminal && selectedAgent && usable(selectedAgent) ? selectedAgent.id : undefined;
+  useEffect(() => {
+    if (!online || !agentKey) return;
+    let alive = true;
+    void agentModels(agentKey, cwd || undefined).then(
+      (models) => { if (alive) setListed({ agent: agentKey, models }); },
+      () => { if (alive) setListed(undefined); },
+    );
+    return () => { alive = false; };
+  }, [agentModels, online, agentKey, cwd]);
+  const models = agentKey && listed?.agent === agentKey ? listed.models : undefined;
+  const model = pickedModel && pickedModel.agent === agentKey ? pickedModel.model : models?.current;
+  const shownModel = models?.models.find((entry) => entry.value === model);
+  const modelLabel = (entry: MethodResult<"agents.models">["models"][number]) => (entry.group ? `${entry.group} · ${entry.name}` : entry.name);
+
   const targetCwd = cwd;
   const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent))) && targetCwd.length > 0 && !busy;
 
@@ -169,7 +187,9 @@ export function NewSessionScreen() {
     }
     if (!selectedAgent) return;
     try {
-      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined });
+      // Only a choice that differs from what the agent would take anyway is sent.
+      const chosen = models && model && model !== models.current && models.models.some((entry) => entry.value === model) ? model : undefined;
+      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined, model: chosen });
       remember(selectedAgent.id);
       router.dismiss();
       openSession(session.id);
@@ -239,6 +259,31 @@ export function NewSessionScreen() {
             </Text>
           ) : null}
         </View>
+
+        {models ? (
+          <View style={{ gap: 10 }}>
+            <Label>模型</Label>
+            {models.models.length ? (
+              <AppMenu
+                title="用哪个模型"
+                shouldOpenOnLongPress={false}
+                onOpenMenu={() => haptics.selection()}
+                actions={models.models.map((entry) => ({
+                  id: entry.value,
+                  title: modelLabel(entry),
+                  subtitle: [entry.value === models.current ? "默认" : undefined, entry.description].filter(Boolean).join(" · ") || undefined,
+                  state: entry.value === model ? ("on" as const) : ("off" as const),
+                }))}
+                onPressAction={({ nativeEvent }) => agentKey && setPickedModel({ agent: agentKey, model: nativeEvent.event })}
+              >
+                <ModelRow name={shownModel ? modelLabel(shownModel) : "默认模型"} note={shownModel?.description} menu />
+              </AppMenu>
+            ) : (
+              // ACP agents name their models only to a session: none was opened here yet to ask.
+              <ModelRow name="默认模型" note="在这台电脑上用过一次这个 Agent 后，这里就能选模型" />
+            )}
+          </View>
+        ) : null}
 
         <View style={{ gap: 10 }}>
           <Label>项目</Label>
@@ -369,6 +414,24 @@ export function NewSessionScreen() {
         ) : null}
       </KeyboardAwareScrollView>
       </View>
+    </View>
+  );
+}
+
+/** The model row: the one chosen and a line about it, styled as the project row below it. */
+function ModelRow({ name, note, menu = false }: { name: string; note?: string; menu?: boolean }) {
+  return (
+    <View
+      accessibilityRole={menu ? "button" : undefined}
+      accessibilityLabel={`模型：${name}${note && !menu ? `，${note}` : ""}`}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 18, borderCurve: "continuous", backgroundColor: colors.sheetCard }}
+    >
+      <Icon sf="cpu" md="memory" size={20} color={colors.accent} />
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: colors.label, fontWeight: "600" }]}>{name}</Text>
+        {note ? <Text numberOfLines={2} style={[type.caption, { color: colors.tertiaryLabel }]}>{note}</Text> : null}
+      </View>
+      {menu ? <Icon sf="chevron.up.chevron.down" md="unfold_more" size={13} color={colors.tertiaryLabel} weight="semibold" /> : null}
     </View>
   );
 }

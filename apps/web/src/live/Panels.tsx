@@ -43,6 +43,7 @@ import {
 import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
+import { isDesktop } from "./desktop";
 import { ChevronRight, GitBranch, RefreshCw, Trash2 } from "lucide-react";
 
 export function Commands({
@@ -253,8 +254,9 @@ export function Changes({ view }: { view?: SessionView }) {
               >
                 <ChevronRight className="changes-chevron" aria-hidden />
                 <span className="changes-file-name">
-                  {slash >= 0 && <small>{shown(file.path).slice(0, slash + 1)}</small>}
-                  {shown(file.path).slice(slash + 1)}
+                  {/* The folder gives way first, cut from its start, so the end nearest the name stays. */}
+                  {slash >= 0 && <small><bdi>{shown(file.path).slice(0, slash + 1)}</bdi></small>}
+                  <span>{shown(file.path).slice(slash + 1)}</span>
                 </span>
                 <DiffStat added={file.stat.added} removed={file.stat.removed} />
               </button>
@@ -476,8 +478,9 @@ export function Tasks({
     id: string;
   }>();
   return (
-    <section>
-      <h3>后台任务、子 Agent 与工作流</h3>
+    <section className="tasks-panel">
+      {/* The desktop's inspector tab already names it. */}
+      {!isDesktop && <h3>后台任务、子 Agent 与工作流</h3>}
       <LoadState {...loaded} />
       {loaded.error && (
         <Button
@@ -522,8 +525,10 @@ export function Tasks({
             </Button>
             {task.state === "running" && (
               <Button
-                variant="link"
-                size="sm"
+                variant={isDesktop ? "secondary" : "link"}
+                size={isDesktop ? "xs" : "sm"}
+                className="task-stop"
+                aria-label="停止任务"
                 disabled={!online || job.busy}
                 onClick={() =>
                   void job.run(async () => {
@@ -532,7 +537,7 @@ export function Tasks({
                   })
                 }
               >
-                停止任务
+                {isDesktop ? "停止" : "停止任务"}
               </Button>
             )}
             {selected?.kind === "task" && selected.id === task.id && (
@@ -658,17 +663,19 @@ function TaskOutput({
   return (
     <div className="task-output">
       <div className="browser-toolbar">
-        <strong>任务输出</strong>
+        <strong>{isDesktop ? "输出" : "任务输出"}</strong>
         <Button
-          variant="link"
-          size="sm"
+          variant={isDesktop ? "ghost" : "link"}
+          size={isDesktop ? "icon-sm" : "sm"}
+          title="刷新输出"
+          aria-label="刷新输出"
           disabled={!online || output.loading}
           onClick={() => {
             setSnapshot(undefined);
             output.reload();
           }}
         >
-          刷新
+          {isDesktop ? <RefreshCw className={output.loading ? "animate-spin" : undefined} /> : "刷新"}
         </Button>
       </div>
       <LoadState
@@ -677,8 +684,9 @@ function TaskOutput({
       />
       {!!current?.start && (
         <Button
-          variant="link"
-          size="sm"
+          variant={isDesktop ? "ghost" : "link"}
+          size={isDesktop ? "xs" : "sm"}
+          className="task-output-earlier"
           disabled={!online || job.busy}
           onClick={() => {
             setSnapshot(current);
@@ -837,7 +845,7 @@ export function Worktrees() {
   return (
     <section className="worktrees-page">
       <PageHeader
-        title="工作目录与分支"
+        title="Worktree"
         actions={<>
       <Button
         variant="ghost"

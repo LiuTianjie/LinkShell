@@ -38,3 +38,14 @@ export function compactTime(timestamp: number, now = Date.now()): string {
   if (date.toDateString() === yesterday.toDateString()) return "昨天";
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
+
+/** A message's own time, as Codex stamps it: the time today, with the weekday within a week, else with the date. */
+export function messageTime(timestamp: number, now = Date.now()): string {
+  const date = new Date(timestamp);
+  const time = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  if (timestamp >= midnight.getTime()) return time;
+  if (timestamp >= midnight.getTime() - 6 * 86_400_000) return `${date.toLocaleDateString("zh-CN", { weekday: "short" })} ${time}`;
+  return `${date.getFullYear() !== midnight.getFullYear() ? `${date.getFullYear()}年` : ""}${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+}

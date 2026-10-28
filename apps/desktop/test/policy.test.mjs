@@ -52,6 +52,8 @@ test("external links never open local files or loopback services", () => {
 
 test("reads what the Swift launcher and `linkshell app` pass on", () => {
   const options = launchOptions(["/x/LinkShell Desktop", "--dashboard", "--home", "/tmp/h", "--cli-node", "/n", "--cli-arg", "--a", "--cli-arg", "--b", "--cli-script", "/s.js", "--check-updates"]);
-  assert.deepEqual(options, { home: "/tmp/h", cliNode: "/n", cliScript: "/s.js", cliArgs: ["--a", "--b"], cliPath: undefined, checkUpdates: true });
+  assert.deepEqual(options, { home: "/tmp/h", cliNode: "/n", cliScript: "/s.js", cliArgs: ["--a", "--b"], cliPath: undefined, checkUpdates: true, hidden: false });
   assert.equal(launchOptions(["x"]).checkUpdates, false);
+  // Windows starts it at sign-in with --hidden (the Run entry): no window until it is asked for.
+  assert.equal(launchOptions(["LinkShell.exe", "--hidden"]).hidden, true);
 });

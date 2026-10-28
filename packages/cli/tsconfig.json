@@ -10,6 +10,7 @@
   "include": [
     "src/**/*.ts",
     "../client-core/src/pro-membership.ts",
+    "../client-core/src/account-errors.ts",
     "../gateway/src/**/*.ts",
     "../host/src/**/*.ts",
     "../wire/src/**/*.ts"

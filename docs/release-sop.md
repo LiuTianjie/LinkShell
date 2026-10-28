@@ -359,7 +359,7 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 
 1. 按上述包版本规则递增版本；独立 App 默认以 CLI 版本作为显示版本与 `CFBundleVersion`。重打同一显示版本时传递严格递增的 `--build`，不要覆盖已发布的同名归档。
 2. `pnpm build`、`pnpm typecheck`，执行 CLI / Host / Swift 相关测试。
-3. 分别运行 `LINKSHELL_NOTARY_PROFILE=<已配置名称> node apps/mac/scripts/build-standalone.mjs --arch arm64` 和 `--arch x64`。构建器检查 Node 下载 SHA-256、嵌套签名和架构，提交 App 和 DMG 公证并 staple。正式发布必须确认两份 `release.json` 的 `notarized` 为 true。
+3. 先 `pnpm --filter @linkshell/mac build`，再分别运行 `LINKSHELL_NOTARY_PROFILE=<已配置名称> node apps/mac/scripts/build-standalone.mjs --arch arm64` 和 `--arch x64`。构建器检查 Node 下载 SHA-256、嵌套签名和架构，再用 `apps/desktop/scripts/package.mjs` 把该架构的 Electron 装进同一个 App 并整体签名（另一架构的 Electron 由 `electron-dist.mjs` 下载，按 electron 包自带的 SHA-256 校验），最后提交 App 和 DMG 公证并 staple。正式发布必须确认两份 `release.json` 的 `notarized` 为 true。输出目录不要放在 `/tmp` 下（它是 `/private/tmp` 的链接，运行时符号链接检查会误判越界），默认的 `artifacts/mac/<arch>` 即可。
 4. 验证全新数据目录的登录入口、浏览器回调、启动服务、权限入口；验证旧版本通过 Sparkle 安装最终 DMG 后，App / Host 版本一致，机器身份与配对信息保留。Intel 的 Rosetta 运行检查不等于 Intel 真机屏幕验收。
 5. 使用 `apps/mac/scripts/appcast.mjs` 与 Keychain 中 `linkshell-desktop` 私钥，为两个架构生成独立 appcast。公钥、bundle id 和 Developer ID 保持不变。最终签名后不要再修改 DMG。
 6. 创建 `desktop-v<version>` GitHub release，先上传两个 DMG，再将对应 feed 放到 `docs/site/updates/mac/appcast-arm64.xml`、`appcast-x64.xml` 并部署 Pages。核对线上 feed 的 URL、长度、签名与 SHA-256；不要提前发布指向缺失资源的 feed。

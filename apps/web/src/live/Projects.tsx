@@ -11,13 +11,14 @@ import {
   AgentMark,
   EmptyState,
   ErrorNotice,
+  LoadMore,
   LoadState,
   titleOf,
   useActions,
   useClient,
   useJob,
 } from "./common";
-import { sessionNeedsAttention } from "./session-list";
+import { sessionNeedsAttention, sessionPreview } from "./session-list";
 import { sessionTime } from "./session-time";
 import { StatusText } from "./StatusText";
 import { PageHeader } from "../components/PageHeader";
@@ -123,7 +124,12 @@ export function Projects({
                       {project.branch}
                     </span>
                   )}
-                  <span>{project.sessionCount} 个会话</span>
+                  {/* The sessions read so far, as under it and in the sidebar (archived ones never
+                      count); the computer's own count says when there are more to read. */}
+                  <span>
+                    {project.sessions.length}
+                    {project.sessionCount > project.sessions.length ? "+" : ""} 个会话
+                  </span>
                   <time dateTime={new Date(project.lastActiveAt).toISOString()}>{sessionTime(project.lastActiveAt)}</time>
                 </div>
                 <Button
@@ -145,7 +151,7 @@ export function Projects({
                       <AgentMark agent={session.agent} />
                       <span className="project-session-title" title={titleOf(session)}>{titleOf(session)}</span>
                       <span className="project-session-detail">
-                        {session.activity?.title ?? session.preview ?? ""}
+                        {sessionPreview(session)}
                       </span>
                       {sessionNeedsAttention(session) || session.state !== "idle" ? (
                         <StatusText state={sessionNeedsAttention(session) ? "waiting" : session.state} />
@@ -186,14 +192,12 @@ export function Projects({
         </EmptyState>
       )}
       {state.sessionsNextBefore !== undefined && (
-        <button
-          type="button"
-          className="list-row-more"
+        <LoadMore
           disabled={job.busy || !online}
           onClick={() => void job.run(() => actions.loadMoreSessions())}
         >
           {job.busy ? "正在加载…" : "加载更早的会话记录"}
-        </button>
+        </LoadMore>
       )}
     </section>
   );

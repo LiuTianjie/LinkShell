@@ -20,7 +20,9 @@ import { ErrorNotice, Modal, useJob } from "./common";
 import { Icon } from "../icons";
 import { Scan } from "./Scan";
 import { AccountMembership } from "./AccountMembership";
-import { desktopLogin, desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
+import { desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
+import { SignIn } from "./SignIn";
+import { useDesktopSignIn } from "./desktop-sign-in";
 
 export function Connect({ close }: { close: () => void }) {
   const state = useStore(engine.state);
@@ -38,6 +40,10 @@ export function Connect({ close }: { close: () => void }) {
   }>({});
   const job = useJob();
   const blocked = job.busy || state.locked;
+  const signIn = useDesktopSignIn(async () => {
+    await engine.connectAccount();
+    close();
+  });
   const pairingLink = decodePairingLink(pairing);
   function updatePairing(value: string) {
     setPairing(value);
@@ -47,43 +53,31 @@ export function Connect({ close }: { close: () => void }) {
     job.clear();
   }
   const accountForm = isDesktop ? (
-    <FieldGroup>
-      <Alert role="status">
-        <AlertTitle>{state.account ?? (state.accountUserId ? "已登录" : "连接其他电脑")}</AlertTitle>
-        <AlertDescription>
-          {state.accountUserId
-            ? "已使用 LinkShell 的同一账号。其他电脑登录此账号后，会自动显示在工作台。"
-            : "在系统浏览器中登录 iTool 账号，即可访问同一账号下的电脑。也可以使用配对码连接。"}
-        </AlertDescription>
-      </Alert>
-      {state.accountUserId ? (
-        <>
-          <AccountMembership key={state.accountUserId} userId={state.accountUserId} disabled={job.busy} />
-          <Button disabled={blocked} onClick={() => void job.run(async () => {
-            await engine.connectAccount();
-            close();
-          })}>
-            刷新账号电脑
-          </Button>
-          <Button variant="outline" disabled={job.busy} onClick={() => void job.run(desktopLogout)}>
-            退出 LinkShell 账号
-          </Button>
-          <p className="field-hint">账号与这台电脑的 LinkShell 服务共用。退出后，本机工作台和已配对的电脑仍可使用。</p>
-        </>
-      ) : (
-        <>
-          <Button disabled={blocked} onClick={() => void job.run(async () => {
-            await desktopLogin();
-            await engine.connectAccount();
-            close();
-          })}>
-            {job.busy && <LoaderCircle data-icon="inline-start" className="animate-spin" />}
-            {job.busy ? "请在浏览器中完成登录…" : "在浏览器中登录 / 注册"}
-          </Button>
-          <p className="field-hint">登录成功后自动返回工作台。电脑接入官方网关需要 Pro 订阅。</p>
-        </>
-      )}
-    </FieldGroup>
+    state.accountUserId ? (
+      <FieldGroup>
+        <Alert role="status">
+          <AlertTitle>{state.account ?? "已登录"}</AlertTitle>
+          <AlertDescription>已使用 LinkShell 的同一账号。其他电脑登录此账号后，会自动显示在工作台。</AlertDescription>
+        </Alert>
+        <AccountMembership key={state.accountUserId} userId={state.accountUserId} disabled={job.busy} />
+        <Button disabled={blocked} onClick={() => void job.run(async () => {
+          await engine.connectAccount();
+          close();
+        })}>
+          刷新账号电脑
+        </Button>
+        <Button variant="outline" disabled={job.busy} onClick={() => void job.run(desktopLogout)}>
+          退出 LinkShell 账号
+        </Button>
+        <p className="field-hint">账号与这台电脑的 LinkShell 服务共用。退出后，本机工作台和已配对的电脑仍可使用。</p>
+      </FieldGroup>
+    ) : (
+      <SignIn
+        {...signIn}
+        disabled={blocked}
+        description="登录 iTool 账号，即可访问同一账号下的电脑。电脑接入官方网关需要 Pro 订阅。"
+      />
+    )
   ) : state.account ? (
     <FieldGroup className="min-w-0 [&_[data-slot=alert-description]]:break-words [&_[data-slot=alert-title]]:break-words [&_[data-slot=field]]:min-w-0">
       <Alert role="status">

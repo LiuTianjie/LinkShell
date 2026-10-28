@@ -31,6 +31,8 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty";
 import { CircleAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { isDesktop } from "./desktop";
 
 export const Runtime = createContext<Connection | null>(null);
 // A socket can be online before this conversation's backlog has been restored.
@@ -95,6 +97,22 @@ export function AgentMark({
   size?: "sm" | "md";
 }) {
   const mark = agentMarks[agent.toLowerCase()];
+  if (isDesktop && mark) {
+    // The desktop draws every agent the same way, as Codex's own glyphs: the bare mark, no tile.
+    // A one-colour mark takes the label's ink of each theme (a picture can't read CSS colour, so
+    // both are drawn and the theme shows one); a full mark loses the white ground it was drawn on.
+    const glyph = (ink: string) => {
+      let svg = mark.svg.replaceAll("currentColor", ink);
+      if (mark.full) svg = svg.replaceAll('fill="#fff"', 'fill="none"').replaceAll("#1E1E2E", ink);
+      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    };
+    return (
+      <span data-size={size} className={`agent-mark agent-glyph ${agent.toLowerCase()}`}>
+        <img className="agent-glyph-light" src={glyph("#1a1c1f")} alt={agent} />
+        <img className="agent-glyph-dark" src={glyph("#dfdfdf")} alt="" aria-hidden />
+      </span>
+    );
+  }
   return (
     <span
       data-size={size}
@@ -166,6 +184,12 @@ export function EmptyState({
       {children && <EmptyContent>{children}</EmptyContent>}
     </Empty>
   );
+}
+/** "Load earlier": on the desktop a 28 px secondary button under the list; on the web a full-width row. */
+export function LoadMore(props: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return isDesktop
+    ? <Button variant="secondary" size="sm" className="list-more-button" {...props} />
+    : <button type="button" className="list-row-more" {...props} />;
 }
 export function Modal({
   title,

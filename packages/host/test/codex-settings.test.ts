@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enableArgs } from "../src/drivers/codex/app-server.js";
-import { configOptions, effective, presetOf, turnOverrides, type CodexModel } from "../src/drivers/codex/settings.js";
+import { configOptions, effective, newThreadModels, presetOf, turnOverrides, type CodexModel } from "../src/drivers/codex/settings.js";
 
 const models: CodexModel[] = [
   {
@@ -54,6 +54,36 @@ describe("Codex settings", () => {
     expect(turnOverrides({ plan: false }, current)).toMatchObject({ collaborationMode: { mode: "default" } });
     // Never touched: nothing is sent.
     expect(turnOverrides({}, current)).toEqual({});
+  });
+});
+
+describe("Codex models for a new thread", () => {
+  const listed: CodexModel[] = [
+    ...models,
+    { id: "old", model: "gpt-4", displayName: "GPT-4", description: "Retired", hidden: true },
+  ];
+
+  it("lists what a thread's model option lists, with Codex's default as the one a new thread gets", () => {
+    expect(newThreadModels(listed, undefined)).toEqual({
+      models: [
+        { value: "gpt-5", name: "GPT-5" },
+        { value: "gpt-5-mini", name: "GPT-5 mini" },
+      ],
+      current: "gpt-5",
+    });
+    // The same names and order as inside a session, whose option this mirrors.
+    expect(newThreadModels(listed, undefined).models).toEqual(configOptions({ model: "gpt-5" }, {}, listed).find((o) => o.id === "model")?.values);
+  });
+
+  it("takes the configured model as the default, listed even when Codex hides or doesn't know it", () => {
+    expect(newThreadModels(listed, "gpt-5-mini").current).toBe("gpt-5-mini");
+    expect(newThreadModels(listed, "gpt-4").models.map((m) => m.value)).toEqual(["gpt-5", "gpt-5-mini", "gpt-4"]);
+    expect(newThreadModels(listed, "local-llm")).toMatchObject({ current: "local-llm", models: [{ value: "local-llm", name: "local-llm" }, {}, {}] });
+  });
+
+  it("has nothing to choose from when Codex lists no models", () => {
+    expect(newThreadModels([], "gpt-5")).toEqual({ models: [] });
+    expect(newThreadModels([], undefined)).toEqual({ models: [] });
   });
 });
 

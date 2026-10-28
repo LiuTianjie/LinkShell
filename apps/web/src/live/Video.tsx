@@ -1044,7 +1044,7 @@ function BrowserScreen({
           <div className="screen-start">
             {!compact && (
               <div className="screen-display-mark" aria-hidden="true">
-                <Monitor size={32} strokeWidth={1.5} />
+                <Monitor size={32} strokeWidth={1.65} />
               </div>
             )}
             <LoadState {...loaded} />

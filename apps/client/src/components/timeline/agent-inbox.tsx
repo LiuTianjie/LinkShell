@@ -1,4 +1,4 @@
-import type { AgentInboxMessage } from "@linkshell/client-core";
+import { inboxLabel, type AgentInboxMessage } from "@linkshell/client-core";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
@@ -16,8 +16,10 @@ export function AgentInbox({ message }: { message: AgentInboxMessage }) {
   const sessionId = useTimelineSession();
   const agents = useClient((state) => sessionId ? state.subagents[sessionId] : undefined);
   const matches = agents?.filter((agent) => agent.name === message.sender) ?? [];
-  const call = matches.length === 1 ? matches[0]!.toolCallId : undefined;
-  const label = message.notice === "idle" ? `@${message.sender} · 本轮已结束` : `来自 @${message.sender}`;
+  const call = message.kind === "teammate" && matches.length === 1 ? matches[0]!.toolCallId : undefined;
+  // Another session's message names it by the app's own id (the Claude app's local_…): its title now, and a way there.
+  const sender = useClient((state) => message.sessionId ? Object.values(state.sessions).find((session) => session.appId === message.sessionId) : undefined);
+  const label = inboxLabel(message, sender?.title || undefined);
   const tint = message.color === "green" ? colors.ok : message.color === "red" ? colors.danger
     : message.color === "yellow" || message.color === "orange" ? colors.waiting : colors.accent;
   return (
@@ -41,6 +43,10 @@ export function AgentInbox({ message }: { message: AgentInboxMessage }) {
         {message.body ? <Pressable onPress={() => { haptics.selection(); setExpanded((value) => !value); }} accessibilityRole="button" accessibilityState={{ expanded }} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>{expanded ? "收起" : "展开全文"}</Text>
         </Pressable> : null}
+        {sender ? <Pressable
+          onPress={() => router.push({ pathname: "/session/[id]", params: { id: sender.id } })}
+          accessibilityRole="button" accessibilityLabel={`打开会话 ${sender.title || message.sender}`} style={{ minHeight: 44, justifyContent: "center" }}
+        ><Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>打开会话</Text></Pressable> : null}
         {sessionId && call ? <Pressable
           onPress={() => router.push({ pathname: "/session/[id]/agent/[call]", params: { id: sessionId, call } })}
           accessibilityRole="button" accessibilityLabel={`查看 @${message.sender} 的过程`} style={{ minHeight: 44, justifyContent: "center" }}

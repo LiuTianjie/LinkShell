@@ -22,6 +22,7 @@ import {
 } from "./model.js";
 import { contentBlockSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
 import { sideChatSchema } from "./side.js";
+import { mcpMethods } from "./rpc-mcp.js";
 
 // ── JSON-RPC 2.0 framing ─────────────────────────────────────────────
 
@@ -150,12 +151,36 @@ const coreMethods = {
       nextBefore: z.number().optional(),
     }),
   },
+  /**
+   * The models a new session of `agent` can start on, for choosing one before
+   * there is a session (whose own list comes later, in its `ls_config`).
+   * `current` is the one the agent takes when `sessions.create` names none:
+   * its own default, which a new session keeps unless another is picked.
+   * Agents that tell their models only to a session give what they said in
+   * the latest one opened on this computer; never asked by starting one, so
+   * empty until there has been one (`current` too may be missing then).
+   * With an empty list `sessions.create` takes no model. Hosts older than
+   * this method answer "method not found".
+   */
+  "agents.models": {
+    params: z.object({
+      agent: z.string().min(1),
+      /** Where the session will work: an agent's project settings can choose another model. */
+      cwd: z.string().optional(),
+    }),
+    result: z.object({
+      /** As a session's model option lists them (`group`: the heading some agents put models under). */
+      models: z.array(z.object({ value: z.string(), name: z.string(), description: z.string().optional(), group: z.string().optional() })),
+      current: z.string().optional(),
+    }),
+  },
   "sessions.create": {
     params: z.object({
       agent: z.string().min(1),
       cwd: z.string().min(1),
       prompt: z.array(contentBlockSchema).optional(),
       clientMessageId: z.string().optional(),
+      /** One of `agents.models`' values; absent: the agent's own default. */
       model: z.string().optional(),
       /**
        * Start in a new git worktree of `cwd`'s repository (its own branch, from
@@ -703,7 +728,7 @@ const coreMethods = {
   },
 } as const;
 
-export const methods: typeof coreMethods & typeof acpMethods = { ...coreMethods, ...acpMethods };
+export const methods: typeof coreMethods & typeof acpMethods & typeof mcpMethods = { ...coreMethods, ...acpMethods, ...mcpMethods };
 
 export type MethodName = keyof typeof methods;
 export type MethodParams<M extends MethodName> = z.input<(typeof methods)[M]["params"]>;
