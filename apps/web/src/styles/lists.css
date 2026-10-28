@@ -12,8 +12,9 @@
   .list-row > * + * {
     margin-left: 12px;
   }
-  .list-row:hover,
-  .list-row:focus-within {
+  /* Only rows that do something answer the pointer; a static row is information. */
+  .list-row:not(.list-row-static):hover,
+  .list-row:not(.list-row-static):focus-within {
     background: var(--fill);
   }
   .list-row-static {

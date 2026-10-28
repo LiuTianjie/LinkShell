@@ -363,6 +363,11 @@ export const terminalInfoSchema = z.object({
   exitCode: z.number().int().nullable().optional(),
   /** Ended without an exit code: the host stopped while it ran. */
   interrupted: z.boolean().optional(),
+  /**
+   * The session it was opened for. Such a terminal belongs to the session: it closes when its
+   * shell exits or the session is archived or deleted, and isn't kept across a host restart.
+   */
+  sessionId: z.string().optional(),
 });
 export type TerminalInfo = z.infer<typeof terminalInfoSchema>;
 

@@ -121,6 +121,8 @@ export interface TerminalRecord {
   exitCode: number | null;
   ended: boolean;
   buffer: string;
+  /** The session it was opened for, if any. */
+  sessionId?: string;
 }
 
 interface SessionRow {
@@ -261,6 +263,8 @@ export class HostStore {
   private migrate(): void {
     const columns = new Set((this.db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name));
     if (!columns.has("custom_title")) this.db.exec("ALTER TABLE sessions ADD COLUMN custom_title TEXT");
+    const terminalColumns = new Set((this.db.prepare("PRAGMA table_info(terminals)").all() as { name: string }[]).map((c) => c.name));
+    if (!terminalColumns.has("session_id")) this.db.exec("ALTER TABLE terminals ADD COLUMN session_id TEXT");
     // event_meta came later (and its sub-agent columns later still): describe
     // the events logged before it, once.
     const meta = new Set((this.db.prepare("PRAGMA table_info(event_meta)").all() as { name: string }[]).map((c) => c.name));
@@ -386,12 +390,12 @@ export class HostStore {
   saveTerminal(t: TerminalRecord): void {
     this.db
       .prepare(
-        `INSERT INTO terminals (id, cwd, title, command, cols, rows, created_at, active_at, exit_code, ended, buffer)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO terminals (id, cwd, title, command, cols, rows, created_at, active_at, exit_code, ended, buffer, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, cols = excluded.cols, rows = excluded.rows,
            active_at = excluded.active_at, exit_code = excluded.exit_code, ended = excluded.ended, buffer = excluded.buffer`,
       )
-      .run(t.id, t.cwd, t.title, t.command ?? null, t.cols, t.rows, t.createdAt, t.activeAt, t.exitCode, t.ended ? 1 : 0, t.buffer);
+      .run(t.id, t.cwd, t.title, t.command ?? null, t.cols, t.rows, t.createdAt, t.activeAt, t.exitCode, t.ended ? 1 : 0, t.buffer, t.sessionId ?? null);
   }
 
   listTerminals(): TerminalRecord[] {
@@ -408,6 +412,7 @@ export class HostStore {
       exitCode: row.exit_code === null ? null : Number(row.exit_code),
       ended: Number(row.ended) === 1,
       buffer: String(row.buffer),
+      sessionId: row.session_id ? String(row.session_id) : undefined,
     }));
   }
 

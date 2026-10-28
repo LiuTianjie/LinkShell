@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { isDesktop } from "@/live/desktop";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 
 function TooltipProvider({
@@ -49,7 +50,11 @@ function TooltipContent({
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow data-slot="tooltip-arrow" className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
+        {/* The desktop's tooltips have no arrow (Codex's don't): hiding it with CSS left the
+            square it is drawn from showing as a light diamond on the dark bubble. */}
+        {!isDesktop && (
+          <TooltipPrimitive.Arrow data-slot="tooltip-arrow" className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
+        )}
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

@@ -51,6 +51,21 @@ import {
 } from "./common";
 
 
+/**
+ * Lines added and removed, each only when there are some: a "−0" in red reads as an error, and a
+ * file that only gained lines says "+38". Nothing at all when nothing changed.
+ */
+export function DiffStat({ added, removed, className = "diff-stat" }: { added: number; removed: number; className?: string }) {
+  if (!added && !removed) return null;
+  return (
+    <span className={className}>
+      {added > 0 && <span className="diff-add">+{added}</span>}
+      {added > 0 && removed > 0 && " "}
+      {removed > 0 && <span className="diff-del">−{removed}</span>}
+    </span>
+  );
+}
+
 /** A folded run of finished steps — "运行 5 条命令 · 读取 3 个文件", one click open. */
 export function StepsSummary({
   steps,
@@ -73,12 +88,7 @@ export function StepsSummary({
       <Layers className="steps-summary-icon" aria-hidden="true" />
       <span className="steps-summary-label">{label}</span>
       {t.failed > 0 && <span className="steps-summary-failed">{t.failed} 个失败</span>}
-      {(t.added > 0 || t.removed > 0) && (
-        <span className="steps-summary-diff">
-          <span className="diff-add">+{t.added}</span>{" "}
-          <span className="diff-del">−{t.removed}</span>
-        </span>
-      )}
+      <DiffStat added={t.added} removed={t.removed} className="steps-summary-diff" />
       <ChevronRight className="steps-summary-chevron" aria-hidden="true" />
     </button>
   );
@@ -615,9 +625,7 @@ export function Diff({
           {shown(change.path)}
           {change.type === "patch" && change.movePath ? ` → ${shown(change.movePath)}` : ""}
         </span>
-        <span className="diff-stat">
-          <span className="diff-add">+{stat.added}</span> <span className="diff-del">−{stat.removed}</span>
-        </span>
+        <DiffStat added={stat.added} removed={stat.removed} />
       </summary>
       <DiffView lines={lines} path={change.type === "patch" && change.movePath ? change.movePath : change.path} />
     </details>
@@ -899,15 +907,12 @@ export const TimelineEntry = memo(function TimelineEntry({
               ) : null}
               <ul>
                 {item.entries.map((entry, index) => (
-                  <li key={index}>
-                    <span>
-                      {entry.status === "completed"
-                        ? "✓"
-                        : entry.status === "in_progress"
-                          ? "◉"
-                          : "○"}
+                  <li key={index} data-status={entry.status}>
+                    {/* Done is a filled check, under way a ring, still to do a dashed ring. */}
+                    <span className="plan-mark" aria-label={entry.status === "completed" ? "已完成" : entry.status === "in_progress" ? "进行中" : "待办"}>
+                      {entry.status === "completed" ? <Check strokeWidth={3} /> : null}
                     </span>
-                    {entry.content}
+                    <span className="plan-text">{entry.content}</span>
                   </li>
                 ))}
               </ul>

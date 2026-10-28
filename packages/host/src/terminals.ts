@@ -73,6 +73,8 @@ class Terminal {
     readonly command: string | undefined,
     private readonly changed: (terminal: Terminal) => void,
     private readonly store?: HostStore,
+    /** The session it was opened for: it belongs to that session and goes with it. */
+    readonly sessionId?: string,
   ) {
     this.title = basename(shell);
     try { this.state = new TerminalState(cols, rows); }
@@ -101,6 +103,7 @@ class Terminal {
       activeAt: this.activeAt,
       command: this.command,
       exitCode: this.exitCode,
+      sessionId: this.sessionId,
     };
   }
 
@@ -128,6 +131,7 @@ class Terminal {
       exitCode: this.exitCode ?? null,
       ended: !this.running,
       buffer,
+      sessionId: this.sessionId,
     };
   }
 
@@ -263,6 +267,7 @@ function recordInfo(record: TerminalRecord, interrupted: boolean): TerminalInfo 
     command: record.command,
     exitCode: record.exitCode,
     interrupted: interrupted || undefined,
+    sessionId: record.sessionId,
   };
 }
 
@@ -286,6 +291,9 @@ export class TerminalManager {
     private readonly store?: HostStore,
   ) {
     for (const record of store?.listTerminals() ?? []) {
+      // A session's terminal is a working shell, not a record to keep: once the host stopped
+      // under it, it is gone (the session opens a fresh one in its directory).
+      if (record.sessionId) { store?.deleteTerminal(record.id); continue; }
       // Still marked live: the host stopped while it ran.
       const interrupted = !record.ended;
       if (interrupted) store?.saveTerminal({ ...record, ended: true });
@@ -326,7 +334,7 @@ export class TerminalManager {
     ].sort((a, b) => b.activeAt - a.activeAt);
   }
 
-  create(options: { cwd?: string; command?: string; cols: number; rows: number; launch?: { command: string; args: string[]; env?: Record<string, string> } }): TerminalInfo {
+  create(options: { cwd?: string; command?: string; cols: number; rows: number; sessionId?: string; launch?: { command: string; args: string[]; env?: Record<string, string> } }): TerminalInfo {
     if (this.terminals.size >= MAX_TERMINALS) throw RpcError.app("busy", `at most ${MAX_TERMINALS} terminals can run at once`);
     const cwd = options.cwd ?? homedir();
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `no such directory: ${cwd}`);
@@ -360,6 +368,11 @@ export class TerminalManager {
     const terminal = new Terminal(pty, cwd, shell, options.cols, options.rows, command, (t) => {
       // Closed (or the host stopping): it's gone; its shell exiting is no news.
       if (this.stopped || !this.terminals.has(t.id)) return;
+      // A session's shell that exits (`exit`, ⌃D) is closed with it: the session's tab goes.
+      if (!t.running && t.sessionId) {
+        this.close(t.id);
+        return;
+      }
       // Ended: keep it as history.
       if (!t.running) {
         this.save(t);
@@ -369,7 +382,7 @@ export class TerminalManager {
         t.close();
       }
       this.emit(t.info());
-    }, this.store);
+    }, this.store, options.sessionId);
     this.terminals.set(terminal.id, terminal);
     // Typed into the shell (not `-c`), so the shell stays for whatever comes next.
     // Once the shell has drawn its prompt: typed any earlier, the tty echoes the
@@ -500,6 +513,15 @@ export class TerminalManager {
     this.store?.deleteTerminal(id);
     for (const [key, value] of this.snapshots) if (value.terminalId === id) this.snapshots.delete(key);
     this.emit(info, true);
+  }
+
+  /** Closes every terminal opened for a session (the session was archived or deleted). */
+  closeForSession(sessionId: string): void {
+    const ids = [
+      ...[...this.terminals.values()].filter((terminal) => terminal.sessionId === sessionId).map((terminal) => terminal.id),
+      ...[...this.history.values()].filter(({ record }) => record.sessionId === sessionId).map(({ record }) => record.id),
+    ];
+    for (const id of ids) this.close(id);
   }
 
   stop(): void {

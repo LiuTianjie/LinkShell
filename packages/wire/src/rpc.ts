@@ -73,8 +73,9 @@ export const RPC_APP_ERROR = -32000;
  * methods or notifications an app may rely on, so an app can tell the
  * computer is older than itself and say so (an absent revision is 0).
  * 1: side conversations (`sessions.side`), `machine.info.protocol` itself.
+ * 2: session terminals (`terminals.create` `sessionId`, `TerminalInfo.sessionId`).
  */
-export const HOST_PROTOCOL = 1;
+export const HOST_PROTOCOL = 2;
 
 const empty = z.object({}).passthrough();
 
@@ -566,6 +567,8 @@ const coreMethods = {
   "terminals.create": {
     params: z.object({
       cwd: z.string().optional(),
+      /** Open it for this session, in its directory unless `cwd` says otherwise (see `TerminalInfo.sessionId`). */
+      sessionId: z.string().optional(),
       /** Run this in the shell right away (the shell stays open after it). */
       command: z.string().max(4000).optional(),
       cols: z.number().int().min(10).max(1000).default(80),

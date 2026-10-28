@@ -58,6 +58,7 @@ import {
 } from "./common";
 import { FileEditor } from "./Editor";
 import { FileDownload } from "./FileDownload";
+import { DesktopFileView } from "./FilePreview";
 import {
   appendFileChunk,
   formatFileSize,
@@ -75,25 +76,10 @@ export async function fileBase64(file: File): Promise<string> {
   });
 }
 
-export function FileView({
-  path,
-  line,
-  close,
-  onDirtyChange,
-}: {
-  path: string;
-  line?: number;
-  close?: () => void;
-  onDirtyChange?: (dirty: boolean) => void;
-}) {
-  const lineRef = useRef<HTMLSpanElement>(null);
+/** A file's content as read so far, more on request, and the requested line split out. */
+function useFileContent(path: string, line: number | undefined) {
   const { link } = useConnection();
   const job = useJob();
-  const [editing, setEditing] = useState(false);
-  const [wrap, setWrap] = useState(false);
-  const markdown = /\.(md|markdown)$/i.test(path);
-  const [reading, setReading] = useState(markdown && !line);
-  const [copied, setCopied] = useState<"path" | "content">();
   const loaded = useLoad(
     () =>
       readFileAtLine((offset) => link.call("fs.read", { path, offset }), line),
@@ -109,6 +95,52 @@ export function FileView({
     () => (line && file?.text ? splitFileAtLine(file.text, line) : undefined),
     [file?.text, line],
   );
+  const more = () =>
+    void job.run(async () => {
+      if (!file || file.nextOffset === undefined) return;
+      const chunk = await link.call("fs.read", { path, offset: file.nextOffset });
+      setExtra({ source: loaded.value!, file: appendFileChunk(file, chunk) });
+    });
+  return { loaded, file, highlighted, more, job };
+}
+
+export function FileView(props: {
+  path: string;
+  line?: number;
+  close?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  return isDesktop ? <DesktopFile {...props} /> : <WebFileView {...props} />;
+}
+
+function DesktopFile(props: {
+  path: string;
+  line?: number;
+  close?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const content = useFileContent(props.path, props.line);
+  return <DesktopFileView {...props} content={content} />;
+}
+
+function WebFileView({
+  path,
+  line,
+  close,
+  onDirtyChange,
+}: {
+  path: string;
+  line?: number;
+  close?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const lineRef = useRef<HTMLSpanElement>(null);
+  const { loaded, file, highlighted, more, job } = useFileContent(path, line);
+  const [editing, setEditing] = useState(false);
+  const [wrap, setWrap] = useState(false);
+  const markdown = /\.(md|markdown)$/i.test(path);
+  const [reading, setReading] = useState(markdown && !line);
+  const [copied, setCopied] = useState<"path" | "content">();
   useEffect(() => {
     lineRef.current?.scrollIntoView({ block: "center" });
   }, [path, line, loaded.value]);
@@ -309,18 +341,7 @@ export function FileView({
                     variant="outline"
                     size="sm"
                     disabled={job.busy}
-                    onClick={() =>
-                      void job.run(async () => {
-                        const chunk = await link.call("fs.read", {
-                          path,
-                          offset: file.nextOffset,
-                        });
-                        setExtra({
-                          source: loaded.value!,
-                          file: appendFileChunk(file, chunk),
-                        });
-                      })
-                    }
+                    onClick={more}
                   >
                     {job.busy && (
                       <LoaderCircle

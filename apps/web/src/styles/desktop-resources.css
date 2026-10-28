@@ -99,8 +99,9 @@ html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); f
    is a 28 px control at the right of its row, not a full-width field. */
 html[data-desktop] .desktop-main .acp-settings { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop][data-theme="dark"] .desktop-main .acp-settings { background: rgb(255 255 255 / .02); }
-html[data-desktop] .desktop-main .acp-settings-heading { padding: 12px 12px 6px; }
-html[data-desktop] .desktop-main .acp-settings-heading h3 { color: var(--label); font-size: 14px; font-weight: 500; }
+html[data-desktop] .desktop-main .acp-group { display: flex; flex-direction: column; gap: 8px; }
+html[data-desktop] .desktop-main .acp-settings-heading { padding: 0 4px; }
+html[data-desktop] .desktop-main .acp-settings-heading h3 { color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .acp-settings-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .acp-agent-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 8px 0 12px; }
 html[data-desktop] .desktop-main .acp-agent-field [data-slot="field-label"] { flex: none; font-size: 13px; font-weight: 510; }
@@ -115,6 +116,26 @@ html[data-desktop] .desktop-main .acp-settings details > summary:hover { backgro
 html[data-desktop] .desktop-main .acp-settings details > summary::-webkit-details-marker { display: none; }
 html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 12px 12px; }
 html[data-desktop] .desktop-main .acp-settings p.muted { color: var(--tertiaryLabel); font-size: 12px; }
+
+/* ── Terminals ───────────────────────────────────────────────────────────── */
+/* One 32 px row, as Codex's terminal panel: the tabs, then (over the row's end) the open terminal's
+   new / menu buttons; nothing between the row and the shell. Its state shows only when it isn't
+   simply connected; the way back to the newest output floats at the foot while scrolled up. */
+html[data-desktop] .desktop-main .terminal-workspace { position: relative; }
+html[data-desktop] .desktop-main .terminal-tab-bar { height: 32px; min-height: 32px; padding: 0 76px 0 0; border-bottom: 0; }
+html[data-desktop] .desktop-main .terminal-actions { position: absolute; top: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 2px; height: 32px; }
+html[data-desktop] .desktop-main .terminal-actions [data-button][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .terminal-actions [data-button][data-size="icon"]:hover:not(:disabled) { color: var(--label); }
+html[data-desktop] .desktop-main .terminal-actions .terminal-connection { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
+html[data-desktop] .desktop-main .terminal-workspace:has(.terminal-session-panel.flex .terminal-connection) .terminal-tab-bar { padding-right: 180px; }
+html[data-desktop] .terminal-font-menu { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .terminal-font-menu > span:first-child { flex: 1; }
+html[data-desktop] .terminal-font-menu [data-button] { width: 28px; height: 28px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .terminal-font-menu .terminal-font-value { width: 24px; color: var(--label); font-variant-numeric: tabular-nums; text-align: center; }
+html[data-desktop] .desktop-main .terminal-live { position: relative; }
+html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absolute; right: 16px; bottom: 16px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); transition: opacity var(--transition), translate var(--transition); }
+html[data-desktop] .desktop-main .terminal-bottom[data-hidden] { opacity: 0; translate: 0 4px; pointer-events: none; }
+html[data-desktop] .desktop-main .terminal-bottom[data-button]:hover { background: var(--plain); color: var(--label); }
 
 /* ── Small things shared by these pages ──────────────────────────────────── */
 html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }

@@ -23,7 +23,17 @@ html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"
 html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 6px; background: var(--separator); }
 /* Who holds the session: a quiet line under the title, not a second bar. */
 html[data-desktop] .desktop-main .handoff-bar { flex: none; margin: 0 12px 4px; padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .conversation-recovery { border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--warning); }
+/* Catching up, or offline: a small pill floating at the top of the reading column, over the
+   text rather than pushing it down, so the conversation keeps its place. */
+html[data-desktop] .desktop-main .conversation-column { position: relative; }
+html[data-desktop] .desktop-main .conversation-recovery { position: absolute; top: 8px; left: 50%; z-index: 4; translate: -50% 0; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 48px)); height: 32px; padding: 0 6px 0 14px; border: 0; border-radius: 999px; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); font-size: 12px; white-space: nowrap; animation: recovery-in 200ms var(--ease-out) both; }
+html[data-desktop][data-theme="dark"] .desktop-main .conversation-recovery { background: #2a2a2a; }
+html[data-desktop] .desktop-main .conversation-recovery > span { overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .desktop-main .conversation-recovery [data-button] { height: 24px; padding-inline: 10px; border-radius: 999px; background: var(--fill); color: var(--label); font-size: 12px; text-decoration: none; }
+html[data-desktop] .desktop-main .conversation-recovery [data-button]:hover:not(:disabled) { background: var(--fillStrong); text-decoration: none; }
+html[data-desktop] .desktop-main .conversation-recovery[data-offline] { color: var(--warning); }
+@keyframes recovery-in { from { opacity: 0; translate: -50% -4px; } }
+@media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .conversation-recovery { animation: none; } }
 
 /* Reading column: 48 rem centred, 32 px from the toolbar. The composer floats over the end of
    it, so the column leaves room for it (Session measures its height). Values from Codex's
@@ -36,7 +46,10 @@ html[data-desktop] .desktop-main .conversation-content { padding: 32px max(24px,
 html[data-desktop] .desktop-main .live-timeline > * { margin-top: 0; margin-bottom: 0; }
 html[data-desktop] .desktop-main .live-timeline > * + * { margin-top: 16px; }
 html[data-desktop] .desktop-main .live-timeline > :is(.tool-record, .steps-summary, .thought-block) + :is(.tool-record, .steps-summary, .thought-block) { margin-top: 4px; }
-html[data-desktop] .desktop-main .live-timeline > .user-message + * { margin-top: 24px; }
+/* While a divider is dragged nothing animates its way to the new width. (Skipping off-screen
+   entries with content-visibility was tried and dropped: entries above the reader then change
+   height as they come into view, and the conversation, which anchors its own scroll, jumps.) */
+html[data-desktop][data-resizing] .desktop-main :is(.session-main, .live-side-panel, .composer, .conversation-content) { transition: none; }
 
 /* Markdown: headings 1.5 / 1.25 / 1.125 of the text, four steps of a quarter-size above. */
 html[data-desktop] .desktop-main .markdown { color: var(--label); font-size: 14px; line-height: 1.625; letter-spacing: 0; }
@@ -63,7 +76,7 @@ html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 6px
 /* Code blocks, Codex's: the panel's surface barely tinted (2 % of the ink, 3 % of white in the
    dark), a subtle edge, 20 px corners; the language in the text face in a 48 px header with a
    20 px round copy button; the source 12 / 20 in the code face. */
-html[data-desktop] .desktop-main .markdown .code-surface { margin: 18px 0; overflow: hidden; border-radius: 20px; background: color-mix(in oklab, var(--label) 2%, var(--plain)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 5%, transparent); contain: content; }
+html[data-desktop] .desktop-main .markdown .code-surface { margin: 18px 0; overflow: hidden; border: 0; border-radius: 20px; background: color-mix(in oklab, var(--label) 2%, var(--plain)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 5%, transparent); contain: content; }
 html[data-desktop][data-theme="dark"] .desktop-main .markdown .code-surface { background: color-mix(in oklab, #fff 3%, var(--plain)); }
 html[data-desktop] .desktop-main .markdown .code-surface:first-child { margin-top: 0; }
 html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 6px 6px 6px 20px; border: 0; background: transparent; color: var(--label); font-family: inherit; font-size: 13px; font-weight: 500; }
@@ -159,9 +172,17 @@ html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; bord
 html[data-desktop] .desktop-main .diff-block { overflow: hidden; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .diff-block > summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--label); font-size: 13px; font-weight: 510; }
 
-html[data-desktop] .desktop-main .plan-card { padding: 14px 16px; }
+/* A task list, as the Claude app's: a box on the surface, a row per step, its mark at the left. */
+html[data-desktop] .desktop-main .plan-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .plan-card > strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
-html[data-desktop] .desktop-main .plan-card li { font-size: 14px; }
+html[data-desktop] .desktop-main .plan-card ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+html[data-desktop] .desktop-main .plan-card li { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 4px 0; color: var(--label); font-size: 14px; line-height: 20px; }
+html[data-desktop] .desktop-main .plan-card li[data-status="completed"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .plan-mark { display: grid; flex: none; place-items: center; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid color-mix(in oklab, var(--label) 45%, transparent); border-radius: 50%; color: var(--plain); }
+html[data-desktop] .desktop-main .plan-card li[data-status="completed"] .plan-mark { border-color: transparent; background: color-mix(in oklab, var(--label) 70%, transparent); }
+html[data-desktop] .desktop-main .plan-card li[data-status="pending"] .plan-mark { border-style: dashed; border-color: color-mix(in oklab, var(--label) 30%, transparent); }
+html[data-desktop] .desktop-main .plan-mark svg { width: 10px; height: 10px; }
+html[data-desktop] .desktop-main .plan-card li[data-status="in_progress"] .plan-text { font-weight: 500; }
 html[data-desktop] .desktop-main .notice-card { padding: 12px 14px; font-size: 13px; }
 html[data-desktop] .desktop-main .notice-card.error { background: var(--dangerSoft); box-shadow: none; }
 html[data-desktop] .desktop-main .notice-card.warning { background: var(--waitingSoft); box-shadow: none; }
@@ -247,6 +268,8 @@ html[data-desktop] .inspector-tabs > button[data-transient]::before { content: "
 html[data-desktop] .inspector-tabs-spacer { flex: 1; }
 html[data-desktop] .inspector-tabs [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
 html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
+/* In the Mac window the inspector is docked on a hairline: the handle is centred on it, full height. */
+html[data-desktop] .desktop-root[data-shell="electron"] .inspector-resizer { top: 0; bottom: 0; left: -4px; }
 html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
 html[data-desktop] .inspector-resizer:hover::after,
 html[data-desktop] .inspector-resizer:focus-visible::after,

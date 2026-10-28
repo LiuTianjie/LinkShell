@@ -139,6 +139,28 @@ describe("tool detail", () => {
     expect(hidden.size).toBe(0);
   });
 
+  it("Claude desktop app: update_plan shows as the plan, and its steps move it on", () => {
+    const line = (message: unknown, type = "assistant") => JSON.stringify({ type, uuid: "u", timestamp: "2026-10-28T00:00:00Z", message });
+    const hidden = new Set<string>();
+    const call = (id: string, input: unknown) =>
+      transcriptLine(line({ id: `m-${id}`, content: [{ type: "tool_use", id, name: "mcp__ccd_turn__update_plan", input }] }), { hidden });
+    const plan = (result: ReturnType<typeof transcriptLine>) =>
+      (result.updates[0] as { entries: { content: string; status: string }[] }).entries.map((entry) => `${entry.status}:${entry.content}`);
+    const first = call("p1", { items: [{ content: "读代码", status: "in_progress" }, { content: "改样式", status: "pending" }, { content: "跑测试", status: "pending" }], scope: "first_task" });
+    expect(first.updates.map((u) => u.sessionUpdate)).toEqual(["plan"]);
+    expect(plan(first)).toEqual(["in_progress:读代码", "pending:改样式", "pending:跑测试"]);
+    expect(plan(call("p2", { advance: true }))).toEqual(["completed:读代码", "in_progress:改样式", "pending:跑测试"]);
+    expect(plan(call("p3", { done: [2], start: 3 }))).toEqual(["completed:读代码", "completed:改样式", "in_progress:跑测试"]);
+    // Its result lines are part of the card, not calls of their own.
+    const result = transcriptLine(line({ role: "user", content: [{ type: "tool_result", tool_use_id: "p3", content: "Plan updated" }] }, "user"), { hidden });
+    expect(result.updates).toEqual([]);
+  });
+
+  it("Claude desktop app: a step update with no list before it stays a plain call", () => {
+    const line = JSON.stringify({ type: "assistant", uuid: "u", timestamp: "2026-10-28T00:00:00Z", message: { id: "m", content: [{ type: "tool_use", id: "p", name: "mcp__ccd_turn__update_plan", input: { advance: true } }] } });
+    expect(transcriptLine(line, { hidden: new Set() }).updates.map((u) => u.sessionUpdate)).toEqual(["tool_call"]);
+  });
+
   it("Claude: imports sub-agent transcripts nested under their Task call", () => {
     const dir = mkdtempSync(join(tmpdir(), "ls-sub-"));
     const main = join(dir, "s.jsonl");

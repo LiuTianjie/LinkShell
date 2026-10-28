@@ -22,7 +22,7 @@ html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transfor
 html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: #fff; transform: translateX(14px); }
 /* Segmented controls: a grey track 2 px deep, the chosen option a white thumb that casts a little. */
 html[data-desktop] [data-slot="tabs-list"] { --segment-track: #ededed; --segment-thumb: #fff; }
-html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: rgb(255 255 255 / .06); --segment-thumb: #303030; }
+html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: #0d0d0d; --segment-thumb: #303030; }
 /* Badges: 4 px corners, semibold, 18 px tall. */
 html[data-desktop] [data-slot="badge"] { height: 18px; padding-inline: 6px; border-radius: 4px; font-size: 11.5px; font-weight: 590; }
 
@@ -142,7 +142,6 @@ html[data-desktop] .desktop-main .service-status { border: 1px solid var(--separ
 html[data-desktop] .desktop-main :is(.workflow-panel, .workflow-phase, .workflow-agent) { border-color: var(--separator); border-radius: var(--radius-well); background: var(--card); }
 
 /* ── Terminals ───────────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .terminal-tab-bar { gap: 6px; padding: 0 0 8px; border-bottom: 0; }
 /* Terminal tabs as Codex's tab strip: 28 px, 10 px corners, the open one a soft tint. */
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 10px !important; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--fill); color: var(--label); }

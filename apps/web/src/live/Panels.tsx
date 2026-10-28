@@ -40,7 +40,7 @@ import {
   useJob,
   useLoad,
 } from "./common";
-import { DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
+import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
 import { ChevronRight, GitBranch, RefreshCw, Trash2 } from "lucide-react";
@@ -236,7 +236,7 @@ export function Changes({ view }: { view?: SessionView }) {
     <section className="changes">
       <header className="changes-head">
         <strong>{files.length} 个文件已更改</strong>
-        <span className="diff-stat"><span className="diff-add">+{total.added}</span> <span className="diff-del">−{total.removed}</span></span>
+        <DiffStat added={total.added} removed={total.removed} />
       </header>
       <div className="changes-files">
         {files.map((file) => {
@@ -256,10 +256,7 @@ export function Changes({ view }: { view?: SessionView }) {
                   {slash >= 0 && <small>{shown(file.path).slice(0, slash + 1)}</small>}
                   {shown(file.path).slice(slash + 1)}
                 </span>
-                {/* A file whose lines didn't change (a move, a mode change) has no count to show. */}
-                {(file.stat.added > 0 || file.stat.removed > 0) && (
-                  <span className="diff-stat"><span className="diff-add">+{file.stat.added}</span> <span className="diff-del">−{file.stat.removed}</span></span>
-                )}
+                <DiffStat added={file.stat.added} removed={file.stat.removed} />
               </button>
               {expanded && <DiffView lines={file.lines} path={file.path} />}
             </div>

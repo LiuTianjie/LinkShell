@@ -244,10 +244,16 @@ export class HostRpcServer {
         return {};
       },
       "sessions.unqueue": (params: P<"sessions.unqueue">) => ({ removed: hub.unqueue(params.sessionId, params.clientMessageId) }),
-      "sessions.archive": async (params: P<"sessions.archive">) => ({ session: await hub.archive(params.sessionId, params.archived) }),
+      "sessions.archive": async (params: P<"sessions.archive">) => {
+        const session = await hub.archive(params.sessionId, params.archived);
+        // Put away with its session: an archived session's shells have nothing left to do.
+        if (params.archived) terminals.closeForSession(params.sessionId);
+        return { session };
+      },
       "sessions.rename": async (params: P<"sessions.rename">) => ({ session: await hub.rename(params.sessionId, params.title) }),
       "sessions.delete": async (params: P<"sessions.delete">) => {
         await hub.delete(params.sessionId, params.worktree);
+        terminals.closeForSession(params.sessionId);
         return {};
       },
       "sessions.goal": (params: P<"sessions.goal">) => hub.goal(params.sessionId, params.change),
@@ -316,7 +322,11 @@ export class HostRpcServer {
       "fs.upload": (params: P<"fs.upload">) => uploadFile(params),
       "fs.mkdir": (params: P<"fs.mkdir">) => makeDirectory(params),
       "terminals.list": () => ({ terminals: terminals.list() }),
-      "terminals.create": (params: P<"terminals.create">) => ({ terminal: terminals.create(params) }),
+      "terminals.create": (params: P<"terminals.create">) => {
+        // A session's terminal starts where the session works (its worktree, if it has one).
+        const cwd = params.cwd ?? (params.sessionId ? hub.getSession(params.sessionId).cwd : undefined);
+        return { terminal: terminals.create({ ...params, cwd }) };
+      },
       "terminals.attach": (params: P<"terminals.attach">, context) => {
         const previous = context.terminals.get(params.terminalId);
         if (previous) terminals.detach(params.terminalId, previous);

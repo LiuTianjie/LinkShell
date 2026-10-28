@@ -98,9 +98,14 @@ html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .
 html[data-desktop][data-fullscreen] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 44px; }
 html[data-desktop] .desktop-titlebar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; height: var(--toolbar); padding: 0 10px 0 82px; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html[data-desktop][data-fullscreen] .desktop-titlebar { padding-left: 12px; }
+/* The mark and name after the traffic lights; it takes the row's spare width, the buttons keep the end. */
+html[data-desktop] .desktop-brand { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; padding-left: 4px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; letter-spacing: -.01em; pointer-events: none; }
+html[data-desktop] .desktop-brand img { flex: none; width: 18px; height: 18px; border-radius: 5px; }
+html[data-desktop] .desktop-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Beside the traffic lights, over the main panel's title row (which leaves it room). */
-html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
+html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; display: flex; align-items: center; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
+html[data-desktop] .desktop-floating-titlebar > button { -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
 html[data-desktop] .desktop-titlebar-button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
@@ -109,6 +114,22 @@ html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStron
 html[data-desktop] .desktop-root[data-shell="electron"] :is(.session-heading, .desktop-page-title, .inspector-tabs) { -webkit-app-region: drag; app-region: drag; }
 html[data-desktop] .desktop-root[data-shell="electron"] :is(.session-heading, .desktop-page-title, .inspector-tabs) :is(button, a, input, select, [role="button"], [role="tab"], [role="combobox"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-sidebar-slot { transition: none; } }
+
+/* The Mac window, as Codex's: the main surface runs to the window's top, right and bottom edges
+   (the window's own corners round it), set off from the sidebar by a hairline, not floated as an
+   inset card. Beside a session the conversation and the inspector share that one surface,
+   divided by a hairline. Windows keeps the inset panel under its drawn title bar. */
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-body,
+html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { padding: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main { margin: 0; border: 0; border-left: var(--hairline) solid var(--separator); border-radius: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { border-left: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page) { background: var(--plain); }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main .live-session .session-layout { gap: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main :is(.session-main, .live-side-panel) { border: 0; border-radius: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main .live-side-panel { border-left: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main *::-webkit-scrollbar-track { margin-block: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-floating-titlebar { top: 0; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page) > .connection-banner { margin: 8px; }
 
 /* Windows: the same top bar, drawn by the page. */
 html[data-desktop] .windows-desktop-header { display: flex; flex: none; align-items: center; gap: 14px; height: var(--toolbar); padding: 0 16px; }
@@ -239,7 +260,7 @@ html[data-desktop] .tree-state[data-tone="running"] { width: 10px; height: 10px;
 @media (prefers-reduced-motion: reduce) {
   html[data-desktop] .tree-state[data-tone="running"] { width: 7px; height: 7px; margin: 0 4.5px; border: 0; background: var(--running); animation: none; }
 }
-html[data-desktop] .tree-more { height: 28px; padding: 0 10px 0 36px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; cursor: default; }
+html[data-desktop] .tree-more { height: 28px; padding: 0 10px 0 32px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; cursor: default; }
 html[data-desktop] .tree-more-projects { margin-top: 4px; }
 html[data-desktop] .tree-more:hover { background: var(--fill); color: var(--label); }
 
@@ -453,6 +474,8 @@ html[data-desktop] .desktop-main .list-skeleton { height: 56px; padding: 18px 12
 /* Agent marks are the agents' own logos: media in a row, small and on their own tile. */
 html[data-desktop] .agent-mark { width: 18px; height: 18px; border-radius: 5px; box-shadow: none; }
 html[data-desktop] .agent-mark[data-size="md"] { width: 22px; height: 22px; border-radius: 6px; }
+/* The tile colour is inline (per mark); only !important can replace an inline value from CSS. */
+html[data-desktop][data-theme="dark"] .agent-mark[data-light-tile] { background: var(--agent-mark-dark) !important; }
 
 /* Groups: rows in one soft box with hairlines between them (the same box as 本机管理's). A row
    under the pointer is tinted edge to edge, as Codex's card rows: the box has no padding of its
@@ -465,10 +488,12 @@ html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resour
 html[data-desktop][data-theme="dark"] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
 html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: rgb(255 255 255 / .02); }
 html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
-html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--label); font-size: 14px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-/* Rows in a group sit 16 px in from its edges, their hairlines too, as Codex's settings rows. */
-html[data-desktop] .desktop-main .computers-section-heading { padding: 14px 16px 6px; }
+/* Rows in a group sit 16 px in from its edges, their hairlines too, as Codex's settings rows. A
+   group's title and its line of why sit above its box, as 本机管理's do (13 / 500 secondary). */
+html[data-desktop] .desktop-main .computers-group { display: flex; flex-direction: column; gap: 8px; }
+html[data-desktop] .desktop-main .computers-section-heading { padding: 0 4px; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .computers-section .list-row { padding: 0 16px; }
 html[data-desktop] .desktop-main .computers-section > .list-row + .list-row::before { left: 16px; right: 16px; }
 html[data-desktop] .desktop-main :is(.screen-list, .screens-page > div) > .screen-row { padding: 0 16px; }
@@ -496,7 +521,9 @@ html[data-desktop] .desktop-main .project-row > .project-new { position: absolut
 html[data-desktop] .desktop-main .project-meta { transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .project-row:is(:hover, :has(.project-new:focus-visible)) .project-meta { opacity: 0; }
 html[data-desktop] .desktop-main .project-icon { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .project-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
+/* Centred on the row like the icon and the facts (a baseline row sits a few pixels low). */
+html[data-desktop] .desktop-main .project-copy { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
+html[data-desktop] .desktop-main .project-copy > * { line-height: 20px; }
 html[data-desktop] .desktop-main .project-copy h2 { flex: none; max-width: 50%; overflow: hidden; color: var(--label); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-copy p { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-meta { display: flex; flex: none; align-items: center; gap: 12px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }

@@ -82,6 +82,7 @@ import "../styles/desktop.css";
 import "../styles/desktop-session.css";
 import "../styles/desktop-components.css";
 import "../styles/desktop-resources.css";
+import "../styles/desktop-preview.css";
 import "../styles/management.css";
 
 type NavigationItem = { id: string; title: string; icon: LucideIcon };
@@ -465,6 +466,8 @@ function DesktopNavigation({
       {isElectronDesktop && (
         // The window's title row: the traffic lights sit at its left, it drags the window.
         <div className="desktop-titlebar desktop-sidebar-titlebar">
+          {/* Ours, in the title row beside the traffic lights: the app's mark and name. */}
+          <span className="desktop-brand" aria-hidden><img src={appMark} alt="" draggable={false} /><span>LinkShell</span></span>
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
@@ -770,16 +773,18 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         ) : !sidebarHidden && (
           <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
         )}
+        <main className="main desktop-main" id="workspace-content" tabIndex={-1} data-screen={screenKey ? "detail" : undefined}>
+          {children}
+        </main>
+        {/* After the main view on purpose: Electron applies drag regions in document order, so a
+            title row's drag area that comes later would cover this button and swallow its click. */}
         {isElectronDesktop && sidebarHidden && (
-          <div className="desktop-titlebar desktop-floating-titlebar">
-            <button type="button" className="desktop-titlebar-button" aria-label="显示侧栏" onClick={toggleSidebar}>
+          <div className="desktop-floating-titlebar">
+            <button type="button" className="desktop-titlebar-button" aria-label="显示侧栏" title="显示侧栏" onClick={toggleSidebar}>
               <PanelLeft size={16} strokeWidth={1.6} />
             </button>
           </div>
         )}
-        <main className="main desktop-main" id="workspace-content" tabIndex={-1} data-screen={screenKey ? "detail" : undefined}>
-          {children}
-        </main>
       </SidebarProvider>
       <DesktopStatusBar openPalette={() => setPalette(true)} navigate={props.navigate} />
       <CommandCenter

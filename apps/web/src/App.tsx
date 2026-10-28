@@ -1038,13 +1038,17 @@ function Computers({
   const { link } = useConnection();
   const job = useJob();
   const gateway = useLoad(() => link.call("gateway.status", {}), [link], 10000);
-  const heading = (title: string, hint?: string) => (
-    <div className="computers-section-heading px-3 pb-2">
-      <h2 className="text-xs font-semibold text-[var(--secondaryLabel)]">
-        {title}
-      </h2>
-      {hint && <p className="text-xs text-[var(--tertiaryLabel)]">{hint}</p>}
-    </div>
+  // A section's title and its line of why sit above its box, as 本机管理's groups do.
+  const section = (title: string, hint: string | undefined, rows: ReactNode) => (
+    <section className="computers-group" aria-label={title}>
+      <div className="computers-section-heading px-3 pb-2">
+        <h2 className="text-xs font-semibold text-[var(--secondaryLabel)]">
+          {title}
+        </h2>
+        {hint && <p className="text-xs text-[var(--tertiaryLabel)]">{hint}</p>}
+      </div>
+      <div className="computers-section">{rows}</div>
+    </section>
   );
   return (
     <section className="computers-page flex min-w-0 flex-col gap-6">
@@ -1069,8 +1073,7 @@ function Computers({
         </div>
       )}
       <ErrorNotice error={job.error} />
-      <div className="computers-section">
-        {heading("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。")}
+      {section("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。", <>
         {state.computers.map((computer) => {
           const current = state.connection?.computer.key === computer.key;
           return (
@@ -1132,21 +1135,12 @@ function Computers({
             </div>
           );
         })}
-      </div>
+      </>)}
       {state.connection?.computer.key === "desktop:local" && (
         // The app shows this Mac's password beside its devices, as links to 本机管理.
-        isElectronDesktop ? null : (
-          <div className="computers-section">
-            {heading("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。")}
-            <AccessPasswordSettings />
-          </div>
-        )
+        isElectronDesktop ? null : section("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。", <AccessPasswordSettings />)
       )}
-      <div className="computers-section">
-        {heading(
-          "当前电脑的 Agent",
-          `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}${machine && (machine.protocol ?? 0) < HOST_PROTOCOL ? "（比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell）" : ""}`,
-        )}
+      {section("当前电脑的 Agent", `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}${machine && (machine.protocol ?? 0) < HOST_PROTOCOL ? "（比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell）" : ""}`, <>
         {!machine && <LoadState loading />}
         {machine?.agents.map((agent) => (
           <div className="list-row list-row-static computer-agent-row" key={agent.id}>
@@ -1174,15 +1168,15 @@ function Computers({
             </span>
           </div>
         ))}
-      </div>
+      </>)}
       {isElectronDesktop && state.connection?.computer.key === "desktop:local" ? (
         // This Mac's phones and password have their own pages (本机管理 → 设备 / 访问密码): here their
         // state and the way there.
-        <div className="computers-section">
-          {heading("这台 Mac 的访问")}
+        section("这台 Mac 的访问", undefined, <>
           <AccessPasswordSummary open={() => navigate(manageView("password"))} />
           <div className="list-row list-row-static">
-            <MonitorSmartphone className="text-[var(--tertiaryLabel)]" aria-hidden />
+            {/* The same 28 px tile as the password row above, so the two labels line up. */}
+            <span className="access-settings-mark" aria-hidden><MonitorSmartphone size={16} /></span>
             <div className="min-w-0 flex-1">
               <div className="font-medium">配对设备</div>
               <p className="text-xs text-[var(--tertiaryLabel)]">
@@ -1191,10 +1185,9 @@ function Computers({
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate(manageView("devices"))}>管理</Button>
           </div>
-        </div>
+        </>)
       ) : (
-      <div className="computers-section">
-        {heading("配对设备", "撤销后，该设备需要重新配对才能连接。")}
+        section("配对设备", "撤销后，该设备需要重新配对才能连接。", <>
         <LoadState {...gateway} />
         {gateway.error && (
           <Button
@@ -1240,7 +1233,7 @@ function Computers({
             </Button>
           </div>
         ))}
-      </div>
+      </>)
       )}
       <AcpManager />
     </section>

@@ -27,15 +27,24 @@ import {
   RotateCw,
   TerminalSquare,
   X,
+  Ellipsis,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { fileBase64 } from "./Files";
 import { readLocal, saveLocal } from "./storage";
 import { DESKTOP_FULLSCREEN_EVENT, isDesktop, isWindowsDesktop, setDesktopScreenFullScreen } from "./desktop";
 import { replayTerminal, writeTerminal } from "./terminal-replay";
 import { useDialogs } from "@/components/Dialogs";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -61,11 +70,18 @@ function isLight(color: string): boolean {
 export function Terminal({
   id,
   active = true,
+  extraActions,
+  menuActions,
 }: {
   id: string;
   active?: boolean;
+  /** The desktop's buttons beside the terminal's menu (a new terminal). */
+  extraActions?: ReactNode;
+  /** The desktop's items at the end of the terminal's menu (close it). */
+  menuActions?: ReactNode;
 }) {
   const { link } = useConnection();
+  const uploadInput = useRef<HTMLInputElement>(null);
   const mount = useRef<HTMLDivElement>(null);
   const activeTerm = useRef<Xterm | null>(null);
   const mountedRef = useRef(true);
@@ -91,6 +107,7 @@ export function Terminal({
     { path: string; inserted: boolean }[]
   >([]);
   const [copied, setCopied] = useState(false);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const uploadJob = useJob();
@@ -204,6 +221,13 @@ export function Terminal({
     activeTerm.current = term;
     fitRef.current = fit;
     term.open(mount.current);
+    // Whether the reader has scrolled up from the newest output: the way back down shows only then.
+    const scrolled = () => {
+      const buffer = term.buffer.active;
+      setAwayFromBottom(buffer.viewportY < buffer.baseY);
+    };
+    const scrollWatch = term.onScroll(scrolled);
+    const writeWatch = term.onWriteParsed(scrolled);
     // A considered 16-colour palette in Ghostty's muted spirit — soft, legible,
     // never the harsh VGA primaries. Background/foreground track the app theme.
     const ansi = {
@@ -502,6 +526,8 @@ export function Terminal({
       online();
       status();
       input.dispose();
+      scrollWatch.dispose();
+      writeWatch.dispose();
       activeTerm.current = null;
       fitRef.current = null;
       readyForInput.current = false;
@@ -565,6 +591,70 @@ export function Terminal({
         }
       }}
     >
+      {isDesktop ? (
+        // The desktop's terminal has no bar of its own: its actions sit at the end of the tab row
+        // (in a menu), its state shows only when it isn't simply connected, and the way back to
+        // the newest output appears when the view has left it.
+        <>
+          <div className="terminal-actions">
+            {(!onlineStatus || restoring || restoreFailed || ended) && (
+              <span className="terminal-connection" role="status">
+                {onlineStatus && restoring ? <LoaderCircle className="animate-spin" size={13} /> : <span className={canInput ? "online-dot" : "offline-dot"} aria-hidden="true" />}
+                {!onlineStatus ? "连接已断开" : restoring ? "正在恢复…" : restoreFailed ? "恢复失败" : "只读记录"}
+              </span>
+            )}
+            {extraActions}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="终端选项" title="终端选项"><Ellipsis /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-52">
+                <div className="terminal-font-menu" role="group" aria-label="终端字号">
+                  <span>字号</span>
+                  <Button variant="ghost" size="icon" aria-label="缩小终端字号" disabled={fontSize <= 10} onClick={() => setFontSize((value) => value - 1)}>A−</Button>
+                  <span className="terminal-font-value">{fontSize}</span>
+                  <Button variant="ghost" size="icon" aria-label="放大终端字号" disabled={fontSize >= 24} onClick={() => setFontSize((value) => value + 1)}>A+</Button>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled={uploadJob.busy || !canInput} onSelect={() => uploadInput.current?.click()}>
+                  <Upload />{uploadJob.busy ? "正在上传…" : "上传文件到终端…"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => fullscreenRequest(!fullscreen)}>
+                  {fullscreen ? <Minimize /> : <Maximize />}{fullscreen ? "退出全屏" : "全屏"}<DropdownMenuShortcut>⌃⌘F</DropdownMenuShortcut>
+                </DropdownMenuItem>
+                {menuActions}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <input
+              ref={uploadInput}
+              type="file"
+              multiple
+              hidden
+              tabIndex={-1}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = "";
+                startUpload(files);
+              }}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="terminal-bottom"
+            data-hidden={!awayFromBottom || undefined}
+            aria-label="回到底部"
+            title="回到底部"
+            tabIndex={awayFromBottom ? 0 : -1}
+            onClick={() => {
+              activeTerm.current?.scrollToBottom();
+              activeTerm.current?.focus();
+            }}
+          >
+            <ArrowDownToLine />
+          </Button>
+        </>
+      ) : (
       <div className="terminal-controls">
         <span className="terminal-connection" role="status">
           {onlineStatus && restoring ? (
@@ -641,6 +731,7 @@ export function Terminal({
           {fullscreen ? "退出全屏" : "全屏"}
         </Button>
       </div>
+      )}
       <div className="terminal-feedback">
         {restoreFailed ? (
           <Alert variant="destructive">
@@ -874,15 +965,23 @@ export function Terminals({
   cwd,
   selected,
   onSelect,
+  sessionId,
 }: {
   cwd?: string;
   selected?: string;
   onSelect: (id?: string) => void;
+  /**
+   * A session's own terminals (its inspector): only those are shown, one is opened in the
+   * session's directory when there is none, and a new one opens there at once, without asking.
+   */
+  sessionId?: string;
 }) {
   const dialogs = useDialogs();
   const { link, computer } = useConnection();
   const load = useTerminalList(link);
   const job = useJob();
+  // Hosts before session terminals take none: their inspector shows the computer's terminals.
+  const sessionMode = useClient((state) => !!sessionId && (state.machine?.protocol ?? 0) >= 2);
   const [creating, setCreating] = useState(false);
   const [browse, setBrowse] = useState(false);
   const [directory, setDirectory] = useState(cwd ?? "");
@@ -894,12 +993,13 @@ export function Terminals({
   const terminals = useMemo(
     () =>
       load.value?.terminals
-        .slice()
+        // A terminal opened from elsewhere for this session (a background task's) shows too.
+        .filter((terminal) => (sessionMode ? terminal.sessionId === sessionId || terminal.id === selected : true))
         .sort(
           (left, right) =>
             left.createdAt - right.createdAt || left.id.localeCompare(right.id),
         ),
-    [load.value?.terminals],
+    [load.value?.terminals, sessionMode, sessionId, selected],
   );
   const current = terminals?.find((terminal) => terminal.id === selected);
   const mounted = [
@@ -909,7 +1009,7 @@ export function Terminals({
     ),
     ...(selected ? [selected] : []),
   ].slice(-4);
-  const selectionKey = `terminal.${computer.key}`;
+  const selectionKey = sessionMode ? `terminal.${computer.key}.${sessionId}` : `terminal.${computer.key}`;
   useEffect(() => {
     if (!selected) return;
     setVisited((previous) => {
@@ -945,7 +1045,27 @@ export function Terminals({
     if (next?.id !== selected) onSelect(next?.id);
   }, [terminals, selected, onSelect, selectionKey]);
   const stopped = current && (current.exitCode != null || current.interrupted);
+  async function createForSession() {
+    const result = await link.call("terminals.create", { sessionId });
+    pendingSelection.current = result.terminal.id;
+    load.reload();
+    onSelect(result.terminal.id);
+  }
+  // Opening a session's terminal tab is asking for a shell there: one appears without a step.
+  // Once per session and mount, so closing the last one leaves the tab empty instead of
+  // bringing it straight back.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!sessionMode || opened.current || !terminals || !online || terminals.length) return;
+    opened.current = true;
+    void job.run(createForSession);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once the list first arrives
+  }, [sessionMode, terminals, online]);
   function openCreate() {
+    if (sessionMode) {
+      void job.run(createForSession);
+      return;
+    }
     job.clear();
     setDirectory(current?.cwd ?? cwd ?? "");
     setCommand("");
@@ -967,17 +1087,18 @@ export function Terminals({
     if (!current) return;
     const target = current;
     const ended = target.exitCode != null || target.interrupted;
-    const choice = await dialogs.choose(
-      `${ended ? "删除" : "关闭"}「${target.title || "Shell"}」？${ended ? "保存的全部输出会被删除。" : "正在运行的进程会结束，保存的全部输出也会被删除。"}工作目录：${target.cwd}`,
-      [
-        {
-          value: "close",
-          label: ended ? "删除记录" : "关闭并删除",
-          destructive: true,
-        },
-      ],
-    );
-    if (choice !== "close") return;
+    // A session's shell sitting at its prompt keeps nothing worth a question: it just closes.
+    // Something still running in it (a server, a build) asks first.
+    // The title is the foreground process: a shell's own name (sometimes with what wraps it,
+    // "zsh (…)") means nothing else is running in it.
+    const idle = sessionMode && !ended && /^-?(zsh|bash|sh|fish|pwsh|powershell)(\.exe)?(\s|$)/i.test(target.title);
+    const confirmed = idle || (await dialogs.choose(
+      sessionMode
+        ? `关闭「${target.title}」？正在运行的进程会结束。`
+        : `${ended ? "删除" : "关闭"}「${target.title || "Shell"}」？${ended ? "保存的全部输出会被删除。" : "正在运行的进程会结束，保存的全部输出也会被删除。"}工作目录：${target.cwd}`,
+      [{ value: "close", label: sessionMode ? "关闭" : ended ? "删除记录" : "关闭并删除", destructive: true }],
+    )) === "close";
+    if (!confirmed) return;
     await job.run(async () => {
       await link.call("terminals.close", { terminalId: target.id });
       const index =
@@ -988,9 +1109,21 @@ export function Terminals({
       load.reload();
     });
   }
+  const newButton = (
+    <Button
+      variant="ghost"
+      size={isDesktop ? "icon" : "icon-sm"}
+      aria-label="新建另一个终端"
+      title="新建另一个终端"
+      disabled={!online}
+      onClick={openCreate}
+    >
+      <Plus />
+    </Button>
+  );
   return (
     <section className="terminals-page">
-      <PageHeader
+      {!sessionMode && <PageHeader
         title="终端"
         // With no terminal yet the empty state below carries the one button.
         actions={terminals?.length ? (
@@ -999,7 +1132,7 @@ export function Terminals({
             新建终端
           </Button>
         ) : undefined}
-      />
+      />}
       {!terminals && online && <LoadState loading={load.loading} />}
       {!terminals && !online && (
         <Alert role="status">
@@ -1085,26 +1218,20 @@ export function Terminals({
                 重新运行
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="新建另一个终端"
-              title="新建另一个终端"
-              disabled={!online}
-              onClick={openCreate}
-            >
-              <Plus />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
-              title={stopped ? "删除当前终端记录" : "关闭当前终端"}
-              disabled={!current || job.busy || !online}
-              onClick={() => void closeCurrent()}
-            >
-              <X />
-            </Button>
+            {/* On the desktop these join the terminal's own actions at the end of this row. */}
+            {!isDesktop && newButton}
+            {!isDesktop && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
+                title={stopped ? "删除当前终端记录" : "关闭当前终端"}
+                disabled={!current || job.busy || !online}
+                onClick={() => void closeCurrent()}
+              >
+                <X />
+              </Button>
+            )}
           </div>
           {mounted.map((id) => (
             <TabsContent
@@ -1118,10 +1245,36 @@ export function Terminals({
                 id === selected ? "flex" : "hidden",
               )}
             >
-              <Terminal id={id} active={id === selected} />
+              <Terminal
+                id={id}
+                active={id === selected}
+                extraActions={newButton}
+                menuActions={
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" disabled={!current || job.busy || !online} onSelect={() => void closeCurrent()}>
+                      <X />{stopped ? "删除这个终端记录" : "关闭这个终端"}
+                    </DropdownMenuItem>
+                  </>
+                }
+              />
             </TabsContent>
           ))}
         </Tabs>
+      ) : sessionMode && online && !load.error ? (
+        // While the first one opens, nothing; after the last one closed, the way to open another.
+        job.busy || !opened.current ? <LoadState loading /> : (
+          <EmptyState
+            icon={<TerminalSquare />}
+            title="这个会话的终端已关闭"
+            description={`在 ${baseName(cwd ?? "") || "会话目录"} 中打开新的 Shell。会话归档或删除时，它的终端会一起关闭。`}
+          >
+            <Button onClick={openCreate}>
+              <Plus data-icon="inline-start" />
+              打开终端
+            </Button>
+          </EmptyState>
+        )
       ) : online && !load.loading && !load.error ? (
         <EmptyState
           icon={<TerminalSquare />}

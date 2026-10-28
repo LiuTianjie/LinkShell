@@ -131,6 +131,9 @@ type Panel =
 // files, a terminal and the computer's preview. Tasks join while the session has some running
 // or done; settings, goal, side, MCP and apps are opened from elsewhere (the composer's chips,
 // the ••• menu) and show as a tab only while open.
+/** The engine sizes a textarea to its text by itself (conversation.css turns it on where it can). */
+const fieldSizing = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+
 const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] = [
   { id: "changes", title: "变更" },
   { id: "files", title: "文件" },
@@ -322,6 +325,10 @@ export function Session({
   useLayoutEffect(() => {
     const element = composer.current;
     if (!element) return;
+    // Where the engine sizes a textarea to its text (Chromium: the Electron and Windows shells),
+    // CSS does it. Measuring by hand writes, reads and writes layout on every resize event, which
+    // is what made resizing the window stutter.
+    if (fieldSizing) return;
     const resize = () => {
       element.style.height = "auto";
       element.style.height = `${element.scrollHeight}px`;
@@ -868,9 +875,11 @@ export function Session({
   const column = (
           <div className="conversation-column">
             {!canInteract && hasContent && (
-              <div className="conversation-recovery" role="status">
+              <div className="conversation-recovery" role="status" data-offline={!online || undefined}>
                 <span>
-                  {online ? "正在同步最新消息，已载入的历史仍可阅读。" : "连接已断开，历史和草稿已保留。"}
+                  {isDesktop
+                    ? online ? "正在同步最新消息" : "连接已断开，历史和草稿已保留"
+                    : online ? "正在同步最新消息，已载入的历史仍可阅读。" : "连接已断开，历史和草稿已保留。"}
                 </span>
                 <Button variant="link" size="sm" onClick={retrySession}>
                   {online ? "重新加载" : "重新连接"}
@@ -1474,6 +1483,7 @@ export function Session({
                 {panel === "terminal" && (
                   <Terminals
                     cwd={session.cwd}
+                    sessionId={session.id}
                     selected={terminal}
                     onSelect={setTerminal}
                   />
@@ -1708,12 +1718,27 @@ function InspectorResizer({ width, resize }: { width: number; resize: (width: nu
         const target = event.currentTarget;
         target.setPointerCapture(event.pointerId);
         document.documentElement.dataset.resizing = "true";
-        const move = (next: PointerEvent) => resize(clamp(startWidth + startX - next.clientX));
+        // While dragging the width goes straight onto the layout, once a frame: rendering the
+        // session again for every pointer move is what made the drag trail the pointer. The
+        // width is handed to React (and saved) once, when the drag ends.
+        const layout = target.closest<HTMLElement>(".session-layout");
+        let latest = startWidth;
+        let frame = 0;
+        const move = (next: PointerEvent) => {
+          latest = clamp(startWidth + startX - next.clientX);
+          if (frame) return;
+          frame = requestAnimationFrame(() => {
+            frame = 0;
+            layout?.style.setProperty("--inspector-width", `${latest}px`);
+          });
+        };
         const end = () => {
           target.removeEventListener("pointermove", move);
           target.removeEventListener("pointerup", end);
           target.removeEventListener("pointercancel", end);
+          cancelAnimationFrame(frame);
           delete document.documentElement.dataset.resizing;
+          resize(latest);
         };
         target.addEventListener("pointermove", move);
         target.addEventListener("pointerup", end);

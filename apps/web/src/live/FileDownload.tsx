@@ -6,7 +6,8 @@ import { ErrorNotice, messageOf, useConnection } from "./common";
 import { formatFileSize } from "./file-content";
 import { saveRemoteFile } from "./file-download";
 
-export function FileDownload({ path }: { path: string }) {
+/** Saving a file from the computer: start, cancel, and what to say about it. */
+export function useFileDownload(path: string) {
   const { link } = useConnection();
   const task = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,17 +34,21 @@ export function FileDownload({ path }: { path: string }) {
       if (task.current === controller) { task.current = null; setBusy(false); }
     }
   }
+  const status = busy && progress ? `${formatFileSize(progress.received)} / ${formatFileSize(progress.total)}` : busy ? "正在下载…" : message;
+  return { save, cancel: () => task.current?.abort(), busy, status, error };
+}
+
+export function FileDownload({ path }: { path: string }) {
+  const download = useFileDownload(path);
   return <div>
     <div className="resource-reader-tools">
-      <Button variant="outline" size="sm" disabled={busy} onClick={() => void save()}>
-        {busy ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
-        {busy ? "正在下载…" : "下载文件"}
+      <Button variant="outline" size="sm" disabled={download.busy} onClick={() => void download.save()}>
+        {download.busy ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
+        {download.busy ? "正在下载…" : "下载文件"}
       </Button>
-      {busy && <Button variant="ghost" size="sm" onClick={() => task.current?.abort()}><X data-icon="inline-start" />取消</Button>}
-      <span className="resource-caption" role="status">
-        {busy && progress ? `${formatFileSize(progress.received)} / ${formatFileSize(progress.total)}` : message}
-      </span>
+      {download.busy && <Button variant="ghost" size="sm" onClick={download.cancel}><X data-icon="inline-start" />取消</Button>}
+      <span className="resource-caption" role="status">{download.busy ? download.status.replace("正在下载…", "") : download.status}</span>
     </div>
-    <ErrorNotice error={error} />
+    <ErrorNotice error={download.error} />
   </div>;
 }

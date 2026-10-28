@@ -1,0 +1,40 @@
+/* A file in the desktop's panels (FilePreview.tsx), after Codex's file preview: one 40 px bar with
+   a hairline under it, then the file on the panel's own surface, no frame around it. */
+html[data-desktop] .desktop-main .file-preview { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+html[data-desktop] .desktop-main .file-preview-bar { display: flex; flex: none; align-items: center; gap: 2px; height: 40px; padding: 0 4px 0 0; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .file-preview-bar [data-button][data-size="icon"] { color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .file-preview-bar [data-button][data-size="icon"]:hover:not(:disabled) { color: var(--label); }
+html[data-desktop] .desktop-main .file-preview-bar [data-button][aria-pressed="true"] { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .file-preview-name { min-width: 0; margin-left: 4px; overflow: hidden; color: var(--label); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; outline: none; }
+html[data-desktop] .desktop-main .file-preview-spacer { flex: 1; min-width: 8px; }
+html[data-desktop] .desktop-main .file-preview-bar [data-slot="tabs"] { margin-right: 4px; }
+html[data-desktop] .desktop-main .file-preview-note { flex: none; padding: 6px 0 0; color: var(--tertiaryLabel); font-size: 12px; }
+
+/* The file: the body scrolls, the bar stays. */
+html[data-desktop] .desktop-main .file-preview-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+html[data-desktop] .desktop-main .file-preview-markdown { padding: 16px 4px 24px; }
+html[data-desktop] .desktop-main .file-preview-markdown .markdown { font-size: 14px; line-height: 1.625; }
+html[data-desktop] .desktop-main .file-preview-image { display: grid; place-items: center; min-height: 240px; padding: 16px; }
+html[data-desktop] .desktop-main .file-preview-image img { max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 0 0 var(--hairline) var(--separator); }
+
+/* Source, as the editor's: a right-aligned number gutter in quaternary ink, 12 / 20 mono, the
+   grammar's colours, the asked-for line tinted. Lines don't wrap unless asked to. */
+html[data-desktop] .desktop-main .file-preview-source { display: grid; width: max-content; min-width: 100%; padding: 8px 0 16px; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; tab-size: 4; outline: none; }
+html[data-desktop] .desktop-main .file-preview-line { display: grid; grid-template-columns: calc(var(--gutter-digits, 3) * 1ch + 24px) minmax(0, 1fr); }
+html[data-desktop] .desktop-main .file-preview-number { position: sticky; left: 0; padding-right: 12px; background: var(--plain); color: var(--quaternaryLabel); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+html[data-desktop] .desktop-main .file-preview-line code { padding: 0 16px 0 0; background: none; font: inherit; white-space: pre; }
+html[data-desktop] .desktop-main .file-preview-line[data-target] { background: color-mix(in oklab, var(--running) 10%, transparent); }
+html[data-desktop] .desktop-main .file-preview-line[data-target] .file-preview-number { background: color-mix(in oklab, var(--running) 10%, var(--plain)); color: var(--running); }
+html[data-desktop] .desktop-main .file-preview-source-wrap { width: auto; }
+html[data-desktop] .desktop-main .file-preview-source-wrap .file-preview-line code { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+html[data-desktop] .desktop-main .file-preview-more { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 4px 16px; color: var(--tertiaryLabel); font-size: 12px; }
+
+/* Opened beside the list (the 文件 page): the preview is the right column, its own surface. */
+html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview { padding-left: 16px; border-left: var(--hairline) solid var(--separator); }
+/* The panel itself scrolls: the bar stays at its top while the file runs on under it. */
+html[data-desktop] .desktop-main .side-panel-content .file-preview-bar { position: sticky; top: -12px; z-index: 2; margin-top: -12px; background: var(--plain); }
+html[data-desktop] .desktop-main .side-panel-content .file-preview-body { overflow: visible; }
+html[data-desktop] .desktop-main .side-panel-content .file-preview-source { width: auto; overflow-x: auto; }
+/* In the inspector the file takes the panel: its bar replaces the list's. */
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"].resource-has-preview > :is(.resource-toolbar, .resource-search) { display: none; }

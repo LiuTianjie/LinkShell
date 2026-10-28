@@ -54,8 +54,8 @@ html[data-desktop] .management-group { display: flex; flex-direction: column; ga
 /* Codex's settings section titles: 13 / 500 in the secondary ink, above their box. */
 html[data-desktop] .management-group-title { display: flex; align-items: baseline; justify-content: space-between; margin: 0; padding: 0 4px; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
 html[data-desktop] .management-group-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
-html[data-desktop] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop][data-theme="dark"] :is(.management-rows, .management-panel, .management-account, .management-pairing, .management-section) { background: rgb(255 255 255 / .02); }
+html[data-desktop] :is(.management-rows, .management-panel, .management-pairing, .management-section) { border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop][data-theme="dark"] :is(.management-rows, .management-panel, .management-pairing, .management-section) { background: rgb(255 255 255 / .02); }
 html[data-desktop] .management-rows { padding: 0; }
 html[data-desktop] .management-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 48px; padding: 12px 16px; font-size: 13px; }
 html[data-desktop] .management-row + .management-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: 1px; background: var(--separator); }
@@ -94,23 +94,24 @@ html[data-desktop] .management-fact > strong[data-tone="warning"] { color: var(-
 html[data-desktop] .management-fact > strong[data-tone="muted"] { color: var(--secondaryLabel); }
 html[data-desktop] .management-fact > strong small { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; letter-spacing: 0; }
 html[data-desktop] .management-fact > p { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-html[data-desktop] .management-fact-action { margin-top: auto; padding-top: 4px; align-self: flex-start; }
 @container desktop-workspace (max-width: 720px) {
   html[data-desktop] .management-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   html[data-desktop] .management-fact:nth-child(3) { box-shadow: none; }
   html[data-desktop] .management-fact:nth-child(n + 3) { box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator); }
 }
 
-/* Account and membership. */
-html[data-desktop] .management-account { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
-html[data-desktop] .management-account-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-html[data-desktop] .management-account-head h2 { font-size: 13px; font-weight: 590; }
-html[data-desktop] .management-account-head p { margin-top: 2px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .management-membership { display: flex; flex-direction: column; gap: 8px; }
-html[data-desktop] .management-membership-line { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-html[data-desktop] .management-inline-form { display: flex; gap: 8px; max-width: 420px; }
-html[data-desktop] .management-inline-form input { flex: 1; }
-html[data-desktop] .management-account-gateway { display: flex; align-items: center; gap: 10px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .management-inline-form { display: flex; gap: 8px; width: 280px; }
+html[data-desktop] .management-inline-form input { flex: 1; height: 28px; }
+
+/* Settings rows (总览, 账号): the name and a line of why at the left, the state or control at the
+   right, 12 × 16 in, as Codex's settings. */
+html[data-desktop] .management-setting { align-items: center; min-height: 56px; }
+html[data-desktop] .management-row.management-setting > .management-setting-copy { display: grid; flex: 1; gap: 2px; min-width: 0; max-width: none; }
+html[data-desktop] .management-setting-copy > strong { overflow: hidden; color: var(--label); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .management-setting-copy > span { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
+html[data-desktop] .management-setting-copy [data-button][data-size="plain"] { height: auto; font-size: 12px; }
+html[data-desktop] .management-row.management-setting > .management-setting-control { display: flex; flex: none; align-items: center; gap: 8px; overflow: visible; }
+html[data-desktop] .management-rows > .management-note { min-height: 0; padding-block: 0 12px; }
 
 /* Pairing. */
 html[data-desktop] .management-pairing { display: flex; flex-direction: column; gap: 16px; padding: 18px; }
@@ -170,8 +171,10 @@ html[data-desktop] .management-chart-foot { display: flex; justify-content: spac
 html[data-desktop] .management-table-wrap { overflow-x: auto; }
 html[data-desktop] .management-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 html[data-desktop] .management-table th { height: 30px; color: var(--tertiaryLabel); font-weight: 510; text-align: right; white-space: nowrap; }
-html[data-desktop] .management-table td { height: 36px; box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--separator) inset; text-align: right; white-space: nowrap; }
-html[data-desktop] .management-table tr:first-child td { box-shadow: none; }
+/* A line between rows, none after the last: each row but the first draws one along its top. */
+html[data-desktop] .management-table td { height: 36px; text-align: right; white-space: nowrap; }
+html[data-desktop] .management-table tbody tr + tr td { box-shadow: inset 0 var(--hairline) 0 var(--separator); }
+html[data-desktop] .management-table thead th { box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--separator); }
 html[data-desktop] .management-table :is(th, td) { padding: 0 6px; }
 html[data-desktop] .management-table :is(th, td):nth-child(-n + 2) { text-align: left; }
 html[data-desktop] .management-table td:nth-child(2) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }

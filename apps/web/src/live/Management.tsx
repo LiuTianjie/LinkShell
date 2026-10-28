@@ -16,6 +16,7 @@ import {
   ScrollText,
   Settings,
   Smartphone,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { PRO_CODE_SHOP_URL } from "@linkshell/client-core";
@@ -232,57 +233,60 @@ function Status({ text, tone }: { text: string; tone?: "success" | "warning" }) 
   return <span className="management-status" data-tone={tone}><span aria-hidden />{text}</span>;
 }
 
+/**
+ * One setting, as Codex's settings rows: what it is and a line of why on the left; its state or
+ * control on the right. Every overview group is a box of these, so the page reads as one list.
+ */
+function SettingRow({ title, detail, children }: { title: ReactNode; detail?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="management-row management-setting">
+      <div className="management-setting-copy">
+        <strong>{title}</strong>
+        {detail && <span>{detail}</span>}
+      </div>
+      {children && <div className="management-setting-control">{children}</div>}
+    </div>
+  );
+}
+
 function Overview({ facts, confirm, navigate }: { facts: Facts; confirm: (action: Confirm) => void; navigate: (page: ManagePage) => void }) {
   const { state, healthy, devices } = facts;
   const gateway = state.snapshot?.gateway;
   const permissions = state.permissions;
   const screenReady = permissions.recording && permissions.control;
   const external = facts.standalone && healthy && !!state.about?.bundle && state.snapshot?.hostOwner !== state.about.bundle;
+  const online = devices.filter((device) => device.online).length;
   return (
     <>
       <Account facts={facts} confirm={confirm} />
-      {state.snapshot?.status === "stopped" && (
-        <div className="management-banner">
-          <span>启动后台服务后，即可从手机连接这台 Mac。</span>
-          <Button disabled={state.busy} onClick={() => void serviceAction("start")}>启动服务</Button>
-        </div>
-      )}
       {external && (
         <div className="management-banner" data-tone="warning">
           <span>当前服务由另一套 CLI 启动</span>
-          <Button variant="outline" disabled={state.busy} onClick={() => confirm("restart")}>切换到 App 内置服务…</Button>
+          <Button variant="outline" size="sm" disabled={state.busy} onClick={() => confirm("restart")}>切换到 App 内置服务…</Button>
         </div>
       )}
-      <Group title="这台 Mac 的状态">
-        <div className="management-facts" data-columns="4">
-          <Fact label="本机服务" value={facts.service} tone={healthy ? undefined : "warning"} caption={healthy ? "手机和工作台随时可以连接" : "启动后，即可从手机连接这台 Mac"}>
-            {!healthy && state.snapshot?.status === "stopped" && <Button size="sm" disabled={state.busy} onClick={() => void serviceAction("start")}>启动</Button>}
-          </Fact>
-          <Fact
-            label="网关"
-            value={facts.gateway}
-            caption={gateway?.error?.message ?? (gateway?.status === "online" ? "不在同一网络也能连上" : "只能在同一网络内连接")}
-            tone={healthy && gateway?.status === "online" ? undefined : "muted"}
-          />
-          <Fact
-            label="屏幕与控制"
-            value={!permissions.known ? "检查中" : screenReady ? "已就绪" : "需要授权"}
-            caption={screenReady ? "可以从手机查看和操作屏幕" : "需要录屏与辅助功能两项权限"}
-            tone={!permissions.known || screenReady ? undefined : "warning"}
+      <Group title="这台 Mac">
+        <div className="management-rows">
+          <SettingRow title="本机服务" detail={healthy ? "手机和工作台随时可以连接" : "启动后，即可从手机连接这台 Mac"}>
+            <Status text={facts.service} tone={healthy ? "success" : "warning"} />
+            {!healthy && state.snapshot?.status === "stopped" && <Button size="sm" disabled={state.busy} onClick={() => void serviceAction("start")}>启动服务</Button>}
+          </SettingRow>
+          <SettingRow
+            title="网关"
+            detail={gateway?.error?.message ?? (gateway?.status === "online" ? "不在同一网络也能连上" : "只能在同一网络内连接")}
           >
-            {permissions.known && !screenReady && <Button size="sm" variant="outline" onClick={openSetup}>授权</Button>}
-          </Fact>
-          <Fact
-            label="已配对设备"
-            value={String(devices.length)}
-            unit="台"
-            caption={devices.length ? `${devices.filter((device) => device.online).length} 台在线` : "扫码配对手机，或用同一账号登录"}
-          >
-            <Button size="sm" variant="outline" onClick={() => navigate("devices")}>管理设备</Button>
-          </Fact>
+            <Status text={facts.gateway} tone={healthy && gateway?.status === "online" ? "success" : undefined} />
+          </SettingRow>
+          <SettingRow title="屏幕与控制" detail={screenReady ? "可以从手机查看和操作屏幕" : "需要录屏与辅助功能两项权限"}>
+            <Status text={!permissions.known ? "检查中" : screenReady ? "已就绪" : "需要授权"} tone={permissions.known ? (screenReady ? "success" : "warning") : undefined} />
+            {permissions.known && !screenReady && <Button size="sm" variant="outline" onClick={openSetup}>授权…</Button>}
+          </SettingRow>
+          <SettingRow title="已配对设备" detail={devices.length ? `${devices.length} 台，${online} 台在线` : "扫码配对手机，或用同一账号登录"}>
+            <Button size="sm" variant="ghost" onClick={() => navigate("devices")}>管理<ChevronRight data-icon="inline-end" /></Button>
+          </SettingRow>
         </div>
       </Group>
-      <Group title="最近活动" trailing={state.activity.length ? `最近 ${Math.min(5, state.activity.length)} 条` : undefined}>
+      <Group title="最近活动">
         <div className="management-rows">
           {!state.activity.length && <Empty title="尚无活动" detail="连接服务后，状态变化会显示在这里。" />}
           {state.activity.slice(0, 5).map((event) => (
@@ -297,17 +301,6 @@ function Overview({ facts, confirm, navigate }: { facts: Facts; confirm: (action
   );
 }
 
-function Fact({ label, value, unit, caption, tone, children }: { label: string; value: string; unit?: string; caption: string; tone?: "warning" | "muted"; children?: ReactNode }) {
-  return (
-    <div className="management-fact">
-      <span>{label}</span>
-      <strong data-tone={tone}>{value}{unit && <small>{unit}</small>}</strong>
-      <p>{caption}</p>
-      {children && <div className="management-fact-action">{children}</div>}
-    </div>
-  );
-}
-
 function Empty({ title, detail }: { title: string; detail: string }) {
   return <div className="management-empty"><strong>{title}</strong><span>{detail}</span></div>;
 }
@@ -317,37 +310,33 @@ function Account({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
   const account = state.snapshot?.account;
   const gateway = state.snapshot?.gateway;
   return (
-    <section className="management-account" aria-label="LinkShell 账号">
-      <div className="management-account-head">
-        <div>
-          <h2>LinkShell 账号</h2>
-          <p className="management-selectable">{signedIn ? account?.email ?? account?.userId : "登录后，在手机上使用同一账号连接这台 Mac。"}</p>
-        </div>
-        {state.signingIn ? (
-          <div className="desktop-page-actions">
-            <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在登录" />
-            <Button variant="outline" onClick={cancelLogin}>取消登录</Button>
-          </div>
-        ) : signedIn ? (
-          <Button variant="outline" disabled={state.busy} onClick={() => confirm("logout")}>退出登录…</Button>
-        ) : (
-          <Button disabled={state.busy} onClick={() => void login()}>登录 / 注册</Button>
-        )}
+    <Group title="LinkShell 账号">
+      <div className="management-rows">
+        <SettingRow
+          title={signedIn ? <span className="management-selectable">{account?.email ?? account?.userId}</span> : "未登录"}
+          detail={signedIn ? `网关：${facts.gateway}` : "登录后，在手机上使用同一账号连接这台 Mac。官方网关需要 Pro；自建网关仍可通过配对使用。"}
+        >
+          {state.signingIn ? (
+            <>
+              <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在登录" />
+              <Button variant="outline" size="sm" onClick={cancelLogin}>取消登录</Button>
+            </>
+          ) : signedIn ? (
+            <>
+              {gateway?.status !== "online" && (
+                <Button size="sm" variant="outline" disabled={state.busy} onClick={() => confirm("connect-gateway")}>连接官方网关…</Button>
+              )}
+              <Button variant="ghost" size="sm" disabled={state.busy} onClick={() => confirm("logout")}>退出登录…</Button>
+            </>
+          ) : (
+            <Button size="sm" disabled={state.busy} onClick={() => void login()}>登录 / 注册</Button>
+          )}
+        </SettingRow>
+        {signedIn && <Membership state={state} />}
       </div>
       {state.accountMessage && <p className="management-hint management-selectable">{state.accountMessage}</p>}
-      {signedIn ? (
-        <>
-          <Membership state={state} />
-          <div className="management-account-gateway">
-            <span>网关：{facts.gateway}</span>
-            {gateway?.status !== "online" && (
-              <Button size="sm" variant="outline" disabled={state.busy} onClick={() => confirm("connect-gateway")}>连接官方网关…</Button>
-            )}
-          </div>
-          {gateway?.error?.message && <p className="management-note management-selectable" data-tone="warning">{gateway.error.message}</p>}
-        </>
-      ) : <p className="management-hint">官方网关需要 Pro；自建网关仍可通过配对使用。</p>}
-    </section>
+      {signedIn && gateway?.error?.message && <p className="management-note management-selectable" data-tone="warning">{gateway.error.message}</p>}
+    </Group>
   );
 }
 
@@ -356,24 +345,23 @@ function Membership({ state }: { state: ManagementState }) {
   const [code, setCode] = useState("");
   const redeem = async () => { if (await redeemPro(code)) setCode(""); };
   return (
-    <div className="management-membership">
-      <div className="management-membership-line">
-        {membership.kind === "pro" ? (
-          <>
-            <Status text="Pro 账户" tone="success" />
-            <span className="management-muted">有效期至 {membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}</span>
-          </>
-        ) : membership.kind === "free" ? (
-          <span className="management-muted">普通账户</span>
-        ) : (
-          <span className="management-muted">{state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}</span>
-        )}
+    <>
+      <SettingRow
+        title="会员"
+        detail={membership.kind === "pro"
+          ? `有效期至 ${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}`
+          : membership.kind === "free" ? "兑换 Pro 后，可通过官方网关在任何网络连接" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
+      >
+        {membership.kind === "pro" ? <Status text="Pro" tone="success" /> : membership.kind === "free" ? <span className="management-muted">普通账户</span> : null}
         {state.checkingMembership
           ? <LoaderCircle className="animate-spin management-muted" size={14} aria-hidden />
-          : <Button variant="ghost" size="icon-xs" title="刷新会员状态" aria-label="刷新会员状态" disabled={state.busy} onClick={refreshAccount}><RefreshCw /></Button>}
-      </div>
+          : <Button variant="ghost" size="icon" title="刷新会员状态" aria-label="刷新会员状态" disabled={state.busy} onClick={refreshAccount}><RefreshCw /></Button>}
+      </SettingRow>
       {membership.kind === "free" && (
-        <>
+        <SettingRow
+          title="兑换 Pro"
+          detail={<>没有激活码？<Button variant="link" size="plain" onClick={() => openDesktopExternal(PRO_CODE_SHOP_URL)}>前往链动小铺</Button></>}
+        >
           <form className="management-inline-form" onSubmit={(event) => { event.preventDefault(); void redeem(); }}>
             <Input
               value={code}
@@ -384,17 +372,14 @@ function Membership({ state }: { state: ManagementState }) {
               spellCheck={false}
               disabled={state.busy}
             />
-            <Button type="submit" disabled={state.busy || !code.trim()}>{state.redeeming ? "正在兑换…" : "兑换 Pro"}</Button>
+            <Button type="submit" size="sm" disabled={state.busy || !code.trim()}>{state.redeeming ? "正在兑换…" : "兑换"}</Button>
           </form>
-          <p className="management-hint">
-            没有激活码？<Button variant="link" size="plain" onClick={() => openDesktopExternal(PRO_CODE_SHOP_URL)}>前往链动小铺</Button>
-          </p>
-        </>
+        </SettingRow>
       )}
       {state.redemptionMessage && (
-        <p className="management-note management-selectable" data-tone={state.redemptionIsError ? "warning" : "success"} role="status">{state.redemptionMessage}</p>
+        <p className="management-row management-note management-selectable" data-tone={state.redemptionIsError ? "warning" : "success"} role="status">{state.redemptionMessage}</p>
       )}
-    </div>
+    </>
   );
 }
 

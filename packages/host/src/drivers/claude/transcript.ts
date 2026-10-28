@@ -218,6 +218,43 @@ function toolContent(name: string, input: Json): ToolCallContent[] | undefined {
   return undefined;
 }
 
+/** The last task list per transcript reader (its `hidden` set), for the updates that only move it on. */
+const lastPlans = new WeakMap<Set<string>, PlanEntry[]>();
+
+/**
+ * The Claude desktop app's task list (its `update_plan` tool, under any MCP server prefix): the
+ * whole list (`items`), or a step on from the last one (`advance`, or `done` / `start` by number).
+ */
+function desktopPlan(input: Json, reader: Set<string> | undefined): PlanEntry[] | undefined {
+  if (Array.isArray(input.items)) {
+    const entries = input.items.flatMap((raw): PlanEntry[] => {
+      const item = obj(raw);
+      const content = str(item?.content);
+      if (!content) return [];
+      const status = item?.status === "completed" || item?.status === "in_progress" ? item.status : "pending";
+      return [{ content, status, priority: "medium" }];
+    });
+    if (reader) lastPlans.set(reader, entries);
+    return entries;
+  }
+  const last = reader && lastPlans.get(reader);
+  if (!last) return undefined;
+  const next = last.map((entry) => ({ ...entry }));
+  if (input.advance === true) {
+    const current = next.findIndex((entry) => entry.status === "in_progress");
+    if (current >= 0) next[current]!.status = "completed";
+    const following = next.findIndex((entry, index) => index > current && entry.status === "pending");
+    if (following >= 0) next[following]!.status = "in_progress";
+  }
+  if (Array.isArray(input.done)) for (const number of input.done) if (typeof number === "number" && next[number - 1]) next[number - 1]!.status = "completed";
+  if (typeof input.start === "number" && next[input.start - 1]) {
+    for (const entry of next) if (entry.status === "in_progress") entry.status = "pending";
+    next[input.start - 1]!.status = "in_progress";
+  }
+  lastPlans.set(reader!, next);
+  return next;
+}
+
 function todoPlan(input: Json): PlanEntry[] | undefined {
   if (!Array.isArray(input.todos)) return undefined;
   return input.todos.flatMap((raw) => {
@@ -507,8 +544,8 @@ export function transcriptLine(
       updates.push({ sessionUpdate: "agent_message_chunk", messageId, content: { type: "text", text: block.text } });
     } else if (block.type === "tool_use" && str(block.id) && str(block.name)) {
       const input = obj(block.input) ?? {};
-      if (block.name === "TodoWrite") {
-        const entries = todoPlan(input);
+      if (block.name === "TodoWrite" || /(^|__)update_plan$/.test(str(block.name)!)) {
+        const entries = block.name === "TodoWrite" ? todoPlan(input) : desktopPlan(input, options.hidden);
         if (entries) updates.push({ sessionUpdate: "plan", entries });
         // The plan card is the view; its result line is skipped by id. Without a
         // reader's set (a single line) the call still shows, and closes cleanly.

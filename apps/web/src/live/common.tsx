@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { useStore } from "zustand";
@@ -79,6 +80,13 @@ export const stateLabel = (state: string) =>
     unknown: "未知",
   })[state] ?? state;
 /** sm = list rows (18px), md = headings (24px). The size lives here so no row can crowd its title. */
+function isLightTile(hex: string): boolean {
+  const value = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
+  if (Number.isNaN(value)) return false;
+  const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 160;
+}
+
 export function AgentMark({
   agent,
   size = "sm",
@@ -93,7 +101,10 @@ export function AgentMark({
       className={`agent-mark ${agent.toLowerCase()} ${mark?.full ? "full-mark" : ""}`}
       // The glyph is drawn in its light-scheme colour, so it needs its own tile: a white
       // Copilot or Grok mark on the page's light inset would not be seen.
-      style={mark?.bg ? { background: mark.bg.light, boxShadow: "none" } : undefined}
+      // A light tile (Claude's cream) would be the brightest thing on a dark page: the desktop's dark
+      // theme swaps it for the mark's own dark tile, which keeps the glyph's colour readable.
+      style={mark?.bg ? { background: mark.bg.light, boxShadow: "none", ...(isLightTile(mark.bg.light) ? { "--agent-mark-dark": mark.bg.dark } : {}) } as CSSProperties : undefined}
+      data-light-tile={mark?.bg && isLightTile(mark.bg.light) ? "" : undefined}
     >
       {mark ? (
         <img

@@ -810,11 +810,20 @@
     line-height: 1.6;
     padding: 3px 0;
   }
-  .plan-card li > span {
+  .plan-mark {
+    display: grid;
     flex-shrink: 0;
-    color: var(--running);
-    font-variant-numeric: tabular-nums;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    margin-top: 4px;
+    border: 1.5px solid var(--running);
+    border-radius: 50%;
+    color: var(--plain);
   }
+  .plan-card li[data-status="completed"] .plan-mark { border-color: transparent; background: var(--success); }
+  .plan-card li[data-status="pending"] .plan-mark { border-style: dashed; border-color: var(--tertiaryLabel); }
+  .plan-mark svg { width: 9px; height: 9px; }
 
   /* ---- Notice / alert cards ---- */
   .notice-card {
@@ -1203,6 +1212,10 @@
     max-height: min(240px, 28dvh);
     overflow-y: auto;
     field-sizing: fixed;
+  }
+  /* The engine grows the draft box with its text where it can (Session skips measuring it then). */
+  @supports (field-sizing: content) {
+    .composer textarea { field-sizing: content; }
   }
   .composer-drop-hint {
     position: absolute;
