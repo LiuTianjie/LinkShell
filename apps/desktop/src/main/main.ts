@@ -37,7 +37,6 @@ let visible = false;
 let pageReady = false;
 let quitting = false;
 let quitConfirmed = false;
-let problem: string | undefined;
 
 app.setName("LinkShell");
 // Hidden or behind other windows, Chromium throttles timers: heartbeats would then come late, and a dead link look alive.
@@ -165,7 +164,6 @@ function createWindow() {
   web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) pageReady = false; });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
-    problem = undefined;
     send("linkshell-desktop-visibility", { visible });
     applyAppearance();
     // React mounts after load; its command listeners are there a moment later.
@@ -225,7 +223,6 @@ function guard(web: WebContents) {
 
 function startServer() {
   if (!window) return;
-  problem = undefined;
   server.start((url) => {
     if (!window) return;
     void window.loadURL(url.href).catch((error: Error) => showProblem(`无法打开工作台：${error.message}`));
@@ -234,7 +231,6 @@ function startServer() {
 
 /** Shown when the page itself cannot be: the native shell has no other way to say it. */
 function showProblem(message: string) {
-  problem = message;
   if (!window) return;
   const html = `<!doctype html><meta charset="utf-8"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}

@@ -70,6 +70,8 @@ describe("readUserText", () => {
     const view = readUserText("<bash-input>npm run sync:duo</bash-input><bash-stdout>&gt; itool-tech@1.1.0 sync:duo\n&gt; node a.mjs &amp;&amp; echo &lt;ok&gt; &amp;gt;</bash-stdout><bash-stderr></bash-stderr>");
     expect(view.shell).toEqual({ command: "npm run sync:duo", stdout: "> itool-tech@1.1.0 sync:duo\n> node a.mjs && echo <ok> &gt;", stderr: undefined });
     expect(readUserText("<local-command-stdout>a &lt; b</local-command-stdout>").output).toBe("a < b");
+    // The shell's own echo, with the backspace zsh wrote: drawn as a terminal draws it.
+    expect(readUserText("<bash-input>ls</bash-input><bash-stdout>n\bnpm run x\n\u0007ok</bash-stdout>").shell?.stdout).toBe("npm run x\nok");
   });
   it("reads a Codex mention of another thread as its title", () => {
     expect(readUserText("&#x20;[修复闪退并优化 UI 和翻译](codex://threads/01a18119-2439-7653-a137-79214eed158d)继续完成这个").text).toBe("「修复闪退并优化 UI 和翻译」继续完成这个");

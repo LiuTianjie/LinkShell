@@ -9,6 +9,11 @@ const ACCEPTED = new Map([
   // werift 0.22 uses `ip` to format ICE candidates' addresses (toBuffer, toString, isV4Format, isLoopback) and never
   // calls isPublic(), the function at fault. No fixed release of `ip` exists; werift 0.24 no longer depends on it.
   ["GHSA-2p57-rm9w-gvfp", "ip.isPublic is not used by werift"],
+  // An array schema collects an issue for every failing element. The schemas that see input before
+  // any authentication (the gateway's clientFrameSchema) have no arrays; arrays are checked only on
+  // RPC from paired or same-account devices inside the end-to-end channel. Zod 3 has no fixed
+  // release: the fix is the move to zod 4.
+  ["GHSA-mrhx-c7xc-m3w5", "no array schema sees unauthenticated input; fixed only in zod 4"],
 ]);
 
 let report;

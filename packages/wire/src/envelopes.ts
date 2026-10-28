@@ -95,6 +95,7 @@ export function stripHiddenContext(text: string, { keepPeers = false }: { keepPe
     .trim();
 }
 
+// eslint-disable-next-line no-control-regex -- terminal colour codes start with ESC.
 const ANSI = /\u001b\[[\d;?]*[ -/]*[@-~]/g;
 
 function tagText(source: string, tag: string): string | undefined {
@@ -206,6 +207,15 @@ function unescapeHtml(value: string): string {
   });
 }
 
+/** Output as a terminal shows it: no colour codes, a backspace takes back the character before it, other controls are not drawn. */
+function printed(value: string): string {
+  let text = value.replace(ANSI, "");
+  // eslint-disable-next-line no-control-regex -- a backspace is the character being handled.
+  for (let previous = ""; previous !== text; ) { previous = text; text = text.replace(/[^\n\x08]\x08/g, ""); }
+  // eslint-disable-next-line no-control-regex -- what a terminal doesn't draw.
+  return text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+}
+
 /**
  * Codex Desktop writes a mention of another of its threads as a Markdown link to
  * codex://threads/<id>, with the space before it as "&#x20;": read as the thread's title.
@@ -249,7 +259,7 @@ export function readUserText(raw: string, { images = 0 }: { images?: number } = 
   }
 
   if (/^<bash-(?:input|stdout|stderr)>/.test(text)) {
-    const clean = (value?: string) => (value === undefined ? undefined : unescapeHtml(value).replace(ANSI, "").replace(/\n+$/, "")) || undefined;
+    const clean = (value?: string) => (value === undefined ? undefined : printed(unescapeHtml(value)).replace(/\n+$/, "")) || undefined;
     const command = clean(tagText(text, "bash-input"))?.trim();
     const stdout = clean(tagText(text, "bash-stdout"));
     const stderr = clean(tagText(text, "bash-stderr"));
