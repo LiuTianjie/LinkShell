@@ -50,14 +50,17 @@ function makeEnv(): Env {
   return { home, configDir, workDir, env };
 }
 
-async function boot(e: Env, busyWindowMs = 60_000, holderCheckMs = 3000) {
+async function boot(e: Env, busyWindowMs = 60_000, holderCheckMs = 3000, logs?: string[]) {
   const host = await startHost({
     home: e.home,
     version: "test",
     drivers: () => [
       new ClaudeDriver({ env: e.env, hostVersion: "test", claudeCommand: FAKE_CLAUDE, adapter: { command: FAKE_ACP, args: [] }, busyWindowMs, holderCheckMs }),
     ],
-    log: process.env.DEBUG_HOST ? (m) => console.log("[host]", m) : () => {},
+    log: (m) => {
+      logs?.push(m);
+      if (process.env.DEBUG_HOST) console.log("[host]", m);
+    },
   });
   cleanups.push(() => host.stop());
   return host;
@@ -678,6 +681,62 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     // Everything once, in the order it happened.
     expect(p.userTexts(desk.id)).toEqual(["first", "app working", "from phone", "back in the app"]);
     expect(p.agentTexts(desk.id)).toEqual(["echo: first", "app done", "echo: from phone", "app again"]);
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("continues a desktop app session through the API that app's Claude uses, not the host's", async () => {
+    const e = makeEnv();
+    const resumeLog = join(e.home, "resume-env.log");
+    // The host's own setup: a key of its own, and nothing else routed.
+    e.env = { ...e.env, FAKE_ACP_RESUME_LOG: resumeLog, ANTHROPIC_API_KEY: "host-key", CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: undefined };
+    for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]) delete e.env[name];
+    const logs: string[] = [];
+    const host = await boot(e, 60_000, 100, logs);
+    const p = await phone(host);
+    const desk = await terminal(host, e);
+    desk.type("first");
+    await waitFor(() => host.hub.getSession(desk.id).title === "Task: first", 8000);
+    await desk.quit();
+    await waitFor(() => host.hub.getSession(desk.id).driver === "none");
+    const nativeId = desk.id.slice("claude:".length);
+    await p.client.call("sessions.subscribe", { sessionId: desk.id, fromSeq: 0 });
+
+    // The desktop app with another provider: its Claude was handed that API in its environment.
+    // Started through sh so it isn't this test's (and so the host's) child.
+    const holderEnv = [
+      "ANTHROPIC_BASE_URL=http://127.0.0.1:9/relay",
+      "ANTHROPIC_AUTH_TOKEN=holder-secret-token",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL='relay opus'",
+      "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+      "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1",
+    ].join(" ");
+    const pid = Number(execSync(`env -i PATH=/usr/bin:/bin ${holderEnv} '${process.execPath}' -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 & echo $!`, { shell: "/bin/sh" }).toString().trim());
+    cleanups.push(() => {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    });
+    mkdirSync(join(e.configDir, "sessions"), { recursive: true });
+    writeFileSync(join(e.configDir, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: nativeId, entrypoint: "claude-desktop-3p", kind: "interactive" }));
+
+    await p.client.call("sessions.prompt", { sessionId: desk.id, clientMessageId: "r", content: text("from phone") });
+    await waitFor(() => p.agentTexts(desk.id).includes("echo: from phone"));
+    const opened = readFileSync(resumeLog, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, string> | null);
+    expect(opened.at(-1)).toMatchObject({
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:9/relay",
+      ANTHROPIC_AUTH_TOKEN: "holder-secret-token",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "relay opus",
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1",
+      // The host's key would go along with the relay's token otherwise.
+      ANTHROPIC_API_KEY: "",
+    });
+    // A refresh only the app can do isn't claimed for the copy.
+    expect(opened.at(-1)).not.toHaveProperty("CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH");
+    // Said where it goes, never with what.
+    expect(logs.some((line) => line.includes("127.0.0.1:9"))).toBe(true);
+    expect(logs.join("\n")).not.toContain("holder-secret-token");
+    // The "-3p" desktop app is the app, not a terminal.
+    const notice = p.of(desk.id).find((ev) => ev.update.sessionUpdate === "ls_notice" && ev.update.title === "已在手机上接着做");
+    expect(notice?.update).toMatchObject({ detail: expect.stringContaining("桌面 App") });
   }, 20_000);
 
   it("opened in the middle of the computer's turn: what is under way keeps its own time, and what Claude writes again after compacting isn't shown again", async () => {

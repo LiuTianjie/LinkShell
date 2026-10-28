@@ -10,7 +10,8 @@ import { AcpItemTracker, toConfigOptions, toHistory, type SourcedConfigOption } 
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
 import type { DriverBehavior } from "../behavior.js";
-import { descendsFrom, sessionHolders, type SessionHolder } from "./holders.js";
+import { descendsFrom, isDesktopApp, sessionHolders, type SessionHolder } from "./holders.js";
+import { processEnv, routingFrom, type ClaudeRouting } from "./routing.js";
 import { ClaudeTasks } from "./tasks.js";
 import { ClaudeActivity } from "./activity.js";
 import {
@@ -286,6 +287,8 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private readonly adapterMissing: boolean;
+  /** Per session: the API of the Claude on the computer, where it isn't the host's (see followHolder). In memory only: it holds credentials. */
+  private readonly routes = new Map<string, ClaudeRouting>();
   /** Sent from a device while another Claude was mid-turn in the session; goes out when that turn ends. */
   private readonly waiting = new Map<string, { content: ContentBlock[]; clientMessageId: string }[]>();
   /** Checks that sessions driven from a device haven't been reopened on the computer. */
@@ -792,6 +795,7 @@ export class ClaudeDriver extends AcpDriver {
   override async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
     if (!findTranscript(this.configDir, nativeId, request.cwd)) throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先发一条再问");
     const key = `${nativeId}\n${request.sideId}`;
+    if (!this.sideClaudes.has(key) && this.modes.get(nativeId) !== "remote") await this.followHolder(nativeId);
     const side = this.sideClaudes.get(key) ?? (await this.openSideClaude(key, nativeId, request.cwd));
     clearTimeout(side.idle);
     const stop = () => this.closeSideClaude(key);
@@ -834,7 +838,7 @@ export class ClaudeDriver extends AcpDriver {
         // Reads the transcript, writes nothing: the session stays as the computer left it.
         persistSession: false,
         pathToClaudeCodeExecutable: this.claudePath,
-        env: { ...this.env, CLAUDE_CONFIG_DIR: this.configDir },
+        env: { ...this.env, ...this.routes.get(nativeId), CLAUDE_CONFIG_DIR: this.configDir },
         // A side answer uses no tools: no MCP servers to start for it.
         strictMcpConfig: true,
         mcpServers: {},
@@ -976,6 +980,8 @@ export class ClaudeDriver extends AcpDriver {
     if (!state?.loaded && !findTranscript(this.configDir, nativeId, cwd)) {
       throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先在电脑上发一条");
     }
+    // Before a `linkshell claude` terminal steps aside: its Claude is the one to read.
+    if (!state?.loaded) await this.followHolder(nativeId);
     const desktop = this.host?.desktop(this.id, nativeId);
     let alsoOpenIn: "app" | "terminal" | undefined;
     if (desktop) {
@@ -997,7 +1003,7 @@ export class ClaudeDriver extends AcpDriver {
     const target = this.stateFor(nativeId, cwd);
     if (!target.loaded) {
       // Leaves a little of the budget for the settings below.
-      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.sessionMeta() }, Math.max(5000, deadline - Date.now() - 8000))
+      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.routedMeta(nativeId) }, Math.max(5000, deadline - Date.now() - 8000))
         .catch((error: unknown) => {
           if (error instanceof RpcError && error.appCode === "timeout") {
             throw RpcError.app("timeout", "电脑上的 Claude 没能及时打开这个会话：它可能连不上网络或代理、或某个 MCP 服务启动卡住。详情见电脑上的 ~/.linkshell/host.log");
@@ -1118,6 +1124,43 @@ export class ClaudeDriver extends AcpDriver {
     return handoff;
   }
 
+  /**
+   * Takes the API settings of the Claude that has the session open on the
+   * computer, when they differ from what the host's Claude would use (see
+   * routing.ts): the device's turns then reach the same API, wherever the user
+   * pointed that Claude. Unreadable (Windows) or no such Claude: the host's own.
+   */
+  private async followHolder(nativeId: string): Promise<void> {
+    if (process.platform === "win32") return;
+    const recorded = (await this.foreignHolders(nativeId)).map((holder) => holder.pid);
+    const pids = recorded.length > 0 || this.hasHolderRecords() ? recorded : await this.commandLineHolders(nativeId);
+    for (const pid of new Set(pids)) {
+      const env = await processEnv(pid);
+      if (!env) continue;
+      const routing = routingFrom(env, this.env);
+      if (!routing) {
+        this.routes.delete(nativeId);
+        return;
+      }
+      this.routes.set(nativeId, routing);
+      // The address only: the rest can be credentials.
+      let api = "its provider";
+      try {
+        if (routing.ANTHROPIC_BASE_URL) api = new URL(routing.ANTHROPIC_BASE_URL).host;
+      } catch {}
+      this.host?.log(`[claude] ${nativeId}: using the API of the Claude that has it open (pid ${pid}, ${api})`);
+      return;
+    }
+  }
+
+  /** What opens the session in the adapter, with the API taken from the computer's Claude, if any. */
+  private routedMeta(nativeId: string): Record<string, unknown> {
+    const base = this.sessionMeta() as { _meta?: { claudeCode?: Record<string, unknown> } };
+    const env = this.routes.get(nativeId);
+    if (!env) return base;
+    return { ...base, _meta: { ...base._meta, claudeCode: { ...base._meta?.claudeCode, options: { env } } } };
+  }
+
   /** Running Claude processes on this session that this host didn't start. */
   private async foreignHolders(nativeId: string): Promise<SessionHolder[]> {
     const foreign: SessionHolder[] = [];
@@ -1170,7 +1213,7 @@ export class ClaudeDriver extends AcpDriver {
     // Claude's own record of who has the session open.
     const holders = await this.foreignHolders(nativeId);
     if (holders.length > 0) {
-      const where = holders.some((holder) => holder.entrypoint !== "claude-desktop") ? "terminal" : "app";
+      const where = holders.some((holder) => !isDesktopApp(holder)) ? "terminal" : "app";
       return { where, working: turnInProgress(path, this.busyWindowMs) };
     }
     if (this.hasHolderRecords()) return undefined;

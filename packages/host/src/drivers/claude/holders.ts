@@ -12,8 +12,13 @@ const execFileAsync = promisify(execFile);
 
 export interface SessionHolder {
   pid: number;
-  /** How that Claude was started: "claude-desktop", "cli", "sdk-ts", … */
+  /** How that Claude was started: "claude-desktop", "claude-desktop-3p", "cli", "sdk-ts", … */
   entrypoint?: string;
+}
+
+/** The Claude desktop app, signed in to Claude or set up with another provider ("-3p"). */
+export function isDesktopApp(holder: SessionHolder): boolean {
+  return holder.entrypoint === "claude-desktop" || !!holder.entrypoint?.startsWith("claude-desktop-");
 }
 
 function alive(pid: number): boolean {
