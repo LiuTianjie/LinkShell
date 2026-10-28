@@ -518,7 +518,7 @@ export function Tasks({
             >
               <Badge state={task.state} />
               <strong>{task.title}</strong>
-              <small>{task.command}</small>
+              <small className="task-command" title={task.command}>{task.command}</small>
             </Button>
             {task.state === "running" && (
               <Button

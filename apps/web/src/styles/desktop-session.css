@@ -293,6 +293,8 @@ html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label
 html[data-desktop] .new-session-composer { display: flex; flex-direction: column; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
 html[data-desktop][data-theme="dark"] .new-session-composer { background: #303030; }
 html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
+/* In the dark a focused composer is lit by its surface already; the ring stays a hairline. */
+html[data-desktop][data-theme="dark"] :is(.new-session-composer, .desktop-main .composer):focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separator); }
 html[data-desktop] .new-session-composer textarea { min-height: 76px; max-height: 40vh; padding: 14px 16px 6px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 20px; resize: none; outline: none; field-sizing: content; }
 html[data-desktop] .new-session-composer textarea::placeholder { color: color-mix(in oklab, var(--tertiaryLabel) 50%, transparent); }
 html[data-desktop] .new-session-bar { display: flex; align-items: center; gap: 2px; padding: 0 8px 8px; }

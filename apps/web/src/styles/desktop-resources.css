@@ -137,6 +137,9 @@ html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absol
 html[data-desktop] .desktop-main .terminal-bottom[data-hidden] { opacity: 0; translate: 0 4px; pointer-events: none; }
 html[data-desktop] .desktop-main .terminal-bottom[data-button]:hover { background: var(--plain); color: var(--label); }
 
+/* A background task's command: two lines at most, the whole of it on hover (Codex's command rows). */
+html[data-desktop] .desktop-main .task-command { display: -webkit-box; overflow: hidden; font-family: var(--mono); font-size: 12px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+
 /* ── Small things shared by these pages ──────────────────────────────────── */
 html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 0; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }

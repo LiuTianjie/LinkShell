@@ -27,7 +27,6 @@ import {
   FolderOpen,
   LoaderCircle,
   Search,
-  Clock,
   MessageSquarePlus,
   MonitorSmartphone,
 } from "lucide-react";
@@ -612,7 +611,8 @@ function Home({
           新建会话
         </Button>
       </div>}
-      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3">
+      {/* An empty archive has nothing to sort: its empty state is the page. */}
+      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3" hidden={isDesktop && archived && loaded && !sessions.length && !query}>
         <Tabs value={filter} onValueChange={setFilter} hidden={archived && isDesktop}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
@@ -732,7 +732,7 @@ function Home({
             query || filter !== "all" ? (
               <Search />
             ) : archived ? (
-              <Clock />
+              <Archive />
             ) : (
               <MessageSquarePlus />
             )

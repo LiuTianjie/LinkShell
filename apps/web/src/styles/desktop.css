@@ -363,7 +363,7 @@ html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 
 /* ⌘K, as Codex's palette: 520 px, 20 px corners, a deep soft shadow; rows 5 × 8 px with 10 px
    corners, the ones not chosen at 75 %. */
-html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; width: min(560px, calc(100vw - 48px)); max-width: none; padding: 4px; border-radius: 20px; background: color-mix(in oklab, #fff 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
+html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; width: min(520px, calc(100vw - 48px)); max-width: none; padding: 4px; border-radius: 20px; background: color-mix(in oklab, #fff 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
 html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, #282828 94%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6); }
 html[data-desktop] .command-center [data-slot="command"] { border-radius: 16px !important; background: transparent; padding: 0; }
 html[data-desktop] .command-center [data-slot="command-input-wrapper"] { padding: 2px 4px 0; }
@@ -371,7 +371,7 @@ html[data-desktop] .command-center [data-slot="command-input-wrapper"] [data-slo
 html[data-desktop] .command-center [data-slot="command-input"] { font-size: 14px; outline: none; }
 html[data-desktop] .desktop-main .live-side-panel:focus-visible { outline: none; }
 html[data-desktop] .command-center-list { max-height: min(440px, 60dvh); margin-top: 4px; padding: 4px 0 0; border-top: 1px solid var(--separator); }
-html[data-desktop] .command-center [cmdk-group-heading] { padding: 8px 8px 4px !important; color: color-mix(in oklab, var(--label) 50%, transparent) !important; font-size: 12px !important; font-weight: 500 !important; }
+html[data-desktop] .command-center [cmdk-group-heading] { padding: 8px 8px 4px !important; color: color-mix(in oklab, var(--label) 50%, transparent) !important; font-size: 13px !important; font-weight: 500 !important; }
 html[data-desktop] .command-center [data-slot="command-item"] { min-height: 32px; padding: 5px 8px; border-radius: 10px !important; font-size: 13px; opacity: .75; content-visibility: auto; contain-intrinsic-size: auto 32px; }
 html[data-desktop] .command-center [data-slot="command-item"][data-selected="true"] { background: var(--fill); opacity: 1; }
 html[data-desktop] .command-center [data-slot="command-item"] > svg:first-child { color: var(--secondaryLabel); }
@@ -569,11 +569,11 @@ html[data-desktop] .desktop-main :is(.computers-section, .session-group, .projec
 
 /* Empty, loading and welcome states: quiet, centred, no frame. */
 html[data-desktop] .desktop-main [data-slot="empty"] { flex: none; margin-top: 24px; padding: 40px 24px; border: 0; border-radius: 0; background: transparent; }
-html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 14px; font-weight: 500; }
 /* `pretty`, not `balance`: balancing splits Chinese at an arbitrary character to even the lines. */
 html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 380px; color: var(--tertiaryLabel); font-size: 13px; line-height: 1.55; text-wrap: pretty; }
-html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 36px; height: 36px; border-radius: 10px; background: var(--fill); color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main [data-slot="empty-icon"] svg { width: 18px; height: 18px; }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: 48px; height: 48px; border-radius: 14px; background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] svg { width: 24px; height: 24px; }
 html[data-desktop] .desktop-main .welcome-live { max-width: 480px; gap: 14px; margin: auto; padding: 36px; }
 html[data-desktop] .desktop-main .welcome-live img { width: 56px; height: 56px; border-radius: 14px; }
 html[data-desktop] .desktop-main .welcome-live h1 { font-size: 20px; font-weight: 590; letter-spacing: -.02em; }
