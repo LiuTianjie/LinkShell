@@ -62,17 +62,34 @@ async function windowSmoke() {
       };
       look();
     })`;
-    const answer = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('The page did not answer')), 50_000);
+    let calls = 0;
+    const evaluate = (source, ms = 50_000) => new Promise((resolve, reject) => {
+      const id = ++calls;
+      const timer = setTimeout(() => reject(new Error('The page did not answer')), ms);
       socket.onmessage = ({ data }) => {
         const message = JSON.parse(data);
-        if (message.id !== 1) return;
+        if (message.id !== id) return;
         clearTimeout(timer);
         if (message.result?.exceptionDetails) reject(new Error(message.result.exceptionDetails.exception?.description ?? 'evaluation failed'));
         else resolve(message.result?.result?.value);
       };
-      socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression: source, awaitPromise: true, returnByValue: true } }));
     });
+    const answer = await evaluate(expression);
+    // For a person to look at (CI uploads them): the whole desktop, so the caption buttons show too.
+    const shots = process.env.LINKSHELL_SMOKE_SHOTS;
+    if (shots) {
+      const shot = async (name) => {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const file = join(resolve(shots), name).replace(/'/g, "''");
+        await run('powershell.exe', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $p = New-Object System.Drawing.Bitmap $b.Width, $b.Height; $g = [System.Drawing.Graphics]::FromImage($p); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); New-Item -ItemType Directory -Force -Path (Split-Path '${file}') | Out-Null; $p.Save('${file}')`], { windowsHide: true });
+      };
+      await shot('window-dark.png');
+      await evaluate("window.linkshellDesktop.postMessage({ action: 'appearance', value: 'light' }), true");
+      await shot('window-light.png');
+      await evaluate("location.hash = '#view=manage', true");
+      await shot('window-manage.png');
+    }
     socket.close();
     assert.equal(answer.platform, 'win32');
     assert.equal(answer.shell, 'electron');

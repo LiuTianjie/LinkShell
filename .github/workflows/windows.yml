@@ -27,6 +27,8 @@ jobs:
       - run: pnpm --filter @linkshell/desktop test
       - run: pnpm --filter @linkshell/windows test
       - run: pnpm --filter @linkshell/windows build:standalone
+        env:
+          LINKSHELL_SMOKE_SHOTS: artifacts/window-shots
       - uses: actions/upload-artifact@v4
         with:
           name: LinkShell-Windows-x64-unsigned
@@ -34,3 +36,9 @@ jobs:
             artifacts/LinkShell-Setup-*-windows-x64.exe
             artifacts/LinkShell-*-windows-x64.zip
             artifacts/*.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LinkShell-Windows-window-shots
+          path: artifacts/window-shots
+          if-no-files-found: ignore

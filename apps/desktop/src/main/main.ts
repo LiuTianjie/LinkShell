@@ -24,8 +24,10 @@ const MAC = process.platform === "darwin";
 const WINDOWS = process.platform === "win32";
 /** The page's own ground where the window is not translucent (theme.ts `background`). */
 const ground = () => (nativeTheme.shouldUseDarkColors ? "#1d1d1d" : "#f3f3f3");
-/** Windows draws its caption buttons over the page's toolbar row, in the page's ink. */
-const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: TOOLBAR });
+/** Windows draws its caption buttons over the page's 46 px title row (--toolbar), in the page's ink. */
+const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: 46 });
+/** The theme the opaque ground and the caption buttons were last painted for. */
+let surfaceDark: boolean | undefined;
 
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -68,9 +70,14 @@ function applyAppearance() {
 function updateWindowSurface() {
   if (!window) return;
   if (!MAC) {
-    // No vibrancy off the Mac: the page paints its own ground, and the caption buttons follow the theme.
-    window.setBackgroundColor(ground());
-    if (WINDOWS) window.setTitleBarOverlay(overlay());
+    // No vibrancy off the Mac: the page paints its own ground, and the caption buttons follow the
+    // theme. Repainted only when it changes: this runs on every resize.
+    const dark = nativeTheme.shouldUseDarkColors;
+    if (dark !== surfaceDark) {
+      surfaceDark = dark;
+      window.setBackgroundColor(ground());
+      if (WINDOWS) window.setTitleBarOverlay(overlay());
+    }
     send("linkshell-desktop-surface", { translucent: false });
     return;
   }
@@ -710,6 +717,8 @@ async function ready() {
     updateTray();
   }
   createWindow();
+  // "Follow the system": the opaque ground and Windows' caption buttons follow it too.
+  nativeTheme.on("updated", updateWindowSurface);
   startUpdater();
   if (launch.checkUpdates) { openManagement("更新"); checkUpdates(); }
 }
