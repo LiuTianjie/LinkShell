@@ -18,4 +18,14 @@ final class MenuBarTests: XCTestCase {
     XCTAssertEqual(menu.items[2].representedObject as? String, "quit")
     XCTAssertTrue(menu.items[0].target === target)
   }
+
+  @MainActor func testStartsNearTheRightOnceAndKeepsWhereItWasMovedTo() throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: "MenuBarTests-\(UUID().uuidString)"))
+    MenuBar.placeFirstTime(defaults)
+    XCTAssertEqual(defaults.double(forKey: MenuBar.positionKey), 300)
+    // Dragged elsewhere: AppKit wrote the new place, which stays.
+    defaults.set(812.0, forKey: MenuBar.positionKey)
+    MenuBar.placeFirstTime(defaults)
+    XCTAssertEqual(defaults.double(forKey: MenuBar.positionKey), 812)
+  }
 }

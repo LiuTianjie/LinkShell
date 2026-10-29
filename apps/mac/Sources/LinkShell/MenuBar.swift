@@ -25,6 +25,7 @@ import AppKit
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    MenuBar.placeFirstTime()
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     item.button?.image = MenuBar.icon()
     item.button?.toolTip = "LinkShell"
@@ -61,6 +62,15 @@ import AppKit
   @objc private func clicked(_ sender: NSMenuItem) {
     guard let id = sender.representedObject as? String else { return }
     link.emit(["t": "click", "id": id])
+  }
+
+  /// Where AppKit keeps this item's place (points from the right): it is the process's first, `Item-0`.
+  static let positionKey = "NSStatusItem Preferred Position Item-0"
+
+  /// A new item goes to the far left, the end a full menu bar beside the notch hides. With no
+  /// place kept yet, it starts near the right; where it is dragged to is kept under the same key.
+  static func placeFirstTime(_ defaults: UserDefaults = .standard) {
+    if defaults.object(forKey: positionKey) == nil { defaults.set(300.0, forKey: positionKey) }
   }
 
   /// The window's own template picture (both resolutions), or the drawn mark if it is missing.
