@@ -1,7 +1,7 @@
 {
   "name": "linkshell",
   "private": true,
-  "version": "0.10.77",
+  "version": "0.10.78",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [

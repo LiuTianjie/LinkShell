@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/desktop",
-  "version": "0.10.77",
+  "version": "0.10.78",
   "private": true,
   "description": "LinkShell desktop: the Electron window inside LinkShell.app (com.bd.linkshell.host).",
   "type": "module",
