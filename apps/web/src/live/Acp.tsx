@@ -44,7 +44,7 @@ function parseJson(value: string, label: string): unknown {
   }
 }
 
-function invalidFields(issues: { path: (string | number)[] }[]) {
+function invalidFields(issues: { path: PropertyKey[] }[]) {
   const fields = [...new Set(issues.map((issue) => issue.path.join(".")))];
   return `请检查配置字段：${fields.filter(Boolean).slice(0, 4).join("、") || "配置格式"}。`;
 }

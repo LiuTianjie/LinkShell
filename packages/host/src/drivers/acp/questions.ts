@@ -49,7 +49,7 @@ const grokSchema = z.object({
     options: z.array(z.object({ label: z.string().min(1), description: z.string().optional(), preview: z.string().nullish() })),
   })).min(1),
 });
-const formSchema = z.object({ mode: z.literal("form"), message: z.string().optional(), requestedSchema: z.unknown(), toolCallId: z.string().optional(), serverName: z.string().optional() });
+const formSchema = z.object({ mode: z.literal("form"), message: z.string().optional(), requestedSchema: z.unknown().optional(), toolCallId: z.string().optional(), serverName: z.string().optional() });
 const invalid = () => new RpcError(-32602, "Agent 的提问格式不受支持，未提交任何回答");
 function unique(values: string[]) { if (new Set(values).size !== values.length) throw invalid(); }
 
@@ -142,7 +142,7 @@ export function mapAcpQuestions(agent: string, method: string, params: unknown, 
     };
   }
   if (kind === "form" || kind === "grok-form") {
-    const url = z.object({ mode: z.literal("url"), message: z.string(), elicitationId: z.string(), url: z.string().url() }).safeParse(params);
+    const url = z.object({ mode: z.literal("url"), message: z.string(), elicitationId: z.string(), url: z.url() }).safeParse(params);
     if (url.success && kind === "form") {
       if (!["https:", "http:"].includes(new URL(url.data.url).protocol)) throw invalid();
       return {

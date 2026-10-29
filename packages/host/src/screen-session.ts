@@ -8,8 +8,8 @@ export const SCREEN_RETAIN_MS = 120_000;
 // before they can release input or change capture on a live connection.
 export const screenConfiguration = z.object({
   t: z.literal("screen.configure"),
-  requestId: z.number().int().nonnegative().safe(),
-  display: z.number().int().nonnegative().safe(),
+  requestId: z.number().int().nonnegative(),
+  display: z.number().int().nonnegative(),
   width: z.union([z.literal("native").transform(() => 3840), z.number(), z.string().regex(/^\d+$/).transform(Number)])
     .pipe(z.number().int().min(640).max(3840)),
   maxFps: z.union([z.literal(30), z.literal(60), z.literal(120)]).optional(),

@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-const env = z.record(z.string());
+const env = z.record(z.string(), z.string());
 export const mcpServerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("stdio"), name: z.string().min(1), command: z.string().min(1), args: z.array(z.string()).default([]), env: env.default({}) }),
-  z.object({ type: z.literal("http"), name: z.string().min(1), url: z.string().url(), headers: env.default({}) }),
-  z.object({ type: z.literal("sse"), name: z.string().min(1), url: z.string().url(), headers: env.default({}) }),
+  z.object({ type: z.literal("http"), name: z.string().min(1), url: z.url(), headers: env.default({}) }),
+  z.object({ type: z.literal("sse"), name: z.string().min(1), url: z.url(), headers: env.default({}) }),
   z.object({ type: z.literal("acp"), name: z.string().min(1), command: z.string().min(1), args: z.array(z.string()).default([]), env: env.default({}) }),
 ]);
 export type AcpMcpServer = z.infer<typeof mcpServerSchema>;
@@ -23,10 +23,10 @@ export const acpRemoteAgentSchema = z.object({
   label: z.string().min(1).max(80),
   transport: z.enum(["stdio", "http", "websocket"]),
   command: z.string().optional(), args: z.array(z.string()).default([]),
-  url: z.string().url().optional(),
+  url: z.url().optional(),
   /** Header name to environment-variable name. The UI does not store secrets. */
   headerEnv: env.default({}),
-  settings: acpAgentSettingsSchema.default({}),
+  settings: acpAgentSettingsSchema.prefault({}),
 });
 export type AcpRemoteAgent = z.infer<typeof acpRemoteAgentSchema>;
 

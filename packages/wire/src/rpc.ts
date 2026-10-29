@@ -78,7 +78,7 @@ export const RPC_APP_ERROR = -32000;
  */
 export const HOST_PROTOCOL = 2;
 
-const empty = z.object({}).passthrough();
+const empty = z.looseObject({});
 
 export const directoryEntrySchema = z.object({
   name: z.string(),
@@ -111,7 +111,7 @@ const acpMethods = {
     result: empty,
   },
   "agents.providers": {
-    params: z.object({ agent: z.string().min(1), operation: z.enum(["list", "set", "disable"]), config: z.object({ providerId: z.string(), apiType: z.string().optional(), baseUrl: z.string().url().optional(), headers: z.record(z.string()).optional() }).optional() }),
+    params: z.object({ agent: z.string().min(1), operation: z.enum(["list", "set", "disable"]), config: z.object({ providerId: z.string(), apiType: z.string().optional(), baseUrl: z.url().optional(), headers: z.record(z.string(), z.string()).optional() }).optional() }),
     result: z.object({ providers: z.array(acpProviderSchema) }),
   },
   "agents.custom": {
@@ -434,12 +434,12 @@ const coreMethods = {
       args: z.array(z.string()).default([]),
       /** The terminal's working directory and environment. */
       cwd: z.string().optional(),
-      env: z.record(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
     }),
     result: z.object({
       command: z.string(),
       args: z.array(z.string()),
-      env: z.record(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
       /** Set for handoff agents: the session this terminal now drives. */
       sessionId: z.string().optional(),
     }),
@@ -455,7 +455,7 @@ const coreMethods = {
     result: z.object({
       command: z.string(),
       args: z.array(z.string()),
-      env: z.record(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
     }),
   },
   // ── Gateway: reach this computer from anywhere ──

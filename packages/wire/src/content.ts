@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-const optionalString = z.string().nullish().transform((value) => value ?? undefined);
-const optionalMeta = z.record(z.unknown()).nullish().transform((value) => value ?? undefined);
+const optionalString = z.string().nullish().transform((value) => value ?? undefined).optional();
+const optionalMeta = z.record(z.string(), z.unknown()).nullish().transform((value) => value ?? undefined).optional();
 const contentMetadata = {
-  annotations: z.object({ audience: z.array(z.enum(["user", "assistant"])).nullish().transform((value) => value ?? undefined), priority: z.number().nullish().transform((value) => value ?? undefined), lastModified: optionalString }).passthrough().nullish().transform((value) => value ?? undefined),
+  annotations: z.looseObject({ audience: z.array(z.enum(["user", "assistant"])).nullish().transform((value) => value ?? undefined).optional(), priority: z.number().nullish().transform((value) => value ?? undefined).optional(), lastModified: optionalString }).nullish().transform((value) => value ?? undefined).optional(),
   _meta: optionalMeta,
 };
 const contentVariants = z.discriminatedUnion("type", [
@@ -28,7 +28,7 @@ const contentVariants = z.discriminatedUnion("type", [
     title: optionalString,
     description: optionalString,
     mimeType: optionalString,
-    size: z.number().nullish().transform((value) => value ?? undefined),
+    size: z.number().nullish().transform((value) => value ?? undefined).optional(),
     ...contentMetadata,
     /** What the link names: a file (default), a skill the user invoked, or another agent. */
     kind: z.enum(["file", "skill", "agent"]).optional(),
@@ -36,7 +36,7 @@ const contentVariants = z.discriminatedUnion("type", [
 ]);
 export type ContentBlock = z.infer<typeof contentVariants>;
 // Hide the nested validator implementation from every exported RPC declaration.
-export const contentBlockSchema: z.ZodType<ContentBlock, z.ZodTypeDef, unknown> = contentVariants;
+export const contentBlockSchema: z.ZodType<ContentBlock, unknown> = contentVariants;
 
 export const toolCallStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
 export type ToolCallStatus = z.infer<typeof toolCallStatusSchema>;

@@ -23,7 +23,7 @@ const unit = z.number().min(0).max(1);
 const button = z.enum(["left", "right"]);
 const modifiers = z.array(z.enum(["cmd", "shift", "alt", "ctrl"])).max(4).optional();
 const clicks = z.number().int().min(1).max(3).optional();
-const delta = z.number().finite();
+const delta = z.number();
 
 /** What a viewer may ask the helper to do. Positions are fractions of the display being watched. */
 export const inputEvent = z.discriminatedUnion("t", [

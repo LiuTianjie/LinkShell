@@ -68,7 +68,7 @@ export const mcpMethods = {
       sessionId: z.string().min(1),
       server: z.string().min(1),
       tool: z.string().min(1),
-      arguments: z.record(z.unknown()).optional(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
       connector: z.string().optional(),
     }),
     result: z.object({

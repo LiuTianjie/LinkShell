@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { acpAgentSettingsSchema, acpRemoteAgentSchema, type AcpAgentSettings, type AcpRemoteAgent } from "@linkshell/wire";
 
-const schema = z.object({ settings: z.record(acpAgentSettingsSchema).default({}), agents: z.array(acpRemoteAgentSchema).default([]) });
+const schema = z.object({ settings: z.record(z.string(), acpAgentSettingsSchema).default({}), agents: z.array(acpRemoteAgentSchema).default([]) });
 export class AcpSettingsStore {
   constructor(private readonly path: string) {}
   private read(): z.infer<typeof schema> {
