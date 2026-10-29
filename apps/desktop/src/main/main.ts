@@ -144,7 +144,9 @@ function createWindow() {
   // Started at sign-in: the window waits in the tray until it is asked for.
   window.on("ready-to-show", () => { if (!quitting && !launch.hidden) showWindow(); });
   window.on("show", () => setVisible(!window!.isMinimized()));
-  window.on("hide", () => setVisible(false));
+  // macOS sends "hide" while the window moves into or out of its full-screen Space, though it stays
+  // on screen: taking that as hidden unmounted the remote screen and so ended its full screen.
+  window.on("hide", () => { if (!window!.isVisible()) setVisible(false); });
   window.on("minimize", () => setVisible(false));
   window.on("restore", () => setVisible(true));
   window.on("close", (event) => {
