@@ -295,10 +295,12 @@ export type ToolOutcome = "running" | "done" | "failed" | "declined" | "stopped"
 export function toolOutcome(item: ToolItem): ToolOutcome {
   if (item.status === "in_progress" || item.status === "pending") return "running";
   if (record(item.rawOutput).declined === true) return "declined";
+  if (item.status !== "failed") return "done";
+  // Only a call that failed is told so in words: one that worked may print them (a log, a test's text).
   const output = toolOutput(item);
   if (/doesn't want to (proceed|take this action)|tool use was rejected|user (rejected|denied|declined)/i.test(output)) return "declined";
   if (/^\[?Request interrupted by user|\binterrupted by (the )?user\b/i.test(output)) return "stopped";
-  return item.status === "failed" ? "failed" : "done";
+  return "failed";
 }
 
 /** Matches a search reported, when its output says how many. */
