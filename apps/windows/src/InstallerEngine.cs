@@ -81,11 +81,12 @@ namespace LinkShell.Windows {
                     }
                     throw new IOException((prepared ? "更新失败，已恢复原有安装。\n" : "安装失败。\n") + installError.Message, installError);
                 }
+                // The new bundle's CLI has run, so no rollback needs the old copies. Each one is a whole app.
+                RemoveOldBundles(progress);
                 Report(progress, 98, "创建开始菜单入口", "正在添加 LinkShell 快捷方式…");
                 try { shortcut(Destination); }
                 catch (Exception error) { throw new IOException("应用文件已安装，但无法创建开始菜单入口。可从安装目录运行 LinkShell.exe，或重试安装。\n" + error.Message, error); }
                 Report(progress, 100, "安装完成", "已创建开始菜单快捷方式");
-                // Retain the previous bundle for manual recovery; never delete user data.
             } finally {
                 if (Directory.Exists(IOPath(scratch))) RetryFileOperation(() => Directory.Delete(IOPath(scratch), true));
             }
@@ -94,6 +95,28 @@ namespace LinkShell.Windows {
         void CheckDestination() {
             if (Directory.Exists(Destination) && !File.Exists(Path.Combine(Destination, "standalone.json"))) throw new IOException("目标目录已存在且不属于 LinkShell，请先检查：" + Destination);
             if (File.Exists(Destination)) throw new IOException("安装位置被同名文件占用：" + Destination);
+        }
+        void RemoveOldBundles(IProgress<InstallProgress> progress) {
+            string prefix = Path.GetFileName(Destination);
+            DirectoryInfo[] old;
+            try {
+                old = new DirectoryInfo(IOPath(Path.GetDirectoryName(Destination))).GetDirectories(prefix + ".*")
+                    .Where(directory => OldBundle(directory.Name, prefix) && (directory.Attributes & FileAttributes.ReparsePoint) == 0).ToArray();
+            } catch (IOException) { return; } catch (UnauthorizedAccessException) { return; }
+            if (old.Length == 0) return;
+            Report(progress, 96, "清理旧版本", "正在删除上一版本的文件…");
+            foreach (var directory in old) {
+                // A file something still holds keeps its copy; the next install tries again.
+                try { RetryFileOperation(() => Directory.Delete(directory.FullName, true)); }
+                catch (IOException) {} catch (UnauthorizedAccessException) {}
+            }
+        }
+        static bool OldBundle(string name, string prefix) {
+            foreach (string kind in new[] { ".previous-", ".failed-" }) {
+                string head = prefix + kind;
+                if (name.Length == head.Length + 32 && name.StartsWith(head, StringComparison.OrdinalIgnoreCase) && name.Substring(head.Length).All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return true;
+            }
+            return false;
         }
         static void MoveBundle(string source, string destination) { RetryFileOperation(() => Directory.Move(IOPath(source), IOPath(destination))); }
         static string IOPath(string path) {

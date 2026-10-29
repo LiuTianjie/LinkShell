@@ -53,7 +53,7 @@ JPEG 兼容路径的正常发送窗口最多保留两帧待确认，查看器绘
 
 ## 更新与卸载
 
-新安装包一起更新桌面界面、Node、CLI、Host 与屏幕组件。更新前从托盘退出界面。安装器仅停止自身托管的 Host，保存并恢复原有机器身份与配对；失败尝试回滚，保留旧目录作为恢复副本。外部 npm 安装的服务不会被自动替换。Windows 首版提供手动下载更新，暂未接入自动更新。
+新安装包一起更新桌面界面、Node、CLI、Host 与屏幕组件。更新前从托盘退出界面。安装器仅停止自身托管的 Host，保存并恢复原有机器身份与配对；失败尝试回滚，保留旧目录作为恢复副本。新版服务恢复成功后，删除这次和以前留下的 `LinkShell.previous-*` / `LinkShell.failed-*` 副本，更新不会越装越大；被占用而删不掉的文件留到下次安装再删。外部 npm 安装的服务不会被自动替换。Windows 首版提供手动下载更新，暂未接入自动更新。
 
 卸载时先在桌面端停止服务，关闭开机启动，再从托盘退出。删除安装目录及开始菜单 LinkShell 快捷方式即可；用户数据目录默认保留。
 
@@ -73,7 +73,7 @@ corepack pnpm --filter @linkshell/windows build:standalone
 
 使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件和安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
 
-已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。
+已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。
 
 命名管道替代 Host 的 Unix socket；不同 `LINKSHELL_HOME` 相互隔离。Codex 的 Windows 进程使用官方 app-server JSONL 标准输入/输出传输；npm 的 `.cmd` Agent 入口通过参数转义启动。终端使用 PowerShell 和随 node-pty 分发的 ConPTY。Mac 原有 socket 与媒体路径保留。
 

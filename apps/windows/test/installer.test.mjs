@@ -20,7 +20,7 @@ before(() => {
 after(() => {
   if (root && resolve(root).startsWith(resolve(tmpdir()) + '\\linkshell-installer-test-')) rmSync(root, { recursive: true, force: true });
 });
-for (const scenario of ['fresh', 'cancel', 'cancel-at-commit', 'update', 'rollback', 'prepare-failure', 'foreign', 'locked', 'transient-lock', 'traversal', 'incomplete', 'shortcut-failure', 'long-path', 'shortcut-real']) {
+for (const scenario of ['fresh', 'cancel', 'cancel-at-commit', 'update', 'rollback', 'prepare-failure', 'foreign', 'locked', 'transient-lock', 'traversal', 'incomplete', 'shortcut-failure', 'long-path', 'shortcut-real', 'cleanup']) {
   test(`installer transaction: ${scenario}`, { skip: !supported }, () => {
     const result = execFileSync(runner, [scenario, root], { windowsHide: true, encoding: 'utf8', stdio: 'pipe' });
     assert.match(result, new RegExp(`PASS ${scenario}`));

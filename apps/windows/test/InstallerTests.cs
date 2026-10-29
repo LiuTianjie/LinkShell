@@ -27,6 +27,7 @@ internal static class InstallerTests {
         stream.Position = 0; return stream;
     }
     static void Old(string path) { Directory.CreateDirectory(path); File.WriteAllText(Path.Combine(path, "standalone.json"), "old"); File.WriteAllText(Path.Combine(path, "LinkShell.exe"), "old"); }
+    static string Copy(string kind) { return "LinkShell." + kind + "-" + Guid.NewGuid().ToString("N"); }
 
     static int Main(string[] args) {
         try {
@@ -38,7 +39,13 @@ internal static class InstallerTests {
             Action<string> link = path => { shortcut = true; Assert(File.Exists(Path.Combine(path, "LinkShell.exe")), "shortcut before files"); };
             Action<string> running = path => {};
             Action commit = () => { token.Token.ThrowIfCancellationRequested(); committed = true; };
-            if (new[] { "cancel", "cancel-at-commit", "update", "rollback", "prepare-failure", "locked", "transient-lock" }.Contains(scenario)) Old(destination);
+            if (new[] { "cancel", "cancel-at-commit", "update", "rollback", "prepare-failure", "locked", "transient-lock", "cleanup" }.Contains(scenario)) Old(destination);
+            string parent = Path.GetDirectoryName(destination);
+            string[] stale = { Copy("previous"), Copy("failed") }, unrelated = { "LinkShell.previous-notes", "Other.previous-" + Guid.NewGuid().ToString("N"), Copy("backup") };
+            if (scenario == "cleanup" || scenario == "rollback") {
+                foreach (string name in stale) Old(Path.Combine(parent, name));
+                foreach (string name in unrelated) { Directory.CreateDirectory(Path.Combine(parent, name)); File.WriteAllText(Path.Combine(parent, name, "keep.txt"), "keep"); }
+            }
             if (scenario == "cancel") updates.OnUpdate = value => { if (value.Percent >= 5 && value.Percent < 85) token.Cancel(); };
             if (scenario == "cancel-at-commit") commit = () => { token.Cancel(); token.Token.ThrowIfCancellationRequested(); };
             if (scenario == "traversal") payload = () => Payload(true, true);
@@ -68,7 +75,7 @@ internal static class InstallerTests {
             else install();
 
             Assert(!Directory.GetDirectories(Path.GetDirectoryName(destination), "*.install-*").Any(), "staging left behind");
-            if (new[] { "fresh", "update", "transient-lock", "long-path", "shortcut-real" }.Contains(scenario)) {
+            if (new[] { "fresh", "update", "transient-lock", "long-path", "shortcut-real", "cleanup" }.Contains(scenario)) {
                 Assert(File.ReadAllText(Path.Combine(destination, "LinkShell.exe")) == "new", "files not installed");
                 Assert(committed && shortcut, "commit/shortcut missing");
                 Assert(updates.Values.Last().Percent == 100, "success not complete");
@@ -78,7 +85,13 @@ internal static class InstallerTests {
             } else Assert(!updates.Values.Any(value => value.Percent == 100), "failure declared success");
             if (new[] { "cancel", "cancel-at-commit", "rollback", "prepare-failure", "locked" }.Contains(scenario)) Assert(File.ReadAllText(Path.Combine(destination, "LinkShell.exe")) == "old", "old install changed");
             if (scenario.StartsWith("cancel")) Assert(!committed && !shortcut && calls.Count == 0, "cancellation affected host");
-            if (scenario == "update") Assert(String.Join(",", calls) == "prepare-update,recover-update" && Directory.GetDirectories(Path.GetDirectoryName(destination), "*.previous-*").Length == 1, "update recovery/backup missing");
+            if (scenario == "update") Assert(String.Join(",", calls) == "prepare-update,recover-update" && Directory.GetDirectories(parent, "*.previous-*").Length == 0, "update recovery missing or old bundle kept");
+            if (scenario == "cleanup") {
+                Assert(stale.All(name => !Directory.Exists(Path.Combine(parent, name))), "old previous/failed bundles kept");
+                Assert(unrelated.All(name => File.Exists(Path.Combine(parent, name, "keep.txt"))), "unrelated directory removed");
+                Assert(updates.Values.Any(value => value.Percent == 96 && value.Stage.Contains("旧版本")), "cleanup stage missing");
+            }
+            if (scenario == "rollback") Assert(stale.Concat(unrelated).All(name => Directory.Exists(Path.Combine(parent, name))) && Directory.GetDirectories(parent, "LinkShell.failed-*").Length == 2, "failed update removed recovery copies");
             if (scenario == "rollback") Assert(String.Join(",", calls) == "prepare-update,recover-update,stop-update-host,recover-update", "rollback order wrong");
             if (scenario == "prepare-failure") Assert(String.Join(",", calls) == "prepare-update,recover-update", "old host not recovered after stop failure");
             if (scenario == "traversal") Assert(!File.Exists(Path.Combine(Path.GetDirectoryName(destination), "escaped.txt")), "escaped staging root");
