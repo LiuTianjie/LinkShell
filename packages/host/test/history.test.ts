@@ -86,6 +86,27 @@ function collector() {
 
 const kinds = (events: SessionEvent[]) => events.map((event) => event.update.sessionUpdate);
 
+/** A message as the ACP agents (Claude) log it: the message, its end, then the turn it starts. */
+function ask(n: number) {
+  driver.emit({ sessionUpdate: "user_message_chunk", messageId: `u${n}`, content: { type: "text", text: `question ${n}` } });
+  driver.emit({ sessionUpdate: "ls_message_done", messageId: `u${n}`, role: "user" });
+  driver.emit({ sessionUpdate: "ls_turn", state: "started" });
+}
+
+/** A thought streamed a few characters at a time, as Claude streams it: one event per piece. */
+function think(id: string, pieces: number) {
+  for (let i = 0; i < pieces; i++) driver.emit({ sessionUpdate: "agent_thought_chunk", messageId: id, content: { type: "text", text: "so " } });
+  driver.emit({ sessionUpdate: "ls_message_done", messageId: id, role: "thought" });
+}
+
+function read(id: string) {
+  driver.emit({ sessionUpdate: "tool_call", toolCallId: id, title: "Read File", kind: "read", status: "pending" });
+  driver.emit({ sessionUpdate: "tool_call_update", toolCallId: id, status: "completed", content: [{ type: "content", content: { type: "text", text: "file" } }] });
+}
+
+/** The first event of the page that starts after `startSeq`, past the standing state sent before it. */
+const firstOfPage = (events: SessionEvent[], startSeq: number) => events.find((event) => event.seq > startSeq);
+
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "lsh-history-"));
   store = new HostStore(join(dir, "state.db"));
@@ -196,6 +217,79 @@ describe("session history in pages", () => {
     expect(client.events.find((event) => event.seq <= startSeq && event.update.sessionUpdate === "ls_turn")).toBeTruthy();
   });
 
+  it("opens a long turn of streamed thinking at the user's message, not at its last few hundred pieces", async () => {
+    for (let n = 1; n <= 30; n++) turn(n, 10);
+    const before = store.getSession("fake:s1")!.lastSeq;
+    // The reported session: reads between thousands of pieces of thought, the turn still running.
+    ask(31);
+    for (let step = 0; step < 12; step++) {
+      think(`thought-${step}`, 300);
+      read(`read-${step}`);
+    }
+    const client = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", 0, client.subscriber);
+    expect(startSeq).toBe(before);
+    expect(firstOfPage(client.events, startSeq)!.update).toMatchObject({ sessionUpdate: "user_message_chunk", messageId: "u31" });
+    expect(client.events.at(-1)!.seq).toBe(store.getSession("fake:s1")!.lastSeq);
+    // The page before is the turns before it, whole.
+    const earlier = hub.history("fake:s1", startSeq + 1);
+    expect(earlier.events.at(-1)!.seq).toBe(startSeq);
+    expect(earlier.events[0]!.update.sessionUpdate).toBe("user_message_chunk");
+  });
+
+  it("reads back a page of streamed thinking whole, however many pieces it has", async () => {
+    turn(1, 2);
+    const first = store.getSession("fake:s1")!.lastSeq;
+    ask(2);
+    think("long", 2000);
+    ask(3);
+    for (let i = 0; i < 200; i++) read(`t${i}`);
+    const { startSeq } = await hub.subscribe("fake:s1", 0, collector().subscriber);
+    const earlier = hub.history("fake:s1", startSeq + 1);
+    expect(earlier.startSeq).toBe(first);
+    expect(earlier.events.map((event) => event.seq)).toEqual(Array.from({ length: startSeq - first }, (_, i) => first + 1 + i));
+  });
+
+  it("starts a page at the user's message, not at the turn that message starts", async () => {
+    for (let n = 1; n <= 30; n++) {
+      ask(n);
+      for (let i = 0; i < 10; i++) read(`t${n}-${i}`);
+      driver.emit({ sessionUpdate: "agent_message_chunk", messageId: `a${n}`, content: { type: "text", text: `answer ${n}` } });
+      driver.emit({ sessionUpdate: "ls_message_done", messageId: `a${n}`, role: "agent" });
+      driver.emit({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
+    }
+    const client = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", 0, client.subscriber);
+    expect(startSeq).toBeGreaterThan(0);
+    expect(firstOfPage(client.events, startSeq)!.update.sessionUpdate).toBe("user_message_chunk");
+    const earlier = hub.history("fake:s1", startSeq + 1);
+    expect(earlier.events[0]!.update.sessionUpdate).toBe("user_message_chunk");
+    // The page before ends with the turn before, not with this turn's message.
+    expect(earlier.events.at(-1)!.update).toMatchObject({ sessionUpdate: "ls_turn", state: "ended" });
+  });
+
+  it("ends a page where a turn starts rather than cut into an older turn that is too big", async () => {
+    turn(1, 1000);
+    const before = store.getSession("fake:s1")!.lastSeq;
+    ask(2);
+    read("small");
+    const client = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", 0, client.subscriber);
+    expect(startSeq).toBe(before);
+    expect(firstOfPage(client.events, startSeq)!.update).toMatchObject({ sessionUpdate: "user_message_chunk", messageId: "u2" });
+  });
+
+  it("lets a client away while the agent thought catch up, instead of starting it over", async () => {
+    for (let n = 1; n <= 5; n++) turn(n, 5);
+    ask(6);
+    const at = store.getSession("fake:s1")!.lastSeq;
+    think("long", 2000);
+    const back = collector();
+    expect((await hub.subscribe("fake:s1", at, back.subscriber)).startSeq).toBe(at);
+    expect(back.windows).toEqual([]);
+    expect(back.events.map((event) => event.seq)).toEqual(Array.from({ length: 2001 }, (_, i) => at + 1 + i));
+  });
+
   it("lets a returning client catch up, unless it missed too much", async () => {
     for (let n = 1; n <= 5; n++) turn(n, 5);
     const at = store.getSession("fake:s1")!.lastSeq;
@@ -290,14 +384,14 @@ describe("session history in pages", () => {
 
   it("describes events logged by an older host, once", () => {
     for (let n = 1; n <= 3; n++) turn(n, 2);
-    const expected = store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9 });
+    const expected = store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9, eventOverhead: 0 });
     expect(expected).toBeGreaterThan(0);
     store.close();
     const raw = new DatabaseSync(join(dir, "state.db"));
     raw.exec("DELETE FROM event_meta; PRAGMA user_version = 0;");
     raw.close();
     store = new HostStore(join(dir, "state.db"));
-    expect(store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9 })).toBe(expected);
+    expect(store.pageStart("fake:s1", store.getSession("fake:s1")!.lastSeq, { minEvents: 5, minBytes: 1e9, maxEvents: 100, maxBytes: 1e9, eventBytes: 1e9, eventOverhead: 0 })).toBe(expected);
   });
 
   it("serves workflow agents and their nested conversations independently", () => {
