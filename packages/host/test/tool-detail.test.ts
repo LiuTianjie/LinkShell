@@ -156,6 +156,26 @@ describe("tool detail", () => {
     expect(result.updates).toEqual([]);
   });
 
+  it("Claude desktop app: one list keeps one id across turns; a new request's list gets its own", () => {
+    const line = (message: unknown) => JSON.stringify({ type: "assistant", uuid: "u", timestamp: "2026-10-28T00:00:00Z", message });
+    const hidden = new Set<string>();
+    const id = (callId: string, input: unknown) =>
+      (transcriptLine(line({ id: `m-${callId}`, content: [{ type: "tool_use", id: callId, name: "mcp__ccd_turn__update_plan", input }] }), { hidden }).updates[0] as { planId?: string }).planId;
+    const items = (scope?: string) => ({ items: [{ content: "a", status: "in_progress" }, { content: "b", status: "pending" }], ...(scope ? { scope } : {}) });
+    expect(id("p1", items("first_task"))).toBe("p1");
+    expect(id("p2", { advance: true })).toBe("p1");
+    // Rewritten for the same request (or by an app that doesn't say): still that card.
+    expect(id("p3", items("continuation"))).toBe("p1");
+    expect(id("p4", items())).toBe("p1");
+    expect(id("p5", { done: [1], start: 2 })).toBe("p1");
+    // The next request's list starts a card of its own, and its steps follow it.
+    expect(id("p6", items("new_task"))).toBe("p6");
+    expect(id("p7", { advance: true })).toBe("p6");
+    // Once every step is done, the next list is a new one, whatever its scope says.
+    expect(id("p8", { done: [1, 2] })).toBe("p6");
+    expect(id("p9", items("continuation"))).toBe("p9");
+  });
+
   it("Claude desktop app: a step update with no list before it stays a plain call", () => {
     const line = JSON.stringify({ type: "assistant", uuid: "u", timestamp: "2026-10-28T00:00:00Z", message: { id: "m", content: [{ type: "tool_use", id: "p", name: "mcp__ccd_turn__update_plan", input: { advance: true } }] } });
     expect(transcriptLine(line, { hidden: new Set() }).updates.map((u) => u.sessionUpdate)).toEqual(["tool_call"]);

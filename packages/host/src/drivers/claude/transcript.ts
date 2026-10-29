@@ -219,13 +219,18 @@ function toolContent(name: string, input: Json): ToolCallContent[] | undefined {
 }
 
 /** The last task list per transcript reader (its `hidden` set), for the updates that only move it on. */
-const lastPlans = new WeakMap<Set<string>, PlanEntry[]>();
+const lastPlans = new WeakMap<Set<string>, { id: string; entries: PlanEntry[] }>();
 
 /**
  * The Claude desktop app's task list (its `update_plan` tool, under any MCP server prefix): the
  * whole list (`items`), or a step on from the last one (`advance`, or `done` / `start` by number).
+ * It is one list the app keeps under the latest message, worked through across turns, so it keeps
+ * one id (the call that began it): moved on, or rewritten while it still has steps to do, it is
+ * the same card. A new request's list (`first_task` / `new_task`), or any list after one whose
+ * steps were all done, is a card of its own: the finished one stays where it was finished.
  */
-function desktopPlan(input: Json, reader: Set<string> | undefined): PlanEntry[] | undefined {
+function desktopPlan(input: Json, reader: Set<string> | undefined, callId: string): { id: string; entries: PlanEntry[] } | undefined {
+  const last = reader && lastPlans.get(reader);
   if (Array.isArray(input.items)) {
     const entries = input.items.flatMap((raw): PlanEntry[] => {
       const item = obj(raw);
@@ -234,12 +239,13 @@ function desktopPlan(input: Json, reader: Set<string> | undefined): PlanEntry[] 
       const status = item?.status === "completed" || item?.status === "in_progress" ? item.status : "pending";
       return [{ content, status, priority: "medium" }];
     });
-    if (reader) lastPlans.set(reader, entries);
-    return entries;
+    const fresh = input.scope === "first_task" || input.scope === "new_task" || !!last?.entries.every((entry) => entry.status === "completed");
+    const plan = { id: last && !fresh ? last.id : callId, entries };
+    if (reader) lastPlans.set(reader, plan);
+    return plan;
   }
-  const last = reader && lastPlans.get(reader);
   if (!last) return undefined;
-  const next = last.map((entry) => ({ ...entry }));
+  const next = last.entries.map((entry) => ({ ...entry }));
   if (input.advance === true) {
     const current = next.findIndex((entry) => entry.status === "in_progress");
     if (current >= 0) next[current]!.status = "completed";
@@ -251,8 +257,9 @@ function desktopPlan(input: Json, reader: Set<string> | undefined): PlanEntry[] 
     for (const entry of next) if (entry.status === "in_progress") entry.status = "pending";
     next[input.start - 1]!.status = "in_progress";
   }
-  lastPlans.set(reader!, next);
-  return next;
+  const plan = { id: last.id, entries: next };
+  lastPlans.set(reader!, plan);
+  return plan;
 }
 
 function todoPlan(input: Json): PlanEntry[] | undefined {
@@ -567,8 +574,9 @@ export function transcriptLine(
     } else if (block.type === "tool_use" && str(block.id) && str(block.name)) {
       const input = obj(block.input) ?? {};
       if (block.name === "TodoWrite" || /(^|__)update_plan$/.test(str(block.name)!)) {
-        const entries = block.name === "TodoWrite" ? todoPlan(input) : desktopPlan(input, options.hidden);
-        if (entries) updates.push({ sessionUpdate: "plan", entries });
+        const desktop = block.name === "TodoWrite" ? undefined : desktopPlan(input, options.hidden, str(block.id)!);
+        const entries = block.name === "TodoWrite" ? todoPlan(input) : desktop?.entries;
+        if (entries) updates.push({ sessionUpdate: "plan", entries, ...(desktop ? { planId: desktop.id } : {}) });
         // The plan card is the view; its result line is skipped by id. Without a
         // reader's set (a single line) the call still shows, and closes cleanly.
         if (entries && options.hidden) {

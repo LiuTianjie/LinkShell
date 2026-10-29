@@ -134,7 +134,7 @@ export interface SessionView {
   turnStartedAt?: number;
   driver?: SessionDriver;
   title?: string;
-  /** Latest plan item id in the current turn (plans update in place). */
+  /** The plan card the current turn updates (in place; see the `plan` update). */
   planId?: string;
 }
 
@@ -410,10 +410,14 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       });
     }
     case "plan": {
-      // One plan card per turn, updated in place.
+      // One card per plan, updated in place. Without an id that is one per turn; a plan the agent
+      // names (one list it keeps working through, turn after turn) has one card, which an update
+      // in a later turn takes down to that turn: its latest state is where the reader is.
       const id = update.planId ? `plan:${update.planId}` : view.planId ?? `plan-${key}`;
       if (update.removed) return removeItem(view, id);
-      const next = upsert(view, { kind: "plan", id, entries: update.entries, title: update.title, markdown: update.markdown, path: update.path, ts: get(view, id, "plan")?.ts ?? ts });
+      const earlier = get(view, id, "plan");
+      const base = earlier && view.planId !== id ? moveOut(view, id) : view;
+      const next = upsert(base, { kind: "plan", id, entries: update.entries, title: update.title, markdown: update.markdown, path: update.path, ts: earlier?.ts ?? ts });
       return { ...next, planId: id };
     }
     case "available_commands_update":
@@ -435,7 +439,8 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         cost: update.cost === undefined ? view.usage?.cost : update.cost, tokens: update.tokens ?? view.usage?.tokens } };
     case "ls_turn":
       // A message sent while the agent works starts no new turn: the clock keeps the first start.
-      if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: undefined, turnStartedAt: view.turnActive ? view.turnStartedAt ?? ts : ts };
+      // Nor does it start a plan card of its own: the running turn's card stays the one it updates.
+      if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: view.turnActive ? view.planId : undefined, turnStartedAt: view.turnActive ? view.turnStartedAt ?? ts : ts };
       {
         const settled = settleAll(view, ts);
         const ended: SessionView = {
@@ -606,9 +611,13 @@ function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
 function joinViews(earlier: SessionView, later: SessionView): SessionView {
   const items: TimelineItem[] = [];
   const joined = new Set<string>();
+  // A turn that ended with a plan the later page took down now ends with what came before it.
+  const moved = new Map<string, string | undefined>();
   for (const item of earlier.items) {
     const at = later.index[item.id];
     if (at === undefined) items.push(item);
+    // A plan updated in a later turn was taken down there: the later place is its place.
+    else if (item.kind === "plan") moved.set(item.id, items.at(-1)?.id);
     else {
       items.push(joinItem(item, later.items[at]!));
       joined.add(item.id);
@@ -619,7 +628,10 @@ function joinViews(earlier: SessionView, later: SessionView): SessionView {
   items.forEach((item, i) => {
     index[item.id] = i;
   });
-  return { ...later, items, index };
+  // Where the earlier page's turns ended, as well as the later page's.
+  const before = (earlier.turnBreaks ?? []).flatMap((id) => (moved.has(id) ? (moved.get(id) ? [moved.get(id)!] : []) : [id]));
+  const breaks = [...new Set([...before, ...(later.turnBreaks ?? [])])].filter((id) => index[id] !== undefined);
+  return { ...later, items, index, ...(breaks.length ? { turnBreaks: breaks } : {}) };
 }
 
 /**
@@ -654,6 +666,19 @@ export function markMessageFailed(view: SessionView, clientMessageId: string): S
 export function markMessageAccepted(view: SessionView, clientMessageId: string): SessionView {
   const item = get(view, `local-${clientMessageId}`, "user");
   return item && item.pending && !item.accepted ? upsert(view, { ...item, accepted: true }) : view;
+}
+
+/**
+ * Takes an item out of an earlier turn to put it in the running one. Where that turn ended stays
+ * marked: if the item was the turn's last, the one before it is.
+ */
+function moveOut(view: SessionView, id: string): SessionView {
+  const at = view.index[id];
+  const removed = removeItem(view, id);
+  if (at === undefined || !view.turnBreaks?.includes(id)) return removed;
+  const before = view.items[at - 1]?.id;
+  const turnBreaks = view.turnBreaks.flatMap((entry) => (entry !== id ? [entry] : before && !view.turnBreaks!.includes(before) ? [before] : []));
+  return { ...removed, turnBreaks };
 }
 
 export function removeItem(view: SessionView, id: string): SessionView {
