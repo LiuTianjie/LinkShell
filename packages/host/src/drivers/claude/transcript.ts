@@ -69,6 +69,11 @@ export class ClaudeTranscriptIndex {
     this.snapshot = undefined;
   }
 
+  /** Every transcript: session id → its paths. */
+  all(): ReadonlyMap<string, string[]> {
+    return this.scan().paths;
+  }
+
   locate(sessionId: string, cwd?: string): TranscriptLocation {
     const direct = cwd ? join(this.configDir, "projects", encodeProjectDir(cwd), `${sessionId}.jsonl`) : undefined;
     const first = direct ? inspectTranscript(direct) : undefined;
@@ -793,7 +798,11 @@ export function readTail(path: string, bytes: number): string {
 }
 
 function readRange(path: string, start: number, end: number): string {
-  if (end <= start) return "";
+  return readBytes(path, start, end).toString("utf8");
+}
+
+function readBytes(path: string, start: number, end: number): Buffer {
+  if (end <= start) return Buffer.alloc(0);
   const fd = openSync(path, "r");
   try {
     const buffer = Buffer.alloc(end - start);
@@ -803,9 +812,65 @@ function readRange(path: string, start: number, end: number): string {
       if (n === 0) break;
       read += n;
     }
-    return buffer.subarray(0, read).toString("utf8");
+    return buffer.subarray(0, read);
   } finally {
     closeSync(fd);
+  }
+}
+
+/** How much of a transcript's start Claude's session list (the Agent SDK) reads for the session's cwd. */
+export const LISTED_HEAD_BYTES = 64 * 1024;
+/** How far into a transcript to look for its cwd: the SDK's own bound for looking through one. */
+const CWD_SCAN_BYTES = 16 * 1024 * 1024;
+const CWD_KEY = Buffer.from('"cwd":"');
+
+/** The first cwd a transcript names, found as the SDK finds it, and the byte just past it. */
+export function firstCwd(path: string, limit = CWD_SCAN_BYTES): { cwd: string; end: number } | undefined {
+  const size = statSync(path).size;
+  // Usually the first message has it; one with a large picture can put it megabytes in.
+  for (const bytes of [LISTED_HEAD_BYTES, 1024 * 1024, limit]) {
+    const start = readBytes(path, 0, Math.min(size, bytes));
+    const at = start.indexOf(CWD_KEY);
+    if (at >= 0) {
+      let end = at + CWD_KEY.length;
+      // (`"` and `\` never occur inside a multibyte UTF-8 character.)
+      while (end < start.length && start[end] !== 0x22) end += start[end] === 0x5c ? 2 : 1;
+      if (end < start.length) {
+        try {
+          return { cwd: JSON.parse(`"${start.toString("utf8", at + CWD_KEY.length, end)}"`) as string, end: end + 1 };
+        } catch {
+          return undefined;
+        }
+      }
+    }
+    if (bytes >= size) break;
+  }
+  return undefined;
+}
+
+/**
+ * Transcripts whose cwd lies past what Claude's session list reads, so the
+ * list can't place their sessions and the adapter leaves them out: a first
+ * prompt with a large picture or paste does it. Remembered per file, since a
+ * transcript only grows and what its start says stays.
+ */
+export class ClaudeLateCwds {
+  private readonly known = new Map<string, { size: number; cwd?: string; settled: boolean }>();
+
+  /** The cwd of the transcript at `path`, `size` bytes long, when the list can't find it. */
+  get(path: string, size: number): string | undefined {
+    const known = this.known.get(path);
+    if (known && (known.settled ? size >= known.size : size === known.size)) return known.cwd;
+    let found: ReturnType<typeof firstCwd>;
+    try {
+      found = firstCwd(path);
+    } catch {
+      return undefined;
+    }
+    const cwd = found && found.end > LISTED_HEAD_BYTES ? found.cwd : undefined;
+    // None yet can mean its first message is still being written.
+    this.known.set(path, { size, cwd, settled: !!found || size >= CWD_SCAN_BYTES });
+    return cwd;
   }
 }
 

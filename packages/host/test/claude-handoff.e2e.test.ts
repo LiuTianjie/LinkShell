@@ -685,6 +685,44 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(p.agentTexts(desk.id)).toEqual(["echo: first", "app done", "echo: from phone", "app again"]);
   }, 20_000);
 
+  it("lists a session the Claude desktop app runs whose first prompt carries a large picture, as running", async () => {
+    const e = makeEnv();
+    const nativeId = randomUUID();
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    mkdirSync(dir, { recursive: true });
+    // As the app writes it: queue bookkeeping first (no cwd), then the prompt,
+    // whose cwd comes after its content, here a screenshot of 100 KB.
+    const line = (entry: Record<string, unknown>) => `${JSON.stringify(entry)}\n`;
+    writeFileSync(
+      join(dir, `${nativeId}.jsonl`),
+      line({ type: "queue-operation", operation: "enqueue", timestamp: new Date().toISOString(), sessionId: nativeId }) +
+        line({
+          parentUuid: null, isSidechain: false, type: "user", uuid: randomUUID(),
+          message: { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(100_000) } }, { type: "text", text: "why does the build fail?" }] },
+          timestamp: new Date().toISOString(), cwd: e.workDir, sessionId: nativeId, entrypoint: "claude-desktop",
+        }) +
+        line({ type: "ai-title", aiTitle: "Why the build fails", sessionId: nativeId }) +
+        line({
+          parentUuid: null, isSidechain: false, type: "assistant", uuid: randomUUID(),
+          message: { id: "msg_build", role: "assistant", content: [{ type: "tool_use", id: "toolu_build", name: "Bash", input: { command: "pnpm build" } }], stop_reason: "tool_use" },
+          timestamp: new Date().toISOString(), cwd: e.workDir, sessionId: nativeId, entrypoint: "claude-desktop",
+        }),
+    );
+    // The app's Claude has it open, as Claude itself records it.
+    const pid = Number(execSync("sleep 60 >/dev/null 2>&1 & echo $!", { shell: "/bin/sh" }).toString().trim());
+    cleanups.push(() => {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    });
+    mkdirSync(join(e.configDir, "sessions"), { recursive: true });
+    writeFileSync(join(e.configDir, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: nativeId, cwd: e.workDir, entrypoint: "claude-desktop", kind: "interactive", status: "busy" }));
+
+    const host = await boot(e);
+    const session = host.hub.listSessions({ limit: 50 }).sessions.find((entry) => entry.nativeId === nativeId);
+    expect(session).toMatchObject({ cwd: e.workDir, title: "Why the build fails", state: "running" });
+  });
+
   it.skipIf(process.platform === "win32")("continues a desktop app session through the API that app's Claude uses, not the host's", async () => {
     const e = makeEnv();
     const resumeLog = join(e.home, "resume-env.log");

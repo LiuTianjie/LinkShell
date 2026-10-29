@@ -17,6 +17,7 @@ import { ClaudeActivity } from "./activity.js";
 import { ClaudeAppSessions, claudeAppSessionRoots } from "./app-sessions.js";
 import {
   claudeConfigDir,
+  ClaudeLateCwds,
   ClaudeTranscriptIndex,
   encodeProjectDir,
   findTranscript,
@@ -252,6 +253,7 @@ export class ClaudeDriver extends AcpDriver {
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly transcriptIndex: ClaudeTranscriptIndex;
+  private readonly lateCwds = new ClaudeLateCwds();
   /** The desktop app's records: which session started, or was forked from, which, and which it has archived. */
   private readonly appSessions: ClaudeAppSessions;
   private readonly busyWindowMs: number;
@@ -485,12 +487,56 @@ export class ClaudeDriver extends AcpDriver {
     this.transcriptIndex.invalidate();
     // Read first, so a session found now starts out archived if the desktop app has it so; and so the app's changes are seen with nobody looking.
     await this.appSessions.refresh();
-    const found = await super.listSessions(limit);
+    const listed = await super.listSessions(limit);
+    const found = [...listed, ...await this.unplacedSessions(listed, limit)];
     return Promise.all(found.map(async (session) => {
       if (this.modes.get(session.nativeId) === "remote") return session;
       const asyncQuestions = session.state === "waiting" ? (await this.waitingQuestion(session.nativeId))?.questions ?? [] : [];
       return { ...session, asyncQuestions };
     }));
+  }
+
+  /**
+   * The sessions Claude's list leaves out for want of a cwd: it looks for one
+   * in a transcript's first 64 KB only, and a first prompt with a large
+   * picture or paste pushes it past (the desktop app's sessions then never
+   * show, running or not). The transcript names it further on; listed again
+   * for that directory, the adapter places them and says what it says of any
+   * session (its title, whether to list it at all).
+   */
+  private async unplacedSessions(listed: DiscoveredSession[], limit: number): Promise<DiscoveredSession[]> {
+    if (!this.canList) return [];
+    const known = new Set(listed.map((session) => session.nativeId));
+    // No older than what the list returned: it cut those for the limit anyway.
+    const since = listed.length >= limit ? Math.min(...listed.map((session) => session.updatedAt)) : 0;
+    const byCwd = new Map<string, Set<string>>();
+    for (const [nativeId, paths] of this.transcriptIndex.all()) {
+      if (known.has(nativeId)) continue;
+      for (const path of paths) {
+        let size: number;
+        try {
+          const info = statSync(path);
+          if (info.mtimeMs < since) continue;
+          size = info.size;
+        } catch {
+          continue;
+        }
+        const cwd = this.lateCwds.get(path, size);
+        if (cwd) byCwd.set(cwd, (byCwd.get(cwd) ?? new Set()).add(nativeId));
+      }
+    }
+    const found: DiscoveredSession[] = [];
+    for (const [cwd, ids] of byCwd) {
+      try {
+        for (const session of await this.listed(ids.size, cwd, (nativeId) => ids.has(nativeId) && !known.has(nativeId))) {
+          known.add(session.nativeId);
+          found.push(session);
+        }
+      } catch (error) {
+        this.host?.log(`[claude] couldn't list the sessions in ${cwd}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return found;
   }
 
   /** Puts the question a Claude on the computer waits on in front of the phone, as an async question card. */

@@ -435,16 +435,25 @@ export class AcpDriver implements AgentDriver {
   }
 
   async listSessions(limit: number): Promise<DiscoveredSession[]> {
-    if (!this.connection?.alive || !this.connection.capabilities.sessionCapabilities?.list) return [];
+    return this.listed(limit);
+  }
+
+  protected get canList(): boolean {
+    return !!this.connection?.alive && !!this.connection.capabilities.sessionCapabilities?.list;
+  }
+
+  /** session/list, of every directory or only `cwd`; `wanted` picks sessions before their state is looked up. */
+  protected async listed(limit: number, cwd?: string, wanted: (sessionId: string) => boolean = () => true): Promise<DiscoveredSession[]> {
+    if (!this.canList) return [];
     const found: DiscoveredSession[] = [];
     let cursor: string | undefined;
     do {
       const page = await this.rpc<{ sessions?: { sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null; additionalDirectories?: string[] }[]; nextCursor?: string | null }>(
         "session/list",
-        cursor ? { cursor } : {},
+        { ...(cwd ? { cwd } : {}), ...(cursor ? { cursor } : {}) },
       );
       for (const info of page.sessions ?? []) {
-        if (!this.sessionExists(info.sessionId, info.cwd)) continue;
+        if (!wanted(info.sessionId) || !this.sessionExists(info.sessionId, info.cwd)) continue;
         if (Array.isArray(info.additionalDirectories) && info.additionalDirectories.every((path) => typeof path === "string" && isAbsolute(path))) this.discoveredDirectories.set(info.sessionId, info.additionalDirectories);
         const updatedAt = info.updatedAt ? Date.parse(info.updatedAt) || Date.now() : Date.now();
         found.push({
