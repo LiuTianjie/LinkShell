@@ -4,12 +4,18 @@ import { FieldSet, FieldLegend } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   questionAnswerError,
   type PendingPermissionSummary,
+  type Question,
   type QuestionAnswer,
 } from "@linkshell/wire";
+import {
+  questionOptionName,
+  questionTitle,
+  recommendedLabel,
+} from "@linkshell/client-core";
 import {
   ErrorNotice,
   useActions,
@@ -20,6 +26,28 @@ import {
 } from "./common";
 import { Diff, Blocks } from "./Timeline";
 import { Icon } from "../icons";
+
+type QuestionOption = NonNullable<Question["options"]>[number];
+
+/** An option's label and description as one block; the agent's "(Recommended)" becomes a 推荐 badge. */
+function OptionText({ option }: { option: QuestionOption }) {
+  const { text, recommended } = recommendedLabel(option.label);
+  return (
+    <span className="choice-text">
+      <span className="choice-label">
+        {text}
+        {recommended && <span className="choice-badge">推荐</span>}
+      </span>
+      {option.description && (
+        <small className="choice-description">{option.description}</small>
+      )}
+    </span>
+  );
+}
+
+// Label's own flex row centres everything on one line; an option is a block of text with its mark
+// beside the first line.
+const choiceOption = "choice-option items-start leading-normal font-normal";
 
 export function Permission({
   permission,
@@ -35,6 +63,7 @@ export function Permission({
   const online = useClient((state) => state.status === "online");
   const available = useSessionOnline();
   const job = useJob();
+  const formId = useId();
   const [submitted, setSubmitted] = useState(false);
   const disabled = !available || job.busy || submitted;
   const defaults = useMemo(
@@ -69,19 +98,24 @@ export function Permission({
       ),
     )
     .find(Boolean);
+  const asks = !!permission.questions;
+  // A lone question is often the title too (Claude, Codex): say it once, in the heading.
+  const repeated =
+    permission.questions?.length === 1 &&
+    permission.questions[0]!.text === permission.title;
   return (
-    <section className="approval-card" aria-busy={job.busy}>
+    <section
+      className="approval-card"
+      data-kind={asks ? "questions" : undefined}
+      aria-busy={job.busy}
+    >
       <div className="approval-heading">
         <span className="approval-icon">
-          <Icon name="shield" />
+          <Icon name={asks ? "question" : "shield"} />
         </span>
         <div>
-          <strong>{permission.title}</strong>
-          <span>
-            {permission.questions
-              ? "请回答 Agent 的问题"
-              : "请确认是否允许此操作"}
-          </span>
+          <strong>{asks ? questionTitle(permission.title) : permission.title}</strong>
+          <span>{asks ? "Agent 在等你的回答" : "请确认是否允许此操作"}</span>
         </div>
       </div>
       {permission.detail && <pre tabIndex={0}>{permission.detail}</pre>}
@@ -115,6 +149,8 @@ export function Permission({
       )}
       {permission.questions && (
         <form
+          id={formId}
+          className="question-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (disabled || validation) return;
@@ -137,12 +173,21 @@ export function Permission({
               className="question-field"
               disabled={disabled}
             >
-              <FieldLegend>
-                {question.header && <small>{question.header} · </small>}
-                {question.text}
-                {question.required && (
-                  <span className="question-required">必填</span>
+              <FieldLegend className="question-legend">
+                {(question.header || (repeated && question.required)) && (
+                  <small className="question-header">
+                    {question.header && <span>{question.header}</span>}
+                    {repeated && question.required && (
+                      <span className="question-required">必填</span>
+                    )}
+                  </small>
                 )}
+                <span className={repeated ? "sr-only" : "question-text"}>
+                  {question.text}
+                  {!repeated && question.required && (
+                    <span className="question-required">必填</span>
+                  )}
+                </span>
               </FieldLegend>
               {question.kind === "text" ? (
                 <Input
@@ -184,6 +229,7 @@ export function Permission({
                 <>
                   {question.kind === "choice" ? (
                     <RadioGroup
+                      className="choice-list"
                       disabled={disabled}
                       value={answers[question.id]?.values[0] ?? ""}
                       onValueChange={(value) =>
@@ -199,57 +245,53 @@ export function Permission({
                       aria-label={question.text}
                     >
                       {question.options?.map((option) => (
-                        <Label className="choice-option" key={option.value}>
+                        <Label className={choiceOption} key={option.value}>
                           <RadioGroupItem value={option.value} />
-                          <span>
-                            {option.label}
-                            {option.description && (
-                              <small>{option.description}</small>
-                            )}
-                          </span>
+                          <OptionText option={option} />
                         </Label>
                       ))}
                     </RadioGroup>
                   ) : (
-                    question.options?.map((option) => (
-                      <Label className="choice-option" key={option.value}>
-                        <Checkbox
-                          disabled={disabled}
-                          checked={
-                            answers[question.id]?.values.includes(
-                              option.value,
-                            ) ?? false
-                          }
-                          onCheckedChange={(checked) =>
-                            setAnswers((previous) => ({
-                              ...previous,
-                              [question.id]: {
-                                ...previous[question.id],
-                                id: question.id,
-                                values:
-                                  checked === true
-                                    ? [
-                                        ...(previous[question.id]?.values ??
-                                          []),
-                                        option.value,
-                                      ]
-                                    : (
-                                        previous[question.id]?.values ?? []
-                                      ).filter(
-                                        (value) => value !== option.value,
-                                      ),
-                              },
-                            }))
-                          }
-                        />
-                        <span>
-                          {option.label}
-                          {option.description && (
-                            <small>{option.description}</small>
-                          )}
-                        </span>
-                      </Label>
-                    ))
+                    <div
+                      className="choice-list grid w-full gap-2"
+                      role="group"
+                      aria-label={question.text}
+                    >
+                      {question.options?.map((option) => (
+                        <Label className={choiceOption} key={option.value}>
+                          <Checkbox
+                            disabled={disabled}
+                            checked={
+                              answers[question.id]?.values.includes(
+                                option.value,
+                              ) ?? false
+                            }
+                            onCheckedChange={(checked) =>
+                              setAnswers((previous) => ({
+                                ...previous,
+                                [question.id]: {
+                                  ...previous[question.id],
+                                  id: question.id,
+                                  values:
+                                    checked === true
+                                      ? [
+                                          ...(previous[question.id]?.values ??
+                                            []),
+                                          option.value,
+                                        ]
+                                      : (
+                                          previous[question.id]?.values ?? []
+                                        ).filter(
+                                          (value) => value !== option.value,
+                                        ),
+                                },
+                              }))
+                            }
+                          />
+                          <OptionText option={option} />
+                        </Label>
+                      ))}
+                    </div>
                   )}
                   {question.other && (
                     <Input
@@ -279,14 +321,12 @@ export function Permission({
               ) : null}
             </FieldSet>
           ))}
-          <Button variant="default" disabled={disabled || !!validation}>
-            {submitted ? "已提交" : job.busy ? "正在提交…" : "提交回答"}
-          </Button>
         </form>
       )}
       <div className="permission-buttons">
         {permission.options.map((option, index) => (
           <Button
+            type="button"
             // One primary: the first allow is the answer most people give; the rest stay secondary.
             variant={index === permission.options.findIndex((entry) => entry.kind.startsWith("allow")) ? "default" : "outline"}
             className="h-auto min-h-9 whitespace-normal"
@@ -321,9 +361,21 @@ export function Permission({
               });
             }}
           >
-            {option.name}
+            {asks ? questionOptionName(option) : option.name}
           </Button>
         ))}
+        {asks && (
+          // The answer is the one primary, at the end of the row after the ways out.
+          <Button
+            type="submit"
+            form={formId}
+            variant="default"
+            className="h-auto min-h-9 whitespace-normal"
+            disabled={disabled || !!validation}
+          >
+            {submitted ? "已提交" : job.busy ? "正在提交…" : "提交回答"}
+          </Button>
+        )}
       </div>
       {!available && (
         <p className="muted" role="status">

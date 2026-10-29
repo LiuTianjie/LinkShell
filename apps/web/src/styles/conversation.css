@@ -1245,9 +1245,15 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+  .question-form {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    margin-top: 18px;
+  }
   .question-field {
     border: 0;
-    margin: 18px 0;
+    margin: 0;
     padding: 0;
   }
   .question-field legend {
@@ -1259,6 +1265,35 @@
   .question-field legend small {
     font-weight: 400;
     color: var(--secondaryLabel);
+  }
+  .question-field .question-header {
+    display: block;
+    font-size: 12px;
+  }
+  /* An option: the label, its description under it, the mark beside the first line. */
+  .approval-card .choice-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .approval-card .choice-description {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--secondaryLabel);
+  }
+  .choice-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--fill);
+    color: var(--secondaryLabel);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 16px;
+    vertical-align: 1px;
+    white-space: nowrap;
   }
   .permission-buttons {
     display: flex;

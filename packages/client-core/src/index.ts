@@ -1,6 +1,7 @@
 export * from "./timeline.js";
 export * from "./steps.js";
 export * from "./tool-labels.js";
+export * from "./question-wording.js";
 export * from "./errors.js";
 export * from "./activity.js";
 export * from "./line-diff.js";

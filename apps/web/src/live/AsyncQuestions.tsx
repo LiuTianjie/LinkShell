@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import type { AsyncQuestion } from "@linkshell/wire";
+import { recommendedLabel } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Check, CircleHelp } from "lucide-react";
@@ -48,19 +49,23 @@ function Question({
             {question.title}
           </FieldLabel>
           <div className="async-options">
-            {question.options.map((option) => (
-              <Button
-                key={option}
-                type="button"
-                variant="outline"
-                className="async-option h-auto min-h-9 whitespace-normal text-left"
-                disabled={disabled}
-                aria-pressed={given === option}
-                onClick={() => answer(option)}
-              >
-                {option}
-              </Button>
-            ))}
+            {question.options.map((option) => {
+              const { text, recommended } = recommendedLabel(option);
+              return (
+                <Button
+                  key={option}
+                  type="button"
+                  variant="outline"
+                  className="async-option h-auto min-h-9 whitespace-normal text-left"
+                  disabled={disabled}
+                  aria-pressed={given === option}
+                  onClick={() => answer(option)}
+                >
+                  {text}
+                  {recommended && <span className="choice-badge">推荐</span>}
+                </Button>
+              );
+            })}
           </div>
           {!done && (
             <Textarea
