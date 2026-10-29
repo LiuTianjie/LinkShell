@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Exact native CLIs for the real-agent CI contract. The ACP adapter and SDK come from the host's frozen pnpm installation.",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.301",
+    "@anthropic-ai/claude-code": "2.1.309",
     "@openai/codex": "0.163.0"
   }
 }
