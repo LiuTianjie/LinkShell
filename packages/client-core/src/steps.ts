@@ -250,6 +250,8 @@ export function isStep(item: TimelineItem): item is Step {
   if (item.kind === "thought") return !item.streaming;
   if (item.kind !== "tool") return false;
   if (isMarker(item)) return false;
+  // A session it started or proposed is a card of its own, as the Claude app shows it: one to open or start.
+  if (toolAction(item) === "start_session") return false;
   // Screenshots and generated images are results worth seeing, not plumbing.
   if (item.content.some((entry) => entry.type === "content" && entry.content.type === "image")) return false;
   if (item.detail?.type === "subagent" && item.detail.action === "spawn") return agentFinished(item);

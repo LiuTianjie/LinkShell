@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent, SessionUpdate } from "@linkshell/wire";
-import { applyEvents, emptyView, plansAtTurnEnd, prependEvents, type SessionView } from "../src/timeline.js";
+import { applyEvents, emptyView, cardsAtTurnEnd, prependEvents, type SessionView } from "../src/timeline.js";
 
 // The task list a Claude desktop session keeps (its update_plan tool) as LinkShell shows it: one
 // card per list, at the end of the turn that last moved it on.
@@ -13,7 +13,7 @@ const starts = () => at({ sessionUpdate: "ls_turn", state: "started" });
 const ends = () => at({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
 const plan = (step: number, planId?: string) =>
   at({ sessionUpdate: "plan", ...(planId ? { planId } : {}), entries: [1, 2, 3].map((n) => ({ content: `step ${n}`, priority: "medium" as const, status: n < step ? "completed" as const : n === step ? "in_progress" as const : "pending" as const })) });
-const shown = (view: SessionView) => plansAtTurnEnd(view.items, view.turnBreaks).map((item) => item.kind === "plan" ? `plan@${item.entries.findIndex((e) => e.status === "in_progress") + 1}` : item.id);
+const shown = (view: SessionView) => cardsAtTurnEnd(view.items, view.turnBreaks).map((item) => item.kind === "plan" ? `plan@${item.entries.findIndex((e) => e.status === "in_progress") + 1}` : item.id);
 
 describe("plan cards", () => {
   it("a background task reporting back mid-turn doesn't start a second card", () => {

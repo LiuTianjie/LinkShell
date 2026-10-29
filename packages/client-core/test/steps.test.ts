@@ -77,6 +77,13 @@ describe("folding", () => {
     expect(two.map((row) => row.type)).toEqual(["steps"]);
   });
 
+  it("keeps a session it started or proposed as a card of its own", () => {
+    const proposed = tool({ title: "ccd_session · start_session", detail: { type: "mcp", server: "ccd_session", tool: "start_session" }, rawInput: { title: "Docs only" }, status: "completed" });
+    expect(isStep(proposed)).toBe(false);
+    const rows = foldStepRuns([bash("ls"), read("/w/a"), proposed], new Set());
+    expect(rows.map((row) => row.type)).toEqual(["steps", "item"]);
+  });
+
   it("lets finished sub-agents join the run, and keeps a working one out", () => {
     const done = tool({ detail: { type: "subagent", action: "spawn", task: "x", state: "completed" }, status: "completed" });
     expect(isStep(done)).toBe(true);

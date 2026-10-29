@@ -20,6 +20,7 @@ import { agentInboxMessages, type AgentInboxMessage } from "./agent-messages.js"
 import { userMessageView } from "./user-message.js";
 import { reconnectOf } from "./errors.js";
 import { questionOptionName, questionTitle, recommendedLabel } from "./question-wording.js";
+import { toolAction } from "./tool-labels.js";
 
 // Turns a session's event log into what the UI renders. Pure and immutable:
 // each event returns a new view, and only the items it touched are new objects,
@@ -257,32 +258,60 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
   return sub === parent.sub ? view : upsert(view, { ...parent, sub });
 }
 
-/** Workflow agents can themselves contain agents; ids are session-wide. */
+/** The Claude app's end-of-turn box (its `wrap_up` tool): the recap, and what it asks. */
+function isWrapUp(item: TimelineItem): boolean {
+  return item.kind === "tool" && toolAction(item) === "wrap_up";
+}
+
+/** Something the person wrote, not an event, a note from another session or the app's own context. */
+function saidByPerson(item: TimelineItem): boolean {
+  if (item.kind !== "user" || item.agentMessages?.length) return false;
+  const view = userMessageView(item.blocks);
+  return !view.hidden && !view.event;
+}
+
 /**
- * Where a plan is shown: at the end of its turn, as the Claude app and Codex keep it — its latest
- * state under everything the turn has done so far, moving down as the turn goes on and updated in
- * place — rather than where it was first written. A finished turn's plan stays at that turn's end,
- * above its "turn ended" line. The same array comes back when nothing moves.
+ * Where the cards that sum a turn up are shown: its plan and the Claude app's end-of-turn box, at
+ * the end of the turn, as the Claude app and Codex keep them — the plan's latest state under
+ * everything the turn has done so far, moving down as the turn goes on and updated in place, and
+ * the box under it — rather than where they were written. A finished turn's cards stay at its end,
+ * above its "turn ended" line. The last box stays at the bottom until the person writes again, as
+ * the Claude app keeps it: turns the agent ran on its own since (a session it started reporting
+ * back) go above it. The same array comes back when nothing moves.
  */
-export function plansAtTurnEnd(items: TimelineItem[], turnBreaks?: readonly string[]): TimelineItem[] {
-  if (!items.some((item) => item.kind === "plan")) return items;
+export function cardsAtTurnEnd(items: TimelineItem[], turnBreaks?: readonly string[]): TimelineItem[] {
+  if (!items.some((item) => item.kind === "plan" || isWrapUp(item))) return items;
   const ends = new Set(turnBreaks);
   // An agent that never says where its turns end: each message of the person's starts one.
   const byMessage = ends.size === 0;
   const out: TimelineItem[] = [];
-  let held: TimelineItem[] = [];
-  const flush = () => { out.push(...held); held = []; };
+  let plans: TimelineItem[] = [];
+  let boxes: TimelineItem[] = [];
+  const holding = () => plans.length > 0 || boxes.length > 0;
+  const flush = () => { out.push(...plans, ...boxes); plans = []; boxes = []; };
+  // A turn that ended at a thought: the words of the same message, when they come next, end it.
+  let wordsOf: string | undefined;
   for (const item of items) {
-    if (item.kind === "plan") {
-      held.push(item);
+    const words = wordsOf !== undefined && item.kind === "agent" && item.id === wordsOf;
+    if (wordsOf !== undefined && !words) flush();
+    wordsOf = undefined;
+    const box = isWrapUp(item);
+    if (box || item.kind === "plan") {
+      (box ? boxes : plans).push(item);
       if (ends.has(item.id)) flush();
       continue;
     }
-    if (held.length && (item.kind === "turn-end" || (byMessage && item.kind === "user"))) flush();
+    if (holding() && (item.kind === "turn-end" || (byMessage && item.kind === "user"))) flush();
     out.push(item);
-    if (held.length && ends.has(item.id)) flush();
+    if (holding() && (ends.has(item.id) || words)) {
+      if (item.kind === "thought") wordsOf = item.id.replace(/^thought:/, "");
+      else flush();
+    }
   }
   flush();
+  let last = out.length - 1;
+  while (last >= 0 && !isWrapUp(out[last]!)) last -= 1;
+  if (last >= 0 && last < out.length - 1 && !out.slice(last + 1).some(saidByPerson)) out.push(...out.splice(last, 1));
   return out.every((item, index) => item === items[index]) ? items : out;
 }
 

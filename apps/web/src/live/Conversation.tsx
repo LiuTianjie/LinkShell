@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ArrowDown, LoaderCircle } from "lucide-react";
-import { foldStepRuns, plansAtTurnEnd, type SessionView, type Step } from "@linkshell/client-core";
+import { foldStepRuns, cardsAtTurnEnd, type SessionView, type Step } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
 import { StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
 import { isDesktop } from "./desktop";
@@ -98,7 +98,7 @@ export function Conversation({
       }),
     [],
   );
-  const rows = useMemo(() => foldStepRuns(plansAtTurnEnd(view.items, view.turnBreaks), openSteps), [view.items, view.turnBreaks, openSteps]);
+  const rows = useMemo(() => foldStepRuns(cardsAtTurnEnd(view.items, view.turnBreaks), openSteps), [view.items, view.turnBreaks, openSteps]);
   // Every entry gets this map; it keeps its identity until its content changes, or each streamed
   // chunk (a new items array) would re-render the whole conversation.
   const answeredRef = useRef<Map<string, string>>(new Map());

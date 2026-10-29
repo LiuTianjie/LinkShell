@@ -1,7 +1,7 @@
 import type { AsyncQuestion } from "@linkshell/wire";
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { answeredQuestions, plansAtTurnEnd, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { answeredQuestions, cardsAtTurnEnd, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -190,7 +190,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const items = view?.items ?? NO_ITEMS;
   // The plan sits at the end of its turn, as on the desktop and in the agents' own apps.
   const turnBreaks = view?.turnBreaks;
-  const timelineItems = useMemo(() => sessionTimelineItems(plansAtTurnEnd(items, turnBreaks), workflows, subagents), [items, turnBreaks, workflows, subagents]);
+  const timelineItems = useMemo(() => sessionTimelineItems(cardsAtTurnEnd(items, turnBreaks), workflows, subagents), [items, turnBreaks, workflows, subagents]);
   // The agent's async questions (Codex Desktop) are answered by a message quoting them, from here or the computer.
   const questions = useMemo(() => {
     const answered = new Map(items.flatMap((item) => (item.kind === "user" && !item.failed && !item.pending ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestions(block.text) : [])) : [])));
