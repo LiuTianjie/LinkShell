@@ -239,11 +239,34 @@ html[data-desktop] .desktop-main .async-actions { display: flex; justify-content
 html[data-desktop] .desktop-main .async-actions [data-button] { height: 28px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
 html[data-desktop] .desktop-main .async-answer { color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-heading strong { font-size: 14px; font-weight: 590; }
-html[data-desktop] .desktop-main .approval-heading span { color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .approval-heading > div > span { color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-icon { width: 28px; height: 28px; border-radius: 50%; background: var(--waitingSoft); color: var(--warning); }
 html[data-desktop] .desktop-main .approval-card pre { border-radius: 12px; background: var(--fill); font-size: 12px; }
 html[data-desktop] .desktop-main .permission-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 8px; }
 html[data-desktop] .desktop-main .permission-buttons [data-button] { min-height: 28px !important; height: auto; padding: 4px 14px; border-radius: 999px; font-size: 13px; }
+/* The same card holding an agent's questions: 16 px in all round, as the other question card.
+   Each option is one block, 10 px in from every edge: the label, its description 2 px under it,
+   the mark beside the label's first line. 6 px between options, 24 px between questions; the ways
+   out and the answer in one row at the foot, the answer last. */
+html[data-desktop] .desktop-main .approval-card[data-kind="questions"] { padding: 16px; }
+html[data-desktop] .desktop-main .approval-card[data-kind="questions"] .approval-heading { margin-bottom: 20px; }
+html[data-desktop] .desktop-main .approval-card[data-kind="questions"] .permission-buttons { margin-top: 20px; padding-top: 0; }
+html[data-desktop] .desktop-main .question-form { display: flex; flex-direction: column; gap: 24px; }
+html[data-desktop] .desktop-main .question-field { gap: 8px; margin: 0; }
+html[data-desktop] .desktop-main .question-legend { margin: 0 0 10px; padding: 0; color: var(--label); font-size: 14px; font-weight: 590; line-height: 20px; }
+html[data-desktop] .desktop-main .question-legend .question-header { display: block; margin-bottom: 2px; color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; line-height: 16px; }
+html[data-desktop] .desktop-main .question-legend .question-required { margin-left: 8px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .question-legend .question-required:first-child { margin-left: 0; }
+html[data-desktop] .desktop-main .approval-card .choice-list { gap: 6px; }
+html[data-desktop] .desktop-main .approval-card .choice-option { align-items: flex-start; gap: 10px; min-height: 40px; margin: 0; padding: 10px 12px; transition: background-color 120ms ease, border-color 120ms ease; }
+html[data-desktop] .desktop-main .approval-card .choice-option:hover:not(:has([data-state="checked"]), :has(:disabled)) { background: color-mix(in oklab, var(--card), var(--label) 3%); }
+html[data-desktop] .desktop-main .approval-card .choice-option > :is([role="radio"], [role="checkbox"]) { margin-top: 2px; }
+html[data-desktop] .desktop-main .approval-card .choice-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+html[data-desktop] .desktop-main .approval-card .choice-label { color: var(--label); font-size: 13px; line-height: 20px; }
+html[data-desktop] .desktop-main .approval-card .choice-description { color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+/* An agent's "(Recommended)", as a quiet tag after the label: grey, since colour is for state. */
+html[data-desktop] .desktop-main .choice-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--fill); color: var(--secondaryLabel); font-size: 11px; font-weight: 500; line-height: 16px; vertical-align: 1px; white-space: nowrap; }
+html[data-desktop] .desktop-main .async-option[aria-pressed="true"] .choice-badge { background: color-mix(in oklab, var(--primaryForeground) 22%, transparent); color: inherit; }
 
 /* Back to the newest message: a 32 px round button just above the composer, faded in and out. */
 html[data-desktop] .desktop-main .conversation-jump { bottom: calc(var(--composer-height, 120px) + 8px); }

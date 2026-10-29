@@ -1,4 +1,4 @@
-import type { PendingPermission } from "@linkshell/client-core";
+import { recommendedLabel, type PendingPermission } from "@linkshell/client-core";
 import { questionAnswerError, type Question, type QuestionAnswer } from "@linkshell/wire";
 import { useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
@@ -63,6 +63,8 @@ function Field({
       </View>
       {question.options?.map((option) => {
         const selected = entry.values.includes(option.value);
+        // The agent's English "(Recommended)" reads as a 推荐 tag; the label sent back is unchanged.
+        const label = recommendedLabel(option.label);
         return (
           <Pressable
             key={option.value}
@@ -89,7 +91,10 @@ function Field({
               color={selected ? colors.accent : colors.tertiaryLabel}
             />
             <View style={{ flex: 1, gap: 1 }}>
-              <Text style={[type.subhead, { color: colors.label, fontWeight: selected ? "600" : "400" }]}>{option.label}</Text>
+              <Text style={[type.subhead, { color: colors.label, fontWeight: selected ? "600" : "400" }]}>
+                {label.text}
+                {label.recommended ? <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{"  推荐"}</Text> : null}
+              </Text>
               {option.description ? <Text style={[type.caption, { color: colors.secondaryLabel }]}>{option.description}</Text> : null}
             </View>
           </Pressable>

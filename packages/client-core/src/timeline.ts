@@ -19,6 +19,7 @@ import type {
 import { agentInboxMessages, type AgentInboxMessage } from "./agent-messages.js";
 import { userMessageView } from "./user-message.js";
 import { reconnectOf } from "./errors.js";
+import { questionOptionName, questionTitle, recommendedLabel } from "./question-wording.js";
 
 // Turns a session's event log into what the UI renders. Pure and immutable:
 // each event returns a new view, and only the items it touched are new objects,
@@ -223,7 +224,10 @@ function answered(questions: Question[], answers: QuestionAnswer[]): { question:
   return questions.flatMap((question) => {
     const answer = answers.find((entry) => entry.id === question.id);
     if (!answer) return [];
-    const picked = answer.values.filter(Boolean).map((value) => question.options?.find((option) => option.value === value)?.label ?? value);
+    const picked = answer.values.filter(Boolean).map((value) => {
+      const label = question.options?.find((option) => option.value === value)?.label;
+      return label === undefined ? value : recommendedLabel(label).text;
+    });
     const said = [...(question.secret && picked.length > 0 ? ["••••••"] : picked), ...(answer.other ? [answer.other] : [])];
     return said.length > 0 ? [{ question: question.header ?? question.text, answer: said.join("，") }] : [];
   });
@@ -491,9 +495,9 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       return upsert(next, {
         kind: "permission-result",
         id: `perm-${update.requestId}`,
-        title: request.title,
+        title: request.questions ? questionTitle(request.title) : request.title,
         detail: request.detail,
-        optionName: option?.name,
+        optionName: option && (request.questions ? questionOptionName(option) : option.name),
         allowed: option ? option.kind.startsWith("allow") : undefined,
         asked: request.questions ? true : undefined,
         answers: request.questions && update.answers ? answered(request.questions, update.answers) : undefined,
