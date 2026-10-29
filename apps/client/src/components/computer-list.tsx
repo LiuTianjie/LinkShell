@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 import { ComputerArt } from "@/components/computer-art";
+import { ComputerSwipe, computerRemovable } from "@/components/computer-swipe";
 import { Text } from "@/components/fixed-text";
 import { Icon } from "@/components/icon";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
@@ -13,7 +14,8 @@ import { type } from "@/theme/type";
 
 const platforms: Record<string, string> = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 
-export function ComputerList({ onSelect }: { onSelect?: () => void }) {
+/** `background` is what the rows sit on, so a row covers the 移除 behind it until it is swiped. */
+export function ComputerList({ onSelect, background = colors.sheet }: { onSelect?: () => void; background?: ColorValue }) {
   const names = useComputerNames((state) => state.names);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
@@ -39,9 +41,13 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
         return (
           <View key={computer.key}>
             {index > 0 ? <View style={{ marginLeft: 52, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} /> : null}
+            <ComputerSwipe computer={computer} name={name} enabled={!selected && computerRemovable(computer, online)} background={background}>
+            {(remove) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Pressable
               accessibilityRole="button"
+              accessibilityActions={remove ? [{ name: "remove", label: "移除" }] : undefined}
+              onAccessibilityAction={remove ? (event) => { if (event.nativeEvent.actionName === "remove") remove(); } : undefined}
               accessibilityLabel={`${name}，${stateLabel}${locked ? "，需要访问密码" : ""}${selected ? "，当前电脑" : ""}`}
               accessibilityState={{ selected }}
               onPress={() => { haptics.selection(); useComputers.getState().select(computer.key); onSelect?.(); }}
@@ -66,6 +72,8 @@ export function ComputerList({ onSelect }: { onSelect?: () => void }) {
               <Icon sf="pencil" md="edit" size={18} color={colors.secondaryLabel} />
             </Pressable>
             </View>
+            )}
+            </ComputerSwipe>
           </View>
         );
       })}

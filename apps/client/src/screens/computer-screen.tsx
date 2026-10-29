@@ -501,7 +501,7 @@ export function ComputerScreen() {
 
         <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
         <ComputerPanel title="电脑" onAdd={() => { haptics.selection(); router.push("/pair"); }}>
-          <ComputerList />
+          <ComputerList background={colors.card} />
         </ComputerPanel>
         <ComputerPanel
           title="Agent"

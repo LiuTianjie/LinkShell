@@ -13,6 +13,7 @@ import { SIGN_UP_URL, useAccount, type OAuthProvider } from "@/lib/account";
 import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
 import { listComputers, useComputers, type Computer } from "@/lib/computers";
+import { ComputerSwipe, computerRemovable } from "@/components/computer-swipe";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -52,7 +53,7 @@ function Row({
   tint = colors.label,
   accessory,
   onPress,
-  onLongPress,
+  onRemove,
 }: {
   icon?: Pick<IconProps, "sf" | "md">;
   iconTint?: IconProps["color"];
@@ -62,14 +63,16 @@ function Row({
   tint?: IconProps["color"];
   accessory?: React.ReactNode;
   onPress?: () => void;
-  onLongPress?: () => void;
+  /** Offered to VoiceOver as an action; sighted people swipe the row. */
+  onRemove?: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      onLongPress={onLongPress}
-      disabled={!onPress && !onLongPress}
+      accessibilityActions={onRemove ? [{ name: "remove", label: "移除" }] : undefined}
+      onAccessibilityAction={onRemove ? (event) => { if (event.nativeEvent.actionName === "remove") onRemove(); } : undefined}
+      disabled={!onPress}
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
@@ -328,47 +331,30 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
     computer.kind === "relay"
       ? `${computer.machine.via === "account" ? "同一账号" : "已配对"} · ${online ? "在线" : relayStatus === "connecting" ? "连接中" : "离线"} · ${hostOf(computer.gateway)}`
       : `局域网 · ${computer.url.replace(/^wss?:\/\//, "")}`;
-  const viaAccount = computer.kind === "relay" && computer.machine.via === "account";
-  // One that is online and signed in would only come straight back.
-  const removable = !viaAccount || !online;
   return (
-    <Row
-      icon={computer.kind === "relay" ? { sf: "laptopcomputer", md: "laptop_mac" } : { sf: "wifi", md: "wifi" }}
-      iconTint={current ? colors.accent : colors.secondaryLabel}
-      iconBackground={current ? colors.accentSoft : colors.fill}
-      title={name}
-      detail={detail}
-      accessory={
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {online !== undefined ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} /> : null}
-          {current ? <Icon sf="checkmark" md="check" size={14} color={colors.accent} weight="bold" /> : null}
-        </View>
-      }
-      onPress={() => {
-        haptics.selection();
-        useComputers.getState().select(computer.key);
-        router.back();
-      }}
-      onLongPress={
-        removable
-          ? () =>
-              Alert.alert(`移除「${name}」？`, viaAccount ? "它会从你的账号下移除。如果这台电脑以后重新上线并登录同一账号，会再次出现。" : computer.kind === "direct" ? "之后可以重新添加这台电脑的局域网地址。" : "之后要重新配对才能连接。", [
-                { text: "取消", style: "cancel" },
-                {
-                  text: "移除",
-                  style: "destructive",
-                  onPress: () =>
-                    void useComputers
-                      .getState()
-                      .remove(computer.key)
-                      .then((removed) => {
-                        if (!removed) Alert.alert("没能移除", "这个网关的版本还不支持移除同一账号下的电脑，升级网关后再试。");
-                      }),
-                },
-              ])
-          : undefined
-      }
-    />
+    <ComputerSwipe computer={computer} name={name} enabled={computerRemovable(computer, online)} background={colors.sheetCard}>
+      {(remove) => (
+        <Row
+          icon={computer.kind === "relay" ? { sf: "laptopcomputer", md: "laptop_mac" } : { sf: "wifi", md: "wifi" }}
+          iconTint={current ? colors.accent : colors.secondaryLabel}
+          iconBackground={current ? colors.accentSoft : colors.fill}
+          title={name}
+          detail={detail}
+          accessory={
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              {online !== undefined ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} /> : null}
+              {current ? <Icon sf="checkmark" md="check" size={14} color={colors.accent} weight="bold" /> : null}
+            </View>
+          }
+          onPress={() => {
+            haptics.selection();
+            useComputers.getState().select(computer.key);
+            router.back();
+          }}
+          onRemove={remove}
+        />
+      )}
+    </ComputerSwipe>
   );
 }
 
@@ -424,7 +410,7 @@ export function AccountScreen() {
             </View>
             <Text style={[type.footnote, { color: colors.secondaryLabel }]}>选择电脑后开始连接，也可以手动添加。</Text>
           </View>
-          <Section footer={computers.length ? "长按可管理已添加的电脑。" : undefined}>
+          <Section footer={computers.length ? "向左滑动可移除电脑。" : undefined}>
             {computers.length === 0 ? (
               <View style={{ paddingHorizontal: 20, paddingVertical: 24, gap: 6 }}>
                 <Text style={[type.headline, { color: colors.label }]}>暂无电脑</Text>
