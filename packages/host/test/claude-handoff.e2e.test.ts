@@ -723,6 +723,38 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(session).toMatchObject({ cwd: e.workDir, title: "Why the build fails", state: "running" });
   });
 
+  it("lists a session as running while the app's Claude says it is busy, though its transcript's turn has ended", async () => {
+    const e = makeEnv();
+    const nativeId = randomUUID();
+    const dir = join(e.configDir, "projects", e.workDir.replace(/[^a-zA-Z0-9]/g, "-"));
+    mkdirSync(dir, { recursive: true });
+    const line = (entry: Record<string, unknown>) => `${JSON.stringify({ isSidechain: false, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd: e.workDir, sessionId: nativeId, entrypoint: "claude-desktop", ...entry })}\n`;
+    // The turn ended after starting agents that go on working in the background.
+    writeFileSync(
+      join(dir, `${nativeId}.jsonl`),
+      line({ type: "user", message: { role: "user", content: "check all three packages" } }) +
+        line({ type: "assistant", message: { id: "msg_bg", role: "assistant", content: [{ type: "text", text: "Three agents are on it." }], stop_reason: "end_turn" } }),
+    );
+    const pid = Number(execSync("sleep 60 >/dev/null 2>&1 & echo $!", { shell: "/bin/sh" }).toString().trim());
+    cleanups.push(() => {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    });
+    mkdirSync(join(e.configDir, "sessions"), { recursive: true });
+    const record = (status: string) =>
+      writeFileSync(join(e.configDir, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: nativeId, cwd: e.workDir, entrypoint: "claude-desktop", kind: "interactive", status }));
+    record("busy");
+
+    const host = await boot(e);
+    const state = () => host.hub.listSessions({ limit: 50 }).sessions.find((entry) => entry.nativeId === nativeId)?.state;
+    expect(state()).toBe("running");
+    // The agents are done.
+    record("idle");
+    await host.hub.refreshDiscovery();
+    expect(state()).toBe("idle");
+  });
+
   it.skipIf(process.platform === "win32")("continues a desktop app session through the API that app's Claude uses, not the host's", async () => {
     const e = makeEnv();
     const resumeLog = join(e.home, "resume-env.log");

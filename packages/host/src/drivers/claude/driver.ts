@@ -452,8 +452,13 @@ export class ClaudeDriver extends AcpDriver {
     const path = findTranscript(this.configDir, nativeId, cwd);
     if (!path) return this.modes.has(nativeId) || this.host?.desktop(this.id, nativeId) ? "idle" : "offline";
     try {
-      const held = this.host?.desktop(this.id, nativeId) || sessionHolders(this.configDir, nativeId).length > 0;
-      if (held) return waitingAsk(path) ? "waiting" : turnInProgress(path, this.busyWindowMs) ? "running" : "idle";
+      const holders = sessionHolders(this.configDir, nativeId);
+      if (this.host?.desktop(this.id, nativeId) || holders.length > 0) {
+        if (waitingAsk(path)) return "waiting";
+        // Its own word counts agents it left working in the background, which a transcript ending in a finished turn doesn't show.
+        if (holders.some((holder) => holder.status === "busy" || holder.status === "waiting")) return "running";
+        return turnInProgress(path, this.busyWindowMs) ? "running" : "idle";
+      }
       if (this.hasHolderRecords()) return "idle";
       const other = await this.elsewhere(nativeId);
       return other && waitingAsk(path) ? "waiting" : other?.working ? "running" : "idle";

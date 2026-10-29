@@ -14,6 +14,8 @@ export interface SessionHolder {
   pid: number;
   /** How that Claude was started: "claude-desktop", "claude-desktop-3p", "cli", "sdk-ts", … */
   entrypoint?: string;
+  /** What that Claude says it is doing: "busy" (a turn, or agents it started in the background), "waiting" (on the user), "idle"; absent in older versions. */
+  status?: string;
 }
 
 /** The Claude desktop app, signed in to Claude or set up with another provider ("-3p"). */
@@ -44,10 +46,14 @@ export function sessionHolders(configDir: string, sessionId: string): SessionHol
   for (const name of names) {
     if (!/^\d+\.json$/.test(name)) continue;
     try {
-      const entry = JSON.parse(readFileSync(join(dir, name), "utf8")) as { pid?: unknown; sessionId?: unknown; entrypoint?: unknown };
+      const entry = JSON.parse(readFileSync(join(dir, name), "utf8")) as { pid?: unknown; sessionId?: unknown; entrypoint?: unknown; status?: unknown };
       const pid = typeof entry.pid === "number" ? entry.pid : Number(name.slice(0, -5));
       if (entry.sessionId !== sessionId || !alive(pid)) continue;
-      holders.push({ pid, entrypoint: typeof entry.entrypoint === "string" ? entry.entrypoint : undefined });
+      holders.push({
+        pid,
+        entrypoint: typeof entry.entrypoint === "string" ? entry.entrypoint : undefined,
+        status: typeof entry.status === "string" ? entry.status : undefined,
+      });
     } catch {
       // Being written, or left behind by a crash: not a holder.
     }
