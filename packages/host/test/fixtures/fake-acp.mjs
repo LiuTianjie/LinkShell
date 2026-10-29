@@ -47,18 +47,28 @@ function appendTranscript(sessionId, cwd, entry) {
   if (process.env.FAKE_ACP_TRANSCRIPT_DELAY) setTimeout(flush, Number(process.env.FAKE_ACP_TRANSCRIPT_DELAY));
   else flush();
 }
-function claudeSessions() {
+// Like the Agent SDK under claude-agent-acp: a session's cwd is looked for in
+// the transcript's first 64 KB only, and one placed nowhere is left out, unless
+// the list is of one directory (`cwd`), which places it there.
+function claudeSessions(cwd) {
   const projects = join(claudeDir, "projects");
   if (!existsSync(projects)) return [];
   const found = [];
   for (const dir of readdirSync(projects)) {
+    if (cwd && dir !== cwd.replace(/[^a-zA-Z0-9]/g, "-")) continue;
     for (const file of readdirSync(join(projects, dir))) {
       if (!file.endsWith(".jsonl")) continue;
       const path = join(projects, dir, file);
-      const lines = readFileSync(path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const raw = readFileSync(path);
+      const lines = raw.toString("utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
       const first = lines.find((l) => l.type === "user");
       const title = lines.findLast?.((l) => l.type === "ai-title")?.aiTitle ?? (typeof first?.message?.content === "string" ? first.message.content : null);
-      found.push({ sessionId: file.replace(/\.jsonl$/, ""), cwd: first?.cwd ?? "/", title, updatedAt: new Date(statSync(path).mtimeMs).toISOString() });
+      let placed = first?.cwd ?? "/";
+      if (first?.cwd && !/"cwd":"[^"]*"/.test(raw.subarray(0, 64 * 1024).toString("utf8"))) {
+        if (!cwd) continue;
+        placed = cwd;
+      }
+      found.push({ sessionId: file.replace(/\.jsonl$/, ""), cwd: placed, title, updatedAt: new Date(statSync(path).mtimeMs).toISOString() });
     }
   }
   return found.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -298,7 +308,7 @@ const handlers = {
     persist();
     return { sessionId, ...config(sessions[sessionId]) };
   },
-  "session/list": () => claudeDir ? { sessions: claudeSessions(), nextCursor: null } : ({
+  "session/list": (params) => claudeDir ? { sessions: claudeSessions(params?.cwd), nextCursor: null } : ({
     sessions: Object.entries(sessions)
       .filter(([, s]) => s.history.length > 0)
       .sort(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
