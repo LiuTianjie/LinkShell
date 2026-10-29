@@ -18,8 +18,8 @@
 
 ## 下载与首次使用
 
-- [Apple Silicon（M 系列）](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.79/LinkShell-0.10.79-arm64.dmg)
-- [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.79/LinkShell-0.10.79-x64.dmg)
+- [Apple Silicon（M 系列）](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.80/LinkShell-0.10.80-arm64.dmg)
+- [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.80/LinkShell-0.10.80-x64.dmg)
 
 需要 macOS 13 及以上。把 DMG 中的 `LinkShell.app` 拖入 Applications，再从 Applications 打开；不要长期从只读 DMG 内运行。已内置 Node、CLI、Host，无需预装 npm 或 Homebrew。
 
