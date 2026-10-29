@@ -727,8 +727,10 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Sends what waited for another Claude's turn, now that it has ended. */
   private async sendWaiting(nativeId: string): Promise<void> {
+    if (!this.waiting.get(nativeId)?.length || (await this.elsewhere(nativeId))?.working) return;
+    // Taken only after that check: "send now" and the watcher can both be in it, and only one may send.
     const waiting = this.waiting.get(nativeId);
-    if (!waiting?.length || (await this.elsewhere(nativeId))?.working) return;
+    if (!waiting?.length) return;
     this.waiting.delete(nativeId);
     this.reportWaiting(nativeId);
     try {

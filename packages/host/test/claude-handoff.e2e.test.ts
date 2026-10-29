@@ -550,6 +550,8 @@ describe("Claude handoff (fake claude TUI + fake ACP adapter)", () => {
     expect(host.hub.getSession(desk.id).queue ?? []).toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(p.userTexts(desk.id)).not.toContain("never mind");
+    // "Send now" and the watcher both saw the turn end; the message still went out once.
+    expect(p.userTexts(desk.id).filter((t) => t === "urgent")).toHaveLength(1);
   }, 25_000);
 
   it("answers the question a claude on the computer waits on, from its card or a typed message, by interrupting that claude", async () => {
