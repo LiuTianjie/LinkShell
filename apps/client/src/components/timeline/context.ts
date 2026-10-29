@@ -17,6 +17,20 @@ export function useTimelineWaiting(): ReadonlySet<string> {
   return useContext(TimelineWaiting);
 }
 
+/**
+ * The end-of-turn box whose reply buttons still answer (see `openWrapUp`), and how a button sends its
+ * words (set where the session can be sent to). Without it every box is drawn as it was left.
+ */
+export interface TimelineWrapUp {
+  open?: string;
+  reply: (message: string) => Promise<void>;
+}
+export const TimelineWrapUp = createContext<TimelineWrapUp | undefined>(undefined);
+
+export function useTimelineWrapUp(): TimelineWrapUp | undefined {
+  return useContext(TimelineWrapUp);
+}
+
 /** Opens a side conversation about a passage picked in a reply (set where the agent has side conversations). */
 export const TimelineSide = createContext<((quote: string) => void) | undefined>(undefined);
 

@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ArrowDown, LoaderCircle } from "lucide-react";
-import { foldStepRuns, cardsAtTurnEnd, type SessionView, type Step } from "@linkshell/client-core";
+import { foldStepRuns, cardsAtTurnEnd, openWrapUp, type SessionView, type Step } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
-import { StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
+import { OpenWrapUp, StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
 import { isDesktop } from "./desktop";
 
 /** A folded-steps row with a stable toggle, so it is memoizable like the message entries. */
@@ -99,6 +99,7 @@ export function Conversation({
     [],
   );
   const rows = useMemo(() => foldStepRuns(cardsAtTurnEnd(view.items, view.turnBreaks), openSteps), [view.items, view.turnBreaks, openSteps]);
+  const openBox = useMemo(() => openWrapUp(view.items), [view.items]);
   // Every entry gets this map; it keeps its identity until its content changes, or each streamed
   // chunk (a new items array) would re-render the whole conversation.
   const answeredRef = useRef<Map<string, string>>(new Map());
@@ -259,6 +260,7 @@ export function Conversation({
               ) : null)}
           </div>
           <div ref={list} className="live-timeline">
+            <OpenWrapUp.Provider value={openBox}>
             {rows.map((row) =>
               row.type === "steps" ? (
                 <StepsRow
@@ -283,6 +285,7 @@ export function Conversation({
                 />
               ),
             )}
+            </OpenWrapUp.Provider>
           </div>
           <div className="conversation-footer">{footer}</div>
         </div>

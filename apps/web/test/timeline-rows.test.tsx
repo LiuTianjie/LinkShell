@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TimelineItem } from "@linkshell/client-core";
 import type { Connection } from "../src/live/engine";
 import { Runtime } from "../src/live/common";
-import { Timeline, TimelineNavigation } from "../src/live/Timeline";
+import { OpenWrapUp, Timeline, TimelineNavigation } from "../src/live/Timeline";
 
 vi.mock("../src/live/engine", async () => ({ engine: { state: (await import("zustand/vanilla")).createStore(() => ({})) } }));
 
@@ -14,9 +14,9 @@ let next = 0;
 const tool = (patch: Partial<Tool>): Tool => ({ kind: "tool", id: `t${next++}`, title: "Tool", toolKind: "other", status: "completed", content: [], output: "", ts: 0, ...patch });
 const agent = (text: string): TimelineItem => ({ kind: "agent", id: `a${next++}`, text, streaming: false, ts: 0 });
 
-function render(items: TimelineItem[], findSession?: (appId: string) => { title: string; open: () => void } | undefined) {
+function render(items: TimelineItem[], findSession?: (appId: string) => { title: string; open: () => void } | undefined, openBox?: string) {
   const connection = { store: createStore(() => ({ status: "online" })), link: {} } as unknown as Connection;
-  const timeline = createElement(Timeline, { items, sessionId: "s", agent: "claude", onFile: () => {} });
+  const timeline = createElement(OpenWrapUp.Provider, { value: openBox }, createElement(Timeline, { items, sessionId: "s", agent: "claude", onFile: () => {} }));
   const navigation = createElement(TimelineNavigation.Provider, { value: { cwd: "/w", open: () => {}, findSession } }, timeline);
   return renderToStaticMarkup(createElement(Runtime.Provider, { value: connection }, navigation));
 }
@@ -64,8 +64,16 @@ describe("conversation rows as the Claude app words them", () => {
     expect(markup).toContain('<p class="timeline-divider timeline-chapter">Survey</p>');
     expect(markup).not.toContain("Update plan");
     expect(markup).toContain("<strong>Fix it</strong><small>已启动</small>");
+    // Not the open box here (no conversation around it): drawn as it was left.
     expect(markup).toContain('<span class="wrap-up-chip">Ship</span>');
     expect(markup).toContain(">上下文已自动压缩</p>");
+  });
+
+  it("lets the last end-of-turn box be answered with its replies, but not with the Claude app's own actions", () => {
+    const box = tool({ detail: { type: "mcp", server: "ccd_turn", tool: "wrap_up" }, rawInput: { recap: "Done.", ask: "Ship?", actions: [{ label: "提交并发版", message: "提交并发版吧" }, { action: "commit" }] } });
+    const markup = render([box], undefined, box.id);
+    expect(markup).toMatch(/<button[^>]*class="[^"]*wrap-up-button[^"]*"[^>]*title="提交并发版吧"[^>]*>提交并发版<\/button>/);
+    expect(markup).toContain('<span class="wrap-up-chip" title="在 Claude App 里操作">提交</span>');
   });
 
   it("opens the started session when this computer has it", () => {

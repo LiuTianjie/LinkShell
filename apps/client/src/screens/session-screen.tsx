@@ -1,7 +1,7 @@
 import type { AsyncQuestion } from "@linkshell/wire";
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { answeredQuestions, cardsAtTurnEnd, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
+import { answeredQuestions, cardsAtTurnEnd, openWrapUp, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
@@ -23,7 +23,7 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
-import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting } from "@/components/timeline/context";
+import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
@@ -200,6 +200,13 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       answer: (question: AsyncQuestion, answer: string) => actions.answerAsync(id, question, answer),
     };
   }, [items, actions, id, summary?.asyncQuestions]);
+  const openBox = useMemo(() => openWrapUp(items), [items]);
+  const wrapUp = useMemo(() => ({
+    open: openBox,
+    reply: async (message: string) => {
+      if ((await actions.send(id, [{ type: "text", text: message }])) === "failed") throw new Error("消息发送失败，请重试");
+    },
+  }), [openBox, actions, id]);
   // The session opens at its latest turns; what came before loads a page at a time.
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(
@@ -524,6 +531,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <TimelineQuestions.Provider value={questions}>
       <TimelineSide.Provider value={askAboutQuote}>
       <TimelineWaiting.Provider value={waitingCalls}>
+      <TimelineWrapUp.Provider value={wrapUp}>
       <Timeline
         computerPreview
         previewHeaderConsumed={headerConsumed}
@@ -538,6 +546,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         onScroll={onScroll}
         earlier={earlier}
       />
+      </TimelineWrapUp.Provider>
       </TimelineWaiting.Provider>
       </TimelineSide.Provider>
       </TimelineQuestions.Provider>

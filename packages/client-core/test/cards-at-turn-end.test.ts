@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cardsAtTurnEnd, type TimelineItem } from "../src/timeline.js";
+import { cardsAtTurnEnd, openWrapUp, type TimelineItem } from "../src/timeline.js";
+import { wrapUpOf } from "../src/tool-labels.js";
 
 const user = (id: string): TimelineItem => ({ kind: "user", id, blocks: [{ type: "text", text: id }], ts: 0 });
 const agent = (id: string): TimelineItem => ({ kind: "agent", id, text: id, streaming: false, ts: 0 });
@@ -70,5 +71,36 @@ describe("the end-of-turn box's place", () => {
     // Answered: it stays with its turn, and the next box is the one at the bottom.
     const answered = [...items, user("u2"), agent("a4"), box("w2"), agent("a5")];
     expect(ids(cardsAtTurnEnd(answered, ["a2", "a3", "a5"]))).toEqual(["u1", "a1", "a2", "w1", "r1", "a3", "u2", "a4", "a5", "w2"]);
+  });
+});
+
+describe("the end-of-turn box that still answers", () => {
+  it("is the last box while the person hasn't written since, turns the agent ran itself included", () => {
+    expect(openWrapUp([user("u1"), box("w1"), agent("a1")])).toBe("w1");
+    expect(openWrapUp([user("u1"), box("w1"), agent("a1"), reported("r1"), agent("a2")])).toBe("w1");
+    expect(openWrapUp([user("u1"), box("w1"), agent("a1"), box("w2")])).toBe("w2");
+  });
+
+  it("is none once the person writes, or when there is no box", () => {
+    expect(openWrapUp([user("u1"), box("w1"), agent("a1"), user("u2")])).toBeUndefined();
+    expect(openWrapUp([user("u1"), agent("a1")])).toBeUndefined();
+  });
+});
+
+describe("an end-of-turn box's buttons", () => {
+  const of = (actions: unknown[]) => wrapUpOf({ ...box("w"), rawInput: { recap: "r", ask: "a", actions } } as Extract<TimelineItem, { kind: "tool" }>);
+
+  it("send their message, else their label, as the Claude app's do", () => {
+    expect(of([{ label: "Ship", message: "Ship it to main." }, { label: "Not now" }]).actions)
+      .toEqual([{ label: "Ship", message: "Ship it to main." }, { label: "Not now", message: "Not now" }]);
+  });
+
+  it("are the app's own when they name an app action, with the app's words", () => {
+    expect(of([{ action: "commit" }, { action: "create_pr", label: "ignored" }, { action: "later", label: "Later" }]).actions)
+      .toEqual([{ label: "提交", app: "commit" }, { label: "创建 PR", app: "create_pr" }, { label: "Later", app: "later" }]);
+  });
+
+  it("drop what has nothing to show", () => {
+    expect(of([{}, { label: "  " }, "x", null]).actions).toEqual([]);
   });
 });

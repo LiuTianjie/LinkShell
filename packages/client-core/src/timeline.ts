@@ -315,6 +315,19 @@ export function cardsAtTurnEnd(items: TimelineItem[], turnBreaks?: readonly stri
   return out.every((item, index) => item === items[index]) ? items : out;
 }
 
+/**
+ * The end-of-turn box still open to an answer: the last one, while the person hasn't written
+ * since, as the Claude app keeps its buttons. An earlier box, or one written over, is history.
+ */
+export function openWrapUp(items: readonly TimelineItem[]): string | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (isWrapUp(item)) return item.id;
+    if (saidByPerson(item)) return undefined;
+  }
+  return undefined;
+}
+
 export function findTool(view: SessionView, id: string): Extract<TimelineItem, { kind: "tool" }> | undefined {
   const own = get(view, id, "tool");
   if (own) return own;

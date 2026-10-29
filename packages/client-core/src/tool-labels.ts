@@ -610,9 +610,27 @@ export function startedSession(item: ToolItem): { title: string; state: "startin
   return { title, state, ...(appId ? { appId } : {}) };
 }
 
+/** What the Claude app calls its own actions on an end-of-turn box's buttons. */
+const APP_ACTIONS: Record<string, string> = {
+  commit: "提交", create_pr: "创建 PR", merge: "合并", fix_ci: "修复 CI", address_comments: "处理评论",
+  resolve_conflicts: "解决冲突", verify: "验证", archive: "归档", new_session: "新会话",
+};
+
+/**
+ * One of an end-of-turn box's buttons: a reply sends `message` as the person's next message (its
+ * label when it has none); an app action (commit, create a PR…) is the Claude app's own, done there.
+ */
+export type WrapUpAction = { label: string; message: string; app?: undefined } | { label: string; app: string; message?: undefined };
+
 /** The Claude app's end-of-turn box (wrap_up): the recap, the question it leaves, the answers it offers. */
-export function wrapUpOf(item: ToolItem): { recap?: string; ask?: string; actions: string[] } {
+export function wrapUpOf(item: ToolItem): { recap?: string; ask?: string; actions: WrapUpAction[] } {
   const input = record(item.rawInput);
-  const actions = (Array.isArray(input.actions) ? input.actions : []).flatMap((entry) => text(record(entry).label) ?? []);
+  const actions = (Array.isArray(input.actions) ? input.actions : []).flatMap((entry): WrapUpAction[] => {
+    const button = record(entry);
+    const app = text(button.action);
+    if (app) return [{ label: APP_ACTIONS[app] ?? text(button.label) ?? app, app }];
+    const label = text(button.label);
+    return label ? [{ label, message: text(button.message) ?? label }] : [];
+  });
   return { recap: text(input.recap), ask: text(input.ask), actions };
 }

@@ -15,7 +15,7 @@ import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Attachments } from "./attachments";
-import { useTimelineWaiting } from "./context";
+import { useTimelineWaiting, useTimelineWrapUp } from "./context";
 import { SubagentCard } from "./subagent";
 import { WorkflowCard } from "../workflow";
 
@@ -217,9 +217,33 @@ function Divider({ text, busy = false, strong = false }: { text: string; busy?: 
   );
 }
 
-/** The Claude app's end-of-turn box: its recap, the question it leaves, and the answers it offered (not buttons here). */
+/**
+ * The Claude app's end-of-turn box: its recap, the question it leaves, and its buttons. While it is
+ * the open box (the last, nobody has written since), a reply button sends its words as the next
+ * message, as the app's does; the app's own actions (commit, create a PR…) are done in the app.
+ */
 function WrapUpCard({ item }: { item: ToolItem }) {
   const box = wrapUpOf(item);
+  const wrapUp = useTimelineWrapUp();
+  const online = useClient((state) => state.status === "online");
+  const open = !!wrapUp && wrapUp.open === item.id;
+  const [sending, setSending] = useState<number>();
+  const [sent, setSent] = useState<number>();
+  const [error, setError] = useState<string>();
+  const send = async (index: number, message: string) => {
+    if (!wrapUp || sending !== undefined || sent !== undefined) return;
+    haptics.selection();
+    setSending(index);
+    setError(undefined);
+    try {
+      await wrapUp.reply(message);
+      setSent(index);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSending(undefined);
+    }
+  };
   return (
     <View style={{ backgroundColor: colors.inset, borderRadius: 16, borderCurve: "continuous", padding: 14, gap: 8 }}>
       <Text style={[type.caption, { color: colors.tertiaryLabel, fontWeight: "600" }]}>已收尾</Text>
@@ -227,13 +251,41 @@ function WrapUpCard({ item }: { item: ToolItem }) {
       {box.ask ? <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>{box.ask}</Text> : null}
       {box.actions.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {box.actions.map((label, index) => (
-            <View key={index} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
-              <Text style={[type.caption, { color: colors.secondaryLabel }]}>{label}</Text>
-            </View>
-          ))}
+          {box.actions.map((action, index) => {
+            const message = action.message;
+            if (open && message !== undefined) {
+              const primary = index === 0;
+              const disabled = !online || sending !== undefined || sent !== undefined;
+              return (
+                <Pressable
+                  key={index}
+                  disabled={disabled}
+                  onPress={() => void send(index, message)}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
+                  accessibilityHint={`发送：${message}`}
+                  accessibilityState={{ disabled, selected: sent === index }}
+                  style={({ pressed }) => ({
+                    flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, borderRadius: 999, paddingHorizontal: 14,
+                    backgroundColor: primary ? colors.label : "transparent",
+                    borderWidth: primary ? 0 : StyleSheet.hairlineWidth, borderColor: colors.separator,
+                    opacity: pressed ? 0.7 : disabled && sent !== index ? 0.4 : 1,
+                  })}
+                >
+                  {sending === index ? <ActivityIndicator size="small" color={primary ? colors.background : colors.secondaryLabel} /> : null}
+                  <Text style={[type.footnote, { color: primary ? colors.background : colors.label, fontWeight: "600" }]}>{action.label}</Text>
+                </Pressable>
+              );
+            }
+            return (
+              <View key={index} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                <Text style={[type.caption, { color: colors.secondaryLabel }]}>{action.label}</Text>
+              </View>
+            );
+          })}
         </View>
       ) : null}
+      {error ? <Text style={[type.footnote, { color: colors.danger }]}>{error}</Text> : null}
     </View>
   );
 }

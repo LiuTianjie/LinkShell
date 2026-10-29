@@ -867,7 +867,8 @@
   }
   .wrap-up-label { color: var(--tertiaryLabel); font-size: 11px; }
   .wrap-up-ask { margin: 0; color: var(--label); font-weight: 500; }
-  .wrap-up-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wrap-up-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .wrap-up-button { border-radius: 999px; }
   .wrap-up-chip {
     padding: 3px 10px;
     border: 1px solid var(--separator);

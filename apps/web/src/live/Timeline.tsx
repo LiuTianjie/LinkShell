@@ -164,6 +164,9 @@ export const TimelineNavigation = createContext<{
   findSession?: (appId: string) => { title: string; open: () => void } | undefined;
 } | null>(null);
 
+/** The end-of-turn box whose buttons still answer (see `openWrapUp`); the conversation sets it. */
+export const OpenWrapUp = createContext<string | undefined>(undefined);
+
 /** Whether code blocks below may be highlighted: off for the block of a reply still streaming. */
 const HighlightCode = createContext(true);
 
@@ -1106,9 +1109,18 @@ const SUBAGENT_STATES: Record<string, string | null> = {
   unknown: "状态未确认",
 };
 
-/** The Claude app's end-of-turn box: its recap, the question it leaves, and the answers it offered (not buttons here). */
-function WrapUpCard({ item }: { item: ToolItem }) {
+/**
+ * The Claude app's end-of-turn box: its recap, the question it leaves, and its buttons. While it is
+ * the open box (the last, nobody has written since), a reply button sends its words as the next
+ * message, as the app's does; the app's own actions (commit, create a PR…) are done in the app.
+ */
+function WrapUpCard({ item, sessionId }: { item: ToolItem; sessionId: string }) {
   const box = wrapUpOf(item);
+  const open = useContext(OpenWrapUp) === item.id;
+  const actions = useActions();
+  const online = useSessionOnline();
+  const job = useJob();
+  const [sent, setSent] = useState<number>();
   return (
     <section className="wrap-up-card" aria-label="已收尾">
       <small className="wrap-up-label">已收尾</small>
@@ -1116,11 +1128,35 @@ function WrapUpCard({ item }: { item: ToolItem }) {
       {box.ask && <p className="wrap-up-ask">{box.ask}</p>}
       {box.actions.length > 0 && (
         <div className="wrap-up-actions">
-          {box.actions.map((label, index) => (
-            <span key={index} className="wrap-up-chip">{label}</span>
-          ))}
+          {box.actions.map((action, index) =>
+            open && action.message !== undefined ? (
+              <Button
+                key={index}
+                type="button"
+                variant={index === 0 ? "default" : "outline"}
+                size="sm"
+                className="wrap-up-button"
+                disabled={!online || job.busy || sent !== undefined}
+                title={action.message}
+                onClick={() =>
+                  void job.run(async () => {
+                    const result = await actions.send(sessionId, [{ type: "text", text: action.message }]);
+                    if (result === "failed") throw new Error("消息发送失败，请重试");
+                    setSent(index);
+                  })
+                }
+              >
+                {action.label}
+              </Button>
+            ) : (
+              <span key={index} className="wrap-up-chip" title={action.app ? "在 Claude App 里操作" : undefined}>
+                {action.label}
+              </span>
+            ),
+          )}
         </div>
       )}
+      <ErrorNotice error={job.error} />
     </section>
   );
 }
@@ -1201,7 +1237,7 @@ function ToolRecord({
       </p>
     );
   if (action === "chapter") return <p className="timeline-divider timeline-chapter">{label.subject ?? "新章节"}</p>;
-  if (action === "wrap_up") return <WrapUpCard item={item} />;
+  if (action === "wrap_up") return <WrapUpCard item={item} sessionId={sessionId} />;
   if (action === "start_session") return <SessionCard item={item} />;
 
   const parts = toolLabelParts(label);
