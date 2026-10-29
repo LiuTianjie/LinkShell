@@ -309,6 +309,7 @@ Remove owned temporary JSON/log/build outputs after recording the useful results
 |---|---|
 | `--connect <socket>` | The app as the host uses it: connects to that unix socket and serves the protocol below. The socket closing ends the app. |
 | `<screen> [--dry-run]` | One viewer's hands on that display, for a host that could not have the system open the app: input events on stdin, `ready` / `trusted` / `cursor` / `posted` on stdout, no `v`. stdin closing ends it. As a child, the permission is its parent's. |
+| `--menubar <socket>` | The Electron window's menu bar item. macOS draws one only for the bundle's main executable, and the window runs as `LinkShell Desktop`, so the window has the system open this (`apps/desktop/src/main/menubar.ts`). It receives `{"t":"menu","tooltip":…,"items":[{"id","label"} or {"separator":true}]}` and sends `{"t":"click","id":…}`, or `{"t":"reopen"}` when LinkShell is opened again with it in front. The socket closing ends it. |
 | `--status` | Prints `status` and exits. |
 | `--setup`, or no arguments when the system opened it | The setup window (above). `--quiet-if-done`, `--pretend`, `--pretend-after`, `--pressed`, `--snapshot`, `--appearance` go with it. |
 

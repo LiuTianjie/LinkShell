@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
+import { MenuBar, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
 import { launchOptions, Runtime } from "./runtime.js";
@@ -31,6 +32,7 @@ let surfaceDark: boolean | undefined;
 
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let menuBar: MenuBar | undefined;
 let nativeModule: NativeModule | undefined;
 let visible = false;
 /** The workspace document has loaded and mounted: commands can be delivered to it. */
@@ -492,6 +494,7 @@ app.on("before-quit", (event) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
     server.stop();
+    menuBar?.stop();
     rememberBounds();
     app.quit();
   });
@@ -619,14 +622,32 @@ function startUpdater() {
   }, 60_000).unref();
 }
 
+const trayItems: MenuBarEntry[] = [
+  { id: "open", label: "打开 LinkShell" },
+  { id: "manage", label: "本机管理" },
+  { separator: true },
+  { id: "quit", label: "退出 LinkShell 界面" },
+];
+
+function trayClicked(id: string) {
+  if (id === "open") { openWorkspace(); showWindow(); }
+  else if (id === "manage") { openManagement(); showWindow(); }
+  else if (id === "quit") app.quit();
+}
+
 function updateTray() {
+  menuBar?.show("LinkShell", trayItems);
   if (!tray) return;
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "打开 LinkShell", click: () => { openWorkspace(); showWindow(); } },
-    { label: "本机管理", click: () => { openManagement(); showWindow(); } },
-    { type: "separator" },
-    { label: "退出 LinkShell 界面", click: () => app.quit() },
-  ]));
+  tray.setContextMenu(Menu.buildFromTemplate(trayItems.map((entry): MenuItemConstructorOptions =>
+    "separator" in entry ? { type: "separator" } : { label: entry.label, click: () => trayClicked(entry.id) })));
+}
+
+/** Clicked in the menu bar process: LinkShell isn't the active app, so it takes the focus to come forward. */
+function menuBarEvent(event: MenuBarEvent) {
+  if (event.t === "click" && event.id === "quit") { app.quit(); return; }
+  app.focus({ steal: true });
+  if (event.t === "click") trayClicked(event.id);
+  else showWindow();
 }
 
 function installMenu() {
@@ -703,7 +724,11 @@ async function ready() {
   }
   // A template the menu bar tints on the Mac; the coloured mark in Windows' notification area.
   const iconPath = join(app.getAppPath(), MAC ? "assets/trayTemplate.png" : "assets/tray.png");
-  if (existsSync(iconPath)) {
+  if (MAC && runtime.bundle) {
+    menuBar = new MenuBar(runtime.bundle, menuBarEvent, (message) => console.error(message));
+    menuBar.start();
+    updateTray();
+  } else if (existsSync(iconPath)) {
     const icon = nativeImage.createFromPath(iconPath);
     if (MAC) icon.setTemplateImage(true);
     tray = new Tray(icon);

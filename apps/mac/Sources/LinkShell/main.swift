@@ -16,6 +16,8 @@ import Foundation
 //   --setup               The window in which the user gives LinkShell its permissions (see
 //                         `Setup`), opened by the system like the first.
 //   --dashboard           Native status UI (also the default when opened by the system).
+//   --menubar <socket>    The Electron window's menu bar item, opened by the system for it (see
+//                         `MenuBar`); the socket closing ends it.
 //
 //   --dry-run             Events are reported (`posted`), not posted.
 //
@@ -65,6 +67,11 @@ if Launch.has("--dashboard") || Launch.has("--dashboard-preview") || (Launch.arg
   // The window is Electron's, in this same bundle (same id, same signature): this process becomes it.
   if !Launch.has("--dashboard-preview") { DesktopShell.exec() }
   MainActor.assumeIsolated { Desktop.run() }
+}
+
+if let path = Launch.value(after: "--menubar") {
+  guard let link = Link(path: path) else { exit(1) }
+  MainActor.assumeIsolated { MenuBar.run(link: link) }
 }
 
 if let path = Launch.value(after: "--connect") {
