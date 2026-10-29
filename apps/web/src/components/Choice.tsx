@@ -7,6 +7,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+export interface ChoiceProps {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: { value: string; label: string; disabled?: boolean }[];
+  label: string;
+  placeholder?: string;
+  disabled?: boolean;
+  id?: string;
+  className?: string;
+  container?: HTMLElement | null;
+}
 export function Choice({
   value,
   onValueChange,
@@ -17,17 +28,7 @@ export function Choice({
   id,
   className,
   container,
-}: {
-  value: string;
-  onValueChange: (value: string) => void;
-  options: { value: string; label: string; disabled?: boolean }[];
-  label: string;
-  placeholder?: string;
-  disabled?: boolean;
-  id?: string;
-  className?: string;
-  container?: HTMLElement | null;
-}) {
+}: ChoiceProps) {
   return (
     <Select
       // Radix reserves the empty string for the placeholder; host options may use it.

@@ -9,7 +9,10 @@ import {
   LockKeyhole,
   X,
   ArrowLeft,
+  Trash2,
 } from "lucide-react";
+import { useDialogs } from "@/components/Dialogs";
+import { DESKTOP_LOCAL } from "./desktop";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import {
@@ -167,6 +170,7 @@ function ScreenCard({
   const names = useStore(computerNames.store);
   const name = computerName(computer, names);
   const { connection, error, retry } = useScreenConnection(live ? computer : undefined);
+  const { forget, forgetting } = useForget(computer);
   return (
     <section
       className={cn(
@@ -244,6 +248,18 @@ function ScreenCard({
                 重新连接
               </Button>
             )}
+            {!computer.machine.online && computer.key !== DESKTOP_LOCAL && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`移除 ${name}`}
+                title="移除这台电脑"
+                disabled={forgetting}
+                onClick={forget}
+              >
+                <Trash2 />
+              </Button>
+            )}
             {!computer.machine.online && (
               <Button variant="outline" onClick={() => engine.reconnect()}>
                 <RefreshCw data-icon="inline-start" />
@@ -314,6 +330,30 @@ function ConnectedScreen({
   );
 }
 
+/** Takes a computer off the list: its pairing, or, for one that signed in to the account, the account. */
+function useForget(computer: Computer | undefined, done?: () => void) {
+  const dialogs = useDialogs();
+  const names = useStore(computerNames.store);
+  const [forgetting, setForgetting] = useState(false);
+  const forget = async () => {
+    if (!computer) return;
+    const confirmed = await dialogs.confirm(
+      `从列表中移除「${computerName(computer, names)}」？之后可以在那台电脑上重新登录或配对。`,
+    );
+    if (!confirmed) return;
+    setForgetting(true);
+    try {
+      await engine.forget(computer);
+      done?.();
+    } catch (reason) {
+      engine.report(reason);
+    } finally {
+      setForgetting(false);
+    }
+  };
+  return { forget: () => void forget(), forgetting };
+}
+
 function useScreenConnection(computer?: Computer) {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState<string>();
@@ -350,6 +390,7 @@ export function ScreenDetail({
   const ready = useStore(engine.state, (state) => state.ready);
   const names = useStore(computerNames.store);
   const { connection, error, retry } = useScreenConnection(computer);
+  const { forget, forgetting } = useForget(computer, back);
   const selectedKey = useStore(
     engine.state,
     (state) => state.connection?.computer.key,
@@ -403,9 +444,17 @@ export function ScreenDetail({
           title="电脑已离线"
           description="电脑开机并运行 LinkShell 后即可连接。"
         >
-          <Button variant="outline" onClick={() => engine.reconnect()}>
-            刷新连接
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => engine.reconnect()}>
+              刷新连接
+            </Button>
+            {computer.key !== DESKTOP_LOCAL && (
+              <Button variant="ghost" disabled={forgetting} onClick={forget}>
+                <Trash2 data-icon="inline-start" />
+                移除这台电脑
+              </Button>
+            )}
+          </div>
         </EmptyState>
       ) : error ? (
         <EmptyState title="暂时无法连接">

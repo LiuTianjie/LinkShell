@@ -663,6 +663,11 @@ html[data-desktop] .desktop-main .screen-toolbar { padding: 10px 12px; }
 html[data-desktop] .desktop-main .screen-display-mark { border-radius: 16px; }
 html[data-desktop] .desktop-main .screen-caption { min-height: 32px; font-size: 12px; }
 html[data-desktop] .desktop-main .screen-stage { min-height: 0; }
+/* The popover is drawn outside .desktop-main, so its controls take the page's look here: a
+   form's padding rather than a menu's, and buttons and choices at one 28 px height. */
+html[data-desktop] .screen-settings-popover[data-slot="popover-content"] { padding: 12px; }
+html[data-desktop] .screen-settings-popover [data-button] { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
+html[data-desktop] .screen-settings-popover [data-slot="select-trigger"] { height: 28px; border: 0; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop] .desktop-screen-settings { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 12px; border-bottom: 1px solid var(--separator); }
 html[data-desktop] .desktop-screen-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 html[data-desktop] .desktop-screen-settings > div > span { margin-right: 6px; color: var(--secondaryLabel); font-size: 12px; }

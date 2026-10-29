@@ -6,8 +6,8 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from "@/components/ui/popover";
-import { Choice } from "../components/Choice";
-import { useEffect, useRef, useState } from "react";
+import { Choice, type ChoiceProps } from "../components/Choice";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ComputerPreviewSubscription } from "@linkshell/client-core";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import {
@@ -756,28 +756,29 @@ function BrowserScreen({
     return () => clearTimeout(pauseTimer.current);
   }, [active, display, view.width, view.maxFps, fitted, html, reusable]);
   const screenLive = started && !!html && !error && !sessionError && !!stats?.width && (!viewerState || viewerState === "ready");
-  const settings = (
-    <div className="screen-settings">
-      {displays.length > 1 && (
-        <Choice
-          container={fullscreen || focused ? surface.current : undefined}
-          className="w-auto"
-          label="选择显示器"
-          value={String(display)}
-          onValueChange={(value) => setDisplay(Number(value))}
-          options={displays.map((entry) => ({
-            value: String(entry.index),
-            label: entry.name,
-          }))}
-        />
-      )}
-      <Choice
-        container={fullscreen || focused ? surface.current : undefined}
-        className="w-auto"
-        label="画面清晰度"
-        value={view.width}
-        onValueChange={(value) => configure("width", value)}
-        options={[
+  // One set of choices, drawn as the toolbar's row while watching and as labelled rows in a list row's popover.
+  const choices: { title: string; choice: Pick<ChoiceProps, "label" | "value" | "onValueChange" | "options"> }[] = [
+    ...(displays.length > 1
+      ? [{
+          title: "显示器",
+          choice: {
+            label: "选择显示器",
+            value: String(display),
+            onValueChange: (value: string) => setDisplay(Number(value)),
+            options: displays.map((entry) => ({
+              value: String(entry.index),
+              label: entry.name,
+            })),
+          },
+        }]
+      : []),
+    {
+      title: "清晰度",
+      choice: {
+        label: "画面清晰度",
+        value: view.width,
+        onValueChange: (value) => configure("width", value),
+        options: [
           {
             value: "auto",
             label: fitted ? `随窗口 · ${fitted}` : "随窗口大小",
@@ -786,31 +787,45 @@ function BrowserScreen({
           { value: "1920", label: "标准 · 1920" },
           { value: "2560", label: "高清 · 2560" },
           { value: "native", label: "原生分辨率" },
-        ]}
-      />
-      <Choice
-        container={fullscreen || focused ? surface.current : undefined}
-        className="w-auto"
-        label="帧率上限"
-        value={view.maxFps}
-        onValueChange={(value) => configure("maxFps", value)}
-        options={[
+        ],
+      },
+    },
+    {
+      title: "帧率",
+      choice: {
+        label: "帧率上限",
+        value: view.maxFps,
+        onValueChange: (value) => configure("maxFps", value),
+        options: [
           { value: "60", label: "流畅 · 最高 60 帧" },
           { value: "120", label: "高刷 · 最高 120 帧" },
           { value: "30", label: "省带宽 · 最高 30 帧" },
-        ]}
-      />
-      <Choice
-        container={fullscreen || focused ? surface.current : undefined}
-        className="w-auto"
-        label="视频编码"
-        value={view.codec}
-        onValueChange={(value) => configure("codec", value)}
-        options={[
+        ],
+      },
+    },
+    {
+      title: "编码",
+      choice: {
+        label: "视频编码",
+        value: view.codec,
+        onValueChange: (value) => configure("codec", value),
+        options: [
           { value: "auto", label: "自动编码" },
           { value: "h264", label: "兼容编码 · H.264" },
-        ]}
-      />
+        ],
+      },
+    },
+  ];
+  const settings = (
+    <div className="screen-settings">
+      {choices.map(({ choice }) => (
+        <Choice
+          key={choice.label}
+          container={fullscreen || focused ? surface.current : undefined}
+          className="w-auto"
+          {...choice}
+        />
+      ))}
     </div>
   );
   if (compact) {
@@ -864,39 +879,50 @@ function BrowserScreen({
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="w-80 max-w-[calc(100vw-32px)] gap-4 p-4"
+              className="screen-settings-popover w-80 max-w-[calc(100vw-32px)] gap-3"
             >
               <PopoverHeader>
                 <PopoverTitle>画质与权限</PopoverTitle>
                 <PopoverDescription>
-                  根据网络情况调整观看体验。
+                  画面设置对所有电脑生效。
                 </PopoverDescription>
               </PopoverHeader>
-              {settings}
-              {access && (
-                <div className="screen-permission-details">
-                  {access.problem && <p>{access.problem}</p>}
-                  <p>
-                    屏幕录制{" "}
-                    <strong>
-                      {access.recording === null
-                        ? "待检查"
-                        : access.recording
-                          ? "已授权"
-                          : "未授权"}
-                    </strong>
-                  </p>
-                  <p>
-                    操作控制{" "}
-                    <strong>
-                      {access.control === null
-                        ? "待检查"
-                        : access.control
-                          ? "已授权"
-                          : "未授权"}
-                    </strong>
-                  </p>
-                  {access.supported &&
+              <div className="screen-settings-list">
+                {choices.map(({ title, choice }) => (
+                  <Fragment key={choice.label}>
+                    <span>{title}</span>
+                    <Choice {...choice} />
+                  </Fragment>
+                ))}
+              </div>
+              <div className="screen-permission-details">
+                {access?.problem && <p>{access.problem}</p>}
+                {access && (
+                  <>
+                    <p>
+                      屏幕录制{" "}
+                      <strong>
+                        {access.recording === null
+                          ? "待检查"
+                          : access.recording
+                            ? "已授权"
+                            : "未授权"}
+                      </strong>
+                    </p>
+                    <p>
+                      操作控制{" "}
+                      <strong>
+                        {access.control === null
+                          ? "待检查"
+                          : access.control
+                            ? "已授权"
+                            : "未授权"}
+                      </strong>
+                    </p>
+                  </>
+                )}
+                <div className="screen-permission-actions">
+                  {access?.supported &&
                     (!access.recording || !access.control) && (
                       <Button
                         variant="outline"
@@ -911,16 +937,16 @@ function BrowserScreen({
                         在电脑上检查权限
                       </Button>
                     )}
+                  <Button
+                    variant="outline"
+                    disabled={loaded.loading || job.busy}
+                    onClick={loaded.reload}
+                  >
+                    <RotateCw data-icon="inline-start" />
+                    刷新权限状态
+                  </Button>
                 </div>
-              )}
-              <Button
-                variant="outline"
-                disabled={loaded.loading || job.busy}
-                onClick={loaded.reload}
-              >
-                <RotateCw data-icon="inline-start" />
-                刷新权限状态
-              </Button>
+              </div>
             </PopoverContent>
           </Popover>
           {loaded.error ? (

@@ -125,6 +125,27 @@
     font-weight: 400;
     color: var(--label);
   }
+.screen-permission-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+.screen-permission-actions > [data-button] {
+    flex: 1;
+  }
+  /* The popover's own layout: labels in one column, the choices filling the other. */
+.screen-settings-list {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 12px;
+    border-top: 1px solid var(--separator);
+    padding-top: 12px;
+  }
+.screen-settings-list > span {
+    font-size: 12px;
+    color: var(--secondaryLabel);
+  }
 
 /* Viewer */
 .screen-page {
