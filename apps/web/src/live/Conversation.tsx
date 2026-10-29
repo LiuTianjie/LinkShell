@@ -197,6 +197,9 @@ export function Conversation({
     startSeq.current = view.startSeq;
   });
   const inFlight = useRef(false);
+  // Counts finished calls. A page shows (and the effect below sees it) before the call that asked
+  // for it returns, while it still counts as in flight: the next page is asked for when it does.
+  const [finished, setFinished] = useState(0);
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = top.current;
@@ -221,13 +224,14 @@ export function Conversation({
       if (!loaded && startSeq.current === from) setFailedAt(from);
     } finally {
       inFlight.current = false;
+      setFinished((count) => count + 1);
     }
   }, [online, loadingEarlier, loadEarlier]);
   useEffect(() => {
     // Each page arrives above the reader, who stays where they were; the top then leaves the
     // view. A page too short to push it out is followed by the next.
     if (settled && topVisible && view.startSeq > 0 && failedAt !== view.startSeq) void load();
-  }, [settled, topVisible, view.startSeq, failedAt, load]);
+  }, [settled, topVisible, view.startSeq, failedAt, load, finished]);
 
   return (
     <div className="conversation-column">

@@ -233,19 +233,42 @@ function projectOf(cwd: string, worktrees: WorktreeRecord[]): string {
   return worktreeOf(cwd, worktrees)?.sourceCwd ?? cwd;
 }
 
-/** How much history one page carries (see `pageStart`). */
+/**
+ * How much history one page carries (see `pageStart`). Events are counted as a client shows
+ * them: the next piece of a message or thought streamed in pieces (one per token, thousands in a
+ * long turn) joins the one before, so it adds bytes but no event.
+ */
 export interface PageBudget {
   /** A page goes back whole turns until it has this many events or bytes… */
   minEvents: number;
   minBytes: number;
-  /** …and never more than this, even inside one turn. */
+  /** …and never more than this: inside one turn, when the newest turn alone is bigger. */
   maxEvents: number;
   maxBytes: number;
   /** What one event counts for at most: its size as sent, not as stored. */
   eventBytes: number;
+  /** What sending any event adds to its own size: the notification around it. */
+  eventOverhead: number;
 }
 
-export const PAGE: PageBudget = { minEvents: 120, minBytes: 384 * 1024, maxEvents: 600, maxBytes: 2 * 1024 * 1024, eventBytes: 40 * 1024 };
+export const PAGE: PageBudget = { minEvents: 120, minBytes: 384 * 1024, maxEvents: 600, maxBytes: 2 * 1024 * 1024, eventBytes: 40 * 1024, eventOverhead: 160 };
+
+/** Updates streamed in pieces: consecutive ones of a kind are one message or thought to a client. */
+const STREAMED = new Set(["agent_message_chunk", "agent_thought_chunk"]);
+const STREAMED_SQL = [...STREAMED].map((kind) => `'${kind}'`).join(", ");
+
+interface MetaRow {
+  seq: number;
+  kind: string;
+  bytes: number;
+  opens_turn: number;
+  parent: string | null;
+}
+
+/** The next piece of the message or thought `before` is part of (`before` is the row just before it). */
+function continuesStream(row: MetaRow, before: MetaRow | undefined): boolean {
+  return !!before && STREAMED.has(row.kind) && before.kind === row.kind && before.parent === row.parent;
+}
 
 function isHistoryLoadError(update: SessionUpdate | undefined): boolean {
   return update?.sessionUpdate === "ls_error" && update.message.startsWith("读取会话消息失败：") && update.hint === "重新打开会话可重试";
@@ -656,37 +679,61 @@ export class HostStore {
     return this.readEvents(sessionId, seq - 1, 1, seq)[0];
   }
 
-  /** How much was logged after `afterSeq`. */
-  sizeAfter(sessionId: string, afterSeq: number): { events: number; bytes: number } {
+  /** How much was logged after `afterSeq`, counted as a page is (see `PageBudget`). */
+  sizeAfter(sessionId: string, afterSeq: number, page: PageBudget = PAGE): { events: number; bytes: number } {
     const row = this.db
-      .prepare("SELECT COUNT(*) AS events, COALESCE(SUM(bytes), 0) AS bytes FROM event_meta WHERE session_id = ? AND seq > ?")
-      .get(sessionId, afterSeq) as { events: number; bytes: number };
+      .prepare(
+        `SELECT COALESCE(SUM(NOT (kind IN (${STREAMED_SQL}) AND kind IS before_kind AND parent IS before_parent)), 0) AS events,
+                COALESCE(SUM(bytes), 0) + COUNT(*) * ? AS bytes
+         FROM (SELECT kind, parent, bytes, LAG(kind) OVER (ORDER BY seq) AS before_kind, LAG(parent) OVER (ORDER BY seq) AS before_parent
+               FROM event_meta WHERE session_id = ? AND seq > ?)`,
+      )
+      .get(page.eventOverhead, sessionId, afterSeq) as { events: number; bytes: number };
     return row;
   }
 
   /**
    * Where a page of history ending at `beforeSeq` starts: the seq before its
    * first event (0: the beginning of the log). Pages are whole turns, going
-   * back until one is worth showing; a single turn too big for a page is cut.
+   * back until one is worth showing; only a newest turn too big for a page is cut.
    */
   pageStart(sessionId: string, beforeSeq: number, page: PageBudget = PAGE): number {
-    const rows = this.db
-      .prepare("SELECT seq, bytes, opens_turn FROM event_meta WHERE session_id = ? AND seq <= ? ORDER BY seq DESC LIMIT ?")
-      .all(sessionId, beforeSeq, page.maxEvents + 1) as { seq: number; bytes: number; opens_turn: number }[];
+    const statement = this.db.prepare("SELECT seq, kind, bytes, opens_turn, parent FROM event_meta WHERE session_id = ? AND seq <= ? ORDER BY seq DESC LIMIT ?");
+    const batch = 1000;
+    const rows: MetaRow[] = [];
+    let complete = false;
+    // Read back only as far as needed: a page of streamed pieces holds many more rows than events.
+    const at = (i: number): MetaRow | undefined => {
+      while (i >= rows.length && !complete) {
+        const more = statement.all(sessionId, rows.length ? rows[rows.length - 1]!.seq - 1 : beforeSeq, batch) as unknown as MetaRow[];
+        rows.push(...more);
+        complete = more.length < batch;
+      }
+      return rows[i];
+    };
     let events = 0;
     let bytes = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]!;
-      const previous = rows[i + 1];
-      events += 1;
+    // Where the newest turn passed so far starts: a page that must stop ends there, not inside an older turn.
+    let boundary: number | undefined;
+    for (let i = 0; ; i++) {
+      const row = at(i);
+      if (!row) return 0;
+      const previous = at(i + 1);
+      if (!continuesStream(row, previous)) events += 1;
       // What a client receives: pictures are left out and long text is cut.
-      bytes += Math.min(row.bytes, page.eventBytes);
+      bytes += Math.min(row.bytes, page.eventBytes) + page.eventOverhead;
       if (!previous) return 0;
-      const turnStarts = row.opens_turn === 1 && previous.opens_turn === 0;
-      if (turnStarts && (events >= page.minEvents || bytes >= page.minBytes)) return previous.seq;
-      if (events >= page.maxEvents || bytes >= page.maxBytes) return previous.seq;
+      // The end of the message before (`ls_message_done`) belongs to it: a user's message, its end,
+      // then the turn it starts is one turn, which starts at the message.
+      let before = i + 1;
+      while (at(before)?.kind === "ls_message_done") before += 1;
+      const turnStarts = row.opens_turn === 1 && at(before)?.opens_turn === 0;
+      if (turnStarts) {
+        if (events >= page.minEvents || bytes >= page.minBytes) return previous.seq;
+        boundary = previous.seq;
+      }
+      if (events >= page.maxEvents || bytes >= page.maxBytes) return boundary ?? previous.seq;
     }
-    return 0;
   }
 
   /** The calls that started a sub-agent, oldest first. */

@@ -799,7 +799,7 @@ export class SessionHub {
    */
   private async forkByReplay(summary: SessionSummary, driver: AgentDriver, cwd: string, cut: number): Promise<SessionSummary> {
     const start = this.store.pageStart(summary.id, cut);
-    const events = this.store.readEvents(summary.id, start, PAGE.maxEvents + 1, cut).filter((event) => isConversation(event.update));
+    const events = this.store.readEvents(summary.id, start, cut - start, cut).filter((event) => isConversation(event.update));
     const discovered = await driver.createSession({ cwd });
     this.recordDiscovered(driver.id, { ...discovered, title: discovered.title ?? summary.title, forkedFrom: summary.nativeId });
     const forkId = sessionIdFor(driver.id, discovered.nativeId);
@@ -968,7 +968,7 @@ export class SessionHub {
     const upTo = beforeSeq - 1;
     if (upTo < 1) return { events: [], startSeq: 0 };
     const startSeq = this.store.pageStart(sessionId, upTo);
-    return { events: this.store.readEvents(sessionId, startSeq, PAGE.maxEvents + 1, upTo).filter((event) => !this.store.isHistoryLoadEvent(event)), startSeq };
+    return { events: this.store.readEvents(sessionId, startSeq, upTo - startSeq, upTo).filter((event) => !this.store.isHistoryLoadEvent(event)), startSeq };
   }
 
   tasks(sessionId: string): BackgroundTask[] {
