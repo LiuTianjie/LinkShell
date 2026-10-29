@@ -42,7 +42,7 @@ export interface LiveActivityPayload extends Partial<LiveActivityContentState> {
 export const liveActivityIdSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/);
 export const liveActivitySubscriptionSchema = z.object({
   activityId: liveActivityIdSchema,
-  serviceUrl: z.string().url().max(256),
+  serviceUrl: z.url().max(256),
   grant: z.string().regex(/^[a-f0-9]{64}$/),
   expiresAt: z.number().int().positive(),
   computerKey: z.string().min(1).max(512),

@@ -35,7 +35,7 @@
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.8.0",
-    "zod": "^3.24.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "vitest": "^3.2.1"

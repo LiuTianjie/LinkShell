@@ -4,7 +4,7 @@ export const PREVIEW_MAX_BYTES = 48 * 1024;
 export const previewFrameSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
   target: z.string().max(1024),
-  capturedAt: z.number().finite().nonnegative(),
+  capturedAt: z.number().nonnegative(),
   width: z.number().int().positive().max(2048),
   height: z.number().int().positive().max(2048),
   mimeType: z.literal("image/webp"),
