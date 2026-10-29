@@ -65,6 +65,18 @@ const savedGateway =
     ? officialGateway
     : readLocal("gateway", initialGateway);
 
+function relayErrorMessage(error: { code: string; message: string }): string {
+  switch (error.code) {
+    case "disconnected":
+    case "connect_failed":
+      return "与网关的连接断开了，正在自动重连…";
+    case "replaced":
+      return "这台设备已在别处连上网关";
+    default:
+      return error.message;
+  }
+}
+
 export class BrowserEngine {
   readonly state = createStore<EngineState>(() => ({
     source,
@@ -76,6 +88,8 @@ export class BrowserEngine {
   }));
   private identity?: Identity;
   private relays = new Map<string, RelayClient>();
+  /** The banner each gateway last raised, taken down again once that gateway is back online. */
+  private relayErrors = new Map<string, string>();
   private paired = readLocal<Computer[]>("paired", []);
   private selected = readLocal<string>("selected", "");
   private releaseLock?: () => void;
@@ -374,9 +388,17 @@ export class BrowserEngine {
     });
     this.relays.set(gateway, relay);
     relay.onStatus((status, error) => {
+      const message = error ? relayErrorMessage(error) : undefined;
+      const raised = this.relayErrors.get(gateway);
+      if (message) this.relayErrors.set(gateway, message);
+      else if (status === "online") this.relayErrors.delete(gateway);
       this.state.setState((state) => ({
         relayStatus: { ...state.relayStatus, [gateway]: status },
-        ...(error ? { error: error.message } : {}),
+        ...(message
+          ? { error: message }
+          : status === "online" && raised !== undefined && state.error === raised
+            ? { error: undefined }
+            : {}),
       }));
       if (status === "online")
         void this.refresh(gateway).catch((error) => this.report(error));
