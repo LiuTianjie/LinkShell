@@ -9,6 +9,9 @@ test("reads whole lines only, and only the events it knows", () => {
   assert.equal(rest, '{"t":"cli');
 });
 
+// The menu bar process is the Mac's, over a unix socket; Windows keeps its tray (and has named pipes).
+const unixSocketsOnly = process.platform === "win32";
+
 /** Plays the Swift `--menubar` process: connects, and hands back what it is sent. */
 function menuBarProcess(path) {
   const socket = connect(path);
@@ -32,7 +35,7 @@ const until = async (check, ms = 3000) => {
   }
 };
 
-test("has the system open the menu bar process, sends it the menu, and hears its clicks", async () => {
+test("has the system open the menu bar process, sends it the menu, and hears its clicks", { skip: unixSocketsOnly }, async () => {
   const launched = [];
   const events = [];
   const bar = new MenuBar("/Applications/LinkShell.app", (event) => events.push(event), () => {}, (bundle, socket) => launched.push({ bundle, socket }));
@@ -64,7 +67,7 @@ test("has the system open the menu bar process, sends it the menu, and hears its
   }
 });
 
-test("stopping ends the menu bar process and opens no other", async () => {
+test("stopping ends the menu bar process and opens no other", { skip: unixSocketsOnly }, async () => {
   const launched = [];
   const bar = new MenuBar("/Applications/LinkShell.app", () => {}, () => {}, () => launched.push(1));
   bar.start();
