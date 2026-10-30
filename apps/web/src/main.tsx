@@ -9,9 +9,11 @@ import "./styles/resources.css";
 import "./styles/terminal.css";
 import "./styles/connect.css";
 import { bootstrapDesktop } from "./live/desktop";
+import { handleAccountOAuthCallback } from "./live/account-oauth";
 
 async function start() {
   try {
+    if (handleAccountOAuthCallback()) return;
     await bootstrapDesktop();
     await import("./render");
   } catch (error) {

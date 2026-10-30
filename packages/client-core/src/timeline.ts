@@ -132,6 +132,8 @@ export interface SessionView {
   usage?: Omit<Extract<SessionUpdate, { sessionUpdate: "usage_update" }>, "sessionUpdate">;
   state: SessionState;
   turnActive: boolean;
+  /** The native turn, when known: repeated starts do not restart its clock or plan. */
+  turnId?: string;
   /** When the running turn started, as its `ls_turn` said: the live row counts from it. */
   turnStartedAt?: number;
   driver?: SessionDriver;
@@ -484,10 +486,15 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       return { ...view, usage: { ...view.usage, usedTokens: update.usedTokens ?? view.usage?.usedTokens, contextWindow: update.contextWindow ?? view.usage?.contextWindow,
         cost: update.cost === undefined ? view.usage?.cost : update.cost, tokens: update.tokens ?? view.usage?.tokens } };
     case "ls_turn":
-      // A message sent while the agent works starts no new turn: the clock keeps the first start.
-      // Nor does it start a plan card of its own: the running turn's card stays the one it updates.
-      if (update.state === "started") return { ...view, turnActive: true, state: "running", planId: view.turnActive ? view.planId : undefined, turnStartedAt: view.turnActive ? view.turnStartedAt ?? ts : ts };
+      if (update.state === "started") {
+        // A repeated start (including older agents' mid-turn input) keeps its clock and plan;
+        // a different native turn is new even if its predecessor's end was not observed.
+        const continuing = view.turnActive && (!update.turnId || update.turnId === view.turnId);
+        return { ...view, turnActive: true, state: "running", turnId: update.turnId ?? (continuing ? view.turnId : undefined),
+          planId: continuing ? view.planId : undefined, turnStartedAt: continuing ? view.turnStartedAt ?? ts : ts };
+      }
       {
+        if (view.turnActive && update.turnId && view.turnId && update.turnId !== view.turnId) return view;
         const settled = settleAll(view, ts);
         const ended: SessionView = {
           ...settled,
@@ -505,7 +512,10 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
     case "ls_status": {
       const turnActive = update.turnActive ?? (update.state === "running" || update.state === "waiting");
       const base = !turnActive && view.turnActive ? settleAll(view, ts) : view;
-      return { ...base, state: update.state, turnActive };
+      // Thread status can precede the new native start; the finished turn's clock and
+      // anonymous plan must not carry into that gap or the start that follows it.
+      return { ...base, state: update.state, turnActive,
+        ...(turnActive && !view.turnActive ? { turnId: undefined, turnStartedAt: undefined, planId: undefined } : {}) };
     }
     case "ls_permission": {
       if (view.permissions.some((p) => p.requestId === update.requestId)) return view;
@@ -691,8 +701,10 @@ export function prependEvents(view: SessionView, events: SessionEvent[], startSe
   // Whatever was still streaming where the page ends is continued by the later items, or was cut off.
   earlier = settleAll(earlier, events[events.length - 1]?.ts ?? 0);
   const joined = joinViews(earlier, view);
-  // A turn still running that began in this page: its start is here.
-  const turnStartedAt = view.turnStartedAt ?? (view.turnActive && earlier.turnActive ? earlier.turnStartedAt : undefined);
+  // A status-only new turn has no clock yet. An older page can supply a start only
+  // when native IDs prove it belongs to the same turn, not just another active one.
+  const sameTurn = view.turnId !== undefined && view.turnId === earlier.turnId;
+  const turnStartedAt = view.turnStartedAt ?? (view.turnActive && earlier.turnActive && sameTurn ? earlier.turnStartedAt : undefined);
   return { ...joined, startSeq, ...(turnStartedAt !== undefined ? { turnStartedAt } : {}) };
 }
 

@@ -157,6 +157,73 @@ describe("timeline reducer", () => {
     expect(kinds(v.items)).toEqual(["plan", "agent", "plan"]);
   });
 
+  it("starts a fresh clock and plan when running status arrives before the next native turn", () => {
+    seq = 0;
+    let view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "first" }, 1000),
+      ev({ sessionUpdate: "plan", entries: [{ content: "First turn", priority: "medium", status: "completed" }] }),
+      ev({ sessionUpdate: "ls_turn", state: "ended", turnId: "first", stopReason: "end_turn" }, 2000),
+      ev({ sessionUpdate: "ls_status", state: "running" }, 10_000),
+    ]);
+    // Codex announces its thread status before turn/started. This gap is not the previous turn.
+    expect(view.turnActive).toBe(true);
+    expect(view.turnStartedAt).toBeUndefined();
+    expect(view.planId).toBeUndefined();
+    view = applyEvents(view, [
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "second" }, 10_020),
+      ev({ sessionUpdate: "plan", entries: [{ content: "Second turn", priority: "medium", status: "pending" }] }),
+    ]);
+    expect(view.turnStartedAt).toBe(10_020);
+    expect(view.items.filter((item) => item.kind === "plan")).toMatchObject([
+      { entries: [{ content: "First turn" }] },
+      { entries: [{ content: "Second turn" }] },
+    ]);
+  });
+
+  it("preserves a running turn's clock and plan on duplicate native or anonymous starts", () => {
+    seq = 0;
+    let view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_status", state: "running" }, 900),
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "same" }, 1000),
+      ev({ sessionUpdate: "plan", entries: [{ content: "Current plan", priority: "medium", status: "pending" }] }),
+    ]);
+    const planId = view.planId;
+    view = applyEvents(view, [
+      ev({ sessionUpdate: "ls_status", state: "waiting" }, 2000),
+      ev({ sessionUpdate: "ls_status", state: "running" }, 2100),
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "same" }, 2200),
+      ev({ sessionUpdate: "ls_turn", state: "started" }, 2300),
+    ]);
+    expect(view.turnStartedAt).toBe(1000);
+    expect(view.planId).toBe(planId);
+  });
+
+  it("resets the clock and plan when a different native turn starts without an intervening end", () => {
+    seq = 0;
+    let view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "first" }, 1000),
+      ev({ sessionUpdate: "plan", entries: [{ content: "Previous plan", priority: "medium", status: "pending" }] }),
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "second" }, 4000),
+    ]);
+    expect(view.turnStartedAt).toBe(4000);
+    expect(view.planId).toBeUndefined();
+    view = applyEvent(view, ev({ sessionUpdate: "ls_turn", state: "ended", turnId: "first", stopReason: "end_turn" }, 4100));
+    expect(view.turnActive).toBe(true);
+  });
+
+  it("does not restore an older turn's clock when paging during the next turn's status-only start", () => {
+    seq = 0;
+    const earlier = [ev({ sessionUpdate: "ls_turn", state: "started", turnId: "first" }, 1000)];
+    const view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_turn", state: "ended", turnId: "first", stopReason: "end_turn" }, 2000),
+      ev({ sessionUpdate: "ls_status", state: "running" }, 4000),
+    ]);
+    const joined = prependEvents(view, earlier, 0);
+    expect(joined.turnActive).toBe(true);
+    expect(joined.turnStartedAt).toBeUndefined();
+    expect(applyEvent(joined, ev({ sessionUpdate: "ls_turn", state: "started", turnId: "second" }, 4020)).turnStartedAt).toBe(4020);
+  });
+
   it("tracks permission requests and leaves a record when one is answered", () => {
     seq = 0;
     const options = [

@@ -1,21 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareDesktopUpdate, recoverDesktopUpdate, stopDesktopUpdateHost } from "../src/commands/desktop-update.js";
 import { ensureHostRunning, withRunningHost } from "../src/commands/host.js";
 import { readPid, readHostOwner, stopDaemonAndWait } from "../src/utils/daemon.js";
 import { standaloneBundle } from "../src/utils/standalone.js";
-const state = vi.hoisted(() => ({ home: "" }));
+const state = vi.hoisted(() => ({ home: "", app: "" }));
 vi.mock("../src/commands/host.js", () => ({ ensureHostRunning: vi.fn(), withRunningHost: vi.fn() }));
 vi.mock("../src/utils/standalone.js", () => ({ standaloneBundle: vi.fn() }));
 vi.mock("../src/utils/daemon.js", () => ({ linkshellDir: () => state.home, readPid: vi.fn(), readHostOwner: vi.fn(), readHostLaunch: () => ({ LINKSHELL_GATEWAY: "off" }), stopDaemonAndWait: vi.fn() }));
 const snapshot = { machine: { machineId: "same-machine", hostVersion: "2.0.0" }, gateway: { machine: { id: "same-key" }, devices: [{ id: "phone" }] } };
 beforeEach(() => {
   vi.resetAllMocks(); state.home = mkdtempSync(join(tmpdir(), "linkshell-update-test-"));
-  vi.mocked(standaloneBundle).mockReturnValue("/Applications/LinkShell.app");
+  state.app = join(state.home, "LinkShell.app"); mkdirSync(state.app);
+  vi.mocked(standaloneBundle).mockReturnValue(state.app);
   vi.mocked(readPid).mockReturnValue(42);
-  vi.mocked(readHostOwner).mockReturnValue("/Applications/LinkShell.app");
+  vi.mocked(readHostOwner).mockReturnValue(state.app);
   vi.mocked(withRunningHost).mockResolvedValue(snapshot);
 });
 afterEach(() => rmSync(state.home, { recursive: true, force: true }));
@@ -37,7 +38,7 @@ describe("standalone update recovery", () => {
   it("persists recovery state before stopping and removes it only after identity verification", async () => {
     vi.mocked(stopDaemonAndWait).mockImplementation(async () => { expect(JSON.parse(readFileSync(marker(), "utf8"))).toMatchObject({ machineId: "same-machine", deviceIds: ["phone"] }); return true; });
     await prepareDesktopUpdate(); await recoverDesktopUpdate("2.0.0");
-    expect(ensureHostRunning).toHaveBeenCalledWith(expect.objectContaining({ LINKSHELL_GATEWAY: "off", LINKSHELL_APP_BUNDLE: "/Applications/LinkShell.app" }));
+    expect(ensureHostRunning).toHaveBeenCalledWith(expect.objectContaining({ LINKSHELL_GATEWAY: "off", LINKSHELL_APP_BUNDLE: state.app }));
     expect(existsSync(marker())).toBe(false);
   });
   it("retains recovery state after a failed stop or failed startup", async () => {
@@ -54,5 +55,30 @@ describe("standalone update recovery", () => {
   it("does not take over an external host appearing during update", async () => {
     await prepareDesktopUpdate(); vi.mocked(readHostOwner).mockReturnValue("/Other.app");
     await expect(recoverDesktopUpdate("2.0.0")).rejects.toThrow("另一套安装"); expect(ensureHostRunning).not.toHaveBeenCalled();
+  });
+  it.runIf(process.platform === "win32")("recognizes Windows aliases throughout preparation, rollback and recovery", async () => {
+    const alias = join(state.home, "linked installation"); symlinkSync(state.app, alias, "junction");
+    vi.mocked(readHostOwner).mockReturnValue(alias);
+    await prepareDesktopUpdate();
+    expect(stopDaemonAndWait).toHaveBeenCalledWith("host", 30_000, 42);
+    const saved = JSON.parse(readFileSync(marker(), "utf8"));
+    writeFileSync(marker(), JSON.stringify({ ...saved, app: alias }));
+    vi.mocked(readHostOwner).mockReturnValue(realpathSync.native(state.app).toUpperCase());
+    vi.mocked(stopDaemonAndWait).mockClear();
+    await stopDesktopUpdateHost();
+    expect(stopDaemonAndWait).toHaveBeenCalledWith("host", 30_000, 42);
+    await recoverDesktopUpdate("2.0.0");
+    expect(ensureHostRunning).toHaveBeenCalledWith(expect.objectContaining({ LINKSHELL_APP_BUNDLE: state.app }));
+    expect(existsSync(marker())).toBe(false);
+  });
+  it.runIf(process.platform === "win32")("keeps different or unresolvable Windows installations outside the update", async () => {
+    const other = join(state.home, "other", "LinkShell.app"); mkdirSync(other, { recursive: true });
+    vi.mocked(readHostOwner).mockReturnValue(other);
+    await prepareDesktopUpdate(); expect(stopDaemonAndWait).not.toHaveBeenCalled(); expect(existsSync(marker())).toBe(false);
+    vi.mocked(readHostOwner).mockReturnValue(state.app); await prepareDesktopUpdate();
+    vi.mocked(stopDaemonAndWait).mockClear(); vi.mocked(readHostOwner).mockReturnValue(join(state.home, "missing"));
+    await stopDesktopUpdateHost(); expect(stopDaemonAndWait).not.toHaveBeenCalled();
+    await expect(recoverDesktopUpdate("2.0.0")).rejects.toThrow("另一套安装");
+    expect(ensureHostRunning).not.toHaveBeenCalled(); expect(existsSync(marker())).toBe(true);
   });
 });

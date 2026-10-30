@@ -347,7 +347,7 @@ try {
     const native = await readEvents('native-events.jsonl');
     assert.equal(native.filter(event => event.event === 'forbidden-request' || ['turn/start', 'turn/steer', 'review/start', 'thread/compact/start', 'command/exec'].includes(event.method)).length, 0);
     assert.equal(forbiddenRPC, false);
-    return { actions, copyClipboardEqualsSelection: true, cutRemovedSelection: true, cutClipboardEqualsSelection: true,
+    return { actions, clipboardAPI: saved.api, copyClipboardEqualsSelection: true, cutRemovedSelection: true, cutClipboardEqualsSelection: true,
       pasteEqualsClipboard: true, undoReversedPaste: true, promptEmpty: true, clipboardRestored: true, inferenceRequests: 0 };
   });
   result.status = 'passed';

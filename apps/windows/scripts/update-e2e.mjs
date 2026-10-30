@@ -74,6 +74,10 @@ async function patchBundle(path, version) {
   const main = join(path, 'resources/app/dist/main/main.js');
   await writeFile(main, `import './update-e2e-hook.mjs';\n${await readFile(main, 'utf8')}`);
   await cp(join(appRoot, 'test/fixtures/update-e2e-hook.mjs'), join(dirname(main), 'update-e2e-hook.mjs'));
+  const cliEntry = join(path, 'runtime/cli/dist/cli/src/index.js');
+  const cliSource = await readFile(cliEntry, 'utf8');
+  await writeFile(cliEntry, cliSource.replace(/^(#![^\n]*\n)?/, prefix => prefix + "import './update-e2e-cli-hook.mjs';\n"));
+  await cp(join(appRoot, 'test/fixtures/update-e2e-cli-hook.mjs'), join(dirname(cliEntry), 'update-e2e-cli-hook.mjs'));
 }
 async function buildInstaller(kind) {
   const directory = join(work, kind); await mkdir(directory);
@@ -175,7 +179,16 @@ async function snapshot(version) {
   const about = await invoke('about'); assert.equal(about.version, version); assert.equal(about.home, home); assert.equal(about.standalone, true);
   const status = await cli('snapshot'); assert.equal(status.status, 'running'); assert.equal(status.cliVersion, version); assert.equal(status.machine.hostVersion, version); assert.equal(status.home, home);
   assert.ok(await samePhysicalPath(status.hostOwner, target), 'The Host must belong to this copied bundle.');
-  return { appVersion: about.version, hostVersion: status.machine.hostVersion, hostPID: await hostPID(), homePreserved: true };
+  return { appVersion: about.version, hostVersion: status.machine.hostVersion, hostPID: await hostPID(), homePreserved: true,
+    appBundle: status.appBundle, hostOwner: status.hostOwner, ownerSpellingMatchesBundle: status.hostOwner === status.appBundle };
+}
+async function assertPrepared(oldHost) {
+  const evidence = (await events()).find(event => event.event === 'cli-update-end' && event.action === 'prepare-update' && event.initialHostPID === oldHost);
+  assert.ok(evidence, 'The production prepare-update command must actually finish.');
+  assert.equal(evidence.exitCode, 0, 'Preparing the real bundled Host must succeed.');
+  assert.equal(evidence.markerExists, true, 'Preparation must write a recovery marker before replacement.');
+  assert.equal(evidence.initialHostAlive, false, 'Preparation must stop the original Host before replacement.');
+  return { originalHostStopped: true, recoveryMarkerWritten: true };
 }
 async function clickControl(selector, text) {
   const point = await until(`visible control ${text}`, () => connection.evaluate(`(()=>{const element=[...document.querySelectorAll(${JSON.stringify(selector)})].find(item=>item.textContent.trim()===${JSON.stringify(text)}&&!item.disabled);if(!element)return; element.scrollIntoView({block:'center'});const r=element.getBoundingClientRect();return r.width>0&&r.height>0?{x:r.x+r.width/2,y:r.y+r.height/2}:undefined})()`));
@@ -301,19 +314,19 @@ try {
   await check('real installer recovery failure rolls back and reopens original app', async () => {
     fixtureMode = 'bad'; await available(); const oldHost = await hostPID(); const { prior, installerPID } = await confirm('rollback');
     await native(installerPID, '重新打开 LinkShell', 'rollback-reopen', 300);
-    await attach(prior); const value = await snapshot(baseVersion); assert.notEqual(value.hostPID, oldHost);
+    await attach(prior); const prepared = await assertPrepared(oldHost); const value = await snapshot(baseVersion); assert.notEqual(value.hostPID, oldHost);
     assert.ok((await events()).some(event => event.event === 'injected-recovery-failure'), 'Injected failure must actually execute in the replaced bundle.');
     assert.deepEqual(await preservedState(), baseline); assert.ok(!(await exists(join(home, 'desktop-update.json'))), 'Rollback recovery marker must be cleared.');
     const failed = (await readdir(dirname(target))).filter(name => name.startsWith('LinkShell.failed-')); assert.ok(failed.length > 0, 'Failed new bundle should remain until a successful update cleans it.');
-    return { ...value, failedBundleCount: failed.length, identityAndHistoryPreserved: true };
+    return { ...value, ...prepared, failedBundleCount: failed.length, identityAndHistoryPreserved: true };
   });
   await check('retry installs new app and Host, preserves identity and history, cleans failed copies', async () => {
     fixtureMode = 'good'; await available(); const oldHost = await hostPID(); const { prior, installerPID } = await confirm('success');
-    await attach(prior); const value = await snapshot(nextVersion); assert.notEqual(value.hostPID, oldHost);
+    await attach(prior); const prepared = await assertPrepared(oldHost); const value = await snapshot(nextVersion); assert.notEqual(value.hostPID, oldHost);
     assert.deepEqual(await preservedState(), baseline); assert.ok(!(await exists(join(home, 'desktop-update.json'))));
     const leftovers = (await readdir(dirname(target))).filter(name => /^LinkShell\.(previous|failed|install)-/.test(name)); assert.deepEqual(leftovers, []);
     await until('successful installer exits', async () => !(await processList()).some(item => item.ProcessId === installerPID));
-    await observeNative(connection.pid, 'updated'); return { ...value, identityAndHistoryPreserved: true, oldBundlesRemoved: true };
+    await observeNative(connection.pid, 'updated'); return { ...value, ...prepared, identityAndHistoryPreserved: true, oldBundlesRemoved: true };
   });
   result.status = 'passed';
 } catch (error) {
