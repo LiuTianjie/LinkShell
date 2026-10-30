@@ -10,6 +10,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Verify native shortcut creation with a custom home
+        working-directory: apps/windows
+        run: >-
+          node --test --test-name-pattern="^installer transaction: shortcut-home$" test/installer.test.mjs
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3
@@ -33,6 +37,12 @@ jobs:
       - name: Exercise Windows automatic update, rollback and data preservation
         if: github.event_name == 'workflow_dispatch'
         run: pnpm --filter @linkshell/windows test:update-e2e
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: LinkShell-Windows-update-e2e
+          path: artifacts/windows-update-e2e
+          if-no-files-found: warn
       - name: Exercise real Codex model selection and session option persistence
         if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.windows_bundle.outcome == 'success' }}
         timeout-minutes: 12
@@ -42,12 +52,6 @@ jobs:
         with:
           name: LinkShell-Windows-model-ui-e2e
           path: artifacts/windows-model-ui-e2e
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always() && github.event_name == 'workflow_dispatch'
-        with:
-          name: LinkShell-Windows-update-e2e
-          path: artifacts/windows-update-e2e
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:

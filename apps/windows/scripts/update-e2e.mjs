@@ -348,13 +348,13 @@ try {
   const cleanupErrors = [];
   if (await exists(shortcut)) {
     try {
-      const shortcutEnv = { ...env, LINKSHELL_QA_SHORTCUT: shortcut };
-      const readTarget = `[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($env:LINKSHELL_QA_SHORTCUT);$link.TargetPath | ConvertTo-Json -Compress`;
-      const observed = JSON.parse((await exec('powershell.exe', ['-NoProfile', '-Command', readTarget], { env: shortcutEnv })).stdout.trim());
+      const shortcutEnv = { ...env, LINKSHELL_QA_SHORTCUT: shortcut, LINKSHELL_QA_SHORTCUT_READER: join(appRoot, 'test/helpers/shortcut-target.ps1') };
+      const readTarget = `. $env:LINKSHELL_QA_SHORTCUT_READER; Read-LinkShellShortcutTarget $env:LINKSHELL_QA_SHORTCUT | ConvertTo-Json -Compress`;
+      const observed = JSON.parse((await exec('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', readTarget], { env: shortcutEnv })).stdout.trim());
       assert.ok(await samePhysicalPath(observed, join(target, 'LinkShell.exe')), 'Refusing to remove a foreign shortcut.');
       // Re-read before deletion so a changed shortcut is never removed after the physical-path check.
-      const removeOwned = `$shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($env:LINKSHELL_QA_SHORTCUT);if($link.TargetPath -eq $env:LINKSHELL_QA_SHORTCUT_TARGET){Remove-Item -LiteralPath $env:LINKSHELL_QA_SHORTCUT -Force}else{throw 'Refusing to remove a changed shortcut'}`;
-      await exec('powershell.exe', ['-NoProfile', '-Command', removeOwned], { env: { ...shortcutEnv, LINKSHELL_QA_SHORTCUT_TARGET: observed } });
+      const removeOwned = `. $env:LINKSHELL_QA_SHORTCUT_READER; $actual=Read-LinkShellShortcutTarget $env:LINKSHELL_QA_SHORTCUT;if([string]::Equals($actual,$env:LINKSHELL_QA_SHORTCUT_TARGET,[StringComparison]::Ordinal)){Remove-Item -LiteralPath $env:LINKSHELL_QA_SHORTCUT -Force}else{throw 'Refusing to remove a changed shortcut'}`;
+      await exec('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', removeOwned], { env: { ...shortcutEnv, LINKSHELL_QA_SHORTCUT_TARGET: observed } });
     } catch (error) { cleanupErrors.push(error.message); }
   }
   await writeFile(join(report, 'events.jsonl'), (await events()).map(event => JSON.stringify(event)).join('\n') + '\n');
