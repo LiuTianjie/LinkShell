@@ -175,14 +175,28 @@ namespace LinkShell.Windows {
         }
         internal static void CreateShortcutAt(string root, string directory, string home = null) {
             Directory.CreateDirectory(directory);
-            Type type = Type.GetTypeFromProgID("WScript.Shell"); object shell = Activator.CreateInstance(type), link = null;
+            object shell = null, link = null;
+            string step = "加载 Windows 快捷方式组件";
             try {
+                Type type = Type.GetTypeFromProgID("WScript.Shell"); shell = Activator.CreateInstance(type);
+                step = "创建开始菜单快捷方式";
                 link = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { Path.Combine(directory, "LinkShell.lnk") });
+                step = "设置快捷方式目标";
                 link.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty, null, link, new object[] { Path.Combine(root, "LinkShell.exe") });
+                step = "设置快捷方式工作目录";
                 link.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { root });
-                if (home != null) link.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, link, new object[] { "--home " + Quote(home) });
+                if (home != null) {
+                    step = "设置快捷方式启动参数";
+                    link.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, link, new object[] { "--home " + Quote(home) });
+                }
+                step = "保存开始菜单快捷方式";
                 link.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
-            } finally { if (link != null) Marshal.FinalReleaseComObject(link); Marshal.FinalReleaseComObject(shell); }
+            } catch (Exception error) {
+                // Reflection otherwise hides the actionable COM error behind a generic invocation failure.
+                Exception cause = error;
+                while (cause is TargetInvocationException && cause.InnerException != null) cause = cause.InnerException;
+                throw new IOException(step + "失败（0x" + cause.HResult.ToString("X8") + "）：" + cause.Message, cause);
+            } finally { if (link != null) Marshal.FinalReleaseComObject(link); if (shell != null) Marshal.FinalReleaseComObject(shell); }
         }
         static string Quote(string value) { return "\"" + value.TrimEnd('\\') + new string('\\', 2 * (value.Length - value.TrimEnd('\\').Length)) + "\""; }
         static void RunCli(string root, string action, string home) {

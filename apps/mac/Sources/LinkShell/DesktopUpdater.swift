@@ -6,7 +6,8 @@ import Sparkle
   private weak var model: DesktopModel?
   private var controller: SPUStandardUpdaterController?
   private var installRequested = false
-  private var installing = false
+  private var waiting: (() -> Void)?
+  private var preparing = false
   private var prepared = false
 
   init(model: DesktopModel) { self.model = model; super.init() }
@@ -25,15 +26,17 @@ import Sparkle
   }
 
   func check() {
-    guard let updater = controller?.updater, updater.canCheckForUpdates else { return }
+    guard let updater = controller?.updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
     model?.checking = true
     model?.updateMessage = "正在检查 App 更新…"
     updater.checkForUpdateInformation()
   }
 
   func install() {
+    if waiting != nil { Task { await prepareHost() }; return }
     guard let controller, controller.updater.canCheckForUpdates, !installRequested else { return }
-    installRequested = true; installing = false; prepared = false
+    installRequested = true
+    if !controller.updater.sessionInProgress { prepared = false }
     model?.updateMessage = "正在打开更新窗口…"
     controller.checkForUpdates(nil)
   }
@@ -66,33 +69,41 @@ import Sparkle
     model?.updateMessage = "下载完成，点击“Install and Relaunch”即可安装并重启"
   }
   func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
-    installing = true
     model?.updateMessage = "正在安装，LinkShell 将重新打开…"
   }
   func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
-    installing = true
-    prepared = true
-    model?.busy = true
-    model?.updateMessage = "正在安装，LinkShell 将重新打开…"
-    Task {
-      _ = try? await Task.detached { try DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45) }.value
-      installHandler()
-    }
+    waiting = installHandler
+    Task { await prepareHost() }
     return true
   }
-  func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
-    guard !prepared else { return }
-    prepared = true
-    _ = try? DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45)
+
+  private func prepareHost() async {
+    guard waiting != nil, !preparing else { return }
+    preparing = true
+    defer { preparing = false }
+    model?.busy = true
+    model?.updateMessage = "正在安装，LinkShell 将重新打开…"
+    do {
+      _ = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "prepare-update"], timeout: 45) }.value
+      guard let resume = waiting else { await recover(); return }
+      waiting = nil; prepared = true
+      resume()
+    } catch {
+      // Sparkle remains postponed; an interrupted CLI may still have stopped the Host.
+      let message = "更新已暂停：\(error.localizedDescription)。可点击下载并更新重试。"
+      await recover()
+      model?.updateMessage = message
+    }
   }
   func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
     model?.checking = false
     installRequested = false
     if let error, (error as NSError).code != 1001 { model?.updateMessage = "更新未完成：\(error.localizedDescription)" }
-    if prepared && !installing {
-      prepared = false
+    let needsRecovery = prepared && error != nil
+    waiting = nil; prepared = false
+    if needsRecovery {
       Task { await recover() }
-    } else if !installing {
+    } else {
       model?.busy = false
     }
   }

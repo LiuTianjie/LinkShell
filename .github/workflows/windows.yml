@@ -10,6 +10,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Verify native shortcut creation with a custom home
+        working-directory: apps/windows
+        run: node --test --test-name-pattern="^installer transaction: shortcut-home$" test/installer.test.mjs
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3

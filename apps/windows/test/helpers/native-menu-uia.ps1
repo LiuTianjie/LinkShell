@@ -15,6 +15,13 @@ param(
 
     [string]$DumpPath,
 
+    [string]$ReadyPath,
+
+    [string]$TriggerPath,
+
+    [ValidateRange(1, 300)]
+    [int]$TriggerTimeoutSeconds = 30,
+
     [Parameter(Mandatory = $true, ParameterSetName = 'Inspect')]
     [switch]$InspectOnly
 )
@@ -29,6 +36,8 @@ $lastWindows = @()
 $lastMenus = @()
 $candidateEvidence = $null
 $startupMs = $null
+$triggerWaitMs = $null
+$searchClock = $null
 
 function Write-Dump {
     param([hashtable]$Value)
@@ -36,6 +45,8 @@ function Write-Dump {
     $Value['name'] = $MenuItemName
     $Value['elapsedMs'] = $helperClock.ElapsedMilliseconds
     $Value['startupMs'] = $startupMs
+    $Value['triggerWaitMs'] = $triggerWaitMs
+    $Value['searchElapsedMs'] = if ($searchClock) { $searchClock.ElapsedMilliseconds } else { $null }
     $Value['phase'] = $phase
     $Value['windows'] = $lastWindows
     $Value['menus'] = $lastMenus
@@ -73,6 +84,9 @@ function Test-TargetProcess {
 
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
     Write-Result @{ clicked = $false; inspected = $false; failed = $true; error = 'Windows GitHub Actions runner required.' } 4
+}
+if ([bool]$ReadyPath -xor [bool]$TriggerPath) {
+    Write-Result @{ clicked = $false; inspected = $false; failed = $true; error = 'ReadyPath and TriggerPath must be supplied together.' } 1
 }
 
 try {
@@ -114,6 +128,15 @@ public static class LinkShellCiNativeMenuWindow
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);
 
+    private delegate bool WindowCallback(IntPtr window, IntPtr state);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(WindowCallback callback, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
     [DllImport("oleacc.dll")]
     private static extern int AccessibleObjectFromWindow(IntPtr window, uint objectId, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
 
@@ -146,7 +169,33 @@ public static class LinkShellCiNativeMenuWindow
 
     public static bool HasOwnedParent(IntPtr window, int expectedProcessId)
     {
-        return IsOwned(GetWindow(window, 4), expectedProcessId); // GW_OWNER
+        IntPtr owner = GetWindow(window, 4); // GW_OWNER
+        return owner != window && IsOwned(owner, expectedProcessId);
+    }
+
+    public static bool IsToolWindow(IntPtr window, int expectedProcessId)
+    {
+        return IsOwned(window, expectedProcessId) && (unchecked((uint)GetWindowLong(window, -20)) & 0x80U) != 0;
+    }
+
+    public static Dictionary<string, object>[] OwnedWindows(int expectedProcessId)
+    {
+        var windows = new List<Dictionary<string, object>>();
+        IntPtr foreground = GetForegroundWindow();
+        // Enumerate HWNDs without traversing any UIA tree; discard other processes before reading metadata.
+        EnumWindows(delegate(IntPtr window, IntPtr state) {
+            if (!IsOwned(window, expectedProcessId) || !IsWindowVisible(window)) return true;
+            IntPtr owner = GetWindow(window, 4);
+            windows.Add(new Dictionary<string, object> {
+                { "nativeHandle", window.ToInt64() }, { "nativeClass", WindowClass(window, expectedProcessId) },
+                { "visible", true }, { "popup", IsPopup(window, expectedProcessId) },
+                { "ownerHandle", owner.ToInt64() }, { "ownedParent", HasOwnedParent(window, expectedProcessId) },
+                { "toolWindow", IsToolWindow(window, expectedProcessId) },
+                { "foreground", window == foreground }, { "foregroundOwned", IsOwned(foreground, expectedProcessId) }
+            });
+            return windows.Count < 32;
+        }, IntPtr.Zero);
+        return windows.ToArray();
     }
 
     private sealed class Candidate
@@ -250,6 +299,35 @@ public static class LinkShellCiNativeMenuWindow
     }
     $lastFailure = $null
     $startupMs = $helperClock.ElapsedMilliseconds
+    if ($ReadyPath) {
+        $phase = 'waiting-for-trigger'
+        $ready = [System.IO.Path]::GetFullPath($ReadyPath)
+        $trigger = [System.IO.Path]::GetFullPath($TriggerPath)
+        if ($ready -eq $trigger -or [System.IO.File]::Exists($ready) -or [System.IO.File]::Exists($trigger)) {
+            throw [System.InvalidOperationException]::new('Ready and trigger paths must be distinct, fresh files.')
+        }
+        $directory = [System.IO.Path]::GetDirectoryName($ready)
+        if ($directory) { [System.IO.Directory]::CreateDirectory($directory) | Out-Null }
+        Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
+        $receipt = @{ pid = $AppProcessId; name = $MenuItemName; startupMs = $startupMs; helperPid = $PID } | ConvertTo-Json -Compress
+        [System.IO.File]::WriteAllText($ready, $receipt, [System.Text.UTF8Encoding]::new($false))
+        $triggerClock = [System.Diagnostics.Stopwatch]::StartNew()
+        while (-not [System.IO.File]::Exists($trigger)) {
+            if (-not (Test-TargetProcess)) {
+                Write-Result @{ clicked = $false; inspected = $false; failed = $true; error = 'Target exited while waiting for the menu trigger.' } 3
+            }
+            if ($triggerClock.Elapsed.TotalSeconds -ge $TriggerTimeoutSeconds) {
+                $triggerWaitMs = $triggerClock.ElapsedMilliseconds
+                Write-Result @{ clicked = $false; inspected = $false; failed = $true; error = 'Timed out waiting for the menu trigger.' } 2
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        $triggerWaitMs = $triggerClock.ElapsedMilliseconds
+        $triggerReceipt = [System.IO.File]::ReadAllText($trigger) | ConvertFrom-Json
+        if ($triggerReceipt.pid -ne $AppProcessId -or $triggerReceipt.name -cne $MenuItemName -or $triggerReceipt.helperPid -ne $PID) {
+            throw [System.InvalidOperationException]::new('The menu trigger does not match this helper and target.')
+        }
+    }
     $searchClock = [System.Diagnostics.Stopwatch]::StartNew()
     while ($searchClock.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if (-not (Test-TargetProcess)) {
@@ -257,28 +335,46 @@ public static class LinkShellCiNativeMenuWindow
         }
         $phase = 'finding-menu-windows'
         Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
-        # Root Children only; never walk the desktop or the main BrowserWindow descendants.
-        $roots = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Children, $ownerCondition)
+        # Owned popup HWNDs can be absent from UIA Root.Children; resolve each verified HWND directly.
+        $windows = [LinkShellCiNativeMenuWindow]::OwnedWindows($AppProcessId)
         $lastMenus = @()
         $lastWindows = @()
-        foreach ($root in $roots) {
+        foreach ($windowInfo in $windows) {
             try {
-                if ($root.Current.ProcessId -ne $AppProcessId) { continue }
-                $handle = [IntPtr]::new($root.Current.NativeWindowHandle)
-                $nativeClass = [LinkShellCiNativeMenuWindow]::WindowClass($handle, $AppProcessId)
-                $popup = [LinkShellCiNativeMenuWindow]::IsPopup($handle, $AppProcessId)
-                $ownedParent = [LinkShellCiNativeMenuWindow]::HasOwnedParent($handle, $AppProcessId)
+                $handle = [IntPtr]::new([long]$windowInfo['nativeHandle'])
+                $nativeClass = $windowInfo['nativeClass']
+                $popup = $windowInfo['popup']
+                $ownedParent = $windowInfo['ownedParent']
+                $toolWindow = $windowInfo['toolWindow']
+                $windowInfo['searched'] = $false
+                $windowInfo['controlType'] = $null
+                $windowInfo['rejectionReason'] = if ($popup) { $null } else { 'Not a visible WS_POPUP HWND' }
+                $lastWindows += $windowInfo
+                Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
+                # Never request descendants from a normal BrowserWindow.
+                if (-not $popup -or -not $nativeClass) { continue }
+                if (-not [LinkShellCiNativeMenuWindow]::IsPopup($handle, $AppProcessId)) { continue }
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                $windowInfo['controlType'] = $root.Current.ControlType.ProgrammaticName
+                $windowInfo['offscreen'] = $root.Current.IsOffscreen
+                if ($root.Current.ProcessId -ne $AppProcessId -or $root.Current.NativeWindowHandle -ne $handle.ToInt64()) {
+                    $windowInfo['rejectionReason'] = 'UIA root does not match the owned popup HWND'
+                    Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
+                    continue
+                }
                 $explicitMenu = $root.Current.ControlType -eq [System.Windows.Automation.ControlType]::Menu
-                $isKnownMenu = $nativeClass -eq '#32768' -or $nativeClass -eq 'Chrome_WidgetWin_2'
-                $eligible = $nativeClass -and $popup -and -not $root.Current.IsOffscreen -and ($explicitMenu -or ($nativeClass -ne 'Chrome_WidgetWin_1' -and ($isKnownMenu -or $ownedParent)))
+                $rootType = $root.Current.ControlType
+                $nativeMenu = $nativeClass -eq '#32768'
+                # Chromium reuses numbered HWND classes. Views menus use owned popup tool windows.
+                $chromeContainer = $nativeClass.StartsWith('Chrome_', [System.StringComparison]::Ordinal) -and $ownedParent -and $toolWindow -and (
+                    $rootType -eq [System.Windows.Automation.ControlType]::Window -or
+                    $rootType -eq [System.Windows.Automation.ControlType]::Pane -or $explicitMenu)
+                $eligible = $nativeClass -and $popup -and -not $root.Current.IsOffscreen -and ($explicitMenu -or $nativeMenu -or $chromeContainer)
                 $rejectionReason = if ($eligible) { $null } elseif (-not $nativeClass) { 'No owned HWND class' }
                     elseif (-not $popup) { 'Not a visible WS_POPUP HWND' } elseif ($root.Current.IsOffscreen) { 'UIA offscreen' }
-                    elseif ($nativeClass -eq 'Chrome_WidgetWin_1' -and -not $explicitMenu) { 'BrowserWindow class without Menu semantics' }
-                    else { 'No Menu semantics, known popup class or same-process owner' }
-                if ($lastWindows.Count -lt 24) {
-                    $lastWindows += @{ nativeHandle = $handle.ToInt64(); nativeClass = $nativeClass; controlType = $root.Current.ControlType.ProgrammaticName; offscreen = $root.Current.IsOffscreen; popup = $popup; ownedParent = $ownedParent; searched = $eligible; rejectionReason = $rejectionReason }
-                }
+                    else { 'No Menu semantics or Win32 menu class; Chromium containers require a same-process owner, WS_EX_TOOLWINDOW and Window/Pane/Menu type' }
+                $windowInfo['searched'] = $eligible
+                $windowInfo['rejectionReason'] = $rejectionReason
                 Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
                 if (-not $eligible) { continue }
                 $diagnostics = @()
@@ -333,7 +429,9 @@ public static class LinkShellCiNativeMenuWindow
                     }
                     if (-not [LinkShellCiNativeMenuWindow]::IsPopup($handle, $AppProcessId) -or
                         [LinkShellCiNativeMenuWindow]::WindowClass($handle, $AppProcessId) -cne $nativeClass -or
-                        $root.Current.ProcessId -ne $AppProcessId -or $root.Current.IsOffscreen -or
+                        ($chromeContainer -and (-not [LinkShellCiNativeMenuWindow]::HasOwnedParent($handle, $AppProcessId) -or -not [LinkShellCiNativeMenuWindow]::IsToolWindow($handle, $AppProcessId))) -or
+                        $root.Current.ProcessId -ne $AppProcessId -or $root.Current.IsOffscreen -or $root.Current.ControlType -ne $rootType -or
+                        $root.Current.NativeWindowHandle -ne $handle.ToInt64() -or
                         $item.Current.ProcessId -ne $AppProcessId -or
                         $item.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem -or
                         $item.Current.Name -cne $MenuItemName -or

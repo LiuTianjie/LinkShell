@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using LinkShell.Windows;
 
 internal static class InstallerTests {
@@ -29,9 +34,95 @@ internal static class InstallerTests {
     static void Old(string path) { Directory.CreateDirectory(path); File.WriteAllText(Path.Combine(path, "standalone.json"), "old"); File.WriteAllText(Path.Combine(path, "LinkShell.exe"), "old"); }
     static string Copy(string kind) { return "LinkShell." + kind + "-" + Guid.NewGuid().ToString("N"); }
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern uint GetShortPathNameW(string path, StringBuilder result, uint length);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern uint GetLongPathNameW(string path, StringBuilder result, uint length);
+
+    static string PathSpelling(string path, bool shortName) {
+        var buffer = new StringBuilder(512);
+        uint size = shortName ? GetShortPathNameW(path, buffer, (uint)buffer.Capacity) : GetLongPathNameW(path, buffer, (uint)buffer.Capacity);
+        if (size == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resolve shortcut fixture path: " + path);
+        if (size >= buffer.Capacity) {
+            buffer = new StringBuilder((int)size + 1);
+            size = shortName ? GetShortPathNameW(path, buffer, (uint)buffer.Capacity) : GetLongPathNameW(path, buffer, (uint)buffer.Capacity);
+            if (size == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resolve shortcut fixture path: " + path);
+            Assert(size < buffer.Capacity, "shortcut fixture path changed while reading");
+        }
+        return buffer.ToString();
+    }
+
+    static string[] ReadShortcut(string path) {
+        object shell = null, link = null;
+        string step = "load WScript.Shell for shortcut readback";
+        try {
+            Type type = Type.GetTypeFromProgID("WScript.Shell"); shell = Activator.CreateInstance(type);
+            step = "open saved shortcut for readback";
+            link = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
+            string[] fields = { "TargetPath", "WorkingDirectory", "Arguments" }, values = new string[fields.Length];
+            for (int index = 0; index < fields.Length; index++) {
+                step = "read shortcut " + fields[index];
+                values[index] = (string)link.GetType().InvokeMember(fields[index], BindingFlags.GetProperty, null, link, null);
+                Console.WriteLine(fields[index] + "=[" + values[index] + "]");
+            }
+            return values;
+        } catch (Exception error) {
+            Exception cause = error;
+            while (cause is TargetInvocationException && cause.InnerException != null) cause = cause.InnerException;
+            throw new IOException(step + " failed (" + cause.GetType().FullName + ", 0x" + cause.HResult.ToString("X8") + "): " + cause.Message, cause);
+        } finally { if (link != null) Marshal.FinalReleaseComObject(link); if (shell != null) Marshal.FinalReleaseComObject(shell); }
+    }
+
+    static void AssertShortcut(string directory, string target, string home) {
+        string path = Path.Combine(directory, "LinkShell.lnk");
+        Assert(File.Exists(path) && new FileInfo(path).Length > 0, "native shortcut missing: " + path);
+        string[] values = ReadShortcut(path);
+        Assert(String.Equals(PathSpelling(values[0], false), PathSpelling(Path.Combine(target, "LinkShell.exe"), false), StringComparison.OrdinalIgnoreCase), "shortcut target differs");
+        Assert(String.Equals(PathSpelling(values[1], false), PathSpelling(target, false), StringComparison.OrdinalIgnoreCase), "shortcut working directory differs");
+        Assert(values[2] == (home == null ? "" : "--home \"" + home + "\""), "shortcut arguments changed home spelling or quoting");
+    }
+
+    static void ShortcutHome(string rawRoot) {
+        string destination = Path.Combine(Path.GetFullPath(rawRoot), "shortcut-home", "中文 安装", "LinkShell");
+        Directory.CreateDirectory(destination);
+        File.Copy(Assembly.GetExecutingAssembly().Location, Path.Combine(destination, "LinkShell.exe"));
+        string programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        Assert(!String.IsNullOrEmpty(programs) && Directory.Exists(programs), "current user's Programs directory is unavailable");
+        string directory = Path.Combine(programs, "LinkShell QA shortcuts-" + Guid.NewGuid().ToString("N"));
+        Assert(!Directory.Exists(directory) && !File.Exists(directory), "refusing to overwrite an existing Programs fixture");
+        Directory.CreateDirectory(directory);
+        Exception failure = null;
+        try {
+            // Keep the launcher's raw RUNNER~1 spelling; shortcut arguments also determine the host's data/pipe identity.
+            string firstHome = Path.Combine(rawRoot, "shortcut-home", "自定义 数据", "home one");
+            string secondHome = Path.Combine(PathSpelling(Path.GetFullPath(rawRoot), true), "shortcut-home", "自定义 数据", "home two");
+            Directory.CreateDirectory(firstHome); Directory.CreateDirectory(secondHome);
+            Console.WriteLine("shortcut-home raw root=[" + rawRoot + "]; Programs fixture=[" + directory + "]");
+            Task.Run(() => {
+                Assert(Thread.CurrentThread.GetApartmentState() == ApartmentState.MTA, "shortcut worker is not MTA");
+                Console.WriteLine("shortcut-home apartment=" + Thread.CurrentThread.GetApartmentState());
+                InstallerEngine.CreateShortcutAt(destination, directory, firstHome);
+                AssertShortcut(directory, destination, firstHome);
+                Assert(File.Exists(Path.Combine(directory, "LinkShell.lnk")), "owned shortcut missing before rewrite");
+                InstallerEngine.CreateShortcutAt(destination, directory, secondHome);
+                AssertShortcut(directory, destination, secondHome);
+            }).GetAwaiter().GetResult();
+        } catch (Exception error) { failure = error; throw; }
+        finally {
+            try { Directory.Delete(directory, true); }
+            catch (Exception cleanupError) {
+                if (failure == null) throw;
+                Console.Error.WriteLine("Programs fixture cleanup also failed: " + cleanupError);
+            }
+        }
+    }
+
     static int Main(string[] args) {
+        Console.OutputEncoding = new UTF8Encoding(false);
+        Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
         try {
             string scenario = args[0], root = Path.GetFullPath(args[1]), destination = Path.Combine(root, scenario, "LinkShell");
+            if (scenario == "shortcut-home") { ShortcutHome(args[1]); Console.WriteLine("PASS " + scenario); return 0; }
             Directory.CreateDirectory(Path.GetDirectoryName(destination));
             var updates = new Updates(); var token = new CancellationTokenSource(); var calls = new List<string>(); bool committed = false, shortcut = false;
             Func<Stream> payload = () => Payload();
@@ -97,7 +188,7 @@ internal static class InstallerTests {
             if (scenario == "traversal") Assert(!File.Exists(Path.Combine(Path.GetDirectoryName(destination), "escaped.txt")), "escaped staging root");
             if (scenario == "foreign") Assert(File.ReadAllText(Path.Combine(destination, "keep.txt")) == "keep", "foreign data changed");
             if (scenario == "long-path") Assert(File.ReadAllText(Directory.GetFiles(@"\\?\" + destination, "module.js", SearchOption.AllDirectories).Single()) == "long", "long path not installed");
-            if (scenario == "shortcut-real") Assert(new FileInfo(Path.Combine(root, "shortcuts", "LinkShell.lnk")).Length > 0, "native shortcut missing");
+            if (scenario == "shortcut-real") AssertShortcut(Path.Combine(root, "shortcuts"), destination, null);
             Console.WriteLine("PASS " + scenario); return 0;
         } catch (Exception error) { Console.Error.WriteLine(error); return 1; }
     }

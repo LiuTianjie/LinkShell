@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -186,26 +186,59 @@ async function clipboardFixture(operation, text) {
   if (response.error) throw new Error(response.error); return response.result;
 }
 async function nativeEditingMenu(selector, name, editFlag, evidenceName) {
-  const before = (await readEvents('app-events.jsonl')).length;
-  const point = await connection.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();const r=e.getBoundingClientRect();return{x:r.x+22,y:r.y+22}})()`);
-  await connection.command('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'right', clickCount: 1 });
-  await connection.command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'right', clickCount: 1 });
-  const context = await until('native editing context', async () => (await readEvents('app-events.jsonl')).slice(before).find(event => event.event === 'editing-context'), 15_000);
-  assert.equal(context.editable, true); assert.equal(context[editFlag], true, `${name} must be enabled by Chromium.`);
-  const started = Date.now(), timeoutMs = 90_000, helperDump = evidenceName + '.json';
-  let response;
+  const started = Date.now(), startupBudgetMs = 60_000, triggerTimeoutSeconds = 30, searchTimeoutSeconds = 30;
+  const timeoutMs = startupBudgetMs + (triggerTimeoutSeconds + searchTimeoutSeconds) * 1000 + 5000;
+  const helperDump = evidenceName + '.json', handshake = join(work, evidenceName + '-' + randomUUID());
+  const readyPath = handshake + '-ready.json', triggerPath = handshake + '-trigger.json', triggerPending = handshake + '-trigger.tmp';
+  await Promise.all([readyPath, triggerPath, triggerPending].map(path => rm(path, { force: true })));
+  // Compile/load UIA before opening a transient native menu. No process starts after the right click.
+  const helper = exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-menu-uia.ps1'),
+    '-AppProcessId', String(connection.pid), '-MenuItemName', name, '-TimeoutSeconds', String(searchTimeoutSeconds), '-DumpPath', join(report, helperDump),
+    '-ReadyPath', readyPath, '-TriggerPath', triggerPath, '-TriggerTimeoutSeconds', String(triggerTimeoutSeconds)], { timeout: timeoutMs });
+  let outcome, ready, context, readyAfterMs, rightClickAfterMs, contextAfterMs, searchTriggeredAfterMs, aborted = false;
+  const completed = helper.then(response => { outcome = { response }; }, error => { outcome = { error }; });
+  const diagnostics = () => ({ name, pid: connection.pid, helperPid: helper.child.pid, elapsedMs: Date.now() - started,
+    startupBudgetMs, triggerTimeoutSeconds, searchTimeoutSeconds, timeoutMs, ready, readyAfterMs, rightClickAfterMs, contextAfterMs, searchTriggeredAfterMs,
+    context, aborted, code: outcome?.error?.code ?? null, signal: outcome?.error?.signal ?? null, killed: outcome?.error?.killed ?? false, helperDump });
   try {
-    response = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-menu-uia.ps1'),
-      '-AppProcessId', String(connection.pid), '-MenuItemName', name, '-TimeoutSeconds', '30', '-DumpPath', join(report, helperDump)], { timeout: timeoutMs });
+    while (!ready && Date.now() - started < startupBudgetMs) {
+      if (outcome) throw new Error('The native menu helper exited before readiness.');
+      try { ready = JSON.parse(await readFile(readyPath, 'utf8')); } catch {}
+      if (!ready) await sleep(100);
+    }
+    assert.ok(ready, 'The native menu helper did not become ready.');
+    assert.equal(ready.pid, connection.pid); assert.equal(ready.name, name); assert.equal(ready.helperPid, helper.child.pid);
+    assert.ok(Number.isFinite(ready.startupMs)); readyAfterMs = Date.now() - started;
+    await writeFile(join(report, evidenceName + '-ready.json'), JSON.stringify(ready, null, 2));
+    await connection.command('Page.bringToFront');
+    const before = (await readEvents('app-events.jsonl')).length;
+    const point = await connection.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();const r=e.getBoundingClientRect();return{x:r.x+22,y:r.y+22}})()`);
+    rightClickAfterMs = Date.now() - started;
+    await connection.command('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'right', clickCount: 1 });
+    await connection.command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'right', clickCount: 1 });
+    context = await until('native editing context', async () => (await readEvents('app-events.jsonl')).slice(before).find(event => event.event === 'editing-context'), 15_000);
+    contextAfterMs = Date.now() - started;
+    assert.equal(context.pid, connection.pid); assert.equal(context.editable, true); assert.equal(context[editFlag], true, `${name} must be enabled by Chromium.`);
+    if (outcome) throw new Error('The native menu helper exited before the context was ready.');
+    await writeFile(triggerPending, JSON.stringify({ pid: connection.pid, name, helperPid: ready.helperPid }));
+    await rename(triggerPending, triggerPath);
+    searchTriggeredAfterMs = Date.now() - started;
+    await completed;
+    if (outcome.error) throw outcome.error;
+    const invoked = JSON.parse(outcome.response.stdout.trim()); assert.equal(invoked.clicked, true); assert.equal(invoked.pid, connection.pid); assert.equal(invoked.name, name); assert.equal(invoked.controlType, 'ControlType.MenuItem');
+    assert.ok(['InvokePattern', 'MSAA.accDoDefaultAction'].includes(invoked.invocationMethod));
+    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ ...diagnostics(), invoked: true }, null, 2));
+    return { name, invoked: true, invocationMethod: invoked.invocationMethod, controlType: invoked.controlType, processId: invoked.pid, chromiumEnabled: true };
   } catch (error) {
-    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ name, pid: connection.pid, elapsedMs: Date.now() - started,
-      searchTimeoutSeconds: 30, startupBudgetMs: 60_000, timeoutMs, code: error.code, signal: error.signal, killed: error.killed,
-      stdout: safeError(error.stdout ?? '').slice(-16000), stderr: safeError(error.stderr ?? '').slice(-16000), helperDump }, null, 2));
+    // Keep this process handle: fixture cleanup deliberately never kills arbitrary powershell.exe PIDs.
+    if (!outcome) { aborted = true; helper.child.kill(); await completed; }
+    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ ...diagnostics(), error: safeError(error),
+      stdout: safeError(outcome?.error?.stdout ?? outcome?.response?.stdout ?? '').slice(-16000),
+      stderr: safeError(outcome?.error?.stderr ?? outcome?.response?.stderr ?? '').slice(-16000) }, null, 2));
     throw new Error(`Native ${name} helper failed; see ${evidenceName}-driver.json and ${helperDump}.`);
+  } finally {
+    await Promise.all([readyPath, triggerPath, triggerPending].map(path => rm(path, { force: true })));
   }
-  const invoked = JSON.parse(response.stdout.trim()); assert.equal(invoked.clicked, true); assert.equal(invoked.pid, connection.pid); assert.equal(invoked.name, name); assert.equal(invoked.controlType, 'ControlType.MenuItem');
-  assert.ok(['InvokePattern', 'MSAA.accDoDefaultAction'].includes(invoked.invocationMethod));
-  return { name, invoked: true, invocationMethod: invoked.invocationMethod, controlType: invoked.controlType, processId: invoked.pid, chromiumEnabled: true };
 }
 const responseAfter = (index, method, matches = () => true) => rpcEvents.slice(index).find(event => event.event === 'response' && event.method === method && event.ok && matches(event));
 async function persisted(sessionId) {
