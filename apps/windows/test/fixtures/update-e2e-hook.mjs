@@ -22,11 +22,13 @@ record('app-start', { version: app.getVersion() });
 
 // Observe native confirmation; retain the real dialog and the user's UIAutomation answer.
 const showMessageBox = dialog.showMessageBox.bind(dialog);
+let dialogSequence = 0;
 dialog.showMessageBox = async (...args) => {
   const options = args.at(-1);
-  record('dialog', { message: options.message, buttons: options.buttons });
+  const id = ++dialogSequence;
+  record('dialog', { id, message: options.message, buttons: options.buttons });
   const result = await showMessageBox(...args);
-  record('dialog-result', { response: result.response });
+  record('dialog-result', { id, response: result.response });
   return result;
 };
 app.whenReady().then(() => {

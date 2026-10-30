@@ -15,6 +15,7 @@ param(
     [ValidateRange(1, 300)]
     [int]$TimeoutSeconds = 60,
 
+    [string]$NativeDialogTitle,
     [string]$DumpPath,
     [string]$ScreenshotPath
 )
@@ -83,6 +84,9 @@ function Get-WindowDiagnostic {
             $items += @{
                 name = $element.Current.Name
                 controlType = $element.Current.ControlType.ProgrammaticName
+                className = $element.Current.ClassName
+                nativeHandle = $element.Current.NativeWindowHandle
+                patterns = if ($ButtonName -and $element.Current.Name -ceq $ButtonName) { @($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
                 enabled = $element.Current.IsEnabled
                 offscreen = $element.Current.IsOffscreen
             }
@@ -92,6 +96,7 @@ function Get-WindowDiagnostic {
         pid = $AppProcessId
         title = $Window.Current.Name
         nativeHandle = $Window.Current.NativeWindowHandle
+        className = $Window.Current.ClassName
         offscreen = $Window.Current.IsOffscreen
         treeScope = $scope.ToString()
         elements = $items
@@ -110,7 +115,7 @@ function Save-WindowScreenshot {
         Write-Phase 'capture-window' @{ title = $Window.Current.Name; nativeHandle = $Window.Current.NativeWindowHandle }
         $size = [LinkShellCiWindowCapture]::Save($handle, $AppProcessId, $fullPath)
         Write-Phase 'capture-complete'
-        return @{ captured = $true; path = $fullPath; method = 'PrintWindow'; width = $size[0]; height = $size[1]; windowTitle = $Window.Current.Name }
+        return @{ captured = $true; path = $fullPath; method = 'PrintWindow'; width = $size[0]; height = $size[1]; windowTitle = $Window.Current.Name; nativeHandle = $Window.Current.NativeWindowHandle; className = $Window.Current.ClassName }
     } catch {
         return @{ captured = $false; path = $ScreenshotPath; method = 'PrintWindow'; error = $_.Exception.Message }
     }
@@ -121,17 +126,21 @@ try {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName WindowsBase
-    if ($ScreenshotPath) {
+    if ($ScreenshotPath -or $NativeDialogTitle) {
         Write-Phase 'load-capture-assembly'
         Add-Type -AssemblyName System.Drawing
+        Add-Type -AssemblyName Accessibility
         Write-Phase 'compile-window-capture'
-        Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+        Add-Type -ReferencedAssemblies System.Drawing, Accessibility -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using Accessibility;
 
 public static class LinkShellCiWindowCapture
 {
@@ -152,6 +161,74 @@ public static class LinkShellCiWindowCapture
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr window, StringBuilder name, int count);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr window, StringBuilder name, int count);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr window, int index);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+    [DllImport("oleacc.dll")]
+    private static extern int AccessibleObjectFromWindow(IntPtr window, uint objectId, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
+
+    private static string WindowClass(IntPtr window)
+    {
+        var value = new StringBuilder(256);
+        if (GetClassName(window, value, value.Capacity) == 0) throw new InvalidOperationException("The native window class is unavailable.");
+        return value.ToString();
+    }
+
+    public static void CheckDialog(IntPtr dialog, int processId, string title)
+    {
+        CheckOwner(dialog, processId);
+        var actual = new StringBuilder(1024);
+        GetWindowText(dialog, actual, actual.Capacity);
+        if (WindowClass(dialog) != "#32770" || actual.ToString() != title)
+            throw new InvalidOperationException("The requested native dialog identity does not match.");
+    }
+
+    public static Dictionary<string, object> CommandLinkAction(IntPtr dialog, IntPtr button, int processId, string title, string name, bool invoke)
+    {
+        CheckDialog(dialog, processId, title);
+        CheckOwner(button, processId);
+        int style = GetWindowLong(button, -16), buttonStyle = style & 15;
+        // .NET's legacy UIA proxy reports BS_COMMANDLINK as Pane and may expose no InvokePattern.
+        // Only an actual command-link HWND within this verified Win32 dialog may use MSAA.
+        string buttonClass = WindowClass(button);
+        if (!IsChild(dialog, button) || !String.Equals(buttonClass, "Button", StringComparison.OrdinalIgnoreCase) || (buttonStyle != 14 && buttonStyle != 15))
+            throw new InvalidOperationException("The target is not a native command-link button in the requested dialog: class=" + buttonClass + ", style=0x" + unchecked((uint)style).ToString("X8") + ".");
+        var interfaceId = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
+        IAccessible accessible;
+        Marshal.ThrowExceptionForHR(AccessibleObjectFromWindow(button, unchecked((uint)-4), ref interfaceId, out accessible));
+        if (accessible == null) throw new InvalidOperationException("The native button has no accessibility object.");
+        try
+        {
+            int role = Convert.ToInt32(accessible.get_accRole(0)), state = Convert.ToInt32(accessible.get_accState(0));
+            string actualName = accessible.get_accName(0), action = accessible.get_accDefaultAction(0);
+            if (actualName != name || role != 43 || String.IsNullOrWhiteSpace(action) || (state & (1 | 0x8000 | 0x10000)) != 0)
+                throw new InvalidOperationException("The native button has no enabled, visible push-button default action matching the requested name: name=" + actualName + ", role=" + role + ", state=" + state + ", defaultAction=" + action + ".");
+            var evidence = new Dictionary<string, object> {
+                { "dialogHandle", dialog.ToInt64() }, { "dialogClass", WindowClass(dialog) },
+                { "targetHandle", button.ToInt64() }, { "targetClass", WindowClass(button) },
+                { "style", "0x" + unchecked((uint)style).ToString("X8") }, { "role", role }, { "state", state },
+                { "name", actualName }, { "defaultAction", action }, { "ownerPid", processId }, { "ownerValidated", true }
+            };
+            if (invoke) {
+                CheckDialog(dialog, processId, title); CheckOwner(button, processId);
+                if (!IsChild(dialog, button)) throw new InvalidOperationException("The native button left its dialog before invocation.");
+                accessible.accDoDefaultAction(0);
+            }
+            return evidence;
+        }
+        finally { Marshal.ReleaseComObject(accessible); }
+    }
 
     private static void CheckOwner(IntPtr window, int expectedProcessId)
     {
@@ -212,8 +289,14 @@ public static class LinkShellCiWindowCapture
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
             [System.Windows.Automation.ControlType]::Button
         )
-        $buttonCondition = [System.Windows.Automation.AndCondition]::new($nameCondition, $typeCondition)
+        $buttonCondition = if ($NativeDialogTitle) { $nameCondition } else { [System.Windows.Automation.AndCondition]::new($nameCondition, $typeCondition) }
     }
+    $dialogCondition = if ($NativeDialogTitle) {
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $NativeDialogTitle),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
+        )
+    } else { $null }
     $script:startupMs = $helperClock.ElapsedMilliseconds
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $lastWindows = @()
@@ -236,37 +319,64 @@ public static class LinkShellCiWindowCapture
             try {
                 # Every lookup remains inside a top-level window owned by the requested process.
                 if ($window.Current.ProcessId -ne $AppProcessId) { continue }
-                $windowTitle = $window.Current.Name
-                if ($null -eq $screenshotWindow -or (-not $screenshotMatchesButton -and $screenshotWindow.Current.IsOffscreen -and -not $window.Current.IsOffscreen)) {
-                    $screenshotWindow = $window
+                $searchWindow = $window
+                if ($NativeDialogTitle) {
+                    Write-Phase 'find-native-dialog'
+                    $dialogs = @($window.FindAll([System.Windows.Automation.TreeScope]::Subtree, $dialogCondition) | Where-Object {
+                        $_.Current.ProcessId -eq $AppProcessId -and $_.Current.ClassName -ceq '#32770' -and $_.Current.NativeWindowHandle -ne 0 -and -not $_.Current.IsOffscreen
+                    })
+                    if ($dialogs.Count -ne 1) {
+                        $diagnostic = Get-WindowDiagnostic $window
+                        if ($null -ne $diagnostic) { $lastWindows += $diagnostic }
+                        continue
+                    }
+                    $searchWindow = $dialogs[0]
+                    [LinkShellCiWindowCapture]::CheckDialog([IntPtr]::new($searchWindow.Current.NativeWindowHandle), $AppProcessId, $NativeDialogTitle)
+                }
+                $windowTitle = $searchWindow.Current.Name
+                if ($null -eq $screenshotWindow -or (-not $screenshotMatchesButton -and $screenshotWindow.Current.IsOffscreen -and -not $searchWindow.Current.IsOffscreen)) {
+                    $screenshotWindow = $searchWindow
                 }
                 $buttons = @()
                 if ($null -ne $buttonCondition) {
                     Write-Phase 'find-button' @{ title = $windowTitle; button = $ButtonName }
-                    $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    $buttons = $searchWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
                 }
                 foreach ($button in $buttons) {
                     if ($button.Current.ProcessId -ne $AppProcessId) { continue }
-                    if (-not $window.Current.IsOffscreen) {
-                        $screenshotWindow = $window
+                    $controlType = $button.Current.ControlType
+                    if ($controlType -ne [System.Windows.Automation.ControlType]::Button -and -not ($NativeDialogTitle -and $controlType -eq [System.Windows.Automation.ControlType]::Pane -and $button.Current.NativeWindowHandle -ne 0)) { continue }
+                    if (-not $searchWindow.Current.IsOffscreen) {
+                        $screenshotWindow = $searchWindow
                         $screenshotMatchesButton = $true
                     }
                     # InspectOnly never requests or invokes an action pattern.
                     if ($InspectOnly) { continue }
                     if (-not $button.Current.IsEnabled -or $button.Current.IsOffscreen) { continue }
                     [object]$invokeObject = $null
-                    if (-not $button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokeObject)) { continue }
-                    $screenshot = Save-WindowScreenshot $window
+                    $patterns = @($button.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                    $dialogEvidence = @{ title = $windowTitle; nativeHandle = $searchWindow.Current.NativeWindowHandle; className = $searchWindow.Current.ClassName; ownerPid = $AppProcessId }
+                    $targetEvidence = @{ name = $button.Current.Name; nativeHandle = $button.Current.NativeWindowHandle; className = $button.Current.ClassName; controlType = $controlType.ProgrammaticName; patterns = $patterns }
+                    $accessibility = $null
+                    if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokeObject)) { $action = 'UIA.InvokePattern' }
+                    elseif ($NativeDialogTitle) {
+                        Write-Phase 'check-command-link' @{ dialog = $dialogEvidence; target = $targetEvidence }
+                        $accessibility = [LinkShellCiWindowCapture]::CommandLinkAction([IntPtr]::new($searchWindow.Current.NativeWindowHandle), [IntPtr]::new($button.Current.NativeWindowHandle), $AppProcessId, $NativeDialogTitle, $ButtonName, $false)
+                        $action = 'MSAA.accDoDefaultAction'
+                    } else { continue }
+                    $screenshot = Save-WindowScreenshot $searchWindow
                     if (-not (Test-TargetProcess)) {
                         Write-Result @{ clicked = $false; pid = $AppProcessId; name = $ButtonName; error = 'The requested process changed before invocation.'; screenshot = $screenshot } 3
                     }
-                    if ($window.Current.ProcessId -ne $AppProcessId -or $button.Current.ProcessId -ne $AppProcessId -or $button.Current.Name -cne $ButtonName -or $button.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or -not $button.Current.IsEnabled -or $button.Current.IsOffscreen) { continue }
-                    Write-Phase 'invoke-button' @{ title = $windowTitle; button = $ButtonName }
-                    ([System.Windows.Automation.InvokePattern]$invokeObject).Invoke()
+                    if ($searchWindow.Current.ProcessId -ne $AppProcessId -or $button.Current.ProcessId -ne $AppProcessId -or $button.Current.Name -cne $ButtonName -or $button.Current.ControlType -ne $controlType -or -not $button.Current.IsEnabled -or $button.Current.IsOffscreen) { continue }
+                    if ($NativeDialogTitle) { [LinkShellCiWindowCapture]::CheckDialog([IntPtr]::new($searchWindow.Current.NativeWindowHandle), $AppProcessId, $NativeDialogTitle) }
+                    Write-Phase 'invoke-button' @{ action = $action; dialog = $dialogEvidence; target = $targetEvidence; accessibility = $accessibility }
+                    if ($action -eq 'UIA.InvokePattern') { ([System.Windows.Automation.InvokePattern]$invokeObject).Invoke() }
+                    else { $accessibility = [LinkShellCiWindowCapture]::CommandLinkAction([IntPtr]::new($searchWindow.Current.NativeWindowHandle), [IntPtr]::new($button.Current.NativeWindowHandle), $AppProcessId, $NativeDialogTitle, $ButtonName, $true) }
                     Write-Phase 'invoke-complete'
-                    Write-Result @{ clicked = $true; inspected = $false; pid = $AppProcessId; name = $ButtonName; windowTitle = $windowTitle; screenshot = $screenshot; elapsedMs = $clock.ElapsedMilliseconds } 0
+                    Write-Result @{ clicked = $true; inspected = $false; pid = $AppProcessId; name = $ButtonName; action = $action; dialog = $dialogEvidence; target = $targetEvidence; accessibility = $accessibility; windowTitle = $windowTitle; screenshot = $screenshot; elapsedMs = $clock.ElapsedMilliseconds } 0
                 }
-                $diagnostic = Get-WindowDiagnostic $window
+                $diagnostic = Get-WindowDiagnostic $searchWindow
                 if ($null -ne $diagnostic) { $lastWindows += $diagnostic }
             } catch [System.Windows.Automation.ElementNotAvailableException] {
                 $lastFailure = 'A target window changed while being inspected.'

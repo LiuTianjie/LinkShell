@@ -27,7 +27,7 @@ const codexBinary = 'package/vendor/x86_64-pc-windows-msvc/bin/codex.exe';
 const codexExe = join(work, 'official-codex', codexBinary);
 const result = { schema: 1, startedAt: new Date().toISOString(), status: 'running', scenarios: [] };
 const rpcEvents = [], requests = new Map();
-let connection, forbiddenRPC = false;
+let connection, forbiddenRPC = false, clipboardNeedsRestore = false, clipboardRestored;
 // Do not inherit account tokens, API keys, proxies, NODE_OPTIONS or a runner's agent configuration.
 const env = {
   SystemRoot: windows, WINDIR: windows, COMSPEC: join(windows, 'System32/cmd.exe'),
@@ -180,6 +180,33 @@ async function screenshot(name) {
   const shot = await connection.command('Page.captureScreenshot', { format: 'png' });
   await writeFile(join(report, name + '.png'), Buffer.from(shot.data, 'base64'));
 }
+async function clipboardFixture(operation, text) {
+  const id = randomUUID();
+  const response = await connection.evaluate(`new Promise(resolve=>{const id=${JSON.stringify(id)};const timer=setTimeout(()=>{window.removeEventListener('linkshell-qa-clipboard',reply);resolve({error:'Clipboard fixture timeout'});},10000);function reply(event){if(event.detail?.id!==id)return;clearTimeout(timer);window.removeEventListener('linkshell-qa-clipboard',reply);resolve(event.detail)}window.addEventListener('linkshell-qa-clipboard',reply);window.linkshellDesktop.postMessage({action:'qaClipboard',token:${JSON.stringify(token)},id,operation:${JSON.stringify(operation)},text:${JSON.stringify(text)}})})`);
+  if (response.error) throw new Error(response.error); return response.result;
+}
+async function nativeEditingMenu(selector, name, editFlag, evidenceName) {
+  const before = (await readEvents('app-events.jsonl')).length;
+  const point = await connection.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();const r=e.getBoundingClientRect();return{x:r.x+22,y:r.y+22}})()`);
+  await connection.command('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'right', clickCount: 1 });
+  await connection.command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'right', clickCount: 1 });
+  const context = await until('native editing context', async () => (await readEvents('app-events.jsonl')).slice(before).find(event => event.event === 'editing-context'), 15_000);
+  assert.equal(context.editable, true); assert.equal(context[editFlag], true, `${name} must be enabled by Chromium.`);
+  const started = Date.now(), timeoutMs = 90_000, helperDump = evidenceName + '.json';
+  let response;
+  try {
+    response = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-menu-uia.ps1'),
+      '-AppProcessId', String(connection.pid), '-MenuItemName', name, '-TimeoutSeconds', '30', '-DumpPath', join(report, helperDump)], { timeout: timeoutMs });
+  } catch (error) {
+    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ name, pid: connection.pid, elapsedMs: Date.now() - started,
+      searchTimeoutSeconds: 30, startupBudgetMs: 60_000, timeoutMs, code: error.code, signal: error.signal, killed: error.killed,
+      stdout: safeError(error.stdout ?? '').slice(-16000), stderr: safeError(error.stderr ?? '').slice(-16000), helperDump }, null, 2));
+    throw new Error(`Native ${name} helper failed; see ${evidenceName}-driver.json and ${helperDump}.`);
+  }
+  const invoked = JSON.parse(response.stdout.trim()); assert.equal(invoked.clicked, true); assert.equal(invoked.pid, connection.pid); assert.equal(invoked.name, name); assert.equal(invoked.controlType, 'ControlType.MenuItem');
+  assert.ok(['InvokePattern', 'MSAA.accDoDefaultAction'].includes(invoked.invocationMethod));
+  return { name, invoked: true, invocationMethod: invoked.invocationMethod, controlType: invoked.controlType, processId: invoked.pid, chromiumEnabled: true };
+}
 const responseAfter = (index, method, matches = () => true) => rpcEvents.slice(index).find(event => event.event === 'response' && event.method === method && event.ok && matches(event));
 async function persisted(sessionId) {
   const source = `import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(process.env.LINKSHELL_HOME+'/state.db',{readOnly:true});const id=${JSON.stringify(sessionId)};const row=db.prepare("SELECT value FROM driver_state WHERE session_id=? AND key='overrides'").get(id);const events=db.prepare('SELECT body FROM events WHERE session_id=? ORDER BY seq').all(id).map(row=>JSON.parse(row.body));const config=events.findLast(event=>event.sessionUpdate==='ls_config');console.log(JSON.stringify({model:row?JSON.parse(row.value).model:null,configModel:config?.options.find(option=>option.id==='model')?.current,messageCount:events.filter(event=>/message|tool_call/.test(event.sessionUpdate)).length,turnStarts:events.filter(event=>event.sessionUpdate==='ls_turn'&&event.state==='started').length}));db.close();`;
@@ -294,6 +321,35 @@ try {
     return { reopenedModel: initial, rendererReloaded: true, hostPIDUnchanged: true, appServerPIDUnchanged: true,
       globalModelConfigChanged: false, credentialsPresent: false, inferenceRequests: 0, ...state };
   });
+  await check('real Windows native Copy, Cut, Paste and Undo preserve clipboard state', async () => {
+    const saved = await clipboardFixture('snapshot'); assert.equal(saved.saved, true); clipboardNeedsRestore = true;
+    assert.equal((await clipboardFixture('write', 'LinkShell clipboard baseline')).written, true);
+    await connection.command('Page.bringToFront');
+    await click('.desktop-new-session');
+    const input = 'textarea[aria-label="任务描述"]', sample = `LinkShell 原生菜单 ${randomUUID()}`;
+    await click(input); await connection.command('Input.insertText', { text: sample });
+    const inputValue = () => connection.evaluate(`document.querySelector(${JSON.stringify(input)})?.value`);
+    await until('native input entered', async () => await inputValue() === sample);
+    await connection.command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await connection.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await until('text selected', () => connection.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(input)});return e.selectionStart===0&&e.selectionEnd===e.value.length})()`));
+    const actions = [];
+    actions.push(await nativeEditingMenu(input, '复制', 'canCopy', 'native-copy'));
+    await until('native Copy clipboard equality', async () => (await clipboardFixture('read')).text === sample); assert.equal(await inputValue(), sample);
+    actions.push(await nativeEditingMenu(input, '剪切', 'canCut', 'native-cut'));
+    await until('native Cut removes selected text', async () => await inputValue() === ''); assert.equal((await clipboardFixture('read')).text, sample);
+    actions.push(await nativeEditingMenu(input, '粘贴', 'canPaste', 'native-paste'));
+    await until('native Paste restores copied text', async () => await inputValue() === sample); assert.equal((await clipboardFixture('read')).text, sample);
+    actions.push(await nativeEditingMenu(input, '撤销', 'canUndo', 'native-undo'));
+    await until('native Undo reverses Paste', async () => await inputValue() === ''); assert.equal((await clipboardFixture('read')).text, sample);
+    await screenshot('native-menu-editing-complete');
+    clipboardRestored = (await clipboardFixture('restore')).restored; assert.equal(clipboardRestored, true); clipboardNeedsRestore = false;
+    const native = await readEvents('native-events.jsonl');
+    assert.equal(native.filter(event => event.event === 'forbidden-request' || ['turn/start', 'turn/steer', 'review/start', 'thread/compact/start', 'command/exec'].includes(event.method)).length, 0);
+    assert.equal(forbiddenRPC, false);
+    return { actions, copyClipboardEqualsSelection: true, cutRemovedSelection: true, cutClipboardEqualsSelection: true,
+      pasteEqualsClipboard: true, undoReversedPaste: true, promptEmpty: true, clipboardRestored: true, inferenceRequests: 0 };
+  });
   result.status = 'passed';
 } catch (error) {
   result.status = 'failed'; result.error = safeError(error); process.exitCode = 1; log(result.error);
@@ -303,16 +359,21 @@ try {
     if (ui) await writeFile(join(report, 'failure-ui.json'), JSON.stringify(ui, null, 2));
   }
 } finally {
-  connection?.close();
   const cleanupErrors = [];
+  if (clipboardNeedsRestore && connection) {
+    try { clipboardRestored = (await clipboardFixture('restore')).restored; assert.equal(clipboardRestored, true); clipboardNeedsRestore = false; }
+    catch (error) { clipboardRestored = false; cleanupErrors.push(safeError(error)); }
+  }
+  connection?.close();
   for (const item of await processList().catch(error => { cleanupErrors.push(safeError(error)); return []; })) {
     await exec('taskkill.exe', ['/PID', String(item.ProcessId), '/T', '/F'], { timeout: 15_000 }).catch(() => {});
   }
   await mkdir(report, { recursive: true });
   await writeFile(join(report, 'rpc-events.jsonl'), rpcEvents.map(event => JSON.stringify(event)).join('\n') + '\n');
   await writeFile(join(report, 'native-events.jsonl'), (await readEvents('native-events.jsonl')).map(event => JSON.stringify(event)).join('\n') + '\n');
+  await writeFile(join(report, 'editing-events.jsonl'), (await readEvents('app-events.jsonl')).filter(event => ['editing-context', 'clipboard-restored'].includes(event.event)).map(event => JSON.stringify(event)).join('\n') + '\n');
   await rm(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }).catch(error => cleanupErrors.push(safeError(error)));
-  result.cleanup = { temporaryFilesRemoved: !(await exists(work)), errors: cleanupErrors };
+  result.cleanup = { temporaryFilesRemoved: !(await exists(work)), clipboardRestored, errors: cleanupErrors };
   if (cleanupErrors.length) { result.status = 'failed'; process.exitCode = 1; }
   result.finishedAt = new Date().toISOString(); await writeFile(join(report, 'report.json'), JSON.stringify(result, null, 2));
   log(`Result: ${result.status}; sanitized report: ${report}`);

@@ -189,12 +189,13 @@ async function available() {
   await clickControl('button', '立即检查');
   return until('available update', async () => { const status = await invoke('updateStatus'); return !status.checking && status.checkedAt !== before.checkedAt && status.available && status.version === nextVersion && status; });
 }
-async function native(pid, button, name, timeout = 180) {
+async function native(pid, button, name, timeout = 180, nativeDialogTitle) {
   const dump = join(report, `${name}.json`), started = Date.now();
   // .NET/UIA initialization and the first screenshot compilation precede the helper's search clock.
   const timeoutMs = (timeout + 60) * 1000;
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-uia.ps1'), '-AppProcessId', String(pid), '-TimeoutSeconds', String(timeout), '-DumpPath', dump, '-ScreenshotPath', join(report, `${name}.png`)];
   args.push(...(button ? ['-ButtonName', button] : ['-InspectOnly']));
+  if (nativeDialogTitle) args.push('-NativeDialogTitle', nativeDialogTitle);
   let completed;
   try {
     completed = await exec('powershell.exe', args, { timeout: timeoutMs });
@@ -230,8 +231,13 @@ async function observeNative(pid, name) {
 }
 async function confirm(name) {
   const prior = connection.pid;
+  const previousDialog = (await events()).filter(event => event.pid === prior && event.event === 'dialog').at(-1)?.id ?? 0;
   await clickControl('button', '下载并更新 App…');
-  await native(prior, '安装并重启', name + '-confirm');
+  const confirmation = await until('native update confirmation', async () => (await events()).find(event => event.pid === prior && event.event === 'dialog' && event.id > previousDialog && event.message === `重启并安装 LinkShell ${nextVersion}？`));
+  assert.deepEqual(confirmation.buttons, ['稍后安装', '安装并重启']);
+  await native(prior, '安装并重启', name + '-confirm', 180, 'LinkShell');
+  const response = await until('native confirmation response', async () => (await events()).find(event => event.pid === prior && event.event === 'dialog-result' && event.id === confirmation.id));
+  assert.equal(response.response, 1, 'The real native confirmation must choose installation.');
   const installerPID = await until('installer ready handshake', async () => {
     const cache = join(profile, 'windows-updates');
     for (const scope of await readdir(cache).catch(() => [])) for (const directory of await readdir(join(cache, scope)).catch(() => [])) {
