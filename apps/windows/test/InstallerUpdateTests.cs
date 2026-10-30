@@ -31,10 +31,42 @@ internal static class InstallerUpdateTests {
         return buffer.ToString();
     }
 
-    static void Handoff(string target, string home, string ready, string childExecutable, bool expectDifferentPath = false) {
-        using (var child = Process.Start(new ProcessStartInfo(childExecutable, "--child") { UseShellExecute = false })) {
+    static string LoadedImagePath(Process child) {
+        var elapsed = Stopwatch.StartNew();
+        while (true) {
+            Assert(!child.HasExited, "desktop fixture exited before its image path was readable");
+            child.Refresh();
+            string path = null;
             try {
-                if (expectDifferentPath) Assert(!String.Equals(child.MainModule.FileName, Path.Combine(target, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase), "short/long fixture did not launch the long process path");
+                var module = child.MainModule;
+                if (module != null) path = module.FileName;
+            } catch (NullReferenceException) {
+                // .NET Framework can return a ProcessModule whose metadata is not filled yet.
+                // Only this observed getter race is retried; the assertions remain outside it.
+            }
+            if (!String.IsNullOrEmpty(path)) return path;
+            if (elapsed.ElapsedMilliseconds >= 2000) throw new TimeoutException("desktop fixture image path did not become readable");
+            Thread.Sleep(10);
+        }
+    }
+
+    static void Handoff(string target, string home, string ready, string childExecutable, bool expectDifferentPath = false) {
+        string started = Path.Combine(Path.GetDirectoryName(childExecutable), "child-ready-" + Guid.NewGuid().ToString("N"));
+        using (var child = Process.Start(new ProcessStartInfo(childExecutable, "--child \"" + started + "\"") { UseShellExecute = false })) {
+            try {
+                // Process.Start returns before the CLR and module list are ready. A child-owned
+                // marker proves this fixture reached Main before we inspect its actual image spelling.
+                var startup = Stopwatch.StartNew();
+                bool childReady = false;
+                while (!childReady) {
+                    Assert(!child.HasExited, "desktop fixture exited before its startup handshake");
+                    try { childReady = File.Exists(started) && File.ReadAllText(started) == child.Id.ToString(); }
+                    catch (IOException) { }
+                    if (childReady) break;
+                    if (startup.ElapsedMilliseconds >= 10000) throw new TimeoutException("desktop fixture startup handshake timed out");
+                    Thread.Sleep(10);
+                }
+                if (expectDifferentPath) Assert(!String.Equals(LoadedImagePath(child), Path.Combine(target, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase), "short/long fixture did not launch the long process path");
                 using (var update = InstallerUpdate.Parse(Args(target, home, ready, child.Id))) {
                     Assert(update.Target == target && update.Home == home && update.Ready == ready, "handoff changed the original path spelling");
                     update.AnnounceReady();
@@ -49,7 +81,10 @@ internal static class InstallerUpdateTests {
                     update.WaitForDesktopExit(CancellationToken.None);
                 }
                 Throws<ArgumentException>(() => InstallerUpdate.Parse(Args(target, home, ready, Int32.MaxValue)));
-            } finally { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } }
+            } finally {
+                if (!child.HasExited) { child.Kill(); child.WaitForExit(); }
+                if (File.Exists(started)) File.Delete(started);
+            }
         }
     }
 
@@ -67,7 +102,10 @@ internal static class InstallerUpdateTests {
     static int Main(string[] args) {
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
-        if (args.Length == 1 && args[0] == "--child") { Thread.Sleep(8000); return 0; }
+        if (args.Length >= 1 && args[0] == "--child") {
+            if (args.Length == 2) File.WriteAllText(args[1], Process.GetCurrentProcess().Id.ToString());
+            Thread.Sleep(8000); return 0;
+        }
         try {
             string scenario = args[0], directory = Path.Combine(args[1], scenario), target = Path.Combine(directory, "App"), home = Path.Combine(directory, "Data");
             string executable = Assembly.GetExecutingAssembly().Location, ready = Path.Combine(Path.GetDirectoryName(executable), "ready");

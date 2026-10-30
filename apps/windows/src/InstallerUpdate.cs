@@ -42,7 +42,8 @@ namespace LinkShell.Windows {
                 if (!File.Exists(Path.Combine(target, file))) throw new IOException("更新目录不是完整的 LinkShell 桌面安装：" + target);
             }
             EnsureDataOutsideBundle(target, home);
-            string installer = Process.GetCurrentProcess().MainModule.FileName;
+            string installer;
+            using (var current = Process.GetCurrentProcess()) installer = ProcessImagePath(current);
             string installerDirectory = Path.GetDirectoryName(installer);
             if (Path.GetFileName(ready) != "ready" || File.Exists(ready) || !SameExistingEntry(Path.GetDirectoryName(ready), installerDirectory, true)) throw new ArgumentException("更新交接文件位置无效。");
             if (WithinDirectory(ResolvedDirectory(installerDirectory, false), ResolvedDirectory(target, false))) throw new ArgumentException("请从安装目录外启动更新程序。");
@@ -52,7 +53,7 @@ namespace LinkShell.Windows {
                 catch (ArgumentException) { }
                 if (waiting != null) {
                     try {
-                        if (!waiting.HasExited && !SameExistingEntry(waiting.MainModule.FileName, Path.Combine(target, "LinkShell.exe"), false)) throw new ArgumentException("请求更新的进程与安装目录不匹配。");
+                        if (!waiting.HasExited && !SameExistingEntry(ProcessImagePath(waiting), Path.Combine(target, "LinkShell.exe"), false)) throw new ArgumentException("请求更新的进程与安装目录不匹配。");
                     } catch (InvalidOperationException) {
                         if (!waiting.HasExited) throw;
                     }
@@ -98,6 +99,25 @@ namespace LinkShell.Windows {
         static extern uint GetFileAttributesW(string name);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
         static extern uint GetFullPathNameW(string name, uint length, StringBuilder path, IntPtr filePart);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder path, ref uint length);
+
+        static string ProcessImagePath(Process process) {
+            // A new renderer may not yet have a module list. Its kernel image path is already
+            // available and is bound to the process handle, including while it is starting.
+            var buffer = new StringBuilder(512);
+            uint length = (uint)buffer.Capacity;
+            if (QueryFullProcessImageNameW(process.Handle, 0, buffer, ref length)) return buffer.ToString();
+            int error = Marshal.GetLastWin32Error();
+            if (error == 122) {
+                buffer = new StringBuilder(32768); length = (uint)buffer.Capacity;
+                if (QueryFullProcessImageNameW(process.Handle, 0, buffer, ref length)) return buffer.ToString();
+                error = Marshal.GetLastWin32Error();
+            }
+            if (process.HasExited) throw new InvalidOperationException("进程已退出。");
+            throw new IOException("无法验证更新进程：" + new Win32Exception(error).Message);
+        }
 
         static bool SameExistingEntry(string first, string second, bool directory) {
             var a = EntryInformation(first, directory);
@@ -203,7 +223,7 @@ namespace LinkShell.Windows {
             foreach (var process in Process.GetProcessesByName("LinkShell")) {
                 using (process) {
                     try {
-                        if (!process.HasExited && SameExistingEntry(process.MainModule.FileName, Path.Combine(Target, "LinkShell.exe"), false)) return true;
+                        if (!process.HasExited && SameExistingEntry(ProcessImagePath(process), Path.Combine(Target, "LinkShell.exe"), false)) return true;
                     } catch (InvalidOperationException) { if (!process.HasExited) throw; }
                 }
             }
