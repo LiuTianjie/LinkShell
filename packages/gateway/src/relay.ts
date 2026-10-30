@@ -101,6 +101,8 @@ export class Gateway {
   private readonly peers = new Map<string, Peer>();
   /** Machines that said they have an access password, as of their last sign-in (memory only: the schema stays as it is). */
   private readonly locked = new Set<string>();
+  /** Hosts persist this marker; retaining it while offline keeps legacy aliases from returning. */
+  private readonly namingConfigured = new Set<string>();
   private readonly offers = new Map<string, Offer>();
   private readonly decisions = new Map<string, { machineId: string; resolve: (accept: boolean) => void }>();
   private readonly claimTimes = new Map<string, number[]>();
@@ -315,9 +317,13 @@ export class Gateway {
     this.store.upsertPeer(record);
     if (role === "machine") {
       const was = this.locked.has(record.id);
+      const nameWasConfigured = this.namingConfigured.has(record.id);
       if (frame.locked) this.locked.add(record.id);
       else this.locked.delete(record.id);
-      if (was !== Boolean(frame.locked)) for (const { peer: device } of this.store.reachable(record.id)) this.event(device.id, "machines.changed", {});
+      if (frame.namingConfigured) this.namingConfigured.add(record.id);
+      if (was !== Boolean(frame.locked) || nameWasConfigured !== this.namingConfigured.has(record.id) || existing?.name !== record.name) {
+        for (const { peer: device } of this.store.reachable(record.id)) this.event(device.id, "machines.changed", {});
+      }
     }
     const previous = this.peers.get(record.id);
     const peer: Peer = { record, socket, email };
@@ -411,6 +417,7 @@ export class Gateway {
       online: this.peers.has(peer.id),
       via,
       ...(this.locked.has(peer.id) ? { locked: true } : {}),
+      ...(this.namingConfigured.has(peer.id) ? { namingConfigured: true } : {}),
     };
   }
 
@@ -454,6 +461,22 @@ export class Gateway {
             .map(({ peer: machine, via }) => this.machineEntry(machine, via))
             .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name)),
         };
+      case "machines.update": {
+        need("machine");
+        if (typeof params.name !== "string" || !params.name.trim() || params.name.length > 120) {
+          throw new RelayError("invalid_params", "name must contain 1 to 120 characters");
+        }
+        const name = params.name.trim();
+        const newlyConfigured = params.namingConfigured === true && !this.namingConfigured.has(peer.record.id);
+        if (peer.record.name !== name || newlyConfigured) {
+          const updated = { ...peer.record, name };
+          this.store.upsertPeer(updated);
+          peer.record = updated;
+          if (params.namingConfigured === true) this.namingConfigured.add(peer.record.id);
+          for (const { peer: device } of this.store.reachable(peer.record.id)) this.event(device.id, "machines.changed", {});
+        }
+        return {};
+      }
       case "machines.forget": {
         need("device");
         const machineId = String(params.machineId ?? "");

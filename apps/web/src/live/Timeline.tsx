@@ -235,7 +235,8 @@ function CodeBlock({ children }: { children: ReactNode }) {
         tabIndex={0}
         aria-label={language ? language + " 代码" : "代码"}
       >
-        {tokens ? <code className={className} data-highlighted><TokenLines tokens={tokens} /></code> : children}
+        {/* Keep identical line breaks before and after the idle highlighter finishes. */}
+        <code className={className} data-highlighted={tokens ? true : undefined}>{tokens ? <TokenLines tokens={tokens} /> : source}</code>
       </pre>
       <ErrorNotice
         error={job.error ? "无法访问剪贴板，请选中代码后复制。" : undefined}
@@ -294,18 +295,15 @@ export function RichText({ text }: { text: string }) {
 
 /**
  * A reply as it streams: released smoothly (useSmoothText), and parsed a block at a time so
- * only the block still growing is parsed again. A block fades in as it first appears.
+ * only the block still growing is parsed again. History snapshots never fade in block by block.
  */
 export function StreamingText({ text, streaming }: { text: string; streaming: boolean }) {
   const shown = useSmoothText(text, streaming);
   const blocks = useMemo(() => markdownBlocks(shown), [shown]);
-  // What was already there when this mounted (history, a reopened session) doesn't fade in;
-  // the fade is a CSS animation, so each new block plays it once, as it is created.
-  const [present] = useState(() => (streaming ? markdownBlocks(text).length - 1 : Number.POSITIVE_INFINITY));
   return (
     <div className="markdown">
       {blocks.map((block, index) => (
-        <div key={index} className="markdown-block" data-enter={index > present || undefined}>
+        <div key={index} className="markdown-block">
           {/* The last block may still be growing: its code is coloured once the reply moves past it. */}
           <HighlightCode.Provider value={!streaming || index < blocks.length - 1}>
             <MarkdownBlock text={block} />
@@ -927,7 +925,7 @@ export const TimelineEntry = memo(function TimelineEntry({
                   <span>{online ? "正在回复…" : "等待会话恢复…"}</span>
                 </div>
               )}
-              <StreamingText text={item.text} streaming={item.streaming} />
+              <StreamingText text={item.text} streaming={item.streaming && online} />
               {showAsyncQuestions && item.questions && !item.streaming && (
                 <AsyncQuestions
                   questions={item.questions}
@@ -966,7 +964,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           return (
             <details className="thought-block" key={item.id}>
               <summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>
-              <StreamingText text={item.text} streaming={item.streaming} />
+              <StreamingText text={item.text} streaming={item.streaming && online} />
             </details>
           );
         if (item.kind === "error") return <ErrorCard key={item.id} item={item} />;

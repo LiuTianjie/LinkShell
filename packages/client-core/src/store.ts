@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   RpcError,
+  RPC_METHOD_NOT_FOUND,
   asyncQuestionReply,
   type AsyncQuestion,
   type ContentBlock,
@@ -133,12 +134,12 @@ export interface ClientActions {
    * (`agents.models`). Empty when the agent can't tell yet or the computer's
    * host is too old to be asked: then there is nothing to choose.
    */
-  agentModels(agent: string, cwd?: string): Promise<MethodResult<"agents.models">>;
+  agentModels(agent: string, cwd?: string, model?: string): Promise<MethodResult<"agents.models">>;
   /**
    * `worktree`: start in a new git worktree of the project instead of its working directory.
    * `model`: one of `agentModels`; absent, the agent's own default.
    */
-  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean; model?: string }): Promise<SessionSummary>;
+  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean; model?: string; config?: Record<string, string> }): Promise<SessionSummary>;
   /**
    * A new session that starts with this one's conversation (through the turn
    * of `itemId` when given), in the same directory or in a new worktree. The
@@ -229,58 +230,76 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   const newId = options.newId ?? defaultId;
   let pending: SessionEvent[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  // A subscription's backlog can span many socket frames. Keep it off screen until its
+  // response arrives; cached messages remain readable while this snapshot is assembled.
+  const replaying = new Map<string, { events: SessionEvent[]; startSeq?: number }>();
+  const earlierRequests = new Map<string, symbol>();
+  const cancelEarlier = (sessionId: string) => {
+    earlierRequests.delete(sessionId);
+    store.setState((state) => {
+      if (!state.loadingEarlier[sessionId]) return state;
+      const loadingEarlier = { ...state.loadingEarlier };
+      delete loadingEarlier[sessionId];
+      return { loadingEarlier };
+    });
+  };
+  const applyBatch = (state: ClientState, batch: SessionEvent[], window?: { sessionId: string; startSeq: number }) => {
+    let views = state.views;
+    if (window) {
+      const current = views[window.sessionId];
+      if (current) views = { ...views, [window.sessionId]: startWindow(current, window.startSeq) };
+    }
+    let subagentViews = state.subagentViews;
+    let workflows = state.workflows;
+    let tasks = state.tasks;
+    let promptProgress = state.promptProgress;
+    const bySession = new Map<string, SessionEvent[]>();
+    for (const event of batch) {
+      const records = tasks[event.sessionId] ?? {};
+      const nextTasks = applyTaskEvent(records, event);
+      if (nextTasks !== records) tasks = { ...tasks, [event.sessionId]: nextTasks };
+      const runs = workflows[event.sessionId] ?? {};
+      const nextRuns = applyWorkflowEvent(runs, event);
+      if (nextRuns !== runs) workflows = { ...workflows, [event.sessionId]: nextRuns };
+      const list = bySession.get(event.sessionId) ?? [];
+      list.push(event);
+      bySession.set(event.sessionId, list);
+      // A sub-agent opened on its own follows along too.
+      const prefix = `${event.sessionId}\n`;
+      // The parent's history may still be loading, so filter this buffer only
+      // after we know which nested calls belong to that view.
+      for (const [key, buffer] of loadingSubagents) if (key.startsWith(prefix)) buffer.push(event);
+      for (const [key, current] of Object.entries(subagentViews)) {
+        if (!key.startsWith(prefix)) continue;
+        const own = eventForSubagent(current, key.slice(prefix.length), event);
+        if (!own) continue;
+        const next = applyEvents(current, [own]);
+        if (next !== current) subagentViews = { ...subagentViews, [key]: next };
+      }
+    }
+    for (const [sessionId, events] of bySession) {
+      const progress = promptProgress[sessionId];
+      if (progress && events.some(({ seq, update }) => seq > progress.afterSeq && !("parentToolCallId" in update && update.parentToolCallId) && (
+        update.sessionUpdate === "ls_turn" || update.sessionUpdate === "ls_status" || update.sessionUpdate === "ls_error" || update.sessionUpdate === "ls_notice" ||
+        (update.sessionUpdate === "ls_message" && update.role === "agent")
+      ))) {
+        promptProgress = { ...promptProgress };
+        delete promptProgress[sessionId];
+      }
+      const current = views[sessionId];
+      if (!current) continue;
+      const next = applyEvents(current, events);
+      if (next !== current) views = { ...views, [sessionId]: next };
+    }
+    return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks && promptProgress === state.promptProgress ? state : { views, subagentViews, workflows, tasks, promptProgress };
+  };
   const flushEvents = () => {
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = undefined;
     if (pending.length === 0) return;
     const batch = pending;
     pending = [];
-    store.setState((state) => {
-      let views = state.views;
-      let subagentViews = state.subagentViews;
-      let workflows = state.workflows;
-      let tasks = state.tasks;
-      let promptProgress = state.promptProgress;
-      const bySession = new Map<string, SessionEvent[]>();
-      for (const event of batch) {
-        const records = tasks[event.sessionId] ?? {};
-        const nextTasks = applyTaskEvent(records, event);
-        if (nextTasks !== records) tasks = { ...tasks, [event.sessionId]: nextTasks };
-        const runs = workflows[event.sessionId] ?? {};
-        const nextRuns = applyWorkflowEvent(runs, event);
-        if (nextRuns !== runs) workflows = { ...workflows, [event.sessionId]: nextRuns };
-        const list = bySession.get(event.sessionId) ?? [];
-        list.push(event);
-        bySession.set(event.sessionId, list);
-        // A sub-agent opened on its own follows along too.
-        const prefix = `${event.sessionId}\n`;
-        // The parent's history may still be loading, so filter this buffer only
-        // after we know which nested calls belong to that view.
-        for (const [key, buffer] of loadingSubagents) if (key.startsWith(prefix)) buffer.push(event);
-        for (const [key, current] of Object.entries(subagentViews)) {
-          if (!key.startsWith(prefix)) continue;
-          const own = eventForSubagent(current, key.slice(prefix.length), event);
-          if (!own) continue;
-          const next = applyEvents(current, [own]);
-          if (next !== current) subagentViews = { ...subagentViews, [key]: next };
-        }
-      }
-      for (const [sessionId, events] of bySession) {
-        const progress = promptProgress[sessionId];
-        if (progress && events.some(({ seq, update }) => seq > progress.afterSeq && !("parentToolCallId" in update && update.parentToolCallId) && (
-          update.sessionUpdate === "ls_turn" || update.sessionUpdate === "ls_status" || update.sessionUpdate === "ls_error" || update.sessionUpdate === "ls_notice" ||
-          (update.sessionUpdate === "ls_message" && update.role === "agent")
-        ))) {
-          promptProgress = { ...promptProgress };
-          delete promptProgress[sessionId];
-        }
-        const current = views[sessionId];
-        if (!current) continue;
-        const next = applyEvents(current, events);
-        if (next !== current) views = { ...views, [sessionId]: next };
-      }
-      return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks && promptProgress === state.promptProgress ? state : { views, subagentViews, workflows, tasks, promptProgress };
-    });
+    store.setState((state) => applyBatch(state, batch));
   };
 
   /**
@@ -289,11 +308,20 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
    */
   const subscribed = (summary: SessionSummary, restored = false) => {
     const sessionId = summary.id;
-    if (!store.getState().open[sessionId]) return;
+    if (!store.getState().open[sessionId] || store.getState().status !== "online") return;
     flushEvents();
-    // After reconnecting, an authoritative snapshot replaces any old local wait.
-    if (restored) updatePromptProgress(sessionId, (progress) => progress?.phase === "sending" ? progress : undefined);
-    store.setState((state) => ({ sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } }));
+    const replay = replaying.get(sessionId);
+    replaying.delete(sessionId);
+    store.setState((state) => {
+      const snapshot = applyBatch(state, replay?.events ?? [], replay?.startSeq === undefined ? undefined : { sessionId, startSeq: replay.startSeq });
+      let promptProgress = snapshot.promptProgress;
+      // After reconnecting, an authoritative snapshot replaces any old local wait.
+      if (restored && promptProgress[sessionId]?.phase !== "sending") {
+        promptProgress = { ...promptProgress };
+        delete promptProgress[sessionId];
+      }
+      return { ...snapshot, promptProgress, sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } };
+    });
     void store.getState().loadTasks(sessionId).catch(() => {});
   };
 
@@ -331,6 +359,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
   /** A deleted session: gone from every list and view. */
   function forget(sessionId: string): void {
+    replaying.delete(sessionId);
+    earlierRequests.delete(sessionId);
     store.setState((state) => {
       const without = <T,>(record: Record<string, T>) => {
         if (!(sessionId in record)) return record;
@@ -454,6 +484,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       dismissNotice(sessionId, id) { set((state) => ({ notices: { ...state.notices, [sessionId]: (state.notices[sessionId] ?? []).filter((notice) => notice.id !== id) } })); },
 
       async refresh() {
+        const machineAtStart = get().machine;
         void link.call("agents.pending", {}).then(({ interactions }) => {
           set((state) => {
             const next = { ...state.interactions };
@@ -478,7 +509,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
               for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
             }
             for (const session of list.sessions) sessions[session.id] = session;
-            return { machine, sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
+            // A live metadata update may arrive while the slower project list is loading.
+            // Do not replace it with the machine.info snapshot this refresh started with.
+            return { machine: state.machine === machineAtStart ? machine : state.machine, sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
           });
         } catch (error) {
           set({ sessionsError: describeError(error) });
@@ -498,6 +531,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       closeSession(sessionId) {
         if (!get().open[sessionId]) return;
+        flushEvents();
+        replaying.delete(sessionId);
+        cancelEarlier(sessionId);
         link.unsubscribe(sessionId);
         set((state) => {
           const open = { ...state.open };
@@ -706,23 +742,23 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       async loadEarlier(sessionId) {
         const from = get().views[sessionId]?.startSeq ?? 0;
-        if (from === 0 || get().loadingEarlier[sessionId]) return false;
+        if (!get().ready[sessionId] || from === 0 || get().loadingEarlier[sessionId]) return false;
+        const request = Symbol();
+        earlierRequests.set(sessionId, request);
         set((state) => ({ loadingEarlier: { ...state.loadingEarlier, [sessionId]: true } }));
         try {
           const page = await link.call("sessions.history", { sessionId, beforeSeq: from + 1, lazyImages: options.lazyImages });
+          if (earlierRequests.get(sessionId) !== request) return false;
           flushEvents();
           // The view may have started over meanwhile (a reconnect after a long absence).
-          if (get().views[sessionId]?.startSeq !== from) return false;
+          if (!get().ready[sessionId] || get().views[sessionId]?.startSeq !== from) return false;
           updateView(sessionId, (view) => prependEvents(view, page.events, page.startSeq));
           return true;
         } catch {
           return false;
         } finally {
-          set((state) => {
-            const loadingEarlier = { ...state.loadingEarlier };
-            delete loadingEarlier[sessionId];
-            return { loadingEarlier };
-          });
+          // A late response must not clear the new reader's loading indicator.
+          if (earlierRequests.get(sessionId) === request) cancelEarlier(sessionId);
         }
       },
 
@@ -829,18 +865,18 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         dropSide(sessionId, sideId);
       },
 
-      async agentModels(agent, cwd) {
+      async agentModels(agent, cwd, model) {
         try {
-          return await link.call("agents.models", { agent, cwd });
+          return await link.call("agents.models", { agent, cwd, ...(model ? { model } : {}) });
         } catch (error) {
-          // A host from before this method, or an agent that isn't available: there is just nothing to pick.
-          if (error instanceof RpcError) return { models: [] };
+          // Only an older host is a missing feature. Connection or agent errors need a visible retry.
+          if (error instanceof RpcError && (error.code === RPC_METHOD_NOT_FOUND || error.appCode === "host_outdated")) return { models: [] };
           throw error;
         }
       },
 
       async createSession(input) {
-        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: input.model }, 60_000);
+        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: input.model, ...(input.config ? { config: input.config } : {}) }, 60_000);
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
         get().openSession(session.id);
         if (input.prompt && input.prompt.length > 0) await get().send(session.id, input.prompt);
@@ -850,8 +886,13 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   });
 
   link.onStatus((status, detail) => {
-    if (status !== "online") resolvedInteractions.clear();
-    store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {}, ready: {} } : {}) });
+    if (status !== "online") {
+      flushEvents();
+      replaying.clear();
+      earlierRequests.clear();
+      resolvedInteractions.clear();
+    }
+    store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {}, ready: {}, loadingEarlier: {} } : {}) });
   });
   link.on("agent.interaction", ({ agent, request }) => {
     const key = `${agent}\n${request.requestId}`;
@@ -861,6 +902,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       : [...(state.interactions[agent] ?? []).filter((pending) => pending.requestId !== request.requestId), request] } }));
   });
   link.on("agent.changed", ({ agent }) => store.setState((state) => state.machine ? { machine: { ...state.machine, agents: state.machine.agents.map((entry) => entry.id === agent.id ? agent : entry) } } : {}));
+  link.on("machine.changed", (machine) => store.setState({ machine }));
   link.on("session.notice", ({ sessionId, notice }) => {
     // Each retry of an agent's connection replaces the one before: one line counting up, not a stack.
     const retry = reconnectOf(notice.title, notice.description);
@@ -873,6 +915,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   link.on("session.side", ({ sessionId, side, closed }) => (closed ? dropSide(sessionId, side.sideId) : putSide(sessionId, side)));
   // What the host sends next for this session starts after `startSeq`.
   link.on("session.window", ({ sessionId, startSeq }) => {
+    if (!store.getState().open[sessionId]) return;
+    cancelEarlier(sessionId);
+    if (store.getState().open[sessionId] && !store.getState().ready[sessionId]) {
+      replaying.set(sessionId, { startSeq, events: [] });
+      return;
+    }
     flushEvents();
     store.setState((state) => {
       const view = state.views[sessionId];
@@ -892,9 +940,18 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       return { sessions: { ...state.sessions, [summary.id]: summary }, promptProgress };
     });
   });
-  // Events arrive one per socket message; a history backlog is hundreds of
-  // them. Apply them in batches, at most one store update per frame.
+  // Only live events animate as they arrive. A history replay becomes one ready snapshot.
   link.onEvent((event) => {
+    const state = store.getState();
+    // A bookmark lookup can use a temporary RPC subscription just to find its summary.
+    // Its replay must not spill into a view created before this batch's timer flushes.
+    if (!state.open[event.sessionId]) return;
+    if (!state.ready[event.sessionId]) {
+      let replay = replaying.get(event.sessionId);
+      if (!replay) replaying.set(event.sessionId, (replay = { events: [] }));
+      replay.events.push(event);
+      return;
+    }
     pending.push(event);
     flushTimer ??= setTimeout(flushEvents, 16);
   });

@@ -7,7 +7,7 @@ import type { Readable } from "node:stream";
 import type { Socket } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
 import { localWebSocket } from "@linkshell/host/local-transport";
-import { isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
+import { gatewayStatusSchema, isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
 import { getValidToken, loadAuth } from "../auth.js";
 import { runLogin, type LoginResult } from "./login.js";
 import { loginWithOAuth, loginWithPassword, openInBrowser } from "./sign-in.js";
@@ -29,6 +29,7 @@ interface LocalComputer {
   key: "desktop:local";
   gateway: "desktop:local";
   machine: MachineEntry;
+  relayId?: string;
 }
 
 export interface DesktopWorkspace {
@@ -122,30 +123,47 @@ async function localComputer(target: string, upstreams: Set<WebSocket>): Promise
   return new Promise((resolve) => {
     const client = localWebSocket(target, 1_500, { maxPayload: MAX_PROXY_BYTES });
     upstreams.add(client);
-    const finish = (computer?: LocalComputer) => {
+    let computer: LocalComputer | undefined;
+    let gatewayRead = false;
+    let relayId: string | undefined;
+    const finish = (result = computer) => {
       clearTimeout(timeout);
-      resolve(computer);
+      resolve(result && relayId ? { ...result, relayId } : result);
       client.terminate();
     };
     const timeout = setTimeout(() => finish(), 3_000);
     client.on("error", () => finish());
-    client.on("close", () => { upstreams.delete(client); clearTimeout(timeout); resolve(undefined); });
-    client.on("open", () => client.send(JSON.stringify({ jsonrpc: "2.0", id: "desktop-info", method: "machine.info", params: {} })));
+    client.on("close", () => { upstreams.delete(client); clearTimeout(timeout); resolve(computer); });
+    client.on("open", () => {
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: "desktop-info", method: "machine.info", params: {} }));
+      // The gateway identifies this host by its signing key, not machine.info's local UUID.
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: "desktop-gateway", method: "gateway.status", params: {} }));
+    });
     client.on("message", (raw) => {
       try {
         const response: unknown = JSON.parse(raw.toString());
-        if (!response || typeof response !== "object" || !("id" in response) || response.id !== "desktop-info") return;
+        if (!response || typeof response !== "object" || !("id" in response)) return;
+        if (response.id === "desktop-gateway") {
+          const gateway = gatewayStatusSchema.safeParse("result" in response ? response.result : undefined);
+          relayId = gateway.success ? gateway.data.machine?.id : undefined;
+          gatewayRead = true;
+          if (computer) finish();
+          return;
+        }
+        if (response.id !== "desktop-info") return;
         const parsed = machineInfoSchema.safeParse("result" in response ? response.result : undefined);
         if (!parsed.success) { finish(); return; }
         const info = parsed.data;
-        finish({
+        computer = {
           key: "desktop:local", gateway: "desktop:local",
           machine: {
-            id: info.machineId, name: info.hostname.replace(/\.local$/, ""), platform: info.platform,
+            id: info.machineId, name: info.naming ? info.hostname : info.hostname.replace(/\.local$/, ""), platform: info.platform,
+            ...(info.naming?.configured ? { namingConfigured: true } : {}),
             // Local transport uses the host's Unix socket or Windows named pipe.
             signKey: "", boxKey: "", online: true, via: "paired",
           },
-        });
+        };
+        if (gatewayRead) finish();
       } catch { finish(); }
     });
   });

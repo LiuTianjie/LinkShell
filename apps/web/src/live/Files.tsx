@@ -393,6 +393,7 @@ export function Files({
 }) {
   const dialogs = useDialogs();
   const uploadRef = useRef<HTMLInputElement>(null);
+  const browserRef = useRef<HTMLElement>(null);
   const [searching, setSearching] = useState(false);
   const { link } = useConnection();
   const [path, setPath] = useState(start);
@@ -639,6 +640,7 @@ export function Files({
   );
   return (
     <section
+      ref={browserRef}
       className={cn(
         "file-browser resource-files",
         file && "resource-has-preview",
@@ -1010,9 +1012,10 @@ export function Files({
             className="files-list-resizer"
             label="调整文件列表宽度"
             width={listWidth}
-            clamp={(value) => Math.round(Math.min(Math.max(value, 200), Math.max(200, Math.min(560, window.innerWidth * 0.45))))}
+            clamp={(value) => Math.round(Math.min(Math.max(value, 200), Math.max(200, Math.min(560, (browserRef.current?.clientWidth ?? window.innerWidth) * 0.5))))}
             side="end"
             target=".file-browser"
+            column=".resource-directory"
             variable="--files-list-width"
             resize={sizeList}
             initial={300}

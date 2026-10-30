@@ -1,5 +1,6 @@
 import { RpcError, type SessionSummary, type WorktreeEntry } from "@linkshell/wire";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { groupProjects, projectLocation } from "@linkshell/client-core";
+import { router, Stack, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
@@ -7,8 +8,9 @@ import { BranchTag } from "@/components/branch-tag";
 import { SessionRow } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
 import { useTerminals } from "@/lib/terminals";
-import { EmptyState } from "@/components/state-views";
-import { useActions, useClient } from "@/lib/client";
+import { EmptyState, LoadingState, WaitingForComputer, unreachable } from "@/components/state-views";
+import { useActions, useClient, useConnection, useConnectionRecovering, useConnectionStatus } from "@/lib/client";
+import { listComputers, retryComputerDiscovery, useComputerDiscovery, useComputers } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
 import { baseName, shortPath } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -119,27 +121,65 @@ export function ProjectDetailScreen() {
   const wide = contentWidth >= 768;
   const entryWidth = wide ? (contentWidth - 48) / 2 : "100%";
   const tabInset = useFloatingTabInset();
-  const { cwd } = useLocalSearchParams<{ cwd: string }>();
+  const { cwd, computerKey, generated: generatedParam } = useLocalSearchParams<{ cwd: string; computerKey?: string; generated?: string }>();
+  const focused = useIsFocused();
+  const discovery = useComputerDiscovery();
+  const recovering = useConnectionRecovering();
+  const displayStatus = useConnectionStatus();
+  const { computer } = useConnection();
+  const matchingComputer = !computerKey || computerKey === computer.key;
+  const saved = useComputers((state) => state.saved);
+  const live = useComputers((state) => state.live);
+  const hasTarget = !computerKey || listComputers({ saved, live }).some((entry) => entry.key === computerKey);
   const sessionsById = useClient((state) => state.sessions);
+  const projects = useClient((state) => state.projects);
+  const loaded = useClient((state) => state.sessionsLoaded);
+  const status = useClient((state) => state.status);
+  const sessionsError = useClient((state) => state.sessionsError);
+  const offline = useClient((state) => unreachable(state.status));
+  const nextBefore = useClient((state) => state.sessionsNextBefore);
+  const { loadMoreSessions, refresh } = useActions();
+  const [loadingMore, setLoadingMore] = useState(false);
+  const generated = generatedParam === "1";
+  const group = useMemo(() => groupProjects(projects, Object.values(sessionsById)).find((project) => project.cwd === cwd && project.generated === generated), [projects, sessionsById, cwd, generated]);
   const now = useNow();
-  const branch = useClient((state) => state.projects.find((project) => project.cwd === cwd)?.branch);
+  const branch = group?.branch;
   const { terminals } = useTerminals();
+  useEffect(() => {
+    // Tab stacks stay mounted: a hidden project must not undo a computer selected elsewhere.
+    if (focused && computerKey && hasTarget && !matchingComputer) useComputers.getState().select(computerKey);
+  }, [computerKey, matchingComputer, hasTarget, focused]);
   // Agent sessions and terminals in this directory, newest first.
   const entries = useMemo(
     () =>
       [
         ...Object.values(sessionsById)
           // Sessions in a worktree of this project are this project's, in with the rest by time.
-          .filter((session: SessionSummary) => (session.worktree ? session.worktree.source === cwd : session.cwd === cwd) && !session.archived)
+          .filter((session: SessionSummary) => {
+            const source = session.worktree?.source ?? session.cwd;
+            const location = projectLocation(source);
+            return !session.archived && (generated ? location.generated && location.key === cwd : source === cwd);
+          })
           .map((session) => ({ key: session.id, at: session.updatedAt, session })),
-        ...terminals.filter((terminal) => terminal.cwd === cwd).map((terminal) => ({ key: `t-${terminal.id}`, at: terminal.activeAt, terminal })),
+        ...terminals.filter((terminal) => {
+          const location = projectLocation(terminal.cwd);
+          return generated ? location.generated && location.key === cwd : terminal.cwd === cwd;
+        }).map((terminal) => ({ key: `t-${terminal.id}`, at: terminal.activeAt, terminal })),
       ].sort((a, b) => b.at - a.at),
-    [sessionsById, terminals, cwd],
+    [sessionsById, terminals, cwd, generated],
   );
+
+  if (!hasTarget) return <><Stack.Screen options={{ title: "项目" }} />{
+    discovery === "loading" || (discovery === "failed" && recovering) ? <LoadingState label="正在恢复电脑列表…" />
+      : discovery === "failed" || discovery === "refused" ? <EmptyState icon={{ sf: "wifi.exclamationmark", md: "wifi_off" }} title="暂时无法读取电脑列表" action={{ title: "重新连接", onPress: retryComputerDiscovery }} />
+        : <EmptyState icon={{ sf: "laptopcomputer", md: "computer" }} title="这台电脑已不在列表中" message="连接电脑后，可重新打开它的项目。" action={{ title: "查看电脑", onPress: () => router.push("/computers") }} />
+  }</>;
+  if (matchingComputer && status === "locked") return <><Stack.Screen options={{ title: "项目" }} /><EmptyState icon={{ sf: "lock", md: "lock" }} title="这台电脑需要访问密码" action={{ title: "输入访问密码", onPress: () => router.push("/unlock") }} /></>;
+  if (!matchingComputer || !loaded) return <><Stack.Screen options={{ title: "项目" }} />{matchingComputer && sessionsError && displayStatus !== "connecting" ? <EmptyState icon={{ sf: "exclamationmark.circle", md: "error" }} title="未能读取项目" message={sessionsError} action={{ title: "重试", onPress: () => void refresh() }} /> : matchingComputer && unreachable(displayStatus) ? <WaitingForComputer what="这个项目的会话" /> : <LoadingState label="正在读取项目…" />}</>;
 
   return (
     <>
-      <Stack.Screen options={{ title: baseName(cwd ?? "") }} />
+      <Stack.Screen options={{ title: group?.name ?? (generated ? "Codex Chats" : baseName(cwd ?? "")) }} />
       <HeaderActions
         actions={[
           {
@@ -147,7 +187,7 @@ export function ProjectDetailScreen() {
             key: "new",
             icon: { sf: "plus", md: "add" },
             label: "在这个项目里新建会话",
-            onPress: () => router.push({ pathname: "/new", params: { cwd } }),
+            onPress: () => router.push({ pathname: "/new", params: generated ? {} : { cwd } }),
           },
         ]}
       />
@@ -158,7 +198,7 @@ export function ProjectDetailScreen() {
       >
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingHorizontal: 4 }}>
           <Text selectable numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>
-            {shortPath(cwd ?? "")}
+            {generated ? "Codex 自动创建的会话目录，按最近活动汇总" : shortPath(cwd ?? "")}
           </Text>
           {branch ? (
             <View style={{ flexShrink: 1, maxWidth: "100%" }}>
@@ -170,7 +210,7 @@ export function ProjectDetailScreen() {
           <EmptyState
             icon={{ sf: "bubble.left.and.bubble.right", md: "forum" }}
             title="这个项目还没有会话"
-            action={{ title: "新建会话", onPress: () => router.push({ pathname: "/new", params: { cwd } }) }}
+            action={{ title: "新建会话", onPress: () => router.push({ pathname: "/new", params: generated ? {} : { cwd } }) }}
           />
         ) : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: wide ? 16 : 0 }}>
@@ -188,7 +228,11 @@ export function ProjectDetailScreen() {
             })}
           </View>
         )}
-        <UnusedWorktrees source={cwd ?? ""} sessionCount={entries.length} />
+        {nextBefore !== undefined ? <Pressable accessibilityRole="button" disabled={loadingMore || offline} onPress={() => {
+          setLoadingMore(true);
+          void loadMoreSessions().catch((error: unknown) => Alert.alert("加载失败", error instanceof Error ? error.message : String(error))).finally(() => setLoadingMore(false));
+        }} style={{ paddingVertical: 14, alignItems: "center", opacity: loadingMore || offline ? 0.5 : 1 }}><Text style={[type.subhead, { color: colors.accent }]}>{loadingMore ? "正在加载…" : "加载更早的会话"}</Text></Pressable> : null}
+        {!generated ? <UnusedWorktrees source={cwd ?? ""} sessionCount={entries.length} /> : null}
       </ScrollView>
     </>
   );

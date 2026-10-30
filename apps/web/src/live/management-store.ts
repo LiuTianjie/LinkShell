@@ -127,6 +127,8 @@ export function startManagement(): void {
   set({ started: true });
   window.addEventListener(DESKTOP_UPDATE_EVENT, receiveUpdate);
   window.addEventListener(DESKTOP_LOGIN_EVENT, receiveLoginLink);
+  // A renderer reload must recover a download already running in the Windows main process.
+  void desktopInvoke<ManagementState["update"] | undefined>("updateStatus").then((update) => { if (update) set({ update }); }, () => undefined);
   void Promise.all([desktopInvoke<DesktopAbout>("about"), loadSettings()]).then(([about]) => {
     set({ about });
     // Sparkle's checks run in main.ts; a CLI install compares with npm here, once per window.
@@ -411,10 +413,10 @@ export function openLoginItems() {
   void desktopInvoke("openLoginItems").catch(() => undefined);
 }
 
-/** A standalone app asks Sparkle; a CLI install compares npm's latest with its own version. */
+/** Standalone apps use their native updater; a CLI install compares npm's latest with its own version. */
 export async function checkUpdates() {
   const state = get();
-  if (state.update.checking) return;
+  if (state.update.checking || state.update.installing) return;
   try {
     const result = await desktopInvoke<{ started: boolean }>("checkUpdates");
     if (result.started) return;
@@ -448,11 +450,12 @@ export function upgradeInstall() {
 }
 
 export function installUpdate() {
+  if (get().update.checking || get().update.installing) return;
   set({ update: { ...get().update, message: "正在打开更新窗口…" } });
   void desktopInvoke("installUpdate").catch((error: unknown) => set({ update: { ...get().update, message: `更新未完成：${messageOf(error)}` } }));
 }
 
-/** Sparkle's progress, forwarded by main.ts. */
+/** Sparkle and the Windows installer download use the same native progress channel. */
 function receiveUpdate(event: Event) {
   const detail = (event as CustomEvent<{ name?: unknown; message?: unknown; version?: unknown }>).detail ?? {};
   const update = get().update;

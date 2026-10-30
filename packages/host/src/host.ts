@@ -18,6 +18,7 @@ import { withoutClaudeSession } from "./shell-env.js";
 import { TerminalManager } from "./terminals.js";
 import { LiveActivityRelay } from "./live-activities.js";
 import { isNamedPipe, windowsPipe } from "./local-transport.js";
+import { MachineName } from "./machine-name.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
@@ -140,6 +141,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   }
 
   const machineId = loadMachineId(paths.home);
+  const machineName = new MachineName(paths.home, options.gateway?.name ?? (process.env.LINKSHELL_MACHINE_NAME || hostname()).replace(/\.local$/, ""));
   // Agents and terminals start clean even when LinkShell ran inside a Claude Code session.
   const env = withoutClaudeSession(options.env ?? process.env);
   const acpSettings = new AcpSettingsStore(join(paths.home, "acp.json"));
@@ -175,8 +177,8 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   const iceServers = options.iceServers ?? iceServersFromEnv(process.env.LINKSHELL_ICE_SERVERS);
   const machineInfo = (): MachineInfo => ({
     machineId,
-    // LINKSHELL_MACHINE_NAME: how this computer is named in the apps (default: its hostname).
-    hostname: process.env.LINKSHELL_MACHINE_NAME || hostname(),
+    hostname: machineName.value,
+    naming: machineName.info(),
     platform: platform(),
     hostVersion: options.version,
     protocol: HOST_PROTOCOL,
@@ -198,6 +200,11 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     hub,
     terminals,
     machineInfo,
+    renameMachine: (name) => {
+      machineName.set(name);
+      void gateway?.rename(machineName.value);
+      return machineInfo();
+    },
     access,
     // The gateway shows a lock on this computer from its next sign-in.
     onAccessChanged: () => gateway?.reauthenticate(),
@@ -224,7 +231,8 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
           url,
           home: paths.home,
           token: chosen?.token,
-          name: chosen?.name,
+          name: machineName.value,
+          namingConfigured: machineName.info().configured,
           locked: () => access.enabled,
           serve: (transport) => server.connect(transport),
           // A link that was replaced has nothing more to say.

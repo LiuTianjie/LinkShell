@@ -368,9 +368,10 @@ const handlers = {
     return { result: { answer: `btw: ${params.question}` } };
   },
   "session/set_mode": (params) => {
-    requireSession(params).mode = params.modeId;
+    const mode = params.modeId === "yolo" ? process.env.FAKE_ACP_MODE_FALLBACK ?? params.modeId : params.modeId;
+    requireSession(params).mode = mode;
     persist();
-    update(params.sessionId, { sessionUpdate: "current_mode_update", currentModeId: params.modeId });
+    if (process.env.FAKE_ACP_MODE_NOTIFICATION !== "0") update(params.sessionId, { sessionUpdate: "current_mode_update", currentModeId: mode });
     return {};
   },
   "session/set_config_option": (params) => {

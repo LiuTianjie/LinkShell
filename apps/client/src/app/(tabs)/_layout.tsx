@@ -20,7 +20,7 @@ export default function TabsLayout() {
       <FloatingTabs
         tabs={[
           { name: "(home)", href: "/", label: "首页", icon: { sf: "tray", md: "inbox" }, badge: waiting },
-          { name: "projects", href: "/projects", label: "项目", icon: { sf: "folder", md: "folder" } },
+          { name: "projects", href: "/projects", label: "项目", icon: { sf: "square.stack.3d.up", md: "stacks" } },
           { name: "computer", href: "/computer", label: "电脑", icon: { sf: "laptopcomputer", md: "laptop_mac" } },
         ]}
       />
@@ -34,7 +34,7 @@ export default function TabsLayout() {
         {waiting > 0 ? <NativeTabs.Trigger.Badge>{String(waiting)}</NativeTabs.Trigger.Badge> : null}
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="projects">
-        <NativeTabs.Trigger.Icon sf={{ default: "folder", selected: "folder.fill" }} md="folder" />
+        <NativeTabs.Trigger.Icon sf={{ default: "square.stack.3d.up", selected: "square.stack.3d.up.fill" }} md="stacks" />
         <NativeTabs.Trigger.Label>项目</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="computer">

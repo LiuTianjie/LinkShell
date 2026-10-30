@@ -30,7 +30,8 @@ export interface RelayClientOptions {
   url: string;
   identity: Identity;
   role: PeerRole;
-  name: string;
+  name: string | (() => string);
+  namingConfigured?: () => boolean;
   platform?: string;
   /** Account token, fetched fresh for each connection. */
   token?: () => Promise<string | undefined> | string | undefined;
@@ -240,7 +241,8 @@ export class RelayClient {
     this.heardAt = Date.now();
     let fatal: { code: string; message: string } | undefined;
     socket.onmessage = (event) => {
-      if (this.socket === socket) this.heardAt = Date.now();
+      if (this.socket !== socket) return;
+      this.heardAt = Date.now();
       let frame;
       try {
         const parsed = serverFrameSchema.safeParse(JSON.parse(String(event.data)));
@@ -251,7 +253,7 @@ export class RelayClient {
       }
       switch (frame.t) {
         case "challenge":
-          void this.authenticate(frame.nonce);
+          void this.authenticate(frame.nonce, socket);
           return;
         case "ready":
           this.attempt = 0;
@@ -362,19 +364,22 @@ export class RelayClient {
     this.scheduleReconnect({ code: "disconnected", message });
   }
 
-  private async authenticate(nonce: string): Promise<void> {
+  private async authenticate(nonce: string, socket: RelaySocket): Promise<void> {
     let token: string | undefined;
     try {
       token = (await this.options.token?.()) ?? undefined;
     } catch {
       token = undefined;
     }
+    // A token refresh may outlive reauthentication; its nonce belongs to the socket that asked.
+    if (this.socket !== socket) return;
     this.sendFrame({
       t: "auth",
       role: this.options.role,
       identity: publicIdentity(this.options.identity),
       signature: sign(this.options.identity, gatewayChallengeMessage(nonce)),
-      name: this.options.name.slice(0, 120),
+      name: (typeof this.options.name === "function" ? this.options.name() : this.options.name).slice(0, 120),
+      ...(this.options.namingConfigured?.() ? { namingConfigured: true } : {}),
       platform: this.options.platform,
       token,
       ...(this.options.locked?.() ? { locked: true } : {}),

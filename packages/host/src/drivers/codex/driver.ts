@@ -1,11 +1,12 @@
 import { rolloutAttention, type CodexAttention } from "./attention.js";
+import { randomUUID } from "node:crypto";
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { archivedThreadIds } from "./archives.js";
 import { codexPreview } from "./computer-preview.js";
 import { ABANDON, RpcError, questionReplies, type ToolDetail, updateAsyncQuestions, type AsyncQuestion, sessionGoalSchema, type GoalChange, type SessionGoal, type ContentBlock, type QuestionAnswer, type RpcId, type SessionState, type SessionUpdate } from "@linkshell/wire";
-import type { AgentAuth, BackgroundTask } from "@linkshell/wire";
+import { RPC_METHOD_NOT_FOUND, type AgentAuth, type BackgroundTask } from "@linkshell/wire";
 import { parseCodexAccountStatus, parseCodexLoginStatus, runStatusCommand } from "../auth.js";
 import type { AgentDriver, DiscoveredSession, DriverHost, DriverStatus, ForkOptions, HistoryItem, LaunchSpec, SideOutput, SideRequest } from "../types.js";
 import { behaviorCapabilities, type DriverBehavior } from "../behavior.js";
@@ -29,7 +30,7 @@ import {
   type CodexThreadState,
 } from "./mapper.js";
 import { nestHistory, nestUnder } from "../nesting.js";
-import { configOptions, effective, newThreadModels, settingsFrom, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
+import { configOptions, effective, newThreadModels, settingsFrom, settingsFromConfig, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
 import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop, updateSettingsThroughDesktop } from "./desktop-ipc.js";
 import { CodexMcpApps } from "./mcp-apps.js";
@@ -250,6 +251,8 @@ export class CodexDriver implements AgentDriver {
   private readonly settings = new Map<string, CodexSettings>();
   /** What a device chose for each thread; kept in the host's state so a restart before the next turn doesn't lose it. */
   private readonly overrides = new Map<string, CodexOverrides>();
+  /** A Stop clicked during a permission change must also stop its continuation. */
+  private readonly permissionResumes = new Map<string, { cancelled: boolean; seenTurns: Set<string>; finishedTurns: Map<string, string> }>();
   /** Side conversations (`sideAsk`), by `<parent>\n<sideId>`, and their threads. */
   private readonly sides = new Map<string, SideThread>();
   private readonly sideThreads = new Map<string, SideThread>();
@@ -1323,7 +1326,7 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  /** Model, reasoning effort and permissions apply from the next turn on (full access at once, see autoApproval). */
+  /** Codex freezes a turn's sandbox: a permission change continues the same thread in a new turn. */
   async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
     const models = await this.loadModels();
     const base = this.settings.get(nativeId) ?? {};
@@ -1344,6 +1347,8 @@ export class CodexDriver implements AgentDriver {
       }
       next.effort = value;
     } else if (optionId === "permissions") {
+      const option = configOptions(base, this.overridesOf(nativeId), models).find((entry) => entry.id === "permissions");
+      if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown permission mode ${value}`);
       if (value === "custom") delete next.permissions;
       else next.permissions = value;
     } else if (optionId === "plan") {
@@ -1351,15 +1356,15 @@ export class CodexDriver implements AgentDriver {
     } else {
       throw RpcError.app("not_supported", `Codex has no setting ${optionId}`);
     }
-    this.setOverrides(nativeId, next);
-    // Codex fixes approvals when a turn starts, so the turn under way would go on asking.
     const running = this.stateOf(nativeId).activeTurnId ?? this.observed.get(nativeId)?.turnId;
-    if (optionId === "permissions" && running) {
-      if (value === "full-access") {
-        this.markFullAccess(running);
-        this.approvePending(nativeId);
-      } else this.fullAccessTurns.delete(running);
+    if (optionId === "permissions" && running && value !== (current.permissions ?? "custom")) {
+      if (this.observed.has(nativeId)) {
+        throw RpcError.app("not_supported", "这一轮由电脑上的另一个 Codex 窗口运行，无法从这里立即切换权限；请在那个窗口修改，或等本轮结束后再切换。");
+      }
+      await this.continueWithPermissions(nativeId, running, next, base, models);
+      return;
     }
+    this.setOverrides(nativeId, next);
     if (this.observed.has(nativeId) && this.desktopBusPath) {
       const updated = effective(base, next, models);
       const threadSettings = turnOverrides(next, { model: updated.model, effort: updated.effort });
@@ -1380,6 +1385,89 @@ export class CodexDriver implements AgentDriver {
       });
     }
     await this.announceConfig(nativeId);
+  }
+
+  private async continueWithPermissions(nativeId: string, turnId: string, next: CodexOverrides, base: CodexSettings, models: CodexModel[]): Promise<void> {
+    const resume = { cancelled: false, seenTurns: new Set<string>(), finishedTurns: new Map<string, string>() };
+    this.permissionResumes.set(nativeId, resume);
+    // Revoking full access also revokes host-side approvals immediately, while
+    // Codex is still stopping the old turn and may emit its last tool requests.
+    this.fullAccessTurns.delete(turnId);
+    this.host?.update(this.id, nativeId, {
+      sessionUpdate: "ls_notice", level: "info", title: "正在切换权限",
+      detail: "保留会话历史，当前任务将在新权限下继续；未处理的审批会撤销。",
+    });
+    let stopped = false;
+    let startRequested = false;
+    try {
+      await this.interruptTurn(nativeId, turnId);
+      const deadline = Date.now() + 12_000;
+      while (this.stateOf(nativeId).activeTurnId === turnId) {
+        if (!this.attached.has(nativeId) || Date.now() >= deadline) {
+          throw RpcError.app("busy", "尚未确认当前运行已停止，权限未更改；请稍后重试。");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      stopped = true;
+      if (resume.cancelled) throw RpcError.app("busy", "已停止，权限切换和自动继续已取消。");
+      if (this.stateOf(nativeId).activeTurnId || !this.attached.has(nativeId)) {
+        throw RpcError.app("busy", "会话状态已经变化，未自动继续；请确认当前状态后重试。");
+      }
+      // Finishing on its own (or failing) while the click was in flight is not
+      // authorization to start another task. Only our interrupted work is resumed.
+      if (resume.finishedTurns.get(turnId) !== "interrupted") {
+        this.setOverrides(nativeId, next);
+        await this.announceConfig(nativeId);
+        this.host?.update(this.id, nativeId, { sessionUpdate: "ls_notice", level: "info", title: "权限已更新", detail: "本轮已经结束，未自动重启；新权限用于下一条消息。" });
+        return;
+      }
+      // Do not replay the original prompt: completed tools and user answers remain in this thread.
+      // Pass the complete chosen policy on this turn, then commit the UI value only after acceptance.
+      const current = effective(base, next, models);
+      const policy = next.permissions ? {} : { approvalPolicy: base.approvalPolicy, sandboxPolicy: base.sandbox };
+      startRequested = true;
+      const started = await this.rpcFor<{ turn?: { id?: unknown } }>(nativeId, "turn/start", {
+        threadId: nativeId,
+        clientUserMessageId: `permissions-${randomUUID()}`,
+        input: [{ type: "text", text: "权限设置已更改。请基于本会话已有上下文继续刚才尚未完成的任务，不要重复已完成的操作；如果仍需要用户回答问题，请重新询问。", text_elements: [] }],
+        ...turnOverrides(next, current),
+        ...policy,
+      });
+      this.setOverrides(nativeId, next);
+      if (next.permissions === "full-access" && typeof started.turn?.id === "string") {
+        this.markFullAccess(started.turn.id);
+        this.approvePending(nativeId);
+      }
+      // The response can beat turn/started. Keep the hub's queue gated until its
+      // own state has seen the new turn (possibly already completed).
+      const startedDeadline = Date.now() + 12_000;
+      while (typeof started.turn?.id === "string" && !resume.seenTurns.has(started.turn.id)) {
+        if (resume.cancelled) {
+          // A response can arrive before turn/started; this accepted id is enough
+          // to stop it even while the notification-based state is still empty.
+          await this.rpcFor(nativeId, "turn/interrupt", { threadId: nativeId, turnId: started.turn.id });
+          throw RpcError.app("busy", "已停止，新权限已保存，自动继续已取消。");
+        }
+        if (!this.attached.has(nativeId) || Date.now() >= startedDeadline) {
+          throw RpcError.app("busy", "新权限已提交，但尚未确认继续运行的状态，请核对会话状态后再操作。");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await this.announceConfig(nativeId);
+      if (resume.cancelled) {
+        await this.interruptTurn(nativeId);
+        throw RpcError.app("busy", "已停止，新权限已保存，自动继续已取消。");
+      }
+      this.host?.update(this.id, nativeId, { sessionUpdate: "ls_notice", level: "info", title: "权限已切换，继续当前任务" });
+    } catch (error) {
+      this.host?.update(this.id, nativeId, {
+        sessionUpdate: "ls_notice", level: "warning", title: "权限切换未完成",
+        detail: `${error instanceof Error ? error.message : String(error)}${startRequested ? " 继续请求可能已送达，请核对会话状态；不会自动重试。" : stopped && !resume.cancelled ? " 会话历史已保留，可以手动继续。" : ""}`,
+      });
+      throw error;
+    } finally {
+      if (this.permissionResumes.get(nativeId) === resume) this.permissionResumes.delete(nativeId);
+    }
   }
 
   private overridesOf(threadId: string): CodexOverrides {
@@ -1410,7 +1498,8 @@ export class CodexDriver implements AgentDriver {
     if (!APPROVAL_METHODS.has(method) || !turnId || !this.fullAccessTurns.has(turnId)) return undefined;
     if (this.overridesOf(request.threadId).permissions !== "full-access") return undefined;
     const options = request.update.options;
-    return (options.find((option) => option.kind === "allow_always") ?? options.find((option) => option.kind === "allow_once"))?.optionId;
+    // A later switch back to a restricted mode must not inherit session-wide grants.
+    return (options.find((option) => option.kind === "allow_once") ?? options.find((option) => option.kind === "allow_always"))?.optionId;
   }
 
   // ── side conversations (/side) ────────────────────────────────────
@@ -1538,32 +1627,46 @@ export class CodexDriver implements AgentDriver {
   }
 
   /** From the app-server the driver keeps running: its model list (cached) and the configuration a thread started in `cwd` reads. */
-  async listModels(cwd?: string): Promise<{ models: { value: string; name: string; description?: string }[]; current?: string }> {
-    const [models, configured] = await Promise.all([this.loadModels(), this.configuredModel(cwd)]);
-    return newThreadModels(models, configured);
+  async listModels(cwd?: string, model?: string): Promise<import("@linkshell/wire").MethodResult<"agents.models">> {
+    const [models, configured] = await Promise.all([this.loadModels(true), this.configuredSettings(cwd)]);
+    const listed = newThreadModels(models, configured.model);
+    const selected = model && listed.models.some((entry) => entry.value === model) ? model : undefined;
+    return { ...listed, config: configOptions(configured, selected ? { model: selected } : {}, models).filter((option) => option.category === "mode" || option.category === "effort") };
   }
 
   /** The model config.toml (with the project's own layers, for `cwd`) gives a new thread; undefined: Codex's default. */
-  private async configuredModel(cwd: string | undefined): Promise<string | undefined> {
+  private async configuredSettings(cwd: string | undefined): Promise<CodexSettings> {
     try {
-      const result = await this.rpc<{ config?: { model?: string | null } }>("config/read", { includeLayers: false, ...(cwd ? { cwd } : {}) });
-      return result.config?.model ?? undefined;
+      const result = await this.rpc<{ config?: Record<string, unknown> }>("config/read", { includeLayers: false, ...(cwd ? { cwd } : {}) });
+      return settingsFromConfig(result.config ?? {});
     } catch (error) {
       // Older app-servers have no config/read: the list's default is the best guess.
       this.host?.log(`[codex] config/read failed: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
+      return {};
     }
   }
 
-  private loadModels(): Promise<CodexModel[]> {
-    this.models ??= this.rpc<{ data: CodexModel[] }>("model/list", { includeHidden: false })
-      .then((result) => result.data)
+  private loadModels(strict = false): Promise<CodexModel[]> {
+    this.models ??= (async () => {
+      const models: CodexModel[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const result = await this.rpc<{ data: CodexModel[]; nextCursor?: string | null }>("model/list", { includeHidden: false, ...(cursor ? { cursor } : {}) });
+        models.push(...result.data);
+        cursor = result.nextCursor ?? undefined;
+        if (cursor && cursors.has(cursor)) throw new Error("Codex 返回了重复的模型分页，请重试");
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
+      return models;
+    })()
       .catch((error: unknown) => {
         this.models = undefined;
         this.host?.log(`[codex] model/list failed: ${error instanceof Error ? error.message : String(error)}`);
-        return [];
+        if (error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND) return [];
+        throw error;
       });
-    return this.models;
+    return strict ? this.models : this.models.catch(() => []);
   }
 
   private async announceConfig(nativeId: string): Promise<void> {
@@ -1633,12 +1736,19 @@ export class CodexDriver implements AgentDriver {
   }
 
   async cancel(nativeId: string): Promise<void> {
+    const resume = this.permissionResumes.get(nativeId);
+    if (resume) resume.cancelled = true;
+    await this.interruptTurn(nativeId);
+  }
+
+  private async interruptTurn(nativeId: string, expectedTurnId?: string): Promise<void> {
     if (this.observed.has(nativeId)) {
       // Stopping stops what's waiting too; the apps put queued text back in the composer.
       for (const entry of this.waiting.get(nativeId) ?? []) this.unqueue(nativeId, entry.clientMessageId);
       return this.stopElsewhere(nativeId);
     }
     const turnId = this.stateOf(nativeId).activeTurnId;
+    if (expectedTurnId && turnId !== expectedTurnId) return;
     let cancelledRequest = false;
     for (const [requestId, pending] of this.approvals) {
       if (pending.threadId !== nativeId || !pending.request.cancel) continue;
@@ -1810,6 +1920,14 @@ export class CodexDriver implements AgentDriver {
   }
 
   private onNotification(method: string, params: unknown, from: Home): void {
+    if (method === "turn/started" || method === "turn/completed") {
+      const event = params as { threadId?: string; turn?: { id?: string; status?: string } };
+      if (event.threadId && event.turn?.id) {
+        const resume = this.permissionResumes.get(event.threadId);
+        resume?.seenTurns.add(event.turn.id);
+        if (method === "turn/completed") resume?.finishedTurns.set(event.turn.id, event.turn.status ?? "unknown");
+      }
+    }
     if (method === "skills/changed") {
       this.skillsRevision++;
       this.skills.clear();

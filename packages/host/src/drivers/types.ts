@@ -231,7 +231,7 @@ export interface AgentDriver {
    * driver can say without starting a session or a turn; absent, or an empty
    * list, where it can't.
    */
-  listModels?(cwd?: string): Promise<MethodResult<"agents.models">>;
+  listModels?(cwd?: string, model?: string): Promise<MethodResult<"agents.models">>;
   createSession(options: { cwd: string; model?: string }): Promise<DiscoveredSession>;
   /**
    * Starts live updates and returns history according to behavior.history.

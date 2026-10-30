@@ -45,7 +45,7 @@ const groups: {
     title: "工作空间",
     items: [
       { id: "home", title: "会话概览", icon: "grid" },
-      { id: "projects", title: "项目", icon: "folder" },
+      { id: "projects", title: "项目", icon: "grid" },
       { id: "computers", title: "电脑", icon: "computer" },
       { id: "archive", title: "已归档", icon: "clock" },
     ],
@@ -169,6 +169,7 @@ export interface ConsoleShellProps {
   navigate: (view: string) => void;
   connect: () => void;
   selectComputer: (computer: Computer) => void;
+  openComputerView: (computer: Computer, view: string) => void;
   children: ReactNode;
 }
 

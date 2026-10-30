@@ -20,6 +20,7 @@ export class SmoothRelease {
   constructor(length: number, private readonly floor = 10) { this.shown = length; this.target = length; }
 
   get length() { return this.shown; }
+  get pending() { return this.shown < this.target; }
 
   /** The text is now `length` long. A shorter text is a new reply: it shows as it is. */
   arrive(length: number, now: number): void {
@@ -78,17 +79,31 @@ export function useSmoothText(text: string, streaming: boolean): string {
   const [, publish] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const frame = useRef(0);
+  const wasStreaming = useRef(streaming);
 
   useLayoutEffect(() => {
     const buffer = release.current!;
+    const resuming = streaming && !wasStreaming.current;
+    wasStreaming.current = streaming;
     buffer.arrive(text.length, seconds());
-    if (!streaming || document.hidden) { buffer.flush(); return; }
+    if (!streaming || document.hidden || resuming) {
+      const before = buffer.length;
+      buffer.flush();
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+      // A reconnect replaces cached text with a snapshot before paint, even if the
+      // remote turn is still running. Only subsequent live chunks are smoothed.
+      if (streaming && buffer.length !== before) publish((value) => value + 1);
+      return;
+    }
     const tick = () => {
       timer.current = undefined;
       const before = buffer.length;
       const after = document.hidden ? buffer.flush() : buffer.drain(seconds());
       if (after !== before && !frame.current) frame.current = requestAnimationFrame(() => { frame.current = 0; publish((value) => value + 1); });
-      if (after < text.length) timer.current = setTimeout(tick, 50);
+      if (buffer.pending) timer.current = setTimeout(tick, 50);
     };
     if (timer.current === undefined) tick();
   }, [text, streaming]);

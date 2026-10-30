@@ -11,6 +11,7 @@ import {
   encodePairingLink,
   RELAY_PATH,
   RelayClient,
+  RelayRequestError,
   RpcError,
   toBase64,
   type GatewayStatus,
@@ -64,6 +65,7 @@ export interface GatewayLinkOptions {
   /** Account token (from `linkshell login`); the machine then belongs to that account. */
   token?: () => Promise<string | undefined> | string | undefined;
   name?: string;
+  namingConfigured?: boolean;
   /** This computer has an access password: devices see a lock before they connect. */
   locked?: () => boolean;
   /** Serves a decrypted channel as a client connection. */
@@ -101,7 +103,14 @@ export class GatewayLink {
   private pairing?: Pairing;
   private readonly tunnels = new Map<string, Tunnel>();
   private readonly online = new Set<string>();
-  private readonly name: string;
+  private name: string;
+  private namingConfigured: boolean;
+  private nameDirty = false;
+  private nameUpdate?: Promise<void>;
+  private nameRetry?: ReturnType<typeof setTimeout>;
+  private nameUpdateUnsupported = false;
+  private stopped = false;
+  private lifecycle = 0;
   /** Channels told `close` because they are unknown here, per device, in the current window. */
   private readonly unknownReplies = new Map<string, { since: number; channels: Set<string> }>();
 
@@ -110,11 +119,13 @@ export class GatewayLink {
     this.devicesPath = join(options.home, "paired-devices.json");
     this.devices = this.loadDevices();
     this.name = options.name ?? (process.env.LINKSHELL_MACHINE_NAME || hostname()).replace(/\.local$/, "");
+    this.namingConfigured = options.namingConfigured ?? false;
     this.relay = new RelayClient({
       url: relayUrl(options.url),
       identity: this.identity,
       role: "machine",
-      name: this.name,
+      name: () => this.name,
+      namingConfigured: () => this.namingConfigured,
       platform: platform(),
       token: options.token,
       locked: options.locked,
@@ -124,6 +135,7 @@ export class GatewayLink {
       if (status === "online") {
         this.options.log(`[gateway] online as ${this.identity.id.slice(0, 8)}${this.relay.account ? ` (${this.relay.account.email ?? "account"})` : ""}`);
         void this.refreshPresence();
+        void this.flushName();
       } else if (error && status === "offline") {
         this.options.log(`[gateway] ${error.code}: ${error.message}`);
         for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway disconnected");
@@ -143,10 +155,16 @@ export class GatewayLink {
   }
 
   start(): void {
+    this.stopped = false;
     this.relay.start();
   }
 
   stop(): void {
+    this.stopped = true;
+    this.lifecycle++;
+    this.nameDirty = false;
+    clearTimeout(this.nameRetry);
+    this.nameRetry = undefined;
     // Devices keep their own gateway socket open. Close their tunnels before
     // leaving so they reconnect now instead of waiting for an RPC heartbeat.
     for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "host stopping", true);
@@ -161,6 +179,54 @@ export class GatewayLink {
   reauthenticate(): void {
     for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway reconnecting", true);
     this.relay.reauthenticate();
+  }
+
+  /** Keep active tunnels intact when a recent gateway supports metadata updates. */
+  async rename(name: string): Promise<void> {
+    this.name = name;
+    this.namingConfigured = true;
+    this.nameDirty = true;
+    this.changed();
+    await this.flushName();
+  }
+
+  /** Serialize metadata writes so a slower previous rename cannot replace the newest one. */
+  private flushName(): Promise<void> | undefined {
+    if (this.stopped || this.nameRetry || !this.nameDirty || this.relay.status !== "online") return;
+    if (this.nameUpdate) return this.nameUpdate;
+    const lifecycle = this.lifecycle;
+    this.nameDirty = false;
+    this.nameUpdate = this.updateName(this.name, lifecycle).finally(() => {
+      this.nameUpdate = undefined;
+      void this.flushName();
+    });
+    return this.nameUpdate;
+  }
+
+  private async updateName(name: string, lifecycle: number): Promise<void> {
+    if (this.nameUpdateUnsupported) {
+      this.reauthenticate();
+      return;
+    }
+    try {
+      await this.relay.request("machines.update", { name, namingConfigured: true }, 5000);
+    } catch (error) {
+      if (this.stopped || lifecycle !== this.lifecycle) return;
+      if (error instanceof RelayRequestError && error.code === "unknown_method") {
+        // Old gateways only learn a name at authentication; its getter already holds the latest choice.
+        this.nameUpdateUnsupported = true;
+        this.nameDirty = false;
+        this.reauthenticate();
+      } else {
+        this.nameDirty = true;
+        this.options.log(`[gateway] retrying name update: ${error instanceof Error ? error.message : String(error)}`);
+        this.nameRetry = setTimeout(() => {
+          this.nameRetry = undefined;
+          void this.flushName();
+        }, 1000);
+        this.nameRetry.unref();
+      }
+    }
   }
 
   status(): GatewayStatus {

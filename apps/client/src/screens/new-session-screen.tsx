@@ -1,4 +1,4 @@
-import type { AgentInfo, MethodResult } from "@linkshell/wire";
+import { displayModelName, type AgentInfo, type MethodResult } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useState } from "react";
@@ -23,6 +23,7 @@ import { SheetHeader } from "@/components/sheet-header";
 import { AgentInteractions } from "./acp-screen";
 import { colors } from "@/theme/colors";
 import { mono, type } from "@/theme/type";
+import { optionLabel, valueHint, valueLabel } from "@/lib/labels";
 
 const LAST_AGENT_KEY = "new.agent";
 /** The "agent" choice that opens a plain terminal instead. */
@@ -139,25 +140,37 @@ export function NewSessionScreen() {
   const [error, setError] = useState<string | null>(null);
 
   // The models the agent offers a new session here, as the desktop's picker lists them.
-  const [listed, setListed] = useState<{ agent: string; models: MethodResult<"agents.models"> }>();
-  const [pickedModel, setPickedModel] = useState<{ agent: string; model: string }>();
+  const [listed, setListed] = useState<{ key: string; link: typeof link; models: MethodResult<"agents.models">; error?: string }>();
+  const [pickedModel, setPickedModel] = useState<{ link: typeof link; agent: string; model: string }>();
+  const [configPick, setConfigPick] = useState<{ link: typeof link; key: string; values: Record<string, string> }>();
+  const [modelsRevision, setModelsRevision] = useState(0);
   const agentKey = !terminal && selectedAgent && usable(selectedAgent) ? selectedAgent.id : undefined;
+  const selectedModel = pickedModel?.link === link && pickedModel.agent === agentKey ? pickedModel.model : undefined;
+  const modelsKey = JSON.stringify([agentKey, cwd, selectedModel, modelsRevision]);
   useEffect(() => {
     if (!online || !agentKey) return;
     let alive = true;
-    void agentModels(agentKey, cwd || undefined).then(
-      (models) => { if (alive) setListed({ agent: agentKey, models }); },
-      () => { if (alive) setListed(undefined); },
+    void agentModels(agentKey, cwd || undefined, selectedModel).then(
+      (models) => { if (alive) setListed({ key: modelsKey, link, models }); },
+      (reason: unknown) => { if (alive) setListed({ key: modelsKey, link, models: { models: [] }, error: reason instanceof Error ? reason.message : String(reason) }); },
     );
     return () => { alive = false; };
-  }, [agentModels, online, agentKey, cwd]);
-  const models = agentKey && listed?.agent === agentKey ? listed.models : undefined;
-  const model = pickedModel && pickedModel.agent === agentKey ? pickedModel.model : models?.current;
+  }, [agentModels, online, agentKey, cwd, selectedModel, modelsKey, link]);
+  const listing = online && agentKey && listed?.key === modelsKey && listed.link === link ? listed : undefined;
+  const models = listing?.models;
+  const model = selectedModel && models?.models.some((entry) => entry.value === selectedModel) ? selectedModel : models?.current;
   const shownModel = models?.models.find((entry) => entry.value === model);
-  const modelLabel = (entry: MethodResult<"agents.models">["models"][number]) => (entry.group ? `${entry.group} · ${entry.name}` : entry.name);
+  const modelLabel = (entry: MethodResult<"agents.models">["models"][number]) => (entry.group ? `${entry.group} · ${displayModelName(entry.name)}` : displayModelName(entry.name));
+  const configKey = JSON.stringify([agentKey, cwd]);
+  const pickedConfig = configPick?.link === link && configPick.key === configKey ? configPick.values : {};
+  const configOptions = (models?.config ?? []).filter((option) => (option.category === "mode" || option.category === "effort") && option.values.length > 0).map((option) => ({
+    ...option,
+    current: option.values.some((value) => value.value === pickedConfig[option.id]) ? pickedConfig[option.id]! : option.current,
+  }));
+  const unavailableModel = selectedModel && models && !listing?.error && !models.models.some((entry) => entry.value === selectedModel);
 
   const targetCwd = cwd;
-  const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent))) && targetCwd.length > 0 && !busy;
+  const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent) && !!listing && !listing.error)) && targetCwd.length > 0 && !busy;
 
   const remember = (id: string) => {
     try {
@@ -187,9 +200,11 @@ export function NewSessionScreen() {
     }
     if (!selectedAgent) return;
     try {
-      // Only a choice that differs from what the agent would take anyway is sent.
-      const chosen = models && model && model !== models.current && models.models.some((entry) => entry.value === model) ? model : undefined;
-      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined, model: chosen });
+      // ACP can cache a default from another project; keep any deliberate, still-valid choice.
+      const chosen = models && selectedModel && models.models.some((entry) => entry.value === selectedModel) ? selectedModel : undefined;
+      const configEntries = (models?.config ?? []).filter((option) => pickedConfig[option.id] !== undefined && option.values.some((value) => value.value === pickedConfig[option.id]))
+        .map((option) => [option.id, pickedConfig[option.id]!] as const);
+      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined, model: chosen, config: configEntries.length ? Object.fromEntries(configEntries) : undefined });
       remember(selectedAgent.id);
       router.dismiss();
       openSession(session.id);
@@ -260,7 +275,15 @@ export function NewSessionScreen() {
           ) : null}
         </View>
 
-        {models ? (
+        {!terminal && online && agentKey && !listing ? <Text accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>正在读取模型与设置…</Text> : null}
+        {unavailableModel ? <Text accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>此前选择的模型已不可用，将使用 Agent 的默认模型；也可以重新选择。</Text> : null}
+        {listing?.error ? (
+          <View style={{ gap: 6 }}>
+            <Text selectable style={[type.footnote, { color: colors.danger, paddingHorizontal: 4 }]}>模型与设置加载失败：{listing.error}</Text>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => setModelsRevision((value) => value + 1)} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 4 }}><Text style={[type.subhead, { color: colors.accent }]}>重新读取模型与设置</Text></Pressable>
+          </View>
+        ) : null}
+        {models && !listing?.error ? (
           <View style={{ gap: 10 }}>
             <Label>模型</Label>
             {models.models.length ? (
@@ -273,17 +296,34 @@ export function NewSessionScreen() {
                   title: modelLabel(entry),
                   subtitle: [entry.value === models.current ? "默认" : undefined, entry.description].filter(Boolean).join(" · ") || undefined,
                   state: entry.value === model ? ("on" as const) : ("off" as const),
+                  attributes: { disabled: busy },
                 }))}
-                onPressAction={({ nativeEvent }) => agentKey && setPickedModel({ agent: agentKey, model: nativeEvent.event })}
+                onPressAction={({ nativeEvent }) => agentKey && setPickedModel({ link, agent: agentKey, model: nativeEvent.event })}
               >
                 <ModelRow name={shownModel ? modelLabel(shownModel) : "默认模型"} note={shownModel?.description} menu />
               </AppMenu>
             ) : (
-              // ACP agents name their models only to a session: none was opened here yet to ask.
-              <ModelRow name="默认模型" note="在这台电脑上用过一次这个 Agent 后，这里就能选模型" />
+              <Pressable accessibilityRole="button" accessibilityLabel="重新读取模型" disabled={busy} onPress={() => setModelsRevision((value) => value + 1)}>
+                <ModelRow name="默认模型" note="Agent 尚未提供可预选的模型，轻点重新读取；也可以使用默认设置开始" />
+              </Pressable>
             )}
           </View>
         ) : null}
+
+        {configOptions.map((option) => (
+          <View key={option.id} style={{ gap: 10 }}>
+            <Label>{optionLabel(option)}</Label>
+            <AppMenu
+              title={optionLabel(option)}
+              shouldOpenOnLongPress={false}
+              onOpenMenu={() => haptics.selection()}
+              actions={option.values.map((entry) => ({ id: entry.value, title: valueLabel(option, entry.value), subtitle: valueHint(option, entry.value), state: entry.value === option.current ? ("on" as const) : ("off" as const), attributes: { disabled: busy } }))}
+              onPressAction={({ nativeEvent }) => setConfigPick({ link, key: configKey, values: { ...pickedConfig, [option.id]: nativeEvent.event } })}
+            >
+              <ModelRow label={optionLabel(option)} category={option.category === "effort" ? "effort" : "mode"} name={valueLabel(option, option.current)} note={valueHint(option, option.current)} menu />
+            </AppMenu>
+          </View>
+        ))}
 
         <View style={{ gap: 10 }}>
           <Label>项目</Label>
@@ -419,14 +459,14 @@ export function NewSessionScreen() {
 }
 
 /** The model row: the one chosen and a line about it, styled as the project row below it. */
-function ModelRow({ name, note, menu = false }: { name: string; note?: string; menu?: boolean }) {
+function ModelRow({ name, note, menu = false, label = "模型", category = "model" }: { name: string; note?: string; menu?: boolean; label?: string; category?: "model" | "effort" | "mode" }) {
   return (
     <View
       accessibilityRole={menu ? "button" : undefined}
-      accessibilityLabel={`模型：${name}${note && !menu ? `，${note}` : ""}`}
+      accessibilityLabel={`${label}：${name}${note && !menu ? `，${note}` : ""}`}
       style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 18, borderCurve: "continuous", backgroundColor: colors.sheetCard }}
     >
-      <Icon sf="cpu" md="memory" size={20} color={colors.accent} />
+      <Icon sf={category === "effort" ? "brain" : category === "mode" ? "lock.shield" : "cpu"} md={category === "effort" ? "psychology" : category === "mode" ? "shield" : "memory"} size={20} color={colors.accent} />
       <View style={{ flex: 1, gap: 1 }}>
         <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: colors.label, fontWeight: "600" }]}>{name}</Text>
         {note ? <Text numberOfLines={2} style={[type.caption, { color: colors.tertiaryLabel }]}>{note}</Text> : null}

@@ -90,7 +90,7 @@ describe("agents.models", () => {
       }),
     ]);
     // The names a session's own model option shows; Codex's hidden models left out.
-    expect(await client.call("agents.models", { agent: "codex" })).toEqual({
+    expect(await client.call("agents.models", { agent: "codex" })).toMatchObject({
       models: [
         { value: "gpt-big", name: "GPT Big", description: "The large one" },
         { value: "gpt-mini", name: "GPT Mini" },
@@ -99,6 +99,10 @@ describe("agents.models", () => {
     });
     // A project's own configuration is read for its directory.
     expect((await client.call("agents.models", { agent: "codex", cwd: "/projects/big" })).current).toBe("gpt-big");
+    const selected = await client.call("agents.models", { agent: "codex", model: "gpt-big" });
+    expect(selected.current).toBe("gpt-mini");
+    expect(selected.config?.find((option) => option.id === "effort")?.values.map((option) => option.value)).toEqual(["low", "medium"]);
+    expect(selected.config?.find((option) => option.id === "permissions")?.values.some((option) => option.value === "read-only")).toBe(true);
     await expect(client.call("agents.models", { agent: "nobody" })).rejects.toThrow("unknown agent nobody");
 
     // The model picked goes to thread/start; none picked leaves Codex to choose, as before.
@@ -112,7 +116,7 @@ describe("agents.models", () => {
     const older = await boot((paths) => [codex(paths.codexSocket, { FAKE_CODEX_MODELS: "1" })]);
     expect(await older.client.call("agents.models", { agent: "codex" })).toMatchObject({ current: "gpt-big", models: [{ value: "gpt-big" }, { value: "gpt-mini" }] });
     const oldest = await boot((paths) => [codex(paths.codexSocket, {})]);
-    expect(await oldest.client.call("agents.models", { agent: "codex" })).toEqual({ models: [] });
+    expect(await oldest.client.call("agents.models", { agent: "codex" })).toMatchObject({ models: [] });
   });
 
   it("offers an ACP agent's models from its latest session, across a host restart, without opening one to ask", async () => {
@@ -121,19 +125,24 @@ describe("agents.models", () => {
     expect(await first.client.call("agents.models", { agent: "fake" })).toEqual({ models: [] });
     expect(agentSessions(first.home)).toBe(0);
     await first.client.call("sessions.create", { agent: "fake", cwd: "/w" });
-    expect(await first.client.call("agents.models", { agent: "fake" })).toEqual(fakeModels);
+    expect(await first.client.call("agents.models", { agent: "fake" })).toMatchObject(fakeModels);
+    const initial = await first.client.call("agents.models", { agent: "fake" });
+    const mode = initial.config?.find((option) => option.category === "mode");
+    expect(mode?.current).toBe("default");
+    await first.client.call("sessions.create", { agent: "fake", cwd: "/w", config: { [mode!.id]: "yolo" } });
+    expect((await first.client.call("agents.models", { agent: "fake" })).config?.find((option) => option.id === mode!.id)?.current).toBe("default");
     // One started on another model doesn't make that the default.
     const { session } = await first.client.call("sessions.create", { agent: "fake", cwd: "/w", model: "smart" });
-    expect(await first.client.call("agents.models", { agent: "fake" })).toEqual(fakeModels);
+    expect(await first.client.call("agents.models", { agent: "fake" })).toMatchObject(fakeModels);
     await first.stop();
 
     const second = await boot((_paths, home) => [acpAgent(home)], first.home);
     const opened = agentSessions(first.home);
-    expect(await second.client.call("agents.models", { agent: "fake" })).toEqual(fakeModels);
+    expect(await second.client.call("agents.models", { agent: "fake" })).toMatchObject(fakeModels);
     expect(agentSessions(first.home)).toBe(opened);
     // Opening an earlier session (on its own model) keeps the default a new one gets.
     await second.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
-    expect(await second.client.call("agents.models", { agent: "fake" })).toEqual(fakeModels);
+    expect(await second.client.call("agents.models", { agent: "fake" })).toMatchObject(fakeModels);
   });
 
   it("lists Claude's models once a session has told them, keeps them across a restart, and starts a session on the model picked", async () => {
@@ -151,13 +160,13 @@ describe("agents.models", () => {
     expect(await client.call("agents.models", { agent: "claude" })).toEqual({ models: [] });
     expect(agentSessions(home)).toBe(0);
     await client.call("sessions.create", { agent: "claude", cwd: workDir });
-    expect(await client.call("agents.models", { agent: "claude" })).toEqual(fakeModels);
+    expect(await client.call("agents.models", { agent: "claude" })).toMatchObject(fakeModels);
     const { session } = await client.call("sessions.create", { agent: "claude", cwd: workDir, model: "smart" });
     await client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
     // That session is on the model picked; a new one still starts on Claude's default.
     expect(await waitFor(() => modelOf(session.id) === "smart")).toBe(true);
     expect(latest(session.id, "ls_notice")).toBeUndefined();
-    expect(await client.call("agents.models", { agent: "claude" })).toEqual(fakeModels);
+    expect(await client.call("agents.models", { agent: "claude" })).toMatchObject(fakeModels);
     // A model Claude doesn't offer: the session starts on its default, and says so.
     const { session: other } = await client.call("sessions.create", { agent: "claude", cwd: workDir, model: "nope" });
     await client.call("sessions.subscribe", { sessionId: other.id, fromSeq: 0 });
@@ -168,7 +177,7 @@ describe("agents.models", () => {
     // Right after a restart, before any Claude has been started.
     const again = await boot((_paths, home) => [claude(home)], home);
     const opened = agentSessions(home);
-    expect(await again.client.call("agents.models", { agent: "claude" })).toEqual(fakeModels);
+    expect(await again.client.call("agents.models", { agent: "claude" })).toMatchObject(fakeModels);
     expect(agentSessions(home)).toBe(opened);
   });
 });

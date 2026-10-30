@@ -78,9 +78,24 @@ html[data-desktop] .desktop-main .file-browser[data-layout="page"] .file-preview
   html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-back { display: inline-flex; }
   html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-name { margin-left: 4px; }
 }
-/* The panel itself scrolls: the bar stays at its top while the file runs on under it. */
-html[data-desktop] .desktop-main .side-panel-content .file-preview-bar { position: sticky; top: -16px; z-index: 2; margin-top: -16px; background: var(--plain); }
-html[data-desktop] .desktop-main .side-panel-content .file-preview-body { overflow: visible; }
-html[data-desktop] .desktop-main .side-panel-content .file-preview-source { width: auto; overflow-x: auto; }
+/* Give the inspector's file workspace a bounded height. Scrolling a file must never move its
+   directory, toolbar or tabs; each column owns its scroll position, as on the full 文件 page. */
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; padding-top: 0; }
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] > :not(.file-browser, .file-preview, .resource-editor, .mcp-app) { flex: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] > :not(.resource-file-layout) { flex: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-file-layout { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; overflow: hidden; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-directory { min-height: 0; max-height: none; overflow: hidden; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-entry-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-list-foot { flex: none; }
+html[data-desktop] .desktop-main .file-browser[data-layout="panel"].resource-has-preview .resource-directory { display: none; }
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] .file-preview { overflow: hidden; }
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] .file-preview-body { scrollbar-gutter: stable; }
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] .resource-editor { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+html[data-desktop] .desktop-main .side-panel-content[data-panel="files"] .resource-editor > * { flex-shrink: 0; }
+@container resource-files (min-width: 740px) {
+  html[data-desktop] .desktop-main .file-browser[data-layout="panel"].resource-has-preview .resource-file-layout { grid-template-columns: minmax(230px, 0.38fr) minmax(0, 1fr); }
+  html[data-desktop] .desktop-main .file-browser[data-layout="panel"].resource-has-preview .resource-directory { display: flex; }
+}
 /* In the inspector the file takes the panel: its bar replaces the list's. */
 html[data-desktop] .desktop-main .file-browser[data-layout="panel"].resource-has-preview > :is(.resource-toolbar, .resource-search) { display: none; }

@@ -2,14 +2,14 @@ import { HOST_PROTOCOL } from "@linkshell/wire";
 import { router } from "expo-router";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { useClient, useConnection } from "@/lib/client";
+import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "./icon";
 
 /** Shown while the host is unreachable; tapping opens the connection sheet. */
 export function ConnectionBanner() {
-  const status = useClient((state) => state.status);
+  const status = useConnectionStatus();
   const detail = useClient((state) => state.statusDetail);
   const { link } = useConnection();
   // An absent revision is a host from before revisions: older than this app either way.

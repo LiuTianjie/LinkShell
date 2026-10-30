@@ -860,6 +860,9 @@ export class ClaudeDriver extends AcpDriver {
     // from the terminal. Remember it; it applies when the phone next drives.
     const option = this.template?.find((entry) => entry.id === optionId);
     if (!option || !option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown setting ${optionId}=${value}`);
+    if (option.category === "mode" && (await this.elsewhere(nativeId))?.working) {
+      throw RpcError.app("not_supported", "这一轮由电脑上的另一个 Claude 窗口运行，无法从这里立即切换权限；请在那个窗口修改，或等本轮结束后再切换。");
+    }
     this.host?.state(this.id, nativeId).set("pendingConfig", JSON.stringify({ ...this.pendingConfig(nativeId), [optionId]: value }));
     this.emitDesktopConfig(nativeId);
   }

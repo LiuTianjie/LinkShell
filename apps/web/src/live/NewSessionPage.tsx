@@ -15,7 +15,8 @@ import {
 import { Modal } from "./common";
 import { AgentMark, ErrorNotice, useActions, useClient, useConnection, useJob, useLoad } from "./common";
 import { AgentInteractions } from "./Acp";
-import { modelName, modelToCreate, useAgentModels } from "./agent-models";
+import { configToCreate, creationOptions, modelName, modelToCreate, useAgentModels } from "./agent-models";
+import { NewSessionConfig } from "./NewSessionConfig";
 import { Files } from "./Files";
 import { useStore } from "zustand";
 import { engine } from "./engine";
@@ -52,7 +53,9 @@ export function NewSessionPage({
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
   // Picked per agent: choosing another agent starts from that agent's own default.
-  const [picked, setPicked] = useState<{ agent: string; model: string }>();
+  const [picked, setPicked] = useState<{ store: typeof store; agent: string; model: string }>();
+  const [configPick, setConfigPick] = useState<{ store: typeof store; key: string; values: Record<string, string> }>();
+  const [modelsRevision, setModelsRevision] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
   // The agent list arrives after the page: choose the first usable one once it does.
   useEffect(() => {
@@ -62,10 +65,15 @@ export function NewSessionPage({
   const git = useLoad(() => (cwd.trim() ? actions.gitInfo(cwd) : Promise.resolve(undefined)), [store, cwd]);
   const selected = machine?.agents.find((entry) => entry.id === agent);
   const usable = !!selected && usableAgent(selected);
-  const ready = online && usable && !!cwd.trim() && !job.busy;
-  const models = useAgentModels(agent, cwd, online && usable);
-  const model = modelToCreate(models, picked?.agent === agent ? picked.model : undefined);
+  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : undefined;
+  const models = useAgentModels(agent, cwd, online && usable, pickedModel, modelsRevision);
+  const ready = online && usable && !!cwd.trim() && !job.busy && !!models && !models.error;
+  const model = modelToCreate(models, pickedModel);
   const shownModel = models?.models.find((entry) => entry.value === (model ?? models.current));
+  const configKey = JSON.stringify([agent, cwd.trim()]);
+  const pickedConfig = configPick?.store === store && configPick.key === configKey ? configPick.values : {};
+  const options = creationOptions(models?.config, pickedConfig);
+  const unavailableModel = pickedModel && models && !models.error && !models.models.some((entry) => entry.value === pickedModel);
   const project = projects.find((entry) => entry.cwd === cwd);
   const place = project?.name ?? (cwd.split(/[\\/]/).filter(Boolean).pop() || cwd || "选择目录");
   const computer = engineState.connection?.computer;
@@ -78,6 +86,7 @@ export function NewSessionPage({
         worktree: worktree && !!git.value,
         // Untouched, the agent picks as it always does (its config, its default): nothing is pinned.
         model,
+        config: configToCreate(models?.config, pickedConfig),
         prompt: prompt.trim() ? [{ type: "text", text: prompt.trim() }] : undefined,
       })),
     );
@@ -106,7 +115,7 @@ export function NewSessionPage({
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); start(); }
             }}
           />
-          <div className="new-session-bar">
+          <div className="new-session-bar flex-wrap">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} aria-label="选择 Agent">
@@ -134,12 +143,14 @@ export function NewSessionPage({
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            {models && !models.models.length && !models.unavailable && (
-              // ACP agents name their models only to a session: none was opened here yet to ask.
-              <span className="new-session-pill new-session-pill-static" title="在这台电脑上用过一次这个 Agent 后，这里就能选模型">
+            {online && usable && !models && (
+              <span className="new-session-pill new-session-pill-static" role="status"><LoaderCircle className="animate-spin" /><span>正在读取模型与设置…</span></span>
+            )}
+            {models && !models.models.length && !models.error && (
+              <Button type="button" variant="ghost" size="sm" className="new-session-pill" title="Agent 尚未提供可预选的模型；点击重新读取" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>
                 <Cpu />
                 <span>默认模型</span>
-              </span>
+              </Button>
             )}
             {!!models?.models.length && (
               <DropdownMenu>
@@ -152,7 +163,7 @@ export function NewSessionPage({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
                   <DropdownMenuLabel>模型</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ agent, model: value })}>
+                  <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ store, agent, model: value })}>
                     {models.models.map((entry) => {
                       const name = modelName(entry);
                       // Claude's own default already reads 默认（推荐）.
@@ -170,6 +181,7 @@ export function NewSessionPage({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } })} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">
@@ -219,6 +231,13 @@ export function NewSessionPage({
           </div>
         </form>
         <ErrorNotice error={job.error} />
+        {unavailableModel && <p className="new-session-note" role="status">此前选择的模型已不可用，将使用 Agent 的默认模型；也可以重新选择。</p>}
+        {models?.error && (
+          <div className="flex flex-col gap-2">
+            <ErrorNotice error={`模型与设置加载失败：${models.error}`} />
+            <Button type="button" variant="outline" size="sm" className="self-start" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>重新读取模型与设置</Button>
+          </div>
+        )}
         {!online && <p className="new-session-note" role="status">电脑连接恢复后即可开始，已写的内容会保留。</p>}
         {online && machine && !usable && <p className="new-session-note">先在「电脑与 Agent」里确认 Agent 已安装并登录。</p>}
         <p className="new-session-hint">Agent 在 <code title={cwd}>{cwd || "所选目录"}</code> 里读写文件、运行命令 · Esc 取消</p>

@@ -1,6 +1,6 @@
 import { setHostHome } from "@/lib/format";
 import { deleteSecret, readSecret, writeSecret } from "./secure";
-import { createContext, use, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { useStore } from "zustand";
@@ -21,6 +21,8 @@ import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
 import { directConnector } from "./direct";
 import { createSessionSubscriptions } from "./session-subscriptions";
+import { syncComputerName } from "./computer-names";
+import { useAccount } from "./account";
 
 type Client = ClientState & ClientActions;
 
@@ -39,6 +41,7 @@ interface Connection {
 
 interface ConnectionContextValue {
   connection: Connection;
+  recovering: boolean;
   /** Points the app at a LAN host directly and reconnects. */
   setUrl(url: string): void;
 }
@@ -48,13 +51,18 @@ const ConnectionContext = createContext<ConnectionContextValue | null>(null);
 /** No computer added yet (a new install): nothing to connect to until one is. */
 const NO_COMPUTER_KEY = "none";
 
+function temporaryDisconnect(message: string): boolean {
+  // Identity, pairing, account and other explicit refusals must remain visible immediately.
+  return /^(?:连接已断开|电脑不在线|电脑没有响应|与网关的连接断开了|连不上网关|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
+}
+
 function fallbackComputer(): Computer {
   if (!__DEV__) return { key: NO_COMPUTER_KEY, kind: "direct", url: "", name: "电脑" };
   return { key: `direct:${DEFAULT_HOST_URL}`, kind: "direct", url: DEFAULT_HOST_URL, name: "本机开发" };
 }
 
 /** The token an access-password unlock returned, per computer: reconnects don't ask again. */
-function accessToken(computer: Computer) {
+export function accessToken(computer: Computer) {
   const key = `linkshell.access.${computer.key.replace(/[^A-Za-z0-9._-]/g, "_")}`;
   return {
     load: () => readSecret<string>(key),
@@ -85,6 +93,7 @@ function createConnection(computer: Computer): Connection {
   store.subscribe((state, previous) => {
     if (state.machine === previous.machine) return;
     setHostHome(state.machine?.home);
+    if (state.machine) syncComputerName(computer, state.machine);
     // The computer just said whether it can go direct, and how.
     streams.connect();
   });
@@ -97,6 +106,8 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   const live = useComputers((state) => state.live);
   const selected = useMemo(() => selectedComputer({ saved, live }) ?? fallbackComputer(), [saved, live]);
   const [connection, setConnection] = useState(() => createConnection(selected));
+  const [recovering, setRecovering] = useState(true);
+  const initialRecovery = useRef(true);
 
   useEffect(() => {
     startRelays();
@@ -110,9 +121,34 @@ export function ClientProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const { store, link } = connection;
-    if (connection.key === NO_COMPUTER_KEY) return;
-    store.getState().connect();
-    connection.streams.start();
+    const hasComputer = connection.key !== NO_COMPUTER_KEY;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    const recoveringNow = () => {
+      clearTimeout(recoveryTimer);
+      setRecovering(true);
+      // Reconnection is expected after suspension. A bounded grace period keeps a real
+      // outage visible without briefly calling the old, suspended socket a failure.
+      recoveryTimer = setTimeout(() => setRecovering(false), 12_000);
+    };
+    if (initialRecovery.current) {
+      initialRecovery.current = false;
+      recoveringNow();
+    } else setRecovering(false);
+    const unwatchStatus = link.onStatus((status, error) => {
+      if (status === "online" || status === "locked" || status === "stopped" || (status === "reconnecting" && error && !temporaryDisconnect(error))) {
+        clearTimeout(recoveryTimer);
+        setRecovering(false);
+      }
+    });
+    const unwatchAccount = useAccount.subscribe((state, previous) => {
+      if (state.session?.userId === previous.session?.userId) return;
+      clearTimeout(recoveryTimer);
+      setRecovering(false);
+    });
+    if (hasComputer) {
+      store.getState().connect();
+      connection.streams.start();
+    }
     // Keep the socket alive in the background while active sessions are running or waiting,
     // and reconnect immediately when returning to the foreground.
     const hasActiveWork = () => {
@@ -128,6 +164,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     };
     let latestTimer: ReturnType<typeof setTimeout> | undefined;
     const bgWatchdog = setInterval(() => {
+      if (!hasComputer) return;
       if (AppState.currentState !== "active" && !hasActiveWork()) return;
       if (store.getState().status !== "online") {
         reconnectRelays();
@@ -136,27 +173,37 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     }, 12_000);
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
+        recoveringNow();
         // Back from the background, sessions show their latest turns at once; earlier ones load
         // on scroll. Only for this return: a reconnect later (a network blip while reading)
         // catches up in place.
         clearTimeout(latestTimer);
         latestTimer = setTimeout(() => link.resumeLatest(false), 45_000);
         reconnectRelays();
-        link.reconnectNow();
+        if (hasComputer) link.reconnectNow();
         // While suspended the sockets may have died without a word: ask, instead of waiting a
         // heartbeat (up to 35 s) to find out.
         probeRelays();
-        link.probe();
-        connection.streams.connect();
-      } else if (state === "background") link.resumeLatest();
-      if (state === "background" && hasActiveWork() && store.getState().status !== "online") {
+        if (hasComputer) {
+          link.probe();
+          connection.streams.connect();
+        }
+      } else if (state === "background") {
+        clearTimeout(recoveryTimer);
+        setRecovering(true);
+        if (hasComputer) link.resumeLatest();
+      }
+      if (state === "background" && hasComputer && hasActiveWork() && store.getState().status !== "online") {
         reconnectRelays();
         link.reconnectNow();
       }
     });
     return () => {
       clearTimeout(latestTimer);
+      clearTimeout(recoveryTimer);
       clearInterval(bgWatchdog);
+      unwatchStatus();
+      unwatchAccount();
       subscription.remove();
       connection.streams.stop();
       store.getState().disconnect();
@@ -166,12 +213,13 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ConnectionContextValue>(
     () => ({
       connection,
+      recovering,
       setUrl(url) {
         const computers = useComputers.getState();
         computers.select(computers.addDirect(url, "局域网电脑"));
       },
     }),
-    [connection],
+    [connection, recovering],
   );
 
   return <ConnectionContext value={value}>{children}</ConnectionContext>;
@@ -188,9 +236,26 @@ export function useHasComputer(): boolean {
   return useConnectionContext().connection.key !== NO_COMPUTER_KEY;
 }
 
+export function useConnectionRecovering(): boolean {
+  return useConnectionContext().recovering;
+}
+
+/** Presentation only: permissions and actions continue to use the actual link status. */
+export function useConnectionStatus(): ClientState["status"] {
+  const status = useClient((state) => state.status);
+  const detail = useClient((state) => state.statusDetail);
+  const recovering = useConnectionRecovering();
+  const hasComputer = useHasComputer();
+  return hasComputer && recovering && (status === "idle" || (status === "reconnecting" && (!detail || temporaryDisconnect(detail)))) ? "connecting" : status;
+}
+
 export function useConnection() {
   const { connection, setUrl } = useConnectionContext();
-  return { url: connection.url, computer: connection.computer, link: connection.link, streams: connection.streams, setUrl };
+  const saved = useComputers((state) => state.saved);
+  const live = useComputers((state) => state.live);
+  const selected = useMemo(() => selectedComputer({ saved, live }), [saved, live]);
+  const computer = selected?.key === connection.key ? selected : connection.computer;
+  return { url: connection.url, computer, link: connection.link, streams: connection.streams, setUrl };
 }
 
 /** The path streams opened now would take: peer to peer, or through the gateway. */

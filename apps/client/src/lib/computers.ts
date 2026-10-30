@@ -10,7 +10,7 @@ import { createSocket } from "./socket";
 
 // Every computer this phone can reach: ones paired through a gateway, ones on
 // the signed-in account (no pairing needed), and hosts on the LAN reached
-// directly. One is selected at a time; the app shows that computer.
+// directly. Actions use the selected computer; project overviews can read several computers.
 
 /** The gateway used for account sign-in. QR codes can name any other gateway. */
 export const DEFAULT_GATEWAY = process.env.EXPO_PUBLIC_LINKSHELL_GATEWAY ?? "wss://gateway.itool.tech";
@@ -57,6 +57,13 @@ function normalizeGateway(url: string): string {
 // ── gateway connections ──────────────────────────────────────────────
 
 const relays = new Map<string, RelayClient>();
+const relayAccounts = new Map<string, string | undefined>();
+const discoveryRequests = new Map<string, number>();
+type DiscoveryStatus = "loading" | "ready" | "failed" | "refused";
+
+function discoveryFailure(code?: string): "failed" | "refused" {
+  return !code || ["offline", "timeout", "disconnected", "connect_failed", "closed"].includes(code) ? "failed" : "refused";
+}
 
 function deviceName(): string {
   return Device.deviceName ?? Device.modelName ?? (Platform.OS === "ios" ? "iPhone" : "Android");
@@ -79,12 +86,21 @@ export function relayFor(gateway: string): RelayClient {
     createSocket: (target) => createSocket(target) as unknown as RelaySocket,
   });
   relays.set(url, relay);
-  const refresh = () => void useComputers.getState().refresh(url);
-  relay.onStatus((status) => {
-    useComputers.setState((state) => ({ relayStatus: { ...state.relayStatus, [url]: status } }));
+  relayAccounts.set(url, url === normalizeGateway(DEFAULT_GATEWAY) ? useAccount.getState().session?.userId : undefined);
+  const current = () => relays.get(url) === relay && (url !== normalizeGateway(DEFAULT_GATEWAY) || relayAccounts.get(url) === useAccount.getState().session?.userId);
+  const refresh = () => { if (current()) void useComputers.getState().refresh(url); };
+  relay.onStatus((status, error) => {
+    if (!current()) return;
+    useComputers.setState((state) => ({
+      relayStatus: { ...state.relayStatus, [url]: status },
+      ...(status === "offline" || status === "stopped"
+        ? { discovery: { ...state.discovery, [url]: discoveryFailure(error?.code) } }
+        : {}),
+    }));
     if (status === "online") refresh();
   });
   relay.on("presence", ({ id, online }) => {
+    if (!current()) return;
     // A computer that just joined the account is announced before this list knows it.
     if (online && !useComputers.getState().live[url]?.some((machine) => machine.id === id)) refresh();
     else useComputers.getState().setOnline(url, id, online);
@@ -110,6 +126,7 @@ interface ComputersState {
   /** Live entries per gateway, from machines.list: paired and account machines. */
   live: Record<string, MachineEntry[]>;
   relayStatus: Record<string, RelayStatus>;
+  discovery: Record<string, DiscoveryStatus>;
   select(key: string): void;
   addPaired(gateway: string, machine: MachineEntry): string;
   addDirect(url: string, name: string): string;
@@ -127,6 +144,7 @@ export const useComputers = create<ComputersState>((set, get) => ({
   saved: load(),
   live: {},
   relayStatus: {},
+  discovery: {},
   select(key) {
     const saved = { ...get().saved, selected: key };
     persist(saved);
@@ -178,11 +196,32 @@ export const useComputers = create<ComputersState>((set, get) => ({
     return true;
   },
   async refresh(gateway) {
+    gateway = normalizeGateway(gateway);
+    const relay = relayFor(gateway);
+    const currentAccount = () => gateway !== normalizeGateway(DEFAULT_GATEWAY) || relayAccounts.get(gateway) === useAccount.getState().session?.userId;
+    if (!currentAccount()) return;
+    const request = (discoveryRequests.get(gateway) ?? 0) + 1;
+    discoveryRequests.set(gateway, request);
+    const current = () => relays.get(gateway) === relay && discoveryRequests.get(gateway) === request && currentAccount();
+    set((state) => ({ discovery: { ...state.discovery, [gateway]: "loading" } }));
     try {
-      const { machines } = await relayFor(gateway).request("machines.list", {});
-      set((state) => ({ live: { ...state.live, [gateway]: machines } }));
-    } catch {
+      const { machines } = await relay.request("machines.list", {});
+      if (!current()) return;
+      const accountId = gateway === normalizeGateway(DEFAULT_GATEWAY) ? useAccount.getState().session?.userId : undefined;
+      const accountMatches = !!accountId && relay.account?.userId === accountId;
+      // Signing out while offline can leave the gateway's old account binding intact.
+      // Only a matching authenticated account may restore its account-only computers.
+      const visibleMachines = machines.filter((machine) => machine.via === "paired" || accountMatches);
+      set((state) => ({
+        live: { ...state.live, [gateway]: visibleMachines },
+        discovery: { ...state.discovery, [gateway]: accountId && !accountMatches ? "refused" : "ready" },
+      }));
+    } catch (error) {
       // Stays as it was; presence events keep it current.
+      const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
+      if (current()) set((state) => ({ discovery: { ...state.discovery, [gateway]:
+        state.discovery[gateway] === "refused" ? "refused" : discoveryFailure(relay.lastError?.code ?? code),
+      } }));
     }
   },
   setOnline(gateway, id, online) {
@@ -199,12 +238,28 @@ export function startRelays(): void {
   if (useAccount.getState().session) relayFor(DEFAULT_GATEWAY);
 }
 
+/** A healthy gateway can still time out on machines.list, so retry the query too. */
+export function retryComputerDiscovery(): void {
+  startRelays();
+  for (const [gateway, relay] of relays) {
+    if (relay.status === "online") void useComputers.getState().refresh(gateway);
+    else relay.reconnectNow();
+  }
+}
+
 // Signing in or out changes which machines the default gateway offers.
 useAccount.subscribe((state, previous) => {
   if (Boolean(state.session) === Boolean(previous.session) && state.session?.userId === previous.session?.userId) return;
   const url = normalizeGateway(DEFAULT_GATEWAY);
-  const relay = state.session ? relayFor(url) : relays.get(url);
-  if (!relay) return;
+  const relay = relays.get(url);
+  // Account-only computers must disappear immediately, before account.leave can wait on the
+  // network. Saved pairings still come from their trusted keys and remain available.
+  discoveryRequests.set(url, (discoveryRequests.get(url) ?? 0) + 1);
+  useComputers.setState((current) => ({ live: { ...current.live, [url]: [] }, discovery: { ...current.discovery, [url]: "loading" } }));
+  if (!relay) {
+    if (state.session || useComputers.getState().saved.relay.some((entry) => entry.gateway === url)) relayFor(url);
+    return;
+  }
   // Signed out (or the session ended on the server): the gateway keeps a phone on its account
   // through a missing or failed token, so it is told. Gateways from before `account.leave`
   // answer unknown_method, and keep it as they always did.
@@ -214,10 +269,23 @@ useAccount.subscribe((state, previous) => {
     // Reconnect so the gateway sees (or forgets) the account.
     relay.stop();
     relays.delete(url);
-    useComputers.setState((current) => ({ live: { ...current.live, [url]: [] } }));
+    relayAccounts.delete(url);
     if (useAccount.getState().session || useComputers.getState().saved.relay.some((entry) => entry.gateway === url)) relayFor(url);
   });
 });
+
+/** Account computers are discovered after startup; an empty list before that is not onboarding. */
+export function useComputerDiscovery(): DiscoveryStatus {
+  const signedIn = useAccount((state) => !!state.session);
+  return useComputers((state) => {
+    const gateways = new Set(state.saved.relay.map((entry) => entry.gateway));
+    if (signedIn) gateways.add(normalizeGateway(DEFAULT_GATEWAY));
+    const states = [...gateways].map((gateway) => state.discovery[gateway]);
+    if (states.some((status) => status === "refused")) return "refused";
+    if (states.some((status) => status === undefined || status === "loading")) return "loading";
+    return states.some((status) => status === "failed") ? "failed" : "ready";
+  });
+}
 
 /** All computers, merged: saved paired ones (with live status), account ones, and direct hosts. */
 export function listComputers(state: Pick<ComputersState, "saved" | "live">): Computer[] {
@@ -254,4 +322,28 @@ export function selectedComputer(state: Pick<ComputersState, "saved" | "live">):
     all.find((computer) => computer.kind === "relay" && computer.machine.online) ??
     all[0]
   );
+}
+
+/** Store only display metadata; the paired signing key and selected connection stay intact. */
+export function updateComputerName(computer: Computer, name: string, namingConfigured?: boolean): void {
+  const state = useComputers.getState();
+  let changed = false;
+  const updateMachine = <T extends { name: string; namingConfigured?: boolean }>(machine: T): T => {
+    if (machine.name === name && (!namingConfigured || machine.namingConfigured)) return machine;
+    changed = true;
+    return { ...machine, name, ...(namingConfigured || machine.namingConfigured ? { namingConfigured: true } : {}) };
+  };
+  const saved: Saved = computer.kind === "direct" ? { ...state.saved,
+    direct: state.saved.direct.map((entry) => entry.url === computer.url ? updateMachine(entry) : entry),
+  } : { ...state.saved,
+    relay: state.saved.relay.map((entry) => entry.gateway === computer.gateway && entry.machine.id === computer.machine.id
+      ? { ...entry, machine: updateMachine(entry.machine) } : entry),
+  };
+  const live = computer.kind === "relay" ? { ...state.live,
+    [computer.gateway]: (state.live[computer.gateway] ?? []).map((machine) => machine.id === computer.machine.id
+      ? updateMachine(machine) : machine),
+  } : state.live;
+  if (!changed) return;
+  persist(saved);
+  useComputers.setState({ saved, live });
 }

@@ -7,7 +7,7 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,6 +29,15 @@ jobs:
       - run: pnpm --filter @linkshell/windows build:standalone
         env:
           LINKSHELL_SMOKE_SHOTS: artifacts/window-shots
+      - name: Exercise Windows automatic update, rollback and data preservation
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm --filter @linkshell/windows test:update-e2e
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: LinkShell-Windows-update-e2e
+          path: artifacts/windows-update-e2e
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: LinkShell-Windows-x64-unsigned

@@ -26,6 +26,8 @@ class FakeDriver implements AgentDriver {
   sessions: DiscoveredSession[] = [{ nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 1 }];
   archives: string[] = [];
   nativeSessionAvailability?: AgentDriver["nativeSessionAvailability"];
+  listModels?: AgentDriver["listModels"];
+  setConfig?: AgentDriver["setConfig"];
 
   async start(host: DriverHost) {
     this.host = host;
@@ -616,6 +618,67 @@ describe("SessionHub", () => {
     expect(summary).toMatchObject({ id: "fake:new", cwd: "/w/other" });
     expect(driver.prompts).toEqual([{ nativeId: "new", content: [text("start")], clientMessageId: "c-9" }]);
     await expect(hub.createSession({ agent: "missing", cwd: "/" })).rejects.toMatchObject({ appCode: "not_found" });
+  });
+
+  it("cancels setting changes queued before Stop without cancelling a later explicit choice", async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const changed = vi.fn(async () => { entered(); await held; });
+    driver.setConfig = changed;
+    const first = hub.setConfig("fake:s1", "permissions", "auto");
+    await started;
+    const queued = hub.setConfig("fake:s1", "permissions", "full-access");
+    const rejected = expect(queued).rejects.toMatchObject({ appCode: "busy" });
+    await hub.cancel("fake:s1");
+    release();
+    await first;
+    await rejected;
+    expect(changed).toHaveBeenCalledTimes(1);
+    await hub.setConfig("fake:s1", "permissions", "read-only");
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(changed).toHaveBeenLastCalledWith("s1", "permissions", "read-only");
+  });
+
+  it("applies creation permissions before a first prompt and removes an unprompted session when settings fail", async () => {
+    // Real agents allocate a fresh native ID; reusing "new" would hit the user's deletion tombstone.
+    const create = vi.spyOn(driver, "createSession")
+      .mockResolvedValueOnce({ nativeId: "configured", cwd: "/w/other", createdAt: 2, updatedAt: 2 })
+      .mockResolvedValueOnce({ nativeId: "refused", cwd: "/w/other", createdAt: 3, updatedAt: 3 });
+    driver.listModels = async () => ({ models: [], config: [{ id: "permissions", name: "Permissions", category: "mode", current: "read-only", values: [{ value: "read-only", name: "Read only" }, { value: "auto", name: "Auto" }] }] });
+    const changed = vi.fn(async () => { expect(driver.prompts).toHaveLength(0); });
+    driver.setConfig = changed;
+    await hub.createSession({ agent: "fake", cwd: "/w/other", config: { permissions: "auto" }, prompt: [text("start")] });
+    expect(changed).toHaveBeenCalledWith("configured", "permissions", "auto");
+    expect(driver.prompts).toHaveLength(1);
+    driver.prompts = [];
+    driver.setConfig = async () => { throw new Error("settings refused"); };
+    await expect(hub.createSession({ agent: "fake", cwd: "/w/other", config: { permissions: "auto" }, prompt: [text("do not run")] })).rejects.toThrow("settings refused");
+    expect(driver.prompts).toHaveLength(0);
+    expect(hub.listSessions({}).sessions.some((session) => session.id === "fake:refused")).toBe(false);
+    expect(hub.getSession("fake:configured").id).toBe("fake:configured");
+    const before = driver.attachCalls;
+    await expect(hub.createSession({ agent: "fake", cwd: "/w/other", config: { permissions: "unknown" } })).rejects.toMatchObject({ appCode: "invalid_params" });
+    expect(driver.attachCalls).toBe(before);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds another client's first prompt until creation settings are accepted", async () => {
+    let release!: () => void;
+    let setting!: () => void;
+    const entered = new Promise<void>((resolve) => { setting = resolve; });
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    driver.listModels = async () => ({ models: [], config: [{ id: "permissions", name: "Permissions", category: "mode", current: "auto", values: [{ value: "read-only", name: "Read only" }] }] });
+    driver.setConfig = async () => { setting(); await pending; };
+    const creating = hub.createSession({ agent: "fake", cwd: "/w/other", config: { permissions: "read-only" } });
+    await entered;
+    const prompting = hub.prompt("fake:new", "another-client", [text("start")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(driver.prompts).toHaveLength(0);
+    release();
+    await Promise.all([creating, prompting]);
+    expect(driver.prompts).toEqual([{ nativeId: "new", clientMessageId: "another-client", content: [text("start")] }]);
   });
 });
 

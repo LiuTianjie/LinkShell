@@ -23,13 +23,15 @@ async function until(check: () => boolean, ms = 3000) {
   }
 }
 
-async function world() {
+async function world(options: { update?: (name: string, reply: (error?: { code: string; message: string }) => void) => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "lsh-gateway-link-"));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
   await new Promise((resolve) => server.once("listening", resolve));
   const sent: { to: string; frame: TunnelFrame }[] = [];
+  const names: string[] = [];
+  const signedInNames: string[] = [];
   let machine: WebSocket | undefined;
   server.on("connection", (socket) => {
     socket.send(JSON.stringify({ t: "challenge", nonce: "n" }));
@@ -37,9 +39,15 @@ async function world() {
       const frame = JSON.parse(String(data));
       if (frame.t === "auth") {
         machine = socket;
+        signedInNames.push(frame.name);
         socket.send(JSON.stringify({ t: "ready", userId: "owner" }));
       } else if (frame.t === "req") {
-        socket.send(JSON.stringify({ t: "res", id: frame.id, result: frame.method === "devices.list" ? { devices: [] } : {} }));
+        if (frame.method === "machines.update") {
+          names.push(frame.params.name);
+          const reply = (error?: { code: string; message: string }) => socket.send(JSON.stringify({ t: "res", id: frame.id, ...(error ? { error } : { result: {} }) }));
+          if (options.update) options.update(frame.params.name, reply);
+          else reply();
+        } else socket.send(JSON.stringify({ t: "res", id: frame.id, result: frame.method === "devices.list" ? { devices: [] } : {} }));
       } else if (frame.t === "to") {
         sent.push({ to: frame.to, frame: JSON.parse(frame.d) });
       }
@@ -66,10 +74,68 @@ async function world() {
   const deliver = (device: Identity, frame: TunnelFrame, via: "paired" | "account" = "account") =>
     machine!.send(JSON.stringify({ t: "from", from: publicIdentity(device), via, d: JSON.stringify(frame) }));
   const hello = (device: Identity, ch: string) => deliver(device, openTunnel(device, machineIdentity, ch).hello);
-  return { link, sent, transports, deliver, hello };
+  return { link, sent, transports, deliver, hello, names, signedInNames };
 }
 
 describe("GatewayLink channels", () => {
+  it("serializes rapid renames and sends only the latest choice after a delayed acknowledgement", async () => {
+    let finishFirst: (() => void) | undefined;
+    const { link, names, signedInNames } = await world({ update: (_name, reply) => {
+      if (!finishFirst) finishFirst = reply;
+      else reply();
+    } });
+    const first = link.rename("First");
+    await until(() => names.length === 1);
+    const second = link.rename("Second");
+    const latest = link.rename("Latest");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(names).toEqual(["First"]);
+    finishFirst!();
+    await Promise.all([first, second, latest]);
+    await until(() => names.length === 2);
+    expect(names).toEqual(["First", "Latest"]);
+    expect(signedInNames).toEqual(["Test Mac"]);
+  });
+
+  it("retries an unacknowledged metadata write while the connection stays online", async () => {
+    let attempted = 0;
+    const { link, names, signedInNames } = await world({ update: (_name, reply) => {
+      if (++attempted > 1) reply();
+    } });
+    void link.rename("Office");
+    await until(() => names.length === 2, 8000);
+    expect(names).toEqual(["Office", "Office"]);
+    expect(link.status().status).toBe("online");
+    expect(signedInNames).toEqual(["Test Mac"]);
+  }, 10_000);
+
+  it("retries ordinary gateway failures with the newest name and cancels retries when stopped", async () => {
+    let attempts = 0;
+    const { link, names } = await world({ update: (_name, reply) => {
+      if (++attempts === 1 || attempts === 3) reply({ code: "internal", message: "temporarily busy" });
+      else reply();
+    } });
+    await link.rename("Before");
+    await link.rename("After");
+    await until(() => names.length === 2);
+    expect(names).toEqual(["Before", "After"]);
+    await link.rename("Stop pending retry");
+    await until(() => names.length === 3);
+    link.stop();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(names).toHaveLength(3);
+  });
+
+  it("uses the latest name when an old gateway requires reauthentication", async () => {
+    const { link, names, signedInNames } = await world({ update: (_name, reply) => reply({ code: "unknown_method", message: "old gateway" }) });
+    await link.rename("Office");
+    await until(() => signedInNames.length === 2 && link.status().status === "online");
+    await link.rename("Home");
+    await until(() => signedInNames.length === 3 && link.status().status === "online");
+    expect(signedInNames).toEqual(["Test Mac", "Office", "Home"]);
+    expect(names).toEqual(["Office"]);
+  });
+
   it("answers a frame on a channel it doesn't have with close, a limited number of times", async () => {
     const { sent, deliver } = await world();
     const phone = createIdentity();

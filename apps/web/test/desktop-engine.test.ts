@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   links: [] as { options: { createSocket(): unknown }; socket?: unknown }[],
   streams: [] as { connector?: unknown }[],
-  relays: [] as { options: { name: string; platform: string }; reauthenticate: ReturnType<typeof vi.fn>; handlers: Map<string, (data: unknown) => void>; request: ReturnType<typeof vi.fn>; status: string }[],
+  relays: [] as { options: { name: string; platform: string }; account?: { userId: string }; reauthenticate: ReturnType<typeof vi.fn>; handlers: Map<string, (data: unknown) => void>; request: ReturnType<typeof vi.fn>; status: string }[],
   supabase: vi.fn(),
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: mocks.supabase }));
@@ -40,6 +40,7 @@ vi.mock("@linkshell/wire", () => ({
     handlers = new Map<string, (data: unknown) => void>();
     request = vi.fn(async () => ({ machines: [] as unknown[] }));
     status = "online";
+    account = { userId: "user-a" };
     constructor(readonly options: { name: string; platform: string }) { mocks.relays.push(this); }
     onStatus() {}
     on(name: string, handler: (data: unknown) => void) { this.handlers.set(name, handler); }
@@ -75,11 +76,11 @@ beforeEach(() => {
 });
 afterEach(() => { engine?.stop(); engine = undefined; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-async function start(accountFailure = false) {
+async function start(accountFailure = false, computer: import("../src/live/engine").Computer = local, userId?: string) {
   vi.stubGlobal("fetch", vi.fn((path: string) => Promise.resolve(
-    path === "/desktop/bootstrap" ? json({ identity: { id: "native-device" }, storage: {}, localComputer: local }) :
-    path === "/desktop/local" ? json({ computer: local }) :
-    path === "/desktop/account" ? json(accountFailure ? { error: "账号服务暂不可用" } : {}, accountFailure ? 503 : 200) :
+    path === "/desktop/bootstrap" ? json({ identity: { id: "native-device" }, storage: {}, localComputer: computer }) :
+    path === "/desktop/local" ? json({ computer }) :
+    path === "/desktop/account" ? json(accountFailure ? { error: "账号服务暂不可用" } : { userId }, accountFailure ? 503 : 200) :
     json({ ok: true }),
   )));
   const desktop = await import("../src/live/desktop");
@@ -102,9 +103,88 @@ async function startBeforeLocalHost(lookup: (options?: RequestInit) => Promise<R
   engine = (await import("../src/live/engine")).engine;
   await engine.start();
   await vi.advanceTimersByTimeAsync(0);
+  mocks.relays[0].account = { userId: "account-a" };
 }
 
 describe("desktop client connections", () => {
+  it("merges the local relay alias by identity, preserves same-name computers and resolves saved remote routes", async () => {
+    const localIdentity = { ...local, relayId: "local-signing-id" };
+    await start(false, localIdentity, "user-a");
+    const connection = engine!.state.getState().connection;
+    const duplicate = { ...remote, key: `${remote.gateway}#local-signing-id`, machine: { ...remote.machine, id: "local-signing-id" } };
+    const other = { ...remote, machine: { ...remote.machine, name: local.machine.name } };
+    const relay = engine!.relay(remote.gateway);
+    vi.mocked(relay.request).mockResolvedValue({ machines: [duplicate.machine, other.machine] });
+    await engine!.refresh(remote.gateway);
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([local.key, other.key]);
+    expect(engine!.computerForKey(duplicate.key)?.key).toBe(local.key);
+    engine!.select(duplicate);
+    expect(engine!.state.getState().connection).toBe(connection);
+    expect(mocks.links).toHaveLength(1);
+  });
+
+  it("merges a relay alias when local discovery finishes later, without interrupting an active remote connection", async () => {
+    vi.useFakeTimers();
+    let discovered = false;
+    await startBeforeLocalHost(() => Promise.resolve(json(discovered ? { computer: { ...local, relayId: remote.machine.id } } : {})));
+    const relay = mocks.relays[0];
+    relay.request.mockResolvedValue({ machines: [remote.machine] });
+    await engine!.refresh(remote.gateway);
+    const connection = engine!.state.getState().connection;
+    expect(connection?.computer.key).toBe(remote.key);
+    discovered = true;
+    await engine!.refreshLocal();
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([local.key]);
+    expect(engine!.state.getState().connection).toBe(connection);
+    expect(engine!.computerForKey(remote.key)?.key).toBe(local.key);
+    const desktop = await import("../src/live/desktop");
+    window.dispatchEvent(new CustomEvent(desktop.DESKTOP_ACCOUNT_EVENT, { detail: {} }));
+    expect(engine!.state.getState().connection).toBeUndefined();
+  });
+
+  it.each(["stopped", "unreachable"])("keeps one reachable relay row when local IPC is %s, and restores the local row when it returns", async (failure) => {
+    const localIdentity = { ...local, relayId: remote.machine.id };
+    await start(false, localIdentity, "user-a");
+    engine!.relay(remote.gateway);
+    const relay = mocks.relays.at(-1)!;
+    relay.request.mockResolvedValue({ machines: [remote.machine] });
+    await engine!.refresh(remote.gateway);
+    const nativeFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((path, init) => path === "/desktop/local"
+      ? failure === "unreachable" ? Promise.reject(new Error("本机桌面服务暂时不可用")) : Promise.resolve(json({}))
+      : nativeFetch(path, init));
+    await engine!.refreshLocal();
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([remote.key]);
+    expect(engine!.computerForKey(local.key)?.key).toBe(remote.key);
+    expect(engine!.state.getState().connection?.computer.key).toBe(local.key);
+    engine!.select(local);
+    expect(engine!.state.getState().connection?.computer.key).toBe(remote.key);
+    relay.handlers.get("presence")!({ id: remote.machine.id, online: false });
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([local.key]);
+    relay.handlers.get("presence")!({ id: remote.machine.id, online: true });
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([remote.key]);
+    vi.mocked(fetch).mockImplementation(nativeFetch);
+    await engine!.refreshLocal();
+    expect(engine!.state.getState().computers.map((computer) => computer.key)).toEqual([local.key]);
+    expect(engine!.computerForKey(remote.key)?.key).toBe(local.key);
+    engine!.select(remote);
+    expect(engine!.state.getState().connection?.computer.key).toBe(local.key);
+  });
+
+  it("does not restore a forgotten hidden relay alias when the local socket later stops", async () => {
+    await start(false, { ...local, relayId: remote.machine.id }, "user-a");
+    engine!.relay(remote.gateway);
+    const relay = mocks.relays.at(-1)!;
+    relay.request.mockResolvedValue({ machines: [remote.machine] });
+    await engine!.refresh(remote.gateway);
+    await engine!.forget(remote);
+    const nativeFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((path, init) => path === "/desktop/local" ? Promise.resolve(json({})) : nativeFetch(path, init));
+    await engine!.refreshLocal();
+    expect(engine!.state.getState().computers).toHaveLength(1);
+    expect(engine!.state.getState().computers[0]).toMatchObject({ key: local.key, machine: { online: false } });
+  });
+
   it("discovers a Host that opens shortly after bootstrap while keeping remote account access ready", async () => {
     vi.useFakeTimers();
     let lookups = 0;

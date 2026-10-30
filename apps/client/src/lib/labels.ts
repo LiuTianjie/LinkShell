@@ -1,4 +1,4 @@
-import type { SessionConfigOption } from "@linkshell/wire";
+import { displayModelName, type SessionConfigOption } from "@linkshell/wire";
 
 // Agents report their settings with their own (English) names. Well-known
 // ids and values get Chinese labels; anything else shows as the agent says.
@@ -69,7 +69,7 @@ export function valueLabel(option: SessionConfigOption, value: string): string {
   if (option.category === "model") {
     // "Default (recommended)" says nothing; the agent resolves it in the description ("Opus 5.5").
     if (value === "default" && reported?.description && reported.description.length <= 24) return `默认 · ${reported.description}`;
-    return reported?.name ?? value;
+    return displayModelName(reported?.name ?? value);
   }
   return scoped[option.id]?.[value]?.name ?? valueNames[value] ?? reported?.name ?? value;
 }
@@ -95,5 +95,5 @@ export function isRisky(value: string): boolean {
 export function modelChipLabel(option: SessionConfigOption): string {
   const current = option.values.find((v) => v.value === option.current);
   if (option.current === "default" && current?.description && current.description.length <= 24) return current.description;
-  return current?.name ?? option.current;
+  return displayModelName(current?.name ?? option.current);
 }

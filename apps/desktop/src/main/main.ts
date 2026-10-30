@@ -1,15 +1,17 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
+import { installEditingContextMenu } from "./editing-context-menu.js";
 import { MenuBar, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
 import { launchOptions, Runtime } from "./runtime.js";
 import { WorkspaceServer } from "./workspace.js";
+import { checkWindowsRelease, cleanWindowsUpdateDownloads, compareVersions, downloadWindowsInstaller, verifyInstaller, type DownloadedInstaller, type WindowsRelease } from "./windows-update.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launch = launchOptions(process.argv);
@@ -192,6 +194,7 @@ function rememberBounds() {
 
 /** The signed page owns the bridge; preview and screen frames never do. */
 function guard(web: WebContents) {
+  installEditingContextMenu(web, () => window, () => server.policy?.isTrusted(web.getURL()) ?? false);
   web.setWindowOpenHandler(({ url }) => {
     if (WorkspacePolicy.externalURL(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -389,7 +392,7 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "usage": return management.usage(Number(params.days), String(params.agent ?? "all"));
     case "log": return { text: await management.log(runtime.home), path: join(runtime.home, "host.log") };
     case "revealLog": shell.showItemInFolder(join(runtime.home, "host.log")); return {};
-    // An npm or Homebrew install updates itself (`linkshell upgrade`); a standalone app uses Sparkle.
+    // Standalone installs replace the whole app; npm/Homebrew installs use their CLI updater.
     case "upgrade": {
       if (runtime.standalone) { if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {}; }
       await management.exec(["upgrade"], 240_000).catch(() => { throw new Error("更新未完成，请在终端运行 linkshell upgrade 查看详情。"); });
@@ -436,12 +439,22 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       const key = String(params.key ?? "");
       if (!["opaqueWindow", "autoCheck", "updateChannel"].includes(key)) throw new Error("未知设置");
       if (key === "updateChannel" && !["stable", "beta"].includes(String(params.value))) throw new Error("未知更新通道");
-      settings.set(key, params.value); await saveSettings();
+      if (key === "updateChannel" && WINDOWS && (windowsUpdate.checking || windowsUpdate.installing)) throw new Error("更新正在进行，请稍后再切换通道");
+      settings.set(key, params.value);
+      if (key === "updateChannel" && WINDOWS) {
+        // Invalidate the old channel before yielding to the settings write or another UI request.
+        windowsInstaller = undefined;
+        windowsUpdateEvent({ name: "current", message: "通道已切换，请检查更新" });
+      }
+      await saveSettings();
       if (key === "opaqueWindow") updateWindowSurface();
-      if (key === "updateChannel") nativeModule?.updaterChannel(String(params.value));
+      if (key === "updateChannel") {
+        nativeModule?.updaterChannel(String(params.value));
+      }
       return {};
     }
     case "checkUpdates": return checkUpdates();
+    case "updateStatus": return WINDOWS && runtime.standalone ? windowsUpdate : undefined;
     case "installUpdate": if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {};
     case "retry": void retry(); return {};
     case "contextMenu": return contextMenu(params.items, params.at);
@@ -544,51 +557,118 @@ function windowsLoginItem(): boolean | undefined {
   return settings.launchItems?.some((item) => item.name === "LinkShell" && item.enabled) ?? settings.openAtLogin;
 }
 
-const newer = (a: string, b: string) => {
-  const parts = (value: string) => value.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
-  const [x, y] = [parts(a), parts(b)];
-  for (let index = 0; index < Math.max(x.length, y.length); index++) if ((x[index] ?? 0) !== (y[index] ?? 0)) return (x[index] ?? 0) > (y[index] ?? 0);
-  return false;
-};
+type WindowsUpdateState = { checking: boolean; installing: boolean; available: boolean; message: string; version?: string; checkedAt?: number };
+let windowsUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "尚未检查更新" };
+let windowsInstaller: WindowsRelease | undefined;
+let windowsDownloaded: DownloadedInstaller | undefined;
+let windowsInstallerChild: ChildProcess | undefined;
+const windowsUpdateCache = () => join(app.getPath("userData"), "windows-updates", runtime.scope);
 
-/**
- * Windows has no Sparkle: the newest desktop release with a Windows installer is found on GitHub,
- * and the person downloads and runs it (the installer keeps the Host, identity and pairings).
- */
-let windowsInstaller: string | undefined;
-async function checkWindowsUpdate() {
-  const update = (detail: Record<string, unknown>) => send("linkshell-desktop-update", detail);
-  update({ name: "checking", message: "正在查找 Windows 版本…" });
-  try {
-    const response = await net.fetch("https://api.github.com/repos/LiuTianjie/LinkShell/releases?per_page=30", { headers: { accept: "application/vnd.github+json" } });
-    if (!response.ok) throw new Error(`GitHub ${response.status}`);
-    const releases = (await response.json()) as { tag_name?: string; draft?: boolean; prerelease?: boolean; assets?: { name?: string; browser_download_url?: string }[] }[];
-    const beta = settings.get("updateChannel") === "beta";
-    const installer = (release: (typeof releases)[number]) => release.assets?.find((asset) => /^LinkShell-Setup-.+-windows-x64\.exe$/.test(asset.name ?? ""));
-    const release = releases.find((entry) => !entry.draft && (beta || !entry.prerelease) && /^desktop-v/.test(entry.tag_name ?? "") && installer(entry));
-    const url = release && installer(release)?.browser_download_url;
-    if (!release || !url) { windowsInstaller = undefined; update({ name: "current", message: "尚无已发布的 Windows 安装包" }); return; }
-    if (!url.startsWith("https://github.com/LiuTianjie/LinkShell/releases/download/")) throw new Error("发布下载地址无效");
-    const version = release.tag_name!.replace(/^desktop-v/, "");
-    if (newer(version, app.getVersion())) {
-      windowsInstaller = url;
-      update({ name: "available", version, message: `有新版本 ${version}，下载安装包后退出 LinkShell 再运行` });
-    } else {
-      windowsInstaller = undefined;
-      update({ name: "current", message: "当前已是最新版本" });
-    }
-  } catch (error) {
-    update({ name: "message", message: `检查失败：${error instanceof Error ? error.message : String(error)}` });
-  } finally {
-    update({ name: "finished" });
-  }
+function windowsUpdateEvent(detail: { name: string; message?: string; version?: string }) {
+  const { name, message, version } = detail;
+  windowsUpdate = { ...windowsUpdate, ...(message === undefined ? {} : { message }), ...(version === undefined ? {} : { version }) };
+  if (name === "checking") windowsUpdate.checking = true;
+  if (name === "available" || name === "current") { windowsUpdate.available = name === "available"; windowsUpdate.checkedAt = Date.now(); }
+  if (name === "current") windowsUpdate.version = undefined;
+  if (name === "installing") windowsUpdate.installing = true;
+  if (name === "finished") { windowsUpdate.checking = false; windowsUpdate.installing = false; }
+  send("linkshell-desktop-update", detail);
 }
 
+async function checkWindowsUpdate() {
+  if (windowsUpdate.checking || windowsUpdate.installing) return;
+  windowsUpdateEvent({ name: "checking", message: "正在查找 Windows 版本…" });
+  try {
+    const release = await checkWindowsRelease((url, init) => net.fetch(url, init), settings.get("updateChannel") === "beta");
+    windowsInstaller = release && compareVersions(release.version, app.getVersion()) > 0 ? release : undefined;
+    if (windowsInstaller) windowsUpdateEvent({ name: "available", version: windowsInstaller.version, message: `有新版本 ${windowsInstaller.version}，可在这里下载并安装` });
+    else windowsUpdateEvent({ name: "current", message: release ? "当前已是最新版本" : "尚无可自动安装的 Windows 发布包" });
+  } catch (error) {
+    windowsUpdateEvent({ name: "message", message: `检查失败：${error instanceof Error ? error.message : String(error)}` });
+  } finally { windowsUpdateEvent({ name: "finished" }); }
+}
+
+/** The installer acknowledges its window and mutex before this app releases its workspace. */
+async function launchWindowsInstaller(download: DownloadedInstaller): Promise<void> {
+  if (!runtime.folder) throw new Error("当前不是 Windows 独立安装");
+  if (windowsInstallerChild?.pid && windowsInstallerChild.exitCode === null) throw new Error("安装程序仍在运行，请先回到安装窗口继续或关闭它");
+  const { readFile, rm } = await import("node:fs/promises");
+  const ready = join(download.directory, "ready");
+  // The installer's working directory is the download cache; resolve a relative home before crossing processes.
+  const home = resolve(runtime.home);
+  await rm(ready, { force: true });
+  const child = spawn(download.path, ["--update", "--wait-pid", String(process.pid), "--target", runtime.folder, "--home", home, "--ready", ready], {
+    detached: true, stdio: "ignore", cwd: download.directory, env: { ...process.env, LINKSHELL_HOME: home },
+  });
+  windowsInstallerChild = child;
+  let failed: Error | undefined;
+  const onError = (error: Error) => { failed = error; };
+  child.on("error", onError);
+  try {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      if (failed) throw failed;
+      if (child.exitCode !== null) throw new Error("安装程序已退出，请重试更新");
+      const acknowledged = Number(await readFile(ready, "utf8").catch(() => ""));
+      if (child.pid && acknowledged === child.pid) { child.unref(); return; }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("安装程序未能就绪，LinkShell 保持运行；请关闭安装窗口后重试");
+  } finally { child.removeListener("error", onError); }
+}
+
+/** Downloads stay inside the app and are verified before the existing installer transaction runs. */
 function downloadWindowsUpdate() {
+  if (!WINDOWS || !runtime.folder) throw new Error("当前不是 Windows 独立安装");
   if (!windowsInstaller) throw new Error("请先检查更新");
-  void shell.openExternal(windowsInstaller);
-  send("linkshell-desktop-update", { name: "message", message: "已在浏览器中下载安装包；下载完成后从托盘退出 LinkShell，再运行安装包" });
-  return {};
+  if (windowsInstallerChild?.pid && windowsInstallerChild.exitCode === null) throw new Error("安装程序仍在运行，请先回到安装窗口继续或关闭它");
+  if (windowsUpdate.checking || windowsUpdate.installing) return { started: false };
+  const release = windowsInstaller;
+  windowsUpdateEvent({ name: "installing", message: "正在下载安装包…" });
+  void (async () => {
+    try {
+      if (windowsDownloaded?.version !== release.version) {
+        if (windowsDownloaded) await import("node:fs/promises").then(({ rm }) => rm(windowsDownloaded!.directory, { recursive: true, force: true }));
+        windowsDownloaded = undefined;
+        windowsDownloaded = await downloadWindowsInstaller(release, windowsUpdateCache(), (url, init) => net.fetch(url, init), (received, total) => {
+          windowsUpdateEvent({ name: "message", message: `正在下载安装包… ${Math.floor(received / total * 100)}%（${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB）` });
+        });
+      }
+      windowsUpdateEvent({ name: "message", message: "下载和校验已完成，等待确认重启安装" });
+      showWindow();
+      const options = {
+        type: "question" as const, message: `重启并安装 LinkShell ${release.version}？`,
+        detail: "将自动更新 App、内置 CLI 和 Host，并重新打开 LinkShell。后台服务会短暂重启，正在执行的任务、终端和屏幕连接可能中断。账号、配对和会话历史会保留。",
+        buttons: ["稍后安装", "安装并重启"], defaultId: 1, cancelId: 0,
+      };
+      const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+      if (response !== 1 || !(await flushOrConfirm("仍然安装并重启"))) {
+        windowsUpdateEvent({ name: "message", message: "安装包已下载，可稍后继续安装" });
+        return;
+      }
+      // A postponed download is checked again: never execute a changed file from the cache.
+      await verifyInstaller(windowsDownloaded);
+      windowsUpdateEvent({ name: "message", message: "正在启动安装程序…" });
+      await launchWindowsInstaller(windowsDownloaded);
+      rememberBounds();
+      await saveSettings();
+      quitConfirmed = true;
+      quitting = true;
+      server.stop();
+      menuBar?.stop();
+      app.quit();
+    } catch (error) {
+      // Failed downloads are removed by the downloader; a changed cached file must be fetched again.
+      if (windowsDownloaded && (!windowsInstallerChild?.pid || windowsInstallerChild.exitCode !== null)) {
+        const failed = windowsDownloaded;
+        windowsDownloaded = undefined;
+        await import("node:fs/promises").then(({ rm }) => rm(failed.directory, { recursive: true, force: true })).catch(() => undefined);
+      }
+      windowsUpdateEvent({ name: "message", message: `更新未完成：${error instanceof Error ? error.message : String(error)}。可点击下载并更新重试。` });
+    } finally { windowsUpdateEvent({ name: "finished" }); }
+  })();
+  // Native progress events carry long downloads; the renderer's RPC must not wait for the transfer.
+  return { started: true };
 }
 
 let lastUpdateCheck = 0;
@@ -602,6 +682,8 @@ function checkUpdates() {
 
 function startUpdater() {
   if (WINDOWS && runtime.standalone) {
+    void cleanWindowsUpdateDownloads(windowsUpdateCache());
+    setTimeout(() => void cleanWindowsUpdateDownloads(windowsUpdateCache()), 60_000).unref();
     setInterval(() => {
       if (settings.get("autoCheck") !== false && Date.now() - lastUpdateCheck > 6 * 3600_000) checkUpdates();
     }, 60_000).unref();

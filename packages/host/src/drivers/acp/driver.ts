@@ -107,6 +107,7 @@ export interface AcpSessionState {
   reportedState?: SessionState;
   commands?: Extract<SessionUpdate, { sessionUpdate: "available_commands_update" }>;
   config: SourcedConfigOption[];
+  modeRevision: number;
   /** Set while a session/load replays history. */
   replaying?: SessionUpdate[];
   turnActive: boolean;
@@ -523,11 +524,16 @@ export class AcpDriver implements AgentDriver {
   /** Keeps the model list a session was just given. `fresh`: a new session, so its model is the agent's default. */
   protected rememberModels(config: SessionConfigOption[], fresh: boolean): void {
     const option = modelOption(config);
-    if (!option) return;
-    const models = option.values.map(({ value, name, description, group }) => ({ value, name, ...(description ? { description } : {}), ...(group ? { group } : {}) }));
-    const previous = this.knownModels()?.current;
-    const current = fresh ? option.current : models.some((model) => model.value === previous) ? previous : undefined;
-    const next: MethodResult<"agents.models"> = { models, ...(current ? { current } : {}) };
+    const known = this.knownModels();
+    const models = option?.values.map(({ value, name, description, group }) => ({ value, name, ...(description ? { description } : {}), ...(group ? { group } : {}) })) ?? known?.models ?? [];
+    const previous = known?.current;
+    const current = fresh && option ? option.current : models.some((model) => model.value === previous) ? previous : undefined;
+    // Only a newly created session tells us defaults. Resuming or changing an existing session
+    // must not make its elevated permissions the default of the next one.
+    const initialConfig = fresh
+      ? config.filter((entry) => entry.category === "mode" || entry.category === "effort").map(({ id, name, description, type, category, current: selected, values }) => ({ id, name, description, type, category, current: selected, values }))
+      : known?.config;
+    const next: MethodResult<"agents.models"> = { models, ...(current ? { current } : {}), ...(initialConfig?.length ? { config: initialConfig } : {}) };
     const text = JSON.stringify(next);
     if (this.reportedModels && JSON.stringify(this.reportedModels) === text) return;
     this.reportedModels = next;
@@ -704,7 +710,13 @@ export class AcpDriver implements AgentDriver {
     if (!option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown value ${value}`);
     // Modes and legacy model lists predate configOptions and have their own methods.
     if (option.source === "modes") {
+      const revision = state.modeRevision;
       await this.rpc("session/set_mode", { sessionId: nativeId, modeId: value });
+      // An agent may acknowledge the choice but report a supported fallback,
+      // including the mode that was already selected before this request.
+      if (state.modeRevision === revision) option.current = value;
+      this.emitConfig(nativeId, state);
+      return;
     } else if (option.source === "models") {
       await this.rpc("session/set_model", { sessionId: nativeId, modelId: value });
     } else {
@@ -887,6 +899,7 @@ export class AcpDriver implements AgentDriver {
         messageAliases: new Map(JSON.parse(this.host?.state(this.id, nativeId).get("acp-message-aliases") ?? "[]") as [string, string][]),
         deferredUserUpdates: [],
         config: [],
+        modeRevision: 0,
         turnActive: false,
         inflight: 0,
         queue: [],
@@ -1037,7 +1050,7 @@ export class AcpDriver implements AgentDriver {
     if (state?.turnActive && (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")) state.toolCalls.add(update.toolCallId);
     if (update.sessionUpdate === "current_mode_update" && state) {
       const mode = state.config.find((option) => option.category === "mode");
-      if (mode) mode.current = update.currentModeId;
+      if (mode) { mode.current = update.currentModeId; state.modeRevision += 1; }
     }
     if (update.sessionUpdate === "ls_config" && state) {
       state.config = this.mergeConfig(state, update.options.map((option) => ({ ...option, source: "configOptions" as const })));

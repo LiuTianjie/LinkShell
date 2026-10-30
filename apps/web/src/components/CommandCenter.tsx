@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
+import { groupProjects } from "@linkshell/client-core";
 import {
   Archive,
-  Folder,
+  Layers3,
   GitBranch,
   Globe,
   Keyboard,
@@ -45,7 +46,7 @@ type Appearance = "system" | "light" | "dark";
 
 const places = [
   { id: "home", title: "会话", icon: MessageSquare },
-  { id: "projects", title: "项目", icon: Folder },
+  { id: "projects", title: "项目", icon: Layers3 },
   { id: "screen", title: "远程桌面", icon: Monitor },
   { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
@@ -192,7 +193,8 @@ function SessionResults({
   newSession: (cwd: string) => void;
 }) {
   const sessions = useStore(store, (state) => state.sessions);
-  const projects = useStore(store, (state) => state.projects);
+  const projectSummaries = useStore(store, (state) => state.projects);
+  const projects = useMemo(() => groupProjects(projectSummaries, Object.values(sessions)), [projectSummaries, sessions]);
   const sorted = useMemo(
     () => Object.values(sessions)
       .filter((session) => !session.archived)
@@ -223,14 +225,14 @@ function SessionResults({
         <CommandGroup heading="项目">
           {projects.slice(0, 40).map((project) => (
             <CommandItem
-              key={project.cwd}
+              key={project.key}
               value={`项目 ${project.name} ${project.cwd}`}
-              onSelect={() => newSession(project.cwd)}
+              onSelect={() => project.generated ? choose("projects") : newSession(project.cwd)}
             >
-              <Folder />
+              {project.generated ? <MessageSquare /> : <Layers3 />}
               <span className="command-session-title">{project.name}</span>
               <span className="command-session-project">{project.cwd}</span>
-              <CommandShortcut>新建会话</CommandShortcut>
+              <CommandShortcut>{project.generated ? "自动创建 · 查看会话" : "新建会话"}</CommandShortcut>
             </CommandItem>
           ))}
         </CommandGroup>

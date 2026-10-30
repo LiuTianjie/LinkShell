@@ -536,6 +536,35 @@ describe("generic ACP driver (fake agent)", () => {
     });
   });
 
+  it.each(["default", "plan"])("keeps the agent's legacy mode fallback to %s after the request is acknowledged", async (fallback) => {
+    const t = await setup({ FAKE_ACP_MODE_FALLBACK: fallback });
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.setConfig", { sessionId: session.id, optionId: "mode", value: "yolo" });
+    expect(JSON.parse(readFileSync(t.storePath, "utf8"))[session.nativeId].mode).toBe(fallback);
+    expect(t.of(session.id).filter((event) => event.update.sessionUpdate === "current_mode_update").at(-1)?.update).toMatchObject({ currentModeId: fallback });
+    expect(t.of(session.id).filter((event) => event.update.sessionUpdate === "ls_config").at(-1)?.update).toMatchObject({
+      options: expect.arrayContaining([expect.objectContaining({ id: "mode", current: fallback })]),
+    });
+    await t.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "fallback", content: prompt("RUN it") });
+    const request = await waitFor(() => t.of(session.id).find((event) => event.update.sessionUpdate === "ls_permission"));
+    expect((request.update as { detail?: string }).detail).toBe("echo hi");
+    await t.client.call("sessions.cancel", { sessionId: session.id });
+    await waitFor(() => t.ended(session.id).length === 1);
+  });
+
+  it("accepts a legacy mode acknowledgment when the agent sends no mode notification", async () => {
+    const t = await setup({ FAKE_ACP_MODE_NOTIFICATION: "0" });
+    const { session } = await t.client.call("sessions.create", { agent: "fake", cwd: "/w" });
+    await t.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await t.client.call("sessions.setConfig", { sessionId: session.id, optionId: "mode", value: "plan" });
+    expect(JSON.parse(readFileSync(t.storePath, "utf8"))[session.nativeId].mode).toBe("plan");
+    expect(t.of(session.id).some((event) => event.update.sessionUpdate === "current_mode_update")).toBe(false);
+    expect(t.of(session.id).filter((event) => event.update.sessionUpdate === "ls_config").at(-1)?.update).toMatchObject({
+      options: expect.arrayContaining([expect.objectContaining({ id: "mode", current: "plan" })]),
+    });
+  });
+
   it("discovers existing sessions, loads their history once, and doesn't duplicate it after an agent restart", async () => {
     const store = {
       old: {

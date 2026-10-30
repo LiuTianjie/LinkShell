@@ -1,6 +1,7 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { Pencil } from "lucide-react";
+import type { MachineInfo } from "@linkshell/wire";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,7 +21,7 @@ import {
   FieldDescription,
   FieldError,
 } from "@/components/ui/field";
-import type { Computer } from "./engine";
+import { engine, type Computer, type Connection } from "./engine";
 import {
   COMPUTER_NAME_LIMIT,
   computerIdentity,
@@ -39,19 +40,59 @@ export function ComputerName({
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string>();
+  const [machine, setMachine] = useState<MachineInfo>();
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const connection = useRef<Connection | undefined>(undefined);
   const id = useId();
-  function save(name: string) {
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    let release: (() => void) | undefined;
+    setLoading(true);
+    setSaving(false);
+    setError(undefined);
+    setMachine(undefined);
     try {
-      computerNames.rename(computer, name);
-      setOpen(false);
+      const retained = engine.retainComputer(computer, { metadataOnly: true });
+      release = retained.release;
+      connection.current = retained.connection;
+      void retained.connection.link.call("machine.info", {}, 15_000).then((info) => {
+        if (cancelled) return;
+        setMachine(info);
+        setValue(info.naming?.configured ? info.naming.customName ?? "" : names[computer.key] ?? "");
+        if (!info.naming) setError("请先更新这台电脑上的 LinkShell，更新后即可在所有端同步名称。");
+      }).catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      }).finally(() => { if (!cancelled) setLoading(false); });
     } catch (reason) {
+      setLoading(false);
       setError(reason instanceof Error ? reason.message : String(reason));
+    }
+    return () => { cancelled = true; connection.current = undefined; release?.(); };
+    // Opening takes a snapshot of the previous alias; typing must not reload the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, computer.key]);
+  async function save(name: string) {
+    const retained = connection.current;
+    if (!retained || !machine?.naming || saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      const updated = await computerNames.rename(computer, name, retained.link);
+      retained.store.setState({ machine: updated });
+      if (connection.current === retained) setOpen(false);
+    } catch (reason) {
+      if (connection.current === retained) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (connection.current === retained) setSaving(false);
     }
   }
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        if (saving) return;
         setOpen(next);
         if (next) {
           setValue(names[computer.key] ?? "");
@@ -75,13 +116,13 @@ export function ComputerName({
         <DialogHeader>
           <DialogTitle>给电脑命名</DialogTitle>
           <DialogDescription>
-            起一个容易认出的名字，仅保存在当前浏览器中。
+            名称保存在这台电脑上，会同步到已连接的手机和电脑端。
           </DialogDescription>
         </DialogHeader>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            save(value);
+            void save(value);
           }}
         >
           <FieldGroup>
@@ -90,6 +131,7 @@ export function ComputerName({
               <Input
                 id={id}
                 value={value}
+                disabled={loading || saving || !machine?.naming}
                 maxLength={COMPUTER_NAME_LIMIT}
                 placeholder="例如：办公室 Mac mini"
                 autoComplete="off"
@@ -101,23 +143,23 @@ export function ComputerName({
                 }}
               />
               <FieldDescription id={`${id}-hint`} className="break-all">
-                原名：{computer.machine.name} · {computerIdentity(computer)}
+                {loading ? "正在读取电脑名称…" : machine ? `原名：${machine.naming?.defaultName ?? machine.hostname}` : "连接电脑后可读取原名"} · {computerIdentity(computer)}
                 。留空将恢复原名。
               </FieldDescription>
               {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
             </Field>
             <DialogFooter>
-              {names[computer.key] && (
-                <Button type="button" variant="ghost" onClick={() => save("")}>
+              {(machine?.naming?.customName || names[computer.key]) && (
+                <Button type="button" variant="ghost" disabled={loading || saving || !machine?.naming} onClick={() => void save("")}>
                   恢复原名
                 </Button>
               )}
               <DialogClose asChild>
-                <Button type="button" variant="outline">
+                <Button type="button" variant="outline" disabled={saving}>
                   取消
                 </Button>
               </DialogClose>
-              <Button type="submit">保存名称</Button>
+              <Button type="submit" disabled={loading || saving || !machine?.naming}>{saving ? "正在同步…" : "保存名称"}</Button>
             </DialogFooter>
           </FieldGroup>
         </form>

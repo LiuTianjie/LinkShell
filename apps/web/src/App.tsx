@@ -38,7 +38,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
 import { NewSessionPage } from "./live/NewSessionPage";
-import { modelName, modelToCreate, useAgentModels } from "./live/agent-models";
+import { configToCreate, creationOptions, modelName, modelToCreate, useAgentModels } from "./live/agent-models";
+import { creationOptionLabel } from "./live/NewSessionConfig";
+import { valueName } from "./live/ComposerControls";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
@@ -83,7 +85,8 @@ import { readLocal, saveLocal } from "./live/storage";
 import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
-import { Projects } from "./live/Projects";
+import { AllProjects, Projects } from "./live/Projects";
+import { projectScope } from "./live/project-overview";
 import { isDesktop, isElectronDesktop, openDesktopManagement, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./live/desktop";
 import { Management } from "./live/Management";
 import { isManageView, managePage, manageView } from "./live/management-model";
@@ -99,6 +102,7 @@ function viewable(view: string): string {
 }
 function LiveApp() {
   const workspaceVisible = useDesktopVisibility();
+  const projectsScope = useStore(projectScope, (state) => state.value);
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
@@ -149,6 +153,14 @@ function LiveApp() {
       else if (view !== "screen") commitView("home");
     });
   }
+  function openComputerView(computer: Computer, id: string) {
+    void guard(() => {
+      const selected = engine.state.getState().connection?.computer;
+      const target = engine.computerForKey(computer.key) ?? computer;
+      if (selected?.key !== target.key) engine.select(target);
+      commitView(id);
+    });
+  }
   const openConnect = () => void guard(() => setConnect(true));
   return (
     <ConsoleShell
@@ -156,6 +168,7 @@ function LiveApp() {
       navigate={navigate}
       connect={openConnect}
       selectComputer={selectComputer}
+      openComputerView={openComputerView}
     >
       {state.error && (
         <div className="connection-banner" role="alert">
@@ -205,6 +218,8 @@ function LiveApp() {
             在此标签页继续
           </Button>
         </div>
+      ) : view === "projects" && projectsScope === "all" ? (
+        <div className="overview live-overview"><AllProjects openComputerView={openComputerView} /></div>
       ) : view === "screen" ? (
         <Screens
           live={workspaceVisible}
@@ -222,6 +237,7 @@ function LiveApp() {
             navigate={navigate}
             connect={openConnect}
             selectComputer={selectComputer}
+            openComputerView={openComputerView}
           />
         </Runtime>
       ) : (
@@ -277,11 +293,13 @@ function Workspace({
   navigate,
   connect,
   selectComputer,
+  openComputerView,
 }: {
   view: string;
   navigate: (id: string) => void;
   connect: () => void;
   selectComputer: (computer: Computer) => void;
+  openComputerView: (computer: Computer, view: string) => void;
 }) {
   const state = useClient((state) => state);
   useNewSessionTarget();
@@ -348,6 +366,7 @@ function Workspace({
             <Projects
               create={(cwd) => setCreate(cwd ?? null)}
               navigate={navigate}
+              openComputerView={openComputerView}
             />
           )}
           {view === "computers" && (
@@ -851,7 +870,9 @@ function NewSession({
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
   // Picked per agent: another agent starts from its own default.
-  const [picked, setPicked] = useState<{ agent: string; model: string }>();
+  const [picked, setPicked] = useState<{ store: typeof store; agent: string; model: string }>();
+  const [configPick, setConfigPick] = useState<{ store: typeof store; key: string; values: Record<string, string> }>();
+  const [modelsRevision, setModelsRevision] = useState(0);
   const [gitPath, setGitPath] = useState(cwd);
   useEffect(() => {
     setWorktree(false);
@@ -871,11 +892,17 @@ function NewSession({
     selectedAgent.auth?.state !== "missing" &&
     selectedAgent.tier !== "terminal";
   // Asked about the directory once typing pauses, like git.
-  const models = useAgentModels(agent, gitPath, online && usable);
+  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : undefined;
+  const models = useAgentModels(agent, gitPath, online && usable, pickedModel, modelsRevision);
   const model = modelToCreate(
     models,
-    picked?.agent === agent ? picked.model : undefined,
+    pickedModel,
   );
+  const configKey = JSON.stringify([agent, cwd.trim()]);
+  const pickedConfig = configPick?.store === store && configPick.key === configKey ? configPick.values : {};
+  const options = creationOptions(models?.config, pickedConfig);
+  const unavailableModel = pickedModel && models && !models.error && !models.models.some((entry) => entry.value === pickedModel);
+  const ready = !job.busy && online && usable && !!cwd.trim() && gitPath === cwd && !!models && !models.error;
 
   return (
     <Modal
@@ -910,7 +937,7 @@ function NewSession({
           className="new-session-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (job.busy || !online || !usable || !cwd.trim()) return;
+            if (!ready) return;
             void job.run(async () =>
               created(
                 await actions.createSession({
@@ -919,6 +946,7 @@ function NewSession({
                   worktree: worktree && !!git.value && gitPath === cwd,
                   // Untouched, the agent picks as it always does: nothing is pinned.
                   model,
+                  config: configToCreate(models?.config, pickedConfig),
                   prompt: prompt.trim()
                     ? [{ type: "text", text: prompt.trim() }]
                     : undefined,
@@ -985,7 +1013,7 @@ function NewSession({
                   placeholder="默认模型"
                   value={model ?? models.current ?? ""}
                   disabled={job.busy}
-                  onValueChange={(value) => setPicked({ agent, model: value })}
+                  onValueChange={(value) => setPicked({ store, agent, model: value })}
                   options={models.models.map((entry) => {
                     const name = modelName(entry);
                     return {
@@ -997,6 +1025,34 @@ function NewSession({
                     };
                   })}
                 />
+              </Field>
+            )}
+            {options.map((option) => (
+              <Field key={option.id} data-disabled={job.busy}>
+                <FieldLabel htmlFor={`new-session-config-${option.id}`}>{creationOptionLabel(option)}</FieldLabel>
+                <Choice
+                  id={`new-session-config-${option.id}`}
+                  label={creationOptionLabel(option)}
+                  value={option.current}
+                  disabled={job.busy || gitPath !== cwd}
+                  onValueChange={(value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [option.id]: value } })}
+                  options={option.values.map((entry) => ({ value: entry.value, label: valueName(entry.name) }))}
+                />
+                {option.values.find((entry) => entry.value === option.current)?.description && <FieldDescription>{option.values.find((entry) => entry.value === option.current)?.description}</FieldDescription>}
+              </Field>
+            ))}
+            {online && usable && (!models || gitPath !== cwd) && <p className="muted" role="status">正在读取模型与设置…</p>}
+            {unavailableModel && <p className="muted" role="status">此前选择的模型已不可用，将使用 Agent 的默认模型；也可以重新选择。</p>}
+            {models?.error && (
+              <Field>
+                <ErrorNotice error={`模型与设置加载失败：${models.error}`} />
+                <Button type="button" variant="outline" size="sm" className="self-start" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>重新读取模型与设置</Button>
+              </Field>
+            )}
+            {models && !models.error && !models.models.length && (
+              <Field>
+                <FieldDescription>Agent 尚未提供可预选的模型，可以使用默认设置开始。</FieldDescription>
+                <Button type="button" variant="ghost" size="sm" className="self-start" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>重新读取模型与设置</Button>
               </Field>
             )}
             <Field data-disabled={job.busy}>
@@ -1061,7 +1117,7 @@ function NewSession({
             >
               取消
             </Button>
-            <Button disabled={job.busy || !online || !usable || !cwd.trim()}>
+            <Button disabled={!ready}>
               {job.busy && (
                 <LoaderCircle
                   data-icon="inline-start"

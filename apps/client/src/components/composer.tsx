@@ -45,6 +45,8 @@ export interface ComposerProps {
   agent: string;
   agentInfo?: AgentInfo;
   online: boolean;
+  /** Connection presentation only; sending and approval still require online. */
+  connecting?: boolean;
   turnActive: boolean;
   driver?: SessionDriver;
   permission?: PendingPermission;
@@ -81,7 +83,9 @@ type Blocked = { title: string; detail?: string } | null;
 
 function blockedReason(props: ComposerProps): Blocked {
   const name = agentLook(props.agent).short;
-  if (!props.online) return { title: "电脑离线", detail: "内容还能查看，电脑连上后才能继续" };
+  if (!props.online) return props.connecting
+    ? { title: "正在连接电脑…", detail: "连接恢复后即可继续" }
+    : { title: "电脑离线", detail: "内容还能查看，电脑连上后才能继续" };
   const info = props.agentInfo;
   if (info && !info.installed) return { title: `这台电脑上没有 ${name}`, detail: info.problem };
   if (info?.auth?.state === "missing") return { title: `${name} 还没登录`, detail: info.auth.hint };
@@ -548,7 +552,7 @@ export function Composer(props: ComposerProps) {
                   transform: [{ scale: pressed ? 0.94 : 1 }],
                 })}
               >
-                <Icon sf="mic.fill" md="mic" size={16} color={colors.label} />
+                <Icon sf="mic.fill" md="mic" size={22} color={colors.label} />
               </Pressable>
               {/* Stop stays within reach for as long as a turn runs, whoever drives it. */}
               {turnActive ? <RoundButton label="停止" onPress={() => void stop()} busy={stopping} tone="stop" /> : null}
@@ -638,9 +642,9 @@ export function RoundButton({
       {busy ? (
         <ActivityIndicator size="small" color={foreground} />
       ) : tone === "stop" ? (
-        <Icon sf="stop.fill" md="stop" size={12} color={foreground} />
+        <View style={{ width: 18, height: 18, borderRadius: 4, backgroundColor: foreground }} />
       ) : (
-        <Icon sf="arrow.up" md="arrow_upward" size={15} color={foreground} weight="bold" />
+        <Icon sf="arrow.up" md="arrow_upward" size={22} color={foreground} weight="bold" />
       )}
       {wide ? <Text style={[type.footnote, { color: foreground, fontWeight: "700" }]}>{label}</Text> : null}
     </Pressable>
