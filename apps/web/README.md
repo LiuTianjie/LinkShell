@@ -28,7 +28,7 @@ opening a tunnel.
 
 ## Functions
 
-- Official email/password and GitHub/Google sign-in, automatic account token refresh, account computer discovery and sign-out. OAuth redirect origins must be allowed in the existing Supabase project.
+- Official email/password and GitHub/Google sign-in, automatic account token refresh, account computer discovery and sign-out. OAuth opens a separate window and returns to the initiating workspace with PKCE. Allow the exact `https://gateway.itool.tech/?linkshell-auth-callback=1` URL in Supabase (or the same path/query on your account-enabled workspace origin); keep the existing iTool, CLI and mobile callbacks. Local `127.0.0.1` builds use the existing `/linkshell/callback` loopback entry.
 - Official or custom gateway pairing by code, pasted link, QR image or camera; persisted browser identity and paired computers; switching computers and revoking devices.
 - Session search/filter, archived sessions, projects, new sessions and worktrees, history pagination, streaming messages, draft persistence, attachments, queue editing/reordering, interrupt, steer, rename, archive, delete, fork, and supported handoff takeover/release.
 - Dynamic slash commands and Skills from the shared mobile command catalog and Host reports. Command palette and inline suggestions support keyboard navigation. MCP and connector commands go through the agent; their output uses the same rich timeline. Available commands and settings depend on the connected agent's capabilities.

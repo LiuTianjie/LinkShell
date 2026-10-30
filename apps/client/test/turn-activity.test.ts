@@ -29,6 +29,9 @@ describe("conversation activity feedback", () => {
   });
 
   it("does not present cached execution as current while reconnect is restoring history", () => {
+    const running = { ...input, session: { ...session, state: "running" as const } };
+    expect(turnActivity({ ...running, online: false, connecting: true })).toMatchObject({ label: "正在恢复连接…", animated: true, tone: "muted" });
+    expect(turnActivity({ ...running, online: false, connecting: false })).toMatchObject({ label: "连接已断开，等待重连…", animated: false });
     expect(turnActivity({ ...input, ready: false, session: { ...session, state: "running" } })?.label).toBe("正在同步会话…");
   });
 });

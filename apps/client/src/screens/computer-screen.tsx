@@ -14,7 +14,7 @@ import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
 import { useAccount } from "@/lib/account";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
-import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
+import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
 import { relativeTime } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -379,7 +379,7 @@ export function ComputerScreen() {
   const columnWidth = wide ? (availableWidth - 20) / 2 : "100%";
   const tabInset = useFloatingTabInset();
   const machine = useClient((state) => state.machine);
-  const status = useClient((state) => state.status);
+  const status = useConnectionStatus();
   const detail = useClient((state) => state.statusDetail);
   const { refresh } = useActions();
   const { url, computer } = useConnection();

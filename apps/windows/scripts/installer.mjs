@@ -22,7 +22,7 @@ export function buildInstaller(archive, output, { main = 'LinkShell.Windows.Inst
     `/resource:${archive},payload.zip`, `/resource:${versionFile},installer-version.txt`,
     `/resource:${join(app, 'src/DesktopTheme.xaml')},DesktopTheme.xaml`, `/resource:${join(app, 'build/brand.png')},brand.png`,
     '/r:System.Core.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll',
-    join(app, 'src/Installer.cs'), join(app, 'src/InstallerEngine.cs'), ...sources];
+    join(app, 'src/Installer.cs'), join(app, 'src/InstallerEngine.cs'), join(app, 'src/InstallerUpdate.cs'), ...sources];
   const result = spawnSync(join(framework, 'csc.exe'), args, { windowsHide: true, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Installer compiler failed (${result.status}).`);

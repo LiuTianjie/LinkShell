@@ -1,4 +1,4 @@
-import type { SessionConfigOption, SessionSummary } from "@linkshell/wire";
+import { displayModelName, type SessionConfigOption, type SessionSummary } from "@linkshell/wire";
 import { Brain, ChevronDown, Cpu, FolderGit2, Settings2, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ const VALUE_NAMES: Record<string, string> = {
   "max": "最高",
 };
 export function valueName(name: string): string {
-  return VALUE_NAMES[name.trim().toLowerCase()] ?? name;
+  return VALUE_NAMES[name.trim().toLowerCase()] ?? displayModelName(name);
 }
 
 export function ComposerConfig({

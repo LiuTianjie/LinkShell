@@ -72,7 +72,7 @@ function http(origin: string, path: string, headers: Record<string, string>) {
   });
 }
 
-async function fakeHost() {
+async function fakeHost(relayId?: string, naming?: { defaultName: string; customName: string; configured: boolean }) {
   const server = createServer();
   const peers = new WebSocketServer({ server });
   const received: { method: string; id?: number | string }[] = [];
@@ -80,7 +80,9 @@ async function fakeHost() {
     const message = JSON.parse(raw.toString());
     received.push(message);
     const result = message.method === "machine.info"
-      ? { machineId: "this-mac", hostname: "Studio.local", platform: "darwin", hostVersion: "1.0.0", agents: [] }
+      ? { machineId: "this-mac", hostname: naming?.customName ?? "Studio.local", platform: "darwin", hostVersion: "1.0.0", agents: [], ...(naming ? { naming } : {}) }
+      : message.method === "gateway.status"
+        ? { status: relayId ? "online" : "off", devices: [], ...(relayId ? { machine: { id: relayId, name: "Studio" } } : {}) }
       : { sessions: [] };
     client.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   }));
@@ -304,6 +306,27 @@ describe("native desktop workspace service", () => {
     await server.stop();
     await closed;
     await vi.waitFor(() => expect(host.peers.clients.size).toBe(0));
+  });
+
+  it("discovers the host's separate relay identity without replacing its local machine UUID", async () => {
+    await fakeHost("signing-identity-id");
+    const server = await workspace();
+    const result = await (await fetch(`${server.origin}/desktop/local`, { headers: server.headers })).json();
+    expect(result.computer).toMatchObject({
+      key: "desktop:local", relayId: "signing-identity-id",
+      machine: { id: "this-mac", signKey: "", boxKey: "" },
+    });
+    expect(result.computer).not.toHaveProperty("signSecret");
+  });
+
+  it("preserves an explicit shared name and its authority through local desktop discovery", async () => {
+    await fakeHost("signing-identity-id", { defaultName: "Studio", customName: "studio.local", configured: true });
+    const server = await workspace();
+    const result = await (await fetch(`${server.origin}/desktop/local`, { headers: server.headers })).json();
+    expect(result.computer).toMatchObject({
+      key: "desktop:local", relayId: "signing-identity-id",
+      machine: { id: "this-mac", name: "studio.local", namingConfigured: true },
+    });
   });
 
   it("rejects unauthorized WebSocket upgrades and explains an offline local host", async () => {

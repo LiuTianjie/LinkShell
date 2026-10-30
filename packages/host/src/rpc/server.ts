@@ -54,6 +54,7 @@ export interface HostRpcServerOptions {
   hub: SessionHub;
   terminals: TerminalManager;
   machineInfo: () => MachineInfo;
+  renameMachine?: (name: string) => MachineInfo;
   /** Unix socket for local clients (terminal shims, CLI). */
   socketPath: string;
   /** Optional loopback TCP port, for local development clients. */
@@ -155,9 +156,15 @@ export class HostRpcServer {
         void hub.refreshAuthIfStale();
         return options.machineInfo();
       },
+      "machine.rename": (params: P<"machine.rename">) => {
+        if (!options.renameMachine) throw RpcError.app("not_supported", "请更新电脑端 LinkShell 后同步名称");
+        const info = options.renameMachine(params.name);
+        this.broadcast("machine.changed", info);
+        return info;
+      },
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
-      "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd),
+      "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd, params.model),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
       "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),
       "git.info": async (params: P<"git.info">) => ({ git: await hub.gitInfo(params.path) }),
@@ -170,13 +177,20 @@ export class HostRpcServer {
         const previous = context.subscriptions.get(params.sessionId);
         if (previous) hub.unsubscribe(params.sessionId, previous);
         const slim = { lazyImages: params.lazyImages };
+        const current = () => context.subscriptions.get(params.sessionId) === subscriber;
         const subscriber: Subscriber = {
-          notice: (notice) => context.peer.notify("session.notice", { sessionId: params.sessionId, notice }),
-          event: (event) => context.peer.notify("session.event", slimEvent(event, slim)),
-          window: (startSeq) => context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }),
+          notice: (notice) => { if (current()) context.peer.notify("session.notice", { sessionId: params.sessionId, notice }); },
+          event: (event) => { if (current()) context.peer.notify("session.event", slimEvent(event, slim)); },
+          window: (startSeq) => { if (current()) context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }); },
         };
         context.subscriptions.set(params.sessionId, subscriber);
-        return hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
+        try {
+          return await hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
+        } finally {
+          // Native attachment may finish after the reader leaves, reconnects or reopens.
+          // In that case it has just registered a subscriber that no connection owns.
+          if (!current()) hub.unsubscribe(params.sessionId, subscriber);
+        }
       },
       "sessions.history": (params: P<"sessions.history">) => {
         const page = hub.history(params.sessionId, params.beforeSeq);

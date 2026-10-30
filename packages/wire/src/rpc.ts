@@ -20,7 +20,7 @@ import {
   questionAnswerSchema,
   pendingPermissionSchema,
 } from "./model.js";
-import { contentBlockSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
+import { contentBlockSchema, sessionConfigOptionSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
 import { sideChatSchema } from "./side.js";
 import { mcpMethods } from "./rpc-mcp.js";
 
@@ -135,6 +135,11 @@ const coreMethods = {
     params: empty,
     result: machineInfoSchema,
   },
+  "machine.rename": {
+    /** Empty restores the configured default; names never change peer identities. */
+    params: z.object({ name: z.string().trim().max(40) }),
+    result: machineInfoSchema,
+  },
   "projects.list": {
     params: z.object({ limit: z.number().int().positive().max(200).optional() }),
     result: z.object({ projects: z.array(projectSummarySchema) }),
@@ -167,11 +172,15 @@ const coreMethods = {
       agent: z.string().min(1),
       /** Where the session will work: an agent's project settings can choose another model. */
       cwd: z.string().optional(),
+      /** Preview settings supported by a selected model without changing the agent's default. */
+      model: z.string().optional(),
     }),
     result: z.object({
       /** As a session's model option lists them (`group`: the heading some agents put models under). */
       models: z.array(z.object({ value: z.string(), name: z.string(), description: z.string().optional(), group: z.string().optional() })),
       current: z.string().optional(),
+      /** Settings available before the first prompt; omitted by older hosts or agents without a template. */
+      config: z.array(sessionConfigOptionSchema).optional(),
     }),
   },
   "sessions.create": {
@@ -182,6 +191,8 @@ const coreMethods = {
       clientMessageId: z.string().optional(),
       /** One of `agents.models`' values; absent: the agent's own default. */
       model: z.string().optional(),
+      /** Explicit choices from agents.models.config, applied before the first prompt. */
+      config: z.record(z.string(), z.string()).optional(),
       /**
        * Start in a new git worktree of `cwd`'s repository (its own branch, from
        * the last commit) instead of in `cwd` itself. Refused with `not_a_repo`
@@ -741,6 +752,7 @@ export function isMethodName(name: string): name is MethodName {
 // ── Notifications (host → client) ────────────────────────────────────
 
 export const notifications = {
+  "machine.changed": machineInfoSchema,
   "agent.changed": z.object({ agent: agentInfoSchema }),
   "agent.interaction": z.object({ agent: z.string(), request: z.union([pendingPermissionSchema, z.object({ requestId: z.string(), resolved: z.literal(true) })]) }),
   "session.notice": z.object({ sessionId: z.string(), notice: sessionNoticeSchema }),

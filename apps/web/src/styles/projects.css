@@ -1,0 +1,40 @@
+/* Browser projects share the desktop hierarchy without its native toolbar chrome. */
+.console-main :is(.projects-page, .projects-overview) .page-header {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}
+.console-main :is(.projects-page, .projects-overview) .page-header-copy { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.console-main :is(.projects-page, .projects-overview) .page-header h1 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.console-main :is(.projects-page, .projects-overview) .page-header-detail { color: var(--secondaryLabel); font-size: 12px; white-space: nowrap; }
+.console-main :is(.projects-page, .projects-overview) .page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.console-main .projects-page .page-search { width: min(260px, 100%); }
+.console-main .projects-overview > .page-header { padding-bottom: 4px; }
+.console-main .projects-overview > .projects-page + .projects-page { padding-top: 24px; border-top: 1px solid var(--separator); }
+.console-main .project-list { display: flex; flex-direction: column; gap: 20px; }
+.console-main .project-group { min-width: 0; }
+.console-main .project-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 0 10px; }
+.console-main .project-icon { width: 18px; height: 18px; flex-shrink: 0; color: var(--secondaryLabel); }
+.console-main .project-copy { flex: 1; min-width: 0; }
+.console-main .project-copy h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; }
+.console-main .project-copy p { margin-top: 3px; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.console-main .project-meta { display: flex; align-items: center; gap: 12px; color: var(--secondaryLabel); font-size: 12px; white-space: nowrap; }
+.console-main .project-branch { display: inline-flex; align-items: center; gap: 4px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.console-main .project-branch svg { width: 13px; height: 13px; flex-shrink: 0; }
+.console-main .project-sessions { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--separator); border-radius: 8px; }
+.console-main .project-session { display: grid; grid-template-columns: 18px minmax(100px, 1fr) minmax(0, 1fr) auto auto; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px; text-align: left; }
+.console-main .project-session + .project-session { border-top: 1px solid var(--separator); }
+.console-main .project-session:hover, .console-main .project-more:hover { background: var(--fill); }
+.console-main .project-session:focus-visible, .console-main .project-more:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.console-main :is(.project-session-title, .project-session-detail) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-main .project-session-title { font-size: 13px; font-weight: 500; }
+.console-main :is(.project-session-detail, .project-session time, .project-empty) { color: var(--secondaryLabel); font-size: 12px; }
+.console-main .project-session time { white-space: nowrap; }
+.console-main .project-more { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border-top: 1px solid var(--separator); color: var(--secondaryLabel); font-size: 12px; }
+.console-main .project-more svg { width: 14px; height: 14px; }
+.console-main .project-more svg[data-open] { rotate: 180deg; }
+@media (max-width: 800px) {
+  .console-main .project-meta { display: none; }
+  .console-main .project-session { grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 8px; }
+  .console-main .project-session-detail { display: none; }
+  .console-main .projects-page .page-header-actions { width: 100%; }
+  .console-main .projects-page .page-search { flex: 1; width: auto; min-width: 120px; }
+}

@@ -7,7 +7,7 @@ import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Icon } from "@/components/icon";
 import { LiveDot } from "@/components/status";
-import { useClient, useConnection, useHasComputer } from "@/lib/client";
+import { useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { reconnectRelays, useComputers } from "@/lib/computers";
 import { normalizeHostUrl } from "@/lib/settings";
@@ -23,7 +23,7 @@ const LAN_FORM = __DEV__;
 export function ConnectScreen() {
   const insets = usePageInsets();
   const { url, computer, setUrl, link } = useConnection();
-  const status = useClient((state) => state.status);
+  const status = useConnectionStatus();
   const detail = useClient((state) => state.statusDetail);
   const machine = useClient((state) => state.machine);
   // Through a gateway: `url` is the gateway's, not an address to type in or save as a LAN computer.

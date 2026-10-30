@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
+import { groupProjects } from "@linkshell/client-core";
 import {
   BookOpen,
   Check,
@@ -51,9 +52,12 @@ import { screenComputerKey } from "../live/screen-route";
 import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
 import { compactTime } from "../live/session-time";
 import { readLocal, saveLocal } from "../live/storage";
+import { projectScope, useProjectConnection } from "../live/project-overview";
+import { Badge } from "./ui/badge";
 import { useApplyDesktopAppearance, useDesktopAppearance, type Appearance } from "../live/desktop-appearance";
 import type { ConsoleShellProps } from "./ConsoleShell";
 import { CommandCenter } from "./CommandCenter";
+import { ColumnResizer } from "./ColumnResizer";
 import { useDialogs } from "./Dialogs";
 import { openProjectMenu, openSessionMenu } from "./sidebar-menus";
 import { Button } from "./ui/button";
@@ -146,7 +150,7 @@ function ComputerPicker({
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
   const selected = state.computers.find(
-    (computer) => computer.key === state.connection?.computer.key,
+    (computer) => computer.key === (state.connection && engine.computerForKey(state.connection.computer.key)?.key),
   ) ?? state.connection?.computer;
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => {
@@ -303,7 +307,7 @@ function SessionRow({
   );
 }
 
-interface ProjectGroup { key: string; name: string; sessions: SessionSummary[]; latest: number; running: number }
+interface ProjectGroup { key: string; cwd: string; name: string; generated: boolean; sessions: SessionSummary[]; latest: number; running: number }
 interface Family { root: SessionSummary; children: SessionSummary[]; latest: number }
 
 /**
@@ -337,10 +341,12 @@ function families(sessions: SessionSummary[]): Family[] {
 }
 
 /** The sidebar's working set: what waits on you, then each project with its recent sessions. */
-function SessionTree({ connection, view, navigate }: { connection: Connection; view: string; navigate: (view: string) => void }) {
+function SessionTree({ connection, view, navigate, background = false, scopeMenu, hideHeading = false }: { connection: Connection; view: string; navigate: (view: string) => void; background?: boolean; scopeMenu?: ReactNode; hideHeading?: boolean }) {
   const sessions = useStore(connection.store, (state) => state.sessions);
   const projects = useStore(connection.store, (state) => state.projects);
   const loaded = useStore(connection.store, (state) => state.sessionsLoaded);
+  const status = useStore(connection.store, (state) => state.status);
+  const sessionsError = useStore(connection.store, (state) => state.sessionsError);
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => tick((value) => value + 1), 60_000);
@@ -359,29 +365,15 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
   const [allProjects, setAllProjects] = useState(false);
   const { waiting, groups } = useMemo(() => {
     const live = Object.values(sessions).filter((session) => !session.archived);
-    const byProject = new Map<string, ProjectGroup>();
-    for (const session of live) {
-      const key = session.worktree?.source ?? session.cwd;
-      const group = byProject.get(key) ?? {
-        key,
-        name: projects.find((project) => project.cwd === key)?.name ?? (baseName(key) || key),
-        sessions: [],
-        latest: 0,
-        running: 0,
-      };
-      group.sessions.push(session);
-      group.latest = Math.max(group.latest, session.updatedAt);
-      if (sessionGroup(session) === "running") group.running += 1;
-      byProject.set(key, group);
-    }
-    for (const group of byProject.values()) group.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
     return {
       waiting: live.filter(sessionNeedsAttention).sort((a, b) => b.updatedAt - a.updatedAt),
-      groups: [...byProject.values()].sort((a, b) => b.latest - a.latest),
+      groups: groupProjects(projects, live).map((project) => ({ ...project,
+        latest: project.lastActiveAt,
+        running: project.sessions.filter((session) => sessionGroup(session) === "running").length,
+      })),
     };
   }, [sessions, projects]);
-  const current = sessions[view];
-  const currentProject = current && (current.worktree?.source ?? current.cwd);
+  const currentProject = groups.find((group) => group.sessions.some((session) => session.id === view))?.key;
   const isOpen = (group: ProjectGroup, index: number) =>
     open[group.key] ?? (group.key === currentProject || index === 0);
   const toggle = (group: ProjectGroup, index: number) => {
@@ -393,7 +385,7 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
   const dialogs = useDialogs();
   const [menuFor, setMenuFor] = useState<string>();
   const withMenu = (key: string, open: (at: { x: number; y: number }) => Promise<void>) =>
-    isElectronDesktop ? (at: { x: number; y: number }) => { setMenuFor(key); void open(at).finally(() => setMenuFor(undefined)); } : undefined;
+    isElectronDesktop && !background ? (at: { x: number; y: number }) => { setMenuFor(key); void open(at).finally(() => setMenuFor(undefined)); } : undefined;
   const sessionMenu = (session: SessionSummary) => withMenu(session.id, (at) => openSessionMenu(session, { connection, dialogs, navigate, at }));
   return (
     <>
@@ -414,20 +406,23 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
         </section>
       )}
       <section className="tree-section" aria-label="项目">
-        <h2 className="tree-heading">
+        {!hideHeading && <h2 className="tree-heading">
           <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => navigate("projects")}>
             项目
           </button>
-          <Tooltip>
+          {scopeMenu}
+          {!background && <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="tree-heading-action" aria-label="新建会话" onClick={() => sendDesktopCommand({ command: "new-session" })}>
                 <Plus size={14} />
               </button>
             </TooltipTrigger>
             <TooltipContent>新建会话 · {shortcutText(desktopShortcuts.newSession)}</TooltipContent>
-          </Tooltip>
-        </h2>
-        {!loaded && <p className="tree-note">正在载入会话…</p>}
+          </Tooltip>}
+        </h2>}
+        {status === "locked" ? <button type="button" className="tree-more" onClick={() => navigate("home")}>输入访问密码以查看项目</button>
+          : sessionsError ? <p className="tree-note" role="alert">{sessionsError}</p>
+          : !loaded && <p className="tree-note">正在载入会话…</p>}
         {loaded && !groups.length && <p className="tree-note">还没有会话。按 {shortcutText(desktopShortcuts.newSession)} 开始第一个任务。</p>}
         {shown.map((group, index) => {
           const expanded = isOpen(group, index);
@@ -438,31 +433,32 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
               <div
                 className="tree-project-row"
                 data-menu-open={menuFor === `project:${group.key}` || undefined}
-                onContextMenu={isElectronDesktop ? (event) => {
+                onContextMenu={isElectronDesktop && !background && !group.generated ? (event) => {
                   event.preventDefault();
-                  withMenu(`project:${group.key}`, (at) => openProjectMenu(group, { connection, dialogs, navigate, at }))?.({ x: event.clientX, y: event.clientY });
+                  withMenu(`project:${group.key}`, (at) => openProjectMenu({ ...group, key: group.cwd }, { connection, dialogs, navigate, at }))?.({ x: event.clientX, y: event.clientY });
                 } : undefined}
               >
                 <button
                   type="button"
                   className="tree-project-toggle"
                   aria-expanded={expanded}
-                  title={group.key}
+                  title={group.cwd}
                   onClick={() => toggle(group, index)}
                 >
                   <ChevronRight size={13} aria-hidden />
                   <span>{group.name}</span>
+                  {group.generated && <Badge variant="secondary">自动</Badge>}
                   {group.running > 0 && <small className="tree-running" title={`${group.running} 个进行中`}>{group.running}</small>}
                 </button>
-                <button
+                {!background && !group.generated && <button
                   type="button"
                   className="tree-project-new"
                   aria-label={`在 ${group.name} 中新建会话`}
                   title={`在 ${group.name} 中新建会话`}
-                  onClick={() => sendDesktopCommand({ command: "new-session", cwd: group.key })}
+                  onClick={() => sendDesktopCommand({ command: "new-session", cwd: group.cwd })}
                 >
                   <SquarePen size={13} />
-                </button>
+                </button>}
               </div>
               {expanded && (
                 <div className="tree-sessions">
@@ -511,11 +507,68 @@ function SessionTree({ connection, view, navigate }: { connection: Connection; v
   );
 }
 
+function ComputerProjectTree({ computer, view, openComputerView }: { computer: Computer; view: string; openComputerView: ConsoleShellProps["openComputerView"] }) {
+  const names = useStore(computerNames.store);
+  const selectedConnection = useStore(engine.state, (state) => state.connection);
+  const selectedKey = selectedConnection?.computer.key;
+  const retained = useProjectConnection(computer);
+  const selected = selectedKey !== undefined && engine.computerForKey(selectedKey)?.key === computer.key;
+  const name = computerName(computer, names);
+  return <section className="tree-section" aria-label={`${name}的项目`}>
+    <h2 className="tree-heading">
+      <button type="button" className="tree-heading-link" title={`打开 ${name} 的项目`} onClick={() => openComputerView(computer, "projects")}>
+        <span className="desktop-presence" data-online={computer.machine.online || undefined} /> {name}
+      </button>
+      {selected && <Badge variant="secondary">当前</Badge>}
+    </h2>
+    {!computer.machine.online ? <p className="tree-note">电脑离线</p>
+      : retained?.error ? <p className="tree-note" role="alert">{retained.error}</p>
+      : retained?.connection ? <ProjectTreeConnection connection={retained.connection} selectedConnection={selected ? selectedConnection : undefined} view={selected ? view : ""} navigate={(id) => openComputerView(computer, id)} />
+      : <p className="tree-note">正在读取项目…</p>}
+  </section>;
+}
+
+function ProjectTreeConnection({ connection, selectedConnection, view, navigate }: {
+  connection: Connection;
+  selectedConnection?: Connection;
+  view: string;
+  navigate: (id: string) => void;
+}) {
+  const selectedStatus = useStore(selectedConnection?.store ?? connection.store, (state) => state.status);
+  // A newly discovered local alias must not replace the still-live relay conversation's actions.
+  // If that route failed, keep the available route read-only until navigation explicitly selects it.
+  const active = selectedConnection && (selectedConnection === connection || selectedStatus === "online");
+  const shown = active ? selectedConnection : connection;
+  return <SessionTree key={shown.computer.key} connection={shown} view={view} navigate={navigate} background={!active} hideHeading />;
+}
+
+function ProjectScopeMenu({ value }: { value: "current" | "all" }) {
+  return <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="xs" className="tree-scope-menu" aria-label={`项目范围：${value === "all" ? "所有电脑" : "当前电脑"}`}>
+        <span>{value === "all" ? "全部" : "当前"}</span><ChevronDown data-icon="inline-end" aria-hidden />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" sideOffset={4}>
+      <DropdownMenuLabel>项目范围</DropdownMenuLabel>
+      <DropdownMenuRadioGroup value={value} onValueChange={(value) => {
+        const next = value === "all" ? "all" : "current";
+        projectScope.setState({ value: next });
+        try { saveLocal("projectScope", next); } catch { /* The current view still changes without storage. */ }
+      }}>
+        <DropdownMenuRadioItem value="current">当前电脑</DropdownMenuRadioItem>
+        <DropdownMenuRadioItem value="all">所有电脑</DropdownMenuRadioItem>
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>;
+}
+
 function DesktopNavigation({
   view,
   navigate,
   connect,
   selectComputer,
+  openComputerView,
   appearance,
   setAppearance,
   openPalette,
@@ -525,6 +578,10 @@ function DesktopNavigation({
   openPalette: () => void;
 }) {
   const state = useStore(engine.state);
+  const scope = useStore(projectScope, (state) => state.value);
+  const multipleComputers = state.computers.length > 1;
+  const showAllProjects = multipleComputers && scope === "all";
+  const scopeMenu = multipleComputers ? <ProjectScopeMenu value={scope} /> : undefined;
   const { setOpenMobile } = useSidebar();
   const go = (id: string) => { navigate(id); setOpenMobile(false); };
   // Management takes the sidebar for its own pages, as Codex's settings do.
@@ -601,7 +658,16 @@ function DesktopNavigation({
         <nav className="desktop-places" aria-label="工作台">
           {navigationItems.map(place)}
         </nav>
-        {state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} />}
+        {showAllProjects && <h2 className="tree-heading tree-projects-heading">
+          <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => go("projects")}>项目</button>
+          {scopeMenu}
+        </h2>}
+        {showAllProjects ? state.computers.map((computer) => <ComputerProjectTree
+          key={computer.key}
+          computer={computer}
+          view={view}
+          openComputerView={(target, id) => { openComputerView(target, id); setOpenMobile(false); }}
+        />) : state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} scopeMenu={scopeMenu} />}
       </SidebarContent>
       {isElectronDesktop && <ManageEntry active={false} open={() => go(manageView())} />}
       </>)}
@@ -710,6 +776,14 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   useWindowSurface();
   const [palette, setPalette] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => readLocal("desktopSidebarHidden", false));
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = readLocal("desktopSidebarWidth", 264);
+    return Number.isFinite(saved) ? Math.max(240, Math.min(420, saved)) : 264;
+  });
+  const resizeSidebar = (width: number) => {
+    setSidebarWidth(width);
+    try { saveLocal("desktopSidebarWidth", width); } catch { /* The layout still works without storage. */ }
+  };
   // With the sidebar hidden, the pointer at the window's left edge brings it out over the page
   // (Codex's peek); leaving it puts it away again.
   const [peek, setPeek] = useState(false);
@@ -830,7 +904,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         event.preventDefault();
         document.getElementById("workspace-content")?.focus();
       }}>跳到内容</a>
-      <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": "264px" } as CSSProperties}>
+      <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.
           <div className="desktop-sidebar-slot" inert={(sidebarHidden && !peek) || undefined}>
@@ -838,6 +912,23 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
           </div>
         ) : !sidebarHidden && (
           <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
+        )}
+        {!sidebarHidden && (
+          <ColumnResizer
+            className="desktop-sidebar-resizer"
+            label="调整导航侧栏宽度"
+            width={sidebarWidth}
+            clamp={(width) => Math.round(Math.max(240, Math.min(420, window.innerWidth - 480, width)))}
+            side="end"
+            target=".desktop-body"
+            variable="--sidebar-width"
+            resize={resizeSidebar}
+            initial={264}
+            collapse={{ threshold: 160, onCollapse: () => {
+              setSidebarHidden(true);
+              try { saveLocal("desktopSidebarHidden", true); } catch { /* The sidebar still closes without storage. */ }
+            } }}
+          />
         )}
         <main className="main desktop-main" id="workspace-content" tabIndex={-1} data-screen={screenKey ? "detail" : undefined}>
           {children}

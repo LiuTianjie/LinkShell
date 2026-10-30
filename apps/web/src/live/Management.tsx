@@ -739,8 +739,8 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
           {standalone ? (
             <Tabs value={state.settings.updateChannel} onValueChange={(value) => void setDesktopSetting("updateChannel", value === "beta" ? "beta" : "stable")}>
               <TabsList variant="line" aria-label="更新通道">
-                <TabsTrigger value="stable" disabled={update.checking}>稳定版</TabsTrigger>
-                <TabsTrigger value="beta" disabled={update.checking}>测试版</TabsTrigger>
+                <TabsTrigger value="stable" disabled={update.checking || update.installing}>稳定版</TabsTrigger>
+                <TabsTrigger value="beta" disabled={update.checking || update.installing}>测试版</TabsTrigger>
               </TabsList>
             </Tabs>
           ) : <span className="management-value">稳定版</span>}
@@ -749,9 +749,9 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
           <Switch checked={state.settings.autoCheck} onCheckedChange={(value) => void setDesktopSetting("autoCheck", value)} aria-label="自动检查更新" />
         </SettingRow>
         <SettingRow title="检查更新" detail={<span className="management-selectable" role="status">{(update.message || "尚未检查") + checked}</span>}>
-          {newVersion && standalone && <Button size="sm" variant="secondary" disabled={state.busy || update.checking || update.installing} onClick={installUpdate}>下载并更新 App…</Button>}
+          {newVersion && standalone && <Button size="sm" variant="secondary" disabled={state.busy || update.checking || update.installing} onClick={installUpdate}>{update.installing ? "正在更新…" : "下载并更新 App…"}</Button>}
           {newVersion && !standalone && <Button size="sm" variant="secondary" disabled={state.busy || update.checking} onClick={() => confirm("upgrade")}>安装更新…</Button>}
-          <Button variant={newVersion ? "ghost" : "secondary"} size="sm" disabled={update.checking} onClick={() => void checkUpdates()}>
+          <Button variant={newVersion ? "ghost" : "secondary"} size="sm" disabled={update.checking || update.installing} onClick={() => void checkUpdates()}>
             {update.checking ? "正在检查…" : "立即检查"}
           </Button>
         </SettingRow>

@@ -10,11 +10,11 @@ const listed = {
 };
 
 describe("the model a new session is created with", () => {
-  it("is only one picked that isn't the agent's own default", () => {
+  it("preserves an explicit selection even when it matches a cached default", () => {
     expect(modelToCreate(listed, "gpt-mini")).toBe("gpt-mini");
-    // Untouched, or the default picked again: the agent chooses as it would without a picker.
+    // Only an untouched picker follows the new project's own default.
     expect(modelToCreate(listed, undefined)).toBeUndefined();
-    expect(modelToCreate(listed, "gpt-big")).toBeUndefined();
+    expect(modelToCreate(listed, "gpt-big")).toBe("gpt-big");
   });
 
   it("is dropped when the list no longer has it, or there is no list", () => {

@@ -48,6 +48,7 @@ html[data-desktop] body { background: var(--background); }
 html[data-desktop][data-surface="translucent"],
 html[data-desktop][data-surface="translucent"] body { background: transparent; }
 html[data-desktop][data-resizing] * { cursor: col-resize !important; user-select: none; }
+html[data-desktop] .column-resizer { touch-action: none; -webkit-app-region: no-drag; app-region: no-drag; }
 
 /* Scrollbars: a narrow thumb that shows itself on hover, never a bright gutter. */
 html[data-desktop],
@@ -78,7 +79,7 @@ html[data-desktop] :focus-visible { outline: 2px solid var(--focus, var(--link))
 html[data-desktop] .desktop-root { display: flex; flex-direction: column; min-width: 0; height: 100dvh; overflow: clip; background: var(--background); color: var(--label); font-size: 13px; letter-spacing: -.003em; }
 html[data-desktop][data-surface="translucent"] .desktop-root { background: transparent; }
 html[data-desktop] .desktop-body { display: flex; flex: 1; min-width: 0; min-height: 0; padding: 0 var(--gutter) var(--gutter) 0; background: transparent; }
-html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: 264px; height: 100%; overflow: hidden; border: 0; border-radius: 0; background: var(--sidebarBackground); }
+html[data-desktop] .desktop-sidebar { box-sizing: border-box; flex: none; width: var(--sidebar-width, 264px); height: 100%; overflow: hidden; border: 0; border-radius: 0; background: var(--sidebarBackground); white-space: nowrap; }
 html[data-desktop][data-surface="opaque"] .desktop-sidebar,
 html[data-desktop]:not([data-surface]) .desktop-sidebar { background: var(--background); }
 html[data-desktop] .desktop-sidebar [data-sidebar="sidebar"] { background: transparent; }
@@ -101,8 +102,13 @@ html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overf
 
 /* The Electron window: the sidebar is a slot that slides away; the main view reaches the top
    when there is no sidebar and keeps clear of the traffic lights. */
-html[data-desktop] .desktop-sidebar-slot { flex: none; width: 264px; height: 100%; overflow: hidden; transition: width 300ms var(--ease-spring), opacity 200ms var(--ease-out); }
-html[data-desktop] .desktop-sidebar-slot > .desktop-sidebar { width: 264px; }
+html[data-desktop] .desktop-sidebar-slot { flex: none; width: var(--sidebar-width, 264px); height: 100%; overflow: hidden; transition: width 300ms var(--ease-spring), opacity 200ms var(--ease-out); }
+html[data-desktop] .desktop-sidebar-slot > .desktop-sidebar { width: var(--sidebar-width, 264px); }
+html[data-desktop][data-resizing] .desktop-sidebar-slot { transition: none; }
+html[data-desktop] .desktop-sidebar-resizer { position: relative; z-index: 8; flex: none; align-self: stretch; width: 12px; margin-inline: -6px; cursor: col-resize; }
+html[data-desktop] .desktop-sidebar-resizer::after { content: ""; position: absolute; inset-block: 0; left: 5px; width: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .desktop-sidebar-resizer:is(:hover, :focus-visible, [data-dragging])::after { background: var(--separatorStrong); }
+html[data-desktop] .desktop-sidebar-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"] .desktop-sidebar-slot { width: 0; opacity: 0; }
 /* Without the sidebar the main panel reaches the window's top; its own title row keeps clear of
    the traffic lights and the button that brings the sidebar back (Codex does the same). */
@@ -112,15 +118,15 @@ html[data-desktop][data-fullscreen] .desktop-root[data-shell="electron"][data-si
 html[data-desktop] .desktop-titlebar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; height: var(--toolbar); padding: 0 10px 0 82px; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html[data-desktop][data-fullscreen] .desktop-titlebar { padding-left: 12px; }
 /* The mark and name after the traffic lights; it takes the row's spare width, the buttons keep the end. */
-html[data-desktop] .desktop-brand { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; padding-left: 4px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; letter-spacing: -.01em; pointer-events: none; }
-html[data-desktop] .desktop-brand img { flex: none; width: 16px; height: 16px; }
-html[data-desktop] .desktop-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-brand { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; padding-left: 2px; color: var(--label); font-size: 14px; font-weight: 600; letter-spacing: -.015em; pointer-events: none; }
+html[data-desktop] .desktop-brand img { flex: none; width: 20px; height: 20px; object-fit: contain; }
+html[data-desktop] .desktop-brand span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Beside the traffic lights, over the main panel's title row (which leaves it room). */
 html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; display: flex; align-items: center; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop] .desktop-floating-titlebar > button { -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
-html[data-desktop] .desktop-titlebar-button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStrong); }
 /* Page title rows can drag the window too, where they have room to spare. */
@@ -170,11 +176,11 @@ html[data-desktop] .desktop-presence[data-online] { background: var(--success); 
 /* Rows are 30 px with a 10 px corner, an icon column at x 18 and the text column at x 44. */
 html[data-desktop] .desktop-sidebar-header { flex: none; gap: 2px; padding: 4px 8px 6px; }
 html[data-desktop] .desktop-root:not([data-shell="electron"]) .desktop-sidebar-header { padding-top: 10px; }
-html[data-desktop] .desktop-computer-picker { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); text-align: left; font: inherit; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-computer-picker { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 40px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); text-align: left; font: inherit; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-computer-picker:hover,
 html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: var(--fill); }
 html[data-desktop] .desktop-computer-picker > .desktop-presence { margin-inline: 4.5px; }
-html[data-desktop] .desktop-computer-copy { display: grid; flex: 1; gap: 0; min-width: 0; }
+html[data-desktop] .desktop-computer-copy { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; gap: 0; min-width: 0; }
 html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 590; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-copy > span { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-picker > svg { flex: none; color: var(--tertiaryLabel); }
@@ -186,11 +192,12 @@ html[data-desktop] .desktop-connection-summary > span:first-child { display: fle
 html[data-desktop] .desktop-connection-summary [data-tone="waiting"] { color: var(--warning); }
 html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 11px; }
-html[data-desktop] .desktop-menu-empty { max-width: 230px; padding: 10px; color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-menu-empty { min-width: 0; max-width: 230px; padding: 10px; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-sidebar-actions { display: flex; gap: 4px; }
-html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; cursor: default; transition: background var(--transition); }
-html[data-desktop] .desktop-new-session > svg { color: var(--secondaryLabel); }
-html[data-desktop] .desktop-new-session kbd { margin-left: auto; opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-new-session > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-new-session > svg { flex: none; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-new-session kbd { flex: none; margin-left: auto; opacity: 0; transition: opacity var(--transition); }
 html[data-desktop] .desktop-new-session:hover kbd,
 html[data-desktop] .desktop-new-session:focus-visible kbd { opacity: 1; }
 html[data-desktop] .desktop-new-session:hover:not(:disabled) { background: var(--fill); }
@@ -205,32 +212,40 @@ html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(-
    sliced line of text; at the top nothing fades. */
 @property --navigation-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes navigation-scrolled { to { --navigation-fade: 16px; } }
-html[data-desktop] .desktop-navigation { gap: 0; padding: 0 8px 16px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); animation: navigation-scrolled linear both; animation-timeline: scroll(self); animation-range: 0 24px; }
+html[data-desktop] .desktop-navigation { gap: 0; min-width: 0; padding: 0 8px 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); animation: navigation-scrolled linear both; animation-timeline: scroll(self); animation-range: 0 24px; }
 html[data-desktop] .desktop-places { display: grid; gap: 1px; }
-html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-place > svg { flex: none; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-place:hover { background: var(--fill); }
 html[data-desktop] .desktop-place:active { background: var(--fillStrong); }
 html[data-desktop] .desktop-place[data-active] { background: var(--fill); }
 html[data-desktop] .desktop-place[data-active] > svg { color: var(--label); }
-html[data-desktop] .tree-heading-link { display: inline-flex; align-items: center; gap: 6px; height: 22px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: default; transition: background var(--transition), color var(--transition); }
+/* Headings contain plain text as well as optional presence marks, so a text box (not an
+   anonymous flex item) provides an ellipsis while the adjacent actions keep their width. */
+html[data-desktop] .tree-heading-link { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 22px; margin-left: -6px; padding: 0 6px; overflow: hidden; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-heading-link > .desktop-presence { margin-right: 6px; vertical-align: 1px; }
 html[data-desktop] .tree-heading-link > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-heading-link:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-nav-badge { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 11px; font-weight: 590; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* The working set: what waits on you, then projects and their sessions. */
 html[data-desktop] .tree-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-top: 16px; }
-html[data-desktop] .tree-heading { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 2px 0 8px; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; font-weight: 500; }
-html[data-desktop] .tree-heading > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-heading { display: flex; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 2px 0 8px; overflow: hidden; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; font-weight: 500; white-space: nowrap; }
+html[data-desktop] .tree-heading > span { flex: none; color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-heading[data-tone="waiting"],
 html[data-desktop] .tree-heading[data-tone="waiting"] > span { color: var(--warning); }
-html[data-desktop] .tree-heading-action { display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition), background var(--transition); }
+html[data-desktop] .tree-heading-action { display: grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition), background var(--transition); }
 html[data-desktop] .tree-section:hover .tree-heading-action,
 html[data-desktop] .tree-heading-action:focus-visible { opacity: 1; }
 html[data-desktop] .tree-heading-action:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .tree-note { padding: 4px 10px 8px 36px; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; text-wrap: pretty; }
-html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; }
+html[data-desktop] .tree-scope-menu { flex: 0 1 auto; min-width: 0; height: 24px; margin-left: auto; padding: 0 6px; gap: 4px; border: 0; background: transparent; color: var(--secondaryLabel); font-size: 12px; font-weight: 400; }
+html[data-desktop] .tree-scope-menu > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-scope-menu > svg { flex: none; }
+html[data-desktop] .tree-scope-menu:is(:hover, [aria-expanded="true"]) { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-scope-menu + .tree-heading-action { margin-left: 0; }
+html[data-desktop] .tree-note { min-width: 0; padding: 4px 10px 8px 36px; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; min-width: 0; }
 html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 30px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .tree-project-toggle > svg { flex: none; margin-inline: 1.5px; color: var(--tertiaryLabel); transition: transform 200ms var(--ease-out); }
 html[data-desktop] .tree-project-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
@@ -242,13 +257,13 @@ html[data-desktop] .tree-project-row:hover .tree-project-new,
 html[data-desktop] .tree-project-new:focus-visible { opacity: 1; }
 html[data-desktop] .tree-project-new:hover { background: var(--fillStrong); color: var(--label); }
 html[data-desktop] .tree-sessions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-bottom: 4px; }
-html[data-desktop] .tree-session { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-session { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .tree-session:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .tree-session:active { background: var(--fillStrong); }
 html[data-desktop] .tree-session[data-active] { background: var(--fill); color: var(--label); }
 /* The row a right-click menu belongs to, while it shows: the hover tint stays on it (ink, not a ring). */
 html[data-desktop] :is(.tree-session[data-menu-open], .tree-project-row[data-menu-open] .tree-project-toggle) { background: var(--fill); color: var(--label); }
-html[data-desktop] .tree-title { display: grid; flex: 1; min-width: 0; }
+html[data-desktop] .tree-title { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-width: 0; }
 /* A row that also names its project is two lines; every other row is the sidebar's 30 px. */
 html[data-desktop] .tree-session:has(.tree-title small) { height: auto; padding-block: 5px; }
 /* A session started from or forked off the one above it: indented under its title, an elbow of
@@ -262,7 +277,7 @@ html[data-desktop] .tree-fold { flex: none; display: inline-grid; place-items: c
 html[data-desktop] .tree-fold:hover { background: var(--fillStrong); color: var(--label); }
 html[data-desktop] .tree-session[aria-expanded="false"] .tree-fold { transform: rotate(-90deg); }
 html[data-desktop] .tree-title > span,
-html[data-desktop] .tree-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-title small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-title small { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 12px; line-height: 16px; }
 html[data-desktop] .tree-session time { flex: none; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 13px; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-state { flex: none; width: 7px; height: 7px; margin-inline: 4.5px; border-radius: 50%; }
@@ -273,14 +288,14 @@ html[data-desktop] .tree-state[data-tone="running"] { width: 10px; height: 10px;
 @media (prefers-reduced-motion: reduce) {
   html[data-desktop] .tree-state[data-tone="running"] { width: 7px; height: 7px; margin: 0 4.5px; border: 0; background: var(--running); animation: none; }
 }
-html[data-desktop] .tree-more { height: 28px; padding: 0 10px 0 32px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; cursor: default; }
+html[data-desktop] .tree-more { min-width: 0; height: 28px; padding: 0 10px 0 32px; overflow: hidden; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 html[data-desktop] .tree-more-projects { margin-top: 4px; }
 html[data-desktop] .tree-more:hover { background: var(--fill); color: var(--label); }
 
-html[data-desktop] .desktop-account > svg { width: 16px; height: 16px; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-account > svg { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-sidebar-footer { flex: none; flex-direction: row; align-items: center; gap: 2px; padding: 8px; border-top: var(--hairline) solid var(--separator); }
 html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 30px; padding: 0 8px; gap: 8px; border: 0; border-radius: var(--radius-row); color: var(--label); font-size: 14px; font-weight: 430; }
-html[data-desktop] .desktop-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-account span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-sidebar-footer > [data-button][data-size="icon"] { width: 30px; height: 30px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electron"]) .desktop-sidebar { display: none; }
@@ -706,7 +721,7 @@ html[data-desktop] .desktop-native-screen.screen-fullscreen .screen-stage { flex
 /* Below a tablet's width the sidebar folds away; ⌘B or the computer menu brings it back. */
 @media (max-width: 767px) {
   html[data-desktop] .desktop-body { padding: 0; gap: 0; }
-  html[data-desktop] .desktop-sidebar { display: none; }
+  html[data-desktop] :is(.desktop-sidebar, .desktop-sidebar-slot, .desktop-sidebar-resizer) { display: none; }
   html[data-desktop] .desktop-main { border-radius: 0; border-inline: 0; }
   html[data-desktop] .desktop-main .live-overview,
   html[data-desktop] .desktop-main .screens-page { padding-inline: 16px; }
@@ -736,7 +751,7 @@ html[data-desktop] .desktop-root[data-platform="windows"] .session-layout.with-p
 
 /* Peek: the hidden sidebar brought out over the page by the pointer at the left edge. */
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { position: relative; }
-html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot { position: absolute; top: calc(var(--toolbar) + 4px); bottom: 8px; left: 0; z-index: 20; width: 264px; opacity: 1; border-radius: 0 14px 14px 0; background: color-mix(in oklab, var(--plain) 86%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 12px 32px -6px rgb(0 0 0 / .22); animation: sidebar-peek 120ms cubic-bezier(0, 0, .58, 1) both; }
+html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot { position: absolute; top: calc(var(--toolbar) + 4px); bottom: 8px; left: 0; z-index: 20; width: var(--sidebar-width, 264px); opacity: 1; border-radius: 0 14px 14px 0; background: color-mix(in oklab, var(--plain) 86%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 12px 32px -6px rgb(0 0 0 / .22); animation: sidebar-peek 120ms cubic-bezier(0, 0, .58, 1) both; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot .desktop-sidebar-titlebar { display: none; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar { background: transparent; }
 @keyframes sidebar-peek { from { opacity: 0; transform: translateX(-12px); } }

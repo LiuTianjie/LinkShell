@@ -211,6 +211,7 @@ function requestApproval(thread, turn, item) {
 }
 
 function finishTurn(thread, turn, status) {
+  status = turn.finishStatus ?? status;
   turn.status = status;
   turn.completedAt = nowSeconds();
   thread.active = undefined;
@@ -468,6 +469,7 @@ const handlers = {
     if (!thread) throw { code: -32600, message: "unknown thread" };
     if (thread.active) throw { code: -32600, message: "a turn is already running" };
     const turn = startTurn(thread, params.input, params.clientUserMessageId);
+    turn.settings = { approvalPolicy: params.approvalPolicy, sandboxPolicy: params.sandboxPolicy };
     return { turn: { id: turn.id, items: [], status: "inProgress" } };
   },
   "thread/queue/add": (params) => {
@@ -509,14 +511,24 @@ const handlers = {
     emitItem(thread, turn, userItem(params.input, params.clientUserMessageId).item);
     return { turnId: turn.id };
   },
-  "turn/interrupt": (params) => {
+  "turn/interrupt": async (params) => {
     const thread = threads.get(params.threadId);
     // The real server can hang on this ordering; fail fast so a regression
     // cannot pass merely because the fixture interrupts every pending tool.
     if (thread?.pendingMcp) throw { code: -32603, message: "MCP confirmation must be resolved before interrupt" };
     const turn = thread?.active;
     if (turn && turn.id === params.turnId) {
+      if (turn.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.text?.includes("APPROVAL_DURING_INTERRUPT")))) {
+        // An already captured tool can ask after the permission change began,
+        // before the old turn has acknowledged interruption.
+        const pending = requestApproval(thread, turn, { id: randomUUID(), command: "echo late", cwd: thread.meta.cwd });
+        await sleep(30);
+        thread.pendingApproval?.("interrupted");
+        turn.interruptApprovalDecision = await pending;
+      }
       turn.interrupted = true;
+      // A task can complete just before an interrupt reaches it.
+      if (turn.items.some((item) => item.type === "userMessage" && item.content.some((part) => part.text?.includes("FINISH_ON_INTERRUPT")))) turn.finishStatus = "completed";
       thread.pendingApproval?.("interrupted");
     }
     return {};

@@ -374,6 +374,18 @@ export function Session({
     !!view?.turnActive ||
     !!notices?.length;
   const hasContent = !!view && (view.items.length > 0 || footerActive);
+  const showComposerCaption = !canInteract && !hasContent;
+  const composerWrap = useRef<HTMLDivElement>(null);
+  const captureComposerWrap = useCallback((wrap: HTMLDivElement | null) => {
+    composerWrap.current = wrap;
+    return composerHeightRef(wrap);
+  }, []);
+  // The loading caption disappears with the history snapshot. Update its inset in
+  // that same layout, before the resize observer's next delivery can move the text.
+  useLayoutEffect(() => {
+    const wrap = composerWrap.current;
+    if (wrap) wrap.parentElement?.style.setProperty("--composer-height", `${Math.round(wrap.offsetHeight)}px`);
+  }, [showComposerCaption]);
   const retrySession = () => {
     if (!online) link.reconnectNow();
     else {
@@ -1060,7 +1072,7 @@ export function Session({
                 <Terminal key={terminal} id={terminal} />
               </div>
             )}
-            <div className="composer-wrap" ref={composerHeightRef}>
+            <div className="composer-wrap" ref={captureComposerWrap}>
               <ErrorNotice error={job.error} />
               <ErrorNotice error={sendJob.error} />
               <ErrorNotice error={attachmentError} />
@@ -1466,7 +1478,7 @@ export function Session({
                   ? "Enter 加入队列，⌘/Ctrl Enter 立即发送"
                   : "Enter 发送，Shift Enter 换行，/ 打开命令"}
               </span>
-              {!canInteract && (
+              {showComposerCaption && (
                 <div className="composer-caption">
                   <span>{online ? "同步完成后可发送" : "连接已断开，草稿已保留"}</span>
                 </div>
@@ -1521,7 +1533,7 @@ export function Session({
                 </DropdownMenu>
               ) : undefined}
             >
-              <div className="side-panel-content">
+              <div className="side-panel-content" data-panel={panel}>
                 {apps.map((tab) => (
                   <McpAppView key={tab.id} sessionId={session.id} tab={{ ...tab, title: appTitle(tab) }} hidden={panel !== tab.id} say={sayFromApp} />
                 ))}
@@ -1693,7 +1705,9 @@ function ConversationPanel({
   /** What the tab row's + offers (Codex's new-tab menu). */
   launcher?: ReactNode;
 }) {
-  const compact = useIsMobile(991);
+  // Desktop CSS turns the same inspector into an overlay. Keep its file/editor state mounted
+  // while the window crosses that breakpoint; swapping it for a Sheet discards unsaved work.
+  const compact = useIsMobile(991) && !isDesktop;
   const panelElement = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     if (compact) return;
@@ -1757,9 +1771,14 @@ function ConversationPanel({
               className="inspector-resizer"
               label="调整检查器宽度"
               width={width}
-              clamp={(value) => Math.round(Math.min(Math.max(value, 320), Math.max(320, window.innerWidth * 0.62)))}
+              clamp={(value) => {
+                const available = panelElement.current?.parentElement?.clientWidth ?? window.innerWidth;
+                const maximum = window.innerWidth <= 1100 ? available - 40 : Math.min(window.innerWidth * 0.62, available - 360);
+                return Math.round(Math.min(Math.max(value, 320), Math.max(320, maximum)));
+              }}
               side="start"
               target=".session-layout"
+              column=".live-side-panel"
               variable="--inspector-width"
               resize={resize}
               initial={440}

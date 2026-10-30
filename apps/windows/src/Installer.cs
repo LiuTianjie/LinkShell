@@ -15,23 +15,26 @@ using System.Windows.Media.Imaging;
 
 namespace LinkShell.Windows {
     internal static class Installer {
-        [STAThread] static int Main() {
-            bool created;
-            using (var single = new Mutex(true, "Local\\LinkShell-Installer", out created)) {
-                if (!created) { MessageBox.Show("另一个 LinkShell 安装程序正在运行，请回到该窗口继续。", "LinkShell 安装"); return 1; }
-                var destination = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "LinkShell");
-                var engine = new InstallerEngine(destination, () => Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"));
-                try {
-                    var window = new InstallerWindow(engine);
-                    new Application().Run(window);
-                    return window.ExitCode;
-                } catch (Exception error) { MessageBox.Show("无法打开安装程序：" + error.Message, "LinkShell 安装", MessageBoxButton.OK, MessageBoxImage.Error); return 1; }
-            }
+        [STAThread] static int Main(string[] args) {
+            try {
+                using (var update = InstallerUpdate.Parse(args)) {
+                    bool created;
+                    using (var single = new Mutex(true, "Local\\LinkShell-Installer", out created)) {
+                        if (!created) { MessageBox.Show("另一个 LinkShell 安装程序正在运行，请回到该窗口继续。", "LinkShell 安装"); return 1; }
+                        var destination = update == null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "LinkShell") : update.Target;
+                        var engine = new InstallerEngine(destination, () => Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"), home: update == null ? null : update.Home);
+                        var window = new InstallerWindow(engine, update);
+                        new Application().Run(window);
+                        return window.ExitCode;
+                    }
+                }
+            } catch (Exception error) { MessageBox.Show("无法打开安装程序：" + error.Message, "LinkShell 安装", MessageBoxButton.OK, MessageBoxImage.Error); return 1; }
         }
     }
 
     internal sealed class InstallerWindow : Window {
         readonly InstallerEngine engine;
+        readonly InstallerUpdate update;
         readonly TextBlock heading, description, stage, percent, detail, result;
         readonly ProgressBar progress;
         readonly Button primary, secondary;
@@ -39,12 +42,13 @@ namespace LinkShell.Windows {
         readonly CheckBox launch;
         readonly string version;
         CancellationTokenSource cancellation;
-        bool working, committing, installed;
+        bool working, committing, installed, updateStarted;
         public int ExitCode { get; private set; }
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr handle, int attribute, ref int value, int size);
 
-        public InstallerWindow(InstallerEngine installEngine) {
+        public InstallerWindow(InstallerEngine installEngine, InstallerUpdate automaticUpdate = null) {
             engine = installEngine;
+            update = automaticUpdate;
             Title = "LinkShell 安装";
             Width = 660; Height = 590; ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -87,6 +91,10 @@ namespace LinkShell.Windows {
             Content = root;
             SourceInitialized += (s, e) => { int value = 1; try { DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref value, 4); } catch (DllNotFoundException) {} };
             Closing += (s, e) => { if (working) { e.Cancel = true; CancelOrClose(); } };
+            if (update != null) {
+                Title = "LinkShell 更新";
+                Loaded += async (s, e) => { if (!updateStarted) { updateStarted = true; await BeginInstall(); } };
+            }
         }
 
         static Stream Resource(string name) { return Assembly.GetExecutingAssembly().GetManifestResourceStream(name); }
@@ -103,11 +111,21 @@ namespace LinkShell.Windows {
             result.Text = "正在解压文件，此阶段可以安全取消。"; result.Foreground = Brush("Secondary");
             primary.Content = "正在安装…"; primary.IsEnabled = false; secondary.Content = "取消安装"; secondary.IsEnabled = true;
             try {
+                if (update != null) {
+                    heading.Text = "正在更新 LinkShell"; description.Text = "更新完成后将自动重新打开。";
+                    stage.Text = "等待 LinkShell 退出"; detail.Text = "保存的账号、配对和会话历史会保留。";
+                    result.Text = "正在等待工作台退出，请保持此窗口打开。";
+                    update.AnnounceReady();
+                    await Task.Run(() => update.WaitForDesktopExit(cancellation.Token));
+                    stage.Text = "检查安装环境"; detail.Text = "正在准备安装文件…";
+                    result.Text = "正在解压文件，此阶段可以安全取消。";
+                }
                 var updates = new Progress<InstallProgress>(value => {
                     progress.Value = value.Percent; percent.Text = value.Percent + "%"; stage.Text = value.Stage; detail.Text = value.Detail;
                 });
                 await Task.Run(() => engine.Install(updates, cancellation.Token, () => Dispatcher.Invoke(new Action(() => {
                     cancellation.Token.ThrowIfCancellationRequested();
+                    if (update != null) update.ValidatePaths();
                     committing = true; secondary.IsEnabled = false;
                     result.Text = "正在应用安装并处理后台服务，请保持窗口打开。";
                 }))));
@@ -118,19 +136,28 @@ namespace LinkShell.Windows {
             } catch (OperationCanceledException) {
                 ExitCode = 0; heading.Text = "安装已取消"; description.Text = "临时文件已清理，现有安装保持不变。";
                 stage.Text = "已取消"; detail.Text = ""; result.Text = "可以随时重新开始安装。";
-                primary.Content = "重新安装"; secondary.Content = "关闭"; secondary.IsEnabled = true;
+                primary.Content = update == null ? "重新安装" : "重试更新"; secondary.Content = update == null ? "关闭" : "重新打开 LinkShell"; secondary.IsEnabled = true;
             } catch (Exception error) {
                 ExitCode = 1; heading.Text = "安装未完成"; description.Text = "解决下方问题后，可以重新尝试。";
                 stage.Text = "安装失败"; detail.Text = ""; result.Text = error.Message; result.Foreground = Brush("Warning");
-                primary.Content = "重试安装"; secondary.Content = "关闭"; secondary.IsEnabled = true;
+                primary.Content = update == null ? "重试安装" : "重试更新"; secondary.Content = update == null ? "关闭" : "重新打开 LinkShell"; secondary.IsEnabled = true;
             } finally { working = false; committing = false; primary.IsEnabled = true; cancellation.Dispose(); cancellation = null; }
+            if (installed && update != null) Finish();
         }
         void CancelOrClose() {
             if (working) { if (!committing) { cancellation.Cancel(); secondary.IsEnabled = false; result.Text = "正在取消并清理临时文件…"; } return; }
             if (installed) { Open(engine.Destination); return; }
+            if (update != null) { if (LaunchUpdated()) Close(); return; }
             Close();
         }
-        void Finish() { if (launch.IsChecked == true && !Open(Path.Combine(engine.Destination, "LinkShell.exe"))) return; Close(); }
+        void Finish() {
+            if (launch.IsChecked == true && !(update == null ? Open(Path.Combine(engine.Destination, "LinkShell.exe")) : LaunchUpdated())) return;
+            Close();
+        }
+        bool LaunchUpdated() {
+            try { update.Launch(); return true; }
+            catch (Exception error) { result.Text = "无法打开 LinkShell：" + error.Message; result.Foreground = Brush("Warning"); return false; }
+        }
         bool Open(string path) {
             try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); return true; }
             catch (Exception error) { result.Text = "安装已完成，但无法打开：" + error.Message; result.Foreground = Brush("Warning"); return false; }

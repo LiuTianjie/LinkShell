@@ -171,6 +171,10 @@ interface LiveSession {
   /** Messages a client asked to hold while a turn runs: sent one per turn end, in this order. */
   held: { clientMessageId: string; content: ContentBlock[] }[];
   sendingHeld?: boolean;
+  /** Keeps a permission-change continuation ahead of queued and concurrently sent messages. */
+  settingsChange?: Promise<void>;
+  /** Stop invalidates setting changes queued before it, as well as the current continuation. */
+  stopGeneration?: number;
   /** Sub-agents the session started, and whether each is working; read from the log when first needed. */
   subagents?: Map<string, SubagentState>;
   tasks?: Map<string, BackgroundTask>;
@@ -722,21 +726,31 @@ export class SessionHub {
   }
 
   /** What a new session of `agent` could run on (see `agents.models`): nothing from a driver that can't tell before a session exists. */
-  async agentModels(agent: string, cwd?: string): Promise<MethodResult<"agents.models">> {
+  async agentModels(agent: string, cwd?: string, model?: string): Promise<MethodResult<"agents.models">> {
     const driver = this.requireDriver(agent);
-    return (await driver.listModels?.(cwd)) ?? { models: [] };
+    return (await driver.listModels?.(cwd, model)) ?? { models: [] };
   }
 
   async createSession(input: {
     agent: string;
     cwd: string;
     model?: string;
+    config?: Record<string, string>;
     prompt?: ContentBlock[];
     clientMessageId?: string;
     /** Start in a new git worktree of `cwd`'s repository. */
     worktree?: boolean;
   }): Promise<SessionSummary> {
     const driver = this.requireDriver(input.agent);
+    const config = Object.entries(input.config ?? {});
+    if (config.length) {
+      if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} 不支持新会话设置`);
+      const available = await this.agentModels(input.agent, input.cwd, input.model);
+      for (const [id, value] of config) {
+        const option = available.config?.find((entry) => entry.id === id && entry.category !== "model");
+        if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `新会话设置不可用：${id}=${value}，请刷新后重试`);
+      }
+    }
     const worktree = input.worktree ? await this.newWorktree(input.cwd, promptLabel(input.prompt)) : undefined;
     const discovered = await driver.createSession({ cwd: worktree?.cwd ?? input.cwd, model: input.model }).catch(async (error: unknown) => {
       // The app shows "not logged in" from the agent list; make it current.
@@ -746,7 +760,33 @@ export class SessionHub {
     });
     this.recordDiscovered(driver.id, discovered);
     const sessionId = sessionIdFor(driver.id, discovered.nativeId);
-    await this.ensureAttached(sessionId);
+    const live = this.liveFor(sessionId);
+    const configuring = Promise.resolve().then(async () => {
+      await this.ensureAttached(sessionId);
+      for (const [id, value] of config) await driver.setConfig!(discovered.nativeId, id, value);
+    });
+    // Discovery can show this session on another device before create returns. Its first
+    // prompt must wait for the same initial permissions as the device that created it.
+    live.settingsChange = configuring;
+    try {
+      await configuring;
+    } catch (error) {
+      // This session has never had a prompt. Retrying should not accumulate empty sessions/worktrees.
+      try {
+        await this.delete(sessionId, worktree ? "remove" : "keep");
+      } catch (cleanupError) {
+        this.log(`[hub] cleaning failed new session ${sessionId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+        if (this.store.getSession(sessionId)) {
+          const detail = error instanceof Error ? error.message : String(error);
+          this.commit(sessionId, { sessionUpdate: "ls_notice", level: "warning", title: "新会话设置失败，任务尚未开始", detail });
+          throw RpcError.app("not_ready", `新会话设置失败，首条消息未发送。空会话已保留在会话列表，可打开后重试设置：${detail}`, { sessionId });
+        }
+        throw error;
+      }
+      throw error;
+    } finally {
+      if (live.settingsChange === configuring) live.settingsChange = undefined;
+    }
     if (input.prompt && input.prompt.length > 0) {
       await this.prompt(sessionId, input.clientMessageId ?? `create-${sessionId}`, input.prompt);
     }
@@ -1186,6 +1226,7 @@ export class SessionHub {
     content: ContentBlock[],
     whenBusy?: "queue",
   ): Promise<"started" | "steered" | "queued" | "duplicate"> {
+    await this.live.get(sessionId)?.settingsChange;
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
     let joinAfterSend = false;
@@ -1263,6 +1304,7 @@ export class SessionHub {
    * that turn if the agent takes input mid-turn, otherwise by stopping it.
    */
   async sendQueuedNow(sessionId: string, clientMessageId?: string): Promise<void> {
+    await this.live.get(sessionId)?.settingsChange;
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
     const live = this.liveFor(sessionId);
@@ -1296,7 +1338,7 @@ export class SessionHub {
   private async sendHeld(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
     const summary = this.store.getSession(sessionId);
-    if (!live || !summary || live.held.length === 0 || live.turnActive || live.sendingHeld) return;
+    if (!live || !summary || live.held.length === 0 || live.turnActive || live.sendingHeld || live.settingsChange) return;
     const driver = this.drivers.get(summary.agent);
     if (!driver) return;
     const next = live.held.shift()!;
@@ -1433,6 +1475,7 @@ export class SessionHub {
     const summary = this.getSession(sessionId);
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
     const live = this.liveFor(sessionId);
+    live.stopGeneration = (live.stopGeneration ?? 0) + 1;
     if (live.held.length > 0) {
       for (const entry of live.held) this.store.releaseClientMessage(sessionId, entry.clientMessageId);
       live.held = [];
@@ -1540,8 +1583,26 @@ export class SessionHub {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
     if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} settings can't be changed remotely yet`);
-    await this.ensureAttached(sessionId);
-    await driver.setConfig(summary.nativeId, optionId, value);
+    const live = this.liveFor(sessionId);
+    const stopGeneration = live.stopGeneration ?? 0;
+    const changing = (live.settingsChange ?? Promise.resolve()).catch(() => {}).then(async () => {
+      if ((live.stopGeneration ?? 0) !== stopGeneration) throw RpcError.app("busy", "已停止，尚未执行的设置修改已取消。");
+      await this.ensureAttached(sessionId);
+      if ((live.stopGeneration ?? 0) !== stopGeneration) throw RpcError.app("busy", "已停止，尚未执行的设置修改已取消。");
+      await driver.setConfig!(summary.nativeId, optionId, value);
+    });
+    live.settingsChange = changing;
+    let accepted = false;
+    try {
+      await changing;
+      accepted = true;
+    } finally {
+      if (live.settingsChange === changing) {
+        live.settingsChange = undefined;
+        // Failed changes leave queued work visible for the user to resume deliberately.
+        if (accepted) void this.sendHeld(sessionId);
+      }
+    }
   }
 
   // ── internals ──────────────────────────────────────────────────────

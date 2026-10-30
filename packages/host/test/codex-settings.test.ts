@@ -85,6 +85,15 @@ describe("Codex models for a new thread", () => {
     expect(newThreadModels([], "gpt-5")).toEqual({ models: [] });
     expect(newThreadModels([], undefined)).toEqual({ models: [] });
   });
+
+  it("keeps every selectable model when an installation does not identify a default", () => {
+    const withoutDefault = models.map((model) => ({ ...model, isDefault: false }));
+    expect(newThreadModels(withoutDefault, undefined)).toEqual({ models: [
+      { value: "gpt-5", name: "GPT-5" },
+      { value: "gpt-5-mini", name: "GPT-5 mini" },
+    ] });
+    expect(configOptions({}, { model: "gpt-5" }, withoutDefault).find((option) => option.id === "effort")?.values.map((entry) => entry.value)).toEqual(["low", "medium", "high"]);
+  });
 });
 
 describe("Codex features", () => {

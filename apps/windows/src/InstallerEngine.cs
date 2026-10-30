@@ -28,9 +28,9 @@ namespace LinkShell.Windows {
         readonly Action<string, string> runCli;
         readonly Action<string> shortcut, checkRunning;
 
-        public InstallerEngine(string destination, Func<Stream> archive, Action<string, string> cli = null, Action<string> createShortcut = null, Action<string> running = null) {
+        public InstallerEngine(string destination, Func<Stream> archive, Action<string, string> cli = null, Action<string> createShortcut = null, Action<string> running = null, string home = null) {
             Destination = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar);
-            payload = archive; runCli = cli ?? RunCli; shortcut = createShortcut ?? CreateShortcut; checkRunning = running ?? CheckRunning;
+            payload = archive; runCli = cli ?? ((root, action) => RunCli(root, action, home)); shortcut = createShortcut ?? (root => CreateShortcut(root, home)); checkRunning = running ?? CheckRunning;
         }
 
         public void Install(IProgress<InstallProgress> progress, CancellationToken token, Action enterCommit) {
@@ -170,26 +170,29 @@ namespace LinkShell.Windows {
                 } finally { process.Dispose(); }
             }
         }
-        static void CreateShortcut(string root) {
-            CreateShortcutAt(root, Environment.GetFolderPath(Environment.SpecialFolder.Programs));
+        static void CreateShortcut(string root, string home) {
+            CreateShortcutAt(root, Environment.GetFolderPath(Environment.SpecialFolder.Programs), home);
         }
-        internal static void CreateShortcutAt(string root, string directory) {
+        internal static void CreateShortcutAt(string root, string directory, string home = null) {
             Directory.CreateDirectory(directory);
             Type type = Type.GetTypeFromProgID("WScript.Shell"); object shell = Activator.CreateInstance(type), link = null;
             try {
                 link = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { Path.Combine(directory, "LinkShell.lnk") });
                 link.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty, null, link, new object[] { Path.Combine(root, "LinkShell.exe") });
                 link.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { root });
+                if (home != null) link.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, link, new object[] { "--home " + Quote(home) });
                 link.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
             } finally { if (link != null) Marshal.FinalReleaseComObject(link); Marshal.FinalReleaseComObject(shell); }
         }
-        static void RunCli(string root, string action) {
+        static string Quote(string value) { return "\"" + value.TrimEnd('\\') + new string('\\', 2 * (value.Length - value.TrimEnd('\\').Length)) + "\""; }
+        static void RunCli(string root, string action, string home) {
             var start = new ProcessStartInfo(Path.Combine(root, "runtime", "node.exe"), "\"" + Path.Combine(root, "runtime", "cli", "dist", "cli", "src", "index.js") + "\" desktop --action " + action) {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
             };
             start.EnvironmentVariables["LINKSHELL_APP_BUNDLE"] = root;
             start.EnvironmentVariables["LINKSHELL_WINDOWS_HELPER"] = Path.Combine(root, "LinkShell.Screen.exe");
+            if (home != null) start.EnvironmentVariables["LINKSHELL_HOME"] = home;
             using (var child = Process.Start(start)) {
                 var output = child.StandardOutput.ReadToEndAsync(); var errors = child.StandardError.ReadToEndAsync();
                 if (!child.WaitForExit(60000)) { child.Kill(); child.WaitForExit(); throw new TimeoutException("停止或恢复后台服务超时，请检查服务状态。"); }

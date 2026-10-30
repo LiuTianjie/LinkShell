@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureHostRunning, withRunningHost } from "./host.js";
 import { linkshellDir, readHostLaunch, readHostOwner, readPid, stopDaemonAndWait } from "../utils/daemon.js";
@@ -14,13 +14,28 @@ type Marker = {
 };
 const markerPath = () => join(linkshellDir(), "desktop-update.json");
 
+function sameInstallation(first: string | undefined, second: string): boolean {
+  if (!first) return false;
+  if (process.platform !== "win32") return first === second;
+  // .NET expands 8.3 names while Node's JS realpath preserves them. Compare existing
+  // physical installs without changing the home spelling used by the Host's pipe.
+  try {
+    const left = realpathSync.native(first), right = realpathSync.native(second);
+    if (left.toLowerCase() !== right.toLowerCase()) return false;
+    // A Windows parent directory can be case-sensitive; aliases must still identify one directory.
+    const a = statSync(left, { bigint: true }), b = statSync(right, { bigint: true });
+    return a.isDirectory() && b.isDirectory() && a.ino !== 0n && a.dev === b.dev && a.ino === b.ino;
+  }
+  catch { return false; }
+}
+
 /** A failed Windows update must release the new executable before moving the old bundle back. */
 export async function stopDesktopUpdateHost(): Promise<void> {
   if (!existsSync(markerPath())) return;
   const app = standaloneBundle();
   const marker = JSON.parse(readFileSync(markerPath(), "utf8")) as Marker;
   const pid = readPid("host");
-  if (app && marker.schema === 1 && marker.app === app && pid && readHostOwner(pid) === app) {
+  if (app && marker.schema === 1 && sameInstallation(marker.app, app) && pid && sameInstallation(readHostOwner(pid), app)) {
     await stopDaemonAndWait("host", 30_000, pid);
   }
 }
@@ -31,7 +46,7 @@ export async function prepareDesktopUpdate(): Promise<void> {
   if (!app) throw new Error("只有独立 App 可以协调自身更新");
   if (existsSync(markerPath())) throw new Error("上次更新尚未恢复，请先重新打开 LinkShell");
   const pid = readPid("host");
-  if (!pid || readHostOwner(pid) !== app) return;
+  if (!pid || !sameInstallation(readHostOwner(pid), app)) return;
   const before = await withRunningHost(async (client) => ({
     machine: await client.call("machine.info", {}, 5000),
     gateway: await client.call("gateway.status", {}, 5000),
@@ -51,9 +66,9 @@ export async function recoverDesktopUpdate(version: string): Promise<void> {
   if (!existsSync(markerPath())) return;
   const marker = JSON.parse(readFileSync(markerPath(), "utf8")) as Marker;
   const app = standaloneBundle();
-  if (!app || marker.schema !== 1 || marker.app !== app) return;
+  if (!app || marker.schema !== 1 || !sameInstallation(marker.app, app)) return;
   const pid = readPid("host");
-  if (pid && readHostOwner(pid) !== app) throw new Error("另一套安装正在运行，未自动替换该服务。请先停止它，再重试恢复。");
+  if (pid && !sameInstallation(readHostOwner(pid), app)) throw new Error("另一套安装正在运行，未自动替换该服务。请先停止它，再重试恢复。");
   await ensureHostRunning({ ...process.env, ...marker.env, LINKSHELL_APP_BUNDLE: app });
   const after = await withRunningHost(async (client) => ({
     machine: await client.call("machine.info", {}, 5000),

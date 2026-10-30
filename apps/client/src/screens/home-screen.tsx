@@ -18,7 +18,7 @@ import { TerminalRow } from "@/components/terminal-row";
 import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
-import { useActions, useClient, useConnection, useHasComputer } from "@/lib/client";
+import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { Welcome } from "@/components/welcome";
 import { haptics } from "@/lib/haptics";
@@ -414,7 +414,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
   const online = useClient((state) => state.status === "online");
   const loaded = useClient((state) => state.sessionsLoaded);
   const error = useClient((state) => state.sessionsError);
-  const offline = useClient((state) => unreachable(state.status));
+  const connectionStatus = useConnectionStatus();
+  const offline = unreachable(connectionStatus);
   const hasComputer = useHasComputer();
   const { refresh } = useActions();
   const now = useNow();
@@ -651,7 +652,9 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
           !hasComputer ? (
             <Welcome />
           ) : !loaded ? (
-            error ? (
+            connectionStatus === "connecting" ? (
+              <LoadingState label="正在恢复连接…" />
+            ) : error ? (
               <EmptyState
                 icon={{ sf: "exclamationmark.triangle", md: "warning" }}
                 title="读取会话失败"

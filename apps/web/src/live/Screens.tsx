@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Icon } from "../icons";
 import { engine, type Computer, type Connection } from "./engine";
+import { computerAtKey } from "./computer-identity";
 import {
   EmptyState,
   ErrorNotice,
@@ -215,7 +216,7 @@ function ScreenCard({
       </div>
       {connection && computer.machine.online ? (
         <Runtime value={connection}>
-          <ConnectedScreen name={name} primaryAction={selected} open={open} />
+          <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />
         </Runtime>
       ) : (
         <div className="screen-idle" role="status">
@@ -279,12 +280,14 @@ function ConnectedScreen({
   open,
   detail = false,
   active = true,
+  retry,
 }: {
   name: string;
   primaryAction?: boolean;
   open?: () => void;
   detail?: boolean;
   active?: boolean;
+  retry?: () => void;
 }) {
   const status = useClient((state) => state.status);
   const statusDetail = useClient((state) => state.statusDetail);
@@ -322,7 +325,7 @@ function ConnectedScreen({
         </div>
       </div>
       <div className="screen-idle-actions">
-        <Button variant="outline" onClick={() => link.reconnectNow()}>
+        <Button variant="outline" onClick={retry ?? (() => link.reconnectNow())}>
           重新连接
         </Button>
       </div>
@@ -354,7 +357,7 @@ function useForget(computer: Computer | undefined, done?: () => void) {
   return { forget: () => void forget(), forgetting };
 }
 
-function useScreenConnection(computer?: Computer) {
+function useScreenConnection(computer?: Computer, identity = computer?.key) {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState<string>();
   const [revision, setRevision] = useState(0);
@@ -369,10 +372,15 @@ function useScreenConnection(computer?: Computer) {
     } catch (reason) {
       setError(messageOf(reason));
     }
-    // Presence changes manage the lease; name/metadata refreshes must not interrupt a viewer.
+    // An alias changing from relay to local must not replace a live viewer's transport.
+    // Retry explicitly acquires the preferred route; presence still releases an offline host.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [computer?.key, computer?.machine.online, revision]);
-  return { connection, error, retry: () => setRevision((value) => value + 1) };
+  }, [identity, computer?.machine.online, revision]);
+  return { connection, error, retry: () => {
+    const preferred = computer && engine.computerForKey(computer.key);
+    if (connection && preferred?.key === connection.computer.key) connection.link.reconnectNow();
+    else setRevision((value) => value + 1);
+  } };
 }
 
 export function ScreenDetail({
@@ -385,15 +393,14 @@ export function ScreenDetail({
   active?: boolean;
 }) {
   const computer = useStore(engine.state, (state) =>
-    state.computers.find((item) => item.key === computerKey),
+    computerAtKey(state.computers, computerKey, state.localComputer),
   );
   const ready = useStore(engine.state, (state) => state.ready);
   const names = useStore(computerNames.store);
-  const { connection, error, retry } = useScreenConnection(computer);
+  const { connection, error, retry } = useScreenConnection(computer, computerKey);
   const { forget, forgetting } = useForget(computer, back);
-  const selectedKey = useStore(
-    engine.state,
-    (state) => state.connection?.computer.key,
+  const selectedKey = useStore(engine.state, (state) => state.connection &&
+    computerAtKey(state.computers, state.connection.computer.key, state.localComputer)?.key,
   );
   useEffect(() => {
     if (!active || !computer?.machine.online || selectedKey === computer.key) return;
@@ -465,7 +472,7 @@ export function ScreenDetail({
         </EmptyState>
       ) : connection ? (
         <Runtime value={connection}>
-          <ConnectedScreen name={name} detail active={active} />
+          <ConnectedScreen name={name} detail active={active} retry={retry} />
         </Runtime>
       ) : (
         <Skeleton className="h-96 w-full" />

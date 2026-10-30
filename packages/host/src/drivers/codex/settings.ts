@@ -1,4 +1,4 @@
-import type { SessionConfigOption } from "@linkshell/wire";
+import { displayModelName, type SessionConfigOption } from "@linkshell/wire";
 
 // Codex session settings: model, reasoning effort and permission mode, as
 // config options. Codex applies overrides on `turn/start`, and they stick for
@@ -121,9 +121,10 @@ export function effective(settings: CodexSettings, overrides: CodexOverrides, mo
 /** The models to choose from while `current` is in use: hidden ones only when it is one, and `current` even if Codex doesn't list it. */
 function modelValues(models: CodexModel[], current: string | undefined): { value: string; name: string; description?: string }[] {
   const visible = models.filter((m) => !m.hidden || m.model === current);
-  if (!current || visible.length === 0) return [];
-  const values = visible.map((m) => ({ value: m.model, name: m.displayName || m.model, description: m.description || undefined }));
-  if (!values.some((v) => v.value === current)) values.unshift({ value: current, name: current, description: undefined });
+  if (visible.length === 0) return [];
+  // Some installations list models without identifying their default. The list is still usable.
+  const values = visible.map((m) => ({ value: m.model, name: displayModelName(m.displayName || m.model), description: m.description || undefined }));
+  if (current && !values.some((v) => v.value === current)) values.unshift({ value: current, name: displayModelName(current), description: undefined });
   return values;
 }
 
@@ -135,7 +136,19 @@ function modelValues(models: CodexModel[], current: string | undefined): { value
 export function newThreadModels(models: CodexModel[], configured: string | undefined): { models: { value: string; name: string; description?: string }[]; current?: string } {
   const { model } = effective({ model: configured }, {}, models);
   const values = modelValues(models, model);
-  return values.length > 0 ? { models: values, current: model } : { models: [] };
+  return values.length > 0 ? { models: values, ...(model ? { current: model } : {}) } : { models: [] };
+}
+
+/** Project configuration uses snake_case while thread responses use the app-server's policy objects. */
+export function settingsFromConfig(config: Record<string, unknown>): CodexSettings {
+  const sandbox = config.sandbox_mode;
+  const type = sandbox === "read-only" ? "readOnly" : sandbox === "workspace-write" ? "workspaceWrite" : sandbox === "danger-full-access" ? "dangerFullAccess" : undefined;
+  return {
+    model: typeof config.model === "string" ? config.model : undefined,
+    effort: typeof config.model_reasoning_effort === "string" ? config.model_reasoning_effort : undefined,
+    approvalPolicy: config.approval_policy,
+    ...(type ? { sandbox: { type } } : {}),
+  };
 }
 
 export function configOptions(settings: CodexSettings, overrides: CodexOverrides, models: CodexModel[]): SessionConfigOption[] {

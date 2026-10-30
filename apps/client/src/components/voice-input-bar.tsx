@@ -97,7 +97,7 @@ export function VoiceInputBar({
             justifyContent: "center",
           })}
         >
-          <Icon sf="xmark" md="close" size={14} color={canceling ? "#ffffff" : colors.secondaryLabel} weight="bold" />
+          <Icon sf="xmark" md="close" size={19} color={canceling ? "#ffffff" : colors.secondaryLabel} weight="bold" />
         </Pressable>
 
         <View
@@ -206,7 +206,7 @@ export function VoiceInputBar({
               transform: [{ scale: pressed ? 0.94 : 1 }],
             })}
           >
-            <Icon sf="arrow.up" md="arrow_upward" size={15} color={hasText ? colors.onAccent : colors.tertiaryLabel} weight="bold" />
+            <Icon sf="arrow.up" md="arrow_upward" size={21} color={hasText ? colors.onAccent : colors.tertiaryLabel} weight="bold" />
           </Pressable>
         ) : null}
       </View>

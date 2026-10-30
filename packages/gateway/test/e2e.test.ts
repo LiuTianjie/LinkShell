@@ -105,6 +105,45 @@ async function pairByQr(local: HostClient, relay: RelayClient, identity: Identit
 }
 
 describe("gateway v2 end to end", () => {
+  it("syncs a machine name across devices without replacing tunnels, and preserves it across a host restart", async () => {
+    const { url, host, local } = await world({ machineToken: "token-alice" });
+    const phone = device(url, "Phone", "token-alice");
+    const tablet = device(url, "Tablet", "token-alice");
+    await Promise.all([phone.relay.waitOnline(5000), tablet.relay.waitOnline(5000)]);
+    const machine = (await phone.relay.request("machines.list", {})).machines[0]!;
+    const phoneLink = connect(phone.relay, phone.identity, machine);
+    const tabletLink = connect(tablet.relay, tablet.identity, machine);
+    const before = await phoneLink.call("machine.info", {});
+    expect(before.naming?.configured).toBe(false);
+    expect(machine.namingConfigured).toBeUndefined();
+    await tabletLink.call("machine.info", {});
+    let remoteName: string | undefined;
+    let connected = 0;
+    tabletLink.on("machine.changed", (info) => { remoteName = info.hostname; });
+    tabletLink.onOnline(() => { connected++; });
+    let listsChanged = 0;
+    tablet.relay.on("machines.changed", () => { listsChanged++; });
+
+    const renamed = await phoneLink.call("machine.rename", { name: " Office Mac " });
+    expect(renamed).toMatchObject({ machineId: before.machineId, hostname: "Office Mac", naming: { customName: "Office Mac", configured: true } });
+    await until(() => remoteName === "Office Mac" && listsChanged > 0);
+    expect((await tablet.relay.request("machines.list", {})).machines[0]).toMatchObject({ id: machine.id, name: "Office Mac", online: true, namingConfigured: true });
+    expect((await tabletLink.call("sessions.list", {})).sessions).toEqual([]);
+    expect(connected).toBe(0);
+    await expect(phone.relay.request("machines.update", { name: "Cannot rename another peer" })).rejects.toMatchObject({ code: "forbidden" });
+
+    await host.stop();
+    const restarted = await startHost({ home: host.paths.home, version: "test", drivers: () => [], log: () => {}, gateway: { url, name: "Test Mac", token: () => "token-alice" } });
+    cleanups.push(() => restarted.stop());
+    const after = await connectHost(restarted.paths.hostSocket);
+    cleanups.push(() => after.close());
+    expect(await after.call("machine.info", {})).toMatchObject({ machineId: before.machineId, hostname: "Office Mac" });
+    expect((await after.call("machine.rename", { name: "" })).hostname).toBe(before.naming!.defaultName);
+    expect((await after.call("machine.info", {})).naming?.customName).toBeUndefined();
+    expect((await after.call("machine.info", {})).naming?.configured).toBe(true);
+    local.close();
+  });
+
   it.each(["paired", "account"])("automatically reconnects a %s phone after a host upgrade with the same identity", async (mode) => {
     const token = mode === "account" ? "token-alice" : undefined;
     const { url, host, local } = await world({ machineToken: token });

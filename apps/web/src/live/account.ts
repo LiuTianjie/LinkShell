@@ -18,10 +18,21 @@ export function accountClient() {
   if (isDesktop) throw new Error("桌面端使用 LinkShell 的系统浏览器登录");
   const { supabaseUrl, anonKey } = accountConfig();
   return (client ??= createClient(supabaseUrl, anonKey, {
+    global: {
+      fetch: (input, init) => {
+        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        return fetch(input, {
+          ...init,
+          // Abort the request itself: an abandoned PKCE exchange must not sign in later.
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
+        });
+      },
+    },
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      // The dedicated popup returns only its code; the initiating tab owns the PKCE verifier.
+      detectSessionInUrl: false,
       flowType: "pkce",
       storageKey: "linkshell.web.account.v2",
     },

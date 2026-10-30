@@ -206,9 +206,14 @@ export class HostLink {
    * made when it comes back, and `onRestored` says so.
    */
   subscribe(sessionId: string, cursor: () => number): Promise<SessionSummary | undefined> {
-    this.subscriptions.set(sessionId, { cursor });
+    const subscription = { cursor };
+    this.subscriptions.set(sessionId, subscription);
     if (this.statusValue !== "online") return Promise.resolve(undefined);
-    return this.sendSubscribe(sessionId).then((result) => result?.session);
+    const socket = this.socket;
+    return this.sendSubscribe(sessionId).then((result) => {
+      if (!result && socket && this.socket === socket && this.subscriptions.get(sessionId) === subscription) void this.restoreLater(sessionId, socket);
+      return result?.session;
+    });
   }
 
   unsubscribe(sessionId: string): void {
@@ -348,11 +353,13 @@ export class HostLink {
    * `restoreLater` so the reconnect isn't held up by it.
    */
   private async restore(sessionId: string, socket: SocketLike): Promise<void> {
+    const subscription = this.subscriptions.get(sessionId);
+    if (!subscription) return;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-      if (this.socket !== socket || !this.subscriptions.has(sessionId)) return;
+      if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       const result = await this.sendSubscribe(sessionId);
-      if (this.socket !== socket) return;
+      if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       if (result?.session) {
         // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
         for (const listener of this.restoredListeners) listener(result.session);
@@ -367,11 +374,13 @@ export class HostLink {
    * session would show nothing new until it was closed and opened again.
    */
   private async restoreLater(sessionId: string, socket: SocketLike): Promise<void> {
+    const subscription = this.subscriptions.get(sessionId);
+    if (!subscription) return;
     for (let attempt = 0; ; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 5000 * 2 ** attempt)));
-      if (this.socket !== socket || !this.subscriptions.has(sessionId)) return;
+      if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       const result = await this.sendSubscribe(sessionId);
-      if (this.socket !== socket) return;
+      if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       if (result?.session) {
         for (const listener of this.restoredListeners) listener(result.session);
         return;
@@ -381,17 +390,26 @@ export class HostLink {
 
   private sendSubscribe(sessionId: string) {
     const subscription = this.subscriptions.get(sessionId);
-    if (!subscription || !this.peer) return Promise.resolve(undefined);
-    return this.peer
+    const peer = this.peer;
+    if (!subscription || !peer) return Promise.resolve(undefined);
+    const current = () => this.peer === peer && this.subscriptions.get(sessionId) === subscription;
+    return peer
       .request<MethodResult<"sessions.subscribe">>("sessions.subscribe", {
         sessionId,
         fromSeq: subscription.cursor(),
         lazyImages: this.options.lazyImages,
         latest: this.latest || undefined,
       })
+      // A closed and reopened conversation owns a new subscription: an older response
+      // must not make its unfinished history appear ready.
+      .then((result) => current() ? result : undefined)
       .catch((error: unknown) => {
         // Gone on the host (deleted meanwhile): nothing to restore, and nothing to retry.
-        if (error instanceof RpcError && error.appCode === "not_found") this.subscriptions.delete(sessionId);
+        if (current() && error instanceof RpcError && error.appCode === "not_found") {
+          this.subscriptions.delete(sessionId);
+          // Archived sessions and older list pages are not covered by refresh's first page.
+          this.onNotification("session.removed", { sessionId });
+        }
         return undefined;
       });
   }

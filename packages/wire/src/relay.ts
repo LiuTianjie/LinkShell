@@ -24,6 +24,8 @@ export type PeerRole = z.infer<typeof peerRoleSchema>;
 /** A machine as a device sees it in the gateway's list. */
 export const machineEntrySchema = publicIdentitySchema.extend({
   name: z.string(),
+  /** An explicit host-owned name/reset supersedes older device-local aliases. */
+  namingConfigured: z.boolean().optional(),
   platform: z.string().optional(),
   online: z.boolean(),
   /** How this device may reach it: it paired, or both belong to the same account. */
@@ -50,6 +52,7 @@ export const clientFrameSchema = z.discriminatedUnion("t", [
     identity: publicIdentitySchema,
     signature: z.string(),
     name: z.string().max(120),
+    namingConfigured: z.boolean().optional(),
     platform: z.string().max(40).optional(),
     /** Account access token, when signed in. */
     token: z.string().optional(),
@@ -96,6 +99,8 @@ export interface RelayMethods {
     result: { machine: MachineEntry };
   };
   "machines.list": { params: Record<string, never>; result: { machines: MachineEntry[] } };
+  /** Machine: refresh its display metadata without replacing its authenticated connection. */
+  "machines.update": { params: { name: string; namingConfigured?: boolean }; result: Record<string, never> };
   "machines.forget": { params: { machineId: string }; result: Record<string, never> };
   "devices.list": { params: Record<string, never>; result: { devices: DeviceEntry[] } };
   "devices.revoke": { params: { deviceId: string }; result: Record<string, never> };

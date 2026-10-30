@@ -1,0 +1,20 @@
+# Windows model UI E2E
+
+`pnpm --filter @linkshell/windows test:model-ui-e2e` runs only on a disposable Windows GitHub Actions runner after a standalone bundle has been built. The dispatch-only workflow stage runs independently of the update E2E result. It does not publish a release.
+
+The harness copies the bundle into its own temporary directory and downloads the official Windows Codex CLI 0.162.1 from npm, checking its pinned SHA-512 integrity. It uses that archive's `package/vendor/x86_64-pc-windows-msvc/bin/codex.exe` and checks the binary and working directory before launch. Electron, the bundled Host, the official agent, their profiles and their working directory are all isolated. Child processes receive an environment allowlist, an empty `CODEX_HOME` and `cli_auth_credentials_store = "file"`. Native `account/read` must confirm `account: null` and `requiresOpenaiAuth: true`.
+
+The actual Electron UI chooses a model from the live catalog, sends the real `agents.models` preview request and creates a session with an empty prompt. The harness then changes that session's model through the composer. It requires all of:
+
+- The actual `sessions.setConfig` request and successful response.
+- The Host's `ls_config` notification with the selected value.
+- The matching model in the SQLite `driver_state` override and latest persisted configuration event.
+- The same checked UI value after leaving and reopening the session, and again after reloading the renderer with the original Host and app-server still running.
+
+A fixture imported only into the copied CLI observes the real official agent's stdio without replacing any response. It records native `account/read`, `model/list` and the empty `thread/start` result. It rejects `turn/start`, `turn/steer`, `review/start`, `thread/compact/start` and `command/exec` before forwarding them to the native process; the final zero-inference assertion checks that same set of methods. No prompt, review, compaction or inference is required or allowed. The Codex global model configuration remains unchanged.
+
+This proves model discovery, option writes, disk persistence and UI reopening. It does not prove account model entitlement, completed inference, or recovery of an empty native thread across a Host restart; an empty thread may have no rollout yet.
+
+The same visible Electron window also exercises the production editing context menu. CDP enters and selects synthetic text, then opens each menu with a real right click. The separate PID-scoped `native-menu-uia.ps1` invokes the native `MenuItem` named Copy, Cut, Paste or Undo. It records the actual invocation method: UIA `InvokePattern`, or a native MSAA default action whose name, role, window owner and bounds match that menu item. Each operation must change the textarea or clipboard as expected; Undo must reverse the preceding Paste. `Menu.popup`, menu roles and editing methods are never intercepted or called directly. The copied fixture hook only observes Chromium context flags and snapshots, seeds, reads and restores the clipboard. It uses Electron 44's asynchronous `read`, `ClipboardItem.getType`, `readText` and `writeText` APIs, and synchronous `clear`; operations are serialized. It refuses non-text formats or multiple items before modifying the clipboard, materializes the original plain text only in main-process memory and awaits verified restoration before process cleanup. A native quit also waits for restoration. No prompt is submitted.
+
+Artifacts contain only allowlisted RPC/native fields, native menu invocation receipts, editing equality checks, scoped renderer screenshots and a report. They exclude credentials, original clipboard contents, environment dumps, connection URLs, tokens, raw agent output, profiles and databases. Cleanup terminates only processes whose executable resolves inside this run's temporary root, then removes that root. The staging bundle is preserved for subsequent CI steps.

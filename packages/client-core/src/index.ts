@@ -19,3 +19,4 @@ export * from "./pro-membership.js";
 export * from "./account-errors.js";
 
 export * from "./tasks.js";
+export * from "./projects.js";

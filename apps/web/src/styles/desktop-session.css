@@ -277,11 +277,11 @@ html[data-desktop] .desktop-main .conversation-jump [data-button]:hover { backgr
 /* As wide as the reading column above it, so the two edges line up. */
 html[data-desktop] .desktop-main .composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; padding: 24px max(24px, calc((100% - 768px) / 2)) 16px; border: 0; background: linear-gradient(to bottom, transparent, var(--plain) 24px); pointer-events: none; }
 html[data-desktop] .desktop-main .composer-wrap > * { pointer-events: auto; }
-html[data-desktop] .desktop-main .composer { height: auto; min-height: 44px; border: 0; border-radius: 22px; background: var(--plain); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
+html[data-desktop] .desktop-main .composer { height: auto; min-height: 112px; border: 0; border-radius: 22px; background: var(--plain); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
 /* Dark: a step lighter than the panel it floats on, as Codex's (#363636 measured on #181818). */
 html[data-desktop][data-theme="dark"] .desktop-main .composer { background: #303030; }
 html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
-html[data-desktop] .desktop-main .composer textarea { min-height: 44px; padding: 12px 14px 4px; font-size: 14px; line-height: 20px; }
+html[data-desktop] .desktop-main .composer textarea { min-height: 76px; padding: 14px 16px 8px; font-size: 14px; line-height: 20px; }
 html[data-desktop] .desktop-main .composer textarea::placeholder { color: color-mix(in oklab, var(--tertiaryLabel) 50%, transparent); }
 html[data-desktop][data-theme="dark"] .desktop-main .composer textarea::placeholder { color: rgb(255 255 255 / .32); }
 html[data-desktop] .desktop-main .composer-toolbar { gap: 5px; padding: 0 8px 8px; }
@@ -299,7 +299,8 @@ html[data-desktop] .desktop-main .composer [data-button].send-button:hover:not(:
 html[data-desktop] .desktop-main .composer [data-button].send-button:disabled { background: var(--accent); color: var(--plain); opacity: .5; }
 html[data-desktop] .desktop-main .composer [data-button].send-button svg { width: 16px; height: 16px; }
 /* Stop, as Codex draws it: the send button's ink disc with a small solid square. */
-html[data-desktop] .desktop-main .composer .composer-stop-glyph { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+html[data-desktop] .desktop-main .composer [data-button] .composer-stop-glyph { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+html[data-desktop] .desktop-main .composer [data-button].send-button .composer-stop-glyph { width: 10px; height: 10px; }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop:disabled { opacity: .5; }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small .composer-stop-glyph { width: 9px; height: 9px; }
@@ -315,7 +316,7 @@ html[data-desktop] .desktop-main .message-queue { padding: 8px 12px; border: var
 html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryLabel); font-weight: 500; }
 
 /* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
-html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: 62vw; min-height: 0; overflow: visible; }
+html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: none; width: var(--inspector-width, 440px); min-width: 320px; max-width: min(62vw, calc(100% - 360px)); min-height: 0; overflow: visible; }
 html[data-desktop] .inspector-tabs { position: relative; z-index: 2; display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; overflow-x: auto; animation: toolbar-scrolled linear both; animation-timeline: --inspector; animation-range: 0 12px; }
 html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 510; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
@@ -351,13 +352,13 @@ html[data-desktop] .mcp-app-frame { flex: 1; width: 100%; min-height: 0; border:
 html[data-desktop] .mcp-app-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .mcp-app-state svg { width: 18px; height: 18px; }
 html[data-desktop] .inspector-tabs [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
-html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 4px); z-index: 4; width: 8px; cursor: col-resize; }
+html[data-desktop] .inspector-resizer { position: absolute; top: 12px; bottom: 12px; left: calc(var(--gutter) / -2 - 6px); z-index: 4; width: 12px; cursor: col-resize; }
 /* In the Mac window the inspector is docked on a hairline: the handle is centred on it, full height. */
-html[data-desktop] .desktop-root[data-shell="electron"] .inspector-resizer { top: 0; bottom: 0; left: -4px; }
-html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .desktop-root[data-shell="electron"] .inspector-resizer { top: 0; bottom: 0; left: -6px; }
+html[data-desktop] .inspector-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
 html[data-desktop] .inspector-resizer:hover::after,
 html[data-desktop] .inspector-resizer:focus-visible::after,
-html[data-desktop][data-resizing] .inspector-resizer::after { background: var(--separatorStrong); }
+html[data-desktop] .inspector-resizer[data-dragging]::after { background: var(--separatorStrong); }
 html[data-desktop] .inspector-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-main .side-panel-content { padding: 16px; border-radius: 0 0 var(--radius-panel) var(--radius-panel); }
 /* Beside a conversation the composer's Send is the screen's primary; the inspector's own actions stay secondary. */
@@ -367,7 +368,7 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
 @media (max-width: 1100px) {
   /* A narrow window keeps the conversation readable: the inspector floats over it. */
   html[data-desktop] .desktop-main .live-side-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; max-width: calc(100% - 40px); box-shadow: var(--float-shadow); }
-  html[data-desktop] .inspector-resizer { left: -4px; }
+  html[data-desktop] .inspector-resizer { left: -6px; }
 }
 
 /* A new session: an empty conversation with the composer in its middle, as Codex starts a thread. */

@@ -11,17 +11,20 @@ export interface TurnActivityState {
 }
 
 /** Delivery is local; execution belongs to the host. Keep the gap visible without inventing a running turn. */
-export function turnActivity({ session, progress, online, ready, hasPermission, queued, view }: {
+export function turnActivity({ session, progress, online, connecting, ready, hasPermission, queued, view }: {
   session: SessionSummary;
   progress?: PromptProgress;
   online: boolean;
+  connecting?: boolean;
   ready: boolean;
   hasPermission: boolean;
   queued: number;
   /** The conversation, when loaded: what the agent does right now reads from it, as on the computer. */
   view?: Pick<SessionView, "items" | "permissions" | "turnStartedAt" | "turnBreaks" | "turnActive">;
 }): TurnActivityState | undefined {
-  if (!online) return { label: "连接已断开，等待重连…", tone: "muted", animated: false };
+  if (!online) return connecting
+    ? { label: "正在恢复连接…", tone: "muted", animated: true }
+    : { label: "连接已断开，等待重连…", tone: "muted", animated: false };
   if (!ready) return { label: "正在同步会话…", tone: "muted", animated: true };
   // The request's own card sits right under the conversation and says it better.
   if (hasPermission) return undefined;

@@ -20,6 +20,7 @@ export function ConfigMenu({
   disabled?: boolean;
 }) {
   const risky = option.category === "mode" && isRisky(option.current);
+  const timing = option.id === "permissions" ? "切换后在当前会话继续" : option.category === "model" || option.category === "effort" ? "从下一条消息开始生效" : undefined;
   // One line per choice: its name, and a check on the current one. Descriptions made a menu of six fill half the screen.
   const actions: MenuAction[] = option.values.map((value) => ({
     id: value.value,
@@ -30,7 +31,7 @@ export function ConfigMenu({
   }));
   return (
     <AppMenu
-      title={`${optionLabel(option)} · 从下一条消息开始生效`}
+      title={timing ? `${optionLabel(option)} · ${timing}` : optionLabel(option)}
       actions={actions}
       shouldOpenOnLongPress={false}
       onOpenMenu={() => haptics.selection()}

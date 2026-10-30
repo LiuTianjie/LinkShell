@@ -57,8 +57,11 @@ export function DesktopFileView({
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState<"path" | "content">();
   const kind = renderable(path, file);
-  // Shown as it reads whenever it can be; the source is one click away.
-  const [source, setSource] = useState(false);
+  // Line links address source lines; ordinary Markdown opens in reading mode.
+  const [source, setSource] = useState(!!line);
+  useEffect(() => {
+    if (line) setSource(true);
+  }, [line, path]);
   const showSource = kind === "markdown" ? source : kind !== "image";
   useEffect(() => {
     if (!copied) return;
@@ -180,7 +183,12 @@ function SourceView({ text, path, line, wrap }: { text: string; path: string; li
   const tokens = useHighlight(lines.join("\n"), grammarForPath(path));
   const target = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    target.current?.scrollIntoView({ block: "center" });
+    const row = target.current;
+    const scroller = row?.closest<HTMLElement>(".file-preview-body");
+    if (!row || !scroller) return;
+    // A source link moves only the file, without scrolling its inspector or the workspace.
+    scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      - (scroller.clientHeight - row.offsetHeight) / 2;
   }, [line, path]);
   return (
     <div className={cn("file-preview-source", wrap && "file-preview-source-wrap")} tabIndex={0} role="region" aria-label="文件源码" style={{ "--gutter-digits": String(lines.length).length } as React.CSSProperties}>

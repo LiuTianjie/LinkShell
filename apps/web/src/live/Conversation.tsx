@@ -86,6 +86,12 @@ export function Conversation({
     resize: "smooth",
   });
 
+  // First load and reconnect deliver a complete snapshot. Place it before paint;
+  // the resize observer should animate only the live growth that follows it.
+  useLayoutEffect(() => {
+    if (state.isAtBottom) state.scrollTop = state.calculatedTargetScrollTop;
+  }, [online, state]);
+
   const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
   // Stable, so a folded-steps row re-renders only when its own open state flips, not every chunk.
   const toggleSteps = useCallback(
@@ -137,7 +143,7 @@ export function Conversation({
   // Mac app's WKWebView, Safari before 27) has no scroll anchoring, so it is done here, the same
   // in every engine (`overflow-anchor: none` on the scroller keeps Chrome's out of the way).
   const list = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroller = scrollRef.current;
     const rows = list.current;
     if (!scroller || !rows) return;
@@ -156,7 +162,12 @@ export function Conversation({
           }
         : undefined;
     };
+    let initialResize = true;
     const keep = () => {
+      // Sibling refs (the floating composer) finish measuring after this child's layout
+      // effect. Its first complete resize is still before paint, so settle that inset now.
+      if (initialResize && state.isAtBottom) state.scrollTop = state.calculatedTargetScrollTop;
+      initialResize = false;
       // At the bottom the newest message stays in view; use-stick-to-bottom owns that.
       if (state.isAtBottom) return note();
       // The reader scrolled since the anchor was taken (events can lag a resize): re-take it first,

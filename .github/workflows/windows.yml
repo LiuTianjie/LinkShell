@@ -7,7 +7,7 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -27,8 +27,28 @@ jobs:
       - run: pnpm --filter @linkshell/desktop test
       - run: pnpm --filter @linkshell/windows test
       - run: pnpm --filter @linkshell/windows build:standalone
+        id: windows_bundle
         env:
           LINKSHELL_SMOKE_SHOTS: artifacts/window-shots
+      - name: Exercise Windows automatic update, rollback and data preservation
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm --filter @linkshell/windows test:update-e2e
+      - name: Exercise real Codex model selection and session option persistence
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.windows_bundle.outcome == 'success' }}
+        timeout-minutes: 12
+        run: pnpm --filter @linkshell/windows test:model-ui-e2e
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: LinkShell-Windows-model-ui-e2e
+          path: artifacts/windows-model-ui-e2e
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: LinkShell-Windows-update-e2e
+          path: artifacts/windows-update-e2e
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: LinkShell-Windows-x64-unsigned

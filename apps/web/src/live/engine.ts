@@ -28,6 +28,8 @@ import { accountClient, accountToken } from "./account";
 import { browserIdentity, readLocal, saveLocal } from "./storage";
 import { browserDirect } from "./direct";
 import { ComputerConnections } from "./computer-connections";
+import { computerNames } from "./computer-names";
+import { computerAtKey, deduplicateLocalComputer } from "./computer-identity";
 import {
   DESKTOP_ACCOUNT_EVENT, DESKTOP_ERROR_EVENT, DESKTOP_LOCAL, DESKTOP_VISIBILITY_EVENT,
   desktopAccount, desktopHostSocket, desktopLocalComputer, desktopRequest, isDesktop, isWindowsDesktop,
@@ -38,6 +40,8 @@ export interface Computer {
   key: string;
   gateway: string;
   machine: MachineEntry;
+  /** The local host's public gateway identity, learned over its trusted local socket. */
+  relayId?: string;
 }
 export interface Connection {
   computer: Computer;
@@ -49,6 +53,8 @@ interface EngineState {
   source: Source;
   gateway: string;
   computers: Computer[];
+  /** Kept while its reachable relay alias is the visible row. */
+  localComputer?: Computer;
   connection?: Connection;
   relayStatus: Record<string, string>;
   error?: string;
@@ -64,6 +70,7 @@ const savedGateway =
   source === "official"
     ? officialGateway
     : readLocal("gateway", initialGateway);
+const accountBindingError = "网关未确认当前账号，请退出账号后重新登录。";
 
 function relayErrorMessage(error: { code: string; message: string }): string {
   switch (error.code) {
@@ -91,14 +98,16 @@ export class BrowserEngine {
   /** The banner each gateway last raised, taken down again once that gateway is back online. */
   private relayErrors = new Map<string, string>();
   private paired = readLocal<Computer[]>("paired", []);
+  private localAliases = new Map<string, Computer>();
   private selected = readLocal<string>("selected", "");
   private releaseLock?: () => void;
   private starting?: Promise<void>;
   private authUser?: string;
+  private accountRevision = 0;
   private authSubscribed = false;
   private generation = 0;
   private desktopPoll?: ReturnType<typeof setInterval>;
-  private desktopAuthTimer?: ReturnType<typeof setTimeout>;
+  private accountAuthTimer?: ReturnType<typeof setTimeout>;
   private desktopRefresh?: Promise<void>;
   private desktopLocalRequest?: Promise<void>;
   private desktopLocalAbort?: AbortController;
@@ -113,7 +122,7 @@ export class BrowserEngine {
   constructor() {
     if (isDesktop) {
       window.addEventListener(DESKTOP_ERROR_EVENT, (event) => this.report((event as CustomEvent<string>).detail));
-      window.addEventListener(DESKTOP_ACCOUNT_EVENT, (event) => this.applyDesktopAccount((event as CustomEvent<DesktopAccount>).detail));
+      window.addEventListener(DESKTOP_ACCOUNT_EVENT, (event) => this.applyAccount((event as CustomEvent<DesktopAccount>).detail));
       window.addEventListener(DESKTOP_VISIBILITY_EVENT, (event) => {
         if ((event as CustomEvent<{ visible: boolean }>).detail?.visible) this.reconnect();
       });
@@ -192,7 +201,9 @@ export class BrowserEngine {
     const generation = ++this.generation;
     this.identity = await browserIdentity();
     if (generation !== this.generation) return;
+    this.localAliases.clear();
     this.state.setState({
+      localComputer: undefined,
       computers: this.paired.map((item) => ({
         ...item,
         machine: { ...item.machine, online: false },
@@ -216,59 +227,57 @@ export class BrowserEngine {
     if (deployment === "self-hosted") throw new Error("私有部署使用设备配对");
     if (isDesktop) {
       const account = await desktopAccount();
-      this.applyDesktopAccount(account);
+      this.applyAccount(account);
       this.state.setState({ source: "official", gateway: officialGateway });
       saveLocal("source", "official");
       return;
     }
     const auth = accountClient().auth;
+    const revision = this.accountRevision;
     const { data, error } = await auth.getSession();
-    if (error) throw error;
-    this.authUser = data.session?.user.id;
+    if (revision === this.accountRevision) {
+      if (error) throw error;
+      this.applyAccount({ userId: data.session?.user.id, email: data.session?.user.email });
+    }
     this.state.setState({
-      account: data.session?.user.email,
-      accountUserId: data.session?.user.id,
       source: "official",
       gateway: officialGateway,
     });
     if (!this.authSubscribed) {
       this.authSubscribed = true;
       auth.onAuthStateChange((_event, session) => {
-        const changed = this.authUser !== session?.user.id;
-        this.authUser = session?.user.id;
-        this.state.setState({
-          account: session?.user.email,
-          accountUserId: session?.user.id,
-        });
-        if (changed && this.releaseLock)
-          setTimeout(() => {
-            this.relays.get(officialGateway)?.reauthenticate();
-            if (session) this.relay(officialGateway);
-          }, 0);
+        this.applyAccount({ userId: session?.user.id, email: session?.user.email });
       });
     }
     saveLocal("source", "official");
-    if (data.session) this.relay(officialGateway).reauthenticate();
   }
-  private applyDesktopAccount(account: DesktopAccount) {
+  private applyAccount(account: Pick<DesktopAccount, "userId" | "email">) {
     const changed = this.authUser !== account.userId;
     this.authUser = account.userId;
     if (changed) {
-      for (const computer of this.state.getState().computers) {
+      this.accountRevision++;
+      // A running relay connection can outlive its merged local row until the user navigates.
+      const known = [...this.state.getState().computers, ...this.connections.values().map((connection) => connection.computer)];
+      for (const computer of known) {
         if (computer.gateway !== officialGateway || computer.machine.via !== "account") continue;
         if (this.state.getState().connection?.computer.key === computer.key) this.disconnect();
         this.connections.remove(computer.key);
+      }
+      for (const [key, computer] of this.localAliases) {
+        if (computer.gateway === officialGateway && computer.machine.via === "account") this.localAliases.delete(key);
       }
     }
     this.state.setState((state) => ({
       account: account.email,
       accountUserId: account.userId,
-      computers: changed ? state.computers.filter((computer) =>
+      computers: changed ? this.mergeComputers(state.computers.filter((computer) =>
         computer.gateway !== officialGateway || computer.machine.via !== "account",
-      ) : state.computers,
+      ), state.localComputer) : state.computers,
     }));
     if (!this.releaseLock) return;
-    if (this.desktopAuthTimer) clearTimeout(this.desktopAuthTimer);
+    // A duplicate INITIAL_SESSION/TOKEN_REFRESHED event must not cancel a pending account switch.
+    if (!changed && (this.accountAuthTimer || this.relays.has(officialGateway))) return;
+    if (this.accountAuthTimer) clearTimeout(this.accountAuthTimer);
     const generation = this.generation;
     // Account changes may arrive while RelayClient awaits its token provider. Let that
     // authentication finish before replacing its socket, so an old nonce cannot escape
@@ -276,9 +285,8 @@ export class BrowserEngine {
     // Only a different account needs a new gateway connection. A refreshed token for the same
     // one (hourly) is fetched on the next connect anyway; reconnecting for it would drop every
     // open tunnel while they still look online.
-    if (!changed && this.relays.has(officialGateway)) return;
-    this.desktopAuthTimer = setTimeout(() => {
-      this.desktopAuthTimer = undefined;
+    this.accountAuthTimer = setTimeout(() => {
+      this.accountAuthTimer = undefined;
       if (!this.releaseLock || generation !== this.generation || account.userId !== this.authUser) return;
       if (changed) this.relays.get(officialGateway)?.reauthenticate();
       if (account.userId) this.relay(officialGateway);
@@ -291,15 +299,31 @@ export class BrowserEngine {
       this.desktopLocalAttempt = undefined;
     }
     this.state.setState((state) => {
-      const previous = state.computers.find((item) => item.key === DESKTOP_LOCAL);
-      const local = computer ?? (previous ? { ...previous, machine: { ...previous.machine, online: false } } : undefined);
+      const previous = state.localComputer ?? state.computers.find((item) => item.key === DESKTOP_LOCAL);
+      const local = computer
+        ? { ...computer, relayId: computer.relayId ?? (computer.machine.id === previous?.machine.id ? previous.relayId : undefined) }
+        : previous ? { ...previous, machine: { ...previous.machine, online: false } } : undefined;
       return {
-        computers: [...(local ? [local] : []), ...state.computers.filter((item) => item.key !== DESKTOP_LOCAL)],
+        localComputer: local,
+        computers: this.mergeComputers(state.computers.filter((item) => item.key !== DESKTOP_LOCAL), local),
         localError: computer ? undefined : "本机服务未运行，请在本机服务中启动。",
       };
     });
-    if (computer && !this.state.getState().connection && (!this.selected || this.selected === DESKTOP_LOCAL))
+    if (computer && !this.state.getState().connection && (!this.selected || this.computerForKey(this.selected)?.key === DESKTOP_LOCAL))
       this.select(computer);
+  }
+  private mergeComputers(computers: Computer[], local: Computer | undefined): Computer[] {
+    // Keep the alternate route's presence while it is hidden, so a stopped local socket does
+    // not remove the only reachable entry. Pairing records themselves remain untouched.
+    for (const [key, alias] of this.localAliases) {
+      if (!local?.relayId || alias.machine.id !== local.relayId) this.localAliases.delete(key);
+    }
+    for (const computer of computers) {
+      if (computer.key !== DESKTOP_LOCAL && local?.relayId === computer.machine.id) this.localAliases.set(computer.key, computer);
+    }
+    const byKey = new Map([...this.localAliases.values(), ...computers].map((computer) => [computer.key, computer]));
+    byKey.delete(DESKTOP_LOCAL);
+    return deduplicateLocalComputer([...(local ? [local] : []), ...byKey.values()]);
   }
   refreshLocal(): Promise<void> {
     if (!isDesktop || !this.releaseLock) return Promise.resolve();
@@ -314,6 +338,7 @@ export class BrowserEngine {
       if (generation === this.generation) this.setLocalComputer(computer);
     }).catch((error: unknown) => {
       if (generation !== this.generation) return;
+      this.setLocalComputer(undefined);
       this.state.setState({ localError: error instanceof Error ? error.message : String(error) });
     }).finally(() => {
       clearTimeout(timeout);
@@ -360,10 +385,15 @@ export class BrowserEngine {
       platform: isWindowsDesktop ? "Windows" : isDesktop ? "macOS" : "web",
       token: useAccount
         ? async () => {
+            const accountRevision = this.accountRevision;
+            const userId = this.authUser;
             try {
-              return await accountToken();
+              const token = await accountToken(userId);
+              if (accountRevision !== this.accountRevision || userId !== this.authUser)
+                throw new Error("账号已更新，正在重新连接");
+              return token;
             } catch (error) {
-              this.report(error);
+              if (accountRevision === this.accountRevision) this.report(error);
               throw error;
             }
           }
@@ -407,17 +437,20 @@ export class BrowserEngine {
       void this.refresh(gateway).catch((error) => this.report(error));
     });
     relay.on("presence", ({ id, online }) => {
+      const aliasKey = `${gateway}#${id}`;
+      const alias = this.localAliases.get(aliasKey);
+      if (alias) this.localAliases.set(aliasKey, { ...alias, machine: { ...alias.machine, online } });
       // A computer that just joined the account is announced before this list knows it.
-      if (online && !this.state.getState().computers.some((item) => item.gateway === gateway && item.machine.id === id)) {
+      if (online && !alias && !this.state.getState().computers.some((item) => item.gateway === gateway && item.machine.id === id)) {
         void this.refresh(gateway).catch((error) => this.report(error));
         return;
       }
       this.state.setState((state) => ({
-        computers: state.computers.map((item) =>
+        computers: this.mergeComputers(state.computers.map((item) =>
           item.gateway === gateway && item.machine.id === id
             ? { ...item, machine: { ...item.machine, online } }
             : item,
-        ),
+        ), state.localComputer),
       }));
     });
     relay.start();
@@ -428,29 +461,41 @@ export class BrowserEngine {
     if (!relay) return;
     const generation = this.generation;
     const accountUser = this.authUser;
+    const accountRevision = this.accountRevision;
     const { machines } = await relay.request("machines.list", {});
     if (generation !== this.generation || relay !== this.relays.get(gateway) ||
-        (gateway === officialGateway && accountUser !== this.authUser)) return;
-    const found = machines.map((machine) => ({
+        (gateway === officialGateway && (accountUser !== this.authUser || accountRevision !== this.accountRevision))) return;
+    const usesAccount = gateway === officialGateway && deployment !== "self-hosted";
+    const accountMatches = usesAccount && !!accountUser && relay.account?.userId === accountUser;
+    // An offline sign-out can leave the gateway's old account binding intact.
+    // Pairings remain usable, but account-only computers require the current authenticated user.
+    const found = machines.filter((machine) => machine.via === "paired" || accountMatches).map((machine) => ({
       gateway,
       machine,
       key: `${gateway}#${machine.id}`,
     }));
+    for (const [key, alias] of this.localAliases) if (alias.gateway === gateway) this.localAliases.delete(key);
+    for (const computer of found) computerNames.remember(computer);
     this.state.setState((state) => ({
-      computers: [
+      computers: this.mergeComputers([
         ...state.computers.filter((item) => item.gateway !== gateway),
         ...found,
-      ],
+      ], state.localComputer),
     }));
     const state = this.state.getState();
     if (!state.connection) {
       const chosen =
-        state.computers.find((item) => item.key === this.selected) ??
+        computerAtKey(state.computers, this.selected, state.localComputer) ??
         state.computers.find((item) => item.machine.online);
       if (chosen) this.select(chosen);
     }
+    if (usesAccount && accountUser && !accountMatches)
+      this.state.setState({ error: accountBindingError });
+    else if (usesAccount && this.state.getState().error === accountBindingError)
+      this.state.setState({ error: undefined });
   }
   select(computer: Computer) {
+    computer = this.computerForKey(computer.key) ?? computer;
     const selected = this.retainComputer(computer);
     this.disconnect();
     this.releaseSelected = selected.release;
@@ -458,9 +503,13 @@ export class BrowserEngine {
     this.selected = computer.key;
     saveLocal("selected", computer.key);
   }
-  retainComputer(computer: Computer) {
+  computerForKey(key: string): Computer | undefined {
+    const state = this.state.getState();
+    return computerAtKey(state.computers, key, state.localComputer);
+  }
+  retainComputer(computer: Computer, options?: { metadataOnly?: boolean }) {
     if (!this.identity || !this.releaseLock) throw new Error("请先在本标签页启用连接");
-    return this.connections.acquire(computer);
+    return this.connections.acquire(this.computerForKey(computer.key) ?? computer, options);
   }
   private openComputer(computer: Computer) {
     if (!this.identity) throw new Error("设备身份尚未就绪");
@@ -477,12 +526,27 @@ export class BrowserEngine {
       connector: local ? undefined : browserDirect,
       iceServers: () => store.getState().machine?.direct?.iceServers,
     });
+    streams.stop();
+    const connection: Connection = { computer, link, store, streams };
     const unsubscribe = store.subscribe((state, previous) => {
-      if (state.machine !== previous.machine) streams.connect();
+      if (state.machine === previous.machine) return;
+      if (state.machine?.naming) {
+        computerNames.sync(computer, state.machine);
+        const updated = { ...connection.computer, machine: { ...connection.computer.machine,
+          name: state.machine.hostname, namingConfigured: state.machine.naming.configured } };
+        connection.computer = updated;
+        this.state.setState((current) => ({
+          computers: current.computers.map((item) => item.key === computer.key ? { ...item, machine: { ...item.machine,
+            name: updated.machine.name, namingConfigured: updated.machine.namingConfigured } } : item),
+          connection: current.connection?.computer.key === computer.key ? { ...current.connection, computer: updated } : current.connection,
+          localComputer: current.localComputer?.key === computer.key ? { ...current.localComputer,
+            machine: { ...current.localComputer.machine, name: updated.machine.name, namingConfigured: updated.machine.namingConfigured } } : current.localComputer,
+        }));
+      }
+      streams.connect();
     });
     store.getState().connect();
-    streams.start();
-    return { connection: { computer, link, store, streams }, close: () => {
+    return { connection, close: () => {
       unsubscribe(); streams.stop(); store.getState().disconnect();
     } };
   }
@@ -523,8 +587,9 @@ export class BrowserEngine {
     if (this.state.getState().connection?.computer.key === computer.key)
       this.disconnect();
     this.connections.remove(computer.key);
+    this.localAliases.delete(computer.key);
     this.state.setState((state) => ({
-      computers: state.computers.filter((item) => item.key !== computer.key),
+      computers: this.mergeComputers(state.computers.filter((item) => item.key !== computer.key), state.localComputer),
     }));
   }
   /** Asks every gateway again for its computers (and the desktop for this one), now. */
@@ -563,8 +628,8 @@ export class BrowserEngine {
     this.desktopLocalRequest = undefined;
     if (this.desktopPoll) clearInterval(this.desktopPoll);
     this.desktopPoll = undefined;
-    if (this.desktopAuthTimer) clearTimeout(this.desktopAuthTimer);
-    this.desktopAuthTimer = undefined;
+    if (this.accountAuthTimer) clearTimeout(this.accountAuthTimer);
+    this.accountAuthTimer = undefined;
     this.disconnect();
     this.connections.clear();
     for (const relay of this.relays.values()) relay.stop();

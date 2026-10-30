@@ -8,9 +8,10 @@ import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-acti
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
+import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentTile } from "@/components/agent-tile";
 import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
@@ -26,7 +27,7 @@ import { Timeline } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
-import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
+import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -132,6 +133,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const loaded = useClient((state) => state.sessionsLoaded);
   const ready = useClient((state) => !!state.ready[id]);
   const online = useClient((state) => state.status === "online");
+  const connecting = useConnectionStatus() === "connecting";
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
   const promptProgress = useClient((state) => state.promptProgress[id]);
@@ -163,15 +165,26 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const hasDraft = useHasComposerDraft(id);
   const { computer } = useConnection();
   const insets = usePageInsets();
+  const systemInsets = useSafeAreaInsets();
   const focused = useIsFocused();
   const ipadKeyboard = useIPadKeyboard(focused);
   const keyboardHeight = useKeyboardState((state) => state.height);
   // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
   const reservedBottom = folded?.bottomReserved ?? consumedBottomInset;
-  const bottomInset = ipadKeyboard.enabled && ipadKeyboard.overlap > 0 ? 0 : Math.max(0, insets.bottom - reservedBottom);
+  // The foldable layout probe may report zero while native bars move between edges.
+  // Keep the system home-indicator inset, subtracting only space the parent actually reserved.
+  const bottomInset = ipadKeyboard.enabled && ipadKeyboard.overlap > 0 ? 0 : Math.max(0, Math.max(insets.bottom, systemInsets.bottom) - reservedBottom);
   // iPad resizes the viewport once; the list and composer must not lift again.
   const keyboardOffset = ipadKeyboard.enabled ? keyboardHeight : reservedBottom + bottomInset;
   const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const { height: keyboardTranslation, progress: keyboardProgress } = useReanimatedKeyboardAnimation();
+  const stickyEnabled = !ipadKeyboard.enabled;
+  const composerKeyboardStyle = useAnimatedStyle(() => {
+    const height = keyboardTranslation.get();
+    // iOS can report progress=1 with a hidden keyboard after rotation; no keyboard means no safe-area compensation.
+    const progress = height < 0 ? keyboardProgress.get() : 0;
+    return { transform: [{ translateY: stickyEnabled ? height + progress * keyboardOffset : 0 }] };
+  }, [keyboardTranslation, keyboardProgress, keyboardOffset, stickyEnabled]);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();
   // Only bounded panes consume the bar; a full-height iOS list underlaps it.
@@ -539,7 +552,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         items={timelineItems}
         planId={view?.planId}
         turnActive={turnActive}
-        activity={turnActivity({ session: summary, progress: promptProgress, online, ready, hasPermission: !!view?.permissions.length, queued: shownQueue(summary.queue, queueing).length, view })}
+        activity={turnActivity({ session: summary, progress: promptProgress, online, connecting, ready, hasPermission: !!view?.permissions.length, queued: shownQueue(summary.queue, queueing).length, view })}
         composerInset={composerInset}
         keyboardOffset={keyboardOffset}
         onFailedMessage={onFailedMessage}
@@ -572,11 +585,9 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       ) : null}
 
 
-      <KeyboardStickyView
-        enabled={!ipadKeyboard.enabled}
-        offset={{ closed: 0, opened: keyboardOffset }}
+      <Animated.View
         pointerEvents="box-none"
-        style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}
+        style={[{ position: "absolute", left: 0, right: 0, bottom: 0 }, composerKeyboardStyle]}
       >
         {!atEnd && items.length > 0 ? (
           <Animated.View
@@ -598,6 +609,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           agent={summary.agent}
           agentInfo={agentInfo}
           online={online}
+          connecting={connecting}
           turnActive={turnActive || summary.state === "unknown"}
           driver={driver}
           permission={view?.permissions[0]}
@@ -632,7 +644,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
           onSettings={() => router.push({ pathname: "/session/[id]/settings", params: { id } })}
         />
         </View>
-      </KeyboardStickyView>
+      </Animated.View>
     </View>
     </ContentHeight>
     </View>

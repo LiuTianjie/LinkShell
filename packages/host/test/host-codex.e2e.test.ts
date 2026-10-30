@@ -366,7 +366,11 @@ describe("host + Codex driver (fake app-server)", () => {
     expect(host.hub.getSession(sessionId)).toMatchObject({ pendingPermissions: 0, state: "idle" });
   });
 
-  it("full access chosen mid-turn answers what the turn already asked and what it asks next", async () => {
+  it.each([
+    ["auto", "on-request", "workspaceWrite"],
+    ["full-access", "never", "dangerFullAccess"],
+    ["read-only", "on-request", "readOnly"],
+  ])("switches to %s in the same thread before draining queued input", async (mode, approvalPolicy, sandboxType) => {
     const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
     const id = session.id;
     await phone.client.call("sessions.subscribe", { sessionId: id, fromSeq: 0 });
@@ -374,18 +378,68 @@ describe("host + Codex driver (fake app-server)", () => {
     const request = await waitFor(() => phone.of(id).find((e) => e.update.sessionUpdate === "ls_permission"));
     const requestId = (request.update as { requestId: string }).requestId;
 
-    await phone.client.call("sessions.setConfig", { sessionId: id, optionId: "permissions", value: "full-access" });
+    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "queued-after-permissions", content: text("queued follow-up"), whenBusy: "queue" });
+    await phone.client.call("sessions.setConfig", { sessionId: id, optionId: "permissions", value: mode });
     const resolved = await waitFor(() => phone.of(id).find((e) => e.update.sessionUpdate === "ls_permission_resolved" && e.update.requestId === requestId));
-    expect(resolved.update).toMatchObject({ optionId: "acceptForSession" });
-    await waitFor(() => phone.turnsEnded(id).length === 1);
+    expect(resolved.update).not.toMatchObject({ optionId: "acceptForSession" });
+    expect(resolved.update).not.toMatchObject({ optionId: "accept" });
+    await waitFor(() => phone.turnsEnded(id).length === 3);
     expect(host.hub.getSession(id)).toMatchObject({ pendingPermissions: 0 });
+    const raw = await rawCodexClient(host.paths.codexSocket);
+    try {
+      const { thread } = await raw.peer.request<{ thread: { id: string; turns: { status: string; settings: unknown; items: { type: string; content?: { type: string; text?: string }[] }[] }[] } }>("thread/read", { threadId: session.nativeId, includeTurns: true });
+      expect(thread.id).toBe(session.nativeId);
+      expect(thread.turns).toHaveLength(3);
+      expect(thread.turns[0]!.status).toBe("interrupted");
+      expect(thread.turns[1]!.settings).toMatchObject({ approvalPolicy, sandboxPolicy: { type: sandboxType } });
+      const prompts = thread.turns.map((turn) => turn.items.filter((item) => item.type === "userMessage").flatMap((item) => item.content ?? []).map((part) => part.text ?? "").join(""));
+      expect(prompts[0]).toBe("RUN it");
+      expect(prompts[1]).toContain("继续刚才尚未完成的任务");
+      expect(prompts[2]).toBe("queued follow-up");
+    } finally {
+      raw.close();
+    }
+  });
 
-    // The fake asks whatever the policy: the host answers it, and no card shows.
-    const asked = phone.of(id).filter((e) => e.update.sessionUpdate === "ls_permission").length;
-    await phone.client.call("sessions.prompt", { sessionId: id, clientMessageId: "fa2", content: text("RUN again") });
-    await waitFor(() => phone.turnsEnded(id).length === 2);
-    expect(phone.of(id).filter((e) => e.update.sessionUpdate === "ls_permission")).toHaveLength(asked);
-    expect(phone.of(id).filter((e) => e.update.sessionUpdate === "tool_call_update" && e.update.appendOutput === "hi\n")).toHaveLength(2);
+  it("does not restart work that completed while a permission change was in flight", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    await phone.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "finish-race", content: text("FINISH_ON_INTERRUPT SLOW") });
+    await waitFor(() => host.hub.getSession(session.id).state === "running");
+    await phone.client.call("sessions.setConfig", { sessionId: session.id, optionId: "permissions", value: "auto" });
+    expect(phone.turnsEnded(session.id)).toHaveLength(1);
+    expect(phone.of(session.id).filter((event) => event.update.sessionUpdate === "ls_turn" && event.update.state === "started")).toHaveLength(1);
+    expect(host.hub.getSession(session.id).state).toBe("idle");
+  });
+
+  it("lets Stop cancel the continuation during a permission change", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    await phone.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "stop-race", content: text("SLOW") });
+    await waitFor(() => host.hub.getSession(session.id).state === "running");
+    const changing = phone.client.call("sessions.setConfig", { sessionId: session.id, optionId: "permissions", value: "full-access" });
+    const rejected = expect(changing).rejects.toMatchObject({ appCode: "busy" });
+    await waitFor(() => phone.of(session.id).some((event) => event.update.sessionUpdate === "ls_notice" && event.update.title === "正在切换权限"));
+    await laptop.client.call("sessions.cancel", { sessionId: session.id });
+    await rejected;
+    expect(phone.of(session.id).filter((event) => event.update.sessionUpdate === "ls_turn" && event.update.state === "started")).toHaveLength(1);
+  });
+
+  it("revokes host-side full access before a stopping turn can ask for another approval", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    await phone.client.call("sessions.subscribe", { sessionId: session.id, fromSeq: 0 });
+    await phone.client.call("sessions.setConfig", { sessionId: session.id, optionId: "permissions", value: "full-access" });
+    await phone.client.call("sessions.prompt", { sessionId: session.id, clientMessageId: "late-approval", content: text("SLOW APPROVAL_DURING_INTERRUPT") });
+    await waitFor(() => host.hub.getSession(session.id).state === "running");
+    await phone.client.call("sessions.setConfig", { sessionId: session.id, optionId: "permissions", value: "read-only" });
+    const raw = await rawCodexClient(host.paths.codexSocket);
+    try {
+      const { thread } = await raw.peer.request<{ thread: { turns: { interruptApprovalDecision?: string }[] } }>("thread/read", { threadId: session.nativeId, includeTurns: true });
+      expect(thread.turns[0]!.interruptApprovalDecision).toBe("interrupted");
+    } finally {
+      raw.close();
+    }
+    await waitFor(() => phone.turnsEnded(session.id).length === 2);
   });
 
   it("answers side questions in an ephemeral read-only fork that never becomes a session or enters this one", async () => {

@@ -9,12 +9,13 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { decodePairingLink } from "@linkshell/wire";
 import { LoaderCircle } from "lucide-react";
 import { engine } from "./engine";
 import { accountClient } from "./account";
+import { signInWithAccountOAuth } from "./account-oauth";
 import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
 import { Icon } from "../icons";
@@ -39,6 +40,9 @@ export function Connect({ close }: { close: () => void }) {
     gateway?: string;
   }>({});
   const job = useJob();
+  const oauth = useRef<AbortController | null>(null);
+  const [oauthStage, setOAuthStage] = useState<"waiting" | "exchanging">();
+  useEffect(() => () => oauth.current?.abort(), []);
   const blocked = job.busy || state.locked;
   const signIn = useDesktopSignIn(async () => {
     await engine.connectAccount();
@@ -193,15 +197,22 @@ export function Connect({ close }: { close: () => void }) {
               disabled={blocked}
               onClick={() =>
                 void job.run(async () => {
-                  // The callback reload must boot the official account connection.
-                  await engine.connectAccount();
-                  const result = await accountClient().auth.signInWithOAuth({
-                    provider,
-                    options: {
-                      redirectTo: location.origin + location.pathname,
-                    },
-                  });
-                  if (result.error) throw result.error;
+                  const controller = new AbortController();
+                  oauth.current = controller;
+                  setOAuthStage("waiting");
+                  try {
+                    await signInWithAccountOAuth(accountClient().auth, provider, {
+                      signal: controller.signal,
+                      onExchanging: () => setOAuthStage("exchanging"),
+                    });
+                    if (controller.signal.aborted) return;
+                    await engine.connectAccount();
+                    if (controller.signal.aborted) return;
+                    close();
+                  } finally {
+                    oauth.current = null;
+                    setOAuthStage(undefined);
+                  }
                 })
               }
             >
@@ -209,6 +220,14 @@ export function Connect({ close }: { close: () => void }) {
             </Button>
           ))}
         </div>
+        {oauthStage && (
+          <div className="flex items-center justify-between gap-3" role="status">
+            <p className="field-hint">{oauthStage === "waiting" ? "请在登录窗口中完成授权。" : "正在完成登录…"}</p>
+            <Button type="button" variant="ghost" size="sm" disabled={oauthStage === "exchanging"} onClick={() => oauth.current?.abort()}>
+              取消登录
+            </Button>
+          </div>
+        )}
         <p className="field-hint flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           登录状态会自动续期。
           <a
