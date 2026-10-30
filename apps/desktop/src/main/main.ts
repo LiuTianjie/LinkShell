@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
+import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
@@ -690,14 +691,27 @@ function startUpdater() {
     return;
   }
   if (!nativeModule || !runtime.standalone) return;
+  const prepare = macUpdatePreparation({
+    prepare: () => management.action("prepare-update"),
+    recover: () => management.action("recover-update"),
+    resume: () => nativeModule?.updaterPrepared(),
+    failed: (message) => {
+      send("linkshell-desktop-update", { name: "message", message });
+      send("linkshell-desktop-update", { name: "finished" });
+    },
+  });
   nativeModule.updaterStart({
     event: (name, detail) => {
       if (name === "prepare") {
         // Sparkle is about to relaunch: the CLI stops this app's Host first, then Sparkle continues.
-        void management.action("prepare-update").catch(() => undefined).finally(() => nativeModule?.updaterPrepared());
+        void prepare();
         return;
       }
-      if (name === "recover") { void management.action("recover-update").catch(() => undefined); }
+      if (name === "recover") {
+        void management.action("recover-update").catch((error: unknown) => {
+          send("linkshell-desktop-update", { name: "message", message: `服务恢复需要处理：${error instanceof Error ? error.message : String(error)}` });
+        });
+      }
       send("linkshell-desktop-update", { name, ...detail });
     },
   }, String(settings.get("updateChannel") ?? "stable"));

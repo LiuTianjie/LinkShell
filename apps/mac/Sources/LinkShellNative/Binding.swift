@@ -108,7 +108,6 @@ final class Callback {
   private var callback: Callback?
   private var channel = "stable"
   private var waiting: (() -> Void)?
-  private var installing = false
   private var prepared = false
 
   func start(callback: Callback, channel: String) -> Bool {
@@ -131,20 +130,31 @@ final class Callback {
   }
 
   func check() {
-    guard let updater = controller?.updater, updater.canCheckForUpdates else { return }
+    guard let updater = controller?.updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
     emit("checking", ["message": "正在检查 App 更新…"])
     updater.checkForUpdateInformation()
   }
 
   func install() {
+    if waiting != nil {
+      emit("installing", ["message": "正在确认后台服务停止…"])
+      emit("prepare", [:])
+      return
+    }
     guard let controller, controller.updater.canCheckForUpdates else { return }
-    installing = false; prepared = false
+    // Sparkle may only be focusing an install whose termination was postponed.
+    if !controller.updater.sessionInProgress { prepared = false }
     emit("message", ["message": "正在打开更新窗口…"])
     controller.checkForUpdates(nil)
   }
 
   func setChannel(_ value: String) { channel = value }
-  func preparedHost() { let resume = waiting; waiting = nil; resume?() }
+  func preparedHost() {
+    // The update may have failed while the CLI was still confirming the Host stopped.
+    guard let resume = waiting else { emit("recover", [:]); return }
+    waiting = nil; prepared = true
+    resume()
+  }
 
   private func emit(_ name: String, _ detail: [String: Any]) { callback?.call(["name": name, "detail": detail]) }
 
@@ -166,11 +176,10 @@ final class Callback {
     MainActor.assumeIsolated { emit("message", ["message": "下载完成，点击“Install and Relaunch”即可安装并重启"]) }
   }
   nonisolated func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
-    MainActor.assumeIsolated { installing = true; emit("installing", ["message": "正在安装，LinkShell 将重新打开…"]) }
+    MainActor.assumeIsolated { emit("installing", ["message": "正在安装，LinkShell 将重新打开…"]) }
   }
   nonisolated func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
     MainActor.assumeIsolated {
-      installing = true; prepared = true
       waiting = installHandler
       emit("installing", ["message": "正在安装，LinkShell 将重新打开…"])
       // main.ts runs `desktop --action prepare-update`, then calls updaterPrepared().
@@ -183,7 +192,9 @@ final class Callback {
     MainActor.assumeIsolated {
       if let message { emit("message", ["message": message]) }
       emit("finished", [:])
-      if prepared && !installing { prepared = false; emit("recover", [:]) }
+      let recover = prepared && error != nil
+      waiting = nil; prepared = false
+      if recover { emit("recover", [:]) }
     }
   }
 }
