@@ -173,30 +173,61 @@ namespace LinkShell.Windows {
         static void CreateShortcut(string root, string home) {
             CreateShortcutAt(root, Environment.GetFolderPath(Environment.SpecialFolder.Programs), home);
         }
+
+        // Keep the native IShellLinkW vtable order. HRESULTs become exceptions rather than
+        // being preserved as ignored return values, and every string uses the Unicode API.
+        [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IShellLinkW {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, IntPtr findData, uint flags);
+            void GetIDList(out IntPtr pidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder description, int length);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int length);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int length);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+            void GetHotkey(out ushort hotkey);
+            void SetHotkey(ushort hotkey);
+            void GetShowCmd(out int command);
+            void SetShowCmd(int command);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, out int index);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+            void Resolve(IntPtr window, uint flags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+        }
+
         internal static void CreateShortcutAt(string root, string directory, string home = null) {
             Directory.CreateDirectory(directory);
-            object shell = null, link = null;
+            string shortcutPath = Path.Combine(directory, "LinkShell.lnk");
+            object link = null;
             string step = "加载 Windows 快捷方式组件";
             try {
-                Type type = Type.GetTypeFromProgID("WScript.Shell"); shell = Activator.CreateInstance(type);
-                step = "创建开始菜单快捷方式";
-                link = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { Path.Combine(directory, "LinkShell.lnk") });
+                link = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"), true));
+                var shortcut = (IShellLinkW)link;
+                var file = (System.Runtime.InteropServices.ComTypes.IPersistFile)link;
+                if (File.Exists(shortcutPath)) {
+                    // Preserve options this install does not change, as the previous shortcut writer did.
+                    step = "读取已有开始菜单快捷方式";
+                    file.Load(shortcutPath, 0);
+                }
                 step = "设置快捷方式目标";
-                link.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty, null, link, new object[] { Path.Combine(root, "LinkShell.exe") });
+                shortcut.SetPath(Path.Combine(root, "LinkShell.exe"));
                 step = "设置快捷方式工作目录";
-                link.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { root });
+                shortcut.SetWorkingDirectory(root);
                 if (home != null) {
                     step = "设置快捷方式启动参数";
-                    link.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, link, new object[] { "--home " + Quote(home) });
+                    shortcut.SetArguments("--home " + Quote(home));
                 }
                 step = "保存开始菜单快捷方式";
-                link.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
+                file.Save(shortcutPath, true);
             } catch (Exception error) {
-                // Reflection otherwise hides the actionable COM error behind a generic invocation failure.
+                // Keep the native operation and HRESULT even when COM activation wraps its exception.
                 Exception cause = error;
                 while (cause is TargetInvocationException && cause.InnerException != null) cause = cause.InnerException;
                 throw new IOException(step + "失败（0x" + cause.HResult.ToString("X8") + "）：" + cause.Message, cause);
-            } finally { if (link != null) Marshal.FinalReleaseComObject(link); if (shell != null) Marshal.FinalReleaseComObject(shell); }
+            } finally { if (link != null) Marshal.FinalReleaseComObject(link); }
         }
         static string Quote(string value) { return "\"" + value.TrimEnd('\\') + new string('\\', 2 * (value.Length - value.TrimEnd('\\').Length)) + "\""; }
         static void RunCli(string root, string action, string home) {

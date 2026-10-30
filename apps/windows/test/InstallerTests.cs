@@ -52,31 +52,61 @@ internal static class InstallerTests {
         return buffer.ToString();
     }
 
+    // Keep the reader's ABI independent of production so a writer declaration mistake cannot validate itself.
+    // HRESULTs are translated into exceptions: these methods deliberately do not use PreserveSig.
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShortcutReadback {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, IntPtr findData, uint flags);
+        void GetIDList(out IntPtr itemIdList);
+        void SetIDList(IntPtr itemIdList);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder description, int capacity);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int capacity);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int capacity);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        void GetHotkey(out ushort hotkey);
+        void SetHotkey(ushort hotkey);
+        void GetShowCmd(out int command);
+        void SetShowCmd(int command);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, out int index);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+        void Resolve(IntPtr window, uint flags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    }
+
     static string[] ReadShortcut(string path) {
-        object shell = null, link = null;
-        string step = "load WScript.Shell for shortcut readback";
+        object shortcut = null;
+        string step = "create Unicode Shell Link for shortcut readback";
         try {
-            Type type = Type.GetTypeFromProgID("WScript.Shell"); shell = Activator.CreateInstance(type);
+            shortcut = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+            var link = (IShortcutReadback)shortcut;
             step = "open saved shortcut for readback";
-            link = type.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
-            string[] fields = { "TargetPath", "WorkingDirectory", "Arguments" }, values = new string[fields.Length];
-            for (int index = 0; index < fields.Length; index++) {
-                step = "read shortcut " + fields[index];
-                values[index] = (string)link.GetType().InvokeMember(fields[index], BindingFlags.GetProperty, null, link, null);
-                Console.WriteLine(fields[index] + "=[" + values[index] + "]");
-            }
+            ((System.Runtime.InteropServices.ComTypes.IPersistFile)shortcut).Load(path, 0);
+            var target = new StringBuilder(32768); var workingDirectory = new StringBuilder(32768); var arguments = new StringBuilder(32768);
+            step = "read shortcut TargetPath";
+            link.GetPath(target, target.Capacity, IntPtr.Zero, 4); // SLGP_RAWPATH avoids resolving or updating the saved target.
+            step = "read shortcut WorkingDirectory";
+            link.GetWorkingDirectory(workingDirectory, workingDirectory.Capacity);
+            step = "read shortcut Arguments";
+            link.GetArguments(arguments, arguments.Capacity);
+            string[] fields = { "TargetPath", "WorkingDirectory", "Arguments" }, values = { target.ToString(), workingDirectory.ToString(), arguments.ToString() };
+            for (int index = 0; index < fields.Length; index++) Console.WriteLine(fields[index] + "=[" + values[index] + "]");
             return values;
         } catch (Exception error) {
             Exception cause = error;
             while (cause is TargetInvocationException && cause.InnerException != null) cause = cause.InnerException;
             throw new IOException(step + " failed (" + cause.GetType().FullName + ", 0x" + cause.HResult.ToString("X8") + "): " + cause.Message, cause);
-        } finally { if (link != null) Marshal.FinalReleaseComObject(link); if (shell != null) Marshal.FinalReleaseComObject(shell); }
+        } finally { if (shortcut != null) Marshal.FinalReleaseComObject(shortcut); }
     }
 
     static void AssertShortcut(string directory, string target, string home) {
         string path = Path.Combine(directory, "LinkShell.lnk");
         Assert(File.Exists(path) && new FileInfo(path).Length > 0, "native shortcut missing: " + path);
         string[] values = ReadShortcut(path);
+        Assert(!String.IsNullOrEmpty(values[0]), "saved shortcut TargetPath is empty");
+        Assert(!String.IsNullOrEmpty(values[1]), "saved shortcut WorkingDirectory is empty");
         Assert(String.Equals(PathSpelling(values[0], false), PathSpelling(Path.Combine(target, "LinkShell.exe"), false), StringComparison.OrdinalIgnoreCase), "shortcut target differs");
         Assert(String.Equals(PathSpelling(values[1], false), PathSpelling(target, false), StringComparison.OrdinalIgnoreCase), "shortcut working directory differs");
         Assert(values[2] == (home == null ? "" : "--home \"" + home + "\""), "shortcut arguments changed home spelling or quoting");
