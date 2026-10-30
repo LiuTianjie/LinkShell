@@ -63,7 +63,11 @@ JPEG 兼容路径的正常发送窗口最多保留两帧待确认，查看器绘
 
 打包时的 smoke（`scripts/smoke.mjs`，`build:standalone` 自动运行）在隔离数据目录启动真实 Host 和打包目录中的 `LinkShell.exe`，经调试端口确认工作台以 Windows 布局加载、页面与主进程的桥能往返，并检查 exe 的名称与版本信息。它不涵盖生产登录、真实激活码或公网性能。
 
-2026-10-30 更新下载链验证：在 macOS 上直接调用生产更新模块，成功检测 GitHub 官方 `desktop-v0.10.80`、下载 278,922,752 字节的 Windows 安装包，并核对 Release 的 SHA-256 后再次验证本地文件；整轮约 23 秒，临时安装包与缓存已清理。隔离编译与 3 项下载行为回归通过。Windows 安装器、原位替换、服务恢复、重开及 junction 路径守卫尚未执行 Windows 验收：现有 Windows 11 VM 的 Parallels LaunchDaemon 启动即退出，日志为 `Bundle has incorrect owner - 501`；正常启动和重启其已配置服务均未恢复。11 项 Windows 交接/路径回归在 macOS 明确跳过，不能视为通过。
+2026-10-30 Windows 自动更新验证：[CI run 41077122254](https://github.com/LiuTianjie/LinkShell/actions/runs/41077122254)（`28ed7146c070a57d21adbef740fade7d8a5a4809`）的更新 E2E 步骤通过，5 个场景与测试清理均成功。在包含中文和空格的独立安装、数据与界面目录中，更新器拒绝损坏下载且未启动安装器；真实安装器完成故意恢复失败后的回滚与原生按钮重开，以及重试后自动打开新 App。Host PID 从基线 `8204` 经回滚后的 `1412` 变为新版 `6992`；新版 App PID 为 `5596`。App / Host 均报告隔离测试版本 `65530.0.2`，两轮准备阶段确实写入恢复标记并停止旧 Host，恢复后清除标记。生成的机器身份与配对 fixture、模拟会话和消息、SQLite 完整性均保持，旧版与失败副本已删除。原生确认框、回滚重开窗口和新版 App 截图已复核。这里记录自动更新步骤的结果，同轮模型选择与原生菜单步骤另行验收。
+
+本轮报告为 `status = passed`、`cleanup.temporaryFilesRemoved = true`、`cleanup.errors = []`。测试清理通过 Unicode Shell Link 接口回读快捷方式，仍须核验同属物理路径，并在删除前再次读取且精确匹配；这套受归属检查约束的清理已无错误完成。上一轮 [run 41074267437](https://github.com/LiuTianjie/LinkShell/actions/runs/41074267437) 已通过 5 个更新场景和真实快捷方式创建、覆盖、Unicode 回读预检，但旧 WScript 清理回读把中文路径变成问号而触发 `ENOENT`；此后更新路径仅修正该测试清理，没有再改生产更新器。完整过程及验证边界见 [Windows update E2E](../apps/windows/test/WINDOWS_UPDATE_E2E.md)。
+
+官方发布下载链另外在 macOS 上验证过：生产更新模块成功检测 `desktop-v0.10.80`，下载 278,922,752 字节的 Windows 安装包，并核对 Release SHA-256 后再次验证本地文件；约 23 秒，临时安装包与缓存已清理。这项下载验证与上述 Windows 安装和恢复证据分别记录。
 
 ```powershell
 corepack pnpm install --frozen-lockfile
@@ -77,7 +81,9 @@ corepack pnpm --filter @linkshell/windows build:standalone
 
 使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件和安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
 
-已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。新增的更新行为回归覆盖发布版本及通道选择、下载校验、损坏/中断清理、活动下载保留，以及 Windows 安装器参数、进程交接和取消不终止进程。应用内更新仍需在真实 Windows 上核对下载→确认→退出→覆盖→服务恢复→重开、失败重试、便携目录和自定义状态目录；跨平台测试不能代替这条验收。
+已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。更新行为回归覆盖发布版本及通道选择、下载校验、损坏/中断清理、活动下载保留，以及 Windows 安装器参数、进程交接、junction 与取消不终止进程。
+
+Windows CI 在安装依赖前运行真实 `shortcut-home` 预检：后台线程通过 Unicode Shell Link 接口，为中文目录中的真实 EXE 在 Programs 专属临时目录创建并覆盖同一快捷方式，再独立回读目标、工作目录与保留原拼写的 Home 参数。`test:update-e2e` 则在打包后验证应用内下载→原生确认→退出→替换→Host 恢复→重开、失败回滚重试，以及便携安装和自定义数据目录。复制包、生成身份与模拟历史的 CI 结果不等同于生产账号、真实 Agent 长任务或公网验收。
 
 命名管道替代 Host 的 Unix socket；不同 `LINKSHELL_HOME` 相互隔离。Codex 的 Windows 进程使用官方 app-server JSONL 标准输入/输出传输；npm 的 `.cmd` Agent 入口通过参数转义启动。终端使用 PowerShell 和随 node-pty 分发的 ConPTY。Mac 原有 socket 与媒体路径保留。
 
@@ -89,7 +95,7 @@ Codex 优先使用 PATH 中的命令行程序；没有全局命令时，自动�
 
 2026-10-19 本机验收：在 3456×2168、200% 缩放的已解锁桌面，通过真实 Host 和浏览器屏幕查看器核对了 JPEG 画面、左键、右键菜单、拖选、中文 / 英文输入、Ctrl+A 替换和向下滚动。实测修复了 Windows 滚轮方向与桌面控件 DPI 缩放。原生测试 4 项通过，无跳过；Host 相关测试 110 项通过；CLI 测试 28 项通过，2 项 POSIX 专用测试跳过。完整构建和类型检查通过，仓库外解压的便携包通过命名管道、SQLite、ConPTY 和运行时依赖 smoke。已安装的 Codex / Claude 及 Claude ACP 完成隔离初始化，未创建真实任务。
 
-验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录、安装器覆盖更新恢复，以及真实 Agent 的长任务和权限批准。当前结果不代表手机真机、安装器升级流程或性能发布验收已完成。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。
+验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录，以及真实 Agent 的长任务和权限批准。隔离 Windows 更新场景不替代真实用户环境、手机真机或性能发布验收。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。
 
 2026-10-19 屏幕优化验收：在同一台主机、1280 像素输出的全屏滚动文字测试中，连续 10 秒的输出从旧版约 2.3 fps 提升到约 7.3 fps，帧间隔中位数从 412 ms 降到 137 ms；这是真实本机采集结果，不是稳定 30 fps 或手机端到端延迟的承诺。静态画面在 8 秒内只发送 5 帧（包含初始、清晰度补帧及心跳）。原生测试覆盖有效图像、不中断进程切换大小/质量、暂停恢复、强制补帧、禁用屏幕与输入释放，DXGI 与强制 GDI 两条路径均通过。`LINKSHELL_SCREEN_DIAGNOSTICS=1` 可输出各阶段平均耗时；`LINKSHELL_SCREEN_CAPTURE=gdi` 用于兼容路径排查。
 
