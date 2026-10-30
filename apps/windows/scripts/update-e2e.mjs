@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -21,6 +21,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const exists = path => stat(path).then(() => true, () => false);
 const readJSON = async path => JSON.parse(await readFile(path, 'utf8'));
 const inside = (root, path) => { const part = relative(root, path); return part && !part.startsWith('..') && !isAbsolute(part); };
+// Windows may report the same fixture with RUNNER~1 or its long directory name.
+const physicalPath = async path => (await realpath(path)).toLowerCase();
+const samePhysicalPath = async (left, right) => await physicalPath(left) === await physicalPath(right);
 const baseVersion = '65530.0.1', nextVersion = '65530.0.2';
 const installerName = `LinkShell-Setup-${nextVersion}-windows-x64.exe`;
 const officialInstaller = `https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v${nextVersion}/${installerName}`;
@@ -170,7 +173,8 @@ async function invoke(method, params = {}) {
 }
 async function snapshot(version) {
   const about = await invoke('about'); assert.equal(about.version, version); assert.equal(about.home, home); assert.equal(about.standalone, true);
-  const status = await cli('snapshot'); assert.equal(status.status, 'running'); assert.equal(status.cliVersion, version); assert.equal(status.machine.hostVersion, version); assert.equal(status.home, home); assert.equal(status.hostOwner.toLowerCase(), target.toLowerCase());
+  const status = await cli('snapshot'); assert.equal(status.status, 'running'); assert.equal(status.cliVersion, version); assert.equal(status.machine.hostVersion, version); assert.equal(status.home, home);
+  assert.ok(await samePhysicalPath(status.hostOwner, target), 'The Host must belong to this copied bundle.');
   return { appVersion: about.version, hostVersion: status.machine.hostVersion, hostPID: await hostPID(), homePreserved: true };
 }
 async function clickControl(selector, text) {
@@ -204,8 +208,16 @@ async function confirm(name) {
   return { prior, installerPID };
 }
 async function processList() {
-  const script = `$root=[System.IO.Path]::GetFullPath($env:LINKSHELL_QA_ROOT).TrimEnd('\\')+'\\'; @(Get-CimInstance Win32_Process | Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase)} | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress`;
-  const text = (await exec('powershell.exe', ['-NoProfile', '-Command', script])).stdout.trim(); const values = text ? JSON.parse(text) : []; return Array.isArray(values) ? values : [values];
+  const script = `[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-CimInstance Win32_Process | Where-Object {$_.ExecutablePath} | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress`;
+  const text = (await exec('powershell.exe', ['-NoProfile', '-Command', script])).stdout.trim();
+  const values = text ? JSON.parse(text) : [], candidates = Array.isArray(values) ? values : [values];
+  const root = await physicalPath(work), owned = [];
+  // Resolve both sides with the same API; lexical short/long-path filtering can miss owned processes.
+  for (const candidate of candidates) {
+    const executable = await physicalPath(candidate.ExecutablePath).catch(() => undefined);
+    if (executable && inside(root, executable)) owned.push(candidate);
+  }
+  return owned;
 }
 try {
   assert.ok(!(await exists(shortcut)), 'Disposable runner already has a LinkShell Start Menu shortcut; refusing to replace it.');
@@ -282,8 +294,15 @@ try {
   }
   const cleanupErrors = [];
   if (await exists(shortcut)) {
-    const script = `$shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($env:LINKSHELL_QA_SHORTCUT);if($link.TargetPath -eq $env:LINKSHELL_QA_EXE){Remove-Item -LiteralPath $env:LINKSHELL_QA_SHORTCUT -Force}else{throw 'Refusing to remove a foreign shortcut'}`;
-    await exec('powershell.exe', ['-NoProfile', '-Command', script], { env: { ...env, LINKSHELL_QA_SHORTCUT: shortcut, LINKSHELL_QA_EXE: join(target, 'LinkShell.exe') } }).catch(error => cleanupErrors.push(error.message));
+    try {
+      const shortcutEnv = { ...env, LINKSHELL_QA_SHORTCUT: shortcut };
+      const readTarget = `[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($env:LINKSHELL_QA_SHORTCUT);$link.TargetPath | ConvertTo-Json -Compress`;
+      const observed = JSON.parse((await exec('powershell.exe', ['-NoProfile', '-Command', readTarget], { env: shortcutEnv })).stdout.trim());
+      assert.ok(await samePhysicalPath(observed, join(target, 'LinkShell.exe')), 'Refusing to remove a foreign shortcut.');
+      // Re-read before deletion so a changed shortcut is never removed after the physical-path check.
+      const removeOwned = `$shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($env:LINKSHELL_QA_SHORTCUT);if($link.TargetPath -eq $env:LINKSHELL_QA_SHORTCUT_TARGET){Remove-Item -LiteralPath $env:LINKSHELL_QA_SHORTCUT -Force}else{throw 'Refusing to remove a changed shortcut'}`;
+      await exec('powershell.exe', ['-NoProfile', '-Command', removeOwned], { env: { ...shortcutEnv, LINKSHELL_QA_SHORTCUT_TARGET: observed } });
+    } catch (error) { cleanupErrors.push(error.message); }
   }
   await writeFile(join(report, 'events.jsonl'), (await events()).map(event => JSON.stringify(event)).join('\n') + '\n');
   await rm(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }).catch(error => cleanupErrors.push(error.message));

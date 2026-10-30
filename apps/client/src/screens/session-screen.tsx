@@ -176,6 +176,10 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const bottomInset = ipadKeyboard.enabled && ipadKeyboard.overlap > 0 ? 0 : Math.max(0, Math.max(insets.bottom, systemInsets.bottom) - reservedBottom);
   // iPad resizes the viewport once; the list and composer must not lift again.
   const keyboardOffset = ipadKeyboard.enabled ? keyboardHeight : reservedBottom + bottomInset;
+  useEffect(() => {
+    if (id !== "codex:01a18cb3-ab8f-7c81-8993-68f933558d53") return;
+    void fetch("http://127.0.0.1:50991", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ insets, systemInsets, reservedBottom, bottomInset, keyboardOffset, keyboardHeight, ipad: ipadKeyboard.enabled, overlap: ipadKeyboard.overlap, isPad: Platform.isPad, embedded }) }).catch(() => {});
+  }, [id, insets, systemInsets, reservedBottom, bottomInset, keyboardOffset, keyboardHeight, ipadKeyboard.enabled, ipadKeyboard.overlap, embedded]);
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();

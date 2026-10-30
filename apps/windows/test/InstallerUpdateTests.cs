@@ -1,7 +1,10 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using LinkShell.Windows;
 
@@ -9,6 +12,46 @@ internal static class InstallerUpdateTests {
     static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
     static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new Exception("Expected " + typeof(T).Name); }
     static string[] Args(string target, string home, string ready, int pid) { return new[] { "--update", "--wait-pid", pid.ToString(), "--target", target, "--home", home, "--ready", ready }; }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern uint GetShortPathNameW(string path, StringBuilder result, uint length);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern uint GetLongPathNameW(string path, StringBuilder result, uint length);
+
+    static string Spelling(string path, bool shortName) {
+        var buffer = new StringBuilder(512);
+        uint size = shortName ? GetShortPathNameW(path, buffer, (uint)buffer.Capacity) : GetLongPathNameW(path, buffer, (uint)buffer.Capacity);
+        if (size == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (size >= buffer.Capacity) {
+            buffer = new StringBuilder((int)size + 1);
+            size = shortName ? GetShortPathNameW(path, buffer, (uint)buffer.Capacity) : GetLongPathNameW(path, buffer, (uint)buffer.Capacity);
+            if (size == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            Assert(size < buffer.Capacity, "path spelling changed while reading");
+        }
+        return buffer.ToString();
+    }
+
+    static void Handoff(string target, string home, string ready, string childExecutable, bool expectDifferentPath = false) {
+        using (var child = Process.Start(new ProcessStartInfo(childExecutable, "--child") { UseShellExecute = false })) {
+            try {
+                if (expectDifferentPath) Assert(!String.Equals(child.MainModule.FileName, Path.Combine(target, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase), "short/long fixture did not launch the long process path");
+                using (var update = InstallerUpdate.Parse(Args(target, home, ready, child.Id))) {
+                    Assert(update.Target == target && update.Home == home && update.Ready == ready, "handoff changed the original path spelling");
+                    update.AnnounceReady();
+                    Assert(File.ReadAllText(ready) == Process.GetCurrentProcess().Id.ToString(), "ready did not identify installer");
+                    Assert(!child.HasExited, "handoff killed the desktop");
+                    using (var cancellation = new CancellationTokenSource()) {
+                        cancellation.CancelAfter(100);
+                        Throws<OperationCanceledException>(() => update.WaitForDesktopExit(cancellation.Token));
+                    }
+                    Assert(!child.HasExited, "cancel killed the desktop");
+                    child.Kill(); child.WaitForExit();
+                    update.WaitForDesktopExit(CancellationToken.None);
+                }
+                Throws<ArgumentException>(() => InstallerUpdate.Parse(Args(target, home, ready, Int32.MaxValue)));
+            } finally { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } }
+        }
+    }
 
     static void Junction(string link, string destination) {
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", "/d /v:off /c mklink /J \"%LINKSHELL_TEST_JUNCTION_LINK%\" \"%LINKSHELL_TEST_JUNCTION_TARGET%\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -22,6 +65,8 @@ internal static class InstallerUpdateTests {
     }
 
     static int Main(string[] args) {
+        Console.OutputEncoding = new UTF8Encoding(false);
+        Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
         if (args.Length == 1 && args[0] == "--child") { Thread.Sleep(8000); return 0; }
         try {
             string scenario = args[0], directory = Path.Combine(args[1], scenario), target = Path.Combine(directory, "App"), home = Path.Combine(directory, "Data");
@@ -43,23 +88,21 @@ internal static class InstallerUpdateTests {
                 File.Delete(Path.Combine(target, "standalone.json"));
                 Throws<IOException>(() => InstallerUpdate.Parse(Args(target, home, ready, Int32.MaxValue)));
             } else if (scenario == "handoff") {
-                using (var child = Process.Start(new ProcessStartInfo(Path.Combine(target, "LinkShell.exe"), "--child") { UseShellExecute = false })) {
-                    try {
-                        using (var update = InstallerUpdate.Parse(Args(target, home, ready, child.Id))) {
-                            update.AnnounceReady();
-                            Assert(File.ReadAllText(ready) == Process.GetCurrentProcess().Id.ToString(), "ready did not identify installer");
-                            Assert(!child.HasExited, "handoff killed the desktop");
-                            using (var cancellation = new CancellationTokenSource()) {
-                                cancellation.CancelAfter(100);
-                                Throws<OperationCanceledException>(() => update.WaitForDesktopExit(cancellation.Token));
-                            }
-                            Assert(!child.HasExited, "cancel killed the desktop");
-                            child.Kill(); child.WaitForExit();
-                            update.WaitForDesktopExit(CancellationToken.None);
-                        }
-                        Throws<ArgumentException>(() => InstallerUpdate.Parse(Args(target, home, ready, Int32.MaxValue)));
-                    } finally { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } }
-                }
+                Handoff(target, home, ready, Path.Combine(target, "LinkShell.exe"));
+            } else if (scenario == "short-path-handoff") {
+                Directory.CreateDirectory(home);
+                string shortTarget = Spelling(target, true), shortHome = Spelling(home, true), longTarget = Spelling(target, false);
+                bool distinct = !String.Equals(shortTarget, longTarget, StringComparison.OrdinalIgnoreCase);
+                Console.WriteLine("INFO target short/long aliases differ: " + distinct);
+                Handoff(shortTarget, shortHome, ready, Path.Combine(longTarget, "LinkShell.exe"), distinct);
+            } else if (scenario == "short-ready-directory") {
+                string moduleDirectory = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
+                string shortDirectory = Spelling(moduleDirectory, true), longDirectory = Spelling(moduleDirectory, false);
+                string otherDirectory = String.Equals(moduleDirectory, shortDirectory, StringComparison.OrdinalIgnoreCase) ? longDirectory : shortDirectory;
+                string alternateReady = Path.Combine(otherDirectory, "ready");
+                Console.WriteLine("INFO ready/main-module directory spellings differ: " + !String.Equals(moduleDirectory, otherDirectory, StringComparison.OrdinalIgnoreCase));
+                Handoff(target, home, alternateReady, Path.Combine(Spelling(target, false), "LinkShell.exe"));
+                Assert(File.Exists(ready), "ready was not created in the installer directory");
             } else if (scenario == "missing-home") {
                 string missing = Path.Combine(home, "nested", "new-data");
                 using (var update = InstallerUpdate.Parse(Args(target, missing, ready, Int32.MaxValue))) {

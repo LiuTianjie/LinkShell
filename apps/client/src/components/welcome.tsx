@@ -58,9 +58,11 @@ export function Welcome() {
         </View>
         <Text style={[type.subhead, { color: colors.secondaryLabel }]}>下载安装后打开 LinkShell，登录账号或显示配对码，即可连接，无需另外配置运行环境。</Text>
         <Link href={DESKTOP_INSTALL} asChild>
-          <Pressable accessibilityRole="link" accessibilityLabel="打开 LinkShell 桌面版安装引导" style={({ pressed }) => ({ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, opacity: pressed ? 0.6 : 1 })}>
-            <Text style={[type.subhead, { color: colors.accent, fontWeight: "600" }]}>查看下载与安装引导</Text>
-            <Icon sf="arrow.up.right" md="open_in_new" size={15} color={colors.accent} />
+          <Pressable accessibilityRole="link" accessibilityLabel="打开 LinkShell 桌面版安装引导" style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+            <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={[type.subhead, { color: colors.accent, fontWeight: "600" }]}>查看下载与安装引导</Text>
+              <Icon sf="arrow.up.right" md="open_in_new" size={15} color={colors.accent} />
+            </View>
           </Pressable>
         </Link>
       </View>

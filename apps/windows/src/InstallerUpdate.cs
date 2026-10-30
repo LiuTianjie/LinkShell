@@ -44,15 +44,15 @@ namespace LinkShell.Windows {
             EnsureDataOutsideBundle(target, home);
             string installer = Process.GetCurrentProcess().MainModule.FileName;
             string installerDirectory = Path.GetDirectoryName(installer);
-            if (!String.Equals(Path.GetDirectoryName(ready), installerDirectory, StringComparison.OrdinalIgnoreCase) || Path.GetFileName(ready) != "ready" || File.Exists(ready)) throw new ArgumentException("更新交接文件位置无效。");
-            if (installerDirectory.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || String.Equals(installerDirectory, target, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请从安装目录外启动更新程序。");
+            if (Path.GetFileName(ready) != "ready" || File.Exists(ready) || !SameExistingEntry(Path.GetDirectoryName(ready), installerDirectory, true)) throw new ArgumentException("更新交接文件位置无效。");
+            if (WithinDirectory(ResolvedDirectory(installerDirectory, false), ResolvedDirectory(target, false))) throw new ArgumentException("请从安装目录外启动更新程序。");
             Process waiting = null;
             try {
                 try { waiting = Process.GetProcessById(pid); }
                 catch (ArgumentException) { }
                 if (waiting != null) {
                     try {
-                        if (!waiting.HasExited && !String.Equals(waiting.MainModule.FileName, Path.Combine(target, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请求更新的进程与安装目录不匹配。");
+                        if (!waiting.HasExited && !SameExistingEntry(waiting.MainModule.FileName, Path.Combine(target, "LinkShell.exe"), false)) throw new ArgumentException("请求更新的进程与安装目录不匹配。");
                     } catch (InvalidOperationException) {
                         if (!waiting.HasExited) throw;
                     }
@@ -62,10 +62,22 @@ namespace LinkShell.Windows {
         }
 
         static string Absolute(string value) {
-            if (String.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value) || value.IndexOf('"') >= 0) throw new ArgumentException("更新路径必须是完整路径。");
+            if (String.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value) || value.IndexOf('"') >= 0 || value.IndexOf('\0') >= 0) throw new ArgumentException("更新路径必须是完整路径。");
             bool drive = value.Length >= 3 && Char.IsLetter(value[0]) && value[1] == ':' && (value[2] == '\\' || value[2] == '/');
             if (!drive && !value.StartsWith(@"\\", StringComparison.Ordinal)) throw new ArgumentException("更新路径必须是完整路径。");
-            string full = Path.GetFullPath(value);
+            // .NET expands existing 8.3 names, unlike Node's path.resolve. The original home
+            // spelling participates in the desktop scope and Host pipe name, so keep that spelling.
+            var buffer = new StringBuilder(512);
+            uint length = GetFullPathNameW(value, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+            if (length == 0) throw PathFailure(value, Marshal.GetLastWin32Error());
+            if (length >= buffer.Capacity) {
+                if (length > 32768) throw new ArgumentException("更新路径过长。");
+                buffer = new StringBuilder((int)length + 1);
+                length = GetFullPathNameW(value, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+                if (length == 0) throw PathFailure(value, Marshal.GetLastWin32Error());
+                if (length >= buffer.Capacity) throw new ArgumentException("更新路径发生变化。");
+            }
+            string full = buffer.ToString();
             return String.Equals(full, Path.GetPathRoot(full), StringComparison.OrdinalIgnoreCase) ? full : full.TrimEnd(Path.DirectorySeparatorChar);
         }
 
@@ -84,11 +96,34 @@ namespace LinkShell.Windows {
         static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
         static extern uint GetFileAttributesW(string name);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        static extern uint GetFullPathNameW(string name, uint length, StringBuilder path, IntPtr filePart);
+
+        static bool SameExistingEntry(string first, string second, bool directory) {
+            var a = EntryInformation(first, directory);
+            var b = EntryInformation(second, directory);
+            // The same executable/directory may arrive through long names, 8.3 names or a junction.
+            return a.VolumeSerialNumber == b.VolumeSerialNumber && a.FileIndexHigh == b.FileIndexHigh && a.FileIndexLow == b.FileIndexLow;
+        }
+
+        static HandleFileInformation EntryInformation(string path, bool directory) {
+            using (var handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+                if (handle.IsInvalid) throw PathFailure(path, Marshal.GetLastWin32Error());
+                HandleFileInformation information;
+                if (!GetFileInformationByHandle(handle, out information)) throw PathFailure(path, Marshal.GetLastWin32Error());
+                if (((information.Attributes & 0x10) != 0) != directory) throw new IOException("更新路径类型不匹配：" + path);
+                return information;
+            }
+        }
+
+        static bool WithinDirectory(string path, string directory) {
+            return String.Equals(path, directory, StringComparison.OrdinalIgnoreCase) || path.StartsWith(directory.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+        }
 
         static void EnsureDataOutsideBundle(string target, string home) {
             string realTarget = ResolvedDirectory(target, false), realHome = ResolvedDirectory(home, true);
             if (String.Equals(realTarget, Path.GetPathRoot(realTarget), StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("应用目录实际指向磁盘根目录，无法安全更新。");
-            if (String.Equals(realHome, realTarget, StringComparison.OrdinalIgnoreCase) || realHome.StartsWith(realTarget.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("LinkShell 数据目录实际位于应用目录内，请先将数据移到应用目录外再更新。");
+            if (WithinDirectory(realHome, realTarget)) throw new ArgumentException("LinkShell 数据目录实际位于应用目录内，请先将数据移到应用目录外再更新。");
         }
 
         static string ResolvedDirectory(string path, bool allowMissingTail) {
@@ -168,7 +203,7 @@ namespace LinkShell.Windows {
             foreach (var process in Process.GetProcessesByName("LinkShell")) {
                 using (process) {
                     try {
-                        if (!process.HasExited && String.Equals(process.MainModule.FileName, Path.Combine(Target, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase)) return true;
+                        if (!process.HasExited && SameExistingEntry(process.MainModule.FileName, Path.Combine(Target, "LinkShell.exe"), false)) return true;
                     } catch (InvalidOperationException) { if (!process.HasExited) throw; }
                 }
             }
