@@ -31,7 +31,7 @@ childProcess.spawn = function (command, args, options) {
   const requests = observeLines(message => {
     if (!message.method) return;
     // Fail before native code receives any inference request, even if an unexpected UI action sends one.
-    if (['turn/start', 'turn/steer', 'command/exec'].includes(message.method)) {
+    if (['turn/start', 'turn/steer', 'review/start', 'thread/compact/start', 'command/exec'].includes(message.method)) {
       record({ event: 'forbidden-request', method: message.method });
       throw new Error('Inference is forbidden in the model UI E2E.');
     }

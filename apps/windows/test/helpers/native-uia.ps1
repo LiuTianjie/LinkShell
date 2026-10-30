@@ -21,9 +21,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$helperClock = [System.Diagnostics.Stopwatch]::StartNew()
+$script:phase = 'starting'
+$script:startupMs = $null
+
+function Write-Phase {
+    param([string]$Phase, [hashtable]$Detail = @{})
+    if ($script:phase -eq $Phase) { return }
+    $script:phase = $Phase
+    if (-not $DumpPath) { return }
+    $path = [System.IO.Path]::GetFullPath($DumpPath + '.progress.jsonl')
+    $directory = [System.IO.Path]::GetDirectoryName($path)
+    if ($directory) { [System.IO.Directory]::CreateDirectory($directory) | Out-Null }
+    $entry = @{ phase = $Phase; pid = $AppProcessId; helperPid = $PID; elapsedMs = $helperClock.ElapsedMilliseconds; at = [DateTime]::UtcNow.ToString('o'); detail = $Detail }
+    $json = $entry | ConvertTo-Json -Depth 5 -Compress
+    # Persist before calls into another process: the parent may have to terminate a blocked provider.
+    [System.IO.File]::AppendAllText($path, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+}
 
 function Write-Result {
     param([object]$Value, [int]$ExitCode)
+    $Value['phase'] = $script:phase
+    $Value['helperElapsedMs'] = $helperClock.ElapsedMilliseconds
+    $Value['startupMs'] = $script:startupMs
+    $Value['exitCode'] = $ExitCode
     $json = $Value | ConvertTo-Json -Depth 8 -Compress
     if ($DumpPath) {
         $fullPath = [System.IO.Path]::GetFullPath($DumpPath)
@@ -50,7 +71,10 @@ function Test-TargetProcess {
 function Get-WindowDiagnostic {
     param([object]$Window)
     if ($Window.Current.ProcessId -ne $AppProcessId) { return $null }
-    $elements = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    Write-Phase 'inspect-window' @{ title = $Window.Current.Name }
+    # A routine screenshot needs only the window summary, not Chromium's lazily created entire tree.
+    $scope = if ($InspectOnly) { [System.Windows.Automation.TreeScope]::Children } else { [System.Windows.Automation.TreeScope]::Descendants }
+    $elements = $Window.FindAll($scope, [System.Windows.Automation.Condition]::TrueCondition)
     $items = @()
     for ($index = 0; $index -lt [Math]::Min($elements.Count, 120); $index++) {
         try {
@@ -69,6 +93,7 @@ function Get-WindowDiagnostic {
         title = $Window.Current.Name
         nativeHandle = $Window.Current.NativeWindowHandle
         offscreen = $Window.Current.IsOffscreen
+        treeScope = $scope.ToString()
         elements = $items
     }
 }
@@ -82,7 +107,9 @@ function Save-WindowScreenshot {
         }
         $handle = [IntPtr]::new($Window.Current.NativeWindowHandle)
         $fullPath = [System.IO.Path]::GetFullPath($ScreenshotPath)
+        Write-Phase 'capture-window' @{ title = $Window.Current.Name; nativeHandle = $Window.Current.NativeWindowHandle }
         $size = [LinkShellCiWindowCapture]::Save($handle, $AppProcessId, $fullPath)
+        Write-Phase 'capture-complete'
         return @{ captured = $true; path = $fullPath; method = 'PrintWindow'; width = $size[0]; height = $size[1]; windowTitle = $Window.Current.Name }
     } catch {
         return @{ captured = $false; path = $ScreenshotPath; method = 'PrintWindow'; error = $_.Exception.Message }
@@ -90,11 +117,14 @@ function Save-WindowScreenshot {
 }
 
 try {
+    Write-Phase 'load-uia-assemblies'
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName WindowsBase
     if ($ScreenshotPath) {
+        Write-Phase 'load-capture-assembly'
         Add-Type -AssemblyName System.Drawing
+        Write-Phase 'compile-window-capture'
         Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -164,6 +194,7 @@ public static class LinkShellCiWindowCapture
 '@
     }
 
+    Write-Phase 'resolve-process'
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     $processStart = $process.StartTime.ToUniversalTime().Ticks
     $process.Dispose()
@@ -183,6 +214,7 @@ public static class LinkShellCiWindowCapture
         )
         $buttonCondition = [System.Windows.Automation.AndCondition]::new($nameCondition, $typeCondition)
     }
+    $script:startupMs = $helperClock.ElapsedMilliseconds
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $lastWindows = @()
     $lastFailure = $null
@@ -192,6 +224,7 @@ public static class LinkShellCiWindowCapture
         if (-not (Test-TargetProcess)) {
             Write-Result @{ clicked = $false; inspected = $false; pid = $AppProcessId; name = $ButtonName; error = 'The requested process exited or its PID was reused.'; windows = $lastWindows } 3
         }
+        Write-Phase 'find-windows'
         $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Children,
             $processCondition
@@ -209,6 +242,7 @@ public static class LinkShellCiWindowCapture
                 }
                 $buttons = @()
                 if ($null -ne $buttonCondition) {
+                    Write-Phase 'find-button' @{ title = $windowTitle; button = $ButtonName }
                     $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
                 }
                 foreach ($button in $buttons) {
@@ -227,7 +261,9 @@ public static class LinkShellCiWindowCapture
                         Write-Result @{ clicked = $false; pid = $AppProcessId; name = $ButtonName; error = 'The requested process changed before invocation.'; screenshot = $screenshot } 3
                     }
                     if ($window.Current.ProcessId -ne $AppProcessId -or $button.Current.ProcessId -ne $AppProcessId -or $button.Current.Name -cne $ButtonName -or $button.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or -not $button.Current.IsEnabled -or $button.Current.IsOffscreen) { continue }
+                    Write-Phase 'invoke-button' @{ title = $windowTitle; button = $ButtonName }
                     ([System.Windows.Automation.InvokePattern]$invokeObject).Invoke()
+                    Write-Phase 'invoke-complete'
                     Write-Result @{ clicked = $true; inspected = $false; pid = $AppProcessId; name = $ButtonName; windowTitle = $windowTitle; screenshot = $screenshot; elapsedMs = $clock.ElapsedMilliseconds } 0
                 }
                 $diagnostic = Get-WindowDiagnostic $window

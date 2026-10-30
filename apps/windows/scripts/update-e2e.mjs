@@ -28,7 +28,7 @@ const baseVersion = '65530.0.1', nextVersion = '65530.0.2';
 const installerName = `LinkShell-Setup-${nextVersion}-windows-x64.exe`;
 const officialInstaller = `https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v${nextVersion}/${installerName}`;
 const fixtureSession = randomUUID();
-const result = { schema: 1, platform: process.platform, startedAt: new Date().toISOString(), scenarios: [], processes: [], status: 'running' };
+const result = { schema: 1, platform: process.platform, startedAt: new Date().toISOString(), scenarios: [], observations: [], processes: [], status: 'running' };
 const report = resolve(process.env.LINKSHELL_UPDATE_E2E_REPORT || join(artifacts, 'windows-update-e2e'));
 await mkdir(report, { recursive: true });
 const work = await mkdtemp(join(tmpdir(), 'linkshell-update-e2e-'));
@@ -190,9 +190,43 @@ async function available() {
   return until('available update', async () => { const status = await invoke('updateStatus'); return !status.checking && status.checkedAt !== before.checkedAt && status.available && status.version === nextVersion && status; });
 }
 async function native(pid, button, name, timeout = 180) {
-  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-uia.ps1'), '-AppProcessId', String(pid), '-TimeoutSeconds', String(timeout), '-DumpPath', join(report, `${name}.json`), '-ScreenshotPath', join(report, `${name}.png`)];
+  const dump = join(report, `${name}.json`), started = Date.now();
+  // .NET/UIA initialization and the first screenshot compilation precede the helper's search clock.
+  const timeoutMs = (timeout + 60) * 1000;
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(appRoot, 'test/helpers/native-uia.ps1'), '-AppProcessId', String(pid), '-TimeoutSeconds', String(timeout), '-DumpPath', dump, '-ScreenshotPath', join(report, `${name}.png`)];
   args.push(...(button ? ['-ButtonName', button] : ['-InspectOnly']));
-  const value = await exec('powershell.exe', args, { timeout: (timeout + 10) * 1000 }); return JSON.parse(value.stdout.trim());
+  let completed;
+  try {
+    completed = await exec('powershell.exe', args, { timeout: timeoutMs });
+    const value = JSON.parse(completed.stdout.trim());
+    assert.equal(value.pid, pid, 'Native UIA must report the requested process.');
+    if (button) {
+      assert.equal(value.name, button, 'Native UIA must invoke the requested button.');
+      assert.equal(value.clicked, true, 'The required native button must actually be invoked.');
+    } else assert.equal(value.inspected, true, 'Native UIA must observe the requested window.');
+    await writeFile(join(report, `${name}-call.json`), JSON.stringify({ pid, button, status: 'passed', elapsedMs: Date.now() - started, timeoutMs, helper: value }, null, 2));
+    return value;
+  } catch (error) {
+    const progress = (await readFile(dump + '.progress.jsonl', 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const details = { pid, button, status: 'failed', elapsedMs: Date.now() - started, timeoutMs, error: error.message,
+      code: error.code ?? null, signal: error.signal ?? null, killed: error.killed ?? false,
+      stdout: error.stdout ?? completed?.stdout ?? '', stderr: error.stderr ?? completed?.stderr ?? '', lastPhase: progress.at(-1) ?? null,
+      helper: await readJSON(dump).catch(() => null) };
+    await writeFile(join(report, `${name}-call.json`), JSON.stringify(details, null, 2));
+    throw new Error(`Native UIA ${name} failed after ${details.elapsedMs} ms (phase: ${details.lastPhase?.phase ?? 'PowerShell startup'}, code: ${details.code}, signal: ${details.signal}, killed: ${details.killed}): ${error.message}`, { cause: error });
+  }
+}
+async function observeNative(pid, name) {
+  // Version, Host and data assertions decide the scenario; these screenshots are supporting evidence.
+  try {
+    const value = await native(pid, undefined, name, 10);
+    const status = value.screenshot?.captured ? 'captured' : 'unavailable';
+    result.observations.push({ name, status, evidence: value });
+    if (status === 'unavailable') log(`Optional ${name} screenshot unavailable; see ${name}.json.`);
+  } catch (error) {
+    result.observations.push({ name, status: 'unavailable', error: error.message });
+    log(`Optional ${name} observation unavailable; see ${name}-call.json.`);
+  }
 }
 async function confirm(name) {
   const prior = connection.pid;
@@ -248,7 +282,7 @@ try {
     recordPID(child.pid, 'electron'); child.on('error', error => log(error.message));
     await attach(); await invoke('setSetting', { key: 'autoCheck', value: false });
     baseline = await preservedState(); const value = await snapshot(baseVersion);
-    await connection.evaluate(`location.hash='#view=manage';true`); await native(connection.pid, undefined, 'baseline', 10);
+    await connection.evaluate(`location.hash='#view=manage';true`); await observeNative(connection.pid, 'baseline');
     return value;
   });
   await check('SHA-256 failure preserves running Host and never starts installer', async () => {
@@ -273,7 +307,7 @@ try {
     assert.deepEqual(await preservedState(), baseline); assert.ok(!(await exists(join(home, 'desktop-update.json'))));
     const leftovers = (await readdir(dirname(target))).filter(name => /^LinkShell\.(previous|failed|install)-/.test(name)); assert.deepEqual(leftovers, []);
     await until('successful installer exits', async () => !(await processList()).some(item => item.ProcessId === installerPID));
-    await native(connection.pid, undefined, 'updated', 10); return { ...value, identityAndHistoryPreserved: true, oldBundlesRemoved: true };
+    await observeNative(connection.pid, 'updated'); return { ...value, identityAndHistoryPreserved: true, oldBundlesRemoved: true };
   });
   result.status = 'passed';
 } catch (error) {

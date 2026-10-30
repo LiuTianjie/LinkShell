@@ -22,7 +22,9 @@ const token = randomUUID(), windows = process.env.WINDIR || 'C:\\Windows';
 const codexVersion = '0.162.1';
 const codexArchive = `https://registry.npmjs.org/@openai/codex/-/codex-${codexVersion}-win32-x64.tgz`;
 const codexIntegrity = 'dfl4MhHuEi0ARKyNmrTxk+RQmsWNCQAoVLUtrYq+yrW1C8P2sg5ziwgHUUACHjYLKuACV7ARH5Nq5pnCz3GlaQ==';
-const codexExe = join(work, 'official-codex/package/vendor/x86_64-pc-windows-msvc/codex/codex.exe');
+// This is the layout in the integrity-pinned native package, not the older codex/ layout.
+const codexBinary = 'package/vendor/x86_64-pc-windows-msvc/bin/codex.exe';
+const codexExe = join(work, 'official-codex', codexBinary);
 const result = { schema: 1, startedAt: new Date().toISOString(), status: 'running', scenarios: [] };
 const rpcEvents = [], requests = new Map();
 let connection, forbiddenRPC = false;
@@ -107,7 +109,7 @@ function observeRPC(method, params) {
   let message; try { message = JSON.parse(params.response.payloadData); } catch { return; }
   const key = params.requestId + ':' + message.id;
   if (method === 'Network.webSocketFrameSent' && message.method) {
-    if (['sessions.send', 'sessions.prompt', 'turn/start', 'turn/steer'].includes(message.method)) forbiddenRPC = true;
+    if (['sessions.send', 'sessions.prompt', 'turn/start', 'turn/steer', 'review/start', 'thread/compact/start', 'command/exec'].includes(message.method)) forbiddenRPC = true;
     if (!['agents.models', 'sessions.create', 'sessions.setConfig', 'sessions.subscribe', 'sessions.unsubscribe'].includes(message.method)) return;
     const input = message.params || {};
     const safe = { agent: input.agent, model: input.model, sessionId: input.sessionId, optionId: input.optionId, value: input.value,
@@ -203,9 +205,12 @@ try {
     const archive = Buffer.from(await response.arrayBuffer()); assert.equal(createHash('sha512').update(archive).digest('base64'), codexIntegrity);
     const destination = join(work, 'official-codex'); await mkdir(destination); const path = join(work, 'codex.tgz'); await writeFile(path, archive);
     await exec('tar.exe', ['-xzf', path, '-C', destination]); await rm(path);
+    const binary = await stat(codexExe).catch(() => undefined);
+    assert.ok(binary?.isFile(), `Official Codex ${codexVersion} archive is missing ${codexBinary}`);
+    assert.ok((await stat(user)).isDirectory(), 'The isolated Codex working directory must exist before launch.');
     const version = (await exec(codexExe, ['--version'])).stdout.trim(); assert.equal(version, `codex-cli ${codexVersion}`);
     catalog = await probeCodex(); assert.ok(!(await exists(join(codexHome, 'auth.json'))));
-    return { version, integrityVerified: true, ...catalog };
+    return { version, integrityVerified: true, binary: codexBinary, binaryBytes: binary.size, workingDirectoryExists: true, ...catalog };
   });
   let hostPID, appServerPID;
   await check('real Electron and bundled Host discover official Codex', async () => {
@@ -284,7 +289,7 @@ try {
     assert.ok(!(await exists(join(codexHome, 'auth.json')))); assert.ok(!(await exists(join(home, 'auth.json'))));
     const native = await readEvents('native-events.jsonl');
     assert.ok(native.some(event => event.method === 'model/list' && event.event === 'response' && event.ok));
-    assert.equal(native.filter(event => event.event === 'forbidden-request' || ['turn/start', 'turn/steer', 'command/exec'].includes(event.method)).length, 0);
+    assert.equal(native.filter(event => event.event === 'forbidden-request' || ['turn/start', 'turn/steer', 'review/start', 'thread/compact/start', 'command/exec'].includes(event.method)).length, 0);
     assert.equal(forbiddenRPC, false);
     return { reopenedModel: initial, rendererReloaded: true, hostPIDUnchanged: true, appServerPIDUnchanged: true,
       globalModelConfigChanged: false, credentialsPresent: false, inferenceRequests: 0, ...state };
