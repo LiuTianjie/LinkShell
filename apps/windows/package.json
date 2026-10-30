@@ -8,6 +8,7 @@
     "build:standalone": "node scripts/package.mjs",
     "test": "node --test test/*.test.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "test:update-e2e": "node scripts/update-e2e.mjs"
+    "test:update-e2e": "node scripts/update-e2e.mjs",
+    "test:model-ui-e2e": "node scripts/model-ui-e2e.mjs"
   }
 }

@@ -107,7 +107,10 @@ async function windowSmoke() {
 
 try {
   assert.equal((await run(node, [cli, '--version'], { env, windowsHide: true })).stdout.trim(), manifest.version);
-  const media = await run(join(bundle, 'media/ffmpeg.exe'), ['-hide_banner', '-version'], { windowsHide: true, timeout: 5000 });
+  // The first load of the copied shared runtime can exceed five seconds on a fresh runner.
+  const mediaStarted = Date.now();
+  const media = await run(join(bundle, 'media/ffmpeg.exe'), ['-hide_banner', '-version'], { windowsHide: true, timeout: 30_000 });
+  console.log(`Packaged FFmpeg version probe completed in ${Date.now() - mediaStarted} ms.`);
   assert.match(media.stdout, /ffmpeg version/);
   assert.ok(!media.stdout.includes('--enable-gpl'), 'The Windows media runtime must remain the LGPL build');
   assert.match(readFileSync(join(bundle, 'media/LICENSE.txt'), 'utf8'), /LESSER GENERAL PUBLIC LICENSE/);
