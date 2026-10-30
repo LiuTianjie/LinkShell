@@ -10,7 +10,7 @@
 | `@linkshell/gateway` | `packages/gateway` | `package.json` | wire |
 | `linkshell-cli` | `packages/cli` | `package.json` | wire、host、gateway |
 | Docker 镜像 `nickname4th/linkshell-gateway` | `packages/gateway/Dockerfile` | tag `gateway-vX.Y.Z` | — |
-| App（iOS / Android） | `apps/client` | tag `vX.Y.Z` | — |
+| App（iOS / Android） | `apps/client` | 本机发布脚本的 `X.Y.Z` 参数；发布 tag `vX.Y.Z` | — |
 
 发布顺序就是依赖顺序：**wire → mac → host → gateway → cli**。没改的包跳过，但要注意：`workspace:*` 在发布时会被写成当时的**确切版本号**，所以上游发了新版本，下游也要跟着发一版才会用上它（改了 wire，就要发 host、gateway、cli；改了 `apps/mac`，就要发 mac、host、cli）。
 
@@ -20,11 +20,12 @@
 
 **只有 `apps/web` 改动时，发布 mac → host → gateway → cli，并更新独立桌面 App。** Web 静态资源由 Gateway 的 npm 包和 Docker 镜像内置，Gateway 的 `prepack` 会构建并打包 `web-client/`；Mac helper 的构建也会把工作区打包到签名 App 的 `Contents/Resources/Workspace`。Host 固定依赖 Mac helper，CLI 固定依赖 Host 和 Gateway，因此这些包需要一起递增版本。同步根 CLI 和 Windows 版本、Homebrew、Gateway Docker tag 与官方网关部署，按下文流程交付 macOS 和 Windows 桌面包；没有移动端改动时不触发移动端发版。上线后核对 `/healthz`、首页引用的新 Web 资源和桌面包内的工作区资源；构建成功不等于线上页面或已安装的桌面 App 已更新。
 
-三种 tag，各管各的：
+四种 tag，各管各的：
 
 - `cli-vX.Y.Z`：标记一次 CLI 发版，不触发 CI。
 - `gateway-vX.Y.Z`：触发 CI 构建并推送 Docker 镜像。
-- `vX.Y.Z`：触发 App 的 iOS、Android 构建。**只给 App 用**，不要拿它标记 CLI 版本。
+- `desktop-vX.Y.Z`：标记独立 macOS / Windows 桌面 Release；制品按下文构建并上传，不由这个 tag 自动构建。
+- `vX.Y.Z`：标记 App 的移动端 Release。iOS / Android 在本机 macOS 构建；当前没有移动端 Actions runner，推送 `v*` 不会自动构建或上传。**只给 App 用**，不要拿它标记 CLI 版本。
 
 ## 1. 发版前检查
 
@@ -82,7 +83,7 @@ docker rm -f gw-dev && docker volume rm gw-dev
 # 根 package.json 的 version 跟 CLI 保持一致，方便在仓库层面追踪
 ```
 
-App 的版本号来自 tag（见 §8），不用手改。
+App 的版本号由本机发布脚本的显式 `X.Y.Z` 参数写入临时构建配置（见 §8），`vX.Y.Z` 标记同一版本的发布。`release-mobile.sh` 会备份并恢复调用前的 `app.json`；直接调用 `release.mjs` 时要自行保留原配置。
 
 ## 3. 构建
 
@@ -264,17 +265,22 @@ iOS 正式版默认打开实时活动远程推送（`LINKSHELL_LIVE_ACTIVITY_PUS
 移动端构建全部在本机 macOS 上执行（GitHub Actions 无移动端 runner）：
 
 ```bash
-./scripts/release-mobile.sh 2.3.28 --yes
+./scripts/release-mobile.sh 2.3.58 --yes
 ```
 
 或分步执行：
 
 ```bash
-cd apps/client
-node scripts/release.mjs ios 2.3.28        # prebuild、archive、上传 TestFlight
-node scripts/release.mjs android 2.3.28    # 输出 build/release/LinkShell-2.3.28.apk / .aab
-git checkout -- app.json
-gh release create v2.3.28 build/release/LinkShell-2.3.28.apk build/release/LinkShell-2.3.28.aab --title "LinkShell 2.3.28"
+(
+  set -e
+  cd apps/client
+  release_config_snapshot="$(mktemp -t linkshell-release-config)"
+  cp app.json "$release_config_snapshot"
+  trap 'cp "$release_config_snapshot" app.json; rm -f "$release_config_snapshot"' EXIT
+  node scripts/release.mjs ios 2.3.58        # prebuild、archive、上传 TestFlight
+  node scripts/release.mjs android 2.3.58    # 输出 build/release/LinkShell-2.3.58.apk / .aab
+  gh release create v2.3.58 build/release/LinkShell-2.3.58.apk build/release/LinkShell-2.3.58.aab --target "$(git rev-parse HEAD)" --title "LinkShell 2.3.58"
+)
 ```
 
 - 版本号：`version = X.Y.Z`，`buildNumber / versionCode = MAJOR*10000 + MINOR*100 + PATCH`。
@@ -283,6 +289,7 @@ gh release create v2.3.28 build/release/LinkShell-2.3.28.apk build/release/LinkS
 - Android release 用 Expo 模板的 `debug.keystore` 签名，和之前发布的所有版本相同，所以 APK 可以直接覆盖安装。
 - iOS 需要本机 Xcode 登录了 team `L95PYLFT86`；上传后在 App Store Connect 处理完成才会出现在 TestFlight。
 - 本地构建会重新生成 `ios/`、`android/`（正式版）；之后跑开发版需要 `APP_VARIANT=development npx expo prebuild --clean`。
+- `vX.Y.Z` 不触发移动端构建。先完成本机归档和上传，再核对 TestFlight 处理状态、GitHub Release 的 APK/AAB 和对应 tag；只推 tag 不能算移动端发版完成。
 
 README 和官网上的 Android 下载链接指向 GitHub 的 `releases/latest`：**最新的 Release 必须是带 APK 的 App 版本**。
 
@@ -295,7 +302,7 @@ git tag cli-vX.Y.Z
 git push origin main cli-vX.Y.Z
 ```
 
-- tag 按名字推，不要用 `--tags`：本地如果留着一个没推过的 `vX.Y.Z`，`--tags` 会顺手触发一次 App 构建。
+- tag 按名字推，不要用 `--tags`，避免将无关或尚未完成发布的本地 tag 一起推送；`gateway-v*` 会触发镜像构建，`v*` 不会触发移动端构建。
 - CLI 发版只打 tag，不建 GitHub Release（原因见上一节末尾）。确实要建的话加 `--latest=false`：`gh release create cli-vX.Y.Z --latest=false --title "cli X.Y.Z" --notes "…"`。
 
 ## 10. 发版后验证
@@ -340,7 +347,8 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 - [ ] 如果要更新官方网关：`luma-gateway.yml` 已改并部署；`/healthz` 是新版本、`relay` 回升；一台已配对的手机不用重新配对就能连上
 - [ ] Homebrew formula 已更新
 - [ ] `cli-vX.Y.Z` tag 已推送（按名字推，没有用 `--tags`）
-- [ ] App 有改动时：`vX.Y.Z` 已发，TestFlight 和 GitHub Release（带 APK）都在；本地构建的话 CI 里重复的构建已取消
+- [ ] App 有改动时：本机 iOS / Android 完整构建已完成，TestFlight 处理成功，`vX.Y.Z` GitHub Release 的 APK/AAB 可下载；没有依赖 `v*` 触发移动端 CI
+- [ ] 下载页版本、安装包 URL 和桌面更新 feeds 只在远端对应资产可下载、大小和摘要核对完成后更新，不提前指向尚不存在的制品
 - [ ] README、README_CN、docs/site（改 `index.src.html` 后跑 `python3 scripts/build-site-pages.py`，再执行 `~/seos/deploy.sh linkshell` 更新 linkshell.itool.tech）、包级 README 已同步新功能
 
 ## 仅准备制品（不发布）
@@ -348,9 +356,9 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 需要先准备制品、延后正式发布时，可以使用下面的独立流程：
 
 - `Prepare release artifacts` 工作流执行构建、类型检查、lint、测试，生成 wire、host、gateway、cli 四个 npm tarball 与 iOS / Android JavaScript bundle，只上传到 Actions artifacts，不执行 npm publish、不创建 Release、不上传商店。
-- 本次包含 Mac 组件改动：需先在有 Developer ID 证书的 Mac 上执行 `pnpm --filter @linkshell/mac pack --pack-destination <制品目录>`，一起交付 `@linkshell/mac@0.1.1`。Linux 流水线不会生成这个签名包。
-- 原生包在有签名环境的 Mac 上执行 `node scripts/release.mjs ios 2.3.7 --prepare-only` 和 `node scripts/release.mjs android 2.3.7 --prepare-only`。必须在独立干净检出里执行，因为 prebuild 会重新生成原生目录。iOS 导出 IPA，不上传 App Store Connect；Android 只生成 AAB / APK。
-- 不推送 `v*` tag：原有 tag 工作流包含 TestFlight 上传和公开 GitHub Release。
+- 包含 Mac 组件改动时，需先在有 Developer ID 证书的 Mac 上执行 `pnpm --filter @linkshell/mac pack --pack-destination <制品目录>`，一起交付与本次 `apps/mac/package.json` 版本一致的签名包。Linux 流水线不会生成这个包。
+- 原生包在有签名环境的 Mac 上，从仓库根目录执行 `node apps/client/scripts/release.mjs ios 2.3.58 --prepare-only` 和 `node apps/client/scripts/release.mjs android 2.3.58 --prepare-only`。必须在独立干净检出里执行，因为 prebuild 会重新生成原生目录。iOS 导出 IPA，不上传 App Store Connect；Android 只生成 AAB / APK。
+- 准备流程不运行正式上传或 `gh release create`，也不推送正式发布 tag；当前 `v*` 不触发移动端构建，推 tag 本身同样不能证明制品已发布。
 - `python3 scripts/check-release-packages.py <tarball目录>` 核对版本依赖和 workspace 重写。完成正式发布并核验远端状态后，才能称为已上线。
 
 ## 独立 macOS App（桌面界面 + 内置 CLI / Host）
@@ -373,6 +381,7 @@ Windows 当前按未签名方式发布，无需等待 Authenticode 证书。发�
 
 1. `apps/windows/package.json` 与 CLI 版本保持一致，避免安装器显示版本与内置运行环境不一致。
 2. 对已推送的发布 tag 运行 `gh workflow run windows.yml --ref cli-vX.Y.Z`，确认该次运行的提交与发布提交一致，全部 CI 步骤通过。
-3. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json`、`resources/app/package.json` 和内置 CLI 的版本。界面有改动时看一眼 `LinkShell-Windows-window-shots` 的三张截图（深色、浅色、本机管理）：打包 smoke 真实启动了 Electron 窗口，但只检查 DOM，看不出排版。
-4. 将这四个文件上传到 `desktop-vX.Y.Z` Release，保留已有 Mac DMG，桌面 Release 仍使用 `--latest=false`，带 APK 的移动版继续作为 latest。
-5. 核对远端文件大小和摘要、实际下载可用性后，清理本轮下载、解压及构建临时目录，保留最终制品与校验记录。原生 ARM64、自动安装更新、手机真机与公网屏幕性能不属于 CI 构建证明。
+3. 自动更新或原生菜单改动必须在同一发布提交的 Windows workflow 中完成对应实际 E2E；打包 smoke 不能替代安装确认、校验失败保护、故障回滚、重试安装和身份/历史保留，也不能替代原生复制、剪切、粘贴、撤销。harness 失败时保留通过的具体场景，修复后重跑，不能将部分通过写成完整更新通过。
+4. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json`、`resources/app/package.json` 和内置 CLI 的版本。界面有改动时看一眼 `LinkShell-Windows-window-shots` 的三张截图（深色、浅色、本机管理）：打包 smoke 真实启动了 Electron 窗口，但只检查 DOM，看不出排版。
+5. 将这四个文件上传到 `desktop-vX.Y.Z` Release，保留已有 Mac DMG，桌面 Release 仍使用 `--latest=false`，带 APK 的移动版继续作为 latest。
+6. 核对远端文件大小和摘要、实际下载可用性后，清理本轮下载、解压及构建临时目录，保留最终制品与校验记录。原生 ARM64、手机真机与公网屏幕性能不属于 CI 构建或更新 E2E 证明。

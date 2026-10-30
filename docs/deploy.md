@@ -154,6 +154,8 @@ Host 的 `LINKSHELL_ICE_SERVERS` 设置 STUN 列表；`off` 禁用通用 DataCha
 
 同一个网关镜像在根路径提供新版网页，官方入口为 `https://gateway.itool.tech`。自托管无需 Supabase，打开自己的网关域名即可使用设备配对。账号入口由网关的公开 Supabase 配置决定。端口预览需要独立来源，可将另一个域名路由到同一容器并设置 `WEB_PREVIEW_ORIGIN=https://preview.example.net`；主网页与预览不能同源。
 
+启用网页账号登录时，在 Supabase Authentication → URL Configuration 中追加工作台的固定 OAuth 回调：官方为 `https://gateway.itool.tech/?linkshell-auth-callback=1`，其他部署替换为自己的工作台来源。不要修改 Site URL 或删除已有网站、CLI、手机回调，也无需通配整个工作台域名。Google/GitHub 在独立窗口登录，原工作台持有 PKCE verifier 并交换回调 code；回调窗口不启动电脑连接。开发环境 `127.0.0.1` 使用已有的 `http://127.0.0.1:*/linkshell/callback` 白名单。
+
 ## 独立 Mac App 连接自建网关
 
 独立 App 已内置 CLI。可在设置安装可选命令入口，再按本文运行 `linkshell host --gateway wss://你的网关 --daemon` 与 `linkshell pair`。自建网关不要求官方网关的 Pro 订阅。独立 App 的更新只更新本机配套运行环境，不修改远端网关容器或数据库；详见[桌面版说明](mac-desktop.md)。

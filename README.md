@@ -40,7 +40,7 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-follow.jpg" alt="A session on the phone: a plan, file edits and a permission request" width="100%" /><br />
       <strong>Follow the work, approve with a tap</strong><br />
-      Replies stream in; plans, tool calls and diffs update live. Permission requests and questions come to the phone, the Lock Screen and the watch.
+      New replies stream in; saved history appears without replaying the stream. Plans, tool calls and diffs update live. Permission requests and questions come to the phone, the Lock Screen and the watch.
     </td>
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-queue.jpg" alt="A message typed while the agent is busy, about to be queued" width="100%" /><br />
@@ -63,7 +63,9 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
 - **Forks and worktrees.** Fork a session from any reply to try another direction, in the same directory or a new git worktree.
 - **Side conversations.** Ask about a session without interrupting it or adding to it, the agent's own way: Codex's `/side` (a read-only temporary fork), Claude's and Grok's `/btw`.
 - **A real terminal and localhost.** Terminals on your computer with a Ctrl / Esc / Tab / arrow-key bar, and your dev server's port on the phone over the same encrypted channel, with no open ports.
-- **Files, settings and connections.** Browse the project, send photos and files to the agent, change model, effort and permission mode, configure MCP servers and custom [ACP](docs/v2/acp-support.md) agents.
+- **Files, settings and connections.** Browse the project, send photos and files to the agent, and choose from its model, effort and permission options before the first message. Adjust supported settings later in the session; configure MCP servers and custom [ACP](docs/v2/acp-support.md) agents.
+- **Projects across computers.** Browse projects grouped by computer from one list. A computer's name is shared across devices, and automatically created Codex chats stay in their own group.
+- **Desktop workspace.** Resize or collapse the sidebar; scroll the file tree and file preview independently. Switching between local and remote access keeps one entry for the same computer.
 - **Adaptive layouts.** iPhone Duo puts the conversation beside its changes or a preview, and adapts to folds and orientation; iPad uses a split view.
 - **Search and housekeeping.** Search sessions by title, preview, path, branch or agent; rename, archive and delete, synced to Codex and Claude's own records where they support it. See [session recovery](docs/v2/session-recovery.md).
 

@@ -40,7 +40,7 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-follow.jpg" alt="手机上的会话：计划、文件改动和一条权限请求" width="100%" /><br />
       <strong>看着它干活，点一下批准</strong><br />
-      回复逐字出现，计划、工具调用和 diff 实时更新。权限请求和提问推到手机、锁屏和手表上。
+      新回复逐字出现，历史直接显示，不重新逐字播放；计划、工具调用和 diff 实时更新。权限请求和提问推到手机、锁屏和手表上。
     </td>
     <td width="33%" valign="top">
       <img src="docs/site/assets/promo/card-queue.jpg" alt="Agent 忙的时候输入的一条消息，即将排队" width="100%" /><br />
@@ -63,7 +63,9 @@ Claude Code、Codex 这些编程 Agent 继续在你的电脑上跑。你在手�
 - **分叉和 worktree。** 从任意一条回复分叉出新会话换个思路，可以留在当前目录，也可以放进新的 git worktree。
 - **旁支对话。** 问一个关于会话的问题，不打断它、也不进入会话，用 Agent 自己的方式：Codex 的 `/side`（只读的临时分叉），Claude 和 Grok 的 `/btw`。
 - **真终端和 localhost。** 电脑上的终端，带 Ctrl、Esc、Tab 和方向键工具栏；dev server 的端口走同一条加密通道在手机上打开，不用暴露端口。
-- **文件、设置和连接。** 浏览项目文件，把照片和文件传给 Agent；修改模型、思考强度和权限模式；配置 MCP 服务和自定义 [ACP](docs/v2/acp-support.md) Agent。
+- **文件、设置和连接。** 浏览项目文件，把照片和文件传给 Agent；在发送首条消息前选择它提供的模型、思考强度和权限选项，会话中仍可调整其支持的设置；配置 MCP 服务和自定义 [ACP](docs/v2/acp-support.md) Agent。
+- **跨电脑查看项目。** 在同一列表里按电脑分组浏览项目。电脑名称在各端同步，自动创建的 Codex 聊天归在独立分组里。
+- **桌面工作台。** 侧栏可以调宽、折叠，文件树与文件预览独立滚动；同一台电脑在本地和远程连接之间切换时只保留一个入口。
 - **适应不同屏幕。** iPhone Duo 展开时对话与改动或预览并排，并随折叠和方向调整；iPad 使用分栏布局。
 - **搜索和整理。** 按标题、预览、路径、分支或 Agent 搜索会话；重命名、归档、删除，Codex 和 Claude 支持的部分同步到它们自己的记录。详见[会话恢复](docs/v2/session-recovery.md)。
 

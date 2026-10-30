@@ -17,14 +17,14 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 - 总览与设备页可生成二维码、六位配对码和有效期。新设备出现后提示配对成功，过期后需要重新生成。
 - 会话与审批统一在工作台完成；管理总览和托盘保留会话概况和工作台入口。账号页支持会员刷新与 Pro 激活码兑换，激活码仅经 stdin 传给 CLI。
 - 用量统计提供全部 / Agent 筛选、今天 / 7 天 / 30 天、Token 等指标、每日趋势和模型明细。无数据不显示为“零消耗”。
-- 日志页读取 Host 最近 64 KB，可选择复制。更新页检查 GitHub 上的 Windows 安装包（测试版通道包含预发布），安装包在浏览器中下载，退出 LinkShell 后运行；未接入 Mac 的 Sparkle 自动更新。
+- 日志页读取 Host 最近 64 KB，可选择复制。更新页自动检查 GitHub 上的 Windows 安装包（测试版通道包含预发布），按版本号选择最新版本；点击“下载并更新 App”后在应用内显示下载进度并验证随 Release 发布的 SHA-256。下载完成后确认重启，自动完成安装并重新打开。下载失败可重试，选择稍后安装会保留本次已校验的安装包。
 - 关闭窗口后 LinkShell 留在任务栏通知区域：单击图标打开窗口，右键菜单可打开本机管理或退出界面。再次启动同一安装会唤回已有窗口。
 
 ## 系统与安装
 
 - Windows 10 1809 或更新版本、Windows 11，x64；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。ARM64 尚未提供原生安装包。
 - 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`，生成 `artifacts/LinkShell-Setup-<版本>-windows-x64.exe` 与 ZIP 便携包。
-- 安装器仅安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`，创建开始菜单入口，不需要管理员权限。当前 Windows 发布包不进行 Authenticode 签名，可能显示“未知发布者”或 SmartScreen 提示；请从官方 Release 下载并核对随包提供的 SHA-256。
+- 手动安装默认安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`；应用内更新沿用当前安装目录，也支持 ZIP 解压的自定义目录。创建开始菜单入口，不需要管理员权限。当前 Windows 发布包不进行 Authenticode 签名，可能显示“未知发布者”或 SmartScreen 提示；请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
 - 数据保存在 `%USERPROFILE%\.linkshell`，或 `LINKSHELL_HOME` 指定的位置。安装、更新和关闭界面不删除账号、配对与会话历史。
@@ -53,13 +53,17 @@ JPEG 兼容路径的正常发送窗口最多保留两帧待确认，查看器绘
 
 ## 更新与卸载
 
-新安装包一起更新桌面界面、Node、CLI、Host 与屏幕组件。更新前从托盘退出界面。安装器仅停止自身托管的 Host，保存并恢复原有机器身份与配对；失败尝试回滚，保留旧目录作为恢复副本。新版服务恢复成功后，删除这次和以前留下的 `LinkShell.previous-*` / `LinkShell.failed-*` 副本，更新不会越装越大；被占用而删不掉的文件留到下次安装再删。外部 npm 安装的服务不会被自动替换。Windows 首版提供手动下载更新，暂未接入自动更新。
+新安装包一起更新桌面界面、Node、CLI、Host 与屏幕组件。应用内更新先完成下载和校验，再确认重启并保存草稿。安装器取得互斥锁并显示窗口后才通知桌面退出，等待桌面及其渲染进程释放安装目录，不强制结束窗口。下载和等待确认期间 Host 保持运行；安装器仅在替换文件前停止自身托管的 Host，保存并恢复原有机器身份与配对。失败尝试回滚，保留旧目录作为恢复副本；失败或取消可在安装窗口重试或重新打开应用。自定义 `LINKSHELL_HOME` 传给更新服务、重新打开的应用与开始菜单入口；数据目录位于应用目录内时拒绝覆盖更新。
+
+新版服务恢复成功后，删除这次和以前留下的 `LinkShell.previous-*` / `LinkShell.failed-*` 副本；被占用而删不掉的文件留到下次安装再删。数据目录保护通过 Windows 目录句柄解析实际位置，覆盖 junction / 符号链接及其祖先；交接和替换文件前复验，无法确认路径时停止更新。应用重开后清理下载缓存，仍运行的下载或安装器保留。外部 npm 安装的服务不会被自动替换。手动下载并运行安装器仍然可用，手动更新前需从托盘退出界面。Windows 更新不依赖 Mac 的 Sparkle，也不会在后台未经确认重启服务。
 
 卸载时先在桌面端停止服务，关闭开机启动，再从托盘退出。删除安装目录及开始菜单 LinkShell 快捷方式即可；用户数据目录默认保留。
 
 ## 开发与验证
 
 打包时的 smoke（`scripts/smoke.mjs`，`build:standalone` 自动运行）在隔离数据目录启动真实 Host 和打包目录中的 `LinkShell.exe`，经调试端口确认工作台以 Windows 布局加载、页面与主进程的桥能往返，并检查 exe 的名称与版本信息。它不涵盖生产登录、真实激活码或公网性能。
+
+2026-10-30 更新下载链验证：在 macOS 上直接调用生产更新模块，成功检测 GitHub 官方 `desktop-v0.10.80`、下载 278,922,752 字节的 Windows 安装包，并核对 Release 的 SHA-256 后再次验证本地文件；整轮约 23 秒，临时安装包与缓存已清理。隔离编译与 3 项下载行为回归通过。Windows 安装器、原位替换、服务恢复、重开及 junction 路径守卫尚未执行 Windows 验收：现有 Windows 11 VM 的 Parallels LaunchDaemon 启动即退出，日志为 `Bundle has incorrect owner - 501`；正常启动和重启其已配置服务均未恢复。11 项 Windows 交接/路径回归在 macOS 明确跳过，不能视为通过。
 
 ```powershell
 corepack pnpm install --frozen-lockfile
@@ -73,7 +77,7 @@ corepack pnpm --filter @linkshell/windows build:standalone
 
 使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件和安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
 
-已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。
+已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。新增的更新行为回归覆盖发布版本及通道选择、下载校验、损坏/中断清理、活动下载保留，以及 Windows 安装器参数、进程交接和取消不终止进程。应用内更新仍需在真实 Windows 上核对下载→确认→退出→覆盖→服务恢复→重开、失败重试、便携目录和自定义状态目录；跨平台测试不能代替这条验收。
 
 命名管道替代 Host 的 Unix socket；不同 `LINKSHELL_HOME` 相互隔离。Codex 的 Windows 进程使用官方 app-server JSONL 标准输入/输出传输；npm 的 `.cmd` Agent 入口通过参数转义启动。终端使用 PowerShell 和随 node-pty 分发的 ConPTY。Mac 原有 socket 与媒体路径保留。
 
