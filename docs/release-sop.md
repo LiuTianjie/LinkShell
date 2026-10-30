@@ -341,6 +341,7 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 - [ ] 改版本号之后重新 `pnpm build`
 - [ ] **使用 `pnpm publish`（不是 `npm publish`）**，顺序 wire → mac → host → gateway → cli
 - [ ] `@linkshell/mac` 是在有 Developer ID 证书的 Mac 上发的
+- [ ] 独立 Mac App 已通过下述真实首次打开、重复打开、关窗重开及 helper 共存的 Dock / 单实例验收
 - [ ] 抽检 tarball：没有 `workspace:`；CLI 包里没有 `web/`（见 §4.1）
 - [ ] `npm i -g linkshell-cli@X.Y.Z --prefer-online` 能装上，`linkshell doctor` 通过
 - [ ] 如果发了 gateway：`gateway-vX.Y.Z` tag 已推送，镜像本地跑过 `/healthz`
@@ -369,6 +370,9 @@ curl -s https://gateway.itool.tech/healthz          # 如果部署了官方网�
 2. `pnpm build`、`pnpm typecheck`，执行 CLI / Host / Swift 相关测试。
 3. 先 `pnpm --filter @linkshell/mac build`，再分别运行 `LINKSHELL_NOTARY_PROFILE=<已配置名称> node apps/mac/scripts/build-standalone.mjs --arch arm64` 和 `--arch x64`。构建器检查 Node 下载 SHA-256、嵌套签名和架构，再用 `apps/desktop/scripts/package.mjs` 把该架构的 Electron 装进同一个 App 并整体签名（另一架构的 Electron 由 `electron-dist.mjs` 下载，按 electron 包自带的 SHA-256 校验），最后提交 App 和 DMG 公证并 staple。正式发布必须确认两份 `release.json` 的 `notarized` 为 true。输出目录不要放在 `/tmp` 下（它是 `/private/tmp` 的链接，运行时符号链接检查会误判越界），默认的 `artifacts/mac/<arch>` 即可。
 4. 验证全新数据目录的登录入口、浏览器回调、启动服务、权限入口；验证旧版本通过 Sparkle 安装最终 DMG 后，App / Host 版本一致，机器身份与配对信息保留。Intel 的 Rosetta 运行检查不等于 Intel 真机屏幕验收。
+
+   使用最终 Developer ID 签名、生产 bundle id 不变的同一 App，实际检查首次打开、连续重复打开 10 次、Cmd+W 关窗重开，并覆盖带 `--connect` 参数的屏幕 helper 与 GUI 均已运行、仅 helper 存活两种启动状态。观察启动瞬态和稳定状态：待发布 App 最多一个 GUI / Dock 入口，重复打开或关窗重开激活、恢复同一 GUI PID；仅 helper 存活时首次打开允许创建新的 GUI PID。helper 不进入 Dock、不抢前台。记录进程路径、参数、PID、activation policy 与实际 Dock / 窗口影像；静态 plist、签名或构建检查不能替代这些行为验收。仅 helper 存活的分支使用隔离实例，不停止或重启承担活跃会话的生产 Host。
+
 5. 使用 `apps/mac/scripts/appcast.mjs` 与 Keychain 中 `linkshell-desktop` 私钥，为两个架构生成独立 appcast。公钥、bundle id 和 Developer ID 保持不变。最终签名后不要再修改 DMG。
 6. 创建 `desktop-v<version>` GitHub release，先上传两个 DMG，再将对应 feed 放到 `docs/site/updates/mac/appcast-arm64.xml`、`appcast-x64.xml` 并部署 Pages。核对线上 feed 的 URL、长度、签名与 SHA-256；不要提前发布指向缺失资源的 feed。
 7. 新版 App 内验证线上“检查更新”；归档与公证通过后清理本轮临时安装和测试数据，保留发布包与校验记录。

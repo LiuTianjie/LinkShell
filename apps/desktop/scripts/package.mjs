@@ -118,8 +118,10 @@ try {
   info.set("LSApplicationCategoryType", "string", "public.app-category.developer-tools");
   info.set("LSEnvironment", "dict", "");
   run("/usr/libexec/PlistBuddy", ["-c", "Add :LSEnvironment:MallocNanoZone string 0", join(contents, "Info.plist")]);
-  // The window is in the Dock; the screen helper hides itself (setActivationPolicy) as before.
-  info.remove("LSUIElement");
+  // This bundle also launches screen and menu-bar workers. Keep every launch out of the Dock;
+  // only the Electron instance that owns the window calls app.dock.show(). A duplicate launch
+  // exits at its single-instance lock without briefly adding another Dock icon.
+  info.set("LSUIElement", "bool", "true");
 
   // Signing: inside out, every Mach-O with the app's identity and hardened runtime.
   let identity = process.env.LINKSHELL_SIGN_IDENTITY;
