@@ -163,7 +163,11 @@ async function attach(previousPID) {
   });
   const socket = new WebSocket(page.webSocketDebuggerUrl), pending = new Map(); let callID = 0;
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = () => reject(new Error('CDP connection failed')); });
-  socket.onmessage = ({ data }) => { const value = JSON.parse(data); const call = pending.get(value.id); if (!call) return; pending.delete(value.id); clearTimeout(call.timer); value.error ? call.reject(new Error(JSON.stringify(value.error))) : call.resolve(value.result); };
+  socket.onmessage = ({ data }) => {
+    const value = JSON.parse(data); const call = pending.get(value.id); if (!call) return; pending.delete(value.id); clearTimeout(call.timer);
+    if (value.error) call.reject(new Error(JSON.stringify(value.error)));
+    else call.resolve(value.result);
+  };
   socket.onclose = () => { for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error('CDP closed')); } pending.clear(); };
   const command = (method, params = {}) => new Promise((resolve, reject) => { const id = ++callID; const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, 60_000); pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params })); });
   const evaluate = async expression => { const value = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description || 'Renderer evaluation failed'); return value.result.value; };

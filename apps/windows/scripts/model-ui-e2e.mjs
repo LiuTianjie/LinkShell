@@ -82,7 +82,8 @@ async function probeCodex() {
       let message; try { message = JSON.parse(line); } catch { continue; }
       const call = pending.get(message.id); if (!call) continue;
       pending.delete(message.id); clearTimeout(call.timer);
-      message.error ? call.reject(new Error(`Codex ${call.method} failed (${message.error.code})`)) : call.resolve(message.result);
+      if (message.error) call.reject(new Error(`Codex ${call.method} failed (${message.error.code})`));
+      else call.resolve(message.result);
     }
   });
   const rpc = (method, params) => new Promise((resolve, reject) => {
@@ -143,7 +144,8 @@ async function attach() {
     const value = JSON.parse(data);
     if (value.method) { observeRPC(value.method, value.params); return; }
     const call = pending.get(value.id); if (!call) return; pending.delete(value.id); clearTimeout(call.timer);
-    value.error ? call.reject(new Error(`CDP error ${value.error.code}`)) : call.resolve(value.result);
+    if (value.error) call.reject(new Error(`CDP error ${value.error.code}`));
+    else call.resolve(value.result);
   };
   socket.onclose = () => { for (const call of pending.values()) { clearTimeout(call.timer); call.reject(new Error('CDP closed')); } pending.clear(); };
   const command = (method, params = {}) => new Promise((resolve, reject) => {
@@ -238,7 +240,7 @@ async function nativeEditingMenu(selector, name, editFlag, evidenceName) {
     await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ ...diagnostics(), error: safeError(error),
       stdout: safeError(outcome?.error?.stdout ?? outcome?.response?.stdout ?? '').slice(-16000),
       stderr: safeError(outcome?.error?.stderr ?? outcome?.response?.stderr ?? '').slice(-16000) }, null, 2));
-    throw new Error(`Native ${name} helper failed; see ${evidenceName}-driver.json and ${helperDump}.`);
+    throw new Error(`Native ${name} helper failed; see ${evidenceName}-driver.json and ${helperDump}.`, { cause: error });
   } finally {
     await Promise.all([readyPath, triggerPath, triggerPending].map(path => rm(path, { force: true })));
   }

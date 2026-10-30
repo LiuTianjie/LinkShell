@@ -10,7 +10,8 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 
-let window, server, menu;
+let window, server;
+const observed = { menu: undefined };
 let count = 0;
 const contexts = [];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -44,7 +45,7 @@ app.whenReady().then(async () => {
   } });
   // Build real Electron menus from real Chromium contexts, without displaying a fixture on the desktop.
   // Native first-responder action execution still requires a visible desktop interaction check.
-  Menu.prototype.popup = function () { menu = this; count++; };
+  Menu.prototype.popup = function () { observed.menu = this; count++; };
   installEditingContextMenu(window.webContents, () => window, () => policy.isTrusted(window.webContents.getURL()));
   window.webContents.on("context-menu", (_event, params) => contexts.push(params));
   await window.loadURL(origin);
@@ -58,7 +59,7 @@ app.whenReady().then(async () => {
       } }
       const rect = element.getBoundingClientRect(); return { x: Math.round(rect.x + 20), y: Math.round(rect.y + 20) };
     })()`);
-    menu = undefined;
+    observed.menu = undefined;
     const before = count;
     window.webContents.sendInputEvent({ type: "mouseDown", button: "right", clickCount: 1, ...point });
     window.webContents.sendInputEvent({ type: "mouseUp", button: "right", clickCount: 1, ...point });
@@ -67,7 +68,7 @@ app.whenReady().then(async () => {
     if (id === "product") await pause(100);
     return before;
   };
-  const item = (role) => menu?.items.find((entry) => entry.role === role);
+  const item = (role) => observed.menu?.items.find((entry) => entry.role === role);
   await open("text");
   assert.equal(item("copy")?.enabled, true, "selected conversation text can be copied");
   assert.equal(item("cut"), undefined, "conversation selection cannot be cut");
