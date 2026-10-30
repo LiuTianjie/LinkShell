@@ -226,9 +226,12 @@ async function nativeEditingMenu(selector, name, editFlag, evidenceName) {
     await completed;
     if (outcome.error) throw outcome.error;
     const invoked = JSON.parse(outcome.response.stdout.trim()); assert.equal(invoked.clicked, true); assert.equal(invoked.pid, connection.pid); assert.equal(invoked.name, name); assert.equal(invoked.controlType, 'ControlType.MenuItem');
+    const accelerator = { '复制': 'Ctrl+C', '剪切': 'Ctrl+X', '粘贴': 'Ctrl+V', '撤销': 'Ctrl+Z' }[name];
+    assert.ok(accelerator); assert.ok([name, name + ' ' + accelerator].includes(invoked.accessibleName));
     assert.ok(['InvokePattern', 'MSAA.accDoDefaultAction'].includes(invoked.invocationMethod));
-    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ ...diagnostics(), invoked: true }, null, 2));
-    return { name, invoked: true, invocationMethod: invoked.invocationMethod, controlType: invoked.controlType, processId: invoked.pid, chromiumEnabled: true };
+    await writeFile(join(report, evidenceName + '-driver.json'), JSON.stringify({ ...diagnostics(), invoked: true, accessibleName: invoked.accessibleName, acceleratorKey: invoked.acceleratorKey }, null, 2));
+    return { name, accessibleName: invoked.accessibleName, acceleratorKey: invoked.acceleratorKey, invoked: true,
+      invocationMethod: invoked.invocationMethod, controlType: invoked.controlType, processId: invoked.pid, chromiumEnabled: true };
   } catch (error) {
     // Keep this process handle: fixture cleanup deliberately never kills arbitrary powershell.exe PIDs.
     if (!outcome) { aborted = true; helper.child.kill(); await completed; }

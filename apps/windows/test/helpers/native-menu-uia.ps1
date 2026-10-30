@@ -32,12 +32,30 @@ $helperClock = [System.Diagnostics.Stopwatch]::StartNew()
 $phase = 'starting'
 $processStart = $null
 $knownNames = @('复制', '剪切', '粘贴', '撤销')
+$menuAccelerators = @{ '复制' = 'Ctrl+C'; '剪切' = 'Ctrl+X'; '粘贴' = 'Ctrl+V'; '撤销' = 'Ctrl+Z' }
 $lastWindows = @()
 $lastMenus = @()
 $candidateEvidence = $null
 $startupMs = $null
 $triggerWaitMs = $null
 $searchClock = $null
+
+function Get-CanonicalMenuName {
+    param([string]$AccessibleName)
+    foreach ($name in $knownNames) {
+        # Chromium MenuItemView appends one space and GetShortcutText() to its label.
+        # Only the four production roles' complete names are accepted, never a prefix.
+        if ([string]::Equals($AccessibleName, $name, [System.StringComparison]::Ordinal) -or
+            [string]::Equals($AccessibleName, $name + ' ' + $menuAccelerators[$name], [System.StringComparison]::Ordinal)) { return $name }
+    }
+    return $null
+}
+
+function Limit-MenuMetadata {
+    param([string]$Value, [int]$Length)
+    if ($null -eq $Value) { return $null }
+    return $Value.Substring(0, [Math]::Min($Value.Length, $Length))
+}
 
 function Write-Dump {
     param([hashtable]$Value)
@@ -293,8 +311,11 @@ public static class LinkShellCiNativeMenuWindow
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
     $itemCondition = $typeCondition
     if ($MenuItemName) {
-        $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        $plainNameCondition = [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty, $MenuItemName)
+        $shortcutNameCondition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $MenuItemName + ' ' + $menuAccelerators[$MenuItemName])
+        $nameCondition = [System.Windows.Automation.OrCondition]::new($plainNameCondition, $shortcutNameCondition)
         $itemCondition = [System.Windows.Automation.AndCondition]::new($typeCondition, $nameCondition)
     }
     $lastFailure = $null
@@ -387,8 +408,14 @@ public static class LinkShellCiNativeMenuWindow
                 foreach ($control in $controls) {
                     if ($menuEvidence['controls'].Count -ge 32) { break }
                     $label = $control.Current.Name
-                    $safeLabel = if ($knownNames -ccontains $label) { $label } else { '<other control>' }
+                    $nativeItem = $control.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem
+                    $safeLabel = if ($nativeItem) { Limit-MenuMetadata $label 160 } else { '<other control>' }
                     $controlEvidence = @{ name = $safeLabel; controlType = $control.Current.ControlType.ProgrammaticName; enabled = $control.Current.IsEnabled; offscreen = $control.Current.IsOffscreen }
+                    if ($nativeItem) {
+                        $controlEvidence['canonicalName'] = Get-CanonicalMenuName $label
+                        $controlEvidence['acceleratorKey'] = Limit-MenuMetadata $control.Current.AcceleratorKey 80
+                        $controlEvidence['accessKey'] = Limit-MenuMetadata $control.Current.AccessKey 80
+                    }
                     $menuEvidence['controls'] += $controlEvidence
                     Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
                     $controlEvidence['patterns'] = @($control.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
@@ -400,17 +427,19 @@ public static class LinkShellCiNativeMenuWindow
                 foreach ($item in $items) {
                     if ($item.Current.ProcessId -ne $AppProcessId -or $item.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem) { continue }
                     $itemName = $item.Current.Name
-                    if ($MenuItemName -and $itemName -cne $MenuItemName) { continue }
+                    $canonicalName = Get-CanonicalMenuName $itemName
+                    if ($MenuItemName -and $canonicalName -cne $MenuItemName) { continue }
                     # Persist identity before provider calls, so a hung provider still leaves evidence.
-                    $safeName = if ($knownNames -ccontains $itemName) { $itemName } else { '<other menu item>' }
-                    $candidateEvidence = @{ name = $safeName; controlType = 'ControlType.MenuItem'; nativeHandle = $handle.ToInt64(); nativeClass = $nativeClass; enabled = $item.Current.IsEnabled; offscreen = $item.Current.IsOffscreen }
+                    $candidateEvidence = @{ name = $canonicalName; accessibleName = (Limit-MenuMetadata $itemName 160); controlType = 'ControlType.MenuItem'; nativeHandle = $handle.ToInt64(); nativeClass = $nativeClass; enabled = $item.Current.IsEnabled; offscreen = $item.Current.IsOffscreen }
                     Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
                     $candidateEvidence['patterns'] = @($item.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                    $candidateEvidence['acceleratorKey'] = Limit-MenuMetadata $item.Current.AcceleratorKey 80
+                    $candidateEvidence['accessKey'] = Limit-MenuMetadata $item.Current.AccessKey 80
                     Write-Dump @{ clicked = $false; inspected = $false } | Out-Null
                     $rectangle = $item.Current.BoundingRectangle
                     $bounds = [double[]]@($rectangle.X, $rectangle.Y, $rectangle.Width, $rectangle.Height)
                     $accessibility = $null
-                    if ($knownNames -ccontains $itemName) {
+                    if ($canonicalName) {
                         try { $accessibility = [LinkShellCiNativeMenuWindow]::MenuAction($handle, $AppProcessId, $itemName, $bounds, $false) }
                         catch { $candidateEvidence['defaultActionErrorType'] = $_.Exception.GetType().FullName }
                     }
@@ -434,7 +463,8 @@ public static class LinkShellCiNativeMenuWindow
                         $root.Current.NativeWindowHandle -ne $handle.ToInt64() -or
                         $item.Current.ProcessId -ne $AppProcessId -or
                         $item.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem -or
-                        $item.Current.Name -cne $MenuItemName -or
+                        -not [string]::Equals($item.Current.Name, $itemName, [System.StringComparison]::Ordinal) -or
+                        (Get-CanonicalMenuName $item.Current.Name) -cne $MenuItemName -or
                         -not $item.Current.IsEnabled -or $item.Current.IsOffscreen) { continue }
                     $phase = 'invoking-menu-item'
                     $candidateEvidence['invocationMethod'] = $method
@@ -444,15 +474,15 @@ public static class LinkShellCiNativeMenuWindow
                         else {
                             $rectangle = $item.Current.BoundingRectangle
                             $bounds = [double[]]@($rectangle.X, $rectangle.Y, $rectangle.Width, $rectangle.Height)
-                            $accessibility = [LinkShellCiNativeMenuWindow]::MenuAction($handle, $AppProcessId, $MenuItemName, $bounds, $true)
+                            $accessibility = [LinkShellCiNativeMenuWindow]::MenuAction($handle, $AppProcessId, $itemName, $bounds, $true)
                             if (-not $accessibility) { throw [System.InvalidOperationException]::new('The default action returned no invocation evidence.') }
                         }
                     } catch {
                         # A provider can act before throwing; never retry an uncertain edit operation.
-                        Write-Result @{ clicked = $false; inspected = $false; failed = $true; actionOutcomeUnknown = $true; invocationMethod = $method; error = 'The native invocation failed; it was not retried.'; errorType = $_.Exception.GetType().FullName } 1
+                        Write-Result @{ clicked = $false; inspected = $false; failed = $true; actionOutcomeUnknown = $true; invocationMethod = $method; accessibleName = $itemName; error = 'The native invocation failed; it was not retried.'; errorType = $_.Exception.GetType().FullName } 1
                     }
                     $phase = 'invoked'
-                    Write-Result @{ clicked = $true; inspected = $false; failed = $false; invocationMethod = $method; controlType = 'ControlType.MenuItem'; nativeHandle = $handle.ToInt64(); nativeClass = $nativeClass } 0
+                    Write-Result @{ clicked = $true; inspected = $false; failed = $false; invocationMethod = $method; accessibleName = $itemName; acceleratorKey = $candidateEvidence['acceleratorKey']; accessKey = $candidateEvidence['accessKey']; controlType = 'ControlType.MenuItem'; nativeHandle = $handle.ToInt64(); nativeClass = $nativeClass } 0
                 }
             } catch [System.Windows.Automation.ElementNotAvailableException] {
                 $lastFailure = 'Target menu changed while being inspected.'
