@@ -12,6 +12,12 @@ services:
     image: coturn/coturn:4.6
     network_mode: host
     restart: unless-stopped
+    # Luma fills these from its secrets; the image's entrypoint expands $NAME in the arguments
+    # (`exec $(eval "echo $@")`), so the values stay out of the job's command line.
+    environment:
+      TURN_SECRET: ${TURN_SECRET}
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP}
+      TURN_PRIVATE_IP: ${TURN_PRIVATE_IP}
     command:
       - -n
       - --log-file=stdout
@@ -19,12 +25,16 @@ services:
       - --no-cli
       - --fingerprint
       - --use-auth-secret
-      - --static-auth-secret=${TURN_SECRET}
+      - --static-auth-secret=$TURN_SECRET
       - --realm=linkshell
       - --listening-port=3478
       - --min-port=49160
       - --max-port=49359
-      - --external-ip=${TURN_PUBLIC_IP}/${TURN_PRIVATE_IP}
+      # Only the interface the public address is NAT'ed to: coturn would otherwise also listen and relay on the
+      # node's Docker, Nomad and Tailscale addresses, and hand out relay addresses no one can reach.
+      - --listening-ip=$TURN_PRIVATE_IP
+      - --relay-ip=$TURN_PRIVATE_IP
+      - --external-ip=$TURN_PUBLIC_IP/$TURN_PRIVATE_IP
       # The relay carries WebRTC only: UDP to public addresses, nothing on this node's networks.
       - --no-tcp-relay
       - --no-multicast-peers
