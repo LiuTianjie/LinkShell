@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import { groupProjects } from "@linkshell/client-core";
@@ -771,6 +771,26 @@ function ConnectionFacts({ connection, name, navigate }: { connection: Connectio
 }
 
 export function DesktopShell({ children, ...props }: ConsoleShellProps) {
+  const workspace = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!isElectronDesktop) return;
+    const focusWorkspace = () => {
+      const active = document.activeElement;
+      // Give the native window a neutral focus target instead of letting it pick the first
+      // toolbar button. Preserve inputs, dialogs and controls the user already focused.
+      if (!active || active === document.body || active === document.documentElement) {
+        workspace.current?.focus({ preventScroll: true });
+      }
+    };
+    focusWorkspace();
+    window.addEventListener("focus", focusWorkspace);
+    // Clicking empty space can leave focus on body; park it before the window is reactivated.
+    window.addEventListener("blur", focusWorkspace);
+    return () => {
+      window.removeEventListener("focus", focusWorkspace);
+      window.removeEventListener("blur", focusWorkspace);
+    };
+  }, []);
   const [appearance, setAppearance] = useDesktopAppearance();
   useApplyDesktopAppearance(appearance);
   useWindowSurface();
@@ -899,10 +919,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     };
   }, []);
   return (
-    <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined} data-platform={isWindowsDesktop ? "windows" : undefined}>
-      {/* No "skip to content" link here: as the window's first focusable element it caught the
-          focus whenever the window got it back, and showed over the sidebar. The sidebar and the
-          main view sit side by side, and ⌘K reaches any of it. */}
+    <div ref={workspace} tabIndex={isElectronDesktop ? -1 : undefined} className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined} data-platform={isWindowsDesktop ? "windows" : undefined}>
       <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.

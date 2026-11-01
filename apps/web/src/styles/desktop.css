@@ -72,6 +72,8 @@ html[data-desktop] * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb
    sidebar and toolbars use. Icons given a weight of their own (a bold check) keep it. */
 html[data-desktop] svg.lucide[stroke-width="2"] { stroke-width: 1.65; }
 html[data-desktop] :focus-visible { outline: 2px solid var(--focus, var(--link)); outline-offset: 1px; }
+/* The workspace only holds the window's idle focus; interactive controls keep their focus rings. */
+html[data-desktop] .desktop-root:focus { outline: none; }
 
 /* ── Frame ──────────────────────────────────────────────────────────────────
    The window draws no title bar: the page's first 46 px are its title row, with the Mac's traffic
