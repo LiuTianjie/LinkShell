@@ -19,6 +19,15 @@ describe("conversation activity feedback", () => {
     expect(turnActivity({ ...input, session: { ...session, state: "running", activity: { kind: "tool", title: "pnpm test", toolKind: "execute" } } })?.label).toContain("pnpm test");
   });
 
+  it("doesn't name a running call twice when its own row is in the conversation", () => {
+    const view = {
+      turnActive: true, permissions: [], turnStartedAt: 1,
+      items: [{ kind: "tool" as const, id: "c", ts: 1, toolCallId: "c", title: "pnpm test", toolKind: "execute" as const, status: "in_progress" as const, content: [], locations: [], rawInput: { command: "pnpm test" } }],
+    };
+    const shown = turnActivity({ ...input, session: { ...session, state: "running" }, view: view as never });
+    expect(shown).toMatchObject({ label: "本轮进行中", animated: true, startedAt: 1 });
+  });
+
   it("stops the work animation for disconnection, approval, queueing and errors", () => {
     const running = { ...input, session: { ...session, state: "running" as const } };
     expect(turnActivity({ ...running, online: false })).toMatchObject({ tone: "muted", animated: false });

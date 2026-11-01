@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect } from "node:net";
-import { MenuBar, menuBarEvents } from "../dist/main/menubar.js";
+import { MenuBar, menuBarEvents, updateFound, updateLabel } from "../dist/main/menubar.js";
+
+test("the menu's update entry follows what the updater found", () => {
+  assert.equal(updateLabel(undefined), "检查更新…");
+  let found = updateFound(undefined, "available", "0.10.83");
+  assert.equal(updateLabel(found), "更新到 0.10.83…");
+  // Progress messages while it downloads keep the version.
+  found = updateFound(found, "message");
+  found = updateFound(found, "finished");
+  assert.equal(found, "0.10.83");
+  assert.equal(updateLabel(updateFound(undefined, "available")), "有新版本…");
+  assert.equal(updateFound(found, "current"), undefined);
+});
 
 test("reads whole lines only, and only the events it knows", () => {
   const { events, rest } = menuBarEvents('{"t":"click","id":"open"}\nnot json\n{"t":"click"}\n{"t":"reopen"}\n{"t":"cli');

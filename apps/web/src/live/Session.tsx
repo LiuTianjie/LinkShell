@@ -1320,9 +1320,11 @@ export function Session({
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       placeholder={
-                        online
-                          ? "发送消息，输入 / 选择命令或技能…"
-                          : "连接已断开，可以继续编辑草稿…"
+                        !online
+                          ? "连接已断开，可以继续编辑草稿…"
+                          : showComposerCaption && isDesktop
+                            ? "正在同步会话，完成后可发送…"
+                            : "发送消息，输入 / 选择命令或技能…"
                       }
                       rows={2}
                       onPaste={(event) => {
@@ -1478,7 +1480,8 @@ export function Session({
                   ? "Enter 加入队列，⌘/Ctrl Enter 立即发送"
                   : "Enter 发送，Shift Enter 换行，/ 打开命令"}
               </span>
-              {showComposerCaption && (
+              {/* On the desktop the composer floats over the conversation: a line under it would lift it while the session syncs. */}
+              {showComposerCaption && !isDesktop && (
                 <div className="composer-caption">
                   <span>{online ? "同步完成后可发送" : "连接已断开，草稿已保留"}</span>
                 </div>

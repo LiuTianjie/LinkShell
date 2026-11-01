@@ -184,6 +184,9 @@ html[data-desktop] .desktop-main :is(.conversation-activity span, .thought-block
 }
 html[data-desktop] .desktop-main .conversation-activity { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--secondaryLabel); font-size: 14px; }
 html[data-desktop] .desktop-main .conversation-activity > svg { width: 16px; height: 16px; opacity: .6; animation: spin 2s steps(60) infinite; }
+/* Only the turn's time: what runs already moves in its own row above. */
+html[data-desktop] .desktop-main .conversation-activity[data-quiet] { font-size: 12px; }
+html[data-desktop] .desktop-main .conversation-activity[data-quiet] span { animation: none; background: none; color: var(--tertiaryLabel); }
 
 /* Diffs: 12 px mono at 1.8, rows tinted by what changed. */
 html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; border-radius: 16px; background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }

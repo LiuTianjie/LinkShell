@@ -33,7 +33,10 @@ export function turnActivity({ session, progress, online, connecting, ready, has
   if (session.state === "running") {
     if (view?.turnActive) {
       const live = liveActivity(view);
-      return { label: live.label, tone: live.waiting ? "waiting" : "active", animated: !live.waiting, startedAt: live.startedAt };
+      // A running call or untitled thought already spins under its own name in the timeline;
+      // naming it again here reads as two things running. The reply row has no spinner of its own.
+      const label = live.echo === "tool" || live.echo === "thought" ? "本轮进行中" : live.label;
+      return { label, tone: live.waiting ? "waiting" : "active", animated: !live.waiting, startedAt: live.startedAt };
     }
     return { label: activityText(session.activity), tone: "active", animated: true };
   }

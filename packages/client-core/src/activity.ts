@@ -13,6 +13,12 @@ export interface LiveActivity {
   waiting: boolean;
   /** When the turn started, when the view knows. */
   startedAt?: number;
+  /**
+   * Which timeline row the label comes from: the running call, an untitled thought, the reply
+   * being written. Where that row already shows itself as live, repeating the label under the
+   * turn reads as two things running.
+   */
+  echo?: "tool" | "thought" | "reply";
 }
 
 /** Elapsed time is shown from this on: a turn that just began needs no clock. */
@@ -43,19 +49,20 @@ export function liveActivity(view: Pick<SessionView, "items" | "permissions" | "
     if (item.kind === "user") continue;
     if (item.kind === "thought") {
       if (!item.streaming) break;
-      return { label: thoughtTitle(item.text) ?? "思考中…", waiting: false, startedAt };
+      const title = thoughtTitle(item.text);
+      return { label: title ?? "思考中…", waiting: false, startedAt, ...(title ? {} : { echo: "thought" as const }) };
     }
     if (item.kind === "agent") {
-      if (item.streaming) return { label: "正在回复", waiting: false, startedAt };
+      if (item.streaming) return { label: "正在回复", waiting: false, startedAt, echo: "reply" };
       break;
     }
     const call = running(item);
-    if (call) return { label: runningText(call), waiting: false, startedAt };
+    if (call) return { label: runningText(call), waiting: false, startedAt, echo: "tool" };
     // Calls the agent made together finish one by one: one still running is what it waits for.
     if (item.kind === "tool") {
       for (let back = at - 1; back >= 0 && inTurn(items[back]!); back--) {
         const earlier = running(items[back]!);
-        if (earlier) return { label: runningText(earlier), waiting: false, startedAt };
+        if (earlier) return { label: runningText(earlier), waiting: false, startedAt, echo: "tool" };
       }
       break;
     }

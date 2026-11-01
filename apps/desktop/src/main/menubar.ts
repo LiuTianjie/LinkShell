@@ -11,6 +11,21 @@ export type MenuBarEntry = { id: string; label: string } | { separator: true };
 /** What the menu bar process reports: a click on an entry, or LinkShell opened again with it in front. */
 export type MenuBarEvent = { t: "click"; id: string } | { t: "reopen" };
 
+/**
+ * What the updater has found, from its events (Sparkle's and the Windows check's): a version,
+ * "" for one whose number wasn't given, undefined for none. Other events leave it as it was.
+ */
+export function updateFound(previous: string | undefined, name: string, version?: unknown): string | undefined {
+  if (name === "available") return typeof version === "string" ? version : previous ?? "";
+  if (name === "current") return undefined;
+  return previous;
+}
+
+export function updateLabel(found: string | undefined): string {
+  if (found === undefined) return "检查更新…";
+  return found ? `更新到 ${found}…` : "有新版本…";
+}
+
 function openMenuBar(bundle: string, socket: string): void {
   // -n: an instance of its own beside this one; -g: without taking the focus.
   const child = spawn("/usr/bin/open", ["-n", "-g", "-a", bundle, "--args", "--menubar", socket], { stdio: "ignore", detached: true });

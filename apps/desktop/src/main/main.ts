@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
-import { MenuBar, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
+import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
 import { launchOptions, Runtime } from "./runtime.js";
@@ -616,6 +616,7 @@ function windowsUpdateEvent(detail: { name: string; message?: string; version?: 
   if (name === "current") windowsUpdate.version = undefined;
   if (name === "installing") windowsUpdate.installing = true;
   if (name === "finished") { windowsUpdate.checking = false; windowsUpdate.installing = false; }
+  noteUpdate(name, version);
   send("linkshell-desktop-update", detail);
 }
 
@@ -755,6 +756,7 @@ function startUpdater() {
           send("linkshell-desktop-update", { name: "message", message: `服务恢复需要处理：${error instanceof Error ? error.message : String(error)}` });
         });
       }
+      noteUpdate(name, detail?.version);
       send("linkshell-desktop-update", { name, ...detail });
     },
   }, String(settings.get("updateChannel") ?? "stable"));
@@ -763,9 +765,19 @@ function startUpdater() {
   }, 60_000).unref();
 }
 
-const trayItems: MenuBarEntry[] = [
+/** A found update is named in the menu bar item's menu, so it can be installed without opening the window first. */
+let updateAvailable: string | undefined;
+function noteUpdate(name: string, version?: unknown) {
+  const next = updateFound(updateAvailable, name, version);
+  if (next === updateAvailable) return;
+  updateAvailable = next;
+  updateTray();
+}
+
+const trayItems = (): MenuBarEntry[] => [
   { id: "open", label: "打开 LinkShell" },
   { id: "manage", label: "本机管理" },
+  { id: "update", label: updateLabel(updateAvailable) },
   { separator: true },
   { id: "quit", label: "退出 LinkShell 界面" },
 ];
@@ -773,13 +785,15 @@ const trayItems: MenuBarEntry[] = [
 function trayClicked(id: string) {
   if (id === "open") { openWorkspace(); showWindow(); }
   else if (id === "manage") { openManagement(); showWindow(); }
+  else if (id === "update") { openManagement("更新"); showWindow(); checkUpdates(); }
   else if (id === "quit") app.quit();
 }
 
 function updateTray() {
-  menuBar?.show("LinkShell", trayItems);
+  const items = trayItems();
+  menuBar?.show("LinkShell", items);
   if (!tray) return;
-  tray.setContextMenu(Menu.buildFromTemplate(trayItems.map((entry): MenuItemConstructorOptions =>
+  tray.setContextMenu(Menu.buildFromTemplate(items.map((entry): MenuItemConstructorOptions =>
     "separator" in entry ? { type: "separator" } : { label: entry.label, click: () => trayClicked(entry.id) })));
 }
 

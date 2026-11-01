@@ -76,11 +76,14 @@ const events = (...updates: SessionUpdate[]): SessionEvent[] => updates.map((upd
 describe("the live row", () => {
   it("says what runs, what is thought, and what waits; the clock starts with the turn", () => {
     let view = applyEvents(emptyView("s"), events({ sessionUpdate: "ls_turn", state: "started" }, { sessionUpdate: "tool_call", toolCallId: "c", title: "npm test", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } }));
-    expect(liveActivity(view)).toMatchObject({ label: "正在运行 npm test", waiting: false });
+    // The call's own row already spins in the timeline: the live row says it repeats it.
+    expect(liveActivity(view)).toMatchObject({ label: "正在运行 npm test", waiting: false, echo: "tool" });
     expect(view.turnStartedAt).toBe(seq * 1000 - 1000);
     const started = view.turnStartedAt;
     view = applyEvents(view, events({ sessionUpdate: "tool_call_update", toolCallId: "c", status: "completed" }, { sessionUpdate: "agent_thought_chunk", messageId: "m", content: { type: "text", text: "**Checking the logs**\n\nThe tests" } }));
-    expect(liveActivity(view).label).toBe("Checking the logs");
+    // A titled thought says more than its row's "思考中…": it is not an echo.
+    expect(liveActivity(view)).toMatchObject({ label: "Checking the logs" });
+    expect(liveActivity(view).echo).toBeUndefined();
     // A message sent mid-turn doesn't restart the clock.
     view = applyEvents(view, events({ sessionUpdate: "ls_turn", state: "started" }));
     expect(view.turnStartedAt).toBe(started);
