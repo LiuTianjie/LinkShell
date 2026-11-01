@@ -154,7 +154,7 @@ Its only state is one SQLite file of public keys and pairings: `~/.linkshell/rel
 
 ## Security
 
-- **End-to-end encryption.** Phone and computer agree on keys signed by their long-term identities; every frame after that is sealed with XChaCha20-Poly1305. Gateways relay ciphertext only. The direct peer-to-peer channel for the screen and previews is negotiated over that tunnel.
+- **End-to-end encryption.** Phone and computer agree on keys signed by their long-term identities; every frame after that is sealed with XChaCha20-Poly1305. Gateways relay ciphertext only. The direct peer-to-peer channel for the screen and previews is negotiated over that tunnel. Where no direct path works, the official gateway's TURN server relays the screen's video, which stays DTLS-SRTP encrypted end to end.
 - **Pairing grants access.** A paired phone can do what you can do in a terminal on that computer. Pair only devices you trust and keep pairing codes to yourself; remove a phone with `linkshell devices remove <name>`.
 - **Your accounts stay yours.** Agents run as your user with their own sign-in. Pro covers the gateway only.
 - **Local state.** Sessions, history and keys live in `~/.linkshell` on the computer (`LINKSHELL_HOME` moves it).
