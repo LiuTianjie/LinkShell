@@ -153,7 +153,7 @@ coturn 用 `deploy/turn/` 下的 compose 文件部署（host 网络，节点要�
 
 **流量与空闲断开。** 经 TURN 中继或经网关 RPC 回退的画面，3 分钟没有任何操作（触摸、点击、滚动、按键、缩放）会自动断开，提示“长时间没有操作，画面已断开”，不会自动换另一条路径。重新连接直接回到上次成功的那条路径。直连的画面不受这个限制。Host 上 `LINKSHELL_SCREEN_IDLE_SECONDS` 改时长（`0` 关闭），`LINKSHELL_TURN=off` 让这台电脑不用 TURN。
 
-自建网关不设这两个变量时没有 TURN，行为和以前相同。
+自建网关不设这两个变量时没有 TURN，行为和以前相同。没更新的客户端（旧版 App、旧版桌面端）连到新版电脑时也和以前一样：不用 TURN，也不会因为空闲被断开。
 
 Host 的 `LINKSHELL_ICE_SERVERS` 设置 STUN 列表；`off` 禁用通用 DataChannel 并给屏幕会话空 STUN 列表，视频仍可尝试局域网候选。需要禁用视频轨道对照时使用 `LINKSHELL_SCREEN_VIDEO=off`。配置在 Host 上，不是 Gateway 环境变量。路径、参数和验收口径见[远程桌面架构](v2/screen-realtime.md)。
 

@@ -18,7 +18,7 @@ class Events {
 }
 
 /** Run the complete shipped script; only browser facilities are replaced, never viewer functions. */
-function viewer({ framed = false, native = false, relayFallback = false, platform = "darwin" }: { framed?: boolean; native?: boolean; relayFallback?: boolean; platform?: NodeJS.Platform } = {}) {
+function viewer({ framed = false, native = false, relayFallback = false, platform = "darwin", search = "" }: { framed?: boolean; native?: boolean; relayFallback?: boolean; platform?: NodeJS.Platform; search?: string } = {}) {
   const page = viewerPage(platform);
   let now = 0, serial = 0;
   const timers = new Map<number, { at: number; action: () => void; interval?: number }>();
@@ -177,7 +177,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
       this.channels.forEach((channel) => this.ondatachannel?.({ channel }));
     }
   }
-  const location = { search: "?video=1&mode=touch&display=0&width=1920&maxFps=120", protocol: "http:", host: "viewer.test", pathname: "/screen", replace: (url: string) => reloads.push(url) };
+  const location = { search: "?video=1&mode=touch&display=0&width=1920&maxFps=120" + search, protocol: "http:", host: "viewer.test", pathname: "/screen", replace: (url: string) => reloads.push(url) };
   const storage = new Map<string, string>();
   const globals = Object.assign(new Events(), {
     document, location, URLSearchParams, URL, navigator: { userAgent: "test" },
@@ -577,9 +577,10 @@ describe("the running viewer screen session", () => {
     expect(ui.input()).toHaveLength(inputs);
   });
 
-  it("asks the host for a TURN login, since this page passes one on to WebRTC", () => {
-    const ui = viewer();
-    expect(new URL(ui.sockets[0]!.url).searchParams.get("turn")).toBe("1");
+  it("asks the host for a TURN login and its idle end only when the app around it knows of them", () => {
+    expect(new URL(viewer({ search: "&turn=1" }).sockets[0]!.url).searchParams.get("turn")).toBe("1");
+    // An older app would take the idle end for a failure: the screen goes on as it always did.
+    expect(new URL(viewer().sockets[0]!.url).searchParams.has("turn")).toBe(false);
   });
 
   it.each([false, true])("says someone uses the picture, at most every 15 s (native=%s)", async (native) => {
@@ -594,7 +595,7 @@ describe("the running viewer screen session", () => {
   });
 
   it("ends for good when the host ended an unused relayed picture: it asks for no relay, and says why it closed", async () => {
-    const ui = viewer({ relayFallback: true }); await ui.ready();
+    const ui = viewer({ relayFallback: true, search: "&turn=1" }); await ui.ready();
     ui.receive({ error: SCREEN_IDLE });
     ui.sockets[0]!.close();
     expect(ui.reports.filter((message) => message.type === "screenFallback")).toEqual([]);

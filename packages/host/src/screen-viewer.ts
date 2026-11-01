@@ -700,8 +700,9 @@ let lighterAt = -Infinity, failures = 0;
 const asked = new URLSearchParams(location.search);
 asked.delete("video");
 if (wantVideo) asked.set("video", "1");
-// This page passes a TURN server's login on to WebRTC: the host may give it one.
-asked.set("turn", "1");
+// This page passes a TURN server's login on to WebRTC and shows an idle end as final. Inside an app, the app
+// must know of the idle end too: an older one says so by not asking for it, and gets the screen as it always did.
+if (!app || query.get("turn") === "1") asked.set("turn", "1");
 // How wide the video track may be (the socket's picture has its own ladder). The app says it in the address;
 // a plain browser remembers its own. A capable host applies a new choice to this same track.
 const WIDTHS = ["1280", "1920", "2560", "native"];

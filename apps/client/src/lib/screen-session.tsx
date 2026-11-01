@@ -202,6 +202,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         const query = new URLSearchParams({ token, video: playback === "relay" ? "0" : "1", display: String(targetDisplay), width: target.width, mode: desired.current.mode });
         if (via === "relay" && computer.kind !== "direct") query.set("q", "low");
         if (Platform.OS === "ios" && playback !== "relay") query.set("fallback", "relay");
+        // This app keeps an idle end final and takes a TURN login: the host may lend the picture its relay.
+        query.set("turn", "1");
         const initialChrome = route.current?.chrome ?? "{}";
         const viewer: Viewer = {
           link, accountId, generation, forward, displays, playback, via, initialTarget: { display: targetDisplay, width: target.width },

@@ -132,11 +132,14 @@ describe("the gateway's TURN server for the screen's video", () => {
     expect(socket.config()).toEqual(offer.iceServers);
   });
 
-  it("is kept from a viewer that would drop the login: a TURN address without one makes WebRTC refuse even the direct path", async () => {
-    const { helper, open } = share();
+  it("is not used at all for an older viewer: it would drop the login, and WebRTC then refuses even the direct path", async () => {
+    const relay = vi.fn(() => Promise.resolve(TURN));
+    const { helper, open } = share(relay);
     const socket = await open({ turn: false });
-    expect(helper.offerVideo.mock.calls[0]![1].iceServers).toHaveLength(3);
-    expect(socket.config()).toEqual([{ urls: ["stun:turn.example.com:3478"] }, { urls: ["stun:stun.cloudflare.com:3478"] }]);
+    expect(relay).not.toHaveBeenCalled();
+    expect(helper.offerVideo.mock.calls[0]![1].iceServers).toEqual([{ urls: ["stun:stun.cloudflare.com:3478"] }]);
+    expect(helper.offerVideo.mock.calls[0]![1].relayKbps).toBeUndefined();
+    expect(socket.config()).toEqual([{ urls: ["stun:stun.cloudflare.com:3478"] }]);
   });
 
   it("never holds the picture up: a gateway slow to answer only costs this picture its relay", async () => {
@@ -221,6 +224,16 @@ describe("a relayed picture no one uses", () => {
     const { open } = share();
     const socket = await open({ relayed: false, video: false });
     await vi.advanceTimersByTimeAsync(600_000);
+    expect(ended(socket)).toBe(false);
+  });
+
+  it("is never ended for an older viewer, which would take the end for a failure and try its next path", async () => {
+    const { helper, open } = share();
+    const track = await open({ turn: false });
+    helper.say({ t: "rtc.path", relayed: true });
+    const socket = await share().open({ relayed: true, video: false, turn: false });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(ended(track)).toBe(false);
     expect(ended(socket)).toBe(false);
   });
 

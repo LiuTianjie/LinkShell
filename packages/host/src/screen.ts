@@ -324,14 +324,6 @@ export class ScreenShare {
     return [...(relay?.servers ?? []), ...this.iceServers().map((url) => ({ urls: [url] }))];
   }
 
-  /**
-   * What a viewer is given. One that doesn't say it takes a TURN login (`turn=1`) drops it, and a TURN
-   * address without one is refused by WebRTC outright: it would lose even the direct path. It gets the
-   * STUN servers, and its relayed pairs come from the sender's TURN allocation alone.
-   */
-  private viewerServers(servers: RelayIceServer[], turn: boolean): RelayIceServer[] {
-    return turn ? servers : servers.filter((server) => !server.credential && server.urls.every((url) => url.startsWith("stun:")));
-  }
 
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
     const displays = (this.displays = await this.listDisplays());
@@ -400,7 +392,8 @@ export class ScreenShare {
       const diagnostics = url.searchParams.get("diagnostics") === "1";
       // "hevc": the receiver decodes HEVC (the iOS app's native one); the app offers it first and H.264 after.
       const codec = url.searchParams.get("codec") === "hevc" ? "hevc" : undefined;
-      // "turn": the viewer takes a TURN login along with the address (older ones drop it).
+      // "turn": the viewer takes a TURN login along with the address, and knows a relayed picture can end for being
+      // unused. Older ones drop the login (and WebRTC then refuses the whole configuration): they get neither.
       const turn = url.searchParams.get("turn") === "1";
       sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn));
     });
@@ -578,7 +571,7 @@ export class ScreenShare {
   private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, turn: boolean, viewer: VideoViewer): Promise<ScreenVideoSession | "refused" | undefined> {
     if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" && windowsMedia()) {
       // The native guard checks the selected desktop and the local opt-out throughout capture.
-      const lending = this.lendRelay();
+      const lending = turn ? this.lendRelay() : undefined;
       await windowsDisplays();
       if (viewer.closed()) return "refused";
       viewer.claim();
@@ -592,7 +585,7 @@ export class ScreenShare {
       const relay = await lending;
       if (viewer.closed()) return "refused";
       const iceServers = this.servers(relay);
-      viewer.tell({ rtc: { t: "config", iceServers: this.viewerServers(iceServers, turn) } });
+      viewer.tell({ rtc: { t: "config", iceServers } });
       const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) }, {
         tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path,
       });
@@ -629,7 +622,7 @@ export class ScreenShare {
       return "refused";
     }
     if (viewer.closed()) return "refused";
-    const lending = this.lendRelay();
+    const lending = turn ? this.lendRelay() : undefined;
     // The latest viewer has the screen, whichever way the one before was getting it.
     viewer.claim();
     this.video?.taken();
@@ -655,7 +648,7 @@ export class ScreenShare {
     let lastStats = 0;
     const relay = await lending;
     const iceServers = this.servers(relay);
-    viewer.tell({ rtc: { t: "config", iceServers: this.viewerServers(iceServers, turn) } });
+    viewer.tell({ rtc: { t: "config", iceServers } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
     const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
     await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}) }, (message) => {
@@ -730,7 +723,9 @@ export class ScreenShare {
     // A picture that costs relay traffic is ended once no one has used it for a while: the video track
     // while it goes through a TURN relay, or frames down this socket when the viewer is reached through the
     // gateway. A direct path costs no one anything and is never ended for this.
-    const idleMs = screenIdleMs();
+    // Only for a viewer that knows of it (`turn=1`): an older one, told the picture ended, would try its next path
+    // or show a generic error. It gets the screen as it always did, with no TURN either.
+    const idleMs = turn ? screenIdleMs() : 0;
     let usedAt = Date.now();
     let videoRelayed = false;
     const used = () => { usedAt = Date.now(); };
