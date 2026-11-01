@@ -130,6 +130,7 @@ function reconcileFullScreen() {
 /** Hidden, minimized or closed: the page pauses its remote screen and previews. */
 function setVisible(value: boolean) {
   visible = value;
+  nativeModule?.screenVisible(value);
   send("linkshell-desktop-visibility", { visible });
 }
 
@@ -162,6 +163,7 @@ function createWindow() {
       safeDialogs: true,
     },
   });
+  window.on("closed", () => nativeModule?.screenStop());
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
@@ -209,7 +211,7 @@ function createWindow() {
     send("linkshell-desktop-fullscreen", { fullscreen: false });
     reconcileFullScreen();
   });
-  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) pageReady = false; });
+  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { pageReady = false; nativeModule?.screenStop(); } });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
     send("linkshell-desktop-visibility", { visible });
@@ -223,6 +225,7 @@ function createWindow() {
     }, 300);
   });
   web.on("render-process-gone", () => {
+    nativeModule?.screenStop();
     showProblem("工作台页面意外退出。请重新连接以恢复电脑与会话。");
   });
   startServer();
@@ -348,8 +351,23 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     case "external":
       if (typeof message.url === "string" && WorkspacePolicy.externalURL(message.url)) void shell.openExternal(message.url);
       return;
-    // The page's own focus handling is enough: nothing native sits above it.
+    // AppKit gives focus to whichever view was clicked; a DOM blur must not steal it back.
     case "contentFocus": return;
+    case "screen": {
+      if (!MAC || typeof message.id !== "string") return;
+      try {
+        if (!nativeModule || !runtime.helper) throw new Error("原生屏幕组件不可用，请重新安装 LinkShell");
+        const rect = message.rect as Record<string, unknown> | undefined;
+        const zoom = window.webContents.getZoomFactor();
+        const adjusted = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number")
+          ? { ...message, rect: Object.fromEntries(["x", "y", "width", "height"].map((key) => [key, (rect[key] as number) * zoom])) } : message;
+        if (message.type === "start") {
+          nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => send("linkshell-native-screen", detail));
+          nativeModule.screenVisible(visible);
+        } else nativeModule.screenMessage(adjusted);
+      } catch (error) { send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
+      return;
+    }
     // A remote screen has the keys: the menu's shortcuts (⌘W, ⌘Q, ⌘H, …) are the remote
     // computer's while it does. The page keeps ⌃⌘F for leaving full screen.
     case "screenKeys":
@@ -552,6 +570,7 @@ app.on("before-quit", (event) => {
   void flushOrConfirm("仍然退出").then((confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
+    nativeModule?.screenStop();
     server.stop();
     menuBar?.stop();
     rememberBounds();

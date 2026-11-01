@@ -10,23 +10,25 @@ let package = Package(
   products: [
     .executable(name: "LinkShell", targets: ["LinkShell"]),
     // The window's native half (apps/desktop loads it into Electron): permissions, the login
-    // item and Sparkle. Never WebRTC: Chromium's own libwebrtc shares its class names.
+    // item, Sparkle and the Metal screen surface. Never WebRTC: Chromium's own libwebrtc shares its class names.
     .library(name: "LinkShellNative", type: .dynamic, targets: ["LinkShellNative"]),
   ],
   targets: [
     .executableTarget(
       name: "LinkShell",
-      dependencies: ["WebRTC", "Sparkle"],
+      dependencies: ["WebRTC", "Sparkle", "LinkShellScreen"],
       path: "Sources/LinkShell",
       linkerSettings: [
         // Where the framework is inside the app: Contents/Frameworks.
         .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
       ]
     ),
+    .target(name: "LinkShellScreenShim", path: "Sources/LinkShellScreenShim", linkerSettings: [.linkedLibrary("bsm")]),
+    .target(name: "LinkShellScreen", dependencies: ["LinkShellScreenShim"], path: "Sources/LinkShellScreen"),
     .target(name: "LinkShellNativeShim", path: "Sources/LinkShellNativeShim"),
     .target(
       name: "LinkShellNative",
-      dependencies: ["Sparkle", "LinkShellNativeShim"],
+      dependencies: ["Sparkle", "LinkShellNativeShim", "LinkShellScreen"],
       path: "Sources/LinkShellNative",
       linkerSettings: [
         // Node-API resolves against the Electron process that loads the module.

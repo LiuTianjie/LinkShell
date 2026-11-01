@@ -306,9 +306,9 @@ export interface ScreenProps {
 
 export function Screen(props: ScreenProps) {
   const visible = useDesktopVisibility();
-  // The WKWebView shell draws the picture natively. The Electron window (Mac and Windows) has a
-  // receiver of its own, made for a mouse and a keyboard; a browser keeps the host's viewer page.
-  if (isDesktop && !isWindowsDesktop && !isElectronDesktop) return <DesktopScreen {...props} />;
+  // Mac keeps native WebRTC/VideoToolbox/Metal, including inside Electron. Windows uses its
+  // Chromium receiver; a browser keeps the host's viewer page.
+  if (isDesktop && !isWindowsDesktop) return <DesktopScreen {...props} />;
   if (isElectronDesktop && !props.embedded) return <RemoteScreen title={props.title ?? "电脑屏幕"} active={props.active ?? true} />;
   return <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
 }

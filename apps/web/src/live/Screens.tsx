@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useDialogs } from "@/components/Dialogs";
-import { DESKTOP_LOCAL, isElectronDesktop } from "./desktop";
+import { DESKTOP_LOCAL, isWindowsDesktop } from "./desktop";
 import { RemoteScreen } from "./RemoteScreen";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import { useEffect, useState } from "react";
@@ -441,7 +441,7 @@ export function ScreenDetail({
   }, [active, computer, selectedKey]);
   const name = computer ? computerName(computer, names) : "远程桌面";
   // The desktop window gives the screen the whole panel: its own bar is the page's title row.
-  if (isElectronDesktop && ready && computer?.machine.online && connection && !error)
+  if (isWindowsDesktop && ready && computer?.machine.online && connection && !error)
     return (
       <div className="screen-detail-page remote-screen-page">
         <Runtime value={connection}>

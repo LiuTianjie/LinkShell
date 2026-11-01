@@ -1,17 +1,12 @@
 import AppKit
 import Foundation
 import LinkShellNativeShim
+import LinkShellScreen
 import ServiceManagement
 import Sparkle
 
-// LinkShellNative.node: what Electron's main process needs of LinkShell.app's Swift code —
-// permissions, the login item and Sparkle. Values cross as JSON text; callbacks come back on the
-// main thread, where Electron's main process runs AppKit.
-//
-// The remote screen is not here. Chromium inside Electron ships its own libwebrtc with the same
-// Objective-C class names as WebRTC.framework (RTCVideoCodecInfo, RTCVideoFrame, …); the runtime
-// keeps one class per name, so the framework in this process ends up with Chromium's classes and
-// traps. The window receives the screen with Chromium's WebRTC instead (screen-viewer.ts).
+// Electron loads AppKit/Metal and system integration here. WebRTC stays in the media child.
+// Only bounded signalling/status crosses Node; IOSurface frames travel directly over Mach IPC.
 
 // MARK: Node-API helpers
 
@@ -22,11 +17,11 @@ private func arguments(_ env: napi_env?, _ info: napi_callback_info?, _ count: I
   return argv
 }
 
-private func string(_ env: napi_env?, _ value: napi_value?) -> String? {
+private func string(_ env: napi_env?, _ value: napi_value?, limit: Int = 4096) -> String? {
   var kind = napi_undefined
   guard napi_typeof(env, value, &kind) == 0, kind == napi_string else { return nil }
   var length = 0
-  guard napi_get_value_string_utf8(env, value, nil, 0, &length) == 0, length <= 4096 else { return nil }
+  guard napi_get_value_string_utf8(env, value, nil, 0, &length) == 0, length <= limit else { return nil }
   var buffer = [CChar](repeating: 0, count: length + 1)
   guard napi_get_value_string_utf8(env, value, &buffer, length + 1, &length) == 0 else { return nil }
   return String(cString: buffer)
@@ -89,6 +84,8 @@ final class Callback {
     _ = napi_unref_threadsafe_function(env, function)
     self.function = function
   }
+
+  deinit { if let function { _ = napi_release_threadsafe_function(function, napi_tsfn_release) } }
 
   func call(_ value: Any) {
     guard let function else { return }
@@ -248,6 +245,40 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
   define(env, exports, "updaterChannel") { env, info in
     let argv = arguments(env, info, 1)
     if let channel = string(env, argv[0]) { MainActor.assumeIsolated { NativeUpdater.shared.setChannel(channel) } }
+    return undefined(env)
+  }
+  define(env, exports, "screenStart") { env, info in
+    let argv = arguments(env, info, 4)
+    var bytes: UnsafeMutableRawPointer?
+    var length = 0
+    guard napi_get_buffer_info(env, argv[0], &bytes, &length) == 0, length == MemoryLayout<UnsafeRawPointer>.size,
+          let pointer = bytes?.load(as: UnsafeRawPointer?.self),
+          let helper = string(env, argv[1]),
+          let text = string(env, argv[2], limit: 262_144), let data = text.data(using: .utf8),
+          let message = DesktopMediaIPC.message(data), let id = DesktopScreenBridge.identifier(message["id"]),
+          let rect = DesktopScreenBridge.rect(message["rect"]), let callback = Callback(env: env, function: argv[3])
+    else { return throwError(env, "screenStart: invalid arguments") }
+    NativeScreen.current?.stop(); NativeScreen.current = nil
+    let host = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
+    do { NativeScreen.current = try NativeScreen(host: host, helper: helper, id: id, rect: rect, callback: callback) }
+    catch { return throwError(env, error.localizedDescription) }
+    return undefined(env)
+  }
+  define(env, exports, "screenMessage") { env, info in
+    let argv = arguments(env, info, 1)
+    if let text = string(env, argv[0], limit: 262_144), let data = text.data(using: .utf8), let message = DesktopMediaIPC.message(data) {
+      NativeScreen.current?.message(message)
+      if message["type"] as? String == "stop", message["id"] as? String == NativeScreen.current?.id { NativeScreen.current = nil }
+    }
+    return undefined(env)
+  }
+  define(env, exports, "screenVisible") { env, info in
+    let argv = arguments(env, info, 1)
+    if let visible = bool(env, argv[0]) { NativeScreen.current?.setVisible(visible) }
+    return undefined(env)
+  }
+  define(env, exports, "screenStop") { env, _ in
+    NativeScreen.current?.stop(); NativeScreen.current = nil
     return undefined(env)
   }
   return exports

@@ -193,7 +193,8 @@ Mac 使用未修改上游的 stasel/WebRTC M154 预编译框架。libwebrtc 负�
 | iOS，原生模块不可用 | WKWebView WebRTC | 强制 RPC 字节流 → WebCodecs / Canvas |
 | Android | WebView WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
 | Web | 隔离 iframe 内 WebRTC | 原通用转发路径上的 WebCodecs / Canvas |
-| 桌面版（Electron，Mac / Windows） | 工作台页面内的接收端，`<video>` 直接播放视频轨道 | 同一 socket 上的 H.264 / JPEG → WebCodecs / Canvas |
+| Mac 桌面版（Electron） | 独立原生 WebRTC / VideoToolbox 进程 → IOSurface Mach 共享 → 窗口内 Metal | 明确报错并提供重试，不切回 Chromium |
+| Windows 桌面版（Electron） | 工作台页面内的接收端，`<video>` 直接播放视频轨道 | 同一 socket 上的 H.264 / JPEG → WebCodecs / Canvas |
 
 iOS 最后一步用 `direct:false` 重新建立该屏幕转发并关闭视频轨道请求，不再依赖通用 DataChannel；其他流不受影响。经网关连接时这一步走加密中继，开发直连 Host 时则走其 RPC 连接。两分钟内返回保留的会话会继续当前播放路径；手动重试或更换 Host 连接重新选择起始路径，过时失败回调不会跳过下一条路径。原生首次无画面等待为 25 秒，之后尝试记录 ICE 诊断并失败回退；持续断开超过 4 秒会失败。主动暂停期间不计算首次无画面的等待。
 
@@ -378,7 +379,7 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 | iOS 原生接收与 Metal | [模块 README](../../apps/client/modules/link-screen/README.md)、[ScreenConnection.swift](../../apps/client/modules/link-screen/ios/ScreenConnection.swift)、[ScreenMetalView.swift](../../apps/client/modules/link-screen/ios/ScreenMetalView.swift) |
 | 网页控件与手机会话/回退 | [screen-viewer.ts](../../packages/host/src/screen-viewer.ts)、[screen-session.tsx](../../apps/client/src/lib/screen-session.tsx)、[screen-playback.ts](../../apps/client/src/lib/screen-playback.ts)、[screen-screen.tsx](../../apps/client/src/screens/screen-screen.tsx) |
 | Web iframe 观看入口与保留层 | [Video.tsx](../../apps/web/src/live/Video.tsx)、[screen-session-slot.tsx](../../apps/web/src/live/screen-session-slot.tsx) |
-| 桌面版接收端（Electron） | [RemoteScreen.tsx](../../apps/web/src/live/RemoteScreen.tsx)、[screen-receiver.ts](../../apps/web/src/live/screen-receiver.ts)、[screen-gate.ts](../../apps/web/src/live/screen-gate.ts)、[screen-input.ts](../../apps/web/src/live/screen-input.ts)、[screen-fullscreen.ts](../../apps/web/src/live/screen-fullscreen.ts) |
+| Windows 桌面版接收端（Electron） | [RemoteScreen.tsx](../../apps/web/src/live/RemoteScreen.tsx)、[screen-receiver.ts](../../apps/web/src/live/screen-receiver.ts)、[screen-gate.ts](../../apps/web/src/live/screen-gate.ts)、[screen-input.ts](../../apps/web/src/live/screen-input.ts)、[screen-fullscreen.ts](../../apps/web/src/live/screen-fullscreen.ts) |
 
 - [Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)：采集与 IOSurface 缓冲。
 - [Apple 低延迟 VideoToolbox](https://developer.apple.com/videos/play/wwdc2021/10158/)：硬件低延迟模式、码率适应与帧重排。
@@ -403,7 +404,7 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 
 ### 桌面版接收端（2026-11-01）
 
-Electron 桌面窗口（Mac 与 Windows）不再把 Host 的手机观看页装进 iframe，而是在工作台页面里自带一个接收端，按鼠标和键盘设计：
+此阶段曾将 Electron 桌面窗口（Mac 与 Windows）改成工作台页面内的接收端。Mac 已由下方的原生接收恢复方案替代；以下浏览器接收逻辑仅用于 Windows：
 
 - **连接**：`ScreenReceiver`（`screen-receiver.ts`）照观看页的协议直接打开 Host 的 `/stream`（经 `HostStreams` 的加密流），接收 Mac / Windows 发来的 WebRTC 视频轨道和四条 DataChannel；视频进 `<video>`，不进 React。没有直连路径时，同一 socket 上的 H.264（Mac / Linux）或 JPEG（Windows）解码到 Canvas。HEVC 按 `RTCRtpReceiver` 的 H.265 能力请求；应答里去掉 FlexFEC，与手机和原 Mac 原生接收端一致。
 - **配置与输入代次**：`ScreenGate` 跟踪 `capabilities` / `screen.configure` / `configured`，只有带着已确认代次（`screenGeneration`）的输入才发出；暂停期间不发。轨道失败回退到 socket 时 Host 会再次发送能力并以新代次重放上一次配置，接收端等待这次确认后才恢复输入。
@@ -414,3 +415,12 @@ Electron 桌面窗口（Mac 与 Windows）不再把 Host 的手机观看页装�
 **验证范围（2026-11-01，同一台 M3 Max，回环，开发版 Electron + 临时 Host，输入 dry-run）**：窗口内 H.265 2560×1662、60 帧/秒、8 秒内 0 丢帧、每帧解码约 2.2 ms、抖动缓冲约 1 ms；全屏后同一连接重新配置为 3024×1964，静态画面下约 52 帧/秒、0 丢帧、每帧解码约 2.8 ms。移动、左右键、滚轮、⌘C、回车、中文文本均以正确的事件到达 Host（dry-run 日志）。全屏按钮、⌃⌘F、退出全屏按钮、窗口自身进入/退出全屏、动画期间 150 ms 间隔的连续切换，结束时窗口与页面状态一致；窗口隐藏 4 秒后恢复不重连。`LINKSHELL_SCREEN_VIDEO=off` 下回退到 socket H.264（1600×1040、20 帧/秒），点击和 ⌘V 仍可送达。Web 单元测试覆盖键位/修饰键映射、画面几何、宽度选择、配置代次与全屏状态。
 
 **没有验证**：真实输入（dry-run 之外）、跨网络 / 公网 / 中继、Windows 桌面版窗口、Intel Mac、用户机器上的已签名正式版；未测 120 帧/秒。
+
+
+### 2026-11-01：Mac Electron 恢复原生接收
+
+Mac 桌面恢复 `DesktopScreen.tsx` 的界面与信令桥接。`LinkShell --desktop-media` 独立运行原生 WebRTC 和 VideoToolbox 硬件解码，`LinkShellNative.node` 只加载 AppKit/Metal、权限和更新集成，不加载 WebRTC。两进程通过 IOSurface Mach rights 共享解码后的缓冲；内核 audit trailer 验证帧发送者是启动的子进程。控制与状态使用继承的管道，帧和纹理均不经过 Node/React/Chromium 视频管线。
+
+共享渲染器保持最新帧 mailbox 和一个在途 GPU 提交。解码进程最多持有三个导出帧及一个最新待发帧，接收视图和 GPU 都释放后才允许解码器复用缓冲；色彩矩阵随元数据传递。原生视图按 DOM 矩形与页面缩放定位，菜单/模态层覆盖时隐藏。结束会话、切页、页面崩溃和退出销毁视图、Mach 端口与子进程，父进程异常退出时管道 EOF 也会结束子进程。
+
+本轮已通过真实本机采集 → 独立原生接收进程 → Electron 窗口内 Metal 的冒烟检查，确认 H.265 硬件解码、实际呈现和隐藏后恢复。该证据不代表成都远端、公网弱网、长期稳定性或实际端到端延迟已验收。

@@ -7,7 +7,7 @@ import WebRTC
 /// Only negotiation crosses WebKit. The peer owns native media and input for one screen mount.
 final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate {
   private let queue = DispatchQueue(label: "linkshell.desktop.screen", qos: .userInteractive)
-  private let surface: DesktopScreenSurface
+  private let surface: DesktopScreenOutput
   private let onSignal: ([String: Any]) -> Void
   private let onStatus: ([String: Any]) -> Void
   private let onFailure: (String) -> Void
@@ -34,7 +34,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var timer: DispatchSourceTimer?
 
   /// Create on the main thread, where the surface lives. All supplied callbacks return there.
-  init(surface: DesktopScreenSurface, onSignal: @escaping ([String: Any]) -> Void,
+  init(surface: DesktopScreenOutput, onSignal: @escaping ([String: Any]) -> Void,
        onStatus: @escaping ([String: Any]) -> Void, onFailure: @escaping (String) -> Void) {
     self.surface = surface; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
     super.init()
@@ -203,13 +203,18 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     else if candidates.count < 256 { candidates.append(value) }
   }
 
-  /// Answers as the phone does: HEVC before H.264, and no FlexFEC. The process enables FlexFEC
-  /// for its sender; as a receiver it would only take bitrate for a recovery that is unproven.
+  /// Intel prioritizes its broadly supported H.264 hardware path. Apple silicon prefers HEVC.
+  /// Only codecs accepted by the hardware decoder factory are offered; neither uses FlexFEC.
   private func preferReceiveCodecs(_ peer: RTCPeerConnection) {
     guard let factory, let transceiver = peer.transceivers.first(where: { $0.mediaType == .video }) else { return }
     let available = factory.rtpReceiverCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs
       .filter { $0.name.uppercased() != "FLEXFEC-03" }
-    let codecs = available.filter { $0.name.uppercased() == "H265" } + available.filter { $0.name.uppercased() != "H265" }
+    #if arch(x86_64)
+    let preferred = "H264"
+    #else
+    let preferred = "H265"
+    #endif
+    let codecs = available.filter { $0.name.uppercased() == preferred } + available.filter { $0.name.uppercased() != preferred }
     guard codecs.contains(where: { ["H264", "H265"].contains($0.name.uppercased()) }) else { return }
     try? transceiver.setCodecPreferences(codecs, error: ())
   }
@@ -372,35 +377,6 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
 }
 
 /// Shared validation keeps malformed bridge values and stale display acknowledgments inert.
-enum DesktopScreenBridge {
-  static func identifier(_ value: Any?) -> String? {
-    guard let value = value as? String, value.utf8.count == 36, UUID(uuidString: value) != nil else { return nil }
-    return value
-  }
-  static func validMessage(_ value: [String: Any]) -> Bool {
-    guard JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value) else { return false }
-    return data.count <= 262_144
-  }
-  static func rect(_ value: Any?) -> CGRect? {
-    guard let value = value as? [String: Any], let x = number(value["x"]), let y = number(value["y"]),
-          let width = number(value["width"]), let height = number(value["height"]),
-          abs(x) <= 16_384, abs(y) <= 16_384, (0...16_384).contains(width), (0...16_384).contains(height) else { return nil }
-    return CGRect(x: x, y: y, width: width, height: height)
-  }
-  static func integer(_ value: Any?) -> Int? {
-    guard let number = number(value), number.rounded() == number, abs(number) <= 9_007_199_254_740_991 else { return nil }
-    return Int(number)
-  }
-  static func boolean(_ value: Any?) -> Bool? {
-    guard let value = value as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
-    return value.boolValue
-  }
-  private static func number(_ value: Any?) -> Double? {
-    guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite else { return nil }
-    return value.doubleValue
-  }
-}
-
 struct DesktopScreenInputState {
   private(set) var generation: Int?
   var display: Int? { requestedDisplay }

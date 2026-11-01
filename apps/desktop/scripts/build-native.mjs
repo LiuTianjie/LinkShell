@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Development build of LinkShellNative.node (apps/mac, product LinkShellNative) into ./native,
-// beside links to the WebRTC and Sparkle frameworks it loads through @loader_path. A packaged
+// beside Sparkle, loaded through @loader_path. WebRTC is only in the media helper. A packaged
 // app gets its own release build in Contents/Frameworks (scripts/package.mjs). Skipped off macOS.
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
@@ -17,7 +17,8 @@ const bin = execFileSync("/usr/bin/swift", [...args, "--show-bin-path"], { encod
 const out = join(here, "native");
 mkdirSync(out, { recursive: true });
 cpSync(join(bin, "libLinkShellNative.dylib"), join(out, "LinkShellNative.node"));
-for (const framework of ["WebRTC.framework", "Sparkle.framework"]) {
+rmSync(join(out, "WebRTC.framework"), { recursive: true, force: true });
+for (const framework of ["Sparkle.framework"]) {
   const link = join(out, framework);
   rmSync(link, { recursive: true, force: true });
   if (existsSync(join(bin, framework))) symlinkSync(join(bin, framework), link);

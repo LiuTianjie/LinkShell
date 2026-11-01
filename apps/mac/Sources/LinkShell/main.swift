@@ -58,6 +58,7 @@ if Launch.has("--status") {
   Link.standard.emit(Permissions.status())
   exit(0)
 }
+if Launch.has("--desktop-media") { DesktopMedia.run() }
 // Opened with nothing by the system (launchd is its parent), not started by a host as its child.
 if Launch.has("--setup") {
   Setup.run()

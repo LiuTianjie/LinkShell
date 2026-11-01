@@ -80,8 +80,14 @@ VideoToolbox decoder that requires hardware acceleration and verifies the sessio
 `UsingHardwareAcceleratedVideoDecoder` property. IOSurface-backed pixel buffers are mapped through
 `CVMetalTextureCache` and rendered with Metal. AppKit handles mouse, keyboard and IME input through
 the screen DataChannels. Web content owns navigation, toolbars and the existing encrypted
-signaling path; decoded frames never enter WebKit or JavaScript. H.264 is the desktop default.
-The decoder also supports HEVC, but this does not establish HEVC negotiation in the desktop UI.
+signaling path; decoded frames never enter Chromium, WebKit or JavaScript. Apple silicon prefers HEVC and Intel prefers H.264;
+only codecs supported by the local hardware decoder are negotiated. In Electron, `LinkShell --desktop-media` owns
+WebRTC and decoding in a separate process to avoid Chromium's conflicting Objective-C classes.
+`LinkShellNative.node` contains only the shared AppKit/Metal surface and system integration.
+IOSurface Mach rights carry frames directly to that surface; the kernel audit trailer restricts
+frames to the launched child. The decoder retains at most three exported frames until the view
+and GPU acknowledge release, plus one newest pending frame. Pipes carry bounded control/status
+and release acknowledgments. No launchd job, global IOSurface ID or per-frame JS message is used.
 There is no software decoder, browser-media or byte-stream fallback for the Mac receiver:
 unsupported hardware or a failed connection produces an explicit error and retry action.
 Leaving the screen, switching to native management or hiding the window destroys the screen

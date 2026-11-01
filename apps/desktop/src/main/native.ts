@@ -6,10 +6,13 @@ import { join } from "node:path";
  * `LinkShellNative.node` (apps/mac, product LinkShellNative): permissions, the login item and
  * Sparkle, under this bundle's own identity. Values cross as JSON text.
  *
- * The remote screen is not native here: Chromium's libwebrtc and WebRTC.framework share
- * Objective-C class names and cannot live in one process. The page receives it with Chromium.
+ * AppKit/Metal present shared IOSurfaces; a separate helper process owns WebRTC/VideoToolbox.
  */
 interface Raw {
+  screenStart(handle: Buffer, helper: string, message: string, callback: (json: string) => void): void;
+  screenMessage(message: string): void;
+  screenVisible(visible: boolean): void;
+  screenStop(): void;
   permissions(): string;
   loginItem(): string;
   setLoginItem(enabled: boolean): string;
@@ -22,6 +25,10 @@ interface Raw {
 }
 
 export interface NativeModule {
+  screenStart(handle: Buffer, helper: string, message: Record<string, unknown>, callback: (event: Record<string, unknown>) => void): void;
+  screenMessage(message: Record<string, unknown>): void;
+  screenVisible(visible: boolean): void;
+  screenStop(): void;
   permissions(): { recording: boolean; control: boolean };
   loginItem(): { enabled: boolean; approval: boolean };
   /** Why it could not be changed, or undefined. */
@@ -39,6 +46,10 @@ const value = (json: string): unknown => (JSON.parse(json) as { v: unknown }).v;
 
 function wrap(raw: Raw): NativeModule {
   return {
+    screenStart: (handle, helper, message, callback) => raw.screenStart(handle, helper, JSON.stringify(message), (json) => callback(value(json) as Record<string, unknown>)),
+    screenMessage: (message) => raw.screenMessage(JSON.stringify(message)),
+    screenVisible: (visible) => raw.screenVisible(visible),
+    screenStop: () => raw.screenStop(),
     permissions: () => value(raw.permissions()) as { recording: boolean; control: boolean },
     loginItem: () => value(raw.loginItem()) as { enabled: boolean; approval: boolean },
     setLoginItem: (enabled) => raw.setLoginItem(enabled) || undefined,
