@@ -904,9 +904,9 @@
           <div class="install-steps">
           <div class="step">
             <h3>安装并启动</h3>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-x64.dmg">Mac · Intel</a></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-x64.dmg">Mac · Intel</a></p>
             <p>macOS 13 及以上：拖入「应用程序」，打开后登录，再在设置里打开屏幕录制和辅助功能两个开关。App 自带 CLI、Host 和 Node，一起更新。</p>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-Setup-0.10.82-windows-x64.exe">Windows · 安装器</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-windows-x64.zip">Windows · ZIP</a></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-Setup-0.10.84-windows-x64.exe">Windows · 安装器</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-windows-x64.zip">Windows · ZIP</a></p>
             <p>Windows 10 1809+ / Windows 11 x64：内置 CLI、Host 和 Node，与 Mac 共用会话、终端、文件和端口预览工作台。窗口与 Mac 是同一个 Electron 应用，不需要 WebView2 Runtime。安装包未签名，可能出现「未知发布者」或 SmartScreen 提示。</p>
             <p>Linux，或者更想用命令行：装 CLI，运行一次设置。它在后台启动 LinkShell、带你打开屏幕需要的两个权限，再连上手机。</p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
@@ -946,7 +946,7 @@
             <div><dt>你的电脑</dt><dd>电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。</dd></div>
             <div><dt>网关</dt><dd>只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</dd></div>
             <div><dt>官方或自建</dt><dd>Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</dd></div>
-            <div><dt>屏幕和预览</dt><dd>能直连时点对点传输，网关只负责牵线。</dd></div>
+            <div><dt>屏幕和预览</dt><dd>能直连时点对点传输，网关只负责牵线；打不通时，屏幕视频经官方 TURN 中继，仍是端到端加密。</dd></div>
           </dl>
         </div>
       </div>

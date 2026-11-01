@@ -905,9 +905,9 @@
           <div class="install-steps">
           <div class="step">
             <h3>Install and start</h3>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-x64.dmg">Mac · Intel</a></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-x64.dmg">Mac · Intel</a></p>
             <p>macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</p>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-Setup-0.10.82-windows-x64.exe">Windows · Installer</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.82/LinkShell-0.10.82-windows-x64.zip">Windows · ZIP</a></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-Setup-0.10.84-windows-x64.exe">Windows · Installer</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.84/LinkShell-0.10.84-windows-x64.zip">Windows · ZIP</a></p>
             <p>Windows 10 1809+ / Windows 11 x64: includes CLI, Host and Node, with the same workspace as Mac for conversations, terminals, files and port previews. The window is the same Electron app as on Mac and needs no WebView2 Runtime. Packages are unsigned and may show unknown-publisher or SmartScreen prompts.</p>
             <p>On Linux, or if you prefer the command line: install the CLI and run the setup once. It starts LinkShell in the background, takes you to the two permissions the screen needs, and connects your phone.</p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
@@ -947,7 +947,7 @@
             <div><dt>Your computer</dt><dd>LinkShell on your computer holds every session, keeps its history and decides who is driving right now.</dd></div>
             <div><dt>The gateway</dt><dd>Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</dd></div>
             <div><dt>Official or your own</dt><dd>Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</dd></div>
-            <div><dt>Screen and previews</dt><dd>They go peer to peer when they can; the gateway only introduces the two sides.</dd></div>
+            <div><dt>Screen and previews</dt><dd>They go peer to peer when they can; the gateway only introduces the two sides. Where they can't, the screen's video goes through the official TURN relay, still encrypted end to end.</dd></div>
           </dl>
         </div>
       </div>
