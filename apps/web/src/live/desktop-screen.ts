@@ -34,7 +34,8 @@ export function screenSignal(data: string | ArrayBuffer): Record<string, unknown
 
 export function nativeScreenQuery(token: string, display: number, width: string, maxFps: string, hevc = false): string {
   // HEVC is offered first and H.264 after, as the phone does; the native decoder accepts either in hardware.
-  const query = new URLSearchParams({ token, display: String(display), width, maxFps, video: "1" });
+  // turn: the native receiver passes a TURN server's login on to WebRTC.
+  const query = new URLSearchParams({ token, display: String(display), width, maxFps, video: "1", turn: "1" });
   if (hevc) query.set("codec", "hevc");
   return "/stream?" + query;
 }

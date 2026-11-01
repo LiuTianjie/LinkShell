@@ -232,6 +232,9 @@ Mac 兼容路径使用 `StreamCapture` / `StreamSession`，光标在画面里，
 | `LINKSHELL_ICE_SERVERS` | Host 的 STUN URL 列表，也传给 Mac 屏幕媒体会话 |
 | `LINKSHELL_ICE_SERVERS=off` | 禁用通用 DataChannel 能力并让屏幕会话收到空 STUN 列表；不阻止视频会话尝试局域网候选 |
 | `LINKSHELL_SCREEN_VIDEO=off` | Host 不提供屏幕视频轨道；用于兼容路径对照/排障 |
+| `LINKSHELL_TURN=off` | Host 不向网关要 TURN 凭证，视频只走直连或回退 |
+| `LINKSHELL_SCREEN_IDLE_SECONDS` | 经 TURN 或经网关回退的画面无人操作多久断开（默认 180，`0` 关闭）；直连不受限 |
+| `?ice=relay`（观看页地址） | 观看页只用中继候选，用来在能直连的网络里实测 TURN |
 | `LINKSHELL_SCREEN_FPS=1..120` | Host 给 Mac 视频会话传固定 `fps`；内部对照用途 |
 | `LINKSHELL_SCREEN_CLOCK=1` | 开启时间码测量入口；不要用诊断运行冒充普通播放性能 |
 

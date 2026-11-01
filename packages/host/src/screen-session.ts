@@ -4,6 +4,16 @@ import { rung } from "./screen-pacer.js";
 
 export const SCREEN_RETAIN_MS = 120_000;
 
+/**
+ * How long a picture that costs relay traffic (a TURN relay, or frames through the gateway) may go unused
+ * before it is ended. LINKSHELL_SCREEN_IDLE_SECONDS changes it, to try it out; 0 turns it off.
+ */
+export function screenIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const seconds = Number(env.LINKSHELL_SCREEN_IDLE_SECONDS);
+  if (env.LINKSHELL_SCREEN_IDLE_SECONDS === undefined || !Number.isFinite(seconds) || seconds < 0) return 180_000;
+  return seconds === 0 ? 0 : Math.max(5, seconds) * 1000;
+}
+
 // URL defaults are permissive for older clients. Stateful changes must be complete and valid
 // before they can release input or change capture on a live connection.
 export const screenConfiguration = z.object({

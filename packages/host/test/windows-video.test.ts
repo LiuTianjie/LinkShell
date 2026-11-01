@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { H264AccessUnits, h264Nals, h264Payloads, ScreenInputOrder } from "../src/screen-h264.js";
-import { windowsVideoProfile } from "../src/windows-video.js";
+import { weriftIceServers, windowsVideoProfile } from "../src/windows-video.js";
 import { viewerPage } from "../src/screen-viewer.js";
 
 const nal = (type: number, bytes = Buffer.from([7, 8, 9])) => Buffer.concat([Buffer.from([0, 0, 0, 1, type]), bytes]);
 const aud = nal(9, Buffer.from([0xf0]));
+
+describe("the Windows sender's ICE servers", () => {
+  it("keeps the UDP TURN address with its login, and leaves the TCP and TLS ones werift can't use", () => {
+    expect(weriftIceServers([
+      { urls: ["stun:turn.example.com:3478"] },
+      { urls: ["turn:turn.example.com:3478?transport=udp", "turn:turn.example.com:3478?transport=tcp", "turns:turn.example.com:443?transport=tcp"], username: "u", credential: "c" },
+      { urls: ["stun:stun.cloudflare.com:3478"] },
+    ])).toEqual([
+      { urls: "stun:turn.example.com:3478" },
+      { urls: "turn:turn.example.com:3478?transport=udp", username: "u", credential: "c" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+    ]);
+  });
+});
 
 describe("Windows H.264 media", () => {
   it("keeps complete access units across every pipe boundary and identifies IDRs", () => {

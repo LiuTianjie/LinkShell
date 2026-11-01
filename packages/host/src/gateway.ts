@@ -20,6 +20,7 @@ import {
   type RelaySocket,
   type SecureChannel,
   type TunnelFrame,
+  type TurnCredentials,
 } from "@linkshell/wire";
 import type { RpcTransport } from "./rpc/server.js";
 
@@ -109,6 +110,11 @@ export class GatewayLink {
   private nameUpdate?: Promise<void>;
   private nameRetry?: ReturnType<typeof setTimeout>;
   private nameUpdateUnsupported = false;
+  private turnCache?: { credentials: TurnCredentials; refreshAt: number; expiresAt: number };
+  private turnFetch?: Promise<TurnCredentials | undefined>;
+  private turnUnsupported = false;
+  /** After a failed request, the gateway is not asked again before this. */
+  private turnRetryAt = 0;
   private stopped = false;
   private lifecycle = 0;
   /** Channels told `close` because they are unknown here, per device, in the current window. */
@@ -136,6 +142,10 @@ export class GatewayLink {
         this.options.log(`[gateway] online as ${this.identity.id.slice(0, 8)}${this.relay.account ? ` (${this.relay.account.email ?? "account"})` : ""}`);
         void this.refreshPresence();
         void this.flushName();
+        // Fetched now, so the first screen of the day doesn't wait for the gateway to start its picture.
+        this.turnUnsupported = false;
+        this.turnRetryAt = 0;
+        void this.turn();
       } else if (error && status === "offline") {
         this.options.log(`[gateway] ${error.code}: ${error.message}`);
         for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway disconnected");
@@ -244,6 +254,45 @@ export class GatewayLink {
         online: this.online.has(device.id),
       })),
     };
+  }
+
+  /**
+   * This gateway's TURN server (and STUN) for video that finds no direct path, with credentials; undefined when
+   * there is none to lend: a self-hosted gateway, an older one, or one that can't be reached. The answer is kept
+   * until half of its life is gone, so a screen that starts on it has hours left and never waits for the gateway.
+   */
+  async turn(): Promise<TurnCredentials | undefined> {
+    if (this.stopped || this.turnUnsupported || this.relay.status !== "online") return undefined;
+    const cached = this.turnCache;
+    if (cached && Date.now() < cached.refreshAt) return cached.credentials.servers.length ? cached.credentials : undefined;
+    if (Date.now() < this.turnRetryAt) return this.usableTurn();
+    this.turnFetch ??= this.fetchTurn().finally(() => { this.turnFetch = undefined; });
+    return this.turnFetch;
+  }
+
+  private async fetchTurn(): Promise<TurnCredentials | undefined> {
+    try {
+      const credentials = await this.relay.request("turn.credentials", {}, 5000);
+      const lent = credentials.servers.length > 0;
+      const now = Date.now();
+      // A gateway without TURN is asked again in ten minutes: it may be given one.
+      this.turnCache = { credentials, refreshAt: now + (lent ? (credentials.ttl * 1000) / 2 : 10 * 60_000), expiresAt: now + credentials.ttl * 1000 };
+      return lent ? credentials : undefined;
+    } catch (error) {
+      if (error instanceof RelayRequestError && error.code === "unknown_method") {
+        this.turnUnsupported = true;
+        return undefined;
+      }
+      this.options.log(`[gateway] no TURN credentials: ${error instanceof Error ? error.message : String(error)}`);
+      this.turnRetryAt = Date.now() + 60_000;
+      return this.usableTurn();
+    }
+  }
+
+  /** What is kept, while it still works. */
+  private usableTurn(): TurnCredentials | undefined {
+    const cached = this.turnCache;
+    return cached && cached.credentials.servers.length && Date.now() < cached.expiresAt ? cached.credentials : undefined;
   }
 
   /** Opens a pairing window; the returned link goes in the QR code. */

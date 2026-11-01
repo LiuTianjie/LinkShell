@@ -46,8 +46,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     target.scheme = "ws"
     target.path = "/stream"
     target.fragment = nil
-    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics", "codec"].contains($0.name) }
-      + [URLQueryItem(name: "video", value: "1"), URLQueryItem(name: "maxFps", value: String(maxFps)), URLQueryItem(name: "diagnostics", value: metrics.enabled ? "1" : "0")]
+    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics", "codec", "turn"].contains($0.name) }
+      + [URLQueryItem(name: "video", value: "1"), URLQueryItem(name: "maxFps", value: String(maxFps)), URLQueryItem(name: "diagnostics", value: metrics.enabled ? "1" : "0"),
+         // This receiver passes a TURN server's login on to WebRTC: the host may give it one.
+         URLQueryItem(name: "turn", value: "1")]
       // The same picture in fewer bits; a host or Mac app that doesn't know it sends H.264.
       + (HEVCDecoder.available ? [URLQueryItem(name: "codec", value: "hevc")] : [])
     guard let address = target.url else { return nil }
@@ -125,6 +127,14 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           session.active || configuration["paused"] as? Bool == true else { return }
     pendingConfiguration = nil
     signal(configuration)
+  }
+
+  /// Someone uses the picture (the page says so, at most every 15 s): a relayed one is ended when no one does.
+  func activity() {
+    queue.async {
+      guard !self.closed, self.ready, self.session.active else { return }
+      self.signal(["t": "activity"])
+    }
   }
 
   func requestControl(_ message: [String: Any] = ["t": "control"]) {
@@ -259,7 +269,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       configuration.disableLinkLocalNetworks = true
       configuration.iceServers = ((rtc["iceServers"] as? [[String: Any]]) ?? []).compactMap { server in
         guard let urls = server["urls"] as? [String], !urls.isEmpty else { return nil }
-        return RTCIceServer(urlStrings: urls)
+        return RTCIceServer(urlStrings: urls, username: server["username"] as? String, credential: server["credential"] as? String)
       }
       let factory = RTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: ScreenDecoderFactory(metrics: metrics))
       self.factory = factory

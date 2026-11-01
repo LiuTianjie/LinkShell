@@ -16,6 +16,7 @@ struct ScreenRequest {
   let fps: Int?
   let maxFps: Int
   let codec: String
+  let relayKbps: Int?
 
   init(viewer: String, _ message: [String: Any]) {
     self.viewer = viewer
@@ -24,6 +25,8 @@ struct ScreenRequest {
       guard !urls.isEmpty else { return nil }
       return RTCIceServer(urlStrings: urls, username: server["username"] as? String, credential: server["credential"] as? String)
     }
+    // What the gateway allows a relayed picture, in kbit/s; older hosts don't say, and the app's own share applies.
+    relayKbps = (message["relayKbps"] as? Int).map { min(max($0, 300), 50_000) }
     screen = (message["screen"] as? Int) ?? 0
     maxWidth = min(max((message["maxWidth"] as? Int) ?? Tuning.defaultMaxWidth, Tuning.narrowestPicture), Tuning.widestPicture)
     fps = (message["fps"] as? Int).map { min(max($0, Tuning.fpsRange.lowerBound), Tuning.fpsRange.upperBound) }
@@ -128,6 +131,11 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var roundTripCount = Rate()
   /// The path last written to the log, so a viewer's log says which one its video took.
   private var pathSaid: String?
+  /// The chosen pair goes through a TURN relay: the picture is held to the relay's share, and the host
+  /// is told, since it ends a relayed picture no one uses.
+  private var relayed = false
+  /// When the host was last told someone used the picture: the channels carrying it bypass the host.
+  private var activitySaid: TimeInterval = 0
   /// Local addresses on a virtual interface (container bridges and the like): a host candidate
   /// on one of these reaches no phone, so it is not offered. Read once, when the session starts.
   private var virtualAddresses: Set<String> = []
@@ -521,8 +529,15 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     )
   }
 
+  /// The most the track may send now: the frame rate's ceiling (or the eased one), and no more than
+  /// the relay's share while it goes through one.
+  private var ceiling: Int {
+    let own = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
+    return relayed ? min(own, (request.relayKbps ?? Tuning.relayKbps) * 1000) : own
+  }
+
   private func apply(to encoding: RTCRtpEncodingParameters) {
-    encoding.maxBitrateBps = NSNumber(value: eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate))
+    encoding.maxBitrateBps = NSNumber(value: ceiling)
     encoding.maxFramerate = NSNumber(value: frameRate)
     encoding.networkPriority = Tuning.networkPriority
   }
@@ -661,8 +676,17 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     DispatchQueue.main.async {
       guard !self.closed else { return }
       self.heard[label, default: 0] += 1
+      self.used()
       if let event { self.apply(event, replaceable: label == "pointer") }
     }
+  }
+
+  /// Someone uses the picture: said to the host at most every 15 s, which is all an idle limit of minutes needs.
+  private func used() {
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - activitySaid >= 15 else { return }
+    activitySaid = now
+    link.emit(["t": "rtc.activity", "v": viewer])
   }
 
   // MARK: The viewer's hands
@@ -861,10 +885,16 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
         pathSaid = path
         link.log("the video goes \(path)")
       }
+      let through = near.type == "relay" || far.type == "relay"
+      if through != relayed {
+        relayed = through
+        link.emit(["t": "rtc.path", "v": viewer, "relayed": through])
+        if through { link.log("held to \(ceiling / 1000) kbit/s while the video goes through a relay") }
+        setParameters()
+      }
     }
     let second = LanFloor.Second(local: near, remote: far,
                                  rttMs: rttMs, fractionLost: StatsReader.number(remote, "fractionLost"), sendDelayMs: sendDelayMs)
-    let ceiling = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
     switch lanFloor.judge(second, ceiling: ceiling) {
     case .apply(let floor):
       link.log("bandwidth estimate held at \(floor / 1000) kbit/s or more: the video is on the local network")

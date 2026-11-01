@@ -16,6 +16,8 @@ import type { Modifier, ScreenInput } from "./screen-input";
  */
 
 export const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
+/** The host ended a relayed picture no one used for minutes (screen-viewer.ts SCREEN_IDLE). */
+export const SCREEN_IDLE = "长时间没有操作，画面已断开";
 
 export type ScreenPhase = "starting" | "connecting" | "receiving" | "live" | "recovering" | "paused" | "error";
 
@@ -42,6 +44,8 @@ export interface ReceiverState {
   error?: string;
   /** Another device took the screen over. */
   taken: boolean;
+  /** The host ended the picture because no one used it while it cost relay traffic. */
+  idle?: boolean;
   /** How the picture comes now: a video track, or the host's socket. */
   transport?: "video" | "socket";
   displays: { index: number; name: string }[];
@@ -69,6 +73,8 @@ export interface ReceiverOptions {
   hevc: boolean;
   /** The workspace reaches this computer through a gateway: the host's own fallback is then lighter. */
   relayed: boolean;
+  /** False: straight to the picture down the socket, with no video track tried first (default true). */
+  videoTrack?: boolean;
   video: HTMLVideoElement;
   canvas: HTMLCanvasElement;
   onState(state: ReceiverState): void;
@@ -124,6 +130,7 @@ export class ScreenReceiver {
   private gaveUp = false;
   private tried = false;
   private timers = new Set<ReturnType<typeof setTimeout>>();
+  private usedAt = -Infinity;
   private patience?: ReturnType<typeof setTimeout>;
   private away?: ReturnType<typeof setTimeout>;
   private firstPicture?: ReturnType<typeof setTimeout>;
@@ -226,7 +233,9 @@ export class ScreenReceiver {
     this.set({ phase: "connecting", displays, display: this.target.display });
     const query = new URLSearchParams({
       token: viewer.token, display: String(this.target.display), width: String(this.target.width),
-      maxFps: String(this.target.maxFps), video: "1",
+      maxFps: String(this.target.maxFps), video: this.options.videoTrack === false ? "0" : "1",
+      // This receiver passes a TURN server's login on to WebRTC: the host may give it one.
+      turn: "1",
     });
     if (this.options.hevc) query.set("codec", "hevc");
     if (this.options.relayed) query.set("q", "low");
@@ -297,6 +306,7 @@ export class ScreenReceiver {
     if (session) return this.sessionMessage(session);
     if (typeof message.error === "string") {
       if (message.error === SCREEN_TAKEN) this.state = { ...this.state, taken: true };
+      if (message.error === SCREEN_IDLE) this.state = { ...this.state, idle: true };
       return this.fail(message.error);
     }
     const rtc = object(message.rtc);
@@ -411,7 +421,10 @@ export class ScreenReceiver {
       const entry = object(server);
       const urls = (Array.isArray(entry?.urls) ? entry.urls : [entry?.urls]).filter((url): url is string =>
         typeof url === "string" && url.length <= 1024 && /^(stuns?|turns?):/.test(url));
-      return urls.length ? [{ urls }] : [];
+      // A TURN server brings its login with it; anything else is just a name.
+      const login = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 512 ? value : undefined;
+      const username = login(entry?.username), credential = login(entry?.credential);
+      return urls.length ? [{ urls, ...(username && credential ? { username, credential } : {}) }] : [];
     });
     let pc: RTCPeerConnection;
     try { pc = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" }); }
@@ -650,8 +663,20 @@ export class ScreenReceiver {
     return this.state.transport === "video" && this.channels.input?.readyState === "open" && this.channels.pointer?.readyState === "open";
   }
 
+  /**
+   * Someone uses the picture: looks around it, zooms, points. The host ends a relayed picture no one has
+   * used for minutes, and input on the video's channels never reaches it. Said at most every 15 s.
+   */
+  used() {
+    const now = performance.now();
+    if (this.closed || now - this.usedAt < 15_000) return;
+    this.usedAt = now;
+    this.sendSocket({ t: "activity" });
+  }
+
   private post(event: ScreenInput, lane: Lane) {
     if (!this.state.canInput) return;
+    this.used();
     const stamped = this.gate.stamp(event);
     if (!this.lanesOpen()) return this.sendSocket(stamped);
     const channel = this.channels[lane];

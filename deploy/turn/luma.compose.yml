@@ -1,0 +1,11 @@
+# luma compose deploy deploy/turn/luma.compose.yml
+# The node must have a public address of its own and the bandwidth for relayed video; see docs/deploy.md.
+# Secrets (scope linkshell-turn): TURN_SECRET, TURN_PUBLIC_IP, TURN_PRIVATE_IP.
+name: linkshell-turn
+compose: docker-compose.yml
+region: cn
+services:
+  coturn:
+    region: cn
+    node: tecent
+    exposure: none

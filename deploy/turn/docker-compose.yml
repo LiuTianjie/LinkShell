@@ -1,0 +1,47 @@
+# The TURN server the official gateway lends computers (`turn.credentials`), for screen video that
+# finds no direct path. Host networking: coturn relays UDP on its own public address, and Docker's port
+# publishing would add a NAT and a copy for every packet of every relayed picture.
+#
+# TURN_SECRET          the same secret as the gateway's TURN_SECRET (coturn's static-auth-secret)
+# TURN_PUBLIC_IP       the node's public address, as phones and computers reach it
+# TURN_PRIVATE_IP      the address that public one is NAT'ed to on the node (a cloud server's own interface)
+#
+# The node's firewall (the cloud provider's security group) must let in UDP 3478, TCP 3478 and UDP 49160-49359.
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - -n
+      - --log-file=stdout
+      - --simple-log
+      - --no-cli
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=linkshell
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49359
+      - --external-ip=${TURN_PUBLIC_IP}/${TURN_PRIVATE_IP}
+      # The relay carries WebRTC only: UDP to public addresses, nothing on this node's networks.
+      - --no-tcp-relay
+      - --no-multicast-peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      # Bytes a second. One picture is held to 3 Mbit/s by the sender (the gateway's TURN_MAX_KBPS);
+      # 4 Mbit/s a session leaves room for its channels and retransmissions, 100 Mbit/s caps the whole node.
+      - --max-bps=500000
+      - --bps-capacity=12500000
+      # One username is one computer's (expiry:computer): its pictures and the viewers it lends it to.
+      - --user-quota=12
+      - --total-quota=400
+      - --stale-nonce=600

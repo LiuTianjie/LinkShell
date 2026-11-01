@@ -238,6 +238,7 @@ final class LinkScreenView: ExpoView {
       case "screen.configure": connection?.configure(signal, maxFps: receiverRate)
       case "control": if active && applicationActive { connection?.requestControl(signal) }
       case "prompt": if active && applicationActive { connection?.input(signal) }
+      case "activity": if active && applicationActive { connection?.activity() }
       default: break
       }
     case "stats": connection?.requestStats()

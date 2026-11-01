@@ -72,6 +72,9 @@ const gateway = await startGateway({ port: 8787, databasePath: "./relay.db" });
 | `SUPABASE_URL`、`SUPABASE_ANON_KEY` | - | 两个都设置后启用账号：校验账号令牌，同一账号下的手机和电脑不用配对就能互相访问 |
 | `AUTH_REQUIRED` | `false` | 设为 `true`：电脑必须登录账号并且订阅有效才能接入（手机不受影响） |
 | `SUPABASE_SERVICE_ROLE_KEY` | - | `AUTH_REQUIRED=true` 时用它查询订阅 |
+| `TURN_SECRET`、`TURN_URLS` | - | 两个都设置后，给电脑签发 TURN 临时凭证，屏幕视频在直连不通时经这台 coturn 中继。`TURN_SECRET` 与 coturn 的 `static-auth-secret` 相同；`TURN_URLS` 是逗号分隔的 `stun:`/`turn:`/`turns:` 地址。部署见 `deploy/turn/` 和 docs/deploy.md |
+| `TURN_TTL_SECONDS` | `28800` | TURN 凭证有效期（秒） |
+| `TURN_MAX_KBPS` | `3000` | 经中继的画面码率上限，电脑端按它限制编码 |
 
 自建网关一般只需要 `PORT` 和 `RELAY_DATA_PATH`。网关前面有反向代理时要留意连接限流按谁的地址算：
 

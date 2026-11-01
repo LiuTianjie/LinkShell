@@ -107,6 +107,8 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const [barVisible, setBarVisible] = useState(true);
   const [focused, setFocused] = useState(false);
   const receiver = useRef<ScreenReceiver | undefined>(undefined);
+  /** The picture came down the socket when it was ended for being unused: the next connection starts there. */
+  const resumeOnSocket = useRef(false);
   const root = useRef<HTMLElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -137,6 +139,8 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
       control: preferences.control,
       hevc: preferences.codec === "auto" && hevcReceivable(),
       relayed: computer.gateway !== DESKTOP_LOCAL && streams.path !== "direct",
+      // After an idle end, back the way the picture came: no waiting for a video track that didn't get through.
+      videoTrack: resumeOnSocket.current ? false : undefined,
       video: video.current,
       canvas: canvas.current,
       onState: (next) => setState(next),
@@ -387,7 +391,11 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const stats = state?.stats;
   const pathLabel = stats?.path === "lan" ? "局域网直连" : stats?.path === "direct" ? "直连" : stats?.path === "relay" ? "中继" : stats?.path === "socket" ? "兼容方式" : state?.transport === "video" ? "直连" : undefined;
   const checkPermissions = () => void job.run(async () => { await link.call("screen.access", { ask: true }); access.reload(); });
-  const retry = () => { setState(undefined); setRevision((value) => value + 1); };
+  const retry = () => {
+    resumeOnSocket.current = !!state?.idle && state.transport === "socket";
+    setState(undefined);
+    setRevision((value) => value + 1);
+  };
   const shortcuts = remoteShortcuts(remote);
 
   const toolbar = (
@@ -516,8 +524,8 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     overlay = (
       <div className="screen-start" role="alert">
         <Monitor size={28} />
-        <h3>{state?.taken ? "画面被另一台设备接手了" : "画面已断开"}</h3>
-        <p>{state?.taken ? "另一台设备打开了这台电脑的屏幕。需要时可以把画面接回来。" : state?.error}</p>
+        <h3>{state?.taken ? "画面被另一台设备接手了" : state?.idle ? "长时间没有操作，画面已断开" : "画面已断开"}</h3>
+        <p>{state?.taken ? "另一台设备打开了这台电脑的屏幕。需要时可以把画面接回来。" : state?.idle ? "画面经中转传输时，3 分钟没有操作会自动断开，以节省流量。" : state?.error}</p>
         <Button onClick={retry}>{state?.taken ? "接回画面" : "重新连接"}</Button>
       </div>
     );
@@ -537,6 +545,11 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
       data-control={canInput || undefined}
       aria-label={`${title}的远程桌面`}
       onPointerMove={onPointerMove}
+      // A relayed picture is ended when no one uses it; looking around it with the pointer counts.
+      onPointerMoveCapture={() => receiver.current?.used()}
+      onPointerDownCapture={() => receiver.current?.used()}
+      onWheelCapture={() => receiver.current?.used()}
+      onKeyDownCapture={() => receiver.current?.used()}
     >
       {toolbar}
       <div

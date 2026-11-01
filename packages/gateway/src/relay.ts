@@ -16,6 +16,7 @@ import {
 } from "@linkshell/wire";
 import type { VerifyToken } from "./accounts.js";
 import { GatewayStore, type PeerRecord } from "./store.js";
+import { turnCredentials, type TurnOptions } from "./turn.js";
 
 export interface GatewayOptions {
   port: number;
@@ -34,6 +35,8 @@ export interface GatewayOptions {
    * require a subscription for computers.
    */
   admit?: (peer: { role: PeerRole; userId?: string }) => Promise<string | undefined>;
+  /** The TURN server peers may use for video that finds no direct path (`turn.credentials`). */
+  turn?: TurnOptions;
   /**
    * How much may wait to be written to one peer before the gateway stops
    * reading from whoever is sending to it (default 4 MB), and how long a peer
@@ -106,6 +109,7 @@ export class Gateway {
   private readonly offers = new Map<string, Offer>();
   private readonly decisions = new Map<string, { machineId: string; resolve: (accept: boolean) => void }>();
   private readonly claimTimes = new Map<string, number[]>();
+  private readonly turnTimes = new Map<string, number[]>();
   private heartbeat?: ReturnType<typeof setInterval>;
   /** Sockets that answered the last ping. */
   private readonly alive = new WeakSet<GatewaySocket>();
@@ -453,6 +457,15 @@ export class Gateway {
       case "pair.claim":
         need("device");
         return this.claim(peer, params);
+      case "turn.credentials": {
+        // The computer asks and gives them to the viewer it sends its picture to: a device has no use for its own.
+        need("machine");
+        const now = Date.now();
+        const recent = (this.turnTimes.get(peer.record.id) ?? []).filter((t) => now - t < 60_000);
+        if (recent.length >= 30) throw new RelayError("rate_limited", "too many credential requests, wait a minute");
+        this.turnTimes.set(peer.record.id, [...recent, now]);
+        return this.options.turn ? turnCredentials(this.options.turn, peer.record.id, now) : { servers: [], ttl: 0 };
+      }
       case "machines.list":
         need("device");
         return {

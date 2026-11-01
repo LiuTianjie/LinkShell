@@ -38,6 +38,13 @@ export function windowsVideoProfile(level: number, request: Pick<VideoOffer, "ma
   return { width, fps, bitrate: Math.max(400_000, Math.round(profile.bitrate * (width / profile.width) ** 2 * fps / profile.fps)) };
 }
 
+/** werift relays over UDP only and takes one address a server: TLS and TCP relays are for the other senders. */
+export function weriftIceServers(servers: VideoOffer["iceServers"]): { urls: string; username?: string; credential?: string }[] {
+  return servers.flatMap(server => server.urls
+    .filter(url => !url.startsWith("turns:") && !/[?&]transport=tcp/.test(url))
+    .map(urls => ({ urls, ...(server.username && server.credential ? { username: server.username, credential: server.credential } : {}) })));
+}
+
 /** Same SDP and input protocol as the Mac helper; media leaves through DTLS-SRTP, never the gateway. */
 export class WindowsVideoSession implements ScreenVideoSession {
   readonly id = `windows-video-${randomBytes(6).toString("hex")}`;
@@ -71,6 +78,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private strainedIntervals = 0;
   private encoder = "";
   private inputUsed = false;
+  /** The chosen pair goes through a TURN relay: the picture is held to the relay's share. */
+  private relayed = false;
   private readonly parameterSets = new Map<number, Buffer>();
   private serial = Promise.resolve();
   private captureSerial = Promise.resolve();
@@ -81,10 +90,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
 
   constructor(
     private readonly request: VideoOffer,
-    private readonly events: { tell(message: object): void; input(message: unknown): void; lost(): void; log(message: string): void },
+    private readonly events: { tell(message: object): void; input(message: unknown): void; lost(): void; log(message: string): void; path?(relayed: boolean): void },
   ) {
     this.pc = new RTCPeerConnection({
-      iceServers: request.iceServers.flatMap(server => server.urls.map(urls => ({ urls }))),
+      iceServers: weriftIceServers(request.iceServers),
       bundlePolicy: "max-bundle",
       codecs: { video: [
         useH264({ payloadType: 96, parameters: "profile-level-id=42e02a;packetization-mode=1;level-asymmetry-allowed=1" }),
@@ -167,9 +176,15 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); if (!this.hidden && !this.closed) this.startCapture(); }).catch(error => this.fail(String(error)));
   }
 
+  /** The profile for this level, held to the relay's share while the path goes through one. */
+  private profile() {
+    const profile = windowsVideoProfile(this.level, this.request);
+    return this.relayed ? { ...profile, bitrate: Math.min(profile.bitrate, (this.request.relayKbps ?? 3000) * 1000) } : profile;
+  }
+
   private startCapture(): void {
     if (this.closed || this.hidden) return;
-    const profile = windowsVideoProfile(this.level, this.request);
+    const profile = this.profile();
     const child = spawn(windowsHelper()!, ["--video", String(this.request.screen), String(profile.width), String(profile.fps), String(profile.bitrate), windowsMedia()!], {
       windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
     });
@@ -247,7 +262,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private report(): void {
     if (this.closed) return;
     const now = performance.now(), elapsed = (now - this.lastStats) / 1000;
-    const profile = windowsVideoProfile(this.level, this.request);
+    const profile = this.profile();
     const sendBitrate = Math.round(this.sentBytes * 8 / elapsed);
     if (process.env.LINKSHELL_SCREEN_DIAGNOSTICS === "1") this.events.log(`[screen] Windows video ${JSON.stringify({ captured: this.captured, sent: this.sentFrames, dropped: this.dropped, queueDrops: this.queueDrops, pli: this.plis, bitrate: sendBitrate, estimate: this.estimate })}`);
     this.captured = this.queueDrops = this.plis = 0;
@@ -256,6 +271,15 @@ export class WindowsVideoSession implements ScreenVideoSession {
     if (!this.connected || this.hidden) return;
     const feedback = this.lastFeedback > 0 && now - this.lastFeedback < 3000;
     const pair = this.pc.iceTransports[0]?.connection.nominated;
+    const relayed = !!pair && (pair.localCandidate.type === "relay" || pair.remoteCandidate.type === "relay");
+    if (relayed !== this.relayed) {
+      const before = profile.bitrate;
+      this.relayed = relayed;
+      this.events.path?.(relayed);
+      this.events.log(`[screen] Windows video ${relayed ? "goes through a TURN relay" : "no longer goes through a relay"}`);
+      // A new ceiling for the encoder only takes effect in a new capture.
+      if (this.profile().bitrate !== before) { this.adapt(this.level); return; }
+    }
     // A same-computer receiver can bootstrap a low REMB from an almost still desktop.
     // That estimate says nothing about link capacity and must not trigger repeated encoder restarts.
     const loopback = pair && pair.localCandidate.host === pair.remoteCandidate.host;
@@ -270,7 +294,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
 
   private adapt(level: number): void {
     this.level = level; this.changed = performance.now(); this.needsKey = true;
-    this.events.log(`[screen] Windows video profile: ${JSON.stringify(windowsVideoProfile(level, this.request))}`);
+    this.events.log(`[screen] Windows video profile: ${JSON.stringify(this.profile())}`);
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); this.startCapture(); }).catch(error => this.fail(String(error)));
   }
 

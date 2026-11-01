@@ -55,7 +55,10 @@ bypassing the bulk direct channel for the last step. Linux uses ffmpeg/X11 and i
 
 `LINKSHELL_ICE_SERVERS=off` disables the bulk channel and removes STUN from screen signalling;
 video can still try LAN candidates. `LINKSHELL_SCREEN_VIDEO=off` disables media-track offers.
-No TURN is deployed. See the [current architecture](../../docs/v2/screen-realtime.md) for
+A gateway with a TURN server lends the host its credentials (`turn.credentials`): video tries
+direct paths first, the relay next (held to the gateway's `TURN_MAX_KBPS`), and the byte relay
+last. A relayed picture, through TURN or the gateway, ends after 3 minutes unused
+(`LINKSHELL_SCREEN_IDLE_SECONDS`, `0` for never); `LINKSHELL_TURN=off` keeps the host off TURN. See the [current architecture](../../docs/v2/screen-realtime.md) for
 source/display limits, transport-specific defaults and validation boundaries.
 
 Requires Node.js 22.13 or newer.

@@ -1,6 +1,6 @@
 import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { viewerPage } from "../src/screen-viewer.js";
+import { SCREEN_IDLE, viewerPage } from "../src/screen-viewer.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The VM boundary carries browser objects, callbacks and untyped wire payloads from the shipped script.
 type Message = Record<string, any>;
@@ -575,6 +575,30 @@ describe("the running viewer screen session", () => {
     ui.session({ active: true }); ui.key(); await ui.settle();
     expect(ui.configure()).toHaveLength(requests);
     expect(ui.input()).toHaveLength(inputs);
+  });
+
+  it("asks the host for a TURN login, since this page passes one on to WebRTC", () => {
+    const ui = viewer();
+    expect(new URL(ui.sockets[0]!.url).searchParams.get("turn")).toBe("1");
+  });
+
+  it.each([false, true])("says someone uses the picture, at most every 15 s (native=%s)", async (native) => {
+    const ui = viewer({ native }); await ui.ready();
+    const said = () => ui.messages().filter((message) => message.t === "activity").length;
+    ui.document.emit("touchstart");
+    ui.document.emit("pointerdown");
+    expect(said()).toBe(1);
+    await ui.advance(15000);
+    ui.document.emit("wheel");
+    expect(said()).toBe(2);
+  });
+
+  it("ends for good when the host ended an unused relayed picture: it asks for no relay, and says why it closed", async () => {
+    const ui = viewer({ relayFallback: true }); await ui.ready();
+    ui.receive({ error: SCREEN_IDLE });
+    ui.sockets[0]!.close();
+    expect(ui.reports.filter((message) => message.type === "screenFallback")).toEqual([]);
+    expect(ui.reports.filter((message) => message.type === "screenClosed")).toEqual([{ type: "screenClosed", reason: "idle" }]);
   });
 
   it("does not report screenClosed in addition to an owned relay fallback", async () => {

@@ -66,6 +66,8 @@ interface ScreenSessionContextValue {
 
 /** The host's words when another device takes the screen (screen-viewer.ts SCREEN_TAKEN). */
 const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
+/** The host's words when it ends a relayed picture no one used for minutes (screen-viewer.ts SCREEN_IDLE). */
+export const SCREEN_IDLE = "长时间没有操作，画面已断开";
 
 const ScreenSessionContext = createContext<ScreenSessionContextValue | null>(null);
 const initialPlayback = (): ScreenPlaybackMode => nativeScreenAvailable ? "native" : "standard";
@@ -100,6 +102,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   desired.current = { display, width, mode };
   const configurable = useRef<boolean | null>(null);
   const starting = useRef<number | null>(null);
+  /** The way the picture came before it was ended for being unused: reconnecting goes straight back to it. */
+  const resumeWith = useRef<ScreenPlaybackMode | null>(null);
   const context = useRef({ link, accountId });
 
   const sendSession = useCallback((active: boolean) => {
@@ -119,6 +123,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     if (context.current.link === link && context.current.accountId === accountId) return;
     context.current = { link, accountId };
     setDisplay(null);
+    resumeWith.current = null;
     setPlayback(initialPlayback());
     setFailure(null);
     reset();
@@ -173,7 +178,9 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   }, [reset]);
   const retry = useCallback(() => {
     setFailure(null);
-    setPlayback(initialPlayback());
+    // After an idle end the path that worked is still the one that works: no waiting for the others to fail again.
+    setPlayback(resumeWith.current ?? initialPlayback());
+    resumeWith.current = null;
     reset();
   }, [reset]);
 
@@ -226,8 +233,10 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
 
   const unavailable = useCallback((failed: Viewer, description?: string) => {
     if (lease.getSnapshot().resource !== failed) return;
+    // Ended for being unused: the next path would only start the picture again by itself.
+    if (description === SCREEN_IDLE) resumeWith.current = failed.playback;
     // Another device has the screen now: trying the next path would only take it back from them.
-    if (failed.playback === "relay" || Platform.OS !== "ios" || description === SCREEN_TAKEN) setFailure(description || "屏幕显示已中断，请重新连接");
+    if (failed.playback === "relay" || Platform.OS !== "ios" || description === SCREEN_TAKEN || description === SCREEN_IDLE) setFailure(description || "屏幕显示已中断，请重新连接");
     else setPlayback(failed.playback === "native" ? "standard" : "relay");
     reset();
   }, [lease, reset]);
@@ -255,7 +264,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       if (wasActive === null) return;
       pauseWatchdog.clear();
       configurable.current = null;
-      setFailure(wasActive ? (message.reason === "taken" ? SCREEN_TAKEN : "屏幕连接已断开，请重新连接") : null);
+      if (message.reason === "idle") resumeWith.current = current.playback;
+      setFailure(wasActive ? (message.reason === "taken" ? SCREEN_TAKEN : message.reason === "idle" ? SCREEN_IDLE : "屏幕连接已断开，请重新连接") : null);
       return;
     }
     if (message.type === "screenSession" && !lease.getSnapshot().active) {

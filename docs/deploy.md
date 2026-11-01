@@ -134,7 +134,26 @@ curl http://localhost:8787/healthz
 
 Mac 屏幕的媒体连接在 LinkShell.app 与手机/浏览器之间，另有 Node Host 与客户端之间的通用数据连接。两者使用 WebRTC，但独立协商。直连需要两端网络允许相应 ICE/STUN 流量；网关的 TCP 443 可达不代表视频 UDP 路径可达，也不需要把 Host 的回环观看端口暴露到公网。
 
-当前不部署 TURN。视频不可达时，客户端可经现有网关加密 RPC 接收兼容 H.264 字节流；iOS 会先试网页视频，最后为该屏幕禁用通用数据直连再走 RPC。网关只转发密文，不承担解码/转码。
+视频按这个顺序找路：先直连（局域网、穿透 NAT），直连不通再走网关借出的 TURN 中继，视频轨道仍然连不上时，才经网关加密 RPC 接收兼容 H.264 字节流（iOS 会先试网页视频，最后为该屏幕禁用通用数据直连再走 RPC）。网关只转发密文，不承担解码/转码；TURN 只转发 DTLS-SRTP 加密的媒体包。
+
+### TURN 中继（可选）
+
+网关设置了 `TURN_SECRET` 和 `TURN_URLS` 时，会给登录的电脑签发临时凭证（coturn 的 `use-auth-secret` 方案：用户名是“过期时间:电脑”，密码是它在共享密钥下的 HMAC-SHA1）。电脑登录网关时取一次，用到有效期过半再换，开屏幕时不等网关。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `TURN_SECRET` | 空 | 与 coturn 的 `static-auth-secret` 相同 |
+| `TURN_URLS` | 空 | 逗号分隔的 `stun:`、`turn:`、`turns:` 地址，例如 `stun:1.2.3.4:3478,turn:1.2.3.4:3478?transport=udp,turn:1.2.3.4:3478?transport=tcp` |
+| `TURN_TTL_SECONDS` | `28800` | 凭证有效期 |
+| `TURN_MAX_KBPS` | `3000` | 经中继的画面码率上限，电脑端按它限制编码 |
+
+coturn 用 `deploy/turn/` 下的 compose 文件部署（host 网络，节点要有自己的公网地址）：云服务器的安全组放行 UDP 3478、TCP 3478 和 UDP 49160–49359，把 `luma.compose.yml` 的 `node` 改成这台机器，用 `luma secret set --scope linkshell-turn` 设好 `TURN_SECRET`、`TURN_PUBLIC_IP`、`TURN_PRIVATE_IP` 后 `luma compose deploy deploy/turn/luma.compose.yml`。官方网关的 coturn 在腾讯云节点 `tecent`；网关的 `TURN_SECRET`、`TURN_URLS` 在 `linkshell-gateway` 的密钥里。配置里屏蔽了转发到私网地址，单会话限 4 Mbit/s，整机限 100 Mbit/s。
+
+能直连时几乎不经过中继：中继候选的优先级最低，只有在直连全部失败时才会被选中；没被选中时，中继上只有少量保活包。
+
+**流量与空闲断开。** 经 TURN 中继或经网关 RPC 回退的画面，3 分钟没有任何操作（触摸、点击、滚动、按键、缩放）会自动断开，提示“长时间没有操作，画面已断开”，不会自动换另一条路径。重新连接直接回到上次成功的那条路径。直连的画面不受这个限制。Host 上 `LINKSHELL_SCREEN_IDLE_SECONDS` 改时长（`0` 关闭），`LINKSHELL_TURN=off` 让这台电脑不用 TURN。
+
+自建网关不设这两个变量时没有 TURN，行为和以前相同。
 
 Host 的 `LINKSHELL_ICE_SERVERS` 设置 STUN 列表；`off` 禁用通用 DataChannel 并给屏幕会话空 STUN 列表，视频仍可尝试局域网候选。需要禁用视频轨道对照时使用 `LINKSHELL_SCREEN_VIDEO=off`。配置在 Host 上，不是 Gateway 环境变量。路径、参数和验收口径见[远程桌面架构](v2/screen-realtime.md)。
 

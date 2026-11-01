@@ -1,12 +1,15 @@
 import { supabaseVerifier } from "./accounts.js";
 import { packageVersion, startGateway } from "./serve.js";
 import { requirePro, supabaseSubscriptions } from "./subscription.js";
+import { turnOptionsFromEnv } from "./turn.js";
 
 // The gateway as a process (the Docker image runs this), configured by environment:
 //   PORT                          listen port (8787)
 //   RELAY_DATA_PATH               SQLite file with pairings and keys (./data/relay.db); keep it on a volume
 //   SUPABASE_URL + SUPABASE_ANON_KEY   turn accounts on
 //   AUTH_REQUIRED=true            computers need an active Pro account (with SUPABASE_SERVICE_ROLE_KEY)
+//   TURN_SECRET + TURN_URLS       lend computers a TURN server for video with no direct path: coturn's static-auth-secret,
+//                                 and its stun:/turn:/turns: URLs (comma separated). TURN_TTL_SECONDS (28800), TURN_MAX_KBPS (3000)
 //   TRUSTED_PROXIES               comma-separated proxy addresses (or IPv4 ranges, 10.0.0.0/8) whose X-Forwarded-For is believed
 //   WS_CONNECT_RATE_LIMIT_MAX / WS_CONNECT_RATE_LIMIT_WINDOW_MS   connections per address (20 per 60000 ms)
 //   LOG_LEVEL                     debug | info | warn | error (info)
@@ -27,6 +30,7 @@ const supabase = {
   serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
 };
 const version = packageVersion();
+const turn = turnOptionsFromEnv(process.env);
 
 const gateway = await startGateway({
   port,
@@ -42,6 +46,7 @@ const gateway = await startGateway({
     process.env.AUTH_REQUIRED === "true"
       ? requirePro(supabaseSubscriptions(supabase), (message) => log("warn", `[relay] ${message}`))
       : undefined,
+  turn,
   trustedProxies: (process.env.TRUSTED_PROXIES ?? "").split(","),
   wsConnectLimit: {
     max: Number(process.env.WS_CONNECT_RATE_LIMIT_MAX ?? 20),
@@ -54,6 +59,7 @@ log("info", `listening on http://0.0.0.0:${gateway.port}`);
 // Said at every start: coming up on an empty file is how every phone gets unpaired.
 log("info", `pairings and keys in ${databasePath}`);
 log("info", `log level: ${logLevel}`);
+log("info", turn ? `TURN for video: ${turn.urls.join(", ")}` : "no TURN server: video uses a direct path or the gateway's byte relay");
 
 function shutdown(): void {
   process.stdout.write("[gateway] shutting down...\n");

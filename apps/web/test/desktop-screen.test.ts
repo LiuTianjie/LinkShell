@@ -10,6 +10,7 @@ describe("native desktop screen transport", () => {
     expect(url.searchParams.get("display")).toBe("2");
     expect(url.searchParams.get("width")).toBe("native");
     expect(url.searchParams.has("codec")).toBe(false);
+    expect(url.searchParams.get("turn")).toBe("1");
     expect(new URL(nativeScreenQuery("t", 0, "1920", "120", true), "http://localhost").searchParams.get("codec")).toBe("hevc");
   });
   it("rejects byte-stream video instead of falling back to browser decoding", () => {

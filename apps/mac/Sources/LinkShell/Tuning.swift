@@ -62,6 +62,10 @@ enum Tuning {
   /// seconds of a screen unreadable; a home network carries this from the first frame.
   static let startBitrate = 2_000_000
 
+  /// The most a picture sent through a TURN relay uses, in kbit/s, where the host doesn't say: someone pays
+  /// for every byte a relay carries, and a phone shows a screen well at this.
+  static let relayKbps = 3000
+
   // MARK: The floor under the estimate on the local network (`LanFloor`)
 
   /// What the estimate is held to while the video stays on the local network: enough for crisp

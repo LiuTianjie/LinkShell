@@ -117,7 +117,12 @@ export class HostRpcServer {
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
-    this.screen = new ScreenShare(options.log, () => options.machineInfo().direct?.iceServers ?? []);
+    // LINKSHELL_ICE_SERVERS=off or LINKSHELL_TURN=off: nothing outside this network is asked to help the picture.
+    this.screen = new ScreenShare(
+      options.log,
+      () => options.machineInfo().direct?.iceServers ?? [],
+      () => (options.machineInfo().direct && process.env.LINKSHELL_TURN !== "off" ? this.gateway?.turn() : undefined),
+    );
     const hub = options.hub;
     this.computerPreview = new ComputerPreviewServer(hub.previews);
     const terminals = options.terminals;

@@ -5,14 +5,14 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RpcError } from "@linkshell/wire";
+import { RpcError, type RelayIceServer, type TurnCredentials } from "@linkshell/wire";
 import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
-import { SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
+import { SCREEN_IDLE, SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
 import { captureWindows, configureWindowsCapture, WindowsFrameSplitter, windowsDisplays, windowsHelper, windowsProfile } from "./windows-screen.js";
 import { WindowsVideoSession, windowsMedia, type ScreenVideoSession } from "./windows-video.js";
-import { fallbackProfile, fallbackSize, SCREEN_RETAIN_MS, screenConfiguration, type ScreenConfiguration } from "./screen-session.js";
+import { fallbackProfile, fallbackSize, SCREEN_RETAIN_MS, screenConfiguration, screenIdleMs, type ScreenConfiguration } from "./screen-session.js";
 
 // Viewing the computer's screen from the phone. The host serves a small
 // viewer page on a loopback port; the phone opens it through the same
@@ -252,6 +252,23 @@ export async function resolvedCandidate(sdp: string, resolve: (name: string) => 
 
 const mdns = async (name: string) => (await lookup(name, { family: 4 })).address;
 
+/** What a viewer sends by itself, with no one doing anything. */
+const VIEWER_OWN = new Set(["ack", "ping", "measure", "keyframe", "hidden"]);
+
+/** What `offerVideo` needs of the viewer it offers the picture to. */
+interface VideoViewer {
+  closed(): boolean;
+  claim(): void;
+  tell(message: object): void;
+  refuse(message: string): void;
+  lost(): void;
+  input(message: unknown): void;
+  /** The sender says whether the track goes through a TURN relay now. */
+  path(relayed: boolean): void;
+  /** The sender saw someone use the picture (its channels, which bypass this host). */
+  activity(): void;
+}
+
 const RECENT_TOKENS = 4;
 
 /** The loopback viewer server; started on first use, one capture per watching device. */
@@ -278,8 +295,42 @@ export class ScreenShare {
     private readonly log: (message: string) => void,
     /** The servers both ends ask for their public address, to reach each other directly. */
     private readonly iceServers: () => string[] = () => [],
+    /** The gateway's TURN server, for video that finds no direct path; undefined where there is none to use. */
+    private readonly relayServers: () => Promise<TurnCredentials | undefined> | undefined = () => undefined,
   ) {
     void reapOrphanCaptures(log);
+  }
+
+  /**
+   * What the gateway lends for relaying the picture. A gateway slow to answer costs the picture its
+   * relay, never a wait: the answer is kept for the next screen.
+   */
+  private async lendRelay(): Promise<TurnCredentials | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve(this.relayServers()),
+        new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 1500); }),
+      ]);
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Both ends' ICE servers: the gateway's own STUN and TURN, then the public STUN. */
+  private servers(relay: TurnCredentials | undefined): RelayIceServer[] {
+    return [...(relay?.servers ?? []), ...this.iceServers().map((url) => ({ urls: [url] }))];
+  }
+
+  /**
+   * What a viewer is given. One that doesn't say it takes a TURN login (`turn=1`) drops it, and a TURN
+   * address without one is refused by WebRTC outright: it would lose even the direct path. It gets the
+   * STUN servers, and its relayed pairs come from the sender's TURN allocation alone.
+   */
+  private viewerServers(servers: RelayIceServer[], turn: boolean): RelayIceServer[] {
+    return turn ? servers : servers.filter((server) => !server.credential && server.urls.every((url) => url.startsWith("stun:")));
   }
 
   async start(): Promise<{ port: number; token: string; displays: Display[] }> {
@@ -349,7 +400,9 @@ export class ScreenShare {
       const diagnostics = url.searchParams.get("diagnostics") === "1";
       // "hevc": the receiver decodes HEVC (the iOS app's native one); the app offers it first and H.264 after.
       const codec = url.searchParams.get("codec") === "hevc" ? "hevc" : undefined;
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec));
+      // "turn": the viewer takes a TURN login along with the address (older ones drop it).
+      const turn = url.searchParams.get("turn") === "1";
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -522,9 +575,10 @@ export class ScreenShare {
    * Has the app offer the screen to this viewer as a video track. False when it can't (no app, an
    * app without the media engine): the picture then goes down the socket.
    */
-  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, viewer: { closed(): boolean; claim(): void; tell(message: object): void; refuse(message: string): void; lost(): void; input(message: unknown): void }): Promise<ScreenVideoSession | "refused" | undefined> {
+  private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, turn: boolean, viewer: VideoViewer): Promise<ScreenVideoSession | "refused" | undefined> {
     if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" && windowsMedia()) {
       // The native guard checks the selected desktop and the local opt-out throughout capture.
+      const lending = this.lendRelay();
       await windowsDisplays();
       if (viewer.closed()) return "refused";
       viewer.claim();
@@ -535,10 +589,12 @@ export class ScreenShare {
         await captureReleased(holder);
       }
       if (viewer.closed()) return "refused";
-      const iceServers = this.iceServers().map(url => ({ urls: [url] }));
-      viewer.tell({ rtc: { t: "config", iceServers } });
-      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps }, {
-        tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log,
+      const relay = await lending;
+      if (viewer.closed()) return "refused";
+      const iceServers = this.servers(relay);
+      viewer.tell({ rtc: { t: "config", iceServers: this.viewerServers(iceServers, turn) } });
+      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) }, {
+        tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path,
       });
       const mine = { id: session.id, taken: () => {
         if (this.video === mine) this.video = undefined;
@@ -573,6 +629,7 @@ export class ScreenShare {
       return "refused";
     }
     if (viewer.closed()) return "refused";
+    const lending = this.lendRelay();
     // The latest viewer has the screen, whichever way the one before was getting it.
     viewer.claim();
     this.video?.taken();
@@ -596,16 +653,21 @@ export class ScreenShare {
     this.video = mine;
     let reached: unknown;
     let lastStats = 0;
-    const iceServers = this.iceServers().map((url) => ({ urls: [url] }));
-    viewer.tell({ rtc: { t: "config", iceServers } });
+    const relay = await lending;
+    const iceServers = this.servers(relay);
+    viewer.tell({ rtc: { t: "config", iceServers: this.viewerServers(iceServers, turn) } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
     const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
-    await app.offerVideo(id, { screen, iceServers, ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}) }, (message) => {
+    await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}) }, (message) => {
       if (this.video !== mine) return;
       const kind = String(message.t);
       if (kind === "gone" || kind === "rtc.error") {
         this.log(`[screen] the video track ended: ${kind === "gone" ? "LinkShell.app went" : String(message.message)}`);
         viewer.lost();
+      } else if (kind === "rtc.path") {
+        viewer.path(message.relayed === true);
+      } else if (kind === "rtc.activity") {
+        viewer.activity();
       } else if (kind === "posted") {
         // A dry run: what the viewer's events, come to the app directly, would have done.
         this.log(`[screen] dry run: ${JSON.stringify(message)}`);
@@ -627,7 +689,7 @@ export class ScreenShare {
     return { id, reconfigure: status.videoReconfigure === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
   }
 
-  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc"): void {
+  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false): void {
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
     let closed = false;
@@ -665,6 +727,22 @@ export class ScreenShare {
     let lighter = false;
     let askedForKey = 0;
     let wantsKey = true;
+    // A picture that costs relay traffic is ended once no one has used it for a while: the video track
+    // while it goes through a TURN relay, or frames down this socket when the viewer is reached through the
+    // gateway. A direct path costs no one anything and is never ended for this.
+    const idleMs = screenIdleMs();
+    let usedAt = Date.now();
+    let videoRelayed = false;
+    const used = () => { usedAt = Date.now(); };
+    const costsRelay = () => (video ? videoRelayed : initialized && relayed);
+    const idleCheck = idleMs ? setInterval(() => {
+      if (!live() || desired.paused || !costsRelay() || Date.now() - usedAt < idleMs) return;
+      this.log(`[screen] unused for ${Math.round(idleMs / 1000)} s on a relayed path (${video ? "TURN" : "the gateway"}): disconnected`);
+      tell({ error: SCREEN_IDLE });
+      dispose();
+      ws.close(1000, "idle");
+    }, Math.min(10_000, Math.max(1000, idleMs / 4))) : undefined;
+    idleCheck?.unref();
 
     const stopControl = () => {
       inputEnabled = false;
@@ -914,6 +992,7 @@ export class ScreenShare {
     const dispose = () => {
       if (closed) return;
       closed = true;
+      if (idleCheck) clearInterval(idleCheck);
       revision += 1;
       pending = undefined;
       stopReminder();
@@ -930,6 +1009,9 @@ export class ScreenShare {
       let message: unknown;
       try { message = JSON.parse(String(data)); } catch { return; }
       const kind = (message as { t?: unknown } | null)?.t;
+      // Anything the person watching does. Acknowledgements, clocks, keyframe requests and signalling are the viewer's own doing.
+      if (typeof kind === "string" && !kind.startsWith("rtc.") && !VIEWER_OWN.has(kind)) used();
+      if (kind === "activity") return;
       if (kind === "screen.configure") {
         const parsed = screenConfiguration.safeParse(message);
         if (!parsed.success || !this.displays.some((entry) => entry.index === parsed.data.display)) {
@@ -981,11 +1063,19 @@ export class ScreenShare {
 
     if (wantsVideo) {
       let lostWhileOpening = false;
-      void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, {
+      void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, turn, {
         closed: () => !live(), claim, tell,
         refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
         lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
+        path: (through) => {
+          if (through === videoRelayed) return;
+          videoRelayed = through;
+          const limit = idleMs ? `it is ended after ${Math.round(idleMs / 1000)} s unused` : "the idle limit is off";
+          this.log(`[screen] the video track ${through ? `goes through a TURN relay: ${limit}` : "no longer goes through a relay"}`);
+        },
+        activity: used,
         input: message => {
+          used();
           if (!live() || desired.paused || !inputEnabled) return;
           controlRequested = true;
           const at = revision;

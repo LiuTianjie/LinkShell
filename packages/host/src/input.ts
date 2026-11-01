@@ -94,7 +94,9 @@ export interface AppStream {
 export interface VideoOffer {
   /** Which of the system's displays. */
   screen: number;
-  iceServers: { urls: string[] }[];
+  iceServers: { urls: string[]; username?: string; credential?: string }[];
+  /** The most a picture sent through a TURN relay should use, kilobits a second; the app's own limit when left out. */
+  relayKbps?: number;
   /** Frames a second; the app's own choice when left out. */
   fps?: number;
   /** Receiver ceiling; adaptation remains enabled. Older helpers safely ignore it. */

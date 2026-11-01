@@ -22,6 +22,8 @@ import { SCREEN_LOADING_HTML, SCREEN_LOADING_SCRIPT, SCREEN_LOADING_STYLE } from
 
 /** Final for a viewer: falling back to another path would only take the screen back. The app matches it too. */
 export const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
+/** Final too: a relayed picture no one used for a while was ended to save the relay's traffic. Reconnecting starts it again. */
+export const SCREEN_IDLE = "长时间没有操作，画面已断开";
 
 const icon = (body: string) =>
   `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -698,6 +700,8 @@ let lighterAt = -Infinity, failures = 0;
 const asked = new URLSearchParams(location.search);
 asked.delete("video");
 if (wantVideo) asked.set("video", "1");
+// This page passes a TURN server's login on to WebRTC: the host may give it one.
+asked.set("turn", "1");
 // How wide the video track may be (the socket's picture has its own ladder). The app says it in the address;
 // a plain browser remembers its own. A capable host applies a new choice to this same track.
 const WIDTHS = ["1280", "1920", "2560", "native"];
@@ -745,7 +749,7 @@ const ws = nativePicture
   : new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
 ws.binaryType = "arraybuffer";
 const send = (message) => { if (ws.readyState === 1) ws.send(JSON.stringify(message)); };
-let capabilityTimer = 0, socketClosed = false, taken = false;
+let capabilityTimer = 0, socketClosed = false, taken = false, idle = false;
 function waitForCapabilities() {
   clearTimeout(capabilityTimer);
   capabilityTimer = setTimeout(() => {
@@ -756,6 +760,16 @@ ws.onopen = () => { if (loading.phase === "connecting") showProgress("receiving"
 // Out of sight, a page answers late (its timers slow to one a second) and shows nothing: the host sends no
 // picture down the socket meanwhile, and starts again at a keyframe.
 document.addEventListener("visibilitychange", () => session.visibility(document.hidden));
+// The host ends a relayed picture no one has used for minutes. Touching or zooming the picture, scrolling, typing:
+// any of these says someone is there, at most every 15 s.
+let usedAt = -Infinity;
+function used() {
+  const now = performance.now();
+  if (now - usedAt < 15000) return;
+  usedAt = now;
+  send({ t: "activity" });
+}
+for (const type of ["pointerdown", "touchstart", "wheel", "keydown"]) document.addEventListener(type, used, { capture: true, passive: true });
 window.linkshellSession = (state) => session.update(state);
 
 function reloadSession(state) {
@@ -828,9 +842,10 @@ ws.onclose = () => {
   session.close();
   // A video track is this socket's: without the one there is no finding the other again, and no hands.
   drop();
-  if (!taken && requestRelay()) return;
-  tellApp({ type: "screenClosed", ...(taken ? { reason: "taken" } : {}) });
-  if (loading.phase !== "error") say("屏幕连接已断开，请确认电脑在线后重新连接。");
+  // Ended for being unused: another path would only start the picture again by itself.
+  if (!taken && !idle && requestRelay()) return;
+  tellApp({ type: "screenClosed", ...(taken ? { reason: "taken" } : idle ? { reason: "idle" } : {}) });
+  if (loading.phase !== "error") say(idle ? SCREEN_IDLE + "，重新连接即可继续。" : "屏幕连接已断开，请确认电脑在线后重新连接。");
   blocked = false;
 };
 
@@ -841,6 +856,7 @@ function heard(message) {
   }
   if (message.error) {
     if (message.error === SCREEN_TAKEN) taken = true;
+    if (message.error === SCREEN_IDLE) { idle = true; return say(SCREEN_IDLE + "，重新连接即可继续。"); }
     return say(message.error);
   }
   if (message.rtc) return signal(message.rtc);
@@ -929,7 +945,8 @@ function signal(message) {
 function connect(iceServers) {
   drop();
   let pc;
-  try { pc = new RTCPeerConnection({ iceServers }); }
+  // ?ice=relay: only relayed paths, to try the TURN server out where a direct one would be found.
+  try { pc = new RTCPeerConnection({ iceServers, ...(query.get("ice") === "relay" ? { iceTransportPolicy: "relay" } : {}) }); }
   catch (error) { return giveUp("the receiver could not start: " + error.message); }
   const mine = (rtc = { pc, channels: {}, described: Promise.resolve(), up: false, away: 0 });
   pc.onicecandidate = ({ candidate }) => {
@@ -3175,7 +3192,7 @@ if (nativePicture) {
 tellApp({ type: "ready", mode });
 `;
 
-const SCRIPT = `(() => {const SCREEN_TAKEN = ${JSON.stringify(SCREEN_TAKEN)};${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
+const SCRIPT = `(() => {const SCREEN_TAKEN = ${JSON.stringify(SCREEN_TAKEN)};const SCREEN_IDLE = ${JSON.stringify(SCREEN_IDLE)};${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
 
 export function viewerPage(platform: NodeJS.Platform = "darwin"): string {
   return `<!doctype html>

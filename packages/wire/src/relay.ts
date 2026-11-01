@@ -87,8 +87,27 @@ export const serverFrameSchema = z.discriminatedUnion("t", [
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;
 
+/** One entry of an `iceServers` list as WebRTC takes it. */
+export interface RelayIceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+/** What the gateway lends a computer so its video can find a way through a network that blocks a direct path. */
+export interface TurnCredentials {
+  /** Empty when this gateway has no TURN server: STUN and the direct path are all there is. */
+  servers: RelayIceServer[];
+  /** Seconds the username and credential stay valid. */
+  ttl: number;
+  /** The most a picture sent through the relay should use, in kilobits a second. */
+  maxKbps?: number;
+}
+
 /** Control methods and their results. */
 export interface RelayMethods {
+  /** Machine: short-lived credentials for the gateway's own TURN server (and its STUN). Older gateways answer `unknown_method`. */
+  "turn.credentials": { params: Record<string, never>; result: TurnCredentials };
   /** Machine: open a pairing window. The QR carries `secret`; the code is for typing. */
   "pair.offer": { params: { secretHash?: string }; result: { code: string; expiresAt: number } };
   /** Machine: accept or refuse a claim it received as a `pair.request` event. */

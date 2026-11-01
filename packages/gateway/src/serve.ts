@@ -22,6 +22,8 @@ export interface StartGatewayOptions {
   /** Validates account tokens; without it, accounts are off and only pairing works. */
   verifyToken?: VerifyToken;
   admit?: GatewayOptions["admit"];
+  /** The TURN server lent to computers whose video finds no direct path. */
+  turn?: GatewayOptions["turn"];
   /** Addresses of the reverse proxies in front, whose X-Forwarded-For is believed. */
   trustedProxies?: readonly string[];
   /** Connections one address may open per window (default 20 a minute). */
@@ -48,6 +50,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     databasePath: options.databasePath,
     verifyToken: options.verifyToken,
     admit: options.admit,
+    turn: options.turn,
     log: options.log,
   });
   const version = options.version ?? packageVersion();

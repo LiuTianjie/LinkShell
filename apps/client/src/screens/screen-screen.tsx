@@ -19,7 +19,7 @@ import { HeaderActions } from "@/components/header-actions";
 import { ScreenConnectionLoading } from "@/components/screen-connection-loading";
 import { Icon } from "@/components/icon";
 import { useConnection } from "@/lib/client";
-import { useScreenSession, type ScreenPageMessage, type ScreenPresentation, type ScreenViewport } from "@/lib/screen-session";
+import { SCREEN_IDLE, useScreenSession, type ScreenPageMessage, type ScreenPresentation, type ScreenViewport } from "@/lib/screen-session";
 import { haptics } from "@/lib/haptics";
 import { loadScreenShortcuts, saveScreenShortcuts, screenShortcuts } from "@/lib/settings";
 import { type } from "@/theme/type";
@@ -246,7 +246,8 @@ export function ScreenScreen() {
         <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingTop: Math.max(insets.top, fullscreen ? 0 : headerHeight) + 24, paddingBottom: insets.bottom + 24, paddingLeft: insets.left + 24, paddingRight: insets.right + 24, gap: 12 }}>
           <Icon sf="display" md="desktop_access_disabled" size={36} color="rgba(255,255,255,0.45)" />
           <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>{failure}</Text>
-          <Button title="重试" variant="tonal" size="small" onPress={retry} />
+          {failure === SCREEN_IDLE ? <Text style={[type.footnote, { color: "rgba(255,255,255,0.5)", textAlign: "center" }]}>画面经中转传输时，3 分钟没有操作会自动断开，以节省流量</Text> : null}
+          <Button title={failure === SCREEN_IDLE ? "重新连接" : "重试"} variant="tonal" size="small" onPress={retry} />
         </ScrollView>
       ) : !viewer ? (
         <ScreenConnectionLoading key={generation} preparing={preparing} onRetry={retry} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} />
