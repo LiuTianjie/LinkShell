@@ -1,5 +1,5 @@
 name: linkshell-gateway
-image: nickname4th/linkshell-gateway:0.6.46
+image: nickname4th/linkshell-gateway:0.6.48
 region: cn
 exposure: cn-edge
 domain: gateway.itool.tech
@@ -26,6 +26,10 @@ env:
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
   SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+  # The coturn on tecent (deploy/turn/): its shared secret and its stun:/turn: addresses, lent to computers for
+  # screen video that finds no direct path.
+  TURN_SECRET: ${TURN_SECRET}
+  TURN_URLS: ${TURN_URLS}
 healthcheck:
   test:
     - CMD

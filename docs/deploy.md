@@ -147,7 +147,7 @@ Mac 屏幕的媒体连接在 LinkShell.app 与手机/浏览器之间，另有 No
 | `TURN_TTL_SECONDS` | `28800` | 凭证有效期 |
 | `TURN_MAX_KBPS` | `3000` | 经中继的画面码率上限，电脑端按它限制编码 |
 
-coturn 用 `deploy/turn/` 下的 compose 文件部署（host 网络，节点要有自己的公网地址）：云服务器的安全组放行 UDP 3478、TCP 3478 和 UDP 49160–49359，把 `luma.compose.yml` 的 `node` 改成这台机器，用 `luma secret set --scope linkshell-turn` 设好 `TURN_SECRET`、`TURN_PUBLIC_IP`、`TURN_PRIVATE_IP` 后 `luma compose deploy deploy/turn/luma.compose.yml`。官方网关的 coturn 在腾讯云节点 `tecent`；网关的 `TURN_SECRET`、`TURN_URLS` 在 `linkshell-gateway` 的密钥里。配置里屏蔽了转发到私网地址，单会话限 4 Mbit/s，整机限 100 Mbit/s。
+coturn 用 `deploy/turn/` 下的 compose 文件部署（host 网络，节点要有自己的公网地址）：云服务器的安全组放行 UDP 3478、TCP 3478 和 UDP 49160–49359，把 `luma.compose.yml` 的 `node` 改成这台机器，用 `luma secret set --scope linkshell-turn` 设好 `TURN_SECRET`、`TURN_PUBLIC_IP`、`TURN_PRIVATE_IP` 后 `luma compose deploy deploy/turn/luma.compose.yml`。官方网关的 coturn 在腾讯云节点 `tecent`；网关的 `TURN_SECRET`、`TURN_URLS` 和 `SUPABASE_*` 一样是 Luma 的全局密钥：网关一旦有了自己作用域的密钥，Luma 就不再给它填全局的值。配置里屏蔽了转发到私网地址，单会话限 4 Mbit/s，整机限 100 Mbit/s。
 
 能直连时几乎不经过中继：中继候选的优先级最低，只有在直连全部失败时才会被选中；没被选中时，中继上只有少量保活包。
 
