@@ -239,7 +239,7 @@ export function postDesktopMessage(message: Record<string, unknown>): boolean {
   return true;
 }
 
-function nativeCommand(message: { action: "manage" } | { action: "workspace" } |{ action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean }): boolean {
+function nativeCommand(message: { action: "manage" } | { action: "workspace" } |{ action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean } | { action: "screenKeys"; captured: boolean }): boolean {
   if (electron) return postDesktopMessage(message);
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
@@ -304,6 +304,14 @@ export function setDesktopScreenFullScreen(enabled: boolean): boolean {
   return nativeCommand({ action: "screenFullScreen", enabled });
 }
 export const DESKTOP_FULLSCREEN_EVENT = "linkshell-desktop-fullscreen";
+
+/**
+ * While a remote screen has the keys, the window's own menu shortcuts (⌘W, ⌘Q, ⌘H, ⌘M, …) go to
+ * the remote computer instead, as in a remote desktop app. ⌃⌘F still leaves full screen here.
+ */
+export function setDesktopScreenKeys(captured: boolean): void {
+  if (isElectronDesktop) nativeCommand({ action: "screenKeys", captured });
+}
 
 export function openDesktopManagement(): void {
   // In Electron, management is a page of this window: the shell navigates on the same command

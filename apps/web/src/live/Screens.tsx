@@ -12,7 +12,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { useDialogs } from "@/components/Dialogs";
-import { DESKTOP_LOCAL } from "./desktop";
+import { DESKTOP_LOCAL, isElectronDesktop } from "./desktop";
+import { RemoteScreen } from "./RemoteScreen";
+import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import {
@@ -333,6 +335,33 @@ function ConnectedScreen({
   );
 }
 
+/** The desktop window's remote screen, once the computer's connection is up. */
+function RemoteScreenConnection({ name, active, back, retry }: { name: string; active: boolean; back: () => void; retry: () => void }) {
+  const status = useClient((state) => state.status);
+  const statusDetail = useClient((state) => state.statusDetail);
+  if (status === "online") return <RemoteScreen title={name} active={active} back={back} />;
+  return (
+    <div className="remote-screen remote-screen-waiting">
+      <div className="remote-screen-bar">
+        <div className="remote-screen-title">
+          <Button variant="ghost" size="icon" aria-label="返回电脑列表" title="返回电脑列表" onClick={back}><ArrowLeft /></Button>
+          <strong>{name}</strong>
+        </div>
+      </div>
+      <div className="remote-screen-stage">
+        <div className="remote-screen-overlay">
+          <ScreenConnectionLoading
+            preparing={false}
+            slow={status === "stopped"}
+            error={status === "stopped" ? statusDetail ?? "连接已断开" : undefined}
+            retry={retry}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Takes a computer off the list: its pairing, or, for one that signed in to the account, the account. */
 function useForget(computer: Computer | undefined, done?: () => void) {
   const dialogs = useDialogs();
@@ -411,6 +440,15 @@ export function ScreenDetail({
     }
   }, [active, computer, selectedKey]);
   const name = computer ? computerName(computer, names) : "远程桌面";
+  // The desktop window gives the screen the whole panel: its own bar is the page's title row.
+  if (isElectronDesktop && ready && computer?.machine.online && connection && !error)
+    return (
+      <div className="screen-detail-page remote-screen-page">
+        <Runtime value={connection}>
+          <RemoteScreenConnection name={name} active={active} back={back} retry={retry} />
+        </Runtime>
+      </div>
+    );
   return (
     <div className="screen-detail-page">
       <header className="flex items-center justify-between gap-3">

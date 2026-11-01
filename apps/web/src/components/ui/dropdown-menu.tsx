@@ -34,10 +34,14 @@ function DropdownMenuContent({
   sideOffset = 4,
   // A menu never touches the window's edge: it keeps 8 px, flipping or shifting to do so.
   collisionPadding = 8,
+  container,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
+  /** Where the menu is put: inside an element in the browser's full screen, which shows nothing else. */
+  container?: HTMLElement | null;
+}) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={container}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}

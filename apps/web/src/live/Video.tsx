@@ -37,6 +37,7 @@ import { cn } from "../lib/utils";
 import { isDesktop, isElectronDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { DesktopScreen } from "./DesktopScreen";
+import { RemoteScreen } from "./RemoteScreen";
 import {
   autoScreenWidth,
   screenPreferences,
@@ -305,8 +306,11 @@ export interface ScreenProps {
 
 export function Screen(props: ScreenProps) {
   const visible = useDesktopVisibility();
-  // The WKWebView shell draws the picture natively; Chromium (Electron, WebView2) decodes it itself.
-  return isDesktop && !isWindowsDesktop && !isElectronDesktop ? <DesktopScreen {...props} /> : <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
+  // The WKWebView shell draws the picture natively. The Electron window (Mac and Windows) has a
+  // receiver of its own, made for a mouse and a keyboard; a browser keeps the host's viewer page.
+  if (isDesktop && !isWindowsDesktop && !isElectronDesktop) return <DesktopScreen {...props} />;
+  if (isElectronDesktop && !props.embedded) return <RemoteScreen title={props.title ?? "电脑屏幕"} active={props.active ?? true} />;
+  return <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
 }
 
 function BrowserScreen({

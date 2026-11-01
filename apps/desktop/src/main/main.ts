@@ -99,6 +99,34 @@ function send(name: string, detail: unknown) {
   window.webContents.send("linkshell:event", name, detail);
 }
 
+/**
+ * The page's latest wish for the window's full screen (the remote screen's or the terminal's
+ * button), applied once the window is still. macOS animates into and out of a full-screen Space
+ * and drops a toggle asked for meanwhile: each finished animation reconciles the window with the
+ * newest wish instead, and a toggle that never took is asked again after a second.
+ */
+let wantedFullScreen: boolean | undefined;
+let fullScreenMoving = false;
+/** The last leave was asked for by the page (its wish is already false), not the window's own button. */
+let fullScreenAsked = false;
+let fullScreenRetry: ReturnType<typeof setTimeout> | undefined;
+function reconcileFullScreen() {
+  if (!window || window.isDestroyed() || wantedFullScreen === undefined || fullScreenMoving) return;
+  const wanted = wantedFullScreen;
+  if (window.isFullScreen() === wanted) {
+    clearTimeout(fullScreenRetry);
+    // The answer the page waits for, whether or not anything had to move.
+    send("linkshell-desktop-fullscreen", { fullscreen: wanted });
+    if (!wanted) wantedFullScreen = undefined;
+    return;
+  }
+  fullScreenMoving = true;
+  if (!wanted) fullScreenAsked = true;
+  window.setFullScreen(wanted);
+  clearTimeout(fullScreenRetry);
+  fullScreenRetry = setTimeout(() => { fullScreenMoving = false; reconcileFullScreen(); }, 1500);
+}
+
 /** Hidden, minimized or closed: the page pauses its remote screen and previews. */
 function setVisible(value: boolean) {
   visible = value;
@@ -158,15 +186,28 @@ function createWindow() {
     // Closing the window leaves LinkShell in the menu bar (the tray on Windows); the Host is never stopped here.
     event.preventDefault();
     // A full-screen window would leave an empty Space behind when hidden.
+    wantedFullScreen = undefined;
     if (window!.isFullScreen()) { window!.once("leave-full-screen", () => window?.hide()); window!.setFullScreen(false); }
     else window!.hide();
     if (process.platform === "darwin") app.dock?.hide();
   });
-  window.on("enter-full-screen", () => send("linkshell-desktop-window", { fullscreen: true }));
+  // Losing the focus gives the menu its shortcuts back: they are captured only while the remote screen is typed into.
+  window.on("blur", () => window?.webContents.setIgnoreMenuShortcuts(false));
+  window.on("enter-full-screen", () => {
+    fullScreenMoving = false;
+    // Entered by the window's own button or the menu: that is the page's wish from now on.
+    if (wantedFullScreen === undefined) wantedFullScreen = true;
+    send("linkshell-desktop-window", { fullscreen: true });
+    reconcileFullScreen();
+  });
   window.on("leave-full-screen", () => {
-    send("linkshell-desktop-window", { fullscreen: false });
+    fullScreenMoving = false;
     // Left by the window's own button or Esc: what asked for full screen leaves it too.
+    if (wantedFullScreen === true && !fullScreenAsked) wantedFullScreen = false;
+    fullScreenAsked = false;
+    send("linkshell-desktop-window", { fullscreen: false });
     send("linkshell-desktop-fullscreen", { fullscreen: false });
+    reconcileFullScreen();
   });
   web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) pageReady = false; });
   web.on("did-finish-load", () => {
@@ -309,15 +350,17 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       return;
     // The page's own focus handling is enough: nothing native sits above it.
     case "contentFocus": return;
+    // A remote screen has the keys: the menu's shortcuts (⌘W, ⌘Q, ⌘H, …) are the remote
+    // computer's while it does. The page keeps ⌃⌘F for leaving full screen.
+    case "screenKeys":
+      if (typeof message.captured === "boolean") window.webContents.setIgnoreMenuShortcuts(message.captured);
+      return;
     // The terminal's full screen: the window goes full screen and the page fills it; the answer
     // comes once the window has got there.
     case "screenFullScreen": {
       if (!window || typeof message.enabled !== "boolean") return;
-      const enabled = message.enabled;
-      if (window.isFullScreen() === enabled) return send("linkshell-desktop-fullscreen", { fullscreen: enabled });
-      const answer = () => send("linkshell-desktop-fullscreen", { fullscreen: enabled });
-      if (enabled) window.once("enter-full-screen", answer); else window.once("leave-full-screen", answer);
-      window.setFullScreen(enabled);
+      wantedFullScreen = message.enabled;
+      reconcileFullScreen();
       return;
     }
     case "invoke": return void invoke(event.sender, message);

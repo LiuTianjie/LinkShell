@@ -860,7 +860,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     };
     const update = () => {
       frame = 0;
-      const focusedRoot = document.fullscreenElement || document.querySelector(".screen-page.screen-focused, .port-preview-focused");
+      const focusedRoot = document.fullscreenElement || document.querySelector(".screen-page.screen-focused, .port-preview-focused, .remote-screen-fullscreen");
       const desktopRoot = focusedRoot?.closest(".desktop-root");
       const siblings = new Set<HTMLElement>();
       let node = focusedRoot;
@@ -900,10 +900,9 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   }, []);
   return (
     <div className="desktop-root" data-sidebar={sidebarHidden ? "hidden" : undefined} data-peek={peek || undefined} data-shell={isElectronDesktop ? "electron" : undefined} data-platform={isWindowsDesktop ? "windows" : undefined}>
-      <a className="skip-navigation" href="#workspace-content" onClick={(event) => {
-        event.preventDefault();
-        document.getElementById("workspace-content")?.focus();
-      }}>跳到内容</a>
+      {/* No "skip to content" link here: as the window's first focusable element it caught the
+          focus whenever the window got it back, and showed over the sidebar. The sidebar and the
+          main view sit side by side, and ⌘K reaches any of it. */}
       <SidebarProvider keyboardShortcut={false} className="desktop-body" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.

@@ -11,7 +11,8 @@
     border-radius: 6px;
     transform: translateY(-160%);
   }
-  .skip-navigation:focus {
+  /* Only for the keyboard: focus put there by a click or by a window coming back stays out of sight. */
+  .skip-navigation:focus-visible {
     transform: none;
   }
 

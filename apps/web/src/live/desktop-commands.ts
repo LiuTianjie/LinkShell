@@ -114,5 +114,6 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: { key: string; a
 
 /** While a remote screen or a focused preview has the keys, they belong to that computer. */
 export function keysBelongToContent(): boolean {
-  return !!(document.fullscreenElement || document.querySelector(".screen-focused, .port-preview-focused"));
+  return !!(document.fullscreenElement || document.documentElement.hasAttribute("data-remote-keys")
+    || document.querySelector(".screen-focused, .port-preview-focused, .remote-screen-fullscreen"));
 }
