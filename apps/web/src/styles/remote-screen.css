@@ -74,9 +74,6 @@
   .remote-screen-fullscreen .remote-screen-title { flex: none; color: rgb(255 255 255 / .7); }
   .remote-screen-fullscreen .remote-screen-title strong { max-width: 240px; color: #fff; font-size: 13px; }
   .remote-screen-fullscreen .remote-screen-path { color: rgb(255 255 255 / .55); }
-  .remote-screen-fullscreen .remote-screen-actions [data-button] { color: rgb(255 255 255 / .82); }
-  .remote-screen-fullscreen .remote-screen-actions [data-button]:hover { background: rgb(255 255 255 / .12); color: #fff; }
-  .remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"] { background: rgb(255 255 255 / .16); color: #fff; }
   .remote-screen-fullscreen > .remote-screen-stage { flex: 1; }
   .remote-screen-fullscreen .remote-screen-overlay { background: #000; color: rgb(255 255 255 / .8); }
   .remote-screen-fullscreen .remote-screen-toast { top: 58px; }
@@ -86,6 +83,13 @@
     .remote-screen-hint { animation: none; }
   }
 }
+
+/* The full-screen bar is dark in either theme. Outside the layers: the buttons' own utilities (`text-secondary-foreground`,
+   `hover:text-foreground`) would otherwise draw dark text on it, whatever these selectors' weight. */
+.remote-screen-fullscreen .remote-screen-actions [data-button] { flex: none; color: rgb(255 255 255 / .82); white-space: nowrap; }
+.remote-screen-fullscreen .remote-screen-actions [data-button]:is(:hover, [aria-expanded="true"]) { background: rgb(255 255 255 / .12); color: #fff; }
+.remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"] { background: rgb(255 255 255 / .16); color: #fff; }
+.remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"]:hover { background: rgb(255 255 255 / .22); }
 
 /* In the desktop window the bar is the page's title row: it drags the window, its controls don't. */
 html[data-desktop] .desktop-root[data-shell="electron"] .remote-screen:not(.remote-screen-fullscreen) > .remote-screen-bar { -webkit-app-region: drag; app-region: drag; }
