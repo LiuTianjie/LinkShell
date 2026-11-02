@@ -368,8 +368,7 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       } catch (error) { send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
       return;
     }
-    // A remote screen has the keys: the menu's shortcuts (⌘W, ⌘Q, ⌘H, …) are the remote
-    // computer's while it does. The page keeps ⌃⌘F for leaving full screen.
+    // A remote screen has the keys: the menu's shortcuts are the remote computer's while it does.
     case "screenKeys":
       if (typeof message.captured === "boolean") window.webContents.setIgnoreMenuShortcuts(message.captured);
       return;

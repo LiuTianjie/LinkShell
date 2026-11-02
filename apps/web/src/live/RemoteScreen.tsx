@@ -28,7 +28,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { cn } from "../lib/utils";
 import { ErrorNotice, useClient, useConnection, useJob, useLoad } from "./common";
-import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { readLocal, saveLocal } from "./storage";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
@@ -52,7 +52,7 @@ import { ScreenReceiver, type ReceiverState } from "./screen-receiver";
 import "../styles/remote-screen.css";
 import { remoteShortcuts, shortcutSign, type RemoteShortcut } from "./screen-shortcuts";
 
-/** The window's own full screen, as the shell reports it (enter by the green button, ⌃⌘F, the menu). */
+/** The window's own full screen, as the shell reports it (entered by the window's controls or its menu). */
 const DESKTOP_WINDOW_EVENT = "linkshell-desktop-window";
 
 const QUALITY = [
@@ -81,7 +81,8 @@ function hevcReceivable(): boolean {
   catch { return false; }
 }
 
-const LOCAL_PLATFORM = isWindowsDesktop ? "windows" : /Mac/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "mac" : "other";
+/** This receiver runs only in the Windows desktop window: a Mac's shows the picture natively (DesktopScreen). */
+const LOCAL_PLATFORM = "windows";
 
 /**
  * The remote screen in the desktop window. The picture is the video track itself, in the page:
@@ -340,12 +341,6 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     const native = event.nativeEvent;
     if (native.isComposing || native.keyCode === 229 || composing.current) return;
     const modifiers = remoteModifiers(native, LOCAL_PLATFORM, remote);
-    // ⌃⌘F stays with this computer: the way out of full screen while controlling the other one.
-    if (LOCAL_PLATFORM === "mac" && native.metaKey && native.ctrlKey && native.code === "KeyF") {
-      event.preventDefault();
-      requestFullscreen(!fullscreenRef.current.owns);
-      return;
-    }
     const named = namedKey(native);
     // Text goes through the field (input methods, dead keys, emoji); shortcuts and named keys go as keys.
     const shortcut = native.metaKey || native.ctrlKey || (native.altKey && remote === "windows");
@@ -494,7 +489,7 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
           </PopoverContent>
         </Popover>
         <Button variant="ghost" size="icon" aria-label="重新连接" title="重新连接" onClick={retry}><RotateCw /></Button>
-        <Button variant={shown ? "secondary" : "ghost"} size="sm" onClick={() => requestFullscreen(!fullscreen.owns)} title={LOCAL_PLATFORM === "mac" ? "全屏（⌃⌘F）" : "全屏"}>
+        <Button variant={shown ? "secondary" : "ghost"} size="sm" onClick={() => requestFullscreen(!fullscreen.owns)} title="全屏">
           {shown ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}
           {shown ? "退出全屏" : "全屏"}
         </Button>

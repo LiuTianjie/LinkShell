@@ -306,8 +306,8 @@ export function setDesktopScreenFullScreen(enabled: boolean): boolean {
 export const DESKTOP_FULLSCREEN_EVENT = "linkshell-desktop-fullscreen";
 
 /**
- * While a remote screen has the keys, the window's own menu shortcuts (⌘W, ⌘Q, ⌘H, ⌘M, …) go to
- * the remote computer instead, as in a remote desktop app. ⌃⌘F still leaves full screen here.
+ * While a remote screen has the keys, the window's own menu shortcuts go to the remote computer
+ * instead, as in a remote desktop app.
  */
 export function setDesktopScreenKeys(captured: boolean): void {
   if (isElectronDesktop) nativeCommand({ action: "screenKeys", captured });
