@@ -28,8 +28,8 @@ import {
   Lock,
   Settings2,
 } from "lucide-react";
-// The app icon without its white tile: beside the traffic lights a tile would glare in dark mode.
-import appGlyph from "../assets/mark-glyph.png";
+// Keep the app icon's white tile visible in both desktop themes.
+import appIcon from "../assets/app-icon.png";
 import { engine, type Computer, type Connection } from "../live/engine";
 import { baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
@@ -610,7 +610,7 @@ function DesktopNavigation({
         // The window's title row: the traffic lights sit at its left, it drags the window.
         <div className="desktop-titlebar desktop-sidebar-titlebar">
           {/* Ours, in the title row beside the traffic lights: the app's mark and name. */}
-          <span className="desktop-brand" aria-hidden><img src={appGlyph} alt="" draggable={false} /><span>LinkShell</span></span>
+          <span className="desktop-brand" aria-hidden><img src={appIcon} alt="" draggable={false} /><span>LinkShell</span></span>
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
