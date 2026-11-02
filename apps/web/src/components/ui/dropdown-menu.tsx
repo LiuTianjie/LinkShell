@@ -17,6 +17,13 @@ function DropdownMenuPortal({
   );
 }
 
+/** The last input was a key, not the pointer: a menu closed by keys hands the focus back. */
+let keyboardInput = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", () => { keyboardInput = true; }, true);
+  document.addEventListener("pointerdown", () => { keyboardInput = false; }, true);
+}
+
 function DropdownMenuTrigger({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
@@ -35,6 +42,7 @@ function DropdownMenuContent({
   // A menu never touches the window's edge: it keeps 8 px, flipping or shifting to do so.
   collisionPadding = 8,
   container,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   /** Where the menu is put: inside an element in the browser's full screen, which shows nothing else. */
@@ -52,6 +60,12 @@ function DropdownMenuContent({
           className,
         )}
         {...props}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          // Radix focuses the trigger again once the chosen item is gone, which Chromium shows as
+          // keyboard focus: a ring, and the trigger's tooltip. After a click the focus stays put.
+          if (!keyboardInput) event.preventDefault();
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   );

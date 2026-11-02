@@ -25,9 +25,21 @@ function Tooltip({
 }
 
 function TooltipTrigger({
+  onFocus,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      {...props}
+      onFocus={(event) => {
+        onFocus?.(event);
+        // Radix opens on every focus, also the focus a closing menu or dialog hands back to its
+        // button and the one the window restores when it comes back: only keyboard focus asks.
+        if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
+      }}
+    />
+  );
 }
 
 function TooltipContent({

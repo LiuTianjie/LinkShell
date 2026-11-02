@@ -305,6 +305,10 @@ function showWindow() {
   if (!window) return;
   if (process.platform === "darwin") void app.dock?.show();
   if (window.isMinimized()) window.restore();
+  // Made key while LinkShell is not yet the active app (the menu bar, a second launch), AppKit
+  // tabs into the page and Chromium focuses its first button. With the page already the first
+  // responder there is nothing to tab into, and the page keeps the focus it had.
+  if (MAC) window.webContents.focus();
   window.show();
   window.focus();
   setVisible(true);
