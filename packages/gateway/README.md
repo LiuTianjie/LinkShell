@@ -6,6 +6,8 @@ LinkShell 网关：手机和电脑之间的中继。它用密钥认证两端，�
 
 需要 Node.js 22.13 或更新版本（数据用 Node 自带的 SQLite 保存）。完整的自建步骤（HTTPS、反向代理、连接手机）见[部署指南](https://github.com/LiuTianjie/LinkShell/blob/main/docs/deploy.md)。
 
+内置网页工作台的「我的电脑」使用网格卡片展示 CPU 与内存方点趋势。负载由 Host 0.4.83 或更新版本提供，通过现有加密连接读取，网关不解密这些数据。
+
 ## 屏幕与网关流量
 
 Mac 屏幕视频轨道由 LinkShell.app 直接发送给原生 iOS 接收器或网页播放器；网关继续负责会话与信令，视频直连成功时不承载画面。Host 与客户端另有一条通用 WebRTC DataChannel，可承载端口预览及屏幕兼容字节流，不能用它的连通状态推断视频轨道状态。

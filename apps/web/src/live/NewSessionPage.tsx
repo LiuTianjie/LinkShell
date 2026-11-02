@@ -115,7 +115,7 @@ export function NewSessionPage({
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); start(); }
             }}
           />
-          <div className="new-session-bar flex-wrap">
+          <div className="new-session-bar">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} aria-label="选择 Agent">
@@ -147,7 +147,7 @@ export function NewSessionPage({
               <span className="new-session-pill new-session-pill-static" role="status"><LoaderCircle className="animate-spin" /><span>正在读取模型与设置…</span></span>
             )}
             {models && !models.models.length && !models.error && (
-              <Button type="button" variant="ghost" size="sm" className="new-session-pill" title="Agent 尚未提供可预选的模型；点击重新读取" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>
+              <Button type="button" variant="ghost" size="sm" className="new-session-pill" aria-label="重新读取默认模型" title="Agent 尚未提供可预选的模型；点击重新读取" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>
                 <Cpu />
                 <span>默认模型</span>
               </Button>
@@ -216,6 +216,7 @@ export function NewSessionPage({
                 className="new-session-pill"
                 data-active={worktree || undefined}
                 aria-pressed={worktree}
+                aria-label={worktree ? "独立 worktree" : "当前分支"}
                 disabled={job.busy}
                 title="基于当前 Git 仓库创建独立工作目录"
                 onClick={() => setWorktree((value) => !value)}

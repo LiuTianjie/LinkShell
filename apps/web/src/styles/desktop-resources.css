@@ -182,7 +182,9 @@ html[data-desktop] .desktop-main .task-command { display: -webkit-box; overflow:
 
 /* ── Small things shared by these pages ──────────────────────────────────── */
 html[data-desktop] .computer-current { padding: 0 8px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .screen-list { display: flex; flex-direction: column; padding: 0; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop][data-theme="dark"] .desktop-main .screen-list { background: rgb(255 255 255 / .02); }
+html[data-desktop] .desktop-main .screens-page { --page-inline: max(24px, calc((100cqw - 1140px) / 2)); }
+@media (max-width: 720px) {
+  html[data-desktop] .desktop-main .screens-page { --page-inline: 16px; }
+}
 /* A footnote under a group starts where the group's rows' text does. */
 html[data-desktop] .desktop-main .screen-note { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-left: 16px; color: var(--tertiaryLabel); font-size: 12px; }

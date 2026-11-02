@@ -39,6 +39,10 @@ Claude and standard ACP forms, Cursor choice questions, and Grok questions/MCP f
 the phone's question card while preserving each agent's native response format.
 See [question support and validation boundaries](../../docs/v2/agent-questions.md).
 
+## Computer metrics
+
+`machine.metrics` returns on-demand whole-computer CPU usage and physical memory use over the existing authenticated channel (protocol revision 3). CPU is a multicore tick delta; memory includes system and cached memory. The web and desktop computer grid samples every five seconds while visible.
+
 ## Remote screen
 
 `screen.start` returns a token-protected loopback viewer port and display list. The phone

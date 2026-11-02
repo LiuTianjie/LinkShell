@@ -352,6 +352,23 @@ export const machineInfoSchema = z.object({
 });
 export type MachineInfo = z.infer<typeof machineInfoSchema>;
 
+/** Whole-computer resource use; CPU is a delta across all logical cores, not load average. */
+export const machineMetricsSchema = z.object({
+  sampledAt: z.number().nonnegative(),
+  sampleIntervalMs: z.number().nonnegative(),
+  cpu: z.object({
+    usage: z.number().min(0).max(100).nullable(),
+    cores: z.number().int().nonnegative(),
+    model: z.string(),
+  }),
+  memory: z.object({
+    totalBytes: z.number().nonnegative(),
+    /** Physical memory minus OS-reported free memory; includes OS and cached memory. */
+    usedBytes: z.number().nonnegative(),
+  }),
+});
+export type MachineMetrics = z.infer<typeof machineMetricsSchema>;
+
 /** A server listening on the host, which a device can preview through the encrypted channel. */
 export const portInfoSchema = z.object({
   port: z.number().int().min(1).max(65535),

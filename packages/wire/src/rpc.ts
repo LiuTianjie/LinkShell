@@ -9,6 +9,7 @@ import {
   agentInfoSchema,
   gatewayStatusSchema,
   machineInfoSchema,
+  machineMetricsSchema,
   portInfoSchema,
   projectSummarySchema,
   terminalInfoSchema,
@@ -75,8 +76,9 @@ export const RPC_APP_ERROR = -32000;
  * computer is older than itself and say so (an absent revision is 0).
  * 1: side conversations (`sessions.side`), `machine.info.protocol` itself.
  * 2: session terminals (`terminals.create` `sessionId`, `TerminalInfo.sessionId`).
+ * 3: whole-computer CPU and physical memory sampling (`machine.metrics`).
  */
-export const HOST_PROTOCOL = 2;
+export const HOST_PROTOCOL = 3;
 
 const empty = z.looseObject({});
 
@@ -135,6 +137,7 @@ const coreMethods = {
     params: empty,
     result: machineInfoSchema,
   },
+  "machine.metrics": { params: empty, result: machineMetricsSchema },
   "machine.rename": {
     /** Empty restores the configured default; names never change peer identities. */
     params: z.object({ name: z.string().trim().max(40) }),

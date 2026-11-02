@@ -39,6 +39,8 @@ const desktopColors: Record<string, [string, string]> = {
   info: ["#5260c5", "#9aa5ff"],
   running: ["#5260c5", "#9aa5ff"],
   danger: ["#c03e48", "#f08891"],
+  monitorCpu: ["#936b27", "#ecd093"],
+  monitorMemory: ["#975684", "#ce8fb9"],
 };
 const variables = (index: 0 | 1) =>
   Object.entries({ ...brandColors, ...desktopColors, ...codeColors })

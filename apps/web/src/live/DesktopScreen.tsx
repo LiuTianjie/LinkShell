@@ -218,8 +218,8 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       <div className="screen-idle-status" role="status">
         <span className="screen-dot" data-on={ready || undefined} aria-hidden="true" />
         <div>
-          <strong>{problem ? "检查失败" : access.loading && !access.value ? "正在检查屏幕…" : !access.value?.supported ? "屏幕共享" : access.value.recording === false ? "等待授权" : "远程桌面"}</strong>
-          <span title={problem}>{problem ?? (access.value?.recording === false ? "需要屏幕录制权限" : "原生画面 · 硬件解码")}</span>
+          <strong>{problem ? "检查失败" : access.loading && !access.value ? "正在检查屏幕…" : !access.value?.supported ? "屏幕共享" : access.value.recording === false ? "等待授权" : "在线"}</strong>
+          <span title={problem}>{problem ?? (!access.value ? "正在读取屏幕状态" : !access.value.supported ? "此系统无法共享屏幕" : access.value.recording === false ? "需要屏幕录制权限" : access.value.control ? "可观看与控制" : "仅观看桌面")}</span>
         </div>
       </div>
       <div className="screen-idle-actions">

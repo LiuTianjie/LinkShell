@@ -1,11 +1,60 @@
 @layer components {
-/* Computer list */
+/* Computer overview */
 .screens-page {
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 24px max(20px, calc((100% - 1040px) / 2)) 32px;
   }
+.computer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); align-items: start; gap: 16px; }
+.computer-grid > [data-slot="empty"], .computer-grid > .screen-list-wait { grid-column: 1 / -1; }
+.computer-card { display: flex; flex-direction: column; min-width: 0; padding: 18px; border: 1px solid var(--separator); border-radius: 14px; background: var(--card); transition: border-color 180ms ease, box-shadow 180ms ease; }
+.computer-card[hidden] { display: none; }
+.computer-card:hover, .computer-card:focus-within { border-color: var(--separatorStrong); box-shadow: 0 4px 18px color-mix(in srgb, var(--label) 4%, transparent); }
+.computer-card-header { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.computer-card-icon { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--secondaryLabel); background: var(--inset); }
+.computer-card-name { flex: 1; min-width: 0; }
+.computer-card-name h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 550; line-height: 22px; }
+.computer-card-name > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tertiaryLabel); font-size: 11px; line-height: 17px; }
+.computer-card-header [data-slot="badge"] { flex: none; font-size: 10px; padding-inline: 5px; }
+.computer-card-header [title="给电脑命名"] { width: 24px; height: 24px; color: var(--tertiaryLabel); }
+/* Keep the plot in its native aspect ratio: each sample is a column of square cells. */
+.computer-telemetry { margin: 16px 0 14px; }
+.computer-readings { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; font-variant-numeric: tabular-nums; }
+.computer-metric-label { display: block; color: var(--secondaryLabel); font-size: 11px; font-weight: 500; }
+.computer-cpu { display: flex; align-items: center; gap: 5px; color: var(--monitorCpu); }
+.computer-cpu strong { font-size: 68px; font-weight: 550; letter-spacing: -.06em; line-height: 1; }
+.computer-cpu > div { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; padding-top: 7px; }
+.computer-cpu > div > span:first-child { font-size: 22px; line-height: 1; }
+.computer-cpu .computer-metric-label { font-size: 12px; }
+.computer-memory { padding-bottom: 3px; color: var(--monitorMemory); text-align: right; }
+.computer-memory .computer-metric-label { display: inline; margin-right: 4px; }
+.computer-memory > div { display: inline-flex; align-items: baseline; gap: 2px; }
+.computer-memory strong { font-size: 24px; font-weight: 550; letter-spacing: -.04em; line-height: 1.2; }
+.computer-memory > div > span { font-size: 13px; }
+.computer-memory small { display: block; margin-top: 4px; color: var(--tertiaryLabel); font-size: 10px; }
+.computer-history-frame { margin-top: 14px; }
+.computer-history { display: block; width: 100%; aspect-ratio: 2; }
+.computer-history rect { fill: var(--separator); }
+.computer-history [data-pending] { opacity: .3; }
+.computer-history [data-tone="memory-fill"] { fill: color-mix(in srgb, var(--monitorMemory) 13%, var(--card)); }
+.computer-history [data-tone="cpu"] { fill: var(--monitorCpu); }
+.computer-history [data-tone="memory"] { fill: var(--monitorMemory); }
+.computer-telemetry-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 16px; margin-top: 6px; color: var(--tertiaryLabel); font-size: 10px; line-height: 16px; }
+.computer-telemetry-empty { display: flex; flex-direction: column; justify-content: center; gap: 10px; padding-block: 24px; }
+.computer-empty-readings { display: flex; gap: 28px; color: var(--tertiaryLabel); font-size: 11px; }
+.computer-empty-readings > span { display: flex; align-items: center; gap: 8px; }
+.computer-empty-readings b { color: var(--quaternaryLabel); font-size: 24px; font-weight: 400; }
+.computer-card-footer { display: flex; flex-direction: column; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--separator); }
+.computer-card-footer :is(.screen-page.screen-is-idle, .screen-idle) { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
+.computer-card-footer .screen-idle-status { flex: 1 1 140px; min-height: 38px; }
+.computer-card-footer .screen-idle-status > div { max-width: 100%; }
+.computer-card-footer .screen-idle-status strong { font-size: 12px; }
+.computer-card-footer .screen-idle-status span { font-size: 11px; }
+.computer-card-footer .screen-idle-actions { justify-content: flex-end; min-height: 28px; margin-left: auto; }
+.computer-card-loading { gap: 24px; min-height: 340px; }
+.computer-card[data-offline] .computer-card-icon { color: var(--quaternaryLabel); }
+.screen-note { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--tertiaryLabel); font-size: 11px; }
 .screen-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

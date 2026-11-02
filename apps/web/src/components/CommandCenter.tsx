@@ -47,7 +47,7 @@ type Appearance = "system" | "light" | "dark";
 const places = [
   { id: "home", title: "会话", icon: MessageSquare },
   { id: "projects", title: "项目", icon: Layers3 },
-  { id: "screen", title: "远程桌面", icon: Monitor },
+  { id: "screen", title: "我的电脑", icon: Monitor },
   { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },

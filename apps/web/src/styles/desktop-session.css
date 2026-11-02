@@ -378,27 +378,33 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
 html[data-desktop] .desktop-main > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
 html[data-desktop] .new-session-stage { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(680px, calc(100% - 48px)); margin: auto; padding: 48px 0 18vh; }
 html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label); font-size: 24px; font-weight: 590; letter-spacing: -.02em; line-height: 30px; text-align: center; }
-html[data-desktop] .new-session-composer { display: flex; flex-direction: column; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
+html[data-desktop] .new-session-composer { display: flex; flex-direction: column; container-type: inline-size; container-name: new-session; border-radius: 22px; background: var(--plain); box-shadow: var(--composer-shadow); transition: box-shadow 200ms var(--ease-out); }
 html[data-desktop][data-theme="dark"] .new-session-composer { background: #303030; }
 html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separatorStrong); }
 /* In the dark a focused composer is lit by its surface already; the ring stays a hairline. */
 html[data-desktop][data-theme="dark"] :is(.new-session-composer, .desktop-main .composer):focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px var(--separator); }
 html[data-desktop] .new-session-composer textarea { min-height: 76px; max-height: 40vh; padding: 14px 16px 6px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 20px; resize: none; outline: none; field-sizing: content; }
 html[data-desktop] .new-session-composer textarea::placeholder { color: color-mix(in oklab, var(--tertiaryLabel) 50%, transparent); }
-html[data-desktop] .new-session-bar { display: flex; align-items: center; gap: 2px; padding: 0 8px 8px; }
+/* Keep Send on the same row; settings give up their label width first. */
+html[data-desktop] .new-session-bar { display: flex; flex-wrap: nowrap; align-items: center; min-width: 0; gap: 2px; padding: 0 8px 8px; }
 html[data-desktop] .new-session-spacer { flex: 1; }
-html[data-desktop] .new-session-pill { max-width: 220px; height: 28px; padding-inline: 8px; gap: 5px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
+html[data-desktop] .new-session-pill { flex: 0 1 auto; min-width: 0; max-width: 220px; height: 28px; padding-inline: 8px; gap: 5px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .new-session-pill:hover:not(:disabled),
 html[data-desktop] .new-session-pill[data-state="open"] { background: var(--fill); color: var(--label); }
 html[data-desktop] .new-session-pill[data-active] { color: var(--running); }
 html[data-desktop] .new-session-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .new-session-pill svg { flex: none; width: 14px; height: 14px; }
 html[data-desktop] .new-session-pill-static { display: inline-flex; align-items: center; cursor: default; }
-html[data-desktop] .new-session-pill .agent-mark { width: 16px; height: 16px; border-radius: 4px; }
+html[data-desktop] .new-session-pill .agent-mark { flex: none; width: 16px; height: 16px; border-radius: 4px; }
 html[data-desktop] .new-session-caret { opacity: .6; }
-html[data-desktop] .new-session-composer [data-button].send-button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
+html[data-desktop] .new-session-composer [data-button].send-button { flex: none; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: var(--accent); color: var(--plain); }
 html[data-desktop] .new-session-composer [data-button].send-button:disabled { opacity: .5; }
 html[data-desktop] .new-session-composer [data-button].send-button svg { width: 16px; height: 16px; }
+@container new-session (max-width: 560px) {
+  html[data-desktop] .new-session-pill[data-button] { flex: none; width: 28px; padding-inline: 0; gap: 0; }
+  html[data-desktop] .new-session-pill[data-button] > span:not(.agent-mark),
+  html[data-desktop] .new-session-caret { display: none; }
+}
 html[data-desktop] .new-session-menu { min-width: 240px; max-width: 360px; }
 html[data-desktop] .new-session-option { display: grid; min-width: 0; }
 html[data-desktop] .new-session-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

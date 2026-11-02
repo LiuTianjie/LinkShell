@@ -95,7 +95,7 @@ type NavigationItem = { id: string; title: string; icon: LucideIcon };
 // list or ⌘K.
 const navigationItems: NavigationItem[] = [
   { id: "home", title: "会话", icon: MessageSquare },
-  { id: "screen", title: "远程桌面", icon: Monitor },
+  { id: "screen", title: "我的电脑", icon: Monitor },
   { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },

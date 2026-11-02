@@ -28,6 +28,7 @@ import type { OutputListener, TerminalManager } from "../terminals.js";
 import type { LiveActivityRelay } from "../live-activities.js";
 import type { AccessControl } from "../access.js";
 import { mcpHandlers } from "./mcp.js";
+import { MachineMetricsSampler } from "../machine-metrics.js";
 
 // How a development client names this machine: loopback, or the Android emulator's alias for its host's loopback.
 const DEVELOPMENT_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "10.0.2.2"]);
@@ -128,6 +129,7 @@ export class HostRpcServer {
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     const usage = options.usage ?? new UsageStatistics();
+    const metrics = new MachineMetricsSampler();
     this.handlers = {
       "desktop.shutdown": (params: P<"desktop.shutdown">) => {
         if (!options.shutdown || params.pid !== process.pid) throw RpcError.app("conflict", "后台服务已改变，请刷新状态后重试");
@@ -167,6 +169,7 @@ export class HostRpcServer {
         this.broadcast("machine.changed", info);
         return info;
       },
+      "machine.metrics": () => metrics.snapshot(),
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
       "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd, params.model),

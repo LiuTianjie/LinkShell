@@ -23,7 +23,6 @@ import {
   InputGroupInput,
   InputGroupButton,
 } from "@/components/ui/input-group";
-import { cn } from "@/lib/utils";
 import { Icon } from "../icons";
 import { engine, type Computer, type Connection } from "./engine";
 import { computerAtKey } from "./computer-identity";
@@ -31,12 +30,15 @@ import {
   EmptyState,
   ErrorNotice,
   Runtime,
+  Modal,
   messageOf,
   useClient,
   useConnection,
 } from "./common";
 import { Screen, StatusDot } from "./Video";
 import { ComputerName } from "./ComputerName";
+import { ComputerMetrics, ComputerTelemetry } from "./ComputerTelemetry";
+import { AccessUnlock } from "./Access";
 import {
   computerName,
   computerIdentity,
@@ -48,11 +50,17 @@ export function Screens({
   connect,
   open,
 }: {
-  /** False while the window is hidden: the page stays, its screen connections are let go. */
+  /** False while the window is hidden: the page stays, sampling and card connections stop. */
   live?: boolean;
   connect: () => void;
   open: (computer: Computer) => void;
 }) {
+  const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const changed = () => setVisible(!document.hidden);
+    document.addEventListener("visibilitychange", changed);
+    return () => document.removeEventListener("visibilitychange", changed);
+  }, []);
   const computers = useStore(engine.state, (state) => state.computers);
   const names = useStore(computerNames.store);
   const [query, setQuery] = useState("");
@@ -90,7 +98,7 @@ export function Screens({
   return (
     <div className="screens-page">
       <PageHeader
-        title="远程桌面"
+        title="我的电脑"
         detail={ready ? <><span>{computers.length} 台电脑</span><span>{online} 台在线</span></> : undefined}
         actions={<>
           {searchField}
@@ -98,23 +106,22 @@ export function Screens({
         </>}
       />
       {!ready ? (
-        <div className="screen-list screen-list-loading" role="status" aria-label="正在加载电脑">
-          {[0, 1].map((key) => (
-            <div key={key} className="screen-row screen-row-skeleton">
-              <div className="flex min-w-0 items-center gap-3">
-                <Skeleton className="size-4" />
-                <Skeleton className="h-4 w-40" />
-              </div>
+        <div className="computer-grid" role="status" aria-label="正在加载电脑">
+          {[0, 1, 2].map((key) => (
+            <div key={key} className="computer-card computer-card-loading">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-20 w-28" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-7 w-28 self-end" />
             </div>
           ))}
-          {/* Only a wait that is noticeable gets words; a quick one is just the rows filling in. */}
           <p className="screen-list-wait">
             <LoaderCircle className="animate-spin" aria-hidden />
             正在读取电脑…
           </p>
         </div>
       ) : computers.length ? (
-        <div className="screen-list">
+        <div className="computer-grid">
           {!found && (
             <EmptyState
               icon={<Search />}
@@ -130,7 +137,7 @@ export function Screens({
             <ScreenCard
               key={computer.key}
               computer={computer}
-              live={live}
+              live={live && visible}
               hidden={!matches(computer)}
               open={() => open(computer)}
             />
@@ -140,7 +147,7 @@ export function Screens({
         <EmptyState
           icon={<Icon name="computer" size={18} />}
           title="还没有连接的电脑"
-          description="连接电脑后，可以在这里打开它们的屏幕。"
+          description="连接你的电脑，查看运行状态，随时打开桌面。"
         >
           <Button onClick={connect}>连接电脑</Button>
         </EmptyState>
@@ -148,7 +155,7 @@ export function Screens({
       {!!computers.length && (
         <p className="screen-note">
           <LockKeyhole size={13} aria-hidden />
-          画面与操作端到端加密，网关只转发密文
+          主机状态、画面与操作端到端加密
         </p>
       )}
     </div>
@@ -172,106 +179,89 @@ function ScreenCard({
   );
   const names = useStore(computerNames.store);
   const name = computerName(computer, names);
-  const { connection, error, retry } = useScreenConnection(live ? computer : undefined);
+  const watching = live && !hidden;
+  const { connection, error, retry } = useScreenConnection(watching ? computer : undefined, computer.key, true);
   const { forget, forgetting } = useForget(computer);
   return (
     <section
-      className={cn(
-        "screen-row border-b border-border px-1 py-2.5 hover:bg-muted/50",
-        hidden && "hidden",
-      )}
+      className="computer-card"
+      hidden={hidden}
       data-current={selected || undefined}
-      aria-label={`${name}的屏幕`}
+      data-offline={!computer.machine.online || undefined}
+      aria-label={name}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="shrink-0 text-muted-foreground">
-          <Icon name="computer" size={16} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13px] leading-5 font-medium" title={name}>
-              {name}
-            </span>
-            {selected && (
-              <Badge
-                variant="secondary"
-                className="h-[18px] shrink-0 px-1.5 py-0 text-[11px] leading-none"
-              >
-                当前
-              </Badge>
-            )}
-            <ComputerName computer={computer} iconOnly />
-          </div>
-          <div
-            className="mt-0.5 truncate text-xs leading-[18px] text-muted-foreground tabular-nums"
-            title={`${computer.machine.name} · ${computer.machine.id}`}
-          >
-            {names[computer.key] && (
-              <>
-                {computer.machine.name}
-                <span aria-hidden="true"> · </span>
-              </>
-            )}
-            {computerIdentity(computer)}
-          </div>
+      <header className="computer-card-header">
+        <span className="computer-card-icon"><Icon name="computer" size={18} /></span>
+        <div className="computer-card-name">
+          <h2 title={name}>{name}</h2>
+          <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computer.key === DESKTOP_LOCAL ? "本机" : computerIdentity(computer)}</span>
         </div>
-      </div>
-      {connection && computer.machine.online ? (
-        <Runtime value={connection}>
-          <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />
-        </Runtime>
+        {selected && <Badge variant="secondary">当前</Badge>}
+        <ComputerName computer={computer} iconOnly />
+      </header>
+      {connection && computer.machine.online && watching ? (
+        <Runtime value={connection}><ComputerTelemetry /></Runtime>
       ) : (
-        <div className="screen-idle" role="status">
-          <div className="screen-idle-status">
-            <StatusDot on={false} />
-            <div>
-              <strong>
-                {error
-                  ? "暂时无法连接"
-                  : !computer.machine.online
-                    ? "电脑离线"
-                    : live
-                      ? "正在连接电脑…"
-                      : "画面已暂停"}
-              </strong>
-              <span title={error}>
-                {error ??
-                  (!computer.machine.online
-                    ? "电脑开机并运行 LinkShell 后即可连接"
-                    : live
-                      ? "正在建立加密连接"
-                      : "窗口回到前台后继续")}
-              </span>
+        <ComputerMetrics status={!computer.machine.online ? "电脑离线" : error ? "暂时无法连接" : live ? "正在连接电脑…" : "刷新已暂停"} detail={error} />
+      )}
+      <footer className="computer-card-footer">
+        {connection && computer.machine.online && watching ? (
+          <Runtime value={connection}>
+            <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />
+          </Runtime>
+        ) : (
+          <div className="screen-idle" role="status">
+            <div className="screen-idle-status">
+              <StatusDot on={false} />
+              <div>
+                <strong>
+                  {error
+                    ? "暂时无法连接"
+                    : !computer.machine.online
+                      ? "电脑离线"
+                      : live
+                        ? "正在连接电脑…"
+                        : "画面已暂停"}
+                </strong>
+                <span title={error}>
+                  {error ??
+                    (!computer.machine.online
+                      ? "电脑开机并运行 LinkShell 后即可连接"
+                      : live
+                        ? "正在建立加密连接"
+                        : "窗口回到前台后继续")}
+                </span>
+              </div>
+            </div>
+            <div className="screen-idle-actions">
+              {error && (
+                <Button variant="outline" onClick={retry}>
+                  <RefreshCw data-icon="inline-start" />
+                  重新连接
+                </Button>
+              )}
+              {!computer.machine.online && computer.key !== DESKTOP_LOCAL && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`移除 ${name}`}
+                  title="移除这台电脑"
+                  disabled={forgetting}
+                  onClick={forget}
+                >
+                  <Trash2 />
+                </Button>
+              )}
+              {!computer.machine.online && (
+                <Button variant="outline" onClick={() => engine.reconnect()}>
+                  <RefreshCw data-icon="inline-start" />
+                  刷新连接
+                </Button>
+              )}
             </div>
           </div>
-          <div className="screen-idle-actions">
-            {error && (
-              <Button variant="outline" onClick={retry}>
-                <RefreshCw data-icon="inline-start" />
-                重新连接
-              </Button>
-            )}
-            {!computer.machine.online && computer.key !== DESKTOP_LOCAL && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`移除 ${name}`}
-                title="移除这台电脑"
-                disabled={forgetting}
-                onClick={forget}
-              >
-                <Trash2 />
-              </Button>
-            )}
-            {!computer.machine.online && (
-              <Button variant="outline" onClick={() => engine.reconnect()}>
-                <RefreshCw data-icon="inline-start" />
-                刷新连接
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+        )}
+      </footer>
     </section>
   );
 }
@@ -294,6 +284,15 @@ function ConnectedScreen({
   const status = useClient((state) => state.status);
   const statusDetail = useClient((state) => state.statusDetail);
   const { link } = useConnection();
+  const [unlocking, setUnlocking] = useState(false);
+  useEffect(() => { if (status !== "locked") setUnlocking(false); }, [status]);
+  if (status === "locked") return detail ? <AccessUnlock name={name} /> : (
+    <div className="screen-idle">
+      <div className="screen-idle-status"><LockKeyhole size={14} /><div><strong>需要访问密码</strong><span>解锁后查看负载与桌面</span></div></div>
+      <div className="screen-idle-actions"><Button variant="outline" onClick={() => setUnlocking(true)}>解锁电脑</Button></div>
+      {unlocking && <Modal title="解锁电脑" close={() => setUnlocking(false)}><AccessUnlock name={name} /></Modal>}
+    </div>
+  );
   if (status === "online")
     return (
       <Screen
@@ -344,7 +343,7 @@ function RemoteScreenConnection({ name, active, back, retry }: { name: string; a
     <div className="remote-screen remote-screen-waiting">
       <div className="remote-screen-bar">
         <div className="remote-screen-title">
-          <Button variant="ghost" size="icon" aria-label="返回电脑列表" title="返回电脑列表" onClick={back}><ArrowLeft /></Button>
+          <Button variant="ghost" size="icon" aria-label="返回我的电脑" title="返回我的电脑" onClick={back}><ArrowLeft /></Button>
           <strong>{name}</strong>
         </div>
       </div>
@@ -386,7 +385,7 @@ function useForget(computer: Computer | undefined, done?: () => void) {
   return { forget: () => void forget(), forgetting };
 }
 
-function useScreenConnection(computer?: Computer, identity = computer?.key) {
+function useScreenConnection(computer?: Computer, identity = computer?.key, metadataOnly = false) {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState<string>();
   const [revision, setRevision] = useState(0);
@@ -395,7 +394,7 @@ function useScreenConnection(computer?: Computer, identity = computer?.key) {
     setError(undefined);
     if (!computer?.machine.online) return;
     try {
-      const retained = engine.retainComputer(computer);
+      const retained = engine.retainComputer(computer, { metadataOnly });
       setConnection(retained.connection);
       return retained.release;
     } catch (reason) {
@@ -404,7 +403,7 @@ function useScreenConnection(computer?: Computer, identity = computer?.key) {
     // An alias changing from relay to local must not replace a live viewer's transport.
     // Retry explicitly acquires the preferred route; presence still releases an offline host.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, computer?.machine.online, revision]);
+  }, [identity, computer?.machine.online, metadataOnly, revision]);
   return { connection, error, retry: () => {
     const preferred = computer && engine.computerForKey(computer.key);
     if (connection && preferred?.key === connection.computer.key) connection.link.reconnectNow();
@@ -456,8 +455,8 @@ export function ScreenDetail({
           <Button
             variant="ghost"
             size="icon"
-            aria-label="返回电脑列表"
-            title="返回电脑列表"
+            aria-label="返回我的电脑"
+            title="返回我的电脑"
             onClick={back}
           >
             <ArrowLeft />
@@ -481,7 +480,7 @@ export function ScreenDetail({
           description="确认电脑仍在当前账号或配对列表中。"
         >
           <Button variant="outline" onClick={back}>
-            返回电脑列表
+            返回我的电脑
           </Button>
         </EmptyState>
       ) : !computer.machine.online ? (
