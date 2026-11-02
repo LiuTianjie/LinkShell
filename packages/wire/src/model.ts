@@ -363,11 +363,21 @@ export const machineMetricsSchema = z.object({
   }),
   memory: z.object({
     totalBytes: z.number().nonnegative(),
-    /** Physical memory minus OS-reported free memory; includes OS and cached memory. */
+    /** Physical memory in use; newer hosts exclude reclaimable caches when OS counters are available. */
     usedBytes: z.number().nonnegative(),
+    /** Absent on older hosts, whose usedBytes includes caches. */
+    includesCache: z.boolean().optional(),
   }),
 });
 export type MachineMetrics = z.infer<typeof machineMetricsSchema>;
+
+export const MACHINE_METRICS_INTERVAL_MS = 5000;
+export const MACHINE_METRICS_HISTORY_LIMIT = 24;
+export const machineMetricsSnapshotSchema = machineMetricsSchema.extend({
+  /** Host-owned recent samples, independent of whether a viewer is connected. Absent on older hosts. */
+  history: z.array(machineMetricsSchema).max(MACHINE_METRICS_HISTORY_LIMIT).optional(),
+});
+export type MachineMetricsSnapshot = z.infer<typeof machineMetricsSnapshotSchema>;
 
 /** A server listening on the host, which a device can preview through the encrypted channel. */
 export const portInfoSchema = z.object({

@@ -115,6 +115,7 @@ export class HostRpcServer {
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
   private readonly computerPreview: ComputerPreviewServer;
+  private readonly metrics = new MachineMetricsSampler();
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
@@ -129,7 +130,6 @@ export class HostRpcServer {
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
     const usage = options.usage ?? new UsageStatistics();
-    const metrics = new MachineMetricsSampler();
     this.handlers = {
       "desktop.shutdown": (params: P<"desktop.shutdown">) => {
         if (!options.shutdown || params.pid !== process.pid) throw RpcError.app("conflict", "后台服务已改变，请刷新状态后重试");
@@ -169,7 +169,7 @@ export class HostRpcServer {
         this.broadcast("machine.changed", info);
         return info;
       },
-      "machine.metrics": () => metrics.snapshot(),
+      "machine.metrics": () => this.metrics.snapshot(),
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
       "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd, params.model),
@@ -410,9 +410,11 @@ export class HostRpcServer {
       // browser tab on this machine, so it checks who is asking.
       await this.listen((server) => server.listen(this.options.tcpPort, "127.0.0.1"), isLocalDevelopmentClient);
     }
+    this.metrics.start();
   }
 
   async stop(): Promise<void> {
+    this.metrics.stop();
     this.screen.stop();
     this.computerPreview.stop();
     // A connection tidies up after itself when its socket closes, and that reaches into the hub. The close

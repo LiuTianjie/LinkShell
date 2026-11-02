@@ -9,7 +9,7 @@ import {
   agentInfoSchema,
   gatewayStatusSchema,
   machineInfoSchema,
-  machineMetricsSchema,
+  machineMetricsSnapshotSchema,
   portInfoSchema,
   projectSummarySchema,
   terminalInfoSchema,
@@ -137,7 +137,7 @@ const coreMethods = {
     params: empty,
     result: machineInfoSchema,
   },
-  "machine.metrics": { params: empty, result: machineMetricsSchema },
+  "machine.metrics": { params: empty, result: machineMetricsSnapshotSchema },
   "machine.rename": {
     /** Empty restores the configured default; names never change peer identities. */
     params: z.object({ name: z.string().trim().max(40) }),

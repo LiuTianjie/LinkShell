@@ -50,7 +50,7 @@ export function ComputerTelemetry({ visual = "pixels" }: { visual?: ComputerVisu
     metrics={metrics}
     history={metrics ? state.history : []}
     status={status === "locked" ? "解锁后查看负载" : status !== "online" ? "等待连接" : unavailable ? "更新电脑端后可查看负载" : state.error ? "负载读取失败" : metrics ? "每 5 秒更新" : "正在采样…"}
-    detail={state.error ?? "CPU 和内存趋势从打开本页时开始采集"}
+    detail={state.error ?? (state.hostHistory ? "电脑端持续采集最近 2 分钟的 CPU 和内存，休眠或服务重启期间留空" : "此电脑端仅支持打开页面后采集趋势，更新电脑端可读取历史")}
     retry={state.error && !unavailable ? () => setRevision((value) => value + 1) : undefined}
   />;
 }

@@ -1,8 +1,47 @@
 import { cpus, freemem, totalmem, type CpuInfo } from "node:os";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import type { MachineMetrics } from "@linkshell/wire";
+import { promisify } from "node:util";
+import { MACHINE_METRICS_HISTORY_LIMIT, MACHINE_METRICS_INTERVAL_MS, type MachineMetrics, type MachineMetricsSnapshot } from "@linkshell/wire";
 
 type CpuSample = { at: number; cores: CpuInfo[] };
+const run = promisify(execFile);
+
+export function macMemoryUsedBytes(output: string): number | null {
+  const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
+  const pages = new Map([...output.matchAll(/^([^:\n]+):\s+(\d+)\./gm)].map((match) => [match[1], Number(match[2])]));
+  const anonymous = pages.get("Anonymous pages"), wired = pages.get("Pages wired down");
+  const compressed = pages.get("Pages occupied by compressor"), purgeable = pages.get("Pages purgeable");
+  if (!pageSize || anonymous === undefined || wired === undefined || compressed === undefined || purgeable === undefined) return null;
+  // File-backed pages are cache. Count the compressor's physical footprint, not its uncompressed contents.
+  const used = (Math.max(0, anonymous - purgeable) + wired + compressed) * pageSize;
+  return Number.isSafeInteger(used) ? used : null;
+}
+
+export function linuxMemoryAvailableBytes(output: string): number | null {
+  const value = /^MemAvailable:\s+(\d+) kB$/m.exec(output)?.[1];
+  const available = value === undefined ? NaN : Number(value) * 1024;
+  return Number.isSafeInteger(available) ? available : null;
+}
+
+async function memoryUsage(): Promise<MachineMetrics["memory"]> {
+  const totalBytes = Math.max(0, totalmem());
+  let usedBytes: number | null = null;
+  try {
+    if (process.platform === "darwin") {
+      const { stdout } = await run("/usr/bin/vm_stat", [], { timeout: 1000, maxBuffer: 64 * 1024 });
+      usedBytes = macMemoryUsedBytes(stdout);
+    } else if (process.platform === "linux") {
+      const available = linuxMemoryAvailableBytes(await readFile("/proc/meminfo", "utf8"));
+      if (available !== null) usedBytes = totalBytes - available;
+    } else if (process.platform === "win32") {
+      // GlobalMemoryStatusEx reports available memory, including reclaimable standby pages.
+      usedBytes = totalBytes - freemem();
+    }
+  } catch { /* Restricted OS counters fall back to the legacy reading, explicitly marked as including cache. */ }
+  return { totalBytes, usedBytes: Math.max(0, Math.min(totalBytes, usedBytes ?? totalBytes - freemem())), includesCache: usedBytes === null };
+}
 
 export function cpuUsage(previous: CpuInfo[], current: CpuInfo[]): number | null {
   if (!current.length || previous.length !== current.length) return null;
@@ -19,36 +58,66 @@ export function cpuUsage(previous: CpuInfo[], current: CpuInfo[]): number | null
   return total > 0 ? Math.round((1 - idle / total) * 1000) / 10 : null;
 }
 
-/** Shared across viewers: sampling is on demand, with no permanent background timer. */
+/** One bounded history per host, collected even when no viewer is connected. */
 export class MachineMetricsSampler {
   private previous?: CpuSample;
   private cached?: MachineMetrics;
   private pending?: Promise<MachineMetrics>;
+  private history: MachineMetrics[] = [];
+  private timer?: ReturnType<typeof setInterval>;
 
-  snapshot(): Promise<MachineMetrics> {
-    if (this.cached && this.previous && performance.now() - this.previous.at < 1000) return Promise.resolve(this.cached);
+  start(): void {
+    if (this.timer) return;
+    const sample = () => { void this.sample().catch(() => {}); };
+    sample();
+    this.timer = setInterval(sample, MACHINE_METRICS_INTERVAL_MS);
+    this.timer.unref();
+  }
+
+  stop(): void {
+    clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  async snapshot(): Promise<MachineMetricsSnapshot> {
+    const metrics = this.pending ? await this.pending
+      : this.cached && this.sampleAge() < 15_000 ? this.cached
+      : await this.sample();
+    return { ...metrics, history: [...this.history] };
+  }
+
+  private sampleAge(): number {
+    // Some platforms pause monotonic time during sleep; wall time still expires the old reading.
+    return this.previous && this.cached
+      ? Math.max(performance.now() - this.previous.at, Date.now() - this.cached.sampledAt)
+      : Infinity;
+  }
+
+  private sample(): Promise<MachineMetrics> {
     if (this.pending) return this.pending;
+    if (this.cached && this.sampleAge() < 1000) return Promise.resolve(this.cached);
     this.pending = this.collect().finally(() => { this.pending = undefined; });
     return this.pending;
   }
 
   private async collect(): Promise<MachineMetrics> {
     let before = this.previous;
-    // First view (or a long gap) needs a fresh window, not an average since host startup.
-    if (!before || performance.now() - before.at > 15_000) {
+    // Startup or waking from sleep needs a fresh window, not an average across the gap.
+    if (!before || this.sampleAge() >= 15_000) {
       before = { at: performance.now(), cores: cpus() };
       await delay(250);
     }
     const after = { at: performance.now(), cores: cpus() };
-    const totalBytes = Math.max(0, totalmem());
-    const usedBytes = Math.max(0, Math.min(totalBytes, totalBytes - freemem()));
+    const sampledAt = Date.now();
+    const memory = await memoryUsage();
     this.previous = after;
     this.cached = {
-      sampledAt: Date.now(),
+      sampledAt,
       sampleIntervalMs: Math.round(after.at - before.at),
       cpu: { usage: cpuUsage(before.cores, after.cores), cores: after.cores.length, model: after.cores[0]?.model ?? "" },
-      memory: { totalBytes, usedBytes },
+      memory,
     };
+    this.history = [...this.history.filter((entry) => entry.sampledAt < sampledAt && entry.sampledAt > sampledAt - MACHINE_METRICS_INTERVAL_MS * MACHINE_METRICS_HISTORY_LIMIT), this.cached].slice(-MACHINE_METRICS_HISTORY_LIMIT);
     return this.cached;
   }
 }

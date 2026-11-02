@@ -41,7 +41,7 @@ See [question support and validation boundaries](../../docs/v2/agent-questions.m
 
 ## Computer metrics
 
-`machine.metrics` returns on-demand whole-computer CPU usage and physical memory use over the existing authenticated channel (protocol revision 3). CPU is a multicore tick delta; memory includes system and cached memory. The web and desktop computer grid samples every five seconds while visible.
+`machine.metrics` returns whole-computer CPU usage, physical memory use and the host's latest 24 samples over the existing authenticated channel (protocol revision 3). The host samples every five seconds from startup, even without viewers; opening or reconnecting the web/desktop grid restores the last two minutes. History stays in memory and starts fresh when the host restarts; sleep gaps stay empty on the chart. CPU is a multicore tick delta. macOS memory counts anonymous pages minus purgeable pages, wired memory and the compressor's physical footprint, excluding file caches. Linux uses `MemAvailable`; Windows uses OS-reported available physical memory. If these counters are unavailable, the free-memory fallback is marked `includesCache: true`. Older hosts omit `history` and `includesCache` and retain page-local sampling with cache-inclusive readings.
 
 ## Remote screen
 

@@ -1,5 +1,5 @@
 import type { MachineMetrics } from "@linkshell/wire";
-import { memoryPercent } from "./machine-metrics";
+import { historySamples, memoryPercent } from "./machine-metrics";
 import type { ComputerVisual } from "./computer-visuals";
 
 export function metricPercent(value: number | null | undefined) { return value == null ? "—" : Math.round(value); }
@@ -7,17 +7,17 @@ export function memorySize(metrics: MachineMetrics) {
   const gib = (bytes: number) => (bytes / 1024 ** 3).toLocaleString("zh-CN", { maximumFractionDigits: 1 });
   return `${gib(metrics.memory.usedBytes)} / ${gib(metrics.memory.totalBytes)} GB`;
 }
-export const memoryDescription = "整机物理内存使用量，包含系统和缓存；不等同于应用内存或内存压力。";
-const columns = 24;
-function historySamples(history: MachineMetrics[]) {
-  return Array.from({ length: columns }, (_, index) => history[index - (columns - history.length)]);
+export function memoryDescription(metrics: MachineMetrics) {
+  return metrics.memory.includesCache === false
+    ? "整机已用物理内存，扣除可回收缓存；包含系统和压缩内存，不等同于内存压力。"
+    : "整机物理内存使用量，包含系统和缓存；不等同于应用内存或内存压力。";
 }
 function Readings({ metrics }: { metrics: MachineMetrics }) {
   return <div className="computer-readings">
     <div className="computer-cpu" title={`${metrics.cpu.model} · ${metrics.cpu.cores} 个逻辑核心`}>
       <strong>{metricPercent(metrics.cpu.usage)}</strong><div><span>%</span><span className="computer-metric-label">CPU</span></div>
     </div>
-    <div className="computer-memory" title={memoryDescription}>
+    <div className="computer-memory" title={memoryDescription(metrics)}>
       <span className="computer-metric-label">内存</span><div><strong>{metricPercent(memoryPercent(metrics))}</strong><span>%</span></div>
       <small>{memorySize(metrics)}</small>
     </div>
@@ -81,7 +81,7 @@ function DialReadings({ metrics }: { metrics: MachineMetrics }) {
   const memory = memoryPercent(metrics);
   return <div className="computer-dial-readings">
     <Dial value={metrics.cpu.usage} />
-    <div className="computer-dial-memory" title={memoryDescription}>
+    <div className="computer-dial-memory" title={memoryDescription(metrics)}>
       <span className="computer-metric-label">内存</span><strong>{metricPercent(memory)}<small>%</small></strong>
       <div className="computer-memory-segments" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <i key={index} data-active={memory != null && index < Math.ceil(memory / 100 * 12) || undefined} />)}</div>
       <small>{memorySize(metrics)}</small>
@@ -92,7 +92,7 @@ function Meters({ metrics }: { metrics: MachineMetrics }) {
   return <div className="computer-meters">{[
     { name: "CPU", tone: "cpu", value: metrics.cpu.usage, detail: `${metrics.cpu.cores} 个逻辑核心` },
     { name: "内存", tone: "memory", value: memoryPercent(metrics), detail: memorySize(metrics) },
-  ].map(({ name, tone, value, detail }) => <div className="computer-meter" data-tone={tone} key={tone} title={tone === "memory" ? memoryDescription : metrics.cpu.model}>
+  ].map(({ name, tone, value, detail }) => <div className="computer-meter" data-tone={tone} key={tone} title={tone === "memory" ? memoryDescription(metrics) : metrics.cpu.model}>
     <div className="computer-meter-reading"><span>{name}</span><strong>{metricPercent(value)}<small>%</small></strong></div>
     <div className="computer-meter-track" aria-hidden="true"><span style={{ transform: `scaleX(${(value ?? 0) / 100})` }} />{[25, 50, 75].map((mark) => <i key={mark} style={{ left: `${mark}%` }} />)}</div>
     <small>{detail}</small>
@@ -101,7 +101,7 @@ function Meters({ metrics }: { metrics: MachineMetrics }) {
 function metricReadings(metrics: MachineMetrics) {
   return [
     { name: "CPU", tone: "cpu", value: metrics.cpu.usage, detail: `${metrics.cpu.cores} 个逻辑核心`, title: metrics.cpu.model },
-    { name: "内存", tone: "memory", value: memoryPercent(metrics), detail: memorySize(metrics), title: memoryDescription },
+    { name: "内存", tone: "memory", value: memoryPercent(metrics), detail: memorySize(metrics), title: memoryDescription(metrics) },
   ] as const;
 }
 function Rings({ metrics }: { metrics: MachineMetrics }) {
