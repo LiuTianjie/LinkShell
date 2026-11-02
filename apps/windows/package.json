@@ -1,6 +1,6 @@
 {
   "name": "@linkshell/windows",
-  "version": "0.10.89",
+  "version": "0.10.90",
   "private": true,
   "type": "module",
   "scripts": {
