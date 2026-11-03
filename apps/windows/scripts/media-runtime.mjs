@@ -6,10 +6,10 @@ import { spawnSync } from 'node:child_process';
 
 // A shared LGPL build: no GPL encoders, and the libraries remain replaceable.
 export const mediaRelease = {
-  tag: 'autobuild-2026-10-19-13-06',
-  name: 'ffmpeg-n8.1.3-18-g46d899d7a0-win64-lgpl-shared-8.1',
-  sha256: '638dd2a073cc1838cb668e736a822a1a58a3ca5405a109b0eca41c5ee03ec9a1',
-  asset: 656306380,
+  tag: 'autobuild-2026-11-02-12-51',
+  name: 'ffmpeg-n8.1.3-32-g760d10603e-win64-lgpl-shared-8.1',
+  sha256: '424ee1ebefd41bda90247db6a08d510d11e14a20ca19ecc168a50d4e63eb7fee',
+  asset: 701751325,
 };
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export async function ensureMedia() {
@@ -48,7 +48,7 @@ export async function ensureMedia() {
   }
   const gpl = join(cache, 'COPYING.GPLv3');
   if (!existsSync(gpl)) {
-    const response = await fetch('https://api.github.com/repos/FFmpeg/FFmpeg/contents/COPYING.GPLv3?ref=46d899d7a0');
+    const response = await fetch('https://api.github.com/repos/FFmpeg/FFmpeg/contents/COPYING.GPLv3?ref=760d10603e');
     if (!response.ok) throw new Error('Cannot retrieve the GPL text incorporated by LGPLv3');
     const data = await response.json();
     const license = Buffer.from(data.content || '', 'base64').toString('utf8');
@@ -56,7 +56,7 @@ export async function ensureMedia() {
     writeFileSync(gpl, license);
   }
   cpSync(gpl, join(target, 'COPYING.GPLv3'));
-  writeFileSync(join(target, 'LINKSHELL-MEDIA-NOTICE.txt'), `FFmpeg shared LGPL build, unmodified.\nUpstream: https://ffmpeg.org/\nBuild and corresponding source instructions: https://github.com/BtbN/FFmpeg-Builds/tree/${mediaRelease.tag}\nBinary: ${url}\nSHA256: ${mediaRelease.sha256}\nFFmpeg source revision: 46d899d7a0 (release/8.1).\nThe shared libraries may be replaced by the user. LinkShell invokes ffmpeg as a separate process.\n`);
+  writeFileSync(join(target, 'LINKSHELL-MEDIA-NOTICE.txt'), `FFmpeg shared LGPL build, unmodified.\nUpstream: https://ffmpeg.org/\nBuild and corresponding source instructions: https://github.com/BtbN/FFmpeg-Builds/tree/${mediaRelease.tag}\nBinary: ${url}\nSHA256: ${mediaRelease.sha256}\nFFmpeg source revision: 760d10603e (release/8.1).\nThe shared libraries may be replaced by the user. LinkShell invokes ffmpeg as a separate process.\n`);
   return target;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(await ensureMedia());
