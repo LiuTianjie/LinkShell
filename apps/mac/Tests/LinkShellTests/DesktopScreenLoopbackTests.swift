@@ -71,6 +71,53 @@ final class DesktopScreenLoopbackTests: XCTestCase {
     print("native-screen-loopback: H264 hardware=true decoder=LinkShellVideoToolboxH264Hardware nativeFrames=\(lastCount); stopped mount rejected late signaling/media")
   }
 
+  /// Even pacing declines the sender's playout-delay extension in the answer (ScreenPacing), and a
+  /// new display is applied in-band: the mount keeps decoding instead of failing, as on the phone.
+  func testSmoothPacingDeclinesPlayoutDelayAndDisplayChangeKeepsTheMount() throws {
+    guard ProcessInfo.processInfo.environment["LINKSHELL_NATIVE_SCREEN_LOOPBACK"] == "1" else {
+      throw XCTSkip("Native WebRTC loopback requires explicit local-network and hardware integration opt-in")
+    }
+    _ = NSApplication.shared
+    let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = surface
+    defer { window.contentView = nil }
+    let decoded = expectation(description: "The smooth mount decodes in hardware")
+    var offer: String?
+    var answer: String?
+    var pacing: String?
+    var errors: [String] = []
+    var sender: SyntheticScreenSender?
+    var fulfilled = false
+    let receiver = DesktopScreenReceiver(surface: surface, smooth: true, onSignal: { message in
+      if message["t"] as? String == "rtc.answer" { answer = message["sdp"] as? String }
+      sender?.receive(message)
+    }, onStatus: { status in
+      if let value = status["pacing"] as? String { pacing = value }
+      if status["hardware"] as? Bool == true, !fulfilled { fulfilled = true; decoded.fulfill() }
+    }, onFailure: { errors.append($0) })
+    sender = try SyntheticScreenSender(toReceiver: { message in
+      if let rtc = message["rtc"] as? [String: Any], rtc["t"] as? String == "offer" { offer = rtc["sdp"] as? String }
+      receiver.receive(message)
+    }, onFailure: { errors.append($0) })
+    defer { receiver.stop(); surface.stop(); sender?.stop() }
+
+    sender?.start()
+    wait(for: [decoded], timeout: 20)
+    XCTAssertTrue(try XCTUnwrap(offer).contains(ScreenPacing.playoutDelayURI), "The sender offers the extension")
+    XCTAssertFalse(try XCTUnwrap(answer).contains(ScreenPacing.playoutDelayURI), "The smooth receiver declines it")
+    XCTAssertEqual(pacing, "smooth")
+
+    // Display 0, then display 1: the mount stays and pictures keep arriving.
+    receiver.receive(["t": "screen.configure", "requestId": 1, "display": 0, "width": "1920", "maxFps": 60, "paused": false])
+    receiver.receive(["session": ["t": "configured", "requestId": 1, "display": 0, "paused": false, "generation": 1]])
+    let before = surface.receivedFrameCount
+    receiver.receive(["t": "screen.configure", "requestId": 2, "display": 1, "width": "1920", "maxFps": 60, "paused": false])
+    receiver.receive(["session": ["t": "configured", "requestId": 2, "display": 1, "paused": false, "generation": 2]])
+    XCTAssertTrue(eventually { surface.receivedFrameCount >= before + 3 }, "Pictures keep arriving after a display change")
+    XCTAssertTrue(errors.isEmpty, errors.joined(separator: "\n"))
+  }
+
   private func eventually(_ predicate: @escaping () -> Bool) -> Bool {
     let ready = expectation(description: "Native renderer receives decoded pixels")
     let timer = DispatchSource.makeTimerSource(queue: .main)

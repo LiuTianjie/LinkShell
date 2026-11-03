@@ -1,6 +1,6 @@
 export const NATIVE_SCREEN_EVENT = "linkshell-native-screen";
 export interface ScreenRect { x: number; y: number; width: number; height: number }
-export interface NativeScreenStatus { live?: boolean; hardware?: boolean; codec?: string; decoder?: string; control?: boolean; controlRequested?: boolean; controlError?: string }
+export interface NativeScreenStatus { live?: boolean; hardware?: boolean; codec?: string; decoder?: string; control?: boolean; controlRequested?: boolean; controlError?: string; displayFps?: number; pacing?: "smooth" | "immediate" }
 export interface NativeScreenEvent {
   id: string;
   type: "signal" | "status" | "error";

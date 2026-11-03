@@ -260,7 +260,7 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
     else { return throwError(env, "screenStart: invalid arguments") }
     NativeScreen.current?.stop(); NativeScreen.current = nil
     let host = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
-    do { NativeScreen.current = try NativeScreen(host: host, helper: helper, id: id, rect: rect, callback: callback) }
+    do { NativeScreen.current = try NativeScreen(host: host, helper: helper, id: id, rect: rect, smooth: DesktopScreenBridge.boolean(message["smooth"]) == true, callback: callback) }
     catch { return throwError(env, error.localizedDescription) }
     return undefined(env)
   }

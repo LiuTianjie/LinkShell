@@ -782,7 +782,9 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     let generation = captureGeneration
     let captured = capturer.takeCounts()
     let strip = stripCheck?.take()
+    FrameTrace.mark("stats")
     connection.statistics { [weak self] report in
+      FrameTrace.mark("statsDone")
       DispatchQueue.main.async {
         guard let self, !self.closed, !self.inputGate.suspended, self.captureGeneration == generation else { return }
         let reader = StatsReader(report: report)

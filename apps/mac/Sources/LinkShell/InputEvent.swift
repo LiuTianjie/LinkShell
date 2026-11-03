@@ -22,7 +22,7 @@ struct InputEvent {
     case "move":
       guard let x = number(command["x"]), let y = number(command["y"]), (0...1).contains(x), (0...1).contains(y) else { return nil }
     case "down", "up":
-      guard let button = command["b"] as? String, button == "left" || button == "right" else { return nil }
+      guard let button = command["b"] as? String, ["left", "right", "middle"].contains(button) else { return nil }
       if let clicks = command["n"] {
         guard let count = number(clicks), count == count.rounded(), (1...3).contains(count) else { return nil }
       }
@@ -33,6 +33,9 @@ struct InputEvent {
       guard let key = command["k"] as? String, (1...16).contains(key.utf16.count), InputEvent.modifiers(command["m"]) else { return nil }
     case "text":
       guard let text = command["s"] as? String, (1...4000).contains(text.utf16.count) else { return nil }
+    case "keydown", "keyup":
+      guard let code = command["c"] as? String, (1...32).contains(code.utf16.count) else { return nil }
+      if let again = command["r"] { guard let value = again as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil } }
     case "prompt":
       break
     default:

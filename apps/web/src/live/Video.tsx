@@ -36,7 +36,7 @@ import {
 import { cn } from "../lib/utils";
 import { isDesktop, isElectronDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
-import { DesktopScreen } from "./DesktopScreen";
+import { MacScreen } from "./DesktopScreen";
 import { RemoteScreen } from "./RemoteScreen";
 import {
   autoScreenWidth,
@@ -308,7 +308,7 @@ export function Screen(props: ScreenProps) {
   const visible = useDesktopVisibility();
   // Mac keeps native WebRTC/VideoToolbox/Metal, including inside Electron. Windows uses its
   // Chromium receiver; a browser keeps the host's viewer page.
-  if (isDesktop && !isWindowsDesktop) return <DesktopScreen {...props} />;
+  if (isDesktop && !isWindowsDesktop) return <MacScreen {...props} />;
   if (isElectronDesktop && !props.embedded) return <RemoteScreen title={props.title ?? "电脑屏幕"} active={props.active ?? true} />;
   return <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
 }

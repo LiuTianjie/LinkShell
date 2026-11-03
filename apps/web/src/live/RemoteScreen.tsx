@@ -28,7 +28,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { cn } from "../lib/utils";
 import { ErrorNotice, useClient, useConnection, useJob, useLoad } from "./common";
-import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { readLocal, saveLocal } from "./storage";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
@@ -81,8 +81,11 @@ function hevcReceivable(): boolean {
   catch { return false; }
 }
 
-/** This receiver runs only in the Windows desktop window: a Mac's shows the picture natively (DesktopScreen). */
-const LOCAL_PLATFORM = "windows";
+/**
+ * The Windows desktop window's receiver, and the Mac's when its native video can't get through
+ * (MacScreen): the local keyboard decides how modifiers map to the remote computer's.
+ */
+const LOCAL_PLATFORM = isWindowsDesktop ? "windows" : /Mac/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "mac" : "other";
 
 /**
  * The remote screen in the desktop window. The picture is the video track itself, in the page:
@@ -341,6 +344,12 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     const native = event.nativeEvent;
     if (native.isComposing || native.keyCode === 229 || composing.current) return;
     const modifiers = remoteModifiers(native, LOCAL_PLATFORM, remote);
+    // ⌃⌘F stays with this Mac: the way out of full screen while controlling the other computer.
+    if (LOCAL_PLATFORM === "mac" && native.metaKey && native.ctrlKey && native.code === "KeyF") {
+      event.preventDefault();
+      requestFullscreen(!fullscreenRef.current.owns);
+      return;
+    }
     const named = namedKey(native);
     // Text goes through the field (input methods, dead keys, emoji); shortcuts and named keys go as keys.
     const shortcut = native.metaKey || native.ctrlKey || (native.altKey && remote === "windows");

@@ -59,6 +59,11 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
         do { try video.setCodecPreferences(codecs, error: ()) }
         catch { self?.link.log("loopback: FlexFEC could not be removed from codec preferences: \(error)") }
       }
+      // Models a viewer that chose even pacing over the lowest latency (`ScreenPacing`).
+      if Launch.has("--loopback-smooth"), let video = connection.transceivers.first(where: { $0.mediaType == .video }),
+         !ScreenPacing.declinePlayoutDelay(video) {
+        self?.link.log("loopback: the playout-delay extension could not be declined")
+      }
       connection.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { description, error in
         guard let description else {
           self?.link.log("loopback: no answer: \(error?.localizedDescription ?? "unknown")")
@@ -100,6 +105,7 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
     guard let frame else { return }
     if MediaStageProbe.enabled { MediaStageProbe.shared.decoded(UInt32(bitPattern: frame.timeStamp)) }
     let host = HostClock.seconds()
+    FrameTrace.mark("decoded")
     lock.lock()
     if let lastFrame { gap = max(gap, host - lastFrame) }
     lastFrame = host
@@ -252,6 +258,7 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
             : ["n": sorted.count, "min": sorted[0], "p50": sorted[sorted.count / 2], "p95": sorted[min(sorted.count - 1, sorted.count * 95 / 100)], "max": sorted[sorted.count - 1]]
         }
         if MediaStageProbe.enabled { message["encodeInputToDecode"] = MediaStageProbe.shared.take() }
+        if FrameTrace.enabled { message["trace"] = FrameTrace.take() }
         self.link.emit(message)
       }
     }

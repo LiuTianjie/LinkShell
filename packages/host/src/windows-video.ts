@@ -13,6 +13,8 @@ export interface ScreenVideoSession {
   signal(message: VideoSignal): void;
   end(): void;
   reconfigure?: boolean;
+  /** Input may name physical keys held and released (`keydown` / `keyup`) and the middle button. */
+  keys?: boolean;
   configure?(configuration: VideoConfiguration): Promise<VideoConfigured>;
   pause?(hidden: boolean): void;
   cursor?(x: number, y: number): boolean;

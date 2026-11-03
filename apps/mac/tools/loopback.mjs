@@ -45,9 +45,12 @@ const flags = [
   "--loopback",
   ...(args.includes("--media-probe") ? ["--media-probe"] : []),
   ...(still ? [] : ["--clock"]),
-  ...["--rtc-log", "--no-playout-delay", "--motion", "--full-screen-motion", "--no-low-latency", "--no-flexfec", "--loopback-no-flexfec"].filter((flag) => args.includes(flag)),
+  ...["--rtc-log", "--no-playout-delay", "--motion", "--full-screen-motion", "--no-low-latency", "--no-flexfec", "--loopback-no-flexfec", "--loopback-smooth"].filter((flag) => args.includes(flag)),
   ...(value("--encoder") ? ["--encoder", value("--encoder")] : []),
   ...(value("--trial") ? ["--trial", value("--trial")] : []),
+  // Diagnostics: per-frame timestamps (`rtc.loopback.trace`), and a statistics interval other than 1 s.
+  ...(args.includes("--frame-trace") ? ["--frame-trace"] : []),
+  ...(value("--stats-interval") ? ["--stats-interval", value("--stats-interval")] : []),
 ];
 /** Seconds left out of the averages: the connection coming up and the bitrate finding its level. */
 const WARM_UP = 3;

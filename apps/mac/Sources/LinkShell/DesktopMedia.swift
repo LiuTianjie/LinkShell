@@ -27,7 +27,7 @@ final class DesktopMedia {
             let port = DesktopFramePort(name: name, receiver: false) else { exit(1) }
       let output = DesktopMediaOutput(port: port, pipe: pipe)
       self.output = output
-      receiver = DesktopScreenReceiver(surface: output, onSignal: { output.emit(["type": "signal", "message": $0]) },
+      receiver = DesktopScreenReceiver(surface: output, smooth: message["smooth"] as? Bool == true, onSignal: { output.emit(["type": "signal", "message": $0]) },
         onStatus: { output.emit(["type": "status", "status": $0]) }, onFailure: { output.emit(["type": "error", "error": $0]) })
       output.emit(["type": "ready"])
     case "signal": if let value = message["message"] as? [String: Any] { receiver?.receive(value) }
@@ -54,6 +54,7 @@ private final class DesktopMediaOutput: NSObject, DesktopScreenOutput {
   var onFirstFrame: (() -> Void)?
   var onFailure: ((String) -> Void)?
   var controlEnabled = false { didSet { emit(["type": "surfaceControl", "enabled": controlEnabled]) } }
+  var physicalKeys = false { didSet { emit(["type": "surfaceKeys", "enabled": physicalKeys]) } }
   private let port: DesktopFramePort
   private let pipe: DesktopMediaPipe
   private let lock = NSLock()

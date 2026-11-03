@@ -70,6 +70,16 @@ function applyAppearance() {
   updateWindowSurface();
 }
 
+/**
+ * A native remote screen is on: the window stays opaque, so the window server does not blend
+ * a blurred background under a picture that changes up to 120 times a second.
+ */
+let nativeScreenShown = false;
+function setNativeScreenShown(value: boolean) {
+  if (nativeScreenShown === value) return;
+  nativeScreenShown = value;
+  updateWindowSurface();
+}
 /** Vibrancy only while it is worth it: focused, and below 4K, where the blur costs frames. */
 function updateWindowSurface() {
   if (!window) return;
@@ -88,7 +98,7 @@ function updateWindowSurface() {
   const bounds = window.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const physical = bounds.width * display.scaleFactor * bounds.height * display.scaleFactor;
-  const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true;
+  const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true && !nativeScreenShown;
   window.setVibrancy(translucent ? "menu" : null);
   window.setBackgroundColor(translucent ? "#00000000" : ground());
   send("linkshell-desktop-surface", { translucent });
@@ -163,7 +173,7 @@ function createWindow() {
       safeDialogs: true,
     },
   });
-  window.on("closed", () => nativeModule?.screenStop());
+  window.on("closed", () => { nativeModule?.screenStop(); nativeScreenShown = false; });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
@@ -211,7 +221,7 @@ function createWindow() {
     send("linkshell-desktop-fullscreen", { fullscreen: false });
     reconcileFullScreen();
   });
-  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { pageReady = false; nativeModule?.screenStop(); } });
+  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { pageReady = false; nativeModule?.screenStop(); setNativeScreenShown(false); } });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
     send("linkshell-desktop-visibility", { visible });
@@ -226,6 +236,7 @@ function createWindow() {
   });
   web.on("render-process-gone", () => {
     nativeModule?.screenStop();
+    nativeScreenShown = false;
     showProblem("工作台页面意外退出。请重新连接以恢复电脑与会话。");
   });
   startServer();
@@ -366,10 +377,17 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
         const adjusted = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number")
           ? { ...message, rect: Object.fromEntries(["x", "y", "width", "height"].map((key) => [key, (rect[key] as number) * zoom])) } : message;
         if (message.type === "start") {
-          nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => send("linkshell-native-screen", detail));
+          nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => {
+            if ((detail as { type?: unknown }).type === "error") setNativeScreenShown(false);
+            send("linkshell-native-screen", detail);
+          });
           nativeModule.screenVisible(visible);
-        } else nativeModule.screenMessage(adjusted);
-      } catch (error) { send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
+          setNativeScreenShown(true);
+        } else {
+          nativeModule.screenMessage(adjusted);
+          if (message.type === "stop") setNativeScreenShown(false);
+        }
+      } catch (error) { setNativeScreenShown(false); send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
       return;
     }
     // A remote screen has the keys: the menu's shortcuts are the remote computer's while it does.
@@ -574,6 +592,7 @@ app.on("before-quit", (event) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
     nativeModule?.screenStop();
+    nativeScreenShown = false;
     server.stop();
     menuBar?.stop();
     rememberBounds();

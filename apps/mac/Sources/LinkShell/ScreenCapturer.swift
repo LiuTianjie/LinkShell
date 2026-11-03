@@ -180,6 +180,7 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
     last = buffer
     lastNew = now
     counts.captured += 1
+    FrameTrace.mark("captured")
     send(buffer, at: stamp, now: now)
     if let onPicture {
       let displayed = (attachments?[.displayTime] as? UInt64).map { HostClock.seconds(mach: $0) } ?? Double(stamp) / 1e9

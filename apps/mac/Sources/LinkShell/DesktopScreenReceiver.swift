@@ -32,11 +32,13 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var startedAt = CACurrentMediaTime()
   private var disconnectedAt: Double?
   private var timer: DispatchSourceTimer?
+  /// Even pacing over the lowest latency (`ScreenPacing`): chosen by the viewer, per session.
+  private let smooth: Bool
 
   /// Create on the main thread, where the surface lives. All supplied callbacks return there.
-  init(surface: DesktopScreenOutput, onSignal: @escaping ([String: Any]) -> Void,
+  init(surface: DesktopScreenOutput, smooth: Bool = false, onSignal: @escaping ([String: Any]) -> Void,
        onStatus: @escaping ([String: Any]) -> Void, onFailure: @escaping (String) -> Void) {
-    self.surface = surface; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
+    self.surface = surface; self.smooth = smooth; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
     super.init()
     surface.onInput = { [weak self] message, replaceable in self?.input(message, replaceable: replaceable) }
     surface.onFirstFrame = { [weak self] in self?.pictureArrived() }
@@ -94,14 +96,12 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     if let error = message["error"] as? String { return fail(String(error.prefix(2048))) }
     if message["t"] as? String == "screen.configure" {
       // The web controller owns request IDs, but native input must observe the same barrier.
-      let previousDisplay = inputState.display
+      // A new display, width or rate is applied in-band, as on the phone: the peer, track and
+      // channels stay. Input waits for the matching acknowledgement (its generation), so a click
+      // meant for the old display can't land on the new one; the few frames from the old display
+      // still in flight are only shown.
       guard inputState.configure(message) else { return }
       releaseButtons()
-      if let previousDisplay, previousDisplay != inputState.display {
-        // An RTP frame has no configuration generation. A new native mount is the only
-        // unambiguous boundary between pictures from two different displays.
-        return fail("显示器已改变，请重新连接以确认新的原生画面")
-      }
       controlAsked = false; controlTrusted = false
       updateControl()
       return
@@ -109,6 +109,10 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     if let session = message["session"] as? [String: Any] {
       if session["t"] as? String == "error" { return fail(String((session["error"] as? String ?? session["message"] as? String ?? "电脑未能应用画面设置，请重新连接").prefix(2048))) }
       inputState.receive(session)
+      // The host's helper takes held keys and the middle button: the view sends them that way.
+      if session["t"] as? String == "capabilities", DesktopScreenBridge.boolean(session["keys"]) == true {
+        DispatchQueue.main.async { [weak self] in self?.surface.physicalKeys = true }
+      }
       requestControlIfReady()
       updateControl()
     }
@@ -175,6 +179,10 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
         self.candidates.removeAll()
         self.attachTrack(peer)
         self.preferReceiveCodecs(peer)
+        if self.smooth, let video = peer.transceivers.first(where: { $0.mediaType == .video }) {
+          let declined = ScreenPacing.declinePlayoutDelay(video)
+          self.status(["pacing": declined ? "smooth" : "immediate"])
+        }
         peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { [weak self, weak peer] answer, error in
           self?.queue.async { [weak self, weak peer] in
             guard let self, let peer, !self.closed, self.peer === peer else { return }
@@ -246,7 +254,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private func input(_ message: [String: Any], replaceable: Bool) {
     queue.async {
       guard !self.closed, self.presentationVisible, self.receivedPicture, self.inputState.allowsInput, self.controlRequested, self.controlTrusted,
-            let type = message["t"] as? String, ["move", "down", "up", "scroll", "key", "text"].contains(type) else { return }
+            let type = message["t"] as? String, ["move", "down", "up", "scroll", "key", "text", "keydown", "keyup"].contains(type) else { return }
       self.sendInput(message, replaceable: replaceable)
     }
   }
@@ -266,7 +274,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       if !replaceable { fail("控制连接已中断，请重新连接") }
       return
     }
-    if let button = message["b"] as? String, ["left", "right"].contains(button) {
+    if let button = message["b"] as? String, ["left", "right", "middle"].contains(button) {
       if message["t"] as? String == "down" { heldButtons[button] = message }
       if message["t"] as? String == "up" { heldButtons.removeValue(forKey: button) }
     }

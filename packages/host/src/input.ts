@@ -58,6 +58,9 @@ export interface HelperStatus {
   video: boolean;
   /** Capture and input can be paused or changed without replacing the video connection. */
   videoReconfigure: boolean;
+  /** Its video connection's input channels take held keys (`keydown` / `keyup` by W3C code) and the
+   * middle button. Only there: events passed through the host stay the kinds above. */
+  keys: boolean;
   preview: boolean;
 }
 
@@ -248,6 +251,7 @@ function statusOf(message: Record<string, unknown>): HelperStatus {
     app: typeof message.app === "string" ? message.app : "",
     video: message.video === true,
     videoReconfigure: message.videoReconfigure === true,
+    keys: message.keys === true,
     preview: message.preview === true,
   };
 }

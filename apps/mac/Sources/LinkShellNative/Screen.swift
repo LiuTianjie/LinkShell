@@ -32,7 +32,7 @@ final class NativeScreen: NSObject {
   private var wantedControl = false
   private var startup: DispatchWorkItem?
 
-  init(host: NSView, helper: String, id: String, rect: CGRect, callback: Callback) throws {
+  init(host: NSView, helper: String, id: String, rect: CGRect, smooth: Bool = false, callback: Callback) throws {
     guard let port = DesktopFramePort(receiver: true) else {
       throw NSError(domain: "LinkShellScreen", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建原生画面通道"])
     }
@@ -69,11 +69,31 @@ final class NativeScreen: NSObject {
       DesktopMediaPipe.read(output.fileHandleForReading, each: { [weak self] in self?.event($0) }, end: { [weak self] in
         DispatchQueue.main.async { self?.fail("原生画面连接已关闭，请重新连接") }
       })
-      pipe.send(["type": "start", "port": port.name])
+      pipe.send(["type": "start", "port": port.name, "smooth": smooth])
     } catch { stop(); throw error }
     let timeout = DispatchWorkItem { [weak self] in self?.fail("原生画面进程未就绪，请重新连接") }
     startup = timeout; DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
     layout()
+    // The rate this Mac can show, as the phone works out its own: frames beyond it would be
+    // encoded and sent only to be dropped here, bits taken from every frame that is shown.
+    for name in [NSWindow.didChangeScreenNotification, ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.reportDisplayRate() })
+    }
+    reportDisplayRate()
+  }
+
+  private var observers: [NSObjectProtocol] = []
+  private var reportedRate: Int?
+  private func reportDisplayRate() {
+    guard !closed else { return }
+    let screen = host.window?.screen ?? NSScreen.main
+    let refresh = screen?.maximumFramesPerSecond ?? 60
+    let constrained = ProcessInfo.processInfo.isLowPowerModeEnabled
+      || [.serious, .critical].contains(ProcessInfo.processInfo.thermalState)
+    let rate = constrained ? min(refresh, 60) : refresh
+    guard rate != reportedRate else { return }
+    reportedRate = rate
+    callback.call(["id": id, "type": "status", "status": ["displayFps": rate]])
   }
 
   func event(_ value: [String: Any]) {
@@ -87,6 +107,7 @@ final class NativeScreen: NSObject {
         for message in self.pending { self.pipe.send(message) }
         self.pending.removeAll()
       case "surfaceControl": self.surface.controlEnabled = value["enabled"] as? Bool == true
+      case "surfaceKeys": self.surface.physicalKeys = value["enabled"] as? Bool == true
       case "cursor": if let cursor = value["message"] as? [String: Any] { self.surface.updateCursor(cursor) }
       case "error": self.fail(value["error"] as? String ?? "原生画面连接失败")
       case "signal", "status": self.callback.call(value.merging(["id": self.id]) { _, new in new })
@@ -145,6 +166,8 @@ final class NativeScreen: NSObject {
   func stop() {
     lock.lock(); guard !closed else { lock.unlock(); return }; closed = true; lock.unlock()
     startup?.cancel(); startup = nil
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    observers.removeAll()
     surface.stop(); clip.removeFromSuperview()
     pending.removeAll(); ready = false
     pipe.send(["type": "stop"]); pipe.close()

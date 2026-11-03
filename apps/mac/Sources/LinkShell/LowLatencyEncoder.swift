@@ -155,7 +155,8 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       state.keyWanted = false
       return (state.generation, key)
     }
-    guard let job else { return Code.ok }
+    guard let job else { FrameTrace.mark("encodeSkip"); return Code.ok }
+    FrameTrace.mark("encodeIn")
     let began = MediaStageProbe.enabled ? ProcessInfo.processInfo.systemUptime : 0
     if MediaStageProbe.enabled, job.key || rtpTime % 31 == 0 {
       MediaStageProbe.shared.reference(native.pixelBuffer, began: began)
@@ -174,6 +175,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         if job.key { state.withLock { if $0.generation == job.generation { $0.keyWanted = true } } }
         break
       case .success(let encoded?):
+        FrameTrace.mark(encoded.key ? "encodeOutKey" : "encodeOut")
         guard let data = encoded.accessUnit() else {
           state.withLock { if $0.generation == job.generation { $0.failure = "an encoded frame had no access unit" } }
           return

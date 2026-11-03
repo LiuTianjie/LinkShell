@@ -182,7 +182,9 @@ enum Tuning {
   /// room for the way JSON writes them.
   static let maxEventBytes = 64_000
 
-  static let statsInterval = 1.0
+  /// `--stats-interval <seconds>` exists only to test whether reading the statistics itself
+  /// disturbs the picture; the frame-rate and floor decisions assume one-second samples.
+  static let statsInterval = Launch.value(after: "--stats-interval").flatMap(Double.init).map { min(max($0, 0.25), 10) } ?? 1.0
 
   // MARK: The stream down the host's socket
 

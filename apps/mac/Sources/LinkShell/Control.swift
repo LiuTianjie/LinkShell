@@ -21,6 +21,11 @@ final class Control {
   private var held: [String: Bool] = [:]
   /// The modifiers held down with each button that is down (shift-click, command-drag).
   private var holding: [String: [String]] = [:]
+  /// Physical keys the viewer holds down (`keydown` / `keyup`), and the modifier keys among them:
+  /// their flags go with every event posted while they are down, as a keyboard's would.
+  private var keysDown: Set<CGKeyCode> = []
+  private var modifiersDown: Set<CGKeyCode> = []
+  private var heldFlags: CGEventFlags { PhysicalKeys.flags(of: modifiersDown) }
   private var lastMove = Date.distantPast
   private var lastReported = CGPoint(x: -1, y: -1)
 
@@ -68,11 +73,12 @@ final class Control {
   }
 
   private func move(to target: CGPoint) {
-    let kind: CGEventType = held["left"] == true ? .leftMouseDragged : held["right"] == true ? .rightMouseDragged : .mouseMoved
-    let event = CGEvent(mouseEventSource: Control.source, mouseType: kind, mouseCursorPosition: target, mouseButton: held["right"] == true ? .right : .left)
+    let kind: CGEventType = held["left"] == true ? .leftMouseDragged : held["right"] == true ? .rightMouseDragged : held["middle"] == true ? .otherMouseDragged : .mouseMoved
+    let pressed: CGMouseButton = held["left"] == true ? .left : held["right"] == true ? .right : held["middle"] == true ? .center : .left
+    let event = CGEvent(mouseEventSource: Control.source, mouseType: kind, mouseCursorPosition: target, mouseButton: pressed)
     event?.setIntegerValueField(.mouseEventDeltaX, value: Int64(target.x - position.x))
     event?.setIntegerValueField(.mouseEventDeltaY, value: Int64(target.y - position.y))
-    event?.flags = []
+    event?.flags = heldFlags
     position = target
     lastMove = Date()
     post(event, ["kind": kind == .mouseMoved ? "move" : "drag", "x": Double(target.x), "y": Double(target.y)])
@@ -97,17 +103,25 @@ final class Control {
     held[name] = down
     // Shift-click, command-drag: the keys go down before the button and stay until it is up.
     // A key the other button is already holding is not pressed again, nor let go under it.
-    let flags: CGEventFlags
+    var flags: CGEventFlags
+    // Modifier keys the viewer holds physically are down already: only the others are pressed here.
+    let names = names.filter { name in !heldFlags.contains(Keys.flags([name])) }
     if down {
       let already = Set(holding.values.joined())
       holding[name] = names
-      flags = modifiers(names.filter { !already.contains($0) }, down: true, over: Keys.flags(Array(already)))
+      flags = modifiers(names.filter { !already.contains($0) }, down: true, over: Keys.flags(Array(already)).union(heldFlags))
     } else {
       flags = Keys.flags(Array(holding.values.joined()))
     }
-    let right = name == "right"
-    let kind: CGEventType = right ? (down ? .rightMouseDown : .rightMouseUp) : (down ? .leftMouseDown : .leftMouseUp)
-    let event = CGEvent(mouseEventSource: Control.source, mouseType: kind, mouseCursorPosition: position, mouseButton: right ? .right : .left)
+    flags.formUnion(heldFlags)
+    let kind: CGEventType
+    let pressed: CGMouseButton
+    switch name {
+    case "right": kind = down ? .rightMouseDown : .rightMouseUp; pressed = .right
+    case "middle": kind = down ? .otherMouseDown : .otherMouseUp; pressed = .center
+    default: kind = down ? .leftMouseDown : .leftMouseUp; pressed = .left
+    }
+    let event = CGEvent(mouseEventSource: Control.source, mouseType: kind, mouseCursorPosition: position, mouseButton: pressed)
     event?.setIntegerValueField(.mouseEventClickState, value: clicks)
     event?.flags = flags
     lastMove = Date()
@@ -117,6 +131,25 @@ final class Control {
       let others = Set(holding.values.joined())
       _ = modifiers(own.filter { !others.contains($0) }, down: false, over: flags)
     }
+  }
+
+  /// A physical key held (`down`) or let go, by its W3C code. A modifier key changes the flags of
+  /// everything after it until it is let go; any other key is posted with the flags held, and a
+  /// repeat (`again`) says so, as the keyboard's own repeat does. Unknown codes are ignored.
+  private func physical(_ code: String, down: Bool, again: Bool) {
+    guard let key = PhysicalKeys.macKeys[code] else { return }
+    if PhysicalKeys.modifier(key) != nil {
+      guard down ? modifiersDown.insert(key).inserted : modifiersDown.remove(key) != nil else { return }
+      let event = CGEvent(keyboardEventSource: Control.source, virtualKey: key, keyDown: down)
+      event?.type = .flagsChanged
+      event?.flags = heldFlags
+      return post(event, ["kind": down ? "moddown" : "modup", "c": code, "flags": heldFlags.rawValue])
+    }
+    if down { keysDown.insert(key) } else if keysDown.remove(key) == nil { return }
+    let event = CGEvent(keyboardEventSource: Control.source, virtualKey: key, keyDown: down)
+    event?.flags = heldFlags
+    if down, again { event?.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
+    post(event, ["kind": down ? "keydown" : "keyup", "c": code, "code": Int(key), "repeat": down && again, "flags": heldFlags.rawValue])
   }
 
   private func key(_ code: CGKeyCode, with names: [String], name: String) {
@@ -155,6 +188,8 @@ final class Control {
     // nothing is posted: an event posted without it has the system ask for it.
     guard Permissions.trusted() else { return }
     for (name, down) in held where down { button(name, down: false, clicks: 1, with: []) }
+    for key in keysDown { if let code = PhysicalKeys.codes[key] { physical(code, down: false, again: false) } }
+    for key in modifiersDown { if let code = PhysicalKeys.codes[key] { physical(code, down: false, again: false) } }
   }
 
   func handle(_ command: [String: Any]) {
@@ -166,20 +201,22 @@ final class Control {
     case "move":
       if let target = point(command) { move(to: target) }
     case "down", "up":
-      let name = (command["b"] as? String) == "right" ? "right" : "left"
+      let name = ["right", "middle"].contains(command["b"] as? String ?? "") ? command["b"] as! String : "left"
       let clicks = Int64(min(max((command["n"] as? Int) ?? 1, 1), 3))
       button(name, down: kind == "down", clicks: clicks, with: (command["m"] as? [String]) ?? [])
     case "scroll":
       let dx = Int32(max(min((command["dx"] as? Double) ?? 0, 2000), -2000))
       let dy = Int32(max(min((command["dy"] as? Double) ?? 0, 2000), -2000))
       let event = CGEvent(scrollWheelEvent2Source: Control.source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
-      event?.flags = Keys.flags(command["m"])
+      event?.flags = Keys.flags(command["m"]).union(heldFlags)
       post(event, ["kind": "scroll", "dx": Int(dx), "dy": Int(dy)])
     case "key":
       guard let name = command["k"] as? String, let code = Keys.code(name) else { return }
       key(code, with: (command["m"] as? [String]) ?? [], name: name)
     case "text":
       if let text = command["s"] as? String { type(text) }
+    case "keydown", "keyup":
+      if let code = command["c"] as? String { physical(code, down: kind == "keydown", again: command["r"] as? Bool == true) }
     default:
       break
     }

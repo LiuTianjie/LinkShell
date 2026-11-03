@@ -46,6 +46,8 @@ final class Service {
     var status = Permissions.status()
     status["preview"] = true
     status["videoReconfigure"] = true
+    // Input may name physical keys held and let go, and the middle button (`Control.physical`).
+    status["keys"] = true
     if options.clock { status["clock"] = ClockStrip.timing }
     return status
   }

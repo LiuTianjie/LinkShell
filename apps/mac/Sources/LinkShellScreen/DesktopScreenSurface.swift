@@ -71,6 +71,11 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
       updateCursorVisibility()
     }
   }
+  /// The remote computer's helper accepts held keys and the middle button (`keys` capability).
+  public var physicalKeys = false
+  /// Keys and modifier keys this remote-desktop view has pressed on the remote computer, so each is released.
+  private var pressedKeys: Set<UInt16> = []
+  private var pressedModifiers: Set<UInt16> = []
   public var receivedFrameCount: UInt64 { renderer.receivedFrameCount }
   private let metalView = DesktopScreenMetalView(frame: .zero)
   private var renderer: DesktopScreenMetalRenderer!
@@ -280,6 +285,10 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public override func mouseUp(with event: NSEvent) { button("left", down: false, event: event) }
   public override func rightMouseDown(with event: NSEvent) { button("right", down: true, event: event) }
   public override func rightMouseUp(with event: NSEvent) { button("right", down: false, event: event) }
+  // The middle button only for a helper that knows it: an older one reads any other name as the left.
+  public override func otherMouseDown(with event: NSEvent) { if physicalKeys, event.buttonNumber == 2 { button("middle", down: true, event: event) } }
+  public override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { button("middle", down: false, event: event) } }
+  public override func otherMouseDragged(with event: NSEvent) { if heldButtons.contains("middle") { _ = move(event, clamp: true) } }
   public override func scrollWheel(with event: NSEvent) {
     guard move(event, replaceable: false) else { return }
     let scale = event.hasPreciseScrollingDeltas ? 1.0 : 12.0
@@ -288,9 +297,14 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private func releaseInput() {
     for button in heldButtons.sorted() { onInput?(["t": "up", "b": button, "n": 1, "m": [String]()], false) }
     heldButtons.removeAll()
+    for key in pressedKeys.union(pressedModifiers).sorted() {
+      if let code = PhysicalKeys.codes[key] { onInput?(["t": "keyup", "c": code], false) }
+    }
+    pressedKeys.removeAll(); pressedModifiers.removeAll()
     inputContext?.discardMarkedText(); unmarkText()
   }
   private func sendKey(_ event: NSEvent) -> Bool {
+    if physicalKeys { return sendHeldKey(event, releaseNow: false) }
     guard canControl, let key = DesktopScreenInput.key(code: event.keyCode, characters: event.charactersIgnoringModifiers) else { return false }
     onInput?(["t": "key", "k": key, "m": DesktopScreenInput.modifiers(event.modifierFlags)], false)
     return true
@@ -299,17 +313,41 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     // ⌃⌘F stays with this Mac, so full screen can always be left while controlling the other one.
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     if flags.contains([.command, .control]), event.charactersIgnoringModifiers?.lowercased() == "f" { return super.performKeyEquivalent(with: event) }
-    if window?.firstResponder === self, canControl, !hasMarkedText(), event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) { return sendKey(event) }
+    if window?.firstResponder === self, canControl, !hasMarkedText(), event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
+      return physicalKeys ? sendHeldKey(event, releaseNow: true) : sendKey(event)
+    }
     return super.performKeyEquivalent(with: event)
   }
   public override func keyDown(with event: NSEvent) {
     guard canControl else { return }
-    if !hasMarkedText(), DesktopScreenInput.isNamedKey(event.keyCode) || event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
+    if !hasMarkedText(), DesktopScreenInput.isNamedKey(event.keyCode) || event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) || (physicalKeys && event.keyCode == 49) {
       if sendKey(event) { return }
     }
     interpretKeyEvents([event])
   }
-  public override func keyUp(with event: NSEvent) { /* Key messages are atomic press/release pairs. */ }
+  /// A key held down on the remote computer by its position (W3C code), until its keyUp here.
+  /// `releaseNow`: AppKit may send no keyUp for a ⌘ or ⌃ shortcut, so that key goes down and up at
+  /// once; the modifier itself stays held as a modifier key (`flagsChanged`).
+  private func sendHeldKey(_ event: NSEvent, releaseNow: Bool) -> Bool {
+    guard canControl, let code = PhysicalKeys.codes[event.keyCode], PhysicalKeys.modifier(event.keyCode) == nil else { return false }
+    onInput?(["t": "keydown", "c": code, "r": event.isARepeat], false)
+    if releaseNow { onInput?(["t": "keyup", "c": code], false) } else { pressedKeys.insert(event.keyCode) }
+    return true
+  }
+  public override func flagsChanged(with event: NSEvent) {
+    guard physicalKeys, canControl, let code = PhysicalKeys.codes[event.keyCode], let flag = PhysicalKeys.modifier(event.keyCode) else {
+      return super.flagsChanged(with: event)
+    }
+    // Which side changed is told by the key; whether it went down, by whether this view had it down.
+    let stillSet = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue)).contains(flag)
+    let down = stillSet && !pressedModifiers.contains(event.keyCode)
+    if down { pressedModifiers.insert(event.keyCode) } else if pressedModifiers.remove(event.keyCode) == nil { return }
+    onInput?(["t": down ? "keydown" : "keyup", "c": code], false)
+  }
+  public override func keyUp(with event: NSEvent) {
+    guard pressedKeys.remove(event.keyCode) != nil, let code = PhysicalKeys.codes[event.keyCode] else { return }
+    onInput?(["t": "keyup", "c": code], false)
+  }
   public func insertText(_ string: Any, replacementRange: NSRange) {
     guard canControl else { return }
     let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
@@ -458,12 +496,14 @@ private final class DesktopScreenMetalRenderer {
     generation &+= 1
     if !value { current = nil; clearRequested = true; changes &+= 1; reportedSize = .zero; reportedFirst = false }
     lock.unlock()
+    if !value { layer.isOpaque = false }
   }
   func resetPresentation() {
     lock.lock()
     pending = nil; current = nil; generation &+= 1; clearRequested = true; changes &+= 1
     reportedSize = .zero; reportedFirst = false
     lock.unlock()
+    layer.isOpaque = false
   }
   func stop() {
     lock.lock(); stopped = true; accepting = false; pending = nil; current = nil; generation &+= 1; lock.unlock()
@@ -553,7 +593,9 @@ private final class DesktopScreenMetalRenderer {
       self.lock.lock(); let live = self.generation == ticket && self.accepting && !self.stopped; self.lock.unlock()
       guard live else { return }
       if newSize { self.onPicture(size) }
-      if first { self.onFirstFrame() }
+      // With a picture every pixel is drawn opaque (black beside it): the window server can then
+      // skip blending this layer with the page beneath it on every frame.
+      if first { self.layer.isOpaque = true; self.onFirstFrame() }
     }
   }
   private func fail(_ message: String) {

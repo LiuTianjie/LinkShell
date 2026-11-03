@@ -8,6 +8,7 @@ protocol DesktopScreenOutput: RTCVideoRenderer {
   var onFirstFrame: (() -> Void)? { get set }
   var onFailure: ((String) -> Void)? { get set }
   var controlEnabled: Bool { get set }
+  var physicalKeys: Bool { get set }
   func updateCursor(_ message: [String: Any])
   func stop()
 }

@@ -679,7 +679,7 @@ export class ScreenShare {
       if (this.video === mine) this.video = undefined;
       return "refused";
     }
-    return { id, reconfigure: status.videoReconfigure === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
+    return { id, reconfigure: status.videoReconfigure === true, keys: status.keys === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
   }
 
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false): void {
@@ -791,7 +791,8 @@ export class ScreenShare {
       if (pausedExpiry) clearTimeout(pausedExpiry);
       pausedExpiry = undefined;
     };
-    const capabilities = () => tell({ session: { t: "capabilities", version: 1, configure: canConfigure, pause: video ? !!(video.reconfigure || video.pause) : true, retainMs: SCREEN_RETAIN_MS } });
+    // `keys`: the video path's input channels take physical keys and the middle button (Mac helper 0.1.49+).
+    const capabilities = () => tell({ session: { t: "capabilities", version: 1, configure: canConfigure, pause: video ? !!(video.reconfigure || video.pause) : true, retainMs: SCREEN_RETAIN_MS, ...(video?.keys ? { keys: true } : {}) } });
     const failure = (error: unknown) => {
       if (!live()) return;
       this.log(`[screen] the capture did not start: ${String(error)}`);

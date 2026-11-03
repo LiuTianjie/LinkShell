@@ -70,7 +70,7 @@ const NOT_EVENTS = [
   "move",
   { t: "move", x: 1.2, y: 0 },
   { t: "move", x: true, y: 0 },
-  { t: "down", b: "middle" },
+  { t: "down", b: "back" },
   { t: "down", b: "left", n: 4 },
   { t: "down", b: "left", n: 1.5 },
   { t: "scroll", dx: 1 },
@@ -257,6 +257,30 @@ await part("socket", "the app on the host's socket", async () => {
     const both = heard.of("both").map((event) => `${event.kind} ${event.b ?? event.k}`);
     row("socket", "both buttons with modifiers: a key both hold goes down once, and up with the last button", same(both, ["moddown shift", "down left", "moddown cmd", "down right", "up left", "up right", "modup cmd", "modup shift"]) && heard.of("both")[4].flags === (CMD | SHIFT), both.join(", "));
     app.send({ t: "close", v: "both" });
+
+    // Held keys (`keys`): ⇧ stays down across a middle-button click and an arrow with its repeat;
+    // ⌘ and C still held when the viewer leaves are let go then, C first.
+    row("socket", "status says the app takes held keys and the middle button", status.keys === true, `keys ${status.keys}`);
+    app.send({ t: "open", v: "held", screen: 0 });
+    for (const event of [
+      { t: "keydown", c: "ShiftLeft" }, { t: "down", b: "middle" }, { t: "up", b: "middle" },
+      { t: "keydown", c: "ArrowLeft" }, { t: "keydown", c: "ArrowLeft", r: true }, { t: "keyup", c: "ArrowLeft" },
+      { t: "keyup", c: "ShiftLeft" }, { t: "keydown", c: "MetaLeft" }, { t: "keydown", c: "KeyC" }, { t: "keydown", c: "NoSuchKey" },
+    ]) app.send({ ...event, v: "held" });
+    await until(() => heard.of("held").some((event) => event.kind === "keydown" && event.c === "KeyC"), "the held keys");
+    app.send({ t: "close", v: "held" });
+    await until(() => heard.of("held").some((event) => event.kind === "modup" && event.c === "MetaLeft"), "the held keys let go");
+    const held = heard.of("held");
+    const heldKinds = held.map((event) => `${event.kind} ${event.c ?? event.b}`);
+    row("socket", "held keys: ⇧ across a middle click and a repeated arrow; ⌘C let go when the viewer leaves", same(heldKinds, [
+      "moddown ShiftLeft", "down middle", "up middle", "keydown ArrowLeft", "keydown ArrowLeft", "keyup ArrowLeft", "modup ShiftLeft",
+      "moddown MetaLeft", "keydown KeyC", "keyup KeyC", "modup MetaLeft",
+    ]), heldKinds.join(", "));
+    const middle = held.find((event) => event.kind === "down");
+    const repeat = held.filter((event) => event.kind === "keydown" && event.c === "ArrowLeft");
+    const copy = held.find((event) => event.kind === "keydown" && event.c === "KeyC");
+    row("socket", "held flags go with each event; the keyboard's repeat is marked", middle?.flags === SHIFT && repeat[0]?.flags === SHIFT && repeat[0]?.repeat === false && repeat[1]?.repeat === true && copy?.flags === CMD && copy?.code === 8,
+      `middle 0x${middle?.flags?.toString(16)}, arrow repeat ${repeat.map((event) => event.repeat).join("/")}, ⌘C 0x${copy?.flags?.toString(16)} code ${copy?.code}`);
 
     // app.test.ts: "holds the permissions under its own name, and serves several viewers at once".
     app.send({ t: "open", v: "a", screen: 0 });
