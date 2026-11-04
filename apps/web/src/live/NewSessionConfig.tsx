@@ -2,7 +2,7 @@ import type { SessionConfigOption } from "@linkshell/wire";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { SessionConfigIcon, sessionConfigLabel, valueName } from "./ComposerControls";
+import { SessionConfigIcon, sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
 
 export function creationOptionLabel(option: SessionConfigOption): string {
   return sessionConfigLabel(option);
@@ -29,7 +29,7 @@ export function NewSessionConfig({ options, disabled, onChange }: { options: Ses
               <DropdownMenuRadioItem key={entry.value} value={entry.value}>
                 <span className="new-session-option">
                   <span>{valueName(entry.name)}</span>
-                  {entry.description && <small>{entry.description}</small>}
+                  {entry.description && <small>{valueDescription(entry.description)}</small>}
                 </span>
               </DropdownMenuRadioItem>
             ))}

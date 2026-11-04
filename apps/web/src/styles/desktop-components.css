@@ -146,7 +146,20 @@ html[data-desktop] .desktop-main .side-panel-content > .muted:first-child,
 html[data-desktop] .desktop-main .side-panel-content > p.muted { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .side-panel-content h3 { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
 html[data-desktop] .desktop-main .settings-panel { gap: 16px; }
-html[data-desktop] .desktop-main .settings-panel > * + * { padding-top: 16px; border-top: 1px solid var(--separator); }
+/* Sections are split by a hairline. A control is never a direct child here: the padding that opens
+   a section pushed a 32 px button's label below its own box. */
+html[data-desktop] .desktop-main .settings-panel > * + * { padding-top: 16px; border-top: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .settings-panel > .settings-panel-place { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .settings-panel > .settings-panel-place + * { border-top: 0; padding-top: 0; }
+html[data-desktop] .desktop-main .settings-panel [data-slot="field-label"] { color: var(--label); font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .settings-panel-more { display: flex; flex-direction: column; gap: 12px; }
+html[data-desktop] .desktop-main .settings-panel-disclosure { justify-content: space-between; width: calc(100% + 16px); height: 32px; margin-inline: -8px; padding-inline: 8px; color: var(--label); font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .settings-panel-disclosure > svg { color: var(--tertiaryLabel); transition: transform 160ms ease-out; }
+html[data-desktop] .desktop-main .settings-panel-disclosure[aria-expanded="true"] > svg { transform: rotate(90deg); }
+/* A select's open list: the option's name, and under it in grey what it means. */
+html[data-desktop] [data-slot="select-item"]:has([data-slot="select-item-body"]) { align-items: flex-start; padding-block: 6px; }
+html[data-desktop] [data-slot="select-item"]:has([data-slot="select-item-body"]) > span:first-child { top: 8px; }
+html[data-desktop] [data-slot="select-item-description"] { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; white-space: normal; }
 /* Tasks, as Codex's background terminals: one grouped list, a row per task — the title, its state
    as a dot and a word at the right, the command under it in mono — a stop button beside a running
    one, and its output opening under the row in a well. No cards inside cards. */

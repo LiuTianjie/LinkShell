@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 export interface ChoiceProps {
   value: string;
   onValueChange: (value: string) => void;
-  options: { value: string; label: string; disabled?: boolean }[];
+  options: { value: string; label: string; description?: string; disabled?: boolean }[];
   label: string;
   placeholder?: string;
   disabled?: boolean;
@@ -57,6 +57,7 @@ export function Choice({
               key={option.value}
               value={`item:${option.value}`}
               disabled={option.disabled}
+              description={option.description}
             >
               {option.label}
             </SelectItem>

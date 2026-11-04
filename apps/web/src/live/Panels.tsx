@@ -43,6 +43,9 @@ import {
 import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
+import { sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
+
+const KNOWN_CATEGORIES = new Set(["mode", "model", "effort"]);
 import { isDesktop } from "./desktop";
 import { ChevronRight, GitBranch, RefreshCw, Trash2 } from "lucide-react";
 
@@ -113,19 +116,29 @@ export function Settings({
       state.machine?.agents.find((agent) => agent.id === session.agent)
         ?.capabilities.acp,
   );
+  const agent = useClient((state) =>
+    state.machine?.agents.find((entry) => entry.id === session.agent),
+  );
+  const home = useClient((state) => state.machine?.home);
+  const cwd =
+    home && (session.cwd === home || session.cwd.startsWith(`${home}/`))
+      ? `~${session.cwd.slice(home.length)}`
+      : session.cwd;
   const [advanced, setAdvanced] = useState(false);
   return (
     <div className="settings-panel">
-      <p className="muted">
-        {session.agent} · {session.cwd}
+      <p className="muted settings-panel-place" title={session.cwd}>
+        {agent?.label ?? session.agent} · {cwd}
       </p>
       <FieldGroup>
         {view?.config.map((option) => (
           <Field key={option.id} data-disabled={!online || job.busy}>
             <FieldLabel htmlFor={`config-${option.id}`}>
-              {option.name}
+              {sessionConfigLabel(option)}
             </FieldLabel>
-            {option.description && (
+            {/* The common settings get a Chinese name of their own; the agent's English line
+                under them ("AI model to use") only repeats it. Others keep the agent's words. */}
+            {option.description && !KNOWN_CATEGORIES.has(option.category ?? "") && (
               <p className="muted">{option.description}</p>
             )}
             {option.type === "boolean" ? (
@@ -154,12 +167,18 @@ export function Settings({
                     actions.setConfig(session.id, option.id, value),
                   )
                 }
+                // The name alone in the field, as on the composer; what an option means shows
+                // under it in the open list.
                 options={option.values.map((value) => ({
                   value: value.value,
                   label:
                     (value.group ? `${value.group} · ` : "") +
-                    value.name +
-                    (value.description ? ` · ${value.description}` : ""),
+                    valueName(value.name) +
+                    // "Default" alone hides which model that is; Claude says it in the description.
+                    (option.category === "model" && /^default\b/i.test(value.name) && value.description
+                      ? ` · ${valueName(value.description)}`
+                      : ""),
+                  description: value.description ? valueDescription(value.description) : undefined,
                 }))}
               />
             )}
@@ -186,14 +205,19 @@ export function Settings({
         </p>
       )}
       {acp && (
-        <Button
-          variant="outline"
-          onClick={() => setAdvanced((value) => !value)}
-        >
-          会话工具与附加目录
-        </Button>
+        <section className="settings-panel-more">
+          <Button
+            variant="ghost"
+            className="settings-panel-disclosure"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced((value) => !value)}
+          >
+            <span>工具与附加目录</span>
+            <ChevronRight data-icon="inline-end" />
+          </Button>
+          {advanced && <AcpSettings agent={session.agent} sessionId={session.id} />}
+        </section>
       )}
-      {advanced && <AcpSettings agent={session.agent} sessionId={session.id} />}
     </div>
   );
 }

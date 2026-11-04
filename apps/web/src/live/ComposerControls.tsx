@@ -55,6 +55,7 @@ const VALUE_NAMES: Record<string, string> = {
   "full access": "完全访问",
   "full-access": "完全访问",
   "ask": "每次询问",
+  "manual": "每次询问",
   "minimal": "最少",
   "low": "低",
   "medium": "中",
@@ -64,6 +65,22 @@ const VALUE_NAMES: Record<string, string> = {
 };
 export function valueName(name: string): string {
   return VALUE_NAMES[name.trim().toLowerCase()] ?? displayModelName(name);
+}
+
+/** What Claude's and Codex's permission modes say they do, in Chinese; anything else as given. */
+const DESCRIPTIONS: Record<string, string> = {
+  "always ask before making changes": "改动前都先问你",
+  "automatically accept all file edits": "文件改动自动接受，其他操作仍会问你",
+  "create a plan before making changes": "先出计划，确认后再动手",
+  "claude handles permission decisions": "由 Claude 判断哪些操作需要问你",
+  "accepts all permissions": "所有操作都不再询问",
+  "can read files; asks before editing or running commands": "可以读文件，编辑或运行命令前会问你",
+  "edits and runs commands in the workspace; asks before anything else": "在工作区内编辑和运行命令，其他操作会问你",
+  "edits and runs anything without asking": "编辑和运行任何东西都不问",
+  "discuss and plan first; no changes until the plan is agreed": "先讨论和计划，计划确认前不做改动",
+};
+export function valueDescription(text: string): string {
+  return DESCRIPTIONS[text.trim().toLowerCase()] ?? text;
 }
 
 export function ComposerConfig({
@@ -116,7 +133,7 @@ export function ComposerConfig({
                   <DropdownMenuRadioItem key={value.value} value={value.value}>
                     <span className="composer-chip-option">
                       <span>{value.group ? `${value.group} · ${valueName(value.name)}` : valueName(value.name)}</span>
-                      {value.description && <small>{value.description}</small>}
+                      {value.description && <small>{valueDescription(value.description)}</small>}
                     </span>
                   </DropdownMenuRadioItem>
                 ))}

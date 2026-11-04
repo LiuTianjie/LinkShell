@@ -383,6 +383,7 @@ a > .external-link-icon {
   /* The connect dialog's one line about the local computer (visual-system.md 登录). */
   .connect-local { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 4px 6px; margin: -4px 0 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-align: center; }
   .connect-local[data-error] { color: var(--danger); }
+  [data-slot="select-item-description"] { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; white-space: normal; }
   .connect-local-link { padding: 0; border: 0; background: none; color: var(--link); font: inherit; cursor: pointer; }
   .connect-local-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
   .connect-local-link:disabled { opacity: .4; cursor: default; }
