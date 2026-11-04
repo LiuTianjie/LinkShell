@@ -14,9 +14,10 @@ import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
 import { listComputers, useComputers, type Computer } from "@/lib/computers";
 import { ComputerSwipe, computerRemovable } from "@/components/computer-swipe";
+import { LinkDot } from "@/components/status";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 // Account and computers, on one page: who you are signed in as (which
 // brings that account's computers in without pairing), and every computer
@@ -34,7 +35,7 @@ function Section({ title, footer, children }: { title?: string; footer?: string;
   return (
     <View style={{ gap: 7 }}>
       {title ? <Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: "600", paddingHorizontal: 16 }]}>{title}</Text> : null}
-      <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", overflow: "hidden" }}>{children}</View>
+      <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>{children}</View>
       {footer ? <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingHorizontal: 16 }]}>{footer}</Text> : null}
     </View>
   );
@@ -84,12 +85,12 @@ function Row({
       })}
     >
       {icon ? (
-        <View style={{ width: 30, height: 30, borderRadius: 8, borderCurve: "continuous", backgroundColor: iconBackground, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 30, height: 30, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: iconBackground, alignItems: "center", justifyContent: "center" }}>
           <Icon {...icon} size={15} color={iconTint} weight="medium" />
         </View>
       ) : null}
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: tint }]}>
+        <Text numberOfLines={1} style={[type.callout, { color: tint }]}>
           {title}
         </Text>
         {detail ? (
@@ -142,7 +143,8 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
         minHeight: 48,
         paddingHorizontal: 14,
         paddingVertical: 11,
-        borderRadius: 14,
+        // A capsule, like every button.
+        borderRadius: 24,
         borderCurve: "continuous",
         backgroundColor: background,
         borderWidth: StyleSheet.hairlineWidth,
@@ -151,7 +153,7 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
         alignItems: "center",
         justifyContent: "center",
         gap: 10,
-        opacity: disabled && !busy ? 0.5 : pressed ? 0.85 : 1,
+        opacity: disabled && !busy ? 0.5 : pressed ? 0.6 : 1,
       })}
     >
       {busy ? <ActivityIndicator color={foreground} /> : <ProviderMark provider={provider} color={foreground} />}
@@ -208,18 +210,18 @@ function SignInForm({ width }: { width: number }) {
     }
   };
 
-  const field = { fontSize: 17, color: colors.label, paddingHorizontal: 16, paddingVertical: 13, minHeight: 50 };
+  const field = { ...type.body, color: colors.label, paddingHorizontal: 16, paddingVertical: 13, minHeight: 50 };
   return (
     <View style={{ gap: 24 }}>
       <View style={{ alignItems: "center", gap: 12, paddingTop: 8, paddingBottom: 12 }}>
         <Image source={require("../../assets/mark.png")} style={{ width: 72, height: 72 }} contentFit="contain" />
         <View style={{ alignItems: "center", gap: 8 }}>
-          <Text style={{ fontSize: 28, lineHeight: 34, fontWeight: "700", letterSpacing: -0.5, color: colors.label }}>LinkShell</Text>
+          <Text style={[type.title1, { color: colors.label }]}>LinkShell</Text>
           <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>电脑上的 Agent，随时跟进</Text>
         </View>
       </View>
       <View style={{ gap: 12 }}>
-        <View style={{ display: emailOpen ? "flex" : "none", backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", overflow: "hidden" }}>
+        <View style={{ display: emailOpen ? "flex" : "none", backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
           <TextInput
             ref={emailRef}
             value={email}
@@ -263,15 +265,15 @@ function SignInForm({ width }: { width: number }) {
             minHeight: 52,
             paddingHorizontal: 18,
             paddingVertical: 14,
-            borderRadius: 16,
+            borderRadius: 26,
             borderCurve: "continuous",
-            backgroundColor: loginDisabled && !busy ? colors.fillStrong : colors.accent,
+            backgroundColor: loginDisabled && !busy ? colors.fillStrong : colors.accentFill,
             alignItems: "center",
             justifyContent: "center",
-            opacity: pressed ? 0.85 : 1,
+            opacity: pressed ? 0.6 : 1,
           })}
         >
-          {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={[type.headline, { color: loginDisabled ? colors.secondaryLabel : colors.onAccent }]}>{emailOpen ? "登录" : "登录 LinkShell"}</Text>}
+          {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={[type.headline, { color: loginDisabled ? colors.secondaryLabel : colors.onAccent }]}>{emailOpen ? "登录" : "登录 LinkShell"}</Text>}
         </Pressable>
       </View>
       <View style={{ gap: 12 }}>
@@ -299,7 +301,7 @@ function SignedIn() {
     <Section>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 16 }}>
         <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.accentFill, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ fontSize: 22, fontWeight: "600", color: "#ffffff" }}>{initial}</Text>
+          <Text style={[type.title, { fontWeight: "600", color: colors.onAccent }]}>{initial}</Text>
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
@@ -337,12 +339,11 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
         <Row
           icon={computer.kind === "relay" ? { sf: "laptopcomputer", md: "laptop_mac" } : { sf: "wifi", md: "wifi" }}
           iconTint={current ? colors.accent : colors.secondaryLabel}
-          iconBackground={current ? colors.accentSoft : colors.fill}
           title={name}
           detail={detail}
           accessory={
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              {online !== undefined ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} /> : null}
+              {online !== undefined ? <LinkDot health={online ? "online" : relayStatus === "connecting" ? "connecting" : "offline"} /> : null}
               {current ? <Icon sf="checkmark" md="check" size={14} color={colors.accent} weight="bold" /> : null}
             </View>
           }
@@ -428,7 +429,6 @@ export function AccountScreen() {
             <Row
               icon={{ sf: "qrcode.viewfinder", md: "qr_code_scanner" }}
               iconTint={colors.accent}
-              iconBackground={colors.accentSoft}
               title="配对电脑"
               detail="扫描二维码或输入配对码"
               accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
@@ -440,7 +440,6 @@ export function AccountScreen() {
             <Row
               icon={{ sf: "wifi", md: "wifi" }}
               iconTint={colors.accent}
-              iconBackground={colors.accentSoft}
               title="局域网连接"
               detail="通过本地地址连接"
               accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}

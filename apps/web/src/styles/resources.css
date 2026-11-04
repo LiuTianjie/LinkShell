@@ -15,7 +15,7 @@
     max-width: 300px;
   }
 .browser-toolbar > label {
-    font-size: 11px;
+    font-size: 12px;
     display: flex;
     gap: 4px;
     align-items: center;
@@ -32,7 +32,7 @@
   }
 .inline-terminal > .browser-toolbar {
     margin: 4px 0;
-    font-size: 11px;
+    font-size: 12px;
   }
 .resource-chip {
     display: inline-flex;
@@ -60,7 +60,7 @@
     max-height: min(65vh, 760px);
     margin: 0;
     padding: 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-card);
     background: var(--code);
     color: var(--codeText);
     font-family: var(--font-mono);
@@ -249,7 +249,7 @@
   }
 .resource-entry-name {
     font-size: 13px;
-    font-weight: 450;
+    font-weight: 400;
   }
 .resource-entry-size {
     font-variant-numeric: tabular-nums;
@@ -283,7 +283,7 @@
     place-items: center;
     min-height: 140px;
     padding: 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-card);
     background: var(--fill);
   }
 .resource-reader-footer {
@@ -480,7 +480,7 @@
     padding-right: 4px;
     border: 1px solid transparent;
     border-bottom: 0;
-    border-radius: 8px 8px 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
     color: var(--secondaryLabel);
   }
 .port-preview-tab[data-active] {
@@ -496,7 +496,7 @@
     min-width: 0;
     min-height: 34px;
     padding: 0 7px 0 10px;
-    border-radius: 7px 0 0 0;
+    border-radius: var(--radius-control) 0 0 0;
     text-align: left;
     white-space: nowrap;
   }
@@ -510,12 +510,12 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
   }
 .port-preview-tab-trigger > small {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
     color: var(--secondaryLabel);
   }
@@ -684,15 +684,16 @@
     align-items: center;
     gap: 6px;
   }
+/* Clean is the normal state (grey); uncommitted changes are the one to notice. */
 .worktree-meta > span:first-child::before {
     content: "";
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: var(--success);
+    background: var(--tertiaryLabel);
   }
 .worktree-meta > .is-dirty:first-child::before {
-    background: var(--warning);
+    background: var(--waiting);
   }
 .worktree-actions {
     display: flex;

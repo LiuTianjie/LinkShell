@@ -138,8 +138,8 @@ export function ManagementUsage() {
               </div>
             ))}
           </div>
-          <Skeleton className="h-[180px] w-full rounded-2xl" />
-          <Skeleton className="h-[140px] w-full rounded-2xl" />
+          <Skeleton className="h-[180px] w-full rounded-lg" />
+          <Skeleton className="h-[140px] w-full rounded-lg" />
         </div>
       )}
       {report && (

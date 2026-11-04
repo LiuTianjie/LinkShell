@@ -13,7 +13,7 @@ import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 /** Path segments from the home directory down, for the tappable path bar. */
 function crumbs(path: string, home: string): { name: string; path: string }[] {
@@ -46,7 +46,7 @@ function Row({ entry, detail, onPress, last }: { entry: DirectoryEntry; detail?:
         style={{
           width: 30,
           height: 30,
-          borderRadius: 8,
+          borderRadius: radius.chip,
           borderCurve: "continuous",
           backgroundColor: entry.project ? colors.accentSoft : colors.fill,
           alignItems: "center",
@@ -200,7 +200,7 @@ export function BrowseScreen() {
             gap: 8,
             minHeight: 44,
             paddingHorizontal: 12,
-            borderRadius: 12,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             backgroundColor: colors.fill,
           }}
@@ -247,7 +247,7 @@ export function BrowseScreen() {
                         justifyContent: "center",
                         paddingHorizontal: 8,
                         paddingVertical: 10,
-                        borderRadius: 8,
+                        borderRadius: radius.chip,
                         backgroundColor: current ? colors.accentSoft : pressed ? colors.fill : undefined,
                       })}
                     >
@@ -280,7 +280,7 @@ export function BrowseScreen() {
                 paddingRight: 6,
                 minHeight: 52,
                 paddingVertical: 4,
-                borderRadius: 18,
+                borderRadius: radius.card,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
               }}
@@ -313,7 +313,7 @@ export function BrowseScreen() {
               {searchMode ? (searching ? "正在搜索…" : `没有找到「${query.trim()}」`) : "这里没有子目录"}
             </Text>
           ) : (
-            <View style={{ backgroundColor: colors.sheetCard, borderRadius: 18, borderCurve: "continuous", overflow: "hidden" }}>
+            <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
               {rows.map((entry, index) => (
                 <Row
                   key={entry.path}

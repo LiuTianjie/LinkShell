@@ -7,7 +7,7 @@ import { ConfigMenu } from "@/components/config-menu";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { optionLabel } from "@/lib/labels";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 export function SessionSettingsScreen() {
   const { id, option: selected } = useLocalSearchParams<{ id: string; option?: string }>();
@@ -27,7 +27,7 @@ export function SessionSettingsScreen() {
     <SheetHeader title="会话设置" />
     {heldElsewhere ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>会话同时开在电脑的另一个 Codex 里，修改将同步到下一轮对话。</Text> : null}
     {/* One grouped list, as Settings draws one: a label and its value per row. */}
-    {options.length ? <View style={{ borderRadius: 16, borderCurve: "continuous", backgroundColor: colors.sheetCard, overflow: "hidden" }}>
+    {options.length ? <View style={{ borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.sheetCard, overflow: "hidden" }}>
       {options.map((option, index) => <View key={option.id} style={{ minHeight: 52, paddingLeft: 16, paddingRight: option.type === "boolean" ? 16 : 10, paddingVertical: 4, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: index ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.separator }}>
         <View style={{ flex: 1, gap: 2, paddingVertical: 8 }}><Text style={[type.body, { color: colors.label }]}>{optionLabel(option)}</Text>{option.description ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{option.description}</Text> : null}</View>
         {option.type === "boolean" ? <Switch accessibilityLabel={optionLabel(option)} disabled={!online} value={option.current === "on"} onValueChange={(value) => void actions.setConfig(id, option.id, value ? "on" : "off").catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} /> : <ConfigMenu option={option} disabled={!online} onChange={(value) => void actions.setConfig(id, option.id, value).catch((error: unknown) => Alert.alert("切换失败", error instanceof Error ? error.message : String(error)))} />}

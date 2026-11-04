@@ -11,14 +11,14 @@ import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
 import { Markdown } from "@/components/markdown";
 import { SheetHeader } from "@/components/sheet-header";
-import { LiveDot } from "@/components/status";
+import { StatusDot } from "@/components/status";
 import { LinkBase } from "@/lib/links";
 import { splitQuote, takeSideQuote, useSideQuotes, withQuote } from "@/lib/side-quote";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 const NO_SIDES: SideChat[] = [];
 const NEW = "new";
@@ -217,7 +217,7 @@ export function SideContent({ sessionId: id, initialSide: initial, embedded = fa
         {/* The keyboard covers the home indicator; a hardware keyboard (no height) does not. A panel stops above the screen's edge; its send button lines up with the conversation's. */}
         <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: embedded ? 18 : keyboardHeight > insets.bottom ? 8 : Math.max(insets.bottom, 8) + 4, gap: 6 }}>
           {!online ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 8 }]}>电脑离线，连上后才能提问。</Text> : null}
-          <View style={{ padding: 6, paddingLeft: 4, borderRadius: 26, borderCurve: "continuous", backgroundColor: colors.sheetCard }}>
+          <View style={{ padding: 6, paddingLeft: 4, borderRadius: radius.panel, borderCurve: "continuous", backgroundColor: colors.sheetCard }}>
           {quote ? (
             <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 4, paddingLeft: 10, paddingTop: 4 }}>
               <QuoteText text={quote} lines={3} fill />
@@ -309,7 +309,7 @@ function SideChip({ label, accessibilityLabel, picked, running, onPress }: { lab
       accessibilityState={{ selected: picked, busy: running }}
       style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: picked ? colors.accentSoft : colors.fill }}
     >
-      {running ? <LiveDot size={6} color={colors.running} /> : null}
+      {running ? <StatusDot /> : null}
       <Text numberOfLines={1} style={[type.footnote, { color: picked ? colors.accent : colors.label, fontWeight: "600", maxWidth: 160 }]}>{label}</Text>
     </Pressable>
   );
@@ -332,7 +332,7 @@ function SideActivity({ lines, live }: { lines: string[]; live: boolean }) {
         hitSlop={6}
         style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", maxWidth: "100%" }}
       >
-        {live ? <LiveDot size={6} color={colors.running} /> : null}
+        {live ? <StatusDot /> : null}
         <Text numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>{summary}</Text>
         <Icon sf={open ? "chevron.up" : "chevron.down"} md={open ? "expand_less" : "expand_more"} size={11} color={colors.tertiaryLabel} weight="semibold" />
       </Pressable>
@@ -351,7 +351,7 @@ function SideMessageView({ message, answering }: { message: SideMessage; answeri
   if (message.role === "user") {
     const { quote, question } = splitQuote(message.text);
     return (
-      <View style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: colors.userBubble }}>
+      <View style={{ alignSelf: "flex-end", maxWidth: "88%", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.card, backgroundColor: colors.userBubble }}>
         {quote ? <QuoteText text={quote} lines={4} /> : null}
         {question ? <Text selectable style={[type.body, { color: colors.label }]}>{question}</Text> : null}
       </View>

@@ -12,7 +12,7 @@ import { useClient } from "@/lib/client";
 import { Markdown } from "../markdown";
 import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Attachments } from "./attachments";
 import { useTimelineWaiting, useTimelineWrapUp } from "./context";
@@ -98,7 +98,7 @@ export function DiffView({
 }) {
   const lines = change.lines.slice(0, maxLines);
   return (
-    <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", overflow: "hidden" }}>
+    <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", overflow: "hidden" }}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: "100%" }}>
         <View style={{ paddingVertical: 6, minWidth: "100%" }}>
           {lines.map((line, index) => {
@@ -153,7 +153,8 @@ export function DiffView({
                       marginVertical: 4,
                       paddingHorizontal: 10,
                       paddingVertical: 6,
-                      borderRadius: 10,
+                      borderRadius: radius.chip,
+                      borderCurve: "continuous",
                       backgroundColor: colors.accentSoft,
                       flexDirection: "row",
                       alignItems: "center",
@@ -184,7 +185,7 @@ export function DiffView({
 export const GLYPH = 18;
 
 function StatusGlyph({ status, waiting }: { status: ToolItem["status"]; waiting: boolean }) {
-  if (waiting) return <Text style={[type.footnote, { color: colors.waiting, fontWeight: "600" }]}>等你允许</Text>;
+  if (waiting) return <Text style={[type.footnote, { color: colors.waiting, fontWeight: "600" }]}>等你确认</Text>;
   if (status === "in_progress" || status === "pending") return <ActivityIndicator size="small" color={colors.secondaryLabel} />;
   if (status === "failed") return <Icon sf="xmark.circle.fill" md="cancel" size={15} color={colors.danger} />;
   return null;
@@ -245,7 +246,7 @@ function WrapUpCard({ item }: { item: ToolItem }) {
     }
   };
   return (
-    <View style={{ backgroundColor: colors.inset, borderRadius: 16, borderCurve: "continuous", padding: 14, gap: 8 }}>
+    <View style={{ backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", padding: 14, gap: 8 }}>
       <Text style={[type.caption, { color: colors.tertiaryLabel, fontWeight: "600" }]}>已收尾</Text>
       {box.recap ? <Markdown text={box.recap} /> : null}
       {box.ask ? <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>{box.ask}</Text> : null}
@@ -267,13 +268,14 @@ function WrapUpCard({ item }: { item: ToolItem }) {
                   accessibilityState={{ disabled, selected: sent === index }}
                   style={({ pressed }) => ({
                     flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, borderRadius: 999, paddingHorizontal: 14,
-                    backgroundColor: primary ? colors.label : "transparent",
+                    // The suggested reply is the one filled button, on accentFill like every primary one.
+                    backgroundColor: primary ? colors.accentFill : "transparent",
                     borderWidth: primary ? 0 : StyleSheet.hairlineWidth, borderColor: colors.separator,
-                    opacity: pressed ? 0.7 : disabled && sent !== index ? 0.4 : 1,
+                    opacity: pressed ? 0.6 : disabled && sent !== index ? 0.4 : 1,
                   })}
                 >
-                  {sending === index ? <ActivityIndicator size="small" color={primary ? colors.background : colors.secondaryLabel} /> : null}
-                  <Text style={[type.footnote, { color: primary ? colors.background : colors.label, fontWeight: "600" }]}>{action.label}</Text>
+                  {sending === index ? <ActivityIndicator size="small" color={primary ? colors.onAccent : colors.secondaryLabel} /> : null}
+                  <Text style={[type.footnote, { color: primary ? colors.onAccent : colors.label, fontWeight: "600" }]}>{action.label}</Text>
                 </Pressable>
               );
             }
@@ -305,7 +307,7 @@ function SessionCard({ item }: { item: ToolItem }) {
       }}
       accessibilityRole={target ? "button" : undefined}
       accessibilityLabel={`${started.title}，${SESSION_STATES[started.state]}`}
-      style={{ flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "flex-start", maxWidth: "100%", backgroundColor: colors.inset, borderRadius: 14, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "flex-start", maxWidth: "100%", backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9 }}
     >
       {started.state === "starting" ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : <Icon sf="plus.bubble" md="add_comment" size={14} color={colors.secondaryLabel} />}
       <View style={{ flexShrink: 1, gap: 1 }}>
@@ -435,7 +437,7 @@ function ToolRow({ item }: { item: ToolItem }) {
 
 function ParamsBlock({ entries, prose }: { entries: [string, string][]; prose?: boolean }) {
   return (
-    <View style={{ backgroundColor: colors.inset, borderRadius: 12, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9, gap: 7 }}>
+    <View style={{ backgroundColor: colors.inset, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 9, gap: 7 }}>
       {entries.map(([key, value], index) => (
         <View key={`${index}:${key}`} style={{ gap: 1 }}>
           <Text style={[type.caption, { color: colors.tertiaryLabel, fontWeight: "600" }]}>{key}</Text>
@@ -453,7 +455,7 @@ function CommandBlock({ item, command, output }: { item: ToolItem; command: stri
   const ended = exitNote(item);
   return (
     <View style={{ gap: 4 }}>
-      <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", paddingVertical: 8, gap: 6 }}>
+      <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", paddingVertical: 8, gap: 6 }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <Text selectable style={{ fontFamily: mono, fontSize: 12, lineHeight: 18, color: colors.codeText, paddingHorizontal: 10 }}>
             <Text style={{ color: colors.tertiaryLabel }}>$ </Text>
@@ -484,7 +486,7 @@ function OutputLines({ text }: { text: string }) {
 function OutputBlock({ text }: { text: string }) {
   const { text: shown, hidden } = tail(text);
   return (
-    <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", paddingVertical: 8 }}>
+    <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", paddingVertical: 8 }}>
       {hidden ? (
         <Text style={[type.caption, { color: colors.tertiaryLabel, paddingHorizontal: 10, paddingBottom: 4 }]}>
           前面还有 {hidden} 行

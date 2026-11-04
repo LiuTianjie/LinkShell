@@ -300,7 +300,9 @@ function showProblem(message: string) {
     body{margin:0;height:100vh;display:grid;place-items:center;background:transparent;color:light-dark(#1a1c1f,#dfdfdf);-webkit-app-region:drag}
     main{max-width:420px;text-align:center;padding:24px}h1{font-size:16px;font-weight:600;margin:0 0 8px}
     p{margin:0 0 20px;color:light-dark(rgb(26 28 31/.7),rgb(255 255 255/.7))}
-    button{-webkit-app-region:no-drag;height:28px;padding:0 14px;border-radius:8px;border:0;font:inherit;font-weight:500;background:light-dark(#1a1c1f,#fff);color:light-dark(#fff,#0d0d0d)}
+    /* accentFill and accentHover, copied from brand-colors.json: this page can't load the workspace's styles */
+    button{-webkit-app-region:no-drag;height:32px;padding:0 12px;border-radius:6px;border:0;font:inherit;font-size:13px;font-weight:500;background:light-dark(#4c5fd5,#5263e8);color:#fff}
+    button:hover{background:light-dark(#4254c7,#4d5fe0)}
   </style><main><h1>工作台暂时不可用</h1><p></p><button>重新连接</button></main>
   <script>document.querySelector("p").textContent=${JSON.stringify(message)};document.querySelector("button").onclick=()=>location.href="linkshell-retry:";</script>`;
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);

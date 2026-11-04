@@ -80,13 +80,51 @@ describe("agent question card", () => {
     expect(single).not.toContain('class="question-text"');
   });
 
-  it("leaves a permission's own options and title alone", () => {
+  it("leaves a permission's own title alone and names a sole cancel as the rejection it is", () => {
     const approval = render(createElement(Permission, {
       permission: { requestId: "p", title: "Stop", options: [{ optionId: "cancel", name: "Stop", kind: "reject_once" }] },
       sessionId: "session-a",
     }));
-    expect(buttons(approval)).toEqual(["Stop"]);
+    expect(approval).toContain("<strong>Stop</strong>");
+    expect(buttons(approval)).toEqual(["拒绝"]);
     expect(approval).not.toContain('data-kind="questions"');
+  });
+
+  it("shows an approval's choices in Chinese, in the shared order, with 允许 the only primary", () => {
+    // Codex's options, in Codex's order and words.
+    const approval = render(createElement(Permission, {
+      permission: {
+        requestId: "codex",
+        title: "Run pnpm test",
+        options: [
+          { optionId: "accept", name: "Allow", kind: "allow_once" },
+          { optionId: "acceptForSession", name: "Allow for this session", kind: "allow_always" },
+          { optionId: "decline", name: "Decline", kind: "reject_once" },
+          { optionId: "cancel", name: "Decline and stop", kind: "reject_once" },
+        ],
+      },
+      sessionId: "session-a",
+    }));
+    expect(buttons(approval)).toEqual(["拒绝", "允许", "本会话都允许", "拒绝并停止"]);
+    const variants = [...approval.matchAll(/<button\b[^>]*data-variant="([^"]+)"[^>]*>([\s\S]*?)<\/button>/g)]
+      .map(([, variant, inner]) => [text(inner!).trim(), variant]);
+    expect(variants).toEqual([["拒绝", "outline"], ["允许", "default"], ["本会话都允许", "outline"], ["拒绝并停止", "outline"]]);
+  });
+
+  it("orders Claude's allow-always choice between allow and the rest", () => {
+    const approval = render(createElement(Permission, {
+      permission: {
+        requestId: "claude",
+        title: "Edit src/app.ts",
+        options: [
+          { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "reject", name: "Reject", kind: "reject_once" },
+        ],
+      },
+      sessionId: "session-a",
+    }));
+    expect(buttons(approval)).toEqual(["拒绝", "允许", "总是允许"]);
   });
 
   it("badges a recommended async answer too, answering with the agent's own text", () => {

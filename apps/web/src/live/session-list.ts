@@ -9,6 +9,12 @@ export function sessionNeedsAttention(session: SessionSummary): boolean {
   );
 }
 
+/** What a session waiting on the person waits for, when that can be told apart (docs/design/visual-system.md). */
+export function waitingLabel(session: SessionSummary): string {
+  if (session.permission?.questions?.length || session.asyncQuestions?.length) return "等你回答";
+  return session.permission ? "等你确认" : "等你处理";
+}
+
 export function sessionGroup(
   session: SessionSummary,
 ): "waiting" | "running" | "recent" {

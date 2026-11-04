@@ -22,7 +22,7 @@ import {
   useJob,
   Runtime,
 } from "./common";
-import { sessionNeedsAttention, sessionPreview } from "./session-list";
+import { sessionNeedsAttention, sessionPreview, waitingLabel } from "./session-list";
 import { sessionTime } from "./session-time";
 import { StatusText } from "./StatusText";
 import { PageHeader } from "../components/PageHeader";
@@ -196,8 +196,10 @@ function ProjectList({ create, navigate, title = "项目", scopeChoice = false, 
                       <span className="project-session-detail">
                         {sessionPreview(session)}
                       </span>
-                      {sessionNeedsAttention(session) || session.state !== "idle" ? (
-                        <StatusText state={sessionNeedsAttention(session) ? "waiting" : session.state} />
+                      {sessionNeedsAttention(session) ? (
+                        <StatusText state="waiting" label={waitingLabel(session)} />
+                      ) : session.state !== "idle" ? (
+                        <StatusText state={session.state} />
                       ) : <span />}
                       <time dateTime={new Date(session.updatedAt).toISOString()}>{sessionTime(session.updatedAt)}</time>
                     </button>

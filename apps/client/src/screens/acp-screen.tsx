@@ -28,7 +28,7 @@ export function AgentInteractions({ agent }: { agent: string }) {
   };
   return <>{requests?.map((request) => request.questions?.length
     ? <QuestionCard key={request.requestId} sessionId={`agent:${agent}`} contained request={{ ...request, ts: 0 }} count={requests.length} agentName={name} disabled={!online} onChoose={choose} onAnswer={async (requestId, answers) => { await link.call("agents.respond", { agent, requestId, answers }); }} />
-    : <AcpSection key={request.requestId} title="需要你确认"><View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}><Icon sf="hand.raised" md="front_hand" size={20} color={colors.waiting} /><Text style={[type.headline, { flex: 1, color: colors.label }]}>{request.title}</Text></View>{request.detail ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{request.detail}</Text> : null}<PermissionContext request={request} /><PermissionActions options={request.options} disabled={!online} onChoose={(optionId) => choose(request.requestId, optionId)} /></AcpSection>)}</>;
+    : <AcpSection key={request.requestId} title="等你确认"><View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}><Icon sf="hand.raised" md="front_hand" size={20} color={colors.waiting} /><Text style={[type.headline, { flex: 1, color: colors.label }]}>{request.title}</Text></View>{request.detail ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{request.detail}</Text> : null}<PermissionContext request={request} /><PermissionActions options={request.options} disabled={!online} onChoose={(optionId) => choose(request.requestId, optionId)} /></AcpSection>)}</>;
 }
 
 export function AcpScreen() {
@@ -132,7 +132,7 @@ function ProviderForm({ agent, provider, changed }: { agent: string; provider: A
     try { changed((await link.call("agents.providers", { agent, operation, config: { providerId: provider.providerId, apiType, baseUrl: operation === "set" ? url.trim() : undefined, headers: operation === "set" ? parseConfigRecord(headers) : undefined } })).providers); setHeaders("{}"); setSaved(true); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); }
   };
-  return <View style={{ gap: 14, padding: 14, borderRadius: radius.row, backgroundColor: colors.fill }}>
+  return <View style={{ gap: 14, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.fill }}>
     <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><Icon sf="network" md="hub" size={18} color={colors.accent} /><Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>{provider.providerId}</Text>{provider.required ? <Text style={[type.caption, { color: colors.secondaryLabel }]}>必需</Text> : null}</View>
     {error ? <AcpBanner message={error} /> : saved ? <AcpBanner kind="success" message="供应商已更新" /> : null}
     <AcpChoice label="API 协议" value={apiType} onChange={setApiType} choices={provider.supported.map((value) => ({ value, label: value }))} disabled={busy || !online} />

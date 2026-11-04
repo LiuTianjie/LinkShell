@@ -28,7 +28,7 @@ import { AgentMark, baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
 import { isWindowsDesktop, openDesktopManagement } from "../live/desktop";
 import { desktopModeShortcuts, desktopShortcuts, sendDesktopCommand, shortcutText, type DesktopShortcut } from "../live/desktop-commands";
-import { sessionNeedsAttention } from "../live/session-list";
+import { sessionNeedsAttention, waitingLabel } from "../live/session-list";
 import { sessionTime } from "../live/session-time";
 import {
   Command,
@@ -57,8 +57,8 @@ const places = [
 ];
 
 function stateWord(session: SessionSummary): string {
-  if (sessionNeedsAttention(session)) return "需要你";
-  if (session.state === "running") return "进行中";
+  if (sessionNeedsAttention(session)) return waitingLabel(session);
+  if (session.state === "running") return "运行中";
   if (session.state === "error") return "出错";
   return sessionTime(session.updatedAt);
 }

@@ -6,27 +6,29 @@ import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { phaseLabel, type AttentionPhase } from "@/lib/session-attention";
 import { agentLook } from "@/theme/agents";
-import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import brandColors from "@/theme/brand-colors.json";
+import { radius, type } from "@/theme/type";
 import { AgentTile } from "./agent-tile";
 import { Icon } from "./icon";
-import { LiveDot } from "./status";
+import { StatusDot } from "./status";
 
+/** The island is dark in both appearances, like the Dynamic Island it mirrors: it takes the dark half of each pair. */
+const onDark = (name: keyof typeof brandColors) => brandColors[name][1];
+
+/** Anything waiting on the user is amber, approval or question alike; done and offline are grey. */
 function phaseAccent(phase: AttentionPhase) {
   switch (phase) {
     case "waiting_for_approval":
-      return colors.waiting;
     case "waiting_for_input":
-      return colors.accent;
+      return onDark("waiting");
     case "failed":
-      return colors.danger;
+      return onDark("danger");
     case "running":
     case "starting":
-      return colors.running;
+      return onDark("running");
     case "completed":
-      return colors.ok;
     case "stale":
-      return colors.tertiaryLabel;
+      return onDark("tertiaryLabel");
   }
 }
 
@@ -38,7 +40,7 @@ export interface AttentionIslandProps {
 /**
  * Interactive Dynamic Island / Live Activity summary capsule on the Home screen.
  * Mirrors the single-card 7-phase attention aggregation sent to iOS ActivityKit,
- * and degrades gracefully to "状态已过期" (`stale`) when offline.
+ * and shows "离线" (`stale`) when the computer is out of reach.
  */
 export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
   const [expanded, setExpanded] = useState(false);
@@ -46,6 +48,7 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
 
   const phase = payload.phase;
   const accent = phaseAccent(phase);
+  const resting = phase === "completed" || phase === "stale";
   const label = phaseLabel(phase);
   const waiting = payload.waitingCount ?? 0;
   const running = payload.runningCount ?? 0;
@@ -70,12 +73,13 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
         accessibilityHint={expanded ? "点击打开该会话" : "点击展开实时活动详情"}
         style={({ pressed }) => ({
           backgroundColor: "#141418",
-          borderRadius: expanded ? 26 : 22,
+          // A capsule while it is one line (half its 40 pt height or more), a panel once expanded.
+          borderRadius: radius.panel,
           borderCurve: "continuous",
           paddingHorizontal: 14,
           paddingVertical: expanded ? 12 : 9,
           gap: expanded ? 10 : 0,
-          opacity: pressed ? 0.92 : 1,
+          opacity: pressed ? 0.6 : 1,
           boxShadow: "0 6px 20px rgba(0,0,0,0.22)",
         })}
       >
@@ -87,7 +91,8 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
               style={{
                 width: 22,
                 height: 22,
-                borderRadius: 7,
+                borderRadius: 22 * 0.26,
+                borderCurve: "continuous",
                 backgroundColor: "rgba(255,255,255,0.12)",
                 alignItems: "center",
                 justifyContent: "center",
@@ -97,12 +102,8 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
             </View>
           )}
           <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <LiveDot
-              color={accent}
-              size={6}
-              live={phase === "running" || phase === "starting" || phase === "waiting_for_approval"}
-            />
-            <Text numberOfLines={1} style={[type.caption, { color: accent, fontWeight: "700" }]}>
+            <StatusDot color={accent} />
+            <Text numberOfLines={1} style={[type.caption, { color: resting ? onDark("secondaryLabel") : accent, fontWeight: "600" }]}>
               {label}
             </Text>
             <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: "#f3f3f7", fontWeight: "600" }]}>
@@ -114,11 +115,12 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
               style={{
                 paddingHorizontal: 7,
                 paddingVertical: 2,
-                borderRadius: 10,
+                borderRadius: radius.chip,
+                borderCurve: "continuous",
                 backgroundColor: "rgba(255,255,255,0.14)",
               }}
             >
-              <Text style={{ fontSize: 11, fontWeight: "600", color: "#d1d1d8", fontVariant: ["tabular-nums"] }}>
+              <Text style={[type.caption2, { fontWeight: "600", color: "#d1d1d8", fontVariant: ["tabular-nums"] }]}>
                 +{extraCount}
               </Text>
             </View>
@@ -144,13 +146,13 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 {waiting > 0 ? (
-                  <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>{waiting} 待处理</Text>
+                  <Text style={[type.caption, { color: onDark("waiting"), fontWeight: "600" }]}>{waiting} 等你处理</Text>
                 ) : null}
                 {failed > 0 ? (
-                  <Text style={[type.caption, { color: colors.danger, fontWeight: "600" }]}>{failed} 出错</Text>
+                  <Text style={[type.caption, { color: onDark("danger"), fontWeight: "600" }]}>{failed} 出错</Text>
                 ) : null}
                 {running > 0 ? (
-                  <Text style={[type.caption, { color: colors.running, fontWeight: "600" }]}>{running} 运行中</Text>
+                  <Text style={[type.caption, { color: onDark("running"), fontWeight: "600" }]}>{running} 运行中</Text>
                 ) : null}
                 <Pressable
                   onPress={() => {
@@ -158,9 +160,9 @@ export function AttentionIsland({ payload, onOpenHero }: AttentionIslandProps) {
                     setExpanded(false);
                   }}
                   hitSlop={8}
-                  style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.12)" }}
+                  style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.chip, borderCurve: "continuous", backgroundColor: "rgba(255,255,255,0.12)", opacity: pressed ? 0.6 : 1 })}
                 >
-                  <Text style={{ fontSize: 11, color: "#d1d1d8", fontWeight: "600" }}>收起</Text>
+                  <Text style={[type.caption, { color: "#d1d1d8", fontWeight: "600" }]}>收起</Text>
                 </Pressable>
               </View>
             </View>

@@ -2,8 +2,9 @@ import { Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
+import { StatusDot } from "./status";
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -60,14 +61,20 @@ export function VoiceInputBar({
               accessibilityLabel={`模拟语音：${phrase}`}
               onPress={() => onInjectPhrase(phrase)}
               style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
                 paddingHorizontal: 10,
                 paddingVertical: 5,
-                borderRadius: 12,
-                backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                borderRadius: radius.chip,
+                borderCurve: "continuous",
+                backgroundColor: colors.fill,
+                opacity: pressed ? 0.6 : 1,
               })}
             >
+              <Icon sf="mic" md="mic" size={11} color={colors.secondaryLabel} />
               <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
-                🎙️ “{phrase.slice(0, 12)}…”
+                “{phrase.slice(0, 12)}…”
               </Text>
             </Pressable>
           ))}
@@ -92,12 +99,13 @@ export function VoiceInputBar({
             width: 38,
             height: 38,
             borderRadius: 19,
-            backgroundColor: canceling ? colors.danger : pressed ? colors.fillStrong : colors.fill,
+            backgroundColor: canceling ? colors.danger : colors.fill,
+            opacity: pressed ? 0.6 : 1,
             alignItems: "center",
             justifyContent: "center",
           })}
         >
-          <Icon sf="xmark" md="close" size={19} color={canceling ? "#ffffff" : colors.secondaryLabel} weight="bold" />
+          <Icon sf="xmark" md="close" size={19} color={canceling ? colors.onAccent : colors.secondaryLabel} weight="bold" />
         </Pressable>
 
         <View
@@ -112,24 +120,8 @@ export function VoiceInputBar({
             backgroundColor: canceling ? colors.dangerSoft : colors.accentSoft,
           }}
         >
-          <View
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: 3.5,
-              backgroundColor: canceling ? colors.danger : colors.accent,
-            }}
-          />
-          <Text
-            style={{
-              fontFamily: mono,
-              fontSize: 12,
-              fontWeight: "600",
-              color: canceling ? colors.danger : colors.accent,
-              fontVariant: ["tabular-nums"],
-              minWidth: 32,
-            }}
-          >
+          <StatusDot color={canceling ? colors.danger : colors.accent} />
+          <Text style={[type.caption, { fontWeight: "600", color: canceling ? colors.danger : colors.accent, fontVariant: ["tabular-nums"], minWidth: 32 }]}>
             {formatDuration(elapsedSeconds)}
           </Text>
 
@@ -178,10 +170,10 @@ export function VoiceInputBar({
           hitSlop={6}
           style={({ pressed }) => ({
             minHeight: 38,
-            opacity: processing ? 0.5 : 1,
+            opacity: processing ? 0.5 : pressed ? 0.6 : 1,
             paddingHorizontal: 12,
             borderRadius: 19,
-            backgroundColor: pressed ? colors.fillStrong : colors.fill,
+            backgroundColor: colors.fill,
             alignItems: "center",
             justifyContent: "center",
           })}
@@ -203,7 +195,7 @@ export function VoiceInputBar({
               backgroundColor: hasText ? colors.accentFill : colors.fillStrong,
               alignItems: "center",
               justifyContent: "center",
-              transform: [{ scale: pressed ? 0.94 : 1 }],
+              opacity: pressed ? 0.6 : 1,
             })}
           >
             <Icon sf="arrow.up" md="arrow_upward" size={21} color={hasText ? colors.onAccent : colors.tertiaryLabel} weight="bold" />

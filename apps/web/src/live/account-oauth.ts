@@ -16,14 +16,14 @@ function callbackURL() {
 function panel(target: Window, message: string) {
   target.document.title = "LinkShell 登录";
   const main = target.document.createElement("main");
-  main.style.cssText = "max-width:400px;margin:18vh auto;padding:32px;font:15px system-ui;line-height:1.65";
+  main.style.cssText = "max-width:400px;margin:18vh auto;padding:32px;font:14px system-ui;line-height:1.65";
   const title = target.document.createElement("h1");
   title.textContent = "LinkShell 登录";
   const text = target.document.createElement("p");
   text.textContent = message;
   const close = target.document.createElement("button");
   close.textContent = "关闭窗口";
-  close.style.cssText = "padding:8px 18px;border-radius:9px;cursor:pointer";
+  close.style.cssText = "height:32px;padding:0 12px;border-radius:6px;cursor:pointer";
   close.onclick = () => target.close();
   main.append(title, text, close);
   target.document.body.replaceChildren(main);

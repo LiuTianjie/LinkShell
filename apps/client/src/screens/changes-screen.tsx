@@ -13,7 +13,7 @@ import { baseName, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { DiffStat } from "@/components/diff-stat";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 export interface DiffReviewComment {
   key: string;
@@ -106,7 +106,7 @@ function FileRow({
               <Text style={[type.caption2, { color: entry.kind === "add" ? colors.ok : colors.danger, fontWeight: "700" }]}>{label}</Text>
             ) : null}
             {fileCommentCount > 0 ? (
-              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.accentSoft }}>
+              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.chip, backgroundColor: colors.accentSoft }}>
                 <Text style={[type.caption2, { color: colors.accent, fontWeight: "700" }]}>{fileCommentCount} 条批注</Text>
               </View>
             ) : null}
@@ -240,7 +240,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
               </Text>
               <Text style={[type.caption, { color: colors.tertiaryLabel }]}>点击任意代码行添加修改批注</Text>
             </View>
-            <View style={{ backgroundColor: colors.card, borderRadius: 22, borderCurve: "continuous", overflow: "hidden" }}>
+            <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
               {files.map((entry, index) => (
                 <FileRow
                   key={entry.path}
@@ -302,14 +302,14 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
               width: "100%",
               maxWidth: 380,
               backgroundColor: colors.card,
-              borderRadius: 22,
+              borderRadius: radius.panel,
               padding: 18,
               gap: 12,
             }}
           >
             <Text style={[type.headline, { color: colors.label }]}>添加代码行批注</Text>
             {editingTarget ? (
-              <View style={{ backgroundColor: colors.code, borderRadius: 10, padding: 8 }}>
+              <View style={{ backgroundColor: colors.code, borderRadius: radius.control, padding: 8 }}>
                 <Text numberOfLines={2} style={{ fontFamily: mono, fontSize: 12, color: colors.codeText }}>
                   {editingTarget.lineCode}
                 </Text>
@@ -326,7 +326,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
                 fontSize: 15,
                 color: colors.label,
                 backgroundColor: colors.fill,
-                borderRadius: 12,
+                borderRadius: radius.control,
                 paddingHorizontal: 12,
                 paddingVertical: 10,
                 minHeight: 72,

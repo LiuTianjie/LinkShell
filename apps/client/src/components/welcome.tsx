@@ -4,7 +4,7 @@ import { Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Button } from "./button";
 import { Icon } from "./icon";
 import { EmptyState, LoadingState } from "./state-views";
@@ -32,26 +32,14 @@ export function Welcome() {
   return (
     <View style={{ paddingTop: 28, gap: 18 }}>
       <View style={{ alignItems: "center", gap: 10, paddingHorizontal: 12 }}>
-        <View
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 16,
-            borderCurve: "continuous",
-            backgroundColor: colors.accentSoft,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Icon sf="laptopcomputer" md="laptop_mac" size={26} color={colors.accent} />
-        </View>
+        <Icon sf="laptopcomputer" md="laptop_mac" size={40} color={colors.secondaryLabel} />
         <Text style={[type.title3, { color: colors.label, textAlign: "center" }]}>连接你的电脑</Text>
         <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
           Agent 在你的电脑上运行，LinkShell 让你在手机上继续。先在电脑上安装桌面版或 CLI。
         </Text>
       </View>
 
-      <View style={{ backgroundColor: colors.card, borderRadius: 18, borderCurve: "continuous", padding: 16, gap: 10 }}>
+      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", padding: 16, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Icon sf="desktopcomputer" md="desktop_windows" size={20} color={colors.label} />
           <Text style={[type.headline, { color: colors.label }]}>桌面版 · macOS / Windows</Text>
@@ -74,7 +62,7 @@ export function Welcome() {
         }}
         accessibilityRole="button"
         accessibilityLabel="复制安装命令"
-        style={{ backgroundColor: colors.card, borderRadius: 18, borderCurve: "continuous", padding: 16, gap: 10 }}
+        style={({ pressed }) => ({ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", padding: 16, gap: 10, opacity: pressed ? 0.6 : 1 })}
       >
         <Text style={[type.headline, { color: colors.label }]}>CLI · 在电脑终端安装</Text>
         <Text selectable style={{ fontFamily: mono, fontSize: 13.5, lineHeight: 21, color: colors.label }}>

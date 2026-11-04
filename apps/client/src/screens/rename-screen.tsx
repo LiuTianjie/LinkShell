@@ -9,7 +9,7 @@ import { haptics } from "@/lib/haptics";
 import { sessionTitle } from "@/lib/describe";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 /** Names a session (in the agent too, where it keeps names: Codex, Claude). */
 export function RenameScreen() {
@@ -39,7 +39,7 @@ export function RenameScreen() {
   return (
     <KeyboardAwareScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1, backgroundColor: colors.sheet }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: insets.bottom + 24, gap: 14 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" bottomOffset={20}>
       <SheetHeader title="重命名" actions={[{ key: "save", label: "保存", icon: { sf: "checkmark", md: "check" }, onPress: () => void save(), disabled: saving, prominent: true }]} />
-      <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", paddingHorizontal: 16 }}>
+      <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16 }}>
         <TextInput
           value={title}
           onChangeText={setTitle}

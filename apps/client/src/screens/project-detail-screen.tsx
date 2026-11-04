@@ -15,7 +15,7 @@ import { haptics } from "@/lib/haptics";
 import { baseName, shortPath } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 import { useFloatingTabInset } from "@/components/floating-tabs";
 import { HeaderActions } from "@/components/header-actions";
 import { useContentWidth } from "@/lib/content-width";
@@ -77,7 +77,7 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
   return (
     <View style={{ gap: 6, marginTop: 4 }}>
       <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingHorizontal: 4 }]}>未使用的 worktree</Text>
-      <View style={{ backgroundColor: colors.card, borderRadius: 18, borderCurve: "continuous", paddingLeft: 14 }}>
+      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingLeft: 14 }}>
         {worktrees.map((entry, index) => {
           const state = [entry.dirty ? "有未提交改动" : null, entry.ahead ? `领先 ${entry.ahead} 个提交` : null].filter(Boolean).join(" · ");
           return (
@@ -95,7 +95,7 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
                 borderTopColor: colors.separator,
               }}
             >
-              <BranchTag branch={entry.branch} size={14} max={26} color={colors.label} />
+              <BranchTag branch={entry.branch} font={type.subhead} max={26} color={colors.label} />
               <Text numberOfLines={stacked ? 2 : 1} style={[type.footnote, { flex: stacked ? undefined : 1, color: colors.secondaryLabel }]}>
                 {state}
               </Text>
@@ -202,7 +202,7 @@ export function ProjectDetailScreen() {
           </Text>
           {branch ? (
             <View style={{ flexShrink: 1, maxWidth: "100%" }}>
-              <BranchTag branch={branch} size={13} max={20} />
+              <BranchTag branch={branch} font={type.footnote} max={20} />
             </View>
           ) : null}
         </View>

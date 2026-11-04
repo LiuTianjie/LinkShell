@@ -6,14 +6,14 @@ import { Text, TextInput } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Icon } from "@/components/icon";
-import { LiveDot } from "@/components/status";
+import { LinkDot } from "@/components/status";
 import { useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { reconnectRelays, useComputers } from "@/lib/computers";
 import { normalizeHostUrl } from "@/lib/settings";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 
 const HOST_COMMAND = "linkshell host --dev-port 7878";
 // The host's TCP port listens on loopback only and is for development: a phone can't reach it,
@@ -66,7 +66,7 @@ export function ConnectScreen() {
       />
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <LiveDot size={8} color={online ? colors.ok : status === "connecting" ? colors.running : colors.waiting} live={status !== "stopped"} />
+        <LinkDot health={online ? "online" : status === "connecting" ? "connecting" : detail ? "error" : "offline"} />
         <Text style={[type.subhead, { color: colors.secondaryLabel, flex: 1 }]}>
           {online
             ? `已连接 ${machine?.hostname.replace(/\.local$/, "") ?? ""}`
@@ -98,7 +98,7 @@ export function ConnectScreen() {
             fontSize: 15,
             color: colors.label,
             backgroundColor: colors.fill,
-            borderRadius: 14,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             paddingHorizontal: 14,
             paddingVertical: 13,
@@ -124,7 +124,7 @@ export function ConnectScreen() {
             alignItems: "center",
             gap: 10,
             padding: 12,
-            borderRadius: 14,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             backgroundColor: colors.code,
           }}

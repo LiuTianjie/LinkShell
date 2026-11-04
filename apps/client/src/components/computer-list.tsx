@@ -10,7 +10,7 @@ import { useClient, useConnection } from "@/lib/client";
 import { listComputers, useComputers } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 const platforms: Record<string, string> = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 
@@ -51,7 +51,7 @@ export function ComputerList({ onSelect, background = colors.sheet }: { onSelect
               accessibilityLabel={`${name}，${stateLabel}${locked ? "，需要访问密码" : ""}${selected ? "，当前电脑" : ""}`}
               accessibilityState={{ selected }}
               onPress={() => { haptics.selection(); useComputers.getState().select(computer.key); onSelect?.(); }}
-              style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minHeight: 72, paddingVertical: 12, borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}
+              style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minHeight: 72, paddingVertical: 12, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: pressed ? colors.fill : "transparent" })}
             >
               <ComputerArt name={name} />
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -68,7 +68,7 @@ export function ComputerList({ onSelect, background = colors.sheet }: { onSelect
             </Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={`给 ${name} 改名`}
               onPress={() => { haptics.selection(); router.push({ pathname: "/rename-computer", params: { computer: computer.key } }); }}
-              style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: pressed ? colors.fill : "transparent" })}>
+              style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: radius.control, borderCurve: "continuous", backgroundColor: pressed ? colors.fill : "transparent" })}>
               <Icon sf="pencil" md="edit" size={18} color={colors.secondaryLabel} />
             </Pressable>
             </View>

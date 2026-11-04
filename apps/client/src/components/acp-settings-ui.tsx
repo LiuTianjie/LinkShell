@@ -3,7 +3,7 @@ import { ActivityIndicator, Platform, ScrollView, StyleSheet, View, type TextInp
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text, TextInput } from "./fixed-text";
 import { Icon, type IconProps } from "./icon";
-import { PressableScale } from "./pressable-scale";
+import { PressableFeedback } from "./pressable-feedback";
 import { SheetHeader, type SheetHeaderAction } from "./sheet-header";
 import { colors } from "@/theme/colors";
 import { mono, radius, type } from "@/theme/type";
@@ -37,7 +37,7 @@ export function AcpRow({ title, detail, icon, trailing, onPress, disabled, busy,
     <View style={{ flex: 1, gap: 3 }}><Text style={[type.subhead, { fontWeight: "500", color: destructive ? colors.danger : colors.label }]}>{title}</Text>{detail ? <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>{detail}</Text> : null}</View>
     {busy ? <ActivityIndicator size="small" color={colors.accent} /> : trailing ?? (onPress ? <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" /> : null)}
   </View>;
-  return onPress ? <PressableScale onPress={onPress} disabled={disabled || busy} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!disabled || !!busy, busy: !!busy }}>{content}</PressableScale> : content;
+  return onPress ? <PressableFeedback onPress={onPress} disabled={disabled || busy} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!disabled || !!busy, busy: !!busy }}>{content}</PressableFeedback> : content;
 }
 
 export function AcpField({ label, value, onChange, helper, code, ...props }: Omit<TextInputProps, "value" | "onChangeText" | "onChange"> & { label: string; value: string; onChange(value: string): void; helper?: string; code?: boolean }) {
@@ -52,16 +52,16 @@ export function AcpField({ label, value, onChange, helper, code, ...props }: Omi
 export function AcpDisclosure({ title, detail, children, initiallyOpen = false }: { title: string; detail?: string; children: ReactNode; initiallyOpen?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   return <View style={{ gap: open ? 16 : 0 }}>
-    <PressableScale onPress={() => setOpen((value) => !value)} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }}>
+    <PressableFeedback onPress={() => setOpen((value) => !value)} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} style={{ marginHorizontal: -8, paddingHorizontal: 8, borderRadius: radius.control, borderCurve: "continuous" }}>
       <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10 }}><View style={{ flex: 1, gap: 3 }}><Text style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>{title}</Text>{detail ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{detail}</Text> : null}</View><Icon sf={open ? "chevron.up" : "chevron.down"} md={open ? "expand_less" : "expand_more"} size={16} color={colors.tertiaryLabel} /></View>
-    </PressableScale>
+    </PressableFeedback>
     {open ? children : null}
   </View>;
 }
 
 export function AcpBanner({ message, kind = "error" }: { message: string; kind?: "error" | "success" | "info" }) {
   const foreground = kind === "error" ? colors.danger : kind === "success" ? colors.ok : colors.secondaryLabel;
-  return <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 14, borderRadius: radius.row, borderCurve: "continuous", backgroundColor: kind === "error" ? colors.dangerSoft : kind === "success" ? colors.okSoft : colors.fill }}>
+  return <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: kind === "error" ? colors.dangerSoft : kind === "success" ? colors.okSoft : colors.fill }}>
     <Icon sf={kind === "error" ? "exclamationmark.circle" : kind === "success" ? "checkmark.circle" : "info.circle"} md={kind === "error" ? "error_outline" : kind === "success" ? "check_circle" : "info"} size={18} color={foreground} />
     <Text selectable style={[type.footnote, { flex: 1, color: foreground }]}>{message}</Text>
   </View>;
@@ -69,15 +69,15 @@ export function AcpBanner({ message, kind = "error" }: { message: string; kind?:
 
 export function AcpChoice<T extends string>({ label, value, choices, onChange, disabled }: { label: string; value: T; choices: { value: NoInfer<T>; label: string }[]; onChange(value: T): void; disabled?: boolean }) {
   return <View style={{ gap: 8 }}><Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: "500" }]}>{label}</Text><View style={{ flexDirection: "row", gap: 4, padding: 4, backgroundColor: colors.fill, borderRadius: radius.control, borderCurve: "continuous" }}>
-    {choices.map((choice) => <PressableScale key={choice.value} onPress={() => onChange(choice.value)} disabled={disabled} accessibilityRole="radio" accessibilityLabel={choice.label} accessibilityState={{ selected: choice.value === value, checked: choice.value === value, disabled: !!disabled }} outerStyle={{ flex: 1 }}>
+    {choices.map((choice) => <PressableFeedback key={choice.value} feedback="button" onPress={() => onChange(choice.value)} disabled={disabled} accessibilityRole="radio" accessibilityLabel={choice.label} accessibilityState={{ selected: choice.value === value, checked: choice.value === value, disabled: !!disabled }} outerStyle={{ flex: 1 }}>
       <View style={{ minHeight: 40, paddingHorizontal: 6, paddingVertical: 8, alignItems: "center", justifyContent: "center", borderRadius: radius.chip, backgroundColor: choice.value === value ? colors.sheetCard : "transparent", opacity: disabled ? 0.5 : 1 }}><Text style={[type.footnote, { fontWeight: choice.value === value ? "600" : "500", color: choice.value === value ? colors.label : colors.secondaryLabel, textAlign: "center" }]}>{choice.label}</Text></View>
-    </PressableScale>)}
+    </PressableFeedback>)}
   </View></View>;
 }
 
 export function AcpLoading() {
   return <View accessibilityLabel="正在读取 Agent 配置" accessibilityState={{ busy: true }} style={{ gap: 24 }}>
-    <AcpSection><View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}><View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.fill }} /><View style={{ flex: 1, gap: 8 }}><View style={{ width: "42%", height: 14, borderRadius: 4, backgroundColor: colors.fill }} /><View style={{ width: "65%", height: 10, borderRadius: 4, backgroundColor: colors.fill }} /></View><ActivityIndicator size="small" color={colors.secondaryLabel} /></View></AcpSection>
-    {[0, 1].map((key) => <AcpSection key={key}><View style={{ width: "32%", height: 12, borderRadius: 4, backgroundColor: colors.fill }} /><View style={{ height: 44, borderRadius: radius.control, backgroundColor: colors.fill }} /></AcpSection>)}
+    <AcpSection><View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}><View style={{ width: 44, height: 44, borderRadius: radius.control, backgroundColor: colors.fill }} /><View style={{ flex: 1, gap: 8 }}><View style={{ width: "42%", height: 14, borderRadius: radius.chip, backgroundColor: colors.fill }} /><View style={{ width: "65%", height: 10, borderRadius: radius.chip, backgroundColor: colors.fill }} /></View><ActivityIndicator size="small" color={colors.secondaryLabel} /></View></AcpSection>
+    {[0, 1].map((key) => <AcpSection key={key}><View style={{ width: "32%", height: 12, borderRadius: radius.chip, backgroundColor: colors.fill }} /><View style={{ height: 44, borderRadius: radius.control, backgroundColor: colors.fill }} /></AcpSection>)}
   </View>;
 }

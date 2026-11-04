@@ -1,6 +1,7 @@
 import type { NativeStackNavigationOptions } from "expo-router/native-stack";
 import { Platform } from "react-native";
 import { colors } from "@/theme/colors";
+import { type } from "@/theme/type";
 
 /**
  * iOS: large-title header over a grouped background, content scrolling under it.
@@ -22,7 +23,7 @@ export function largeTitleHeader(): NativeStackNavigationOptions {
     : {
         headerShadowVisible: false,
         headerStyle: { backgroundColor: colors.background as string },
-        headerTitleStyle: { fontSize: 22, fontWeight: "600", color: colors.label as string },
+        headerTitleStyle: { fontSize: type.title.fontSize, fontWeight: "600", color: colors.label as string },
         headerTintColor: colors.label as string,
         contentStyle: { backgroundColor: colors.background },
       };

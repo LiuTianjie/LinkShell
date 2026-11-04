@@ -71,7 +71,7 @@
     padding: 0 12px;
     border-top: 1px solid var(--separator);
     color: var(--secondaryLabel);
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
     transition: background var(--transition), color var(--transition);
   }

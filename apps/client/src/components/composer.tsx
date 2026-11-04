@@ -21,7 +21,7 @@ import { imageMimeType } from "@/lib/image-type";
 import { queuedSendAction } from "@/lib/queued-send-action";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Button } from "./button";
 import { ConfigSummary } from "./config-menu";
 import { Glass } from "./glass";
@@ -291,7 +291,7 @@ export function Composer(props: ComposerProps) {
         nestedScrollEnabled
         bounces={false}
       >
-      {slashQuery !== undefined ? <Glass style={{ borderRadius: 22, padding: 8 }}>
+      {slashQuery !== undefined ? <Glass style={{ borderRadius: radius.panel, padding: 8 }}>
           {suggestions.length ? (
             // Keep a bounded list so suggestions do not take over the conversation.
             <ScrollView
@@ -317,7 +317,8 @@ export function Composer(props: ComposerProps) {
                     minHeight: 44,
                     paddingVertical: 8,
                     paddingHorizontal: 8,
-                    borderRadius: 10,
+                    borderRadius: radius.control,
+                    borderCurve: "continuous",
                     backgroundColor: pressed ? colors.fill : "transparent",
                   })}
                 >
@@ -347,21 +348,9 @@ export function Composer(props: ComposerProps) {
               onChoose={props.onRespond}
             />
           ) : (
-            <Glass style={{ borderRadius: 26, padding: 14, gap: 10 }}>
+            <Glass style={{ borderRadius: radius.panel, padding: 14, gap: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 9,
-                    borderCurve: "continuous",
-                    backgroundColor: colors.waitingSoft,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Icon sf="hand.raised.fill" md="front_hand" size={13} color={colors.waiting} />
-                </View>
+                <Icon sf="hand.raised.fill" md="front_hand" size={15} color={colors.waiting} />
                 <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
                   {permission.title}
                 </Text>
@@ -405,7 +394,7 @@ export function Composer(props: ComposerProps) {
       ) : null}
 
       {hasInputExtras ? (
-        <Glass style={{ borderRadius: 22, paddingHorizontal: 8, paddingVertical: 8 }}>
+        <Glass style={{ borderRadius: radius.panel, paddingHorizontal: 8, paddingVertical: 8 }}>
           {flash ? (
             <Animated.Text
               allowFontScaling={false}
@@ -421,7 +410,7 @@ export function Composer(props: ComposerProps) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 8 }}>
               {attachments.map((image, index) => (
                 <View key={`${image.uri}-${index}`}>
-                  {image.kind === "audio" || image.kind === "resource" ? <View style={{ width: 108, height: 64, borderRadius: 14, backgroundColor: colors.fill, padding: 8, justifyContent: "center", gap: 4 }}><Icon sf={image.kind === "audio" ? "waveform" : "doc"} md={image.kind === "audio" ? "graphic_eq" : "description"} size={18} color={colors.accent} /><Text numberOfLines={1} style={[type.caption, { color: colors.label }]}>{image.name ?? "附件"}</Text></View> : <Image source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 14 }} contentFit="cover" />}
+                  {image.kind === "audio" || image.kind === "resource" ? <View style={{ width: 108, height: 64, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, padding: 8, justifyContent: "center", gap: 4 }}><Icon sf={image.kind === "audio" ? "waveform" : "doc"} md={image.kind === "audio" ? "graphic_eq" : "description"} size={18} color={colors.accent} /><Text numberOfLines={1} style={[type.caption, { color: colors.label }]}>{image.name ?? "附件"}</Text></View> : <Image source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: radius.control }} contentFit="cover" />}
                   <Pressable
                     onPress={() => setAttachments((current) => current.filter((_, i) => i !== index))}
                     accessibilityRole="button"
@@ -468,7 +457,7 @@ export function Composer(props: ComposerProps) {
           </ScrollView>
         </Animated.View>
       ) : (
-        <Glass style={{ borderRadius: 26, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
+        <Glass style={{ borderRadius: radius.panel, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
           <View style={{ flexDirection: compact && !voice.recording ? "row" : "column", alignItems: compact && !voice.recording ? "center" : "stretch", gap: compact && !voice.recording ? 4 : 0 }}>
           <TextInput
             ref={input}
@@ -545,11 +534,10 @@ export function Composer(props: ComposerProps) {
                   width: 44,
                   height: 44,
                   borderRadius: 22,
-                  backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                  backgroundColor: colors.fill,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: inputDisabled ? 0.45 : 1,
-                  transform: [{ scale: pressed ? 0.94 : 1 }],
+                  opacity: inputDisabled ? 0.45 : pressed ? 0.6 : 1,
                 })}
               >
                 <Icon sf="mic.fill" md="mic" size={22} color={colors.label} />
@@ -574,7 +562,7 @@ function PermissionDetail({ detail }: { detail: string }) {
   const [overflows, setOverflows] = useState(false);
   const textStyle = { fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText };
   return (
-    <View style={{ backgroundColor: colors.code, borderRadius: 12, borderCurve: "continuous", padding: 10, overflow: "hidden" }}>
+    <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", padding: 10, overflow: "hidden" }}>
       {/* Measure the full text at the same width so wrapped lines also offer expansion. */}
       <Text
         accessible={false}
@@ -636,7 +624,7 @@ export function RoundButton({
         alignItems: "center",
         justifyContent: "center",
         gap: 4,
-        transform: [{ scale: pressed ? 0.94 : 1 }],
+        opacity: pressed ? 0.6 : 1,
       })}
     >
       {busy ? (
@@ -669,13 +657,13 @@ function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: (
     }
   };
   return (
-    <Glass style={{ borderRadius: 26, padding: 14, gap: 12 }}>
+    <Glass style={{ borderRadius: radius.panel, padding: 14, gap: 12 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <View
           style={{
             width: 40,
             height: 40,
-            borderRadius: 13,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             backgroundColor: colors.fill,
             alignItems: "center",

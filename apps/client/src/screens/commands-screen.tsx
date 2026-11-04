@@ -11,7 +11,7 @@ import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { commandDetail, matchCommands, type Command } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 /**
  * The agent's slash commands, searchable: the common ones first (compact,
@@ -57,7 +57,7 @@ export function CommandsScreen() {
             gap: 8,
             minHeight: 44,
             paddingHorizontal: 12,
-            borderRadius: 12,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             backgroundColor: colors.fill,
           }}
@@ -92,7 +92,7 @@ export function CommandsScreen() {
               {commands.length === 0 ? "这个 Agent 还没有报告可用的命令" : `没有找到「${query.trim()}」`}
             </Text>
           ) : (
-            <View style={{ backgroundColor: colors.sheetCard, borderRadius: 18, borderCurve: "continuous", overflow: "hidden" }}>
+            <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
               {shown.map((command, index) => {
                 const detail = commandDetail(command);
                 return (

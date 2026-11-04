@@ -174,7 +174,7 @@ function AgentSettings({
                 {info.features.authMethods.map((method) => (
                   <Button
                     variant="outline"
-                    className="h-auto min-h-9 max-w-full whitespace-normal"
+                    className="h-auto min-h-[32px] max-w-full whitespace-normal"
                     key={method.id}
                     title={method.description}
                     disabled={disabled}

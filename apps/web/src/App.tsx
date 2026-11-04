@@ -1,4 +1,4 @@
-import { sessionGroup, sessionNeedsAttention, sessionPreview } from "./live/session-list";
+import { sessionGroup, sessionNeedsAttention, sessionPreview, waitingLabel } from "./live/session-list";
 import { sessionTime } from "./live/session-time";
 import { StatusText } from "./live/StatusText";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -470,12 +470,12 @@ function SessionTable({
               </span>
               <span className="list-row-detail">{sessionPreview(session)}</span>
               <span className="list-row-status">
-                {/* A finished session is the normal state, not news, and a row under 进行中 or 需要你
+                {/* An idle session is the normal state, not news, and a row under 运行中 or 等你处理
                     is already said to be: on the desktop only the others say so. */}
                 {(() => {
                   const status = sessionNeedsAttention(session) ? "waiting" : session.state;
                   const said = status === "idle" || (group === "running" && status === "running") || (group === "waiting" && status === "waiting");
-                  return !isDesktop || !said ? <StatusText state={status} /> : null;
+                  return !isDesktop || !said ? <StatusText state={status} label={status === "waiting" ? waitingLabel(session) : undefined} /> : null;
                 })()}
               </span>
               {session.permission && (
@@ -489,7 +489,7 @@ function SessionTable({
                 </Button>
               )}
               <time
-                className="list-row-meta w-14 text-right"
+                className="list-row-meta min-w-14 text-right"
                 dateTime={new Date(session.updatedAt).toISOString()}
                 title={new Date(session.updatedAt).toLocaleString()}
               >
@@ -658,11 +658,11 @@ function Home({
           </h1>
           <p className="mt-1 flex items-center gap-1.5 text-[13px] text-[var(--secondaryLabel)]">
             <StatusText
-              state={state.status === "online" ? "idle" : "pending"}
+              state={state.status === "online" ? "online" : "pending"}
               label={state.machine?.hostname ?? "正在连接"}
             />
             <span aria-hidden>·</span>
-            <span>{pending ? `${pending} 项需要你` : "暂无待处理事项"}</span>
+            <span>{pending ? `${pending} 项等你处理` : "暂无待处理事项"}</span>
           </p>
         </div>
         <Button
@@ -681,9 +681,9 @@ function Home({
           <TabsList variant="line" aria-label="筛选会话">
             {[
               { id: "all", name: "全部会话" },
-              { id: "running", name: "进行中" },
-              { id: "waiting", name: "需要你" },
-              { id: "idle", name: "已完成" },
+              { id: "running", name: "运行中" },
+              { id: "waiting", name: "等你处理" },
+              { id: "idle", name: "空闲" },
               { id: "error", name: "出错" },
             ].map((item) => (
               <TabsTrigger key={item.id} value={item.id}>
@@ -747,7 +747,7 @@ function Home({
         const floor = nextBefore !== undefined && (group === "recent" || group === "archived");
         const heading = (
           <h2 className="list-section-title">
-            {({ waiting: "需要你", running: "进行中", recent: "最近会话", archived: "已归档" } as Record<string, string>)[group]}
+            {({ waiting: "等你处理", running: "运行中", recent: "最近会话", archived: "已归档" } as Record<string, string>)[group]}
             <span className="font-normal text-[var(--tertiaryLabel)]">
               {shown.length}{floor ? "+" : ""}
             </span>

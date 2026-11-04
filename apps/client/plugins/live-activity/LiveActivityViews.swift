@@ -16,8 +16,8 @@ struct ActivityCountsView: View {
     HStack(spacing: 10) {
       if state.runningCount + state.waitingCount + state.failedCount > 1 {
         count(state.runningCount, color: .white.opacity(0.58), label: "进行中", filter: "running")
-        count(state.waitingCount, color: .orange.opacity(0.9), label: "待处理", filter: "attention")
-        count(state.failedCount, color: .red.opacity(0.9), label: "出错", filter: "failed")
+        count(state.waitingCount, color: ActivityPalette.waiting, label: "等你处理", filter: "attention")
+        count(state.failedCount, color: ActivityPalette.danger, label: "出错", filter: "failed")
       } else {
         Link(destination: activityURL(state.deepLink) ?? collectionURL(computerKey)) {
           HStack(spacing: 4) {
@@ -194,16 +194,9 @@ struct WatchSmartStackBannerView: View {
                 .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 26)
-                .foregroundColor(action.role == "allow" ? Color.black : Color.white.opacity(0.95))
-                .background(
-                  Capsule().fill(
-                    action.role == "allow"
-                      ? state.phaseColor
-                      : action.role == "reject" || action.role == "stop"
-                        ? Color(red: 0.95, green: 0.30, blue: 0.30).opacity(0.24)
-                        : Color.white.opacity(0.14)
-                  )
-                )
+                // Only 允许 is filled; 拒绝 and 停止 are quiet like the rest, never red.
+                .foregroundColor(Color.white.opacity(action.role == "allow" ? 1 : 0.95))
+                .background(Capsule().fill(action.role == "allow" ? ActivityPalette.accentFill : Color.white.opacity(0.14)))
             }
             .buttonStyle(.plain)
           }

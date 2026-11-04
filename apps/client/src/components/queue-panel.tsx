@@ -6,7 +6,7 @@ import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import type { queuedSendAction } from "@/lib/queued-send-action";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { AppMenu } from "./app-menu";
 import { Glass } from "./glass";
 import { Icon } from "./icon";
@@ -113,11 +113,12 @@ function Row({
             hitSlop={4}
             style={{ minWidth: 54, height: 44, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" }}
           >
-            <View style={{ minHeight: 28, paddingHorizontal: 9, borderRadius: 14, backgroundColor: sendAction.interrupts ? colors.waitingSoft : colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
+            {/* An action either way, so accent: amber is kept for what waits on the user, and the label says it interrupts. */}
+            <View style={{ minHeight: 28, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
               {sending ? (
-                <ActivityIndicator size="small" color={sendAction.interrupts ? colors.waiting : colors.accent} style={{ transform: [{ scale: 0.7 }] }} />
+                <ActivityIndicator size="small" color={colors.accent} style={{ transform: [{ scale: 0.7 }] }} />
               ) : (
-                <Text style={[type.caption, { fontWeight: "600", color: sendAction.interrupts ? colors.waiting : colors.accent }]}>{sendAction.label}</Text>
+                <Text style={[type.caption, { fontWeight: "600", color: colors.accent }]}>{sendAction.label}</Text>
               )}
             </View>
           </Pressable>
@@ -162,7 +163,7 @@ export function QueuePanel({ queue, disabled = false, contained = false, sendAct
   const held = queue.filter((entry) => !entry.pending).length;
 
   return (
-    <Glass style={{ borderRadius: 22, paddingHorizontal: 4, overflow: "hidden" }}>
+    <Glass style={{ borderRadius: radius.panel, paddingHorizontal: 4, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4 }}>
         <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "600" }]}>待发送 · {queue.length}</Text>
         <Text style={[type.caption, { color: colors.secondaryLabel }]}>{status}</Text>

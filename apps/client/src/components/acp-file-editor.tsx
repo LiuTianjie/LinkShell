@@ -10,7 +10,7 @@ import { AgentInteractions } from "@/screens/acp-screen";
 import { AcpBanner, AcpSection } from "./acp-settings-ui";
 import { AgentTile } from "./agent-tile";
 import { Icon } from "./icon";
-import { PressableScale } from "./pressable-scale";
+import { PressableFeedback } from "./pressable-feedback";
 import { colors } from "@/theme/colors";
 import { mono, radius, type } from "@/theme/type";
 
@@ -57,8 +57,8 @@ export function AcpFileEditor({ path, onClose }: { path: string; onClose(): void
     {error ? <AcpBanner message={error} /> : null}
     {!online ? <AcpBanner kind="info" message="等待电脑连接，连上后可继续编辑。" /> : null}
     {agent ? <AgentInteractions agent={agent} /> : null}
-    {!editor ? <AcpSection title="选择提供编辑建议的 AI">{availableAgents.length ? availableAgents.map((entry) => <PressableScale key={entry.id} disabled={busy || !online} accessibilityRole="button" accessibilityLabel={`使用 ${entry.label} 编辑`} onPress={() => void run(() => open(entry.id))}><View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, opacity: busy || !online ? 0.5 : 1 }}><AgentTile agent={entry.id} size={36} /><View style={{ flex: 1, gap: 3 }}><Text style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>{entry.label}</Text><Text style={[type.footnote, { color: colors.secondaryLabel }]}>{busy && agent === entry.id ? "正在打开编辑页面…" : "读取文件并获取编辑建议"}</Text></View><Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} /></View></PressableScale>) : <Text style={[type.subhead, { color: colors.secondaryLabel }]}>电脑上还没有可用的 ACP Agent，请先在电脑页添加连接。</Text>}</AcpSection> : <>
-      <View style={{ backgroundColor: colors.code, borderRadius: radius.row, borderCurve: "continuous", overflow: "hidden" }}>
+    {!editor ? <AcpSection title="选择提供编辑建议的 AI">{availableAgents.length ? availableAgents.map((entry) => <PressableFeedback key={entry.id} disabled={busy || !online} accessibilityRole="button" accessibilityLabel={`使用 ${entry.label} 编辑`} onPress={() => void run(() => open(entry.id))} style={{ marginHorizontal: -8, paddingHorizontal: 8, borderRadius: radius.control, borderCurve: "continuous" }}><View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, opacity: busy || !online ? 0.5 : 1 }}><AgentTile agent={entry.id} size={36} /><View style={{ flex: 1, gap: 3 }}><Text style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>{entry.label}</Text><Text style={[type.footnote, { color: colors.secondaryLabel }]}>{busy && agent === entry.id ? "正在打开编辑页面…" : "读取文件并获取编辑建议"}</Text></View><Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} /></View></PressableFeedback>) : <Text style={[type.subhead, { color: colors.secondaryLabel }]}>电脑上还没有可用的 ACP Agent，请先在电脑页添加连接。</Text>}</AcpSection> : <>
+      <View style={{ backgroundColor: colors.code, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
         <View style={{ padding: 12, flexDirection: "row", alignItems: "center", gap: 8 }}><Icon sf="doc.text" md="description" size={16} color={colors.secondaryLabel} /><Text selectable numberOfLines={2} style={[type.caption, { flex: 1, color: colors.secondaryLabel }]}>{editor.path}</Text><Text style={[type.caption2, { color: text === saved ? colors.tertiaryLabel : colors.accent }]}>{text === saved ? "已保存" : "未保存"}</Text></View>
         <TextInput ref={field} multiline value={text} selection={selection} onChangeText={(value) => { setText(value); setPreview(undefined); setSuggestions([]); setRequested(false); }} onSelectionChange={(event) => setSelection(event.nativeEvent.selection)} editable={!busy && online} autoCapitalize="none" autoCorrect={false} selectionColor={colors.accent} accessibilityLabel="文件内容" style={{ fontFamily: mono, fontSize: 13, lineHeight: 20, color: colors.codeText, minHeight: 260, maxHeight: 480, padding: 12, paddingTop: 0, textAlignVertical: "top" }} />
       </View>
@@ -71,7 +71,7 @@ export function AcpFileEditor({ path, onClose }: { path: string; onClose(): void
         }, "suggest")} />
       </View>
       {requested && !suggestions.length ? <AcpBanner kind="info" message="这个位置暂时没有编辑建议，可以换个位置再试。" /> : null}
-      {suggestions.map((suggestion) => <View key={suggestion.id} style={{ padding: 16, backgroundColor: colors.fill, borderRadius: radius.row, borderCurve: "continuous", gap: 12 }}>
+      {suggestions.map((suggestion) => <View key={suggestion.id} style={{ padding: 16, backgroundColor: colors.fill, borderRadius: radius.card, borderCurve: "continuous", gap: 12 }}>
         <Text numberOfLines={2} style={[type.footnote, { color: colors.label }]}>{suggestion.kind === "jump" ? "跳转" : suggestion.kind === "rename" ? `重命名为 ${suggestion.newName}` : suggestion.kind === "searchAndReplace" ? "搜索替换" : `${suggestion.edits.length} 处编辑`} · {suggestion.uri}</Text>
         <View style={{ flexDirection: "row", gap: 8 }}><Button title="预览修改" disabled={busy || !online} onPress={() => void run(async () => setPreview((await link.call("agents.editor", { agent, editorId: editor.editorId, operation: "preview", suggestionId: suggestion.id })).preview))} /><Button title="忽略" variant="plain" disabled={busy || !online} onPress={() => void run(async () => { await link.call("agents.editor", { agent, editorId: editor.editorId, operation: "reject", suggestionId: suggestion.id }); setSuggestions((current) => current.filter((entry) => entry.id !== suggestion.id)); setPreview(undefined); })} /></View>
       </View>)}

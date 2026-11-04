@@ -10,7 +10,7 @@ import { useClient, useConnection } from "@/lib/client";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 /** Asks for the current computer's access password (its status is `locked`). */
 export function UnlockScreen() {
@@ -52,7 +52,7 @@ export function UnlockScreen() {
         <Icon sf="lock.fill" md="lock" size={16} color={colors.secondaryLabel} />
         <Text style={[type.subhead, { flex: 1, color: colors.secondaryLabel }]}>{name} 设置了访问密码，输入后继续。</Text>
       </View>
-      <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", paddingHorizontal: 16, borderWidth: error ? 1 : 0, borderColor: colors.danger }}>
+      <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, borderWidth: error ? 1 : 0, borderColor: colors.danger }}>
         <TextInput value={password} onChangeText={(text) => { setPassword(text); setError(""); }} autoFocus secureTextEntry
           textContentType="password" autoComplete="current-password" autoCapitalize="none" autoCorrect={false}
           accessibilityLabel="访问密码" placeholder="访问密码" placeholderTextColor={colors.placeholder as string}

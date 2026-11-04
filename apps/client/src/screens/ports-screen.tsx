@@ -12,7 +12,7 @@ import { usePorts } from "@/lib/ports";
 import { SheetHeader } from "@/components/sheet-header";
 import { sheetBottom } from "@/lib/sheet-bottom";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -94,7 +94,7 @@ export function PortsScreen() {
                 minHeight: 52,
                 paddingVertical: 4,
                 flexWrap: "wrap",
-                borderRadius: 18,
+                borderRadius: radius.card,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
               }}
@@ -119,7 +119,7 @@ export function PortsScreen() {
                   minHeight: 44,
                   paddingVertical: 10,
                   paddingHorizontal: 16,
-                  borderRadius: 14,
+                  borderRadius: 22,
                   backgroundColor: colors.accentFill,
                   alignItems: "center",
                   justifyContent: "center",

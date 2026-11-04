@@ -38,7 +38,7 @@ function running(item: TimelineItem): ToolItem | undefined {
 
 export function liveActivity(view: Pick<SessionView, "items" | "permissions" | "turnStartedAt" | "turnBreaks">): LiveActivity {
   const startedAt = view.turnStartedAt;
-  if (view.permissions.length) return { label: "需要您的输入", waiting: true, startedAt };
+  if (view.permissions.length) return { label: "等你确认", waiting: true, startedAt };
   const items = view.items;
   // The running turn's items: back to where the last one ended. A message sent while the agent
   // works is part of the turn, not its start.

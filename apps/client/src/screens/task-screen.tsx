@@ -7,12 +7,12 @@ import { Text } from "@/components/fixed-text";
 import { SheetHeader } from "@/components/sheet-header";
 import { Button } from "@/components/button";
 import { taskStatus } from "@/components/background-tasks";
-import { LiveDot } from "@/components/status";
+import { StatusDot } from "@/components/status";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { duration } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 export function TaskScreen() {
   const { id, task: taskId } = useLocalSearchParams<{ id: string; task: string }>();
@@ -74,15 +74,15 @@ export function TaskScreen() {
   ]);
   return <View style={{ flex: 1 }}><SheetHeader title="任务详情" /><View style={{ flex: 1, overflow: "hidden" }}><ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 44, gap: 16 }}>
     <Text selectable style={[type.title3, { color: colors.label }]}>{task?.title ?? "正在读取…"}</Text>
-    {task ? <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>{task.state === "running" ? <LiveDot size={7} /> : null}<Text style={[type.subhead, { color: task.state === "failed" ? colors.danger : colors.secondaryLabel }]}>{taskStatus[task.state]} · {duration(Math.max(0, (task.endedAt ?? now) - task.startedAt))}{task.exitCode !== undefined ? ` · 退出码 ${task.exitCode}` : ""}</Text></View> : null}
-    {task?.command ? <Text selectable style={[type.footnote, { fontFamily: mono, padding: 14, borderRadius: 14, backgroundColor: colors.inset, color: colors.label }]}>{task.command}</Text> : null}
+    {task ? <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>{task.state === "running" ? <StatusDot /> : null}<Text style={[type.subhead, { color: task.state === "failed" ? colors.danger : colors.secondaryLabel }]}>{taskStatus[task.state]} · {duration(Math.max(0, (task.endedAt ?? now) - task.startedAt))}{task.exitCode !== undefined ? ` · 退出码 ${task.exitCode}` : ""}</Text></View> : null}
+    {task?.command ? <Text selectable style={[type.footnote, { fontFamily: mono, padding: 14, borderRadius: radius.control, backgroundColor: colors.inset, color: colors.label }]}>{task.command}</Text> : null}
     {task?.summary ? <Text selectable style={[type.subhead, { color: colors.secondaryLabel }]}>{task.summary}</Text> : null}
     {task?.state === "unknown" ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>电脑端已无法确认任务状态，未收到可靠的结束结果。</Text> : null}
     {task?.state === "running" && !task.canStop ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>此任务目前只能查看，请在电脑上的 Agent 中停止。</Text> : null}
     {task?.canStop && task.state === "running" ? <Button title="停止任务" variant="destructive" onPress={stop} busy={busy} disabled={!online} /> : null}
     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}><Text style={[type.headline, { color: colors.label }]}>输出</Text><Button title="查看最新" variant="plain" size="small" onPress={() => void latest()} disabled={!online || paging} /></View>
     {output?.start ? <Button title="加载更早的输出" onPress={() => void earlier()} busy={paging} disabled={!online} /> : null}
-    <Text selectable style={[type.footnote, { fontFamily: mono, color: colors.label, padding: 14, backgroundColor: colors.inset, borderRadius: 14 }]}>{output?.text || (output ? "没有可读的输出" : "正在读取输出…")}</Text>
+    <Text selectable style={[type.footnote, { fontFamily: mono, color: colors.label, padding: 14, backgroundColor: colors.inset, borderRadius: radius.control }]}>{output?.text || (output ? "没有可读的输出" : "正在读取输出…")}</Text>
     {error ? <Text accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.danger }]}>{error}</Text> : null}
   </ScrollView></View></View>;
 }

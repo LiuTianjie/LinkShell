@@ -1,49 +1,37 @@
 import { View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import Animated, { FadeOut, useReducedMotion } from "react-native-reanimated";
+import Animated, { FadeOut } from "react-native-reanimated";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
-const pulse = {
-  "0%": { opacity: 0.45 },
-  "50%": { opacity: 1 },
-  "100%": { opacity: 0.45 },
-};
-
-function Bar({ width, height = 14, align = "flex-start", radius = 7 }: { width: `${number}%` | number; height?: number; align?: "flex-start" | "flex-end"; radius?: number }) {
-  return <View style={{ width, height, borderRadius: radius, backgroundColor: colors.fill, alignSelf: align }} />;
+function Bar({ width, height = 14, align = "flex-start", corner = height / 2 }: { width: `${number}%` | number; height?: number; align?: "flex-start" | "flex-end"; corner?: number }) {
+  return <View style={{ width, height, borderRadius: corner, borderCurve: "continuous", backgroundColor: colors.fill, alignSelf: align }} />;
 }
 
-/** Placeholder conversation shown while a session's history loads. */
+/** Placeholder conversation shown while a session's history loads. It holds still: the label says it's loading, and nothing pulses. */
 export function TimelineSkeleton({ label, top = 16 }: { label: string; top?: number }) {
-  const reduceMotion = useReducedMotion();
   return (
     <Animated.View
       exiting={FadeOut.duration(200)}
       pointerEvents="none"
       style={{ position: "absolute", left: 0, right: 0, top, paddingHorizontal: 16, gap: 22 }}
     >
-      <Animated.View
-        style={[
-          { gap: 22 },
-          reduceMotion ? null : { animationName: pulse, animationDuration: "1400ms", animationIterationCount: "infinite", animationTimingFunction: "ease-in-out" },
-        ]}
-      >
-        <Bar width="62%" height={40} align="flex-end" radius={20} />
+      <View style={{ gap: 22 }}>
+        <Bar width="62%" height={40} align="flex-end" corner={radius.card} />
         <View style={{ gap: 9 }}>
           <Bar width="92%" />
           <Bar width="86%" />
           <Bar width="54%" />
         </View>
         <View style={{ gap: 8 }}>
-          <Bar width="70%" height={26} radius={9} />
-          <Bar width="64%" height={26} radius={9} />
+          <Bar width="70%" height={26} corner={radius.chip} />
+          <Bar width="64%" height={26} corner={radius.chip} />
         </View>
         <View style={{ gap: 9 }}>
           <Bar width="90%" />
           <Bar width="40%" />
         </View>
-      </Animated.View>
+      </View>
       <Text style={[type.footnote, { color: colors.tertiaryLabel, textAlign: "center" }]}>{label}</Text>
     </Animated.View>
   );

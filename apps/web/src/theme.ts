@@ -1,11 +1,44 @@
 import brandColors from "../../client/src/theme/brand-colors.json";
 
-// Desktop chrome has its own quieter palette; mobile branding and native screens stay independent.
-const desktopColors: Record<string, [string, string]> = {
-  // Linear-style: a darker app frame with the workspace as a lighter inset
-  // panel. The dark ramp is a continuous luminance ladder (frame darkest →
-  // panel → raised), inset reads as recessed (darker than its surface), and
-  // every hairline is a translucent tint so it blends on any backdrop.
+type Palette = Record<string, [string, string]>;
+const pair = (values: readonly string[]): [string, string] => [values[0]!, values[1]!];
+
+// Brand and status colours have one source shared with the phone and the native windows
+// (docs/design/visual-system.md). The other names the components read are those same values under
+// the names they already use, so no surface can drift from the spec.
+const brandAliases: Palette = {
+  link: pair(brandColors.accent),
+  focus: pair(brandColors.accent),
+  info: pair(brandColors.running),
+  runningSoft: pair(brandColors.accentSoft),
+  success: pair(brandColors.ok),
+  warning: pair(brandColors.waiting),
+  primaryForeground: ["#ffffff", "#ffffff"],
+  monitorCpu: pair(brandColors.accent),
+};
+
+// Status names that are grey take each surface's own greys: idle and finished are the normal
+// state, and memory is the neutral line beside the CPU's accent.
+const neutralAliases = (neutrals: Palette): Palette => ({
+  idle: neutrals.tertiaryLabel!,
+  monitorMemory: neutrals.secondaryLabel!,
+});
+
+/** Every variable one surface defines: the shared brand values over that surface's neutrals. */
+const palette = (neutrals: Palette): Palette => ({
+  ...Object.fromEntries(Object.entries(brandColors).map(([name, values]) => [name, pair(values)])),
+  ...neutrals,
+  ...brandAliases,
+  ...neutralAliases(neutrals),
+  ...codeColors,
+});
+
+// The browser console's neutrals: brand and status colours are not defined here.
+const consoleNeutrals: Palette = {
+  // A darker app frame with the workspace as a lighter inset panel. The dark
+  // ramp is a continuous luminance ladder (frame darkest → panel → raised),
+  // inset reads as recessed (darker than its surface), and every hairline is a
+  // translucent tint so it blends on any backdrop.
   background: ["#f6f6f8", "#08090a"],
   plain: ["#ffffff", "#0f1011"],
   card: ["#ffffff", "#131417"],
@@ -26,33 +59,13 @@ const desktopColors: Record<string, [string, string]> = {
   code: ["#f3f3f6", "#0b0c0d"],
   codeText: ["#30323b", "#dedfe8"],
   userBubble: ["#ececf1", "#1a1b1f"],
-  accent: ["#5e6ad2", "#6872e5"],
-  accentHover: ["#515dc0", "#7681ec"],
-  accentSoft: ["#5e6ad214", "#6872e524"],
-  primaryForeground: ["#ffffff", "#ffffff"],
-  link: ["#5260c5", "#9aa5ff"],
-  success: ["#218058", "#6cc29a"],
-  ok: ["#218058", "#6cc29a"],
-  warning: ["#917021", "#d8b76c"],
-  waiting: ["#917021", "#d8b76c"],
-  waitingSoft: ["#9170210d", "#d8b76c10"],
-  info: ["#5260c5", "#9aa5ff"],
-  running: ["#5260c5", "#9aa5ff"],
-  danger: ["#c03e48", "#f08891"],
-  // A metric keeps its colour when the person switches chart styles.
-  monitorCpu: ["#5e6ad2", "#9aa4f3"],
-  monitorMemory: ["#3d827d", "#7bbab1"],
   composerSurface: ["#ffffff", "#232428"],
   composerToolbar: ["#f7f8fa", "#ffffff04"],
 };
-const variables = (index: 0 | 1) =>
-  Object.entries({ ...brandColors, ...desktopColors, ...codeColors })
-    .map(([name, pair]) => `--${name}: ${pair[index]};`)
-    .join("\n");
 
 // Syntax colours (Codex's codex-light / codex-dark), read by the highlighter's CSS-variable theme
 // in highlight-engine.ts; text the grammar doesn't colour keeps the block's own colour.
-const codeColors: Record<string, [string, string]> = {
+const codeColors: Palette = {
   "code-foreground": ["currentColor", "currentColor"],
   "code-background": ["transparent", "transparent"],
   "code-token-keyword": ["#ab4f7a", "#f8a6c8"],
@@ -69,17 +82,10 @@ const codeColors: Record<string, [string, string]> = {
   "code-token-changed": ["#ac4f23", "#f1a275"],
 };
 
-export const themeStyles = `
-  :root { ${variables(0)} color-scheme: light; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ${variables(1)} color-scheme: dark; } }
-  :root[data-theme="dark"] { ${variables(1)} color-scheme: dark; }
-`;
-
-// The desktop app's own system, after Codex's desktop app (docs/design/codex-reference.md):
-// neutral greys, text and hairlines as translucent ink so they sit on any surface, a
-// translucent sidebar over the window's vibrancy and a solid main surface beside it. Colour is
-// kept for state and restrained indigo primary actions.
-const nativeDesktopColors: Record<string, [string, string]> = {
+// The desktop app's neutrals (brand and status colours are not defined here): text and hairlines
+// as translucent ink so they sit on any surface, a translucent sidebar over the window's vibrancy
+// and a solid main surface beside it.
+const desktopNeutrals: Palette = {
   // The window's ground where vibrancy is off (unfocused, 4K, "opaque window"); the sidebar is
   // see-through over it, the main surface is not.
   "background": ["#f3f4f6", "#1c1d20"],
@@ -98,32 +104,13 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   "placeholder": ["#1a1c1f73", "#ffffff66"],
   "separator": ["#1a1c1f14", "#ffffff14"],
   "separatorStrong": ["#1a1c1f1f", "#ffffff29"],
-  // Codex's ghost hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
+  // Hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
   "fill": ["#1a1c1f0d", "#ffffff14"],
   "fillStrong": ["#1a1c1f1f", "#ffffff29"],
-  "accent": ["#5e6ad2", "#6872e5"],
-  "accentHover": ["#515dc0", "#7681ec"],
-  "accentSoft": ["#5e6ad214", "#6872e524"],
-  "primaryForeground": ["#ffffff", "#ffffff"],
-  "link": ["#0169cc", "#339cff"],
-  "focus": ["#5e6ad2", "#9aa4f3"],
-  "running": ["#0285ff", "#339cff"],
-  "runningSoft": ["#0285ff1a", "#339cff24"],
-  "info": ["#0285ff", "#339cff"],
-  "success": ["#00a240", "#40c977"],
-  "ok": ["#00a240", "#40c977"],
-  "okSoft": ["#00a2401a", "#40c97724"],
-  // A finished session is the normal state, not news: it stays grey.
-  "idle": ["#1a1c1f80", "#ffffff80"],
-  "warning": ["#946a23", "#d8b76c"],
-  "waiting": ["#946a23", "#d8b76c"],
-  "waitingSoft": ["#946a2310", "#d8b76c14"],
-  "danger": ["#e02e2a", "#fa423e"],
-  "dangerSoft": ["#e02e2a14", "#fa423e24"],
   "userBubble": ["#1a1c1f0d", "#ffffff0d"],
   "code": ["#f9f9f9", "#131313"],
   "codeText": ["#1a1c1f", "#dfdfdf"],
-  // The terminal is the panel itself, as Codex's: no darker block inside it.
+  // The terminal is the panel itself: no darker block inside it.
   "terminal": ["#ffffff", "#18191c"],
   "diffAdd": ["#00a24026", "#40c9773b"],
   "diffDel": ["#e02e2a26", "#fa423e3b"],
@@ -134,13 +121,27 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   "desktop-selected-shadow": ["#00000000", "#00000000"],
 };
 
+export const consolePalette = palette(consoleNeutrals);
+export const desktopPalette = palette({ ...consoleNeutrals, ...desktopNeutrals });
+
+const variables = (index: 0 | 1) =>
+  Object.entries(consolePalette)
+    .map(([name, values]) => `--${name}: ${values[index]};`)
+    .join("\n");
+
+export const themeStyles = `
+  :root { ${variables(0)} color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ${variables(1)} color-scheme: dark; } }
+  :root[data-theme="dark"] { ${variables(1)} color-scheme: dark; }
+`;
+
 export function applyDesktopTheme(theme: "light" | "dark"): void {
   const root = document.documentElement;
   const index = theme === "dark" ? 1 : 0;
   root.dataset.theme = theme;
   // Native appearance changes must update the same resolved tokens on every
   // control and portal; a second CSS palette must not retain light values.
-  for (const [name, values] of Object.entries({ ...brandColors, ...desktopColors, ...codeColors, ...nativeDesktopColors })) {
+  for (const [name, values] of Object.entries(desktopPalette)) {
     root.style.setProperty(`--${name}`, values[index]);
   }
   root.style.colorScheme = theme;

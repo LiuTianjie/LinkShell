@@ -71,22 +71,22 @@ struct DesktopUsageView: View {
           Text("这台电脑的 Token 用量与模型分布").font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary)
         }
         Spacer()
-        Text(model.preview ? "示例数据" : "本机统计").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
+        Text(model.preview ? "示例数据" : "本机统计").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
         if loading { ProgressView().controlSize(.small) }
         Button { Task { await refresh() } } label: { Label("立即同步", systemImage: "arrow.clockwise") }
-          .buttonStyle(DesktopPillStyle(.secondary)).disabled(loading || model.preview)
+          .buttonStyle(DesktopButtonStyle(.secondary)).disabled(loading || model.preview)
       }.padding(.bottom, 9)
       HStack(spacing: 6) {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 2) {
             agentTab("全部", "all")
             ForEach(agents) { entry in agentTab(entry.label, entry.id) }
-          }.padding(2).background(Capsule().fill(DesktopStyle.raised))
+          }.padding(2).background(RoundedRectangle(cornerRadius: DesktopStyle.wellRadius, style: .continuous).fill(DesktopStyle.raised))
         }.fixedSize(horizontal: false, vertical: true)
         Spacer(minLength: 4)
         DesktopSegmented(options: [(1, "今天"), (7, "7 天"), (30, "30 天")], selection: $days).accessibilityLabel("时间范围")
       }
-      if let error { Text(error).foregroundStyle(DesktopStyle.waiting).font(.system(size: 12)) }
+      if let error { Text(error).foregroundStyle(DesktopStyle.danger).font(.system(size: 12)) }
       if let report {
         if report.totals.records == 0 {
           Text("所选范围暂无可用数据；未上报用量不等于零消耗。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
@@ -102,16 +102,16 @@ struct DesktopUsageView: View {
         }.desktopCard(padding: 0)
         VStack(alignment: .leading, spacing: 10) {
           HStack {
-            Text("使用趋势").font(.system(size: 13.5, weight: .semibold))
-            Text(agents.first(where: { $0.id == agent })?.label ?? "全部 Agent").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
-            Circle().fill(DesktopStyle.accent).frame(width: 7, height: 7)
-            Text(chartMetric == "tokens" ? "Token" : "记录（条）").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
+            Text("使用趋势").font(.system(size: 14, weight: .semibold))
+            Text(agents.first(where: { $0.id == agent })?.label ?? "全部 Agent").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+            Circle().fill(DesktopStyle.accent).frame(width: 8, height: 8)
+            Text(chartMetric == "tokens" ? "Token" : "记录（条）").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
             Spacer()
             DesktopSegmented(options: [("tokens", "Token"), ("records", "记录")], selection: $chartMetric).accessibilityLabel("趋势指标")
           }
           Chart(report.daily) { day in
             BarMark(x: .value("日期", day.date), y: .value(chartMetric == "tokens" ? "Token" : "记录（条）", chartMetric == "tokens" ? day.totalTokens : (day.records ?? 0)))
-              .foregroundStyle(DesktopStyle.mint.opacity(selectedDate == nil || selectedDate == day.date ? 0.9 : 0.35)).cornerRadius(3)
+              .foregroundStyle(DesktopStyle.accent.opacity(selectedDate == nil || selectedDate == day.date ? 0.9 : 0.35)).cornerRadius(3)
               .accessibilityLabel(day.date).accessibilityValue("\(number(chartMetric == "tokens" ? day.totalTokens : (day.records ?? 0))) \(chartMetric == "tokens" ? "Token" : "条")")
           }
           .chartYAxis { AxisMarks(position: .leading) { value in AxisGridLine(); AxisValueLabel { if let n = value.as(Double.self) { Text(compact(n)) } } } }
@@ -137,8 +137,8 @@ struct DesktopUsageView: View {
         .desktopCard(padding: 12)
         VStack(alignment: .leading, spacing: 0) {
           HStack {
-            Text("模型明细").font(.system(size: 13.5, weight: .semibold))
-            Text("\(report.models.count)").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
+            Text("模型明细").font(.system(size: 14, weight: .semibold))
+            Text("\(report.models.count)").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
             Spacer()
             Text("按 Agent / 模型汇总 · Token").font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary)
           }.padding(.top, 2).padding(.bottom, 6)
@@ -147,7 +147,7 @@ struct DesktopUsageView: View {
             Text("Agent").frame(width: 120, alignment: .leading)
             Text("模型").frame(maxWidth: .infinity, alignment: .leading)
             column("记录（条）"); column("输入"); column("输出"); column("缓存读取"); column("总 Token")
-          }.font(.system(size: 11.5, weight: .medium)).foregroundStyle(DesktopStyle.secondary).frame(height: 32)
+          }.font(.system(size: 12, weight: .medium)).foregroundStyle(DesktopStyle.secondary).frame(height: 32)
           ForEach(report.models) { entry in
             Rectangle().fill(DesktopStyle.line.opacity(0.6)).frame(height: 1)
             HStack(spacing: 12) {
@@ -186,9 +186,9 @@ struct DesktopUsageView: View {
           .fixedSize(horizontal: true, vertical: false)
       }
       .padding(.horizontal, 9)
-      .frame(height: 26)
-      .background(Capsule().fill(selected ? DesktopStyle.selection : .clear))
-      .contentShape(Capsule())
+      .frame(height: DesktopStyle.compactControlHeight - 4)
+      .background(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).fill(selected ? DesktopStyle.selection : .clear))
+      .contentShape(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
     }.buttonStyle(.plain).help(title).accessibilityLabel(title).accessibilityAddTraits(selected ? [.isSelected] : [])
   }
   private func column(_ text: String) -> some View { Text(text).frame(width: 68, alignment: .trailing).lineLimit(1).minimumScaleFactor(0.85).help(text) }

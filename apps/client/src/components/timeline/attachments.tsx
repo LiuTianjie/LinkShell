@@ -19,9 +19,9 @@ import { baseName } from "@/lib/format";
 import { openLink } from "@/lib/links";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "../icon";
-import { PressableScale } from "../pressable-scale";
+import { PressableFeedback } from "../pressable-feedback";
 import { useTimelineSession } from "./context";
 
 type ImageBlock = Extract<ContentBlock, { type: "image" }>;
@@ -294,7 +294,8 @@ export const ImageThumb = memo(function ImageThumb({
   const frame = typeof size === "number" ? { width: size, height: size } : size;
   return (
     <>
-      <PressableScale
+      <PressableFeedback
+        feedback="button"
         onPress={() => {
           haptics.selection();
           // The viewer loads the picture itself, so it opens on one that isn't here yet.
@@ -307,7 +308,7 @@ export const ImageThumb = memo(function ImageThumb({
         <View
           style={{
             ...frame,
-            borderRadius: 14,
+            borderRadius: radius.control,
             borderCurve: "continuous",
             overflow: "hidden",
             backgroundColor: colors.fill,
@@ -339,7 +340,7 @@ export const ImageThumb = memo(function ImageThumb({
             <ActivityIndicator size="small" color={colors.tertiaryLabel} />
           )}
         </View>
-      </PressableScale>
+      </PressableFeedback>
       {open ? <Viewer block={block} onClose={() => setOpen(false)} /> : null}
     </>
   );
@@ -382,7 +383,7 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
         minHeight: 44,
         paddingHorizontal: 9,
         paddingVertical: 5,
-        borderRadius: 10,
+        borderRadius: radius.chip,
         borderCurve: "continuous",
         // On the (grey) user bubble a chip sits on the page colour; elsewhere on a fill.
         backgroundColor: onBubble ? colors.plain : skill ? colors.accentSoft : colors.fill,
@@ -437,7 +438,7 @@ function AudioAttachment({ block }: { block: AudioBlock }) {
   const expoAudio = getExpoAudio();
   if (!expoAudio) {
     return (
-      <View style={{ minHeight: 48, borderRadius: 16, paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View style={{ minHeight: 48, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
         <Icon sf="waveform" md="graphic_eq" size={18} color={colors.secondaryLabel} />
         <Text style={[type.footnote, { color: colors.secondaryLabel }]}>音频附件</Text>
       </View>
@@ -483,7 +484,7 @@ function NativeAudioAttachment({ block, expoAudio }: { block: AudioBlock; expoAu
   };
   const seconds = Math.max(0, Math.floor(status.currentTime));
   return <View style={{ gap: 4, minWidth: 180, maxWidth: 300 }}>
-    <Pressable onPress={() => void play()} disabled={!loaded.uri && !loaded.failed} accessibilityRole="button" accessibilityLabel={status.playing ? "暂停音频" : "播放音频"} style={{ minHeight: 48, borderRadius: 16, paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
+    <Pressable onPress={() => void play()} disabled={!loaded.uri && !loaded.failed} accessibilityRole="button" accessibilityLabel={status.playing ? "暂停音频" : "播放音频"} style={{ minHeight: 48, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 14, backgroundColor: colors.fill, flexDirection: "row", alignItems: "center", gap: 12 }}>
       {!loaded.uri && !loaded.failed ? <ActivityIndicator size="small" color={colors.accent} /> : <Icon sf={status.playing ? "pause.fill" : "play.fill"} md={status.playing ? "pause" : "play_arrow"} size={18} color={colors.accent} />}
       <Text style={[type.footnote, { color: colors.label }]}>{loaded.failed ? "重新加载音频" : `音频 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}${status.duration ? ` / ${Math.floor(status.duration)} 秒` : ""}`}</Text>
     </Pressable>
@@ -499,7 +500,7 @@ function EmbeddedResource({ block }: { block: Extract<ContentBlock, { type: "res
   if (/^audio\//.test(mimeType) && (resource.blob || resource.assetUri)) return <AudioAttachment block={{ type: "audio", mimeType, data: resource.blob, uri: resource.assetUri }} />;
   let label = baseName(resource.uri);
   try { label = decodeURIComponent(label.replace(/^attachment:/, "")); } catch { /* Keep the original resource name. */ }
-  return <View style={{ gap: 6, padding: 12, borderRadius: 14, backgroundColor: colors.fill, maxWidth: 320 }}>
+  return <View style={{ gap: 6, padding: 12, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, maxWidth: 320 }}>
     <Pressable onPress={() => setExpanded((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded }} style={{ minHeight: 32, flexDirection: "row", gap: 8, alignItems: "center" }}>
       <Icon sf="doc.text" md="description" size={16} color={colors.accent} /><Text numberOfLines={2} style={[type.footnote, { color: colors.label, flexShrink: 1 }]}>{label}</Text>
     </Pressable>

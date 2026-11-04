@@ -5,10 +5,8 @@ import { useClient, useConnection } from "./common";
 import { observeMachineMetrics, type MachineMetricsState } from "./machine-metrics";
 
 import { ComputerMetricsVisual } from "./ComputerMetricsVisuals";
-import { computerVisualHasHistory, type ComputerVisual } from "./computer-visuals";
 
-export function ComputerMetrics({ metrics, history = [], status, detail, retry, visual = "pixels" }: {
-  visual?: ComputerVisual;
+export function ComputerMetrics({ metrics, history = [], status, detail, retry }: {
   metrics?: MachineMetrics;
   history?: MachineMetrics[];
   status: string;
@@ -16,22 +14,23 @@ export function ComputerMetrics({ metrics, history = [], status, detail, retry, 
   retry?: () => void;
 }) {
   if (!metrics) return (
-    <div className="computer-telemetry computer-telemetry-empty" data-visual={visual} title={detail}>
+    <div className="computer-telemetry computer-telemetry-empty" title={detail}>
       <div className="computer-visual-body"><div className="computer-empty-readings"><span>CPU <b>—</b></span><span>内存 <b>—</b></span></div></div>
       <div className="computer-telemetry-caption"><span>{status}</span>{retry && <Button variant="ghost" size="plain" onClick={retry}>重试</Button>}</div>
     </div>
   );
   return (
-    <div className="computer-telemetry" data-visual={visual}>
-      <div className="computer-visual-body"><ComputerMetricsVisual visual={visual} metrics={metrics} history={history} /></div>
+    <div className="computer-telemetry">
+      <div className="computer-visual-body"><ComputerMetricsVisual metrics={metrics} history={history} /></div>
+      {/* Under the chart the caption is its time axis; the sampling status moves to the tooltip. */}
       <div className="computer-telemetry-caption" title={detail}>
-        <span>{computerVisualHasHistory(visual) ? "最近 2 分钟" : "整机负载"}</span><span title={status}>{computerVisualHasHistory(visual) ? "现在" : status}</span>
+        <span>最近 2 分钟</span><span title={status}>现在</span>
       </div>
     </div>
   );
 }
 
-export function ComputerTelemetry({ visual = "pixels" }: { visual?: ComputerVisual }) {
+export function ComputerTelemetry() {
   const { link } = useConnection();
   const status = useClient((state) => state.status);
   const machine = useClient((state) => state.machine);
@@ -46,7 +45,6 @@ export function ComputerTelemetry({ visual = "pixels" }: { visual?: ComputerVisu
   const unavailable = (!!machine && !supported) || state.unsupported;
   const metrics = status === "online" && supported && !state.error ? state.metrics : undefined;
   return <ComputerMetrics
-    visual={visual}
     metrics={metrics}
     history={metrics ? state.history : []}
     status={status === "locked" ? "解锁后查看负载" : status !== "online" ? "等待连接" : unavailable ? "更新电脑端后可查看负载" : state.error ? "负载读取失败" : metrics ? "每 5 秒更新" : "正在采样…"}

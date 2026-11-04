@@ -193,13 +193,17 @@
       --text: #f4f4f5;
       --text-sec: #a1a1aa;
       --text-muted: #a1a1aa;
-      --accent: #3de0c0;
-      --accent-ink: #052e26;
+      /* Hues from apps/client/src/theme/brand-colors.json (accent, accentFill, accentHover, ok,
+         danger, waiting), dark then light; apps/web/test/brand-colors.test.ts checks the copy. */
+      --accent: #8d9bff;
+      --accent-fill: #5263e8;
+      --accent-hover: #4d5fe0;
+      --accent-ink: #ffffff;
       --ink: #f4f4f5;
       --ink-fg: #09090b;
-      --success: #3de0c0;
-      --danger: #ff7b7b;
-      --warning: #f2a33d;
+      --success: #4cc38a;
+      --danger: #ff7b72;
+      --warning: #ffad5c;
       --code-bg: #111113;
       --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
       --sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
@@ -224,13 +228,15 @@
       --text: #09090b;
       --text-sec: #52525b;
       --text-muted: #52525b;
-      --accent: #078570;
+      --accent: #4c5fd5;
+      --accent-fill: #4c5fd5;
+      --accent-hover: #4254c7;
       --accent-ink: #ffffff;
       --ink: #09090b;
       --ink-fg: #fafafa;
-      --success: #078570;
-      --danger: #c93a3a;
-      --warning: #965c05;
+      --success: #187a4a;
+      --danger: #c8322f;
+      --warning: #ad5200;
       --code-bg: #f2f2f3;
       color-scheme: light;
     }
@@ -281,13 +287,13 @@
     @media (max-width: 460px) { .nav nav a.wide { display: none; } .nav nav a { padding-inline: 9px; } }
     @media (max-width: 480px) { .btns .btn { flex: 1 1 auto; justify-content: center; } }
 
-    /* buttons: one shape (a pill), one primary (ink), the rest a tone step */
+    /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
     .btns { display: flex; flex-wrap: wrap; gap: 10px; }
     .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: 999px; font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
     .btn:hover { text-decoration: none; }
     .btn:active { transform: scale(.97); }
-    .btn-p { background: var(--ink); color: var(--ink-fg); }
-    .btn-p:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+    .btn-p { background: var(--accent-fill); color: var(--accent-ink); }
+    .btn-p:hover { background: var(--accent-hover); }
     .btn-s { background: var(--surface-2); color: var(--text); }
     .btn-s:hover { background: var(--surface-3); }
     .btn svg { width: 18px; height: 18px; flex: none; }
@@ -300,7 +306,7 @@
     .code pre { padding-right: 60px; }
     .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
     .copy:hover { color: var(--text); background: var(--surface-3); }
-    .copy.ok { color: var(--accent); }
+    .copy.ok { color: var(--success); }
     .copy svg { width: 16px; height: 16px; }
     .code .copy { position: absolute; top: 10px; right: 10px; background: var(--code-bg); }
     .code .copy:hover { background: var(--surface-3); }
@@ -356,11 +362,11 @@
     .ask-actions button { flex: 1; height: 38px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: var(--small); font-weight: 500; cursor: pointer; transition: background-color .15s, transform .15s var(--ease); }
     .ask-actions button:hover { background: var(--surface-3); }
     .ask-actions button:active { transform: scale(.96); }
-    .ask-actions .allow { background: var(--ink); color: var(--ink-fg); }
-    .ask-actions .allow:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+    .ask-actions .allow { background: var(--accent-fill); color: var(--accent-ink); }
+    .ask-actions .allow:hover { background: var(--accent-hover); }
     .ask-result { display: none; align-items: center; gap: 10px; margin-top: 14px; min-height: 38px; color: var(--text); }
     .ask-result .spin { width: 14px; height: 14px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: ask-spin .8s linear infinite; }
-    .ask-result .tick { color: var(--accent); font-weight: 600; }
+    .ask-result .tick { color: var(--success); font-weight: 600; }
     .ask-result button { margin-left: auto; border: 0; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; }
     .ask-result button:hover { color: var(--text); }
     .ask[data-state="running"] .ask-actions, .ask[data-state="done"] .ask-actions, .ask[data-state="denied"] .ask-actions { display: none; }
@@ -522,8 +528,8 @@
     #pricing-buy p { margin-top: 16px; font-size: var(--small); color: var(--text-sec); }
     .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 999px; background: var(--surface-3); color: var(--text); font: 500 var(--body) var(--sans); cursor: pointer; text-decoration: none !important; transition: background-color .15s; }
     .auth-btn:hover { background: color-mix(in srgb, var(--surface-3) 80%, var(--text)); }
-    .auth-btn-primary { background: var(--ink); color: var(--ink-fg); }
-    .auth-btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+    .auth-btn-primary { background: var(--accent-fill); color: var(--accent-ink); }
+    .auth-btn-primary:hover { background: var(--accent-hover); }
     .auth-btn + .auth-btn { margin-top: 10px; }
     .ts { color: var(--success); }
     .to { color: var(--text-sec); }
@@ -564,8 +570,9 @@
     .feature.field > .text h2 { color: var(--field-ink); }
     .feature.field > .stage { padding: 0; background: none; align-self: end; }
     .feature.field .phone { margin-bottom: -60px; border-color: color-mix(in srgb, var(--field) 70%, #000); }
-    :root { --field: #0d2b26; --field-ink: #e8fbf6; --field-sec: #9fd3c7; }
-    :root[data-theme="light"] { --field: #dff3ee; --field-ink: #053a31; --field-sec: #2f5f56; }
+    /* accentSoft (16% of the dark accent, 10% of the light one) laid on the page's ground. */
+    :root { --field: color-mix(in srgb, var(--accent) 16%, var(--bg)); --field-ink: var(--text); --field-sec: var(--text-sec); }
+    :root[data-theme="light"] { --field: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
     .feature.field + .feature { margin-top: 200px; }
     .feature.center > .feature-stage { margin-top: 48px; padding: 0; background: none; }
     .feature.center .phone.side { width: 100%; max-width: 1120px; }

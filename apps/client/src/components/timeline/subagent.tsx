@@ -10,10 +10,11 @@ import { haptics } from "@/lib/haptics";
 import { useNow } from "@/lib/use-now";
 import { findWorkflowAgent } from "@/lib/workflows";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "../icon";
+import { StatusDot } from "../status";
 import { SubagentGlyph } from "../subagent-glyph";
-import { PressableScale } from "../pressable-scale";
+import { PressableFeedback } from "../pressable-feedback";
 import { useTimelineSession } from "./context";
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
@@ -109,8 +110,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
   const report = running ? undefined : finalReport(children);
 
   return (
-    <PressableScale
-      pressedScale={0.985}
+    <PressableFeedback
       disabled={!sessionId}
       onPress={() => {
         haptics.selection();
@@ -119,7 +119,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
       accessibilityRole="button"
       accessibilityLabel={`${progress.name}：${progress.task}`}
       accessibilityHint={progress.workflow ? "查看工作流和各个 Agent 的过程" : "查看这个子 Agent 的全部过程"}
-      style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 12, gap: 8 }}
+      style={{ backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", padding: 12, gap: 8 }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <SubagentGlyph sessionId={sessionId} toolCallId={item.id} size={30} />
@@ -145,7 +145,7 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
 
       {running && activity ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent }} />
+          <StatusDot />
           <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.accent }]}>
             {activity}
           </Text>
@@ -159,12 +159,13 @@ export const SubagentCard = memo(function SubagentCard({ item }: { item: ToolIte
       ) : null}
 
       <Text style={[type.caption, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{progress.summary}</Text>
-    </PressableScale>
+    </PressableFeedback>
   );
 });
 
 export function StatusMark({ running, failed, paused, stopped, unknown }: { running: boolean; failed: boolean; paused?: boolean; stopped?: boolean; unknown?: boolean }) {
-  if (paused) return <Icon sf="pause.circle" md="pause_circle" size={16} color={colors.waiting} />;
+  // Paused is not waiting on the user: amber is kept for what needs them.
+  if (paused) return <Icon sf="pause.circle" md="pause_circle" size={16} color={colors.secondaryLabel} />;
   if (stopped) return <Icon sf="stop.circle" md="stop_circle" size={16} color={colors.secondaryLabel} />;
   if (unknown) return <Icon sf="questionmark.circle" md="help_outline" size={16} color={colors.secondaryLabel} />;
   if (running) return <ActivityIndicator size="small" color={colors.accent} />;

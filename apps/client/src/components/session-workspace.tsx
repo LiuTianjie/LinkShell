@@ -18,7 +18,7 @@ import { workspaceLayout } from "@/lib/workspace-layout";
 import { homeNavigationLayout } from "@/lib/home-layout";
 import { SessionFoldLayoutContext } from "@/lib/session-fold-layout";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Icon, type IconProps } from "./icon";
 import { Button } from "./button";
 import { PortRow } from "./port-row";
@@ -82,7 +82,7 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
           <MountedMotionPane frame={chat} visible={chatVisible} action={motionAction} geometry={motionGeometry}>
             <ConsumedTopInset height={chat.top}><SessionFoldLayoutContext value={foldLayout}><ComputerPreviewVisible value={chatVisible}>{children}</ComputerPreviewVisible></SessionFoldLayoutContext></ConsumedTopInset>
           </MountedMotionPane>
-          <MountedMotionPane fixedWidth={Math.max(0, split && axis === "row" ? after - 12 : width)} frame={tools} visible={toolsOpen} action={motionAction} geometry={motionGeometry} style={{ borderRadius: 26, borderCurve: "continuous", backgroundColor: colors.background }}>
+          <MountedMotionPane fixedWidth={Math.max(0, split && axis === "row" ? after - 12 : width)} frame={tools} visible={toolsOpen} action={motionAction} geometry={motionGeometry} style={{ borderRadius: radius.panel, borderCurve: "continuous", backgroundColor: colors.background }}>
             <SessionTools sessionId={sessionId} panel={panel} onPanel={showPanel} onClose={closeTools} active={toolsOpen} motionAction={motionAction} motionGeometry={motionGeometry} />
           </MountedMotionPane>
         </View>
@@ -112,7 +112,7 @@ export function SessionTools({ sessionId, panel, onPanel, onClose, active = true
             accessibilityRole="tab"
             accessibilityState={{ selected: panel === item }}
             accessibilityLabel={`${PANEL_LABEL[item]}面板`}
-            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 44, paddingHorizontal: 12, borderRadius: 14, backgroundColor: panel === item ? colors.card : "transparent", opacity: pressed ? 0.65 : 1 })}
+            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 7, minHeight: 44, paddingHorizontal: 12, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: panel === item ? colors.card : "transparent", opacity: pressed ? 0.6 : 1 })}
           >
             <Icon {...PANEL_ICON[item]} size={16} color={panel === item ? colors.label : colors.secondaryLabel} />
             <Text style={[type.subhead, { color: panel === item ? colors.label : colors.secondaryLabel, fontWeight: "600" }]}>{PANEL_LABEL[item]}</Text>
@@ -150,15 +150,15 @@ function PreviewPicker({ cwd, onOpen, active }: { cwd?: string; onOpen: (port: n
   return (
     <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" bottomOffset={16} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 16, gap: 16 }}>
       <View style={{ alignItems: "flex-start", gap: 10, paddingVertical: 12 }}>
-        <View style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }}><Icon sf="globe" md="language" size={24} color={colors.accent} /></View>
+        <Icon sf="globe" md="language" size={40} color={colors.secondaryLabel} />
         <Text style={[type.title, { color: colors.label }]}>查看运行结果</Text>
-        <Text style={[type.subhead, { color: colors.secondaryLabel, lineHeight: 22 }]}>打开电脑上的网页，在这里查看效果，继续和 Agent 对话。</Text>
+        <Text style={[type.subhead, { color: colors.secondaryLabel }]}>打开电脑上的网页，在这里查看效果，继续和 Agent 对话。</Text>
       </View>
       {ports === null && !error ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><ActivityIndicator size="small" color={colors.secondaryLabel} /><Text style={[type.footnote, { color: colors.secondaryLabel }]}>正在查找网页服务…</Text></View> : null}
       {ports?.length === 0 ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>还没有发现网页服务，也可以直接输入端口。</Text> : null}
       {sorted.map((entry, index) => <PortRow key={entry.port} entry={entry} position={positionOf(index, sorted.length)} onPress={() => onOpen(entry.port)} />)}
       {error ? <Text style={[type.footnote, { color: colors.danger }]}>{error}</Text> : null}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.fill, padding: 10, borderRadius: 14 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.fill, padding: 10, borderRadius: radius.control, borderCurve: "continuous" }}>
         <Text style={{ fontFamily: mono, color: colors.secondaryLabel }}>localhost:</Text>
         <TextInput accessibilityLabel="预览端口" value={typed} onChangeText={(value) => setTyped(value.replace(/\D/g, "").slice(0, 5))} placeholder="3000" placeholderTextColor={colors.placeholder as string} keyboardType="number-pad" onSubmitEditing={() => valid && onOpen(port)} style={{ flex: 1, minHeight: 44, color: colors.label, fontFamily: mono }} />
         <Button title="打开" size="small" disabled={!valid} onPress={() => onOpen(port)} />

@@ -5,7 +5,7 @@ import { Text } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { swipeKeySteps } from "@/lib/terminal-snippets";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Icon, type IconProps } from "../icon";
 
 type Key =
@@ -53,12 +53,13 @@ function KeyPill({
         minWidth: 36,
         height: 34,
         paddingHorizontal: 10,
-        borderRadius: 11,
+        borderRadius: radius.control,
         borderCurve: "continuous",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: active ? colors.accent : pressed ? colors.fillStrong : colors.fill,
-        transform: [{ scale: pressed ? 0.95 : 1 }],
+        // A latched modifier carries white text, so it sits on accentFill, never the lighter text accent.
+        backgroundColor: active ? colors.accentFill : colors.fill,
+        opacity: pressed ? 0.6 : 1,
       })}
     >
       {children}
@@ -94,8 +95,8 @@ function ActionCircle({
         borderCurve: "continuous",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: active ? colors.accentSoft : pressed ? colors.fillStrong : colors.fill,
-        transform: [{ scale: pressed ? 0.94 : 1 }],
+        backgroundColor: active ? colors.accentSoft : colors.fill,
+        opacity: pressed ? 0.6 : 1,
       })}
     >
       <Icon {...icon} size={14} color={active ? colors.accent : colors.label} weight="medium" />
@@ -253,7 +254,7 @@ export function KeyBar({
             justifyContent: "center",
           }}
         >
-          <Text style={[type.caption, { color: colors.accent, fontWeight: "700" }]}>{scrubHint}</Text>
+          <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{scrubHint}</Text>
         </View>
       ) : null}
 

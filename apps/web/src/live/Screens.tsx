@@ -10,7 +10,6 @@ import {
   X,
   ArrowLeft,
   Trash2,
-  Palette,
 } from "lucide-react";
 import { useDialogs } from "@/components/Dialogs";
 import { DESKTOP_LOCAL, isWindowsDesktop } from "./desktop";
@@ -40,8 +39,6 @@ import { Screen, StatusDot } from "./Video";
 import { ComputerName } from "./ComputerName";
 import { ComputerMetrics, ComputerTelemetry } from "./ComputerTelemetry";
 import { AccessUnlock } from "./Access";
-import { computerVisualLabels, computerVisuals, useComputerVisuals, type ComputerVisual } from "./computer-visuals";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   computerName,
   computerIdentity,
@@ -65,7 +62,6 @@ export function Screens({
     return () => document.removeEventListener("visibilitychange", changed);
   }, []);
   const computers = useStore(engine.state, (state) => state.computers);
-  const { visuals, change } = useComputerVisuals(computers);
   const names = useStore(computerNames.store);
   const [query, setQuery] = useState("");
   const ready = useStore(engine.state, (state) => state.ready);
@@ -143,8 +139,6 @@ export function Screens({
               computer={computer}
               live={live && visible}
               hidden={!matches(computer)}
-              visual={visuals[computer.key] ?? "pixels"}
-              changeVisual={(visual) => change(computer.key, visual)}
               open={() => open(computer)}
             />
           ))}
@@ -172,15 +166,11 @@ function ScreenCard({
   computer,
   live,
   hidden,
-  visual,
-  changeVisual,
   open,
 }: {
   computer: Computer;
   live: boolean;
   hidden: boolean;
-  visual: ComputerVisual;
-  changeVisual: (visual: ComputerVisual) => void;
   open: () => void;
 }) {
   const selected = useStore(
@@ -207,20 +197,12 @@ function ScreenCard({
           <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computer.key === DESKTOP_LOCAL ? "本机" : computerIdentity(computer)}</span>
         </div>
         {selected && <Badge variant="secondary">当前</Badge>}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="computer-visual-menu" aria-label={`更换 ${name} 的仪表样式`} title="更换仪表样式"><Palette size={14} /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup value={visual} onValueChange={(value) => changeVisual(value as ComputerVisual)}>
-              {computerVisuals.map((value) => <DropdownMenuRadioItem key={value} value={value}>{computerVisualLabels[value]}</DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
         <ComputerName computer={computer} iconOnly />
       </header>
       {connection && computer.machine.online && watching ? (
-        <Runtime value={connection}><ComputerTelemetry visual={visual} /></Runtime>
+        <Runtime value={connection}><ComputerTelemetry /></Runtime>
       ) : (
-        <ComputerMetrics visual={visual} status={!computer.machine.online ? "电脑离线" : error ? "暂时无法连接" : live ? "正在连接电脑…" : "刷新已暂停"} detail={error} />
+        <ComputerMetrics status={!computer.machine.online ? "电脑离线" : error ? "暂时无法连接" : live ? "正在连接电脑…" : "刷新已暂停"} detail={error} />
       )}
       <footer className="computer-card-footer">
         {connection && computer.machine.online && watching ? (

@@ -19,7 +19,7 @@ import { SessionNotices } from "@/components/session-notices";
 import { AgentInteractions } from "./acp-screen";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
-import { LiveDot } from "@/components/status";
+import { StatusDot } from "@/components/status";
 import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
@@ -82,7 +82,7 @@ function HeaderTitle({
             {title}
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            {live ? <LiveDot size={5} /> : null}
+            {live ? <StatusDot /> : null}
             {/* Tight: the branch (what the agent is working on) stays whole, the project name gives way. */}
             <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
               {subtitle}
@@ -393,7 +393,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                   borderRadius: 16,
                   borderCurve: "continuous",
                   backgroundColor: pressed ? colors.fillStrong : colors.fill,
-                  transform: [{ scale: pressed ? 0.96 : 1 }],
                 })}
               >
                 <Text style={[type.footnote, { color: colors.label, fontWeight: "500" }]}>{starter}</Text>

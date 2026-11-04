@@ -8,7 +8,7 @@ import { useConnection } from "@/lib/client";
 import { useContentHeight } from "@/lib/content-height";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Button } from "./button";
 import { Glass } from "./glass";
 import { Icon } from "./icon";
@@ -79,7 +79,7 @@ function Field({
               minHeight: 44,
               paddingVertical: 9,
               paddingHorizontal: 12,
-              borderRadius: 14,
+              borderRadius: radius.control,
               borderCurve: "continuous",
               backgroundColor: selected ? colors.accentSoft : colors.fill,
             }}
@@ -116,7 +116,7 @@ function Field({
           accessibilityLabel={typed ? question.text : "自己写一个回答"}
           style={[
             type.subhead,
-            { color: colors.label, backgroundColor: colors.fill, borderRadius: 14, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, maxHeight: 110 },
+            { color: colors.label, backgroundColor: colors.fill, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, maxHeight: 110 },
           ]}
         />
       ) : null}
@@ -198,18 +198,15 @@ export function QuestionCard({
     });
 
   return (
-    <Glass style={{ borderRadius: 26 }}>
+    <Glass style={{ borderRadius: radius.panel }}>
       <QuestionBody contained={contained} maxHeight={maxHeight}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View
-          style={{ width: 26, height: 26, borderRadius: 9, borderCurve: "continuous", backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="questionmark.bubble.fill" md="help" size={13} color={colors.accent} />
-        </View>
+        {/* Waiting on the user, so amber, as the approval card is. */}
+        <Icon sf="questionmark.bubble.fill" md="help" size={15} color={colors.waiting} />
         <Text numberOfLines={1} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
           {agentName} 想问你
         </Text>
-        {count > 1 ? <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>1/{count}</Text> : null}
+        {count > 1 ? <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{count}</Text> : null}
       </View>
       {request.detail ? <Text style={[type.caption, { color: colors.secondaryLabel }]}>{request.detail}</Text> : null}
       <View style={{ gap: 16 }}>

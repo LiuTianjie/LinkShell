@@ -47,8 +47,8 @@ struct DesktopRootView: View {
             Text("工作台暂时无法连接").font(.system(size: 17, weight: .semibold))
             Text(problem).font(.system(size: 13)).foregroundStyle(DesktopStyle.secondary).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: 440)
             HStack(spacing: 10) {
-              Button("本机管理") { workspace.setManaging(true) }.buttonStyle(DesktopPillStyle(.secondary))
-              Button("重新连接") { workspace.retry() }.buttonStyle(DesktopPillStyle(.primary))
+              Button("本机管理") { workspace.setManaging(true) }.buttonStyle(DesktopButtonStyle(.secondary))
+              Button("重新连接") { workspace.retry() }.buttonStyle(DesktopButtonStyle(.primary))
             }.padding(.top, 4)
           } else {
             ProgressView().controlSize(.small)
@@ -77,7 +77,7 @@ private struct DesktopTopBar: View {
         HStack(spacing: 8) {
           Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
             .resizable().scaledToFit().frame(width: 20, height: 20)
-          Text("LinkShell").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DesktopStyle.secondary).fixedSize()
+          Text("LinkShell").font(.system(size: 13, weight: .semibold)).foregroundStyle(DesktopStyle.secondary).fixedSize()
         }.allowsHitTesting(false)
         modes
         Spacer(minLength: 12)
@@ -85,16 +85,16 @@ private struct DesktopTopBar: View {
           Button { workspace.send(command: "palette") } label: {
             HStack(spacing: 8) {
               Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium))
-              Text("搜索会话、项目和命令").font(.system(size: 12.5)).lineLimit(1)
+              Text("搜索会话、项目和命令").font(.system(size: 12)).lineLimit(1)
               Spacer(minLength: 8)
-              Text("⌘K").font(.system(size: 11, weight: .medium)).padding(.horizontal, 5).frame(height: 18)
-                .background(RoundedRectangle(cornerRadius: 5).fill(DesktopStyle.raised))
+              Text("⌘K").font(.system(size: 11, weight: .medium)).padding(.horizontal, 4).frame(height: 18)
+                .background(RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous).fill(DesktopStyle.raised))
             }
             .foregroundStyle(DesktopStyle.tertiary)
-            .padding(.leading, 12).padding(.trailing, 6).frame(width: 320, height: 30)
-            .background(Capsule().fill(DesktopStyle.panel))
-            .overlay { Capsule().strokeBorder(DesktopStyle.line, lineWidth: 1) }
-            .contentShape(Capsule())
+            .padding(.leading, 12).padding(.trailing, 4).frame(width: 320, height: DesktopStyle.compactControlHeight)
+            .background(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).fill(DesktopStyle.panel))
+            .overlay { RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).strokeBorder(DesktopStyle.line, lineWidth: 1) }
+            .contentShape(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
           }.buttonStyle(.plain).help("搜索与命令 · ⌘K").accessibilityLabel("搜索与命令")
           Spacer(minLength: 12)
         }
@@ -108,17 +108,17 @@ private struct DesktopTopBar: View {
       mode("工作台", shortcut: "⌘1", selected: !managing) { workspace.setManaging(false) }
       mode("本机管理", shortcut: "⌘2", selected: managing) { workspace.setManaging(true) }
     }
-    .padding(2).background(Capsule().fill(DesktopStyle.raised))
+    .padding(2).background(RoundedRectangle(cornerRadius: DesktopStyle.wellRadius, style: .continuous).fill(DesktopStyle.raised))
     .accessibilityElement(children: .contain).accessibilityLabel("切换 LinkShell 入口")
   }
 
   private func mode(_ title: String, shortcut: String, selected: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Text(title).font(.system(size: 12.5, weight: .medium))
+      Text(title).font(.system(size: 12, weight: .medium))
         .foregroundStyle(selected ? DesktopStyle.primary : DesktopStyle.secondary)
-        .padding(.horizontal, 12).frame(height: 26)
-        .background(Capsule().fill(selected ? DesktopStyle.selection : .clear))
-        .contentShape(Capsule())
+        .padding(.horizontal, 12).frame(height: DesktopStyle.compactControlHeight - 4)
+        .background(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).fill(selected ? DesktopStyle.selection : .clear))
+        .contentShape(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
     }
     .buttonStyle(.plain)
     .help("\(title) · \(shortcut)")
@@ -130,18 +130,18 @@ private struct DesktopTopBar: View {
     HStack(spacing: 6) {
       if model.pending > 0 {
         Button { workspace.setManaging(false) } label: {
-          DesktopStatusPill(text: "\(model.pending) 个请求等待确认", tone: DesktopStyle.waiting, tinted: true)
+          DesktopStatusPill(text: "\(model.pending) 个请求等待确认", tone: DesktopStyle.waiting, soft: DesktopStyle.waitingSoft)
         }.buttonStyle(.plain).help("回到工作台处理")
       }
       if model.newVersion {
         Button { workspace.setManaging(true); model.selected = "更新" } label: {
-          DesktopStatusPill(text: "有新版本", tone: DesktopStyle.mint, tinted: true)
+          DesktopStatusPill(text: "有新版本", tone: DesktopStyle.accent, soft: DesktopStyle.accentSoft)
         }.buttonStyle(.plain)
       }
       Button { workspace.setManaging(true); model.selected = "总览" } label: {
         DesktopStatusPill(
           text: model.healthy ? "本机服务运行中 · 网关\(model.gatewayLabel)" : "本机服务\(model.serviceLabel)",
-          tone: model.healthy ? (model.snapshot?.gateway?.status == "online" ? DesktopStyle.mint : DesktopStyle.tertiary) : DesktopStyle.waiting
+          tone: model.healthy ? model.gatewayTone ?? DesktopStyle.tertiary : model.serviceTone
         )
       }.buttonStyle(.plain).help("这台 Mac 的服务与网关")
     }

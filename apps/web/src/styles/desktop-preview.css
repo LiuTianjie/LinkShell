@@ -15,7 +15,7 @@ html[data-desktop] .desktop-main .file-preview-body { flex: 1; min-height: 0; ov
 html[data-desktop] .desktop-main .file-preview-markdown { padding: 16px 4px 24px; }
 html[data-desktop] .desktop-main .file-preview-markdown .markdown { font-size: 14px; line-height: 1.625; }
 html[data-desktop] .desktop-main .file-preview-image { display: grid; place-items: center; min-height: 240px; padding: 16px; }
-html[data-desktop] .desktop-main .file-preview-image img { max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .file-preview-image img { max-width: 100%; max-height: 70vh; border-radius: var(--radius-card); box-shadow: 0 0 0 var(--hairline) var(--separator); }
 
 /* Source, as the editor's: a right-aligned number gutter in quaternary ink, 12 / 20 mono, the
    grammar's colours, the asked-for line tinted. Lines don't wrap unless asked to. */
@@ -38,7 +38,7 @@ html[data-desktop] .desktop-main .file-browser[data-layout="page"] { display: fl
 html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-file-layout { display: flex; flex: 1; align-items: stretch; gap: 0; min-height: 0; }
 /* The list is a side bar, as the window's own: it runs from the panel's edge to the hairline before
    the file, with no frame of its own (the hairline is its edge); rows are the sidebar's, tinted
-   8 px in from both edges with 10 px corners, and the count sits at the column's foot. */
+   8 px in from both edges with 6 px corners, and the count sits at the column's foot. */
 html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-directory { display: flex; flex: none; flex-direction: column; gap: 0; width: var(--files-list-width, 300px); max-width: 50%; max-height: none; min-height: 0; margin-left: calc(-1 * var(--page-inline)); padding: 0; overflow: hidden; }
 html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-height: 0; padding: 0 8px 8px; overflow-y: auto; overscroll-behavior: contain; border-radius: 0; background: transparent; box-shadow: none; }
 html[data-desktop] .desktop-main .file-browser[data-layout="page"] .resource-entry-list > .resource-entry { flex: none; height: 30px; min-height: 30px; padding: 0 8px; border-radius: var(--radius-row); }
@@ -53,14 +53,14 @@ html[data-desktop] .desktop-main .file-browser[data-list-folded] .resource-direc
 html[data-desktop] .desktop-main .file-browser[data-list-folded] .file-preview { padding-left: 0; border-left: 0; }
 /* The list's edge, over the hairline between it and the file: a line shows while it's held. */
 html[data-desktop] .files-list-resizer { position: relative; z-index: 2; flex: none; width: 8px; margin: 0 -4px; cursor: col-resize; }
-html[data-desktop] .files-list-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .files-list-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 999px; background: transparent; transition: background var(--transition); }
 html[data-desktop] .files-list-resizer:hover::after,
 html[data-desktop] .files-list-resizer:focus-visible::after,
 html[data-desktop][data-resizing] .files-list-resizer::after { background: var(--separatorStrong); }
 html[data-desktop] .files-list-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-main .file-browser[data-layout="page"] :is(.file-preview, .file-preview-empty) { flex: 1; min-width: 0; min-height: 0; padding-left: 16px; border-left: var(--hairline) solid var(--separator); }
 html[data-desktop] .desktop-main .file-preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding-bottom: var(--toolbar); color: var(--tertiaryLabel); font-size: 13px; }
-html[data-desktop] .desktop-main .file-preview-empty > svg { width: 28px; height: 28px; stroke-width: 1.4; color: var(--quaternaryLabel); }
+html[data-desktop] .desktop-main .file-preview-empty > svg { width: 28px; height: 28px; stroke-width: 1.4; color: var(--secondaryLabel); }
 /* With the list beside it, the file needs no way back to it (folded or too narrow, it does). */
 html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-back { display: none; }
 html[data-desktop] .desktop-main .file-browser[data-layout="page"]:not([data-list-folded]) .file-preview-name { margin-left: 8px; }

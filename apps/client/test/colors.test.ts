@@ -3,7 +3,10 @@ import brandColors from "../src/theme/brand-colors.json";
 
 const environment = vi.hoisted(() => ({ os: "android", scheme: "light" as string | null }));
 vi.mock("react-native", () => ({
-  Platform: { get OS() { return environment.os; } },
+  Platform: {
+    get OS() { return environment.os; },
+    select: <T,>(options: Record<string, T>) => options[environment.os] ?? options.default,
+  },
   Appearance: { getColorScheme: () => environment.scheme },
   DynamicColorIOS: (pair: unknown) => ({ dynamic: pair }),
   PlatformColor: (...paths: string[]) => ({ resource_paths: paths }),

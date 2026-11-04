@@ -14,7 +14,7 @@ import { deviceIdentity } from "@/lib/identity";
 import { createSocket } from "@/lib/socket";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 export function RenameComputerScreen() {
   const { computer: key } = useLocalSearchParams<{ computer: string }>();
@@ -82,7 +82,7 @@ function ComputerNameForm({ computerKey }: { computerKey: string }) {
 
   return <KeyboardAwareScrollView contentInsetAdjustmentBehavior="never" style={{ flex: 1, backgroundColor: colors.sheet }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: insets.bottom + 24, gap: 14 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" bottomOffset={20}>
     <SheetHeader title="电脑名称" actions={[{ key: "save", label: saving ? "同步中" : "保存", icon: { sf: "checkmark", md: "check" }, onPress: () => void save(value), disabled: !computer || loading || saving || !machine?.naming, prominent: true }]} />
-    <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", paddingHorizontal: 16 }}>
+    <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16 }}>
       <TextInput value={value} onChangeText={(text) => { setValue(text); setError(""); }} autoFocus selectTextOnFocus
         accessibilityLabel="电脑名称" placeholder="例如：办公室 Mac mini" placeholderTextColor={colors.placeholder as string}
         returnKeyType="done" onSubmitEditing={() => void save(value)} maxLength={COMPUTER_NAME_LIMIT} editable={Boolean(computer && machine?.naming && !loading && !saving)}

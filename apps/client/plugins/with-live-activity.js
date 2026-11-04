@@ -136,16 +136,15 @@ extension LinkShellAttentionAttributes.ContentState {
     }
   }
 
+  /// Running is the brand indigo and anything waiting on the user amber; done and offline are grey.
   var phaseColor: Color {
     switch phase {
     case "waiting_for_approval", "waiting_for_input":
-      return Color(red: 0.98, green: 0.65, blue: 0.10)
+      return ActivityPalette.waiting
     case "failed":
-      return Color(red: 0.95, green: 0.30, blue: 0.30)
+      return ActivityPalette.danger
     case "running", "starting":
-      return Color(red: 0.22, green: 0.84, blue: 0.42)
-    case "completed":
-      return Color.white.opacity(0.75)
+      return ActivityPalette.running
     default:
       return Color.white.opacity(0.55)
     }
@@ -163,6 +162,15 @@ extension LinkShellAttentionAttributes.ContentState {
     default: return project
     }
   }
+}
+
+/// The app's status colours (src/theme/brand-colors.json), dark half: the activity is drawn on
+/// its own dark tint on the Lock Screen and in the Dynamic Island alike.
+enum ActivityPalette {
+  static let running = Color(red: 0x8d / 255, green: 0x9b / 255, blue: 0xff / 255)
+  static let accentFill = Color(red: 0x52 / 255, green: 0x63 / 255, blue: 0xe8 / 255)
+  static let waiting = Color(red: 1, green: 0xad / 255, blue: 0x5c / 255)
+  static let danger = Color(red: 1, green: 0x7b / 255, blue: 0x72 / 255)
 }
 
 @available(iOS 16.2, *)
@@ -259,7 +267,7 @@ struct AgentStackView: View {
       }
     }
     .fixedSize()
-    .animation(reduceMotion || isLuminanceReduced ? nil : .easeInOut(duration: 0.35), value: agents.map(\\.id))
+    .animation(reduceMotion || isLuminanceReduced ? nil : .easeOut(duration: 0.2), value: agents.map(\\.id))
     .opacity(state.phase == "stale" ? 0.55 : 1)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(agents.map(\\.name).joined(separator: "、"))
@@ -274,10 +282,9 @@ struct StatusGlyphView: View {
 
   var body: some View {
     if #available(iOS 17.0, *), !isLuminanceReduced && !reduceMotion {
+      // The symbol swaps when the phase changes; it never pulses.
       Image(systemName: state.phaseSymbolName)
         .contentTransition(.symbolEffect(.replace))
-        // Live Activities animate data updates, not an indefinitely running timer.
-        .symbolEffect(.pulse, options: .nonRepeating, value: state.phase == "running" ? state.subtitle : state.phase)
     } else {
       Image(systemName: state.phaseSymbolName)
     }
@@ -321,7 +328,7 @@ struct ActivityTextView: View {
   var body: some View {
     Text(text)
       .contentTransition(.opacity)
-      .animation(reduceMotion || isLuminanceReduced ? nil : .easeInOut(duration: 0.3), value: text)
+      .animation(reduceMotion || isLuminanceReduced ? nil : .easeOut(duration: 0.2), value: text)
   }
 }
 
@@ -343,8 +350,9 @@ struct ActivityActionsView: View {
                   .fixedSize()
                   .padding(.horizontal, 14)
                   .frame(minHeight: 36)
-                  .foregroundColor(action.role == "allow" ? Color.black : Color.white.opacity(0.94))
-                  .background(Capsule().fill(action.role == "allow" ? state.phaseColor : Color.white.opacity(0.12)))
+                  // Only 允许 is filled, white on accentFill; the rest are quiet, 拒绝 included.
+                  .foregroundColor(Color.white.opacity(action.role == "allow" ? 1 : 0.94))
+                  .background(Capsule().fill(action.role == "allow" ? ActivityPalette.accentFill : Color.white.opacity(0.12)))
               }
               .buttonStyle(.plain)
             }

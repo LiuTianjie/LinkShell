@@ -122,19 +122,19 @@ export function useSnoozedSessions(): Record<string, number> {
 export function phaseLabel(phase: AttentionPhase): string {
   switch (phase) {
     case "waiting_for_approval":
-      return "等待确认";
+      return "等你确认";
     case "waiting_for_input":
-      return "等待回答";
+      return "等你回答";
     case "failed":
-      return "执行出错";
+      return "出错";
     case "running":
-      return "正在运行";
+      return "运行中";
     case "starting":
       return "正在启动";
     case "completed":
-      return "已完成";
+      return "空闲";
     case "stale":
-      return "状态已过期";
+      return "离线";
   }
 }
 
@@ -256,7 +256,7 @@ export function buildIOSShortcutItems(
       const running = session.state === "running";
       const project = baseName(session.worktree?.source ?? session.cwd);
       const agent = agentLook(session.agent).short;
-      const statusPrefix = waiting ? "⚠️ 待确认 · " : running ? "⚡️ 运行中 · " : "";
+      const statusPrefix = waiting ? "等你处理 · " : running ? "运行中 · " : "";
       return {
         id: `linkshell.session.${session.id}`,
         title: sessionTitle(session),

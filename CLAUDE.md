@@ -150,3 +150,4 @@ Install channels: `npm i -g linkshell-cli`, `brew install LiuTianjie/linkshell/l
 - Chinese UI text in the app and in the screen's viewer page (`packages/host/src/screen-viewer.ts`); errors the phone shows are Chinese too
 - English in README.md, Chinese in README_CN.md; keep the two saying the same
 - Comments say why, not what
+- Every surface (app, desktop, web console, site) follows one visual system: [docs/design/visual-system.md](docs/design/visual-system.md), with brand and status colours in `apps/client/src/theme/brand-colors.json`. Change those first, then all surfaces together; never restyle one end alone

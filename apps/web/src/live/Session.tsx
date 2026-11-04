@@ -117,6 +117,7 @@ import { readLocal, saveLocal } from "./storage";
 import { ComputerPreview } from "./Video";
 import { McpAppView, appTabId, type AppTab } from "./McpApp";
 import { isDesktop } from "./desktop";
+import { sessionNeedsAttention, waitingLabel } from "./session-list";
 import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
 
 type Panel =
@@ -669,7 +670,9 @@ export function Session({
               <div className="session-title">
                 <h1 title={titleOf(session)}>{titleOf(session)}</h1>
                 {/* On the desktop the state shows in the sidebar and the conversation's own working line. */}
-                {!isDesktop && <Badge state={session.state} />}
+                {!isDesktop && (sessionNeedsAttention(session)
+                  ? <Badge state="waiting" label={waitingLabel(session)} />
+                  : <Badge state={session.state} />)}
               </div>
               <div className="session-subtitle">
                 <AgentMark agent={session.agent} size={isDesktop ? "sm" : "md"} />
@@ -1313,7 +1316,7 @@ export function Session({
                     </div>
                     <InputGroupTextarea
                       ref={composer}
-                      className="px-3.5 pt-3 pb-1 text-sm leading-relaxed"
+                      className="px-3.5 pt-3 pb-1 text-md leading-relaxed"
                       aria-label="消息"
                       aria-describedby="composer-hint"
                       value={draft}

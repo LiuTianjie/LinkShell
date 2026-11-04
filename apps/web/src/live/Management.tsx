@@ -31,6 +31,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { officialGateway } from "../config";
@@ -246,11 +247,15 @@ function Note({ children, tone, role }: { children: ReactNode; tone?: "warning" 
   return <p className="management-footnote management-selectable" data-tone={tone} role={role}>{children}</p>;
 }
 
-/** A state as a dot and, unless the row's own words already say it, a word. */
-function Status({ text, tone, label }: { text?: string; tone?: "success" | "warning"; label?: string }) {
+/**
+ * A state as a dot and, unless the row's own words already say it, a word. Connection health has
+ * its own scale (docs/design/visual-system.md): reachable is green, off or stopped grey, a failed
+ * connection red, and one still connecting a spinner rather than a colour.
+ */
+function Status({ text, tone, label }: { text?: string; tone?: "success" | "warning" | "danger" | "connecting"; label?: string }) {
   return (
     <span className="management-status" data-tone={tone} title={text ? undefined : label} aria-label={text ? undefined : label} role={text ? undefined : "img"}>
-      <span aria-hidden />{text}
+      {tone === "connecting" ? <LoaderCircle className="animate-spin" size={12} aria-hidden /> : <span aria-hidden />}{text}
     </span>
   );
 }
@@ -324,13 +329,16 @@ function Overview({ facts, confirm, navigate }: { facts: Facts; confirm: (action
       <Group title={THIS_COMPUTER}>
         <div className="management-rows">
           <SettingRow title="本机服务" detail={healthy ? "手机和工作台随时可以连接" : `启动后，即可从手机连接${THIS_COMPUTER}`}>
-            <Status text={facts.service} tone={healthy ? "success" : "warning"} />
+            <Status
+              text={facts.service}
+              tone={healthy ? "success" : state.problem ? undefined : state.snapshot?.status === "unreachable" ? "danger" : state.snapshot?.status === "stopped" ? undefined : "connecting"}
+            />
             {!healthy && state.snapshot?.status === "stopped" && <Button size="sm" variant="secondary" disabled={state.busy} onClick={() => void serviceAction("start")}>启动服务</Button>}
           </SettingRow>
           <SettingRow title="网关" detail={gatewayDetail}>
             <Status
               text={facts.gateway}
-              tone={!healthy ? undefined : gateway?.status === "online" ? "success" : gateway?.status === "offline" || gateway?.error ? "warning" : undefined}
+              tone={!healthy ? undefined : gateway?.status === "online" ? "success" : gateway?.status === "offline" || gateway?.error ? "danger" : gateway?.status === "connecting" ? "connecting" : undefined}
             />
             {healthy && <Button size="sm" variant="secondary" disabled={state.busy} onClick={() => setChoosingGateway(true)}>更改…</Button>}
           </SettingRow>
@@ -341,7 +349,7 @@ function Overview({ facts, confirm, navigate }: { facts: Facts; confirm: (action
           >
             {!permissions.known ? <Status text="检查中" />
               : screenReady ? <Status text="已就绪" tone="success" />
-              : permissions.sharing === false ? <><Status tone="warning" label="已关闭" /><Button size="sm" variant="secondary" onClick={() => navigate("settings")}>设置…</Button></>
+              : permissions.sharing === false ? <><Status label="已关闭" /><Button size="sm" variant="secondary" onClick={() => navigate("settings")}>设置…</Button></>
               : <><Status tone="warning" label="未授权" /><Button size="sm" variant="secondary" onClick={openSetup}>授权…</Button></>}
           </SettingRow>
           <SettingRow
@@ -538,7 +546,8 @@ function Membership({ state }: { state: ManagementState }) {
           ? `有效期至 ${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}`
           : membership.kind === "free" ? "兑换 Pro 后，可通过官方网关在任何网络连接" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
       >
-        {membership.kind === "pro" ? <Status text="Pro" tone="success" /> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
+        {/* Membership is not a state: a neutral badge. */}
+        {membership.kind === "pro" ? <Badge variant="secondary">Pro</Badge> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
         {state.checkingMembership
           ? <LoaderCircle className="animate-spin management-muted" size={16} aria-hidden />
           : (
@@ -618,7 +627,7 @@ function Password({ facts, confirm }: { facts: Facts; confirm: (action: Confirm)
             ? `手机、网页和其他电脑打开${THIS_COMPUTER_SPACED}前要先输入密码，输错 5 次要等 5 分钟；同一设备 7 天内不用再输。`
             : `设置后，手机、网页和其他电脑打开${THIS_COMPUTER_SPACED}前要先输入密码；同一设备解锁后 7 天内不用再输。`}
         >
-          {enabled && <Status text="已开启" tone="success" />}
+          {enabled && <Status text="已开启" />}
           {!editing && (enabled ? (
             <>
               <Button size="sm" variant="secondary" disabled={state.busy} onClick={edit}>修改</Button>

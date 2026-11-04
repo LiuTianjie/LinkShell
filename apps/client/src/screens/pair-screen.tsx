@@ -15,7 +15,7 @@ import { haptics } from "@/lib/haptics";
 import { deviceIdentity } from "@/lib/identity";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 function hostOf(url: string): string {
   try {
@@ -199,7 +199,7 @@ export function PairScreen() {
         </View>
 
         {error ? (
-          <View style={{ flexDirection: "row", gap: 8, padding: 12, borderRadius: 14, backgroundColor: colors.dangerSoft }}>
+          <View style={{ flexDirection: "row", gap: 8, padding: 12, borderRadius: radius.control, backgroundColor: colors.dangerSoft }}>
             <Icon sf="exclamationmark.triangle.fill" md="warning" size={15} color={colors.danger} />
             <Text style={[type.subhead, { flex: 1, color: colors.label }]}>{error}</Text>
           </View>
@@ -228,7 +228,7 @@ export function PairScreen() {
               textAlign: "center",
               color: colors.label,
               backgroundColor: colors.sheetCard,
-              borderRadius: 18,
+              borderRadius: radius.card,
               borderCurve: "continuous",
               paddingVertical: 14,
             }}
@@ -242,7 +242,7 @@ export function PairScreen() {
               keyboardType="url"
               placeholder="wss://gateway.example.com"
               placeholderTextColor={colors.placeholder as string}
-              style={[type.subhead, { fontFamily: mono, color: colors.label, backgroundColor: colors.sheetCard, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }]}
+              style={[type.subhead, { fontFamily: mono, color: colors.label, backgroundColor: colors.sheetCard, borderRadius: radius.control, paddingHorizontal: 12, paddingVertical: 10 }]}
             />
           ) : (
             <Pressable onPress={() => setEditingGateway(true)} accessibilityRole="button" accessibilityLabel="更改配对网关" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", minHeight: 44, gap: 6, paddingHorizontal: 4, paddingVertical: 10 }}>

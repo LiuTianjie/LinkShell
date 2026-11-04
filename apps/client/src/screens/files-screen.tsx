@@ -9,7 +9,7 @@ import { ScrollableState } from "@/components/scrollable-state";
 import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
 import { Icon, type IconProps } from "@/components/icon";
-import { PressableScale } from "@/components/pressable-scale";
+import { PressableFeedback } from "@/components/pressable-feedback";
 import { positionOf, type RowPosition } from "@/components/session-row";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useClient, useConnection } from "@/lib/client";
@@ -20,7 +20,7 @@ import { branchOf, useGitInfo } from "@/lib/worktree";
 import { ContentPane, useContentWidth } from "@/lib/content-width";
 import { FileContent } from "./file-screen";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 interface Listing {
   path: string;
@@ -53,27 +53,24 @@ const Row = memo(function Row({ entry, position, onPress, selected }: { entry: D
   const bottom = position === "last" || position === "only";
   const glyph: Glyph = entry.file ? fileGlyph(entry.name) : { sf: "folder.fill", md: "folder" };
   return (
-    <PressableScale
+    <PressableFeedback
       onPress={() => onPress(entry)}
-      pressedScale={0.985}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={entry.file ? `文件 ${entry.name}` : `文件夹 ${entry.name}`}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingLeft: 14,
+        backgroundColor: selected ? colors.accentSoft : colors.card,
+        borderTopLeftRadius: top ? radius.card : 0,
+        borderTopRightRadius: top ? radius.card : 0,
+        borderBottomLeftRadius: bottom ? radius.card : 0,
+        borderBottomRightRadius: bottom ? radius.card : 0,
+        borderCurve: "continuous",
+      }}
     >
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 12,
-          paddingLeft: 14,
-          backgroundColor: selected ? colors.accentSoft : colors.card,
-          borderTopLeftRadius: top ? 20 : 0,
-          borderTopRightRadius: top ? 20 : 0,
-          borderBottomLeftRadius: bottom ? 20 : 0,
-          borderBottomRightRadius: bottom ? 20 : 0,
-          borderCurve: "continuous",
-        }}
-      >
         <View style={{ width: 24, alignItems: "center" }}>
           <Icon {...glyph} size={entry.file ? 18 : 20} color={entry.file ? colors.secondaryLabel : colors.accent} />
         </View>
@@ -90,7 +87,7 @@ const Row = memo(function Row({ entry, position, onPress, selected }: { entry: D
             borderBottomColor: colors.separator,
           }}
         >
-          <Text numberOfLines={1} ellipsizeMode="middle" style={[type.body, { flex: 1, fontSize: 16, color: colors.label }]}>
+          <Text numberOfLines={1} ellipsizeMode="middle" style={[type.callout, { flex: 1, color: colors.label }]}>
             {entry.name}
           </Text>
           {entry.file ? (
@@ -101,8 +98,7 @@ const Row = memo(function Row({ entry, position, onPress, selected }: { entry: D
             <Icon sf="chevron.right" md="chevron_right" size={11} color={colors.tertiaryLabel} weight="semibold" />
           )}
         </View>
-      </View>
-    </PressableScale>
+    </PressableFeedback>
   );
 });
 
@@ -210,8 +206,8 @@ export function FilesScreen() {
         renderItem={({ item, index }) => <Row entry={item} position={positionOf(index, entries.length)} onPress={open} selected={selected === item.path} />}
         estimatedItemSize={46}
         ListHeaderComponent={branch ? (
-          // A capsule like the terminal's directory: the folder's branch, said once above its files.
-          <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", height: 26, paddingHorizontal: 10, marginBottom: 12, borderRadius: 13, borderCurve: "continuous", backgroundColor: colors.fill }}>
+          // A tag like the terminal's directory: the folder's branch, said once above its files.
+          <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", height: 26, paddingHorizontal: 10, marginBottom: 12, borderRadius: radius.chip, borderCurve: "continuous", backgroundColor: colors.fill }}>
             <BranchTag branch={branch} max={28} />
           </View>
         ) : null}

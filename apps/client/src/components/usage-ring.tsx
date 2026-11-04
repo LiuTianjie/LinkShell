@@ -2,7 +2,9 @@ import { Alert, Pressable } from "react-native";
 import { Text } from "@/components/fixed-text";
 import Svg, { Circle } from "react-native-svg";
 import { compactNumber } from "@/lib/format";
+import brandColors from "@/theme/brand-colors.json";
 import { palette } from "@/theme/colors";
+import { type } from "@/theme/type";
 import { useColorScheme } from "react-native";
 
 /** How full the context window is, as a small ring. */
@@ -14,7 +16,8 @@ export function UsageRing({ used, window }: { used?: number; window?: number }) 
   const stroke = 2.2;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
-  const color = ratio > 0.85 ? "#e5484d" : ratio > 0.65 ? "#e8830c" : dark ? palette.dark.secondaryLabel : palette.light.secondaryLabel;
+  // Red only when it is about to run out; short of that it is a reading, not a state, so grey.
+  const color = ratio > 0.85 ? brandColors.danger[dark ? 1 : 0] : dark ? palette.dark.secondaryLabel : palette.light.secondaryLabel;
   return (
     // A gauge with its number, so it never reads as a loading spinner.
     <Pressable
@@ -43,7 +46,7 @@ export function UsageRing({ used, window }: { used?: number; window?: number }) 
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </Svg>
-      <Text style={{ fontSize: 12, fontWeight: "600", fontVariant: ["tabular-nums"], color }}>{Math.round(ratio * 100)}%</Text>
+      <Text style={[type.caption, { fontWeight: "600", fontVariant: ["tabular-nums"], color }]}>{Math.round(ratio * 100)}%</Text>
     </Pressable>
   );
 }

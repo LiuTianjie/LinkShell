@@ -11,8 +11,10 @@ import { Button } from "./button";
 
 /**
  * Reject / allow buttons for a permission request, plus the less common
- * choices as quieter buttons underneath. Resolves itself when the host
- * reports the answer (from here or from the computer).
+ * choices as quieter buttons after them: 拒绝 → 允许 → 始终允许 → 停止, the
+ * order every end uses. Only 允许 is filled; nothing is red, so a refusal
+ * never reads as the dangerous choice. Resolves itself when the host reports
+ * the answer (from here or from the computer).
  */
 export function PermissionActions({
   options,
@@ -59,12 +61,6 @@ export function PermissionActions({
   return (
     <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ gap: 8 }}>
       <View style={{ flexDirection: stacked ? "column" : "row", gap: 8, alignItems: stacked ? "stretch" : "center" }}>
-        {compact && !stacked ? extra.map((choice) => (
-          <Button key={choice.option.optionId} title={choice.label} variant="plain" size="small"
-            busy={busy === choice.option.optionId}
-            disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
-            onPress={() => void choose(choice)} />
-        )) : null}
         {compact && !stacked ? <View style={{ flex: 1 }} /> : null}
         {main.map((choice) => (
           <Button
@@ -79,6 +75,12 @@ export function PermissionActions({
             onPress={() => void choose(choice)}
           />
         ))}
+        {compact && !stacked ? extra.map((choice) => (
+          <Button key={choice.option.optionId} title={choice.label} variant="plain" size="small"
+            busy={busy === choice.option.optionId}
+            disabled={disabled || (busy !== null && busy !== choice.option.optionId)}
+            onPress={() => void choose(choice)} />
+        )) : null}
       </View>
       {extra.length && (!compact || stacked) ? (
         <View style={{ gap: 4, alignItems: "stretch" }}>
@@ -86,7 +88,7 @@ export function PermissionActions({
             <Button
               key={choice.option.optionId}
               title={choice.label}
-              variant={choice.role === "stop" ? "destructive" : "plain"}
+              variant="plain"
               size="small"
               style={{ minHeight: 44, justifyContent: "center" }}
               busy={busy === choice.option.optionId}

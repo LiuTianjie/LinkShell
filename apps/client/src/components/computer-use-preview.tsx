@@ -7,6 +7,7 @@ import { Modal, Pressable, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useComputerPreview } from "@/lib/use-computer-preview";
 import { colors } from "@/theme/colors";
+import { radius } from "@/theme/type";
 import { Icon } from "./icon";
 import { Glass } from "./glass";
 import { useTimelineSession } from "./timeline/context";
@@ -33,8 +34,8 @@ function SessionComputerUse({ sessionId, bounds }: { sessionId: string; bounds: 
   return (
     <>
       <MovablePreview positionKey={positionKey} bounds={bounds} width={width} height={height}>
-      <View style={{ borderRadius: 14, borderCurve: "continuous", backgroundColor: colors.card, boxShadow: "0 6px 24px rgba(0,0,0,0.14)" }}>
-        <Pressable accessibilityRole="imagebutton" accessibilityLabel="放大电脑画面" onPress={() => setExpanded(true)} style={{ height, borderRadius: 14, overflow: "hidden" }}>
+      <View style={{ borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.card, boxShadow: "0 6px 24px rgba(0,0,0,0.14)" }}>
+        <Pressable accessibilityRole="imagebutton" accessibilityLabel="放大电脑画面" onPress={() => setExpanded(true)} style={{ height, borderRadius: radius.control, overflow: "hidden" }}>
           <Image source={{ uri: frame.uri }} style={{ width: "100%", height: "100%" }} contentFit="contain" cachePolicy="none" />
         </Pressable>
         <View style={{ position: "absolute", top: 0, right: 0, flexDirection: "row" }}>

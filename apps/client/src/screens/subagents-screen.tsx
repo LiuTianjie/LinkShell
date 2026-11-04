@@ -6,9 +6,9 @@ import { Text } from "@/components/fixed-text";
 import { AdaptiveGrid, usePageInsets } from "@/components/adaptive-page";
 import { SheetHeader } from "@/components/sheet-header";
 import { Icon } from "@/components/icon";
-import { PressableScale } from "@/components/pressable-scale";
+import { PressableFeedback } from "@/components/pressable-feedback";
 import { EmptyState, LoadingState } from "@/components/state-views";
-import { LiveDot } from "@/components/status";
+import { StatusDot } from "@/components/status";
 import { SubagentGlyph } from "@/components/subagent-glyph";
 import { TaskList } from "@/components/background-tasks";
 import { WorkflowCardContent } from "@/components/workflow";
@@ -17,7 +17,7 @@ import { duration, relativeTime } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 function Row({ sessionId, entry, last, now, onPress }: { sessionId: string; entry: SubagentInfo; last: boolean; now: number; onPress: () => void }) {
   const failed = entry.failed === true;
@@ -26,9 +26,8 @@ function Row({ sessionId, entry, last, now, onPress }: { sessionId: string; entr
     ? entry.state === "paused" ? "已暂停" : `已运行 ${duration(now - entry.startedAt)}`
     : `${outcome} · ${relativeTime(entry.endedAt ?? entry.startedAt, now)}`;
   return (
-    <PressableScale
+    <PressableFeedback
       onPress={onPress}
-      pressedScale={0.985}
       accessibilityRole="button"
       accessibilityLabel={[entry.name ?? entry.agentType ?? "子 Agent", entry.task, entry.running ? "运行中" : outcome].join("，")}
       accessibilityHint="查看这个子 Agent 的全部过程"
@@ -52,7 +51,7 @@ function Row({ sessionId, entry, last, now, onPress }: { sessionId: string; entr
               {entry.task || entry.agentType || "子 Agent"}
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-              {entry.running ? <LiveDot size={6} /> : null}
+              {entry.running ? <StatusDot /> : null}
               <Text
                 numberOfLines={1}
                 style={[type.footnote, { flex: 1, color: entry.running ? colors.running : failed ? colors.danger : colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}
@@ -65,7 +64,7 @@ function Row({ sessionId, entry, last, now, onPress }: { sessionId: string; entr
           <Icon sf="chevron.right" md="chevron_right" size={11} color={colors.tertiaryLabel} weight="semibold" />
         </View>
       </View>
-    </PressableScale>
+    </PressableFeedback>
   );
 }
 
@@ -138,7 +137,7 @@ export function SubagentsScreen() {
           ) : list.length === 0 ? (
             runs.length || tasks.length ? null : <EmptyState icon={{ sf: "square.stack.3d.up", md: "layers" }} title="这个会话没有子 Agent" message="Agent 把任务分给子 Agent 后，会列在这里。" />
           ) : (
-            <View style={{ backgroundColor: colors.sheetCard, borderRadius: 20, borderCurve: "continuous", overflow: "hidden" }}>
+            <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
               {list.map((entry, index) => (
                 <Row key={entry.toolCallId} sessionId={id} entry={entry} last={index === list.length - 1} now={now} onPress={() => open(entry)} />
               ))}

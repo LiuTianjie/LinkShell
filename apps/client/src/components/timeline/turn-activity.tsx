@@ -7,13 +7,14 @@ import type { TurnActivityState } from "@/lib/turn-activity";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Text } from "../fixed-text";
-import { LiveDot } from "../status";
+import { StatusDot } from "../status";
 
+/** The three dots of a reply being written: the one motion that may run on, and it only fades. */
 const working = {
-  "0%": { opacity: 0.45, transform: [{ scaleY: 0.45 }] },
-  "40%": { opacity: 1, transform: [{ scaleY: 1 }] },
-  "80%": { opacity: 0.45, transform: [{ scaleY: 0.45 }] },
-  "100%": { opacity: 0.45, transform: [{ scaleY: 0.45 }] },
+  "0%": { opacity: 0.3 },
+  "40%": { opacity: 1 },
+  "80%": { opacity: 0.3 },
+  "100%": { opacity: 0.3 },
 };
 
 /** How long the turn has run, counted on the phone: the clock needs nothing from the computer. */
@@ -56,11 +57,11 @@ export function TurnActivity({ activity, onLayout }: { activity: TurnActivitySta
           <Animated.View
             key={index}
             style={[
-              { width: 4, height: 14, borderRadius: 2, backgroundColor: color },
+              { width: 6, height: 6, borderRadius: 3, backgroundColor: color, opacity: animate ? undefined : 0.6 },
               animate ? { animationName: working, animationDuration: "1100ms", animationDelay: `${index * 140}ms`, animationIterationCount: "infinite", animationTimingFunction: "ease-in-out" } : null,
             ]}
           />
-        )) : <LiveDot size={8} color={color} live={false} />}
+        )) : <StatusDot color={color} />}
       </View>
       <Text numberOfLines={2} style={[type.subhead, { flexShrink: 1, color: activity.tone === "active" ? colors.label : colors.secondaryLabel }]}>{activity.label}</Text>
       {activity.startedAt !== undefined ? <Elapsed since={activity.startedAt} visible={visible} /> : null}

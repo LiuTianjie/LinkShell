@@ -22,14 +22,14 @@ a > .external-link-icon {
     width: 18px;
     height: 18px;
     overflow: hidden;
-    border-radius: 5px;
+    border-radius: var(--radius-small);
     background: var(--inset);
     box-shadow: inset 0 0 0 1px var(--separator);
   }
 .agent-mark[data-size="md"] {
     width: 24px;
     height: 24px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
   }
 .agent-mark img {
     width: 66%;
@@ -55,8 +55,8 @@ a > .external-link-icon {
     background: var(--accentSoft);
   }
 .badge.done {
-    color: var(--ok);
-    background: var(--okSoft);
+    color: var(--secondaryLabel);
+    background: var(--fill);
   }
 .session-layout.with-panel {
     grid-template-columns: minmax(0, 1fr) 320px;
@@ -65,7 +65,7 @@ a > .external-link-icon {
     opacity: 0.45;
   }
 .async-options button.chosen {
-    background: var(--accent);
+    background: var(--accentFill);
     color: var(--primaryForeground);
   }
 .removed {
@@ -142,7 +142,7 @@ a > .external-link-icon {
   .acp-settings textarea {
     width: 100%;
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 10px;
     color: var(--label);
     background: var(--background);
@@ -202,7 +202,7 @@ a > .external-link-icon {
     max-height: 65vh;
     padding: 14px;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-control);
     color: var(--label);
     background: var(--card);
   }
@@ -212,7 +212,7 @@ a > .external-link-icon {
     gap: 9px;
     line-height: 1.6;
     margin: 9px 0;
-    font-size: 14px;
+    font-size: 13px;
   }
 .choice-option input {
     flex-shrink: 0;
@@ -231,11 +231,14 @@ a > .external-link-icon {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+/* A branch is a fact, not an action: neutral, as on the desktop. */
 .branch-chip {
-    background: var(--accentSoft);
-    color: var(--link);
+    background: var(--fill);
+    color: var(--secondaryLabel);
     padding: 3px 6px;
-    border-radius: 8px;
+    border-radius: var(--radius-small);
+    font-family: var(--font-mono);
+    font-size: 12px;
   }
 .danger-text {
     color: var(--danger);
@@ -339,15 +342,25 @@ a > .external-link-icon {
 .online-dot,
 .offline-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--tertiaryLabel);
   flex-shrink: 0;
 }
 .online-dot {
-  background: var(--success);
+  background: var(--ok);
 }
+
+/* Loading placeholders: a tint with a band of light crossing it every three seconds, one of the
+   three things allowed to keep moving (visual-system.md). */
+[data-slot="skeleton"] {
+  border-radius: var(--radius-control);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--label) 8%, transparent) 0 40%, color-mix(in oklab, var(--label) 14%, transparent) 50%, color-mix(in oklab, var(--label) 8%, transparent) 60% 100%) 0 0 / 300% 100%;
+  animation: skeleton-sweep 3s linear infinite;
+}
+@keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { [data-slot="skeleton"] { animation: none; } }
 
 /* Floating surfaces share one layered, Linear-style shadow and a hairline
    frame; the flat shadcn shadow-md/ring is replaced here in one place. */

@@ -4,22 +4,17 @@
      see-through over the window's vibrancy; the main view beside it is one solid panel with a
      12 px corner and a hairline edge. Beside a session the inspector is a second such panel.
    - Hairlines are translucent ink (8 % of the text), half a pixel on Retina displays. Nothing
-     at rest casts a shadow; menus, dialogs and the floating composer do, softly.
+     at rest casts a shadow; only what floats (menus, popovers, dialogs) does, softly.
    - Colour is state: blue while an agent works, amber when it waits on you, red when it failed.
      Primary actions use restrained indigo; navigation and utility icons stay neutral.
-   - One face (the system font): 14 px reading text, 13 px controls at weight 510, 12 px meta.
+   - One face (the system font): 14 px reading text, 13 px controls at weight 500, 12 px meta.
      Paths, branches, ports and versions are monospace; nothing else is.
-   - Motion follows Codex's curves: 150 ms ease-out for hover and press, a damped spring for
-     panels and the sidebar, nothing that bounces.
+   - Corners, sizes and motion are docs/design/visual-system.md's: 4 / 6 / 8 / 12 px, 28 and
+     32 px controls, 120–200 ms ease-out for every change of state, nothing that bounces.
 
    These rules sit outside Tailwind layers and only apply inside the desktop shell. */
 
 html[data-desktop] {
-  --radius-panel: 12px;
-  --radius-well: 10px;
-  --radius-row: 8px;
-  --radius-control: 8px;
-  --radius-composer: 18px;
   --icon-stroke: 1.75;
   --icon-size: 16px;
   --icon-small: 14px;
@@ -34,12 +29,12 @@ html[data-desktop] {
   --ease-spring: linear(0, .086, .2539, .428, .5786, .698, .7879, .8534, .8998, .9323, .9546, .9697, .98, .9868, .9913, .9943, .9963, .9976, .9985, 1);
   --transition: 150ms var(--ease-out);
   --float-shadow: 0 0 0 .5px var(--separatorStrong), 0 4px 8px -2px rgb(0 0 0 / .1), 0 8px 16px -4px rgb(0 0 0 / .12);
-  --composer-shadow: 0 0 0 1px var(--separatorStrong), 0 4px 16px -6px color-mix(in srgb, var(--label) 12%, transparent);
+  /* The composer and the cards in the conversation are flat: a hairline, no shadow. */
+  --composer-shadow: 0 0 0 1px var(--separatorStrong);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-synthesis-weight: none;
 }
-html[data-desktop][data-theme="dark"] { --composer-shadow: 0 0 0 1px var(--separatorStrong), 0 6px 20px -6px rgb(0 0 0 / .32); }
 @media (min-resolution: 2dppx) { html[data-desktop] { --hairline: .5px; } }
 /* The window's frames cut off what overflows them with `clip`, not `hidden`: a hidden box can
    still be scrolled by a scrollIntoView or a focus deep inside it, which shifts the toolbar and
@@ -108,7 +103,7 @@ html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overf
 
 /* The Electron window: the sidebar is a slot that slides away; the main view reaches the top
    when there is no sidebar and keeps clear of the traffic lights. */
-html[data-desktop] .desktop-sidebar-slot { flex: none; width: var(--sidebar-width, 264px); height: 100%; overflow: hidden; transition: width 300ms var(--ease-spring), opacity 200ms var(--ease-out); }
+html[data-desktop] .desktop-sidebar-slot { flex: none; width: var(--sidebar-width, 264px); height: 100%; overflow: hidden; transition: width 200ms var(--ease-out), opacity 200ms var(--ease-out); }
 html[data-desktop] .desktop-sidebar-slot > .desktop-sidebar { width: var(--sidebar-width, 264px); }
 html[data-desktop][data-resizing] .desktop-sidebar-slot { transition: none; }
 html[data-desktop] .desktop-sidebar-resizer { position: relative; z-index: 8; flex: none; align-self: stretch; width: 12px; margin-inline: -6px; cursor: col-resize; }
@@ -132,7 +127,7 @@ html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -w
 html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; display: flex; align-items: center; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop] .desktop-floating-titlebar > button { -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
-html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStrong); }
 /* Page title rows can drag the window too, where they have room to spare. */
@@ -161,22 +156,23 @@ html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .te
 html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) .desktop-main { margin: 0; border: 0; border-radius: 0; }
 
 /* Shortcut keys, wherever they are shown. */
-html[data-desktop] kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: 5px; background: transparent; color: var(--tertiaryLabel); font: 400 12px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: .02em; }
+html[data-desktop] kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: var(--radius-small); background: transparent; color: var(--tertiaryLabel); font: 400 11px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: .02em; }
 
 /* The status line at the foot of the window: the Mac app keeps it out of the way. */
 html[data-desktop] .desktop-status-bar { display: flex; flex: none; align-items: center; gap: 16px; height: 28px; padding: 0 20px 0 24px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-status-bar { display: none; }
 html[data-desktop] .desktop-status-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-html[data-desktop] .desktop-status-item strong { color: var(--secondaryLabel); font-weight: 510; }
-html[data-desktop] .desktop-status-meta { font-family: var(--mono); font-size: 11px; }
+html[data-desktop] .desktop-status-item strong { color: var(--secondaryLabel); font-weight: 500; }
+html[data-desktop] .desktop-status-meta { font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-status-spacer { flex: 1; }
-html[data-desktop] .desktop-status-item[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .desktop-status-item[data-tone="waiting"] { color: var(--waiting); }
 html[data-desktop] .desktop-status-item[data-tone="running"] { color: var(--running); }
 html[data-desktop] .desktop-status-action { height: 22px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: default; }
 html[data-desktop] .desktop-status-action:hover { background: var(--fill); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-status-bar > .desktop-status-action:last-child { margin-left: 0; }
-html[data-desktop] .desktop-presence { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--quaternaryLabel); }
-html[data-desktop] .desktop-presence[data-online] { background: var(--success); }
+/* Status dots are 8 px and solid (visual-system.md); online is the health scale's green. */
+html[data-desktop] .desktop-presence { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--quaternaryLabel); }
+html[data-desktop] .desktop-presence[data-online] { background: var(--ok); }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 /* Navigation rows keep a 40 px target and align their icons with the project tree. */
@@ -185,9 +181,9 @@ html[data-desktop] .desktop-root:not([data-shell="electron"]) .desktop-sidebar-h
 html[data-desktop] .desktop-computer-picker { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 40px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); text-align: left; font: inherit; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-computer-picker:hover,
 html[data-desktop] .desktop-computer-picker[aria-expanded="true"] { background: var(--fill); }
-html[data-desktop] .desktop-computer-picker > .desktop-presence { margin-inline: 4.5px; }
+html[data-desktop] .desktop-computer-picker > .desktop-presence { margin-inline: 4px; }
 html[data-desktop] .desktop-computer-copy { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; gap: 0; min-width: 0; }
-html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 590; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-computer-copy strong { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-copy > span { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-computer-picker > svg { flex: none; color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-computer-picker { height: 30px; }
@@ -195,12 +191,12 @@ html[data-desktop] .desktop-root[data-shell="electron"] .desktop-computer-copy s
 html[data-desktop] .desktop-computer-menu { min-width: 244px; max-width: min(340px, calc(100vw - 32px)); }
 html[data-desktop] .desktop-connection-summary { display: grid; gap: 2px; padding: 6px 8px 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
 html[data-desktop] .desktop-connection-summary > span:first-child { display: flex; align-items: center; gap: 7px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-connection-summary [data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .desktop-connection-summary [data-tone="waiting"] { color: var(--waiting); }
 html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 11px; }
+html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-menu-empty { min-width: 0; max-width: 230px; padding: 10px; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-sidebar-actions { display: flex; gap: 4px; }
-html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 400; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-new-session > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-new-session > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-new-session kbd { flex: none; margin-left: auto; opacity: 0; transition: opacity var(--transition); }
@@ -209,7 +205,7 @@ html[data-desktop] .desktop-new-session:focus-visible kbd { opacity: 1; }
 html[data-desktop] .desktop-new-session:hover:not(:disabled) { background: var(--fill); }
 html[data-desktop] .desktop-new-session:active:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] .desktop-new-session:disabled { color: var(--tertiaryLabel); cursor: default; }
-html[data-desktop] .desktop-search { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); cursor: default; }
+html[data-desktop] .desktop-search { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); cursor: default; }
 html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(--label); }
 
 /* The list fades out over its last 16 px, so rows that run on under the footer read as more,
@@ -220,7 +216,7 @@ html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(-
 @keyframes navigation-scrolled { to { --navigation-fade: 16px; } }
 html[data-desktop] .desktop-navigation { gap: 0; min-width: 0; padding: 0 8px 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); animation: navigation-scrolled linear both; animation-timeline: scroll(self); animation-range: 0 24px; }
 html[data-desktop] .desktop-places { display: grid; gap: 1px; }
-html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-place > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-place:hover { background: var(--fill); }
@@ -229,19 +225,19 @@ html[data-desktop] .desktop-place[data-active] { background: var(--fill); }
 html[data-desktop] .desktop-place[data-active] > svg { color: var(--label); }
 /* Headings contain plain text as well as optional presence marks, so a text box (not an
    anonymous flex item) provides an ellipsis while the adjacent actions keep their width. */
-html[data-desktop] .tree-heading-link { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 22px; margin-left: -6px; padding: 0 6px; overflow: hidden; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-heading-link { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 22px; margin-left: -6px; padding: 0 6px; overflow: hidden; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .tree-heading-link > .desktop-presence { margin-right: 6px; vertical-align: 1px; }
 html[data-desktop] .tree-heading-link > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-heading-link:hover { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-nav-badge { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 11px; font-weight: 590; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+html[data-desktop] .desktop-nav-badge { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--waitingSoft); color: var(--waiting); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* The working set: what waits on you, then projects and their sessions. */
 html[data-desktop] .tree-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-top: 16px; }
-html[data-desktop] .tree-heading { display: flex; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 2px 0 8px; overflow: hidden; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; font-weight: 500; white-space: nowrap; }
+html[data-desktop] .tree-heading { display: flex; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 2px 0 8px; overflow: hidden; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 13px; font-weight: 500; white-space: nowrap; }
 html[data-desktop] .tree-heading > span { flex: none; color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-heading[data-tone="waiting"],
-html[data-desktop] .tree-heading[data-tone="waiting"] > span { color: var(--warning); }
-html[data-desktop] .tree-heading-action { display: grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition), background var(--transition); }
+html[data-desktop] .tree-heading[data-tone="waiting"] > span { color: var(--waiting); }
+html[data-desktop] .tree-heading-action { display: grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition), background var(--transition); }
 html[data-desktop] .tree-section:hover .tree-heading-action,
 html[data-desktop] .tree-heading-action:focus-visible { opacity: 1; }
 html[data-desktop] .tree-heading-action:hover { background: var(--fill); color: var(--label); }
@@ -252,18 +248,18 @@ html[data-desktop] .tree-scope-menu:is(:hover, [aria-expanded="true"]) { backgro
 html[data-desktop] .tree-scope-menu + .tree-heading-action { margin-left: 0; }
 html[data-desktop] .tree-note { min-width: 0; padding: 4px 10px 8px 36px; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; min-width: 0; }
-html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 30px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 30px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .tree-project-toggle > svg { flex: none; margin-inline: 1.5px; color: var(--tertiaryLabel); transition: transform 200ms var(--ease-out); }
 html[data-desktop] .tree-project-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
 html[data-desktop] .tree-project-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-project-toggle:hover { background: var(--fill); }
-html[data-desktop] .tree-running { flex: none; margin-left: -4px; color: var(--tertiaryLabel); font-size: 11px; font-weight: 590; font-variant-numeric: tabular-nums; }
-html[data-desktop] .tree-project-new { position: absolute; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition); }
+html[data-desktop] .tree-running { flex: none; margin-left: -4px; color: var(--tertiaryLabel); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-project-new { position: absolute; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--tertiaryLabel); opacity: 0; cursor: default; transition: opacity var(--transition); }
 html[data-desktop] .tree-project-row:hover .tree-project-new,
 html[data-desktop] .tree-project-new:focus-visible { opacity: 1; }
 html[data-desktop] .tree-project-new:hover { background: var(--fillStrong); color: var(--label); }
 html[data-desktop] .tree-sessions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-bottom: 4px; }
-html[data-desktop] .tree-session { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-session { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .tree-session:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .tree-session:active { background: var(--fillStrong); }
 html[data-desktop] .tree-session[data-active] { background: var(--fill); color: var(--label); }
@@ -276,23 +272,23 @@ html[data-desktop] .tree-session:has(.tree-title small) { height: auto; padding-
    hairline leading to it, as the Claude app nests side sessions. */
 html[data-desktop] .tree-session[data-child] { position: relative; padding-left: 26px; }
 html[data-desktop] .tree-session[data-child]::before { content: ""; position: absolute; top: 6px; left: 16px; width: 7px; height: 9px; border-bottom-left-radius: 4px; box-shadow: inset 1px -1px 0 color-mix(in oklab, var(--label) 22%, transparent); pointer-events: none; }
-html[data-desktop] .tree-session[data-child] .tree-state { margin-inline: 2px 4.5px; }
+html[data-desktop] .tree-session[data-child] .tree-state { margin-inline: 2px 4px; }
 html[data-desktop] .tree-title > .tree-name { display: flex; align-items: center; min-width: 0; }
 html[data-desktop] .tree-name > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .tree-fold { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 2px; vertical-align: -3px; border-radius: 5px; color: var(--tertiaryLabel); transition: transform 150ms var(--ease-out), background var(--transition); }
+html[data-desktop] .tree-fold { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 2px; vertical-align: -3px; border-radius: var(--radius-small); color: var(--tertiaryLabel); transition: transform 150ms var(--ease-out), background var(--transition); }
 html[data-desktop] .tree-fold:hover { background: var(--fillStrong); color: var(--label); }
 html[data-desktop] .tree-session[aria-expanded="false"] .tree-fold { transform: rotate(-90deg); }
 html[data-desktop] .tree-title > span,
 html[data-desktop] .tree-title small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-title small { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 12px; line-height: 16px; }
-html[data-desktop] .tree-session time { flex: none; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 13px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .tree-state { flex: none; width: 7px; height: 7px; margin-inline: 4.5px; border-radius: 50%; }
-html[data-desktop] .tree-state[data-tone="waiting"] { background: var(--warning); }
+html[data-desktop] .tree-session time { flex: none; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 12px; font-variant-numeric: tabular-nums; }
+html[data-desktop] .tree-state { flex: none; width: 8px; height: 8px; margin-inline: 4px; border-radius: 50%; }
+html[data-desktop] .tree-state[data-tone="waiting"] { background: var(--waiting); }
 html[data-desktop] .tree-state[data-tone="error"] { background: var(--danger); }
-html[data-desktop] .tree-state[data-tone="running"] { width: 10px; height: 10px; margin: -1.5px 3px; border: 1.5px solid color-mix(in srgb, var(--running) 25%, transparent); border-top-color: var(--running); animation: tree-spin 800ms linear infinite; }
+html[data-desktop] .tree-state[data-tone="running"] { width: 10px; height: 10px; margin: -1px 3px; border: 1.5px solid color-mix(in srgb, var(--running) 25%, transparent); border-top-color: var(--running); animation: tree-spin 1s linear infinite; }
 @keyframes tree-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  html[data-desktop] .tree-state[data-tone="running"] { width: 7px; height: 7px; margin: 0 4.5px; border: 0; background: var(--running); animation: none; }
+  html[data-desktop] .tree-state[data-tone="running"] { width: 8px; height: 8px; margin: 0 4px; border: 0; background: var(--running); animation: none; }
 }
 html[data-desktop] .tree-more { min-width: 0; height: 28px; padding: 0 10px 0 32px; overflow: hidden; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--tertiaryLabel); font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 html[data-desktop] .tree-more-projects { margin-top: 4px; }
@@ -300,9 +296,9 @@ html[data-desktop] .tree-more:hover { background: var(--fill); color: var(--labe
 
 html[data-desktop] .desktop-account > svg { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-sidebar-footer { flex: none; flex-direction: row; align-items: center; gap: 2px; padding: 8px; border-top: var(--hairline) solid var(--separator); }
-html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 30px; padding: 0 8px; gap: 8px; border: 0; border-radius: var(--radius-row); color: var(--label); font-size: 14px; font-weight: 430; }
+html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 28px; padding: 0 8px; gap: 8px; border: 0; border-radius: var(--radius-row); color: var(--label); font-size: 13px; font-weight: 400; }
 html[data-desktop] .desktop-account span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-sidebar-footer > [data-button][data-size="icon"] { width: 30px; height: 30px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-sidebar-footer > [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electron"]) .desktop-sidebar { display: none; }
 
@@ -310,10 +306,9 @@ html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electro
 /* Primary actions, utility controls and navigation have distinct, shared states. */
 html[data-desktop] [data-button] { font-weight: 500; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
 /* Primary actions share the indigo accent; secondary and ghost actions use neutral surfaces. */
-html[data-desktop] [data-button][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accent); box-shadow: none; color: var(--primaryForeground); }
-html[data-desktop] [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--accentHover); }
-html[data-desktop] [data-button][data-variant="default"]:active:not(:disabled) { opacity: .8; }
-html[data-desktop] [data-button][data-variant="default"]:disabled { background: var(--accent); color: var(--primaryForeground); opacity: .4; }
+html[data-desktop] [data-button][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accentFill); box-shadow: none; color: var(--primaryForeground); }
+html[data-desktop] [data-button][data-variant="default"]:is(:hover, :active):not(:disabled) { background: var(--accentHover); }
+html[data-desktop] [data-button][data-variant="default"]:disabled { background: var(--accentFill); color: var(--primaryForeground); opacity: .4; }
 html[data-desktop] [data-button][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
 /* Codex's secondary states: a little darker on hover, lighter while pressed (light); in the dark, steps of white. */
 html[data-desktop] [data-button][data-variant="secondary"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 10%, transparent); }
@@ -323,7 +318,7 @@ html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:ho
 html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:active:not(:disabled) { background: color-mix(in oklab, var(--label) 12%, transparent); }
 html[data-desktop] [data-button][data-variant="outline"] { border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
 html[data-desktop] [data-button][data-variant="outline"]:hover:not(:disabled) { background: var(--fill); }
-html[data-desktop] [data-button][data-variant="outline"]:active:not(:disabled) { opacity: .8; }
+html[data-desktop] [data-button][data-variant="outline"]:active:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] [data-button][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
 html[data-desktop] [data-button][data-variant="ghost"]:hover:not(:disabled),
 html[data-desktop] [data-button][data-variant="ghost"][data-state="open"] { background: var(--fill); }
@@ -336,23 +331,25 @@ html[data-desktop] [data-button]:disabled { cursor: default; }
 html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4; }
 /* Interactive things keep the arrow, as in a native app. */
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, a.desktop-place, .list-row, [cmdk-item]) { cursor: default; }
-/* Text controls are 28 px; icon targets and form actions are 32 px. Toolbar labels can wrap. */
-html[data-desktop] .desktop-main [data-button]:is([data-size="default"], [data-size="sm"]):not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
+/* A button on its own is 32 px; toolbar buttons (sm) and icon buttons are 28. xs is for a control
+   nested in another one. Toolbar labels can wrap. */
+html[data-desktop] .desktop-main [data-button][data-size="default"]:not(.resource-entry):not(.resource-service),
 html[data-desktop] .desktop-main [data-button][data-size="lg"] { height: 32px; padding-inline: 12px; gap: 6px; font-size: 13px; }
+html[data-desktop] .desktop-main [data-button][data-size="sm"]:not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
 html[data-desktop] .desktop-main [data-button][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
-html[data-desktop] .desktop-main [data-button][data-size="icon"] { width: 32px; height: 32px; border-radius: var(--radius-control); }
+html[data-desktop] .desktop-main [data-button]:is([data-size="icon"], [data-size="icon-sm"]) { width: 28px; height: 28px; border-radius: var(--radius-control); }
 html[data-desktop] .desktop-main [data-button] svg:not([class*="size-"]) { width: var(--icon-size); height: var(--icon-size); }
 html[data-desktop] .desktop-main [data-button][data-size="xs"] svg:not([class*="size-"]) { width: var(--icon-small); height: var(--icon-small); }
 html[data-desktop] .desktop-main [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
 html[data-desktop] .desktop-main [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
 
 /* Selectable toolbar options share their geometry in new and existing conversations. */
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 30px; height: auto; padding: 5px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 28px; height: auto; padding: 4px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal; }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:is(:hover, [data-state="open"]):not(:disabled) { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:active:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg { width: var(--icon-size); height: var(--icon-size); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg[data-icon="inline-end"] { width: var(--icon-caret); height: var(--icon-caret); margin-left: 1px; color: var(--tertiaryLabel); }
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-risky] > svg[data-icon="inline-start"] { color: var(--warning); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-risky] > svg[data-icon="inline-start"] { color: var(--waiting); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] { background: var(--accentSoft); color: var(--link); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] > svg { color: inherit; }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > span:not(.agent-mark) { min-width: 0; overflow-wrap: anywhere; white-space: normal; text-align: left; }
@@ -373,28 +370,29 @@ html[data-desktop] [data-slot="textarea"] { border: 0; border-radius: var(--radi
 /* Segmented filters: a recessed track; the current one is a raised plain step. 28 px, the height of
    the buttons and selects beside them. Terminal tabs share the primitive but are a tab strip (their
    own rules, desktop-resources.css): no thumb, no raised step. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--segment-track); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
 /* In the dark the track is a tint of white over the panel (Codex's 5 %), never darker than the page. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: 8px; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 1px 4px -1px rgb(0 0 0 / .2); }
+html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop][data-theme="dark"] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { box-shadow: inset 0 0 0 var(--hairline) rgb(255 255 255 / .08); }
 html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
 
-/* Status marks: a hue on a tint of itself, a finished session stays grey. */
-html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 7px; border-radius: 6px; font-size: 12px; font-weight: 510; }
+/* Status marks: a hue on a tint of itself, a finished session stays grey. 20 px, 4 px corners. */
+html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 6px; border-radius: var(--radius-small); font-size: 12px; font-weight: 500; }
 html[data-desktop] [data-slot="badge"][data-variant="info"] { background: var(--runningSoft); color: var(--running); }
-html[data-desktop] [data-slot="badge"][data-variant="warning"] { background: var(--waitingSoft); color: var(--warning); }
+html[data-desktop] [data-slot="badge"][data-variant="warning"] { background: var(--waitingSoft); color: var(--waiting); }
 html[data-desktop] [data-slot="badge"][data-variant="destructive"] { background: var(--dangerSoft); color: var(--danger); }
-html[data-desktop] [data-slot="badge"][data-variant="success"],
-html[data-desktop] [data-slot="badge"][data-variant="secondary"] { background: var(--fill); color: var(--secondaryLabel); }
+/* Done is the normal state, so it stays grey; a neutral mark (Pro, a version) is ink on fill. */
+html[data-desktop] [data-slot="badge"][data-variant="success"] { background: var(--fill); color: var(--secondaryLabel); }
+html[data-desktop] [data-slot="badge"][data-variant="secondary"] { background: var(--fill); color: var(--label); }
 
-/* Floating surfaces share a subtle edge and shadow; 12 px panels contain 8 px menu rows. */
+/* Floating surfaces share a subtle edge and shadow; 8 px panels contain 6 px menu rows. */
 html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"],
 html[data-desktop] [data-slot="popover-content"],
-html[data-desktop] [data-slot="context-menu-content"] { padding: 6px; border: 0; border-radius: 12px; background: color-mix(in oklab, var(--sheetSolid, #fff) 96%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12); color: var(--label); animation: none !important; }
+html[data-desktop] [data-slot="context-menu-content"] { padding: 6px; border: 0; border-radius: var(--radius-card); background: color-mix(in oklab, var(--plain) 96%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12); color: var(--label); animation: none !important; }
 html[data-desktop][data-theme="dark"] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"]) { background: color-mix(in oklab, var(--cardRaised) 96%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 8px 24px -4px rgb(0 0 0 / .5); }
 html[data-desktop] [data-slot="popover-content"] { padding: 12px; }
 html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
@@ -403,7 +401,7 @@ html[data-desktop] [data-slot="dropdown-menu-radio-item"],
 html[data-desktop] [data-slot="dropdown-menu-checkbox-item"],
 html[data-desktop] [data-slot="dropdown-menu-sub-trigger"],
 html[data-desktop] [data-slot="context-menu-item"],
-html[data-desktop] [data-slot="select-item"] { min-height: 32px; padding: 6px 8px; gap: 8px; border-radius: 8px; color: var(--label); font-size: 13px; font-weight: 430; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 32px; }
+html[data-desktop] [data-slot="select-item"] { min-height: 32px; padding: 6px 8px; gap: 8px; border-radius: var(--radius-control); color: var(--label); font-size: 13px; font-weight: 400; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 32px; }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"])[data-highlighted] { background: var(--fill); color: var(--label); }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="select-item"]) svg:not([class*="size-"]) { width: 16px; height: 16px; color: var(--secondaryLabel); }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"])[data-disabled] { opacity: .4; }
@@ -413,16 +411,16 @@ html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"][
 html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"][data-disabled] svg { color: var(--label); }
 html[data-desktop] [data-slot="dropdown-menu-label"] { padding: 6px 8px 4px; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 12px; font-weight: 500; }
 html[data-desktop] [data-slot="dropdown-menu-separator"] { height: 1px; margin: 4px 8px; background: var(--separator); }
-html[data-desktop] [data-slot="dropdown-menu-shortcut"] { height: 16px; margin-left: auto; padding: 0 4px; border-radius: 4px; background: color-mix(in oklab, currentColor 10%, transparent); color: var(--secondaryLabel); font-size: 12px; letter-spacing: 0; line-height: 16px; }
+html[data-desktop] [data-slot="dropdown-menu-shortcut"] { height: 16px; margin-left: auto; padding: 0 4px; border-radius: var(--radius-small); background: color-mix(in oklab, currentColor 10%, transparent); color: var(--secondaryLabel); font-size: 11px; letter-spacing: 0; line-height: 16px; }
 html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 
-/* ⌘K, as Codex's palette: 520 px, 20 px corners, a deep soft shadow; rows 5 × 8 px with 10 px
-   corners, the ones not chosen at 75 %. */
+/* ⌘K: 520 px, a dialog's 12 px corners and its shadow; rows 5 × 8 px with 6 px corners, the
+   ones not chosen at 75 %. */
 /* Opaque enough (with a 32 px blur) that the page behind never reads through as text; in the dark,
    Codex's 1 px inner light on the edge. */
-html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; width: min(520px, calc(100vw - 48px)); max-width: none; padding: 4px; overflow: hidden; border-radius: 20px; background: color-mix(in oklab, #fff 94%, transparent); -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
-html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, #282828 94%, transparent); box-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6); }
-html[data-desktop] .command-center [data-slot="command"] { border-radius: 16px !important; background: transparent; padding: 0; }
+html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; width: min(520px, calc(100vw - 48px)); max-width: none; padding: 4px; overflow: hidden; border-radius: var(--radius-panel); background: color-mix(in oklab, var(--plain) 94%, transparent); -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, var(--cardRaised) 94%, transparent); box-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6); }
+html[data-desktop] .command-center [data-slot="command"] { border-radius: var(--radius-card) !important; background: transparent; padding: 0; }
 html[data-desktop] .command-center [data-slot="command-input-wrapper"] { padding: 2px 4px 0; }
 html[data-desktop] .command-center [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 40px !important; padding: 0 6px; border: 0; background: transparent !important; box-shadow: none !important; }
 html[data-desktop] .command-center [data-slot="command-input"] { font-size: 14px; outline: none; }
@@ -435,20 +433,20 @@ html[data-desktop] .desktop-main .live-side-panel:focus-visible { outline: none;
 @keyframes palette-scrolled { to { --palette-fade-top: 20px; } }
 @keyframes palette-more { from { --palette-fade-end: 20px; } to { --palette-fade-end: 0px; } }
 html[data-desktop] .command-center-list { max-height: min(440px, 60dvh); margin-top: 4px; padding: 4px 0 8px; scroll-padding-block: 4px 8px; border-top: 1px solid var(--separator); -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--palette-fade-top), #000 calc(100% - var(--palette-fade-end)), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--palette-fade-top), #000 calc(100% - var(--palette-fade-end)), transparent); animation: palette-scrolled linear both, palette-more linear both; animation-timeline: scroll(self), scroll(self); animation-range: 0 24px, calc(100% - 24px) 100%; }
-html[data-desktop] .command-center [cmdk-group-heading] { padding: 8px 8px 4px !important; color: color-mix(in oklab, var(--label) 50%, transparent) !important; font-size: 13px !important; font-weight: 500 !important; }
-html[data-desktop] .command-center [data-slot="command-item"] { min-height: 32px; padding: 5px 8px; border-radius: 10px !important; font-size: 13px; opacity: .75; content-visibility: auto; contain-intrinsic-size: auto 32px; }
+html[data-desktop] .command-center [cmdk-group-heading] { padding: 8px 8px 4px !important; color: color-mix(in oklab, var(--label) 50%, transparent) !important; font-size: 12px !important; font-weight: 500 !important; }
+html[data-desktop] .command-center [data-slot="command-item"] { min-height: 32px; padding: 5px 8px; border-radius: var(--radius-control) !important; font-size: 13px; opacity: .75; content-visibility: auto; contain-intrinsic-size: auto 32px; }
 html[data-desktop] .command-center [data-slot="command-item"][data-selected="true"] { background: var(--fill); opacity: 1; }
 html[data-desktop] .command-center [data-slot="command-item"] > svg:first-child { color: var(--secondaryLabel); }
-html[data-desktop] .command-center [data-slot="command-shortcut"] { flex: none; color: var(--tertiaryLabel); font-size: 12px; letter-spacing: 0; white-space: nowrap; }
-html[data-desktop] .command-center [data-slot="command-shortcut"][data-attention] { color: var(--warning); }
+html[data-desktop] .command-center [data-slot="command-shortcut"] { flex: none; color: var(--tertiaryLabel); font-size: 11px; letter-spacing: 0; white-space: nowrap; }
+html[data-desktop] .command-center [data-slot="command-shortcut"][data-attention] { color: var(--waiting); }
 html[data-desktop] .command-session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .command-session-project { flex: none; max-width: 40%; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .command-presence { flex: none; width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--quaternaryLabel); }
-html[data-desktop] .command-presence[data-online] { background: var(--success); }
+html[data-desktop] .command-presence { flex: none; width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: var(--quaternaryLabel); }
+html[data-desktop] .command-presence[data-online] { background: var(--ok); }
 html[data-desktop] .shortcut-sheet { width: min(440px, calc(100vw - 48px)); }
 html[data-desktop] .shortcut-sheet dl { display: grid; margin-top: 8px; }
 html[data-desktop] .shortcut-sheet dl > div { display: flex; align-items: center; justify-content: space-between; min-height: 36px; border-top: var(--hairline) solid var(--separator); font-size: 13px; }
-html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-size: 12px; }
+html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-size: 11px; }
 
 /* ── Pages ───────────────────────────────────────────────────────────────── */
 /* A page is its toolbar (PageHeader) over content in a column: 880 px for lists and settings,
@@ -467,11 +465,11 @@ html[data-desktop] .page-header-copy { display: flex; flex: 1; align-items: base
 html[data-desktop] .page-header h1 { flex: none; overflow: hidden; color: var(--label); font-size: 14px; font-weight: 500; letter-spacing: -.005em; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .page-header-detail { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .page-header-detail > span + span::before { content: "·"; margin: 0 6px; color: var(--quaternaryLabel); }
-html[data-desktop] .page-header-detail > span[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .page-header-detail > span[data-tone="waiting"] { color: var(--waiting); }
 html[data-desktop] .page-header-actions { display: flex; flex: none; align-items: center; gap: 4px; }
 html[data-desktop] .page-header-actions > [data-button][data-variant="default"] { margin-left: 4px; }
 html[data-desktop] :is(.page-header-actions, .session-actions) > [data-button][data-variant="ghost"],
-html[data-desktop] :is(.page-header-actions, .session-actions) > * > [data-button][data-variant="ghost"] { border-radius: 10px; color: color-mix(in oklab, var(--label) 50%, transparent); font-weight: 430; }
+html[data-desktop] :is(.page-header-actions, .session-actions) > * > [data-button][data-variant="ghost"] { border-radius: var(--radius-control); color: color-mix(in oklab, var(--label) 50%, transparent); font-weight: 400; }
 html[data-desktop] :is(.page-header-actions, .session-actions) [data-button][data-variant="ghost"]:hover:not(:disabled) { color: var(--label); }
 html[data-desktop] .page-header-actions { gap: 6px; }
 html[data-desktop] .desktop-root[data-shell="electron"] .page-header { -webkit-app-region: drag; app-region: drag; }
@@ -487,11 +485,11 @@ html[data-desktop] .desktop-main .side-panel-content .page-header-actions { marg
 html[data-desktop] .desktop-page-title,
 html[data-desktop] .desktop-main .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--toolbar); margin: 0 0 8px; padding: 0; border: 0; }
 html[data-desktop] .desktop-page-title h1,
-html[data-desktop] .desktop-main .page-heading h1 { font-size: 13px; font-weight: 590; line-height: 18px; }
+html[data-desktop] .desktop-main .page-heading h1 { font-size: 14px; font-weight: 500; line-height: 20px; }
 html[data-desktop] .desktop-page-title p,
 html[data-desktop] .desktop-main .page-heading p { margin-top: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .desktop-page-title p > span + span::before { content: "·"; margin: 0 6px; color: var(--quaternaryLabel); }
-html[data-desktop] .desktop-page-title p > span[data-tone="waiting"] { color: var(--warning); }
+html[data-desktop] .desktop-page-title p > span[data-tone="waiting"] { color: var(--waiting); }
 html[data-desktop] .desktop-page-actions { display: flex; flex: none; align-items: center; gap: 4px; }
 html[data-desktop] .desktop-main .session-overview { gap: 16px; }
 html[data-desktop] .desktop-main .session-overview > *,
@@ -505,12 +503,12 @@ html[data-desktop] .desktop-main :is(.session-overview-tools, .page-header) [dat
 /* Lists: rows straight on the panel, as Codex's thread lists. A row is two lines (what, then
    where and how it is going), divided by hairlines that step aside for the row under the
    pointer. A group is a small title and its rows. */
-html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: baseline; gap: 6px; min-height: 28px; margin: 0; padding: 4px 12px; color: var(--label); font-size: 14px; font-weight: 500; }
+html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: baseline; gap: 6px; min-height: 28px; margin: 0; padding: 4px 12px; color: var(--label); font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .session-group { overflow: visible; margin-inline: -12px; border: 0; border-radius: 0; background: transparent; }
 html[data-desktop] .desktop-main .session-group + .session-group { margin-top: 8px; }
 html[data-desktop] .desktop-main .session-overview > :is(.list-row-more, [role="status"]) { margin-inline: -12px; }
 html[data-desktop] .desktop-main .session-group > .list-section-title > span { color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--warning); }
+html[data-desktop] .desktop-main .session-group[data-session-group="waiting"] > .list-section-title { color: var(--waiting); }
 html[data-desktop] .desktop-main .list-row { position: relative; height: 44px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-row); transition: background var(--transition); }
 html[data-desktop] .desktop-main .list-row + .list-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: var(--hairline); background: var(--separator); pointer-events: none; transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .list-row:hover::before,
@@ -524,7 +522,7 @@ html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > :first-chil
 /* The title, then its project in tertiary ink ("· claude-remote"); the title gives way first, the
    project keeps up to 40 % of the line. */
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-heading { grid-row: 1; grid-column: 2; display: flex; align-items: baseline; gap: 6px; min-width: 0; height: 18px; overflow: hidden; }
-html[data-desktop] .desktop-main .list-row-heading > .list-row-title { flex: 0 1 auto; display: block; min-width: 0; height: 18px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--label); font-size: 13px; font-weight: 510; line-height: 18px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .desktop-main .list-row-heading > .list-row-title { flex: 0 1 auto; display: block; min-width: 0; height: 18px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--label); font-size: 13px; font-weight: 500; line-height: 18px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html[data-desktop] .desktop-main .list-row-heading > .list-row-project { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-heading > .list-row-project::before { content: "·"; margin-right: 6px; }
 html[data-desktop] .desktop-main .list-row-title:hover { background: transparent; }
@@ -537,7 +535,8 @@ html[data-desktop] .desktop-main .list-row:has(> .list-row-detail:empty):not(:ha
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > time { grid-row: 1; grid-column: 4; width: auto; justify-self: end; color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > .list-row-status { grid-row: 1; grid-column: 3; justify-self: end; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-status > span { font-size: 12px; line-height: 18px; }
-html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button { grid-row: 2; grid-column: 4; height: 20px; min-height: 20px; justify-self: end; padding: 0 8px; border: 0; border-radius: 999px; background: var(--waitingSoft); color: var(--warning); font-size: 12px; font-weight: 510; white-space: nowrap; }
+/* 处理 is a small tag-shaped action inside the row's 18 px line, not a pill. */
+html[data-desktop] .desktop-main .list-row:has(> .list-row-detail) > button { grid-row: 2; grid-column: 4; height: 20px; min-height: 20px; justify-self: end; padding: 0 8px; border: 0; border-radius: var(--radius-small); background: var(--waitingSoft); color: var(--waiting); font-size: 12px; font-weight: 500; white-space: nowrap; }
 html[data-desktop] .desktop-main .list-row-more { display: block; width: 100%; height: 32px; margin-top: 4px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; cursor: default; }
 html[data-desktop] .desktop-main .list-row-more:hover:not(:disabled) { background: var(--fill); color: var(--label); }
 /* "Load earlier": a quiet 28 px button under the list it continues. */
@@ -551,8 +550,8 @@ html[data-desktop] .desktop-main .list-section-actions .list-refresh:hover:not(:
 html[data-desktop] .desktop-main .list-skeleton { height: 56px; padding: 18px 12px; }
 
 /* Agent marks are the agents' own logos: media in a row, small and on their own tile. */
-html[data-desktop] .agent-mark { width: 18px; height: 18px; border-radius: 5px; box-shadow: none; }
-html[data-desktop] .agent-mark[data-size="md"] { width: 22px; height: 22px; border-radius: 6px; }
+html[data-desktop] .agent-mark { width: 18px; height: 18px; border-radius: var(--radius-small); box-shadow: none; }
+html[data-desktop] .agent-mark[data-size="md"] { width: 22px; height: 22px; border-radius: var(--radius-control); }
 html[data-desktop] .agent-mark.agent-glyph { width: 16px; height: 16px; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
 html[data-desktop] .agent-mark.agent-glyph[data-size="md"] { width: 20px; height: 20px; }
 html[data-desktop] .agent-mark.agent-glyph img { width: 100%; height: 100%; }
@@ -562,16 +561,16 @@ html[data-desktop][data-theme="dark"] .agent-glyph-dark { display: block; }
 /* The tile colour is inline (per mark); only !important can replace an inline value from CSS. */
 html[data-desktop][data-theme="dark"] .agent-mark[data-light-tile] { background: var(--agent-mark-dark) !important; }
 
-/* Groups: rows in one soft box with hairlines between them (the same box as 本机管理's). A row
+/* Groups: rows in one 8 px box with hairlines between them (the same box as 本机管理's). A row
    under the pointer is tinted edge to edge, as Codex's card rows: the box has no padding of its
    own and its first and last rows take its corners. */
 html[data-desktop] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
-html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 0; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 0; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resource-entry-list, .resource-service-list, .screen-list, .project-sessions, .acp-settings) > :is(.list-row, .screen-row, .resource-entry, .resource-service, .worktree-entry, .project-session, .project-more) { border-radius: 0; }
-html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resource-entry-list, .resource-service-list, .screen-list, .project-sessions, .acp-settings) > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
-html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resource-entry-list, .resource-service-list, .screen-list, .project-sessions, .acp-settings) > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resource-entry-list, .resource-service-list, .screen-list, .project-sessions, .acp-settings) > :first-child { border-top-left-radius: var(--radius-card); border-top-right-radius: var(--radius-card); }
+html[data-desktop] .desktop-main :is(.computers-section, .worktree-list, .resource-entry-list, .resource-service-list, .screen-list, .project-sessions, .acp-settings) > :last-child { border-bottom-left-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card); }
 html[data-desktop][data-theme="dark"] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
-html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: rgb(255 255 255 / .02); }
+html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: color-mix(in oklab, var(--label) 2%, transparent); }
 html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
 html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 /* Rows in a group sit 16 px in from its edges, their hairlines too, as Codex's settings rows. A
@@ -590,17 +589,17 @@ html[data-desktop] .desktop-main :is(.screen-list, .screens-page > div) > .scree
 html[data-desktop] .desktop-main .project-sessions > .project-session { padding: 0 16px; }
 html[data-desktop] .desktop-main .resource-service-list > .resource-service { padding: 0 16px; }
 /* The rename pencil beside a computer's name: there when the row is hovered or it has focus. */
-html[data-desktop] .desktop-main :is(.computer-row-name, .screen-row) [title="给电脑命名"] { width: 20px; height: 20px; border-radius: 6px; color: var(--tertiaryLabel); opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-main :is(.computer-row-name, .screen-row) [title="给电脑命名"] { width: 20px; height: 20px; border-radius: var(--radius-control); color: var(--tertiaryLabel); opacity: 0; transition: opacity var(--transition); }
 html[data-desktop] .desktop-main :is(.list-row:hover, .screen-row:hover) [title="给电脑命名"],
 html[data-desktop] .desktop-main [title="给电脑命名"]:is(:focus-visible, [data-state="open"]) { opacity: 1; }
 html[data-desktop] .desktop-main [title="给电脑命名"] svg { width: 13px; height: 13px; }
 html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
 html[data-desktop] .desktop-main .computer-agent-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-html[data-desktop] .desktop-main .computer-agent-label { flex: none; max-width: 60%; font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .computer-agent-label { flex: none; max-width: 60%; font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .computer-agent-version { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-main .computer-agent-auth { justify-self: end; max-width: 360px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .desktop-main .computer-agent-row:not([data-installed]) .computer-agent-label { color: var(--tertiaryLabel); font-weight: 430; }
+html[data-desktop] .desktop-main .computer-agent-row:not([data-installed]) .computer-agent-label { color: var(--tertiaryLabel); font-weight: 400; }
 html[data-desktop] .desktop-main .computer-agent-row:not([data-installed]) > .agent-mark { opacity: .5; }
 html[data-desktop] .desktop-main :is(.computer-agent-label, .computer-agent-version, .computer-agent-auth) { width: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -622,22 +621,22 @@ html[data-desktop] .desktop-main .project-copy > * { margin: 0; line-height: 20p
 html[data-desktop] .desktop-main .project-copy h2 { flex: none; max-width: 50%; overflow: hidden; color: var(--label); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-copy p { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-meta { display: flex; flex: none; align-items: baseline; gap: 12px; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .project-branch { display: inline-flex; align-items: center; gap: 4px; max-width: 160px; overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-branch { display: inline-flex; align-items: center; gap: 4px; max-width: 160px; overflow: hidden; font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-branch svg { flex: none; width: 12px; height: 12px; }
 html[data-desktop] .desktop-main .project-new { opacity: 0; transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .project-row:hover .project-new,
 html[data-desktop] .desktop-main .project-new:focus-visible { opacity: 1; }
-html[data-desktop] .desktop-main .project-sessions { display: flex; flex-direction: column; padding: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
-html[data-desktop][data-theme="dark"] .desktop-main .project-sessions { background: rgb(255 255 255 / .02); }
-html[data-desktop] .desktop-main .project-session { position: relative; display: grid; grid-template-columns: 18px minmax(120px, max-content) minmax(0, 1fr) auto 56px; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-main .project-sessions { display: flex; flex-direction: column; padding: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .project-sessions { background: color-mix(in oklab, var(--label) 2%, transparent); }
+html[data-desktop] .desktop-main .project-session { position: relative; display: grid; grid-template-columns: 18px minmax(120px, max-content) minmax(0, 1fr) auto 56px; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-main .project-session + .project-session::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .project-session:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .project-session:hover::before,
 html[data-desktop] .desktop-main .project-session:hover + .project-session::before { opacity: 0; }
-html[data-desktop] .desktop-main .project-session-title { max-width: 320px; overflow: hidden; font-weight: 510; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-main .project-session-title { max-width: 320px; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-session-detail { min-width: 0; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .project-session time { justify-self: end; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .project-more { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 12px; cursor: default; }
+html[data-desktop] .desktop-main .project-more { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 12px; cursor: default; }
 html[data-desktop] .desktop-main .project-more:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-main .project-more svg { width: 14px; height: 14px; transition: transform 200ms var(--ease-out); }
 html[data-desktop] .desktop-main .project-more svg[data-open] { transform: rotate(180deg); }
@@ -645,38 +644,37 @@ html[data-desktop] .desktop-main .project-empty { padding: 4px 28px 0; color: va
 
 /* Resource lists (files, ports, worktrees) share the group's row. */
 html[data-desktop] .desktop-main .resource-entry,
-html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: 8px; }
+html[data-desktop] .desktop-main .resource-service { position: relative; border: 0; border-radius: var(--radius-row); }
 html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
 html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); pointer-events: none; }
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover::before,
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover + :is(.resource-entry, .resource-service)::before { opacity: 0; }
 /* Screens: rows in the group like any other list; the current computer is marked by its badge,
    not a second tinted box inside the group. */
-html[data-desktop] .desktop-main .screen-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; min-height: 60px; margin: 0; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; transition: background var(--transition); }
+html[data-desktop] .desktop-main .screen-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; min-height: 60px; margin: 0; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; transition: background var(--transition); }
 html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .screen-row:not(.screen-row-skeleton):hover { background: var(--fill); }
 html[data-desktop] .desktop-main .screen-row:hover::before,
 html[data-desktop] .desktop-main .screen-row:hover + .screen-row::before { opacity: 0; }
 html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 18px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .screen-row [data-slot="badge"] { height: 18px; padding-inline: 6px; border-radius: 6px; font-size: 11px; }
 /* Inside a group an empty state is just its words, the size of what it stands in for. */
 html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-sessions, .resource-directory, .screen-list, .acp-settings) [data-slot="empty"] { flex: none; margin: 0; padding: 24px; border: 0; background: transparent; }
 
 /* Empty, loading and welcome states: quiet, no frame, in the middle of the room the page has (a
    little above it, as 文件's own empty side is), the same on every page: a bare 28 px icon in
-   quaternary ink, the title, at most 360 px of why balanced over its lines (so no line is left
+   secondary ink, the title, at most 360 px of why balanced over its lines (so no line is left
    with a word or two), then its one action. */
 html[data-desktop] .desktop-main .live-overview > :is(.session-overview, .projects-page, .computers-page, .worktrees-page) { flex: 1 0 auto; }
 html[data-desktop] .desktop-main [data-slot="empty"] { flex: 1 0 auto; justify-content: center; gap: 12px; margin: 0; padding: 40px 24px calc(40px + var(--toolbar)); border: 0; border-radius: 0; background: transparent; }
 html[data-desktop] .desktop-main [data-slot="empty-header"] { max-width: 360px; gap: 6px; }
 html[data-desktop] .desktop-main [data-slot="empty-title"] { font-size: 14px; font-weight: 500; }
 html[data-desktop] .desktop-main [data-slot="empty-description"] { max-width: 360px; color: var(--tertiaryLabel); font-size: 13px; line-height: 1.55; text-wrap: balance; }
-html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: auto; height: auto; margin-bottom: 4px; border-radius: 0; background: transparent; color: var(--quaternaryLabel); }
+html[data-desktop] .desktop-main [data-slot="empty-icon"] { width: auto; height: auto; margin-bottom: 4px; border-radius: 0; background: transparent; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main [data-slot="empty-icon"] svg { width: 28px; height: 28px; stroke-width: 1.4; }
 html[data-desktop] .desktop-main .welcome-live { max-width: 480px; gap: 14px; margin: auto; padding: 36px; }
-html[data-desktop] .desktop-main .welcome-live img { width: 56px; height: 56px; border-radius: 14px; }
-html[data-desktop] .desktop-main .welcome-live h1 { font-size: 20px; font-weight: 590; letter-spacing: -.02em; }
-html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 8px 8px 0; padding: 8px 12px; border: 0; border-radius: 10px; background: var(--waitingSoft); color: var(--warning); font-size: 13px; }
+html[data-desktop] .desktop-main .welcome-live img { width: 56px; height: 56px; border-radius: var(--radius-panel); }
+html[data-desktop] .desktop-main .welcome-live h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 8px 8px 0; padding: 8px 12px; border: 0; border-radius: var(--radius-card); background: var(--waitingSoft); color: var(--waiting); font-size: 13px; }
 html[data-desktop] .desktop-main:has(> .session-page) > .connection-banner { margin: 0 0 var(--gutter); }
 
 /* ── Tool pages ──────────────────────────────────────────────────────────── */
@@ -693,7 +691,7 @@ html[data-desktop] .desktop-main .screen-detail-page > .screen-page { min-height
 html[data-desktop] .desktop-main .screen-detail-page > .screen-page.screen-focused,
 html[data-desktop] .desktop-main .screen-detail-page > .screen-page:fullscreen { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .screen-toolbar { padding: 10px 12px; }
-html[data-desktop] .desktop-main .screen-display-mark { border-radius: 16px; }
+html[data-desktop] .desktop-main .screen-display-mark { border-radius: var(--radius-card); }
 html[data-desktop] .desktop-main .screen-caption { min-height: 32px; font-size: 12px; }
 html[data-desktop] .desktop-main .screen-stage { min-height: 0; }
 /* The popover is drawn outside .desktop-main, so its controls take the page's look here: a
@@ -769,7 +767,7 @@ html[data-desktop] .desktop-root[data-platform="windows"] .session-layout.with-p
 
 /* Peek: the hidden sidebar brought out over the page by the pointer at the left edge. */
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { position: relative; }
-html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot { position: absolute; top: calc(var(--toolbar) + 4px); bottom: 8px; left: 0; z-index: 20; width: var(--sidebar-width, 264px); opacity: 1; border-radius: 0 14px 14px 0; background: color-mix(in oklab, var(--plain) 86%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 12px 32px -6px rgb(0 0 0 / .22); animation: sidebar-peek 120ms cubic-bezier(0, 0, .58, 1) both; }
+html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot { position: absolute; top: calc(var(--toolbar) + 4px); bottom: 8px; left: 0; z-index: 20; width: var(--sidebar-width, 264px); opacity: 1; border-radius: 0 var(--radius-panel) var(--radius-panel) 0; background: color-mix(in oklab, var(--plain) 86%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 12px 32px -6px rgb(0 0 0 / .22); animation: sidebar-peek 120ms cubic-bezier(0, 0, .58, 1) both; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar-slot .desktop-sidebar-titlebar { display: none; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar { background: transparent; }
 @keyframes sidebar-peek { from { opacity: 0; transform: translateX(-12px); } }

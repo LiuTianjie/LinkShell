@@ -36,7 +36,7 @@ import { holdTerminal } from "@/lib/terminal-attach";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { pickFile, pickPhoto, shellQuote, upload, type Picked } from "@/lib/upload";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 
 const MAX_RECENT_OUTPUT_CHARS = 65_536;
 
@@ -622,7 +622,7 @@ export function TerminalScreen() {
           ) : null}
         </View>
         <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: keyboardOpen ? 6 : insets.bottom + 8 }}>
-          <Glass style={{ borderRadius: 24, overflow: "hidden" }}>
+          <Glass style={{ borderRadius: radius.panel, overflow: "hidden" }}>
             {ended ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}>
                 <Icon

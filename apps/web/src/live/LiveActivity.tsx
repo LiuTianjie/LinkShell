@@ -27,10 +27,11 @@ export function LiveActivity({ view, asking }: { view: SessionView; asking: bool
       </div>
     ) : null;
   }
-  const label = asking && !activity.waiting ? "需要您的输入" : activity.label;
+  const waiting = activity.waiting || asking;
+  const label = asking && !activity.waiting ? "等你回答" : activity.label;
   return (
-    <div className="conversation-activity" role="status" data-waiting={activity.waiting || asking || undefined}>
-      <LoaderCircle aria-hidden="true" />
+    <div className="conversation-activity" role="status" data-waiting={waiting || undefined}>
+      {!waiting && <LoaderCircle aria-hidden="true" />}
       <span className="conversation-activity-label">{label}</span>
       {clock && <span className="conversation-activity-elapsed">{clock}</span>}
     </div>

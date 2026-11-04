@@ -26,21 +26,21 @@ struct DesktopPairingView: View {
         Spacer()
         if offer == nil {
           Button("配对新设备") { Task { await start() } }
-            .buttonStyle(DesktopPillStyle(.primary))
+            .buttonStyle(DesktopButtonStyle(.primary))
             .disabled(loading || model.preview)
         } else {
-          Button("重新生成") { Task { await start() } }.buttonStyle(DesktopPillStyle(.secondary)).disabled(loading || model.preview)
+          Button("重新生成") { Task { await start() } }.buttonStyle(DesktopButtonStyle(.secondary)).disabled(loading || model.preview)
         }
       }
       if loading { ProgressView("正在生成安全配对码…") }
-      if paired { Label("设备已配对", systemImage: "checkmark.circle.fill").foregroundStyle(DesktopStyle.mint) }
-      if let error { Text(error).font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting) }
+      if paired { Label("设备已配对", systemImage: "checkmark.circle.fill").foregroundStyle(DesktopStyle.ok) }
+      if let error { Text(error).font(.system(size: 12)).foregroundStyle(DesktopStyle.danger) }
       if let offer {
         TimelineView(.periodic(from: .now, by: 1)) { context in
           let remaining = max(0, Int(offer.expiresAt / 1000 - context.date.timeIntervalSince1970))
           HStack(spacing: 24) {
             if remaining > 0, let image = qr(offer.link) {
-              Image(nsImage: image).interpolation(.none).resizable().frame(width: 136, height: 136).padding(10).background(.white).clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityLabel("设备配对二维码")
+              Image(nsImage: image).interpolation(.none).resizable().frame(width: 136, height: 136).padding(10).background(.white).clipShape(RoundedRectangle(cornerRadius: DesktopStyle.wellRadius, style: .continuous)).accessibilityLabel("设备配对二维码")
             } else { Image(systemName: "clock.badge.exclamationmark").font(.largeTitle).frame(width: 156, height: 156).foregroundStyle(DesktopStyle.secondary) }
             VStack(alignment: .leading, spacing: 10) {
               Text(remaining > 0 ? "在 LinkShell 手机端扫描" : "配对码已过期").font(.system(size: 14, weight: .medium))
@@ -54,7 +54,7 @@ struct DesktopPairingView: View {
           }
         }
       } else if !paired {
-        Text("同账号登录可自动发现；设备配对独立于账号。免登录配对需连接自建网关，官方网关需要 Pro 账号。").font(.system(size: 11.5)).foregroundStyle(DesktopStyle.secondary)
+        Text("同账号登录可自动发现；设备配对独立于账号。免登录配对需连接自建网关，官方网关需要 Pro 账号。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
       }
     }.desktopCard(padding: 18)
       .task {

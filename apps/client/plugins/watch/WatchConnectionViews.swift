@@ -76,10 +76,10 @@ struct WatchMembershipView: View {
           }
         }
         if let notice = account.redemptionNotice {
-          Text(notice).font(.caption).foregroundStyle(.green)
+          Text(notice).font(.caption).foregroundStyle(WatchPalette.ok)
         }
         if let error = account.membershipError {
-          Text(error).font(.caption).foregroundStyle(.red)
+          Text(error).font(.caption).foregroundStyle(WatchPalette.danger)
         }
       } else {
         Text("请先登录账号").font(.caption).foregroundStyle(.secondary)
@@ -108,7 +108,7 @@ struct WatchLoginView: View {
       TextField("邮箱", text: $email).textContentType(.emailAddress)
         .textInputAutocapitalization(.never).autocorrectionDisabled()
       SecureField("密码", text: $password).textContentType(.password)
-      if let errorText { Text(errorText).font(.caption).foregroundStyle(.red) }
+      if let errorText { Text(errorText).font(.caption).foregroundStyle(WatchPalette.danger) }
       Button(client.working ? "正在登录…" : "登录") {
         Task {
           do {
@@ -136,7 +136,7 @@ struct WatchPairView: View {
         .font(.caption).foregroundStyle(.secondary)
       TextField("六位配对码", text: $code).textContentType(.oneTimeCode)
       Text(client.status).font(.caption).foregroundStyle(.secondary)
-      if let errorText { Text(errorText).font(.caption).foregroundStyle(.red) }
+      if let errorText { Text(errorText).font(.caption).foregroundStyle(WatchPalette.danger) }
       Button(client.working ? "正在配对…" : "配对电脑") {
         Task {
           do { try await client.pair(code: code); dismiss() }

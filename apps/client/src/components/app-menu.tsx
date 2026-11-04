@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 import { haptics } from "@/lib/haptics";
 import { colors, palette } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
 
 // Menus: the system's UIMenu on iOS; on Android a floating card in the app's
@@ -181,7 +181,8 @@ function FloatingMenu({
                 width,
                 maxHeight,
                 ...(openUp ? { bottom: window.height - anchorTop + 6 } : { top: anchorBottom + 6 }),
-                borderRadius: 18,
+                borderRadius: radius.card,
+                borderCurve: "continuous",
                 backgroundColor: colors.cardRaised,
                 boxShadow: "0 12px 36px rgba(12,14,30,0.22), 0 2px 6px rgba(12,14,30,0.08)",
                 // A shadow doesn't show on black; the edge does.
@@ -217,7 +218,7 @@ function FloatingMenu({
                         accessibilityState={{ disabled, selected: checked }}
                         onPress={() => choose(action)}
                         android_ripple={{ color: colors.fill as string }}
-                        style={{
+                        style={({ pressed }) => ({
                           flexDirection: "row",
                           alignItems: "center",
                           gap: 10,
@@ -225,14 +226,16 @@ function FloatingMenu({
                           paddingHorizontal: 16,
                           paddingVertical: 8,
                           opacity: disabled ? 0.4 : 1,
-                        }}
+                          // A held row is washed with `fill`, as list rows are; Android has its ripple.
+                          backgroundColor: pressed && Platform.OS !== "android" ? colors.fill : undefined,
+                        })}
                       >
                         <View style={{ flex: 1, gap: 1 }}>
                           <Text
                             numberOfLines={2}
                             style={[
-                              type.body,
-                              { fontSize: 16, color: destructive ? colors.danger : colors.label, fontWeight: checked ? "600" : "400" },
+                              type.callout,
+                              { color: destructive ? colors.danger : colors.label, fontWeight: checked ? "600" : "400" },
                             ]}
                           >
                             {action.title}
@@ -265,7 +268,7 @@ function FloatingMenu({
                 pointerEvents="none"
                 importantForAccessibility="no-hide-descendants"
                 accessibilityElementsHidden
-                style={{ position: "absolute", left: anchor.x, top: anchor.y, width: anchor.width, height: anchor.height, borderRadius: 20, overflow: "hidden", transform: [{ scale: 1.015 }] }}
+                style={{ position: "absolute", left: anchor.x, top: anchor.y, width: anchor.width, height: anchor.height, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}
               >
                 {children}
               </Animated.View>

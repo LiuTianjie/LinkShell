@@ -9,10 +9,10 @@ import { baseName, relativeTime } from "@/lib/format";
 import { BranchTag } from "./branch-tag";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { AgentTile } from "./agent-tile";
 import { Icon } from "./icon";
-import { PressableScale } from "./pressable-scale";
+import { PressableFeedback, PressedWash } from "./pressable-feedback";
 import { OwnedFloatingMenu, type FloatingMenuHandle } from "./app-menu";
 import { haptics } from "@/lib/haptics";
 import { useActions } from "@/lib/client";
@@ -25,7 +25,7 @@ import {
   usePinnedSessionIds,
   useSnoozedSessions,
 } from "@/lib/session-attention";
-import { LiveDot, stateColor } from "./status";
+import { StatusDot, stateColor } from "./status";
 
 /** The agent tile beside a row's title. */
 const ICON = 20;
@@ -45,7 +45,6 @@ export function openSession(sessionId: string) {
 /** Agent tile with a status badge in its corner. */
 export function SessionAvatar({ session, size = 36 }: { session: SessionSummary; size?: number }) {
   const showBadge = session.state !== "idle" || needsUserInput(session);
-  const dot = Math.max(6, Math.round(size * 0.22));
   return (
     <View style={{ width: size, height: size }}>
       <AgentTile agent={session.agent} size={size} dimmed={session.state === "offline"} />
@@ -56,11 +55,12 @@ export function SessionAvatar({ session, size = 36 }: { session: SessionSummary;
             right: size < 28 ? -4 : -3,
             bottom: size < 28 ? -4 : -3,
             padding: size < 28 ? 1.5 : 2,
-            borderRadius: dot,
+            borderRadius: 6,
             backgroundColor: colors.card,
           }}
         >
-          <LiveDot color={needsUserInput(session) ? colors.accent : stateColor(session.state)} size={dot} live={session.state === "running" && !needsUserInput(session)} />
+          {/* A question is waiting on the user even while the agent keeps running. */}
+          <StatusDot color={needsUserInput(session) ? colors.waiting : stateColor(session.state)} />
         </View>
       ) : null}
     </View>
@@ -69,8 +69,8 @@ export function SessionAvatar({ session, size = 36 }: { session: SessionSummary;
 
 export function UserInputBadge() {
   return (
-    <View style={{ backgroundColor: colors.accentSoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 }}>
-      <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>需要用户输入</Text>
+    <View style={{ backgroundColor: colors.waitingSoft, borderRadius: radius.chip, borderCurve: "continuous", paddingHorizontal: 8, paddingVertical: 3 }}>
+      <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>等你回答</Text>
     </View>
   );
 }
@@ -84,7 +84,7 @@ function DriverGlyph({ session }: { session: SessionSummary }) {
       sf={phone ? "iphone" : "laptopcomputer"}
       md={phone ? "smartphone" : "laptop_mac"}
       size={12}
-      color={phone ? colors.accent : colors.tertiaryLabel}
+      color={colors.tertiaryLabel}
     />
   );
 }
@@ -140,40 +140,33 @@ export function ListRow({
   const floatingMenu = !!menu?.length;
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
+  const corners = {
+    borderTopLeftRadius: top ? radius.card : 0,
+    borderTopRightRadius: top ? radius.card : 0,
+    borderBottomLeftRadius: bottom ? radius.card : 0,
+    borderBottomRightRadius: bottom ? radius.card : 0,
+    borderCurve: "continuous",
+  } as const;
   const row = (
-    <PressableScale
+    <PressableFeedback
       onPress={onPress}
       onLongPress={floatingMenu ? () => floating.current?.open() : undefined}
-      pressedScale={0.985}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel}
     >
-      <View
-        style={{
-          backgroundColor: selected ? colors.accentSoft : colors.card,
-          borderTopLeftRadius: top ? 20 : 0,
-          borderTopRightRadius: top ? 20 : 0,
-          borderBottomLeftRadius: bottom ? 20 : 0,
-          borderBottomRightRadius: bottom ? 20 : 0,
-          borderCurve: "continuous",
-          paddingLeft: 14,
-        }}
-      >
+      {({ pressed }) => (
+      <View style={{ backgroundColor: selected ? colors.accentSoft : colors.card, ...corners, paddingLeft: 14 }}>
+        <PressedWash pressed={pressed} style={corners} />
         <View style={{ paddingVertical: 11, paddingRight: 14, gap: 3 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             {leading}
             <Text
               numberOfLines={largeText ? 2 : 1}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontSize: titleMono ? 14.5 : 16,
-                lineHeight: 21,
-                fontWeight: titleMono ? "400" : "600",
-                color: colors.label,
-                fontFamily: titleMono ? mono : undefined,
-              }}
+              style={[
+                titleMono ? { fontFamily: mono, fontSize: 14.5, lineHeight: 21 } : type.callout,
+                { flex: 1, minWidth: 0, fontWeight: titleMono ? "400" : "600", color: colors.label },
+              ]}
             >
               {title}
             </Text>
@@ -187,15 +180,15 @@ export function ListRow({
             {branch ? (
               // Project, then the branch as a chip: on the line the project already has.
               <>
-                {project ? <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "35%", fontSize: 14, lineHeight: 19, color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
-                <BranchTag branch={branch} size={12} own />
-                <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 19, color: detailColor }}>
+                {project ? <Text numberOfLines={1} style={[type.subhead, { flexShrink: 1, maxWidth: "35%", color: colors.secondaryLabel, fontWeight: "500" }]}>{project}</Text> : null}
+                <BranchTag branch={branch} own />
+                <Text numberOfLines={1} style={[type.subhead, { flex: 1, minWidth: 0, color: detailColor }]}>
                   {detail ? <Text style={{ color: colors.tertiaryLabel }}>{"· "}</Text> : null}
                   {detail}
                 </Text>
               </>
             ) : (
-              <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, lineHeight: 19, color: detailColor }}>
+              <Text numberOfLines={1} style={[type.subhead, { flex: 1, color: detailColor }]}>
                 {project ? <Text style={{ color: colors.secondaryLabel, fontWeight: "500" }}>{project}</Text> : null}
                 {project && detail ? <Text style={{ color: colors.tertiaryLabel }}>{" · "}</Text> : null}
                 {detail}
@@ -215,7 +208,8 @@ export function ListRow({
           />
         )}
       </View>
-    </PressableScale>
+      )}
+    </PressableFeedback>
   );
   if (!floatingMenu) return row;
   return (

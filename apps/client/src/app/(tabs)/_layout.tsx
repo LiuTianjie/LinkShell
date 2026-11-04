@@ -27,7 +27,8 @@ export default function TabsLayout() {
     );
   }
   return (
-    <NativeTabs tintColor={colors.accent} minimizeBehavior="onScrollDown">
+    // The badge counts sessions waiting on the user, so it is their amber, not the system red.
+    <NativeTabs tintColor={colors.accent} badgeBackgroundColor={colors.waitingFill} minimizeBehavior="onScrollDown">
       <NativeTabs.Trigger name="(home)">
         <NativeTabs.Trigger.Icon sf={{ default: "tray", selected: "tray.fill" }} md="inbox" />
         <NativeTabs.Trigger.Label>首页</NativeTabs.Trigger.Label>

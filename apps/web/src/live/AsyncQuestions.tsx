@@ -56,7 +56,7 @@ function Question({
                   key={option}
                   type="button"
                   variant="outline"
-                  className="async-option h-auto min-h-9 whitespace-normal text-left"
+                  className="async-option h-auto min-h-[32px] whitespace-normal text-left"
                   disabled={disabled}
                   aria-pressed={given === option}
                   onClick={() => answer(option)}

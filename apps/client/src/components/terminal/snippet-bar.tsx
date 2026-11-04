@@ -11,7 +11,7 @@ import {
   type TerminalSnippet,
 } from "@/lib/terminal-snippets";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Button } from "../button";
 import { Icon } from "../icon";
 
@@ -107,11 +107,11 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
               paddingHorizontal: 10,
               borderRadius: 14,
               borderCurve: "continuous",
-              backgroundColor: pressed ? colors.fillStrong : colors.accentSoft,
+              backgroundColor: colors.accentSoft,
+              opacity: pressed ? 0.6 : 1,
               flexDirection: "row",
               alignItems: "center",
               gap: 4,
-              transform: [{ scale: pressed ? 0.96 : 1 }],
             })}
           >
             <Icon sf="sparkles" md="auto_awesome" size={11} color={colors.accent} />
@@ -132,11 +132,11 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
               paddingHorizontal: 10,
               borderRadius: 14,
               borderCurve: "continuous",
-              backgroundColor: pressed ? colors.fillStrong : colors.fill,
+              backgroundColor: colors.fill,
+              opacity: pressed ? 0.6 : 1,
               flexDirection: "row",
               alignItems: "center",
               gap: 4,
-              transform: [{ scale: pressed ? 0.96 : 1 }],
             })}
           >
             <Text style={{ fontFamily: mono, fontSize: 12, fontWeight: "500", color: colors.label }}>
@@ -154,7 +154,8 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
             height: 28,
             borderRadius: 14,
             borderCurve: "continuous",
-            backgroundColor: pressed ? colors.fillStrong : colors.fill,
+            backgroundColor: colors.fill,
+            opacity: pressed ? 0.6 : 1,
             alignItems: "center",
             justifyContent: "center",
           })}
@@ -180,7 +181,7 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
               width: "100%",
               maxWidth: 360,
               backgroundColor: colors.cardRaised,
-              borderRadius: 22,
+              borderRadius: radius.panel,
               borderCurve: "continuous",
               padding: 18,
               gap: 12,
@@ -217,7 +218,7 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
                 {
                   color: colors.label,
                   backgroundColor: colors.fill,
-                  borderRadius: 12,
+                  borderRadius: radius.control,
                   paddingHorizontal: 12,
                   paddingVertical: 10,
                 },
@@ -235,7 +236,7 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
                 fontSize: 13,
                 color: colors.label,
                 backgroundColor: colors.fill,
-                borderRadius: 12,
+                borderRadius: radius.control,
                 paddingHorizontal: 12,
                 paddingVertical: 10,
               }}

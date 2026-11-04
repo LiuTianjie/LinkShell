@@ -32,7 +32,7 @@
   .remote-screen-overlay > .screen-start { position: static; inset: auto; max-width: 440px; }
   .remote-screen-overlay .screen-start > svg { color: var(--tertiaryLabel); }
 
-  .remote-screen-toast, .remote-screen-hint { position: absolute; left: 50%; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100% - 32px)); padding: 7px 12px; border-radius: 10px; transform: translateX(-50%); color: #fff; font-size: 12.5px; line-height: 18px; background: rgb(28 28 30 / .86); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 0 0 .5px rgb(255 255 255 / .12), 0 8px 24px -6px rgb(0 0 0 / .5); pointer-events: auto; }
+  .remote-screen-toast, .remote-screen-hint { position: absolute; left: 50%; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100% - 32px)); padding: 7px 12px; border-radius: var(--radius-card); transform: translateX(-50%); color: #fff; font-size: 13px; line-height: 18px; background: rgb(28 28 30 / .86); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 0 0 .5px rgb(255 255 255 / .12), 0 8px 24px -6px rgb(0 0 0 / .5); pointer-events: auto; }
   .remote-screen-toast { top: 14px; }
   .remote-screen-toast[data-tone="warning"] { align-items: flex-start; }
   .remote-screen-toast [data-button] { flex: none; border-color: rgb(255 255 255 / .25); background: transparent; color: #fff; }
@@ -42,31 +42,31 @@
   /* The settings popover. */
   .remote-screen-settings { gap: 14px; padding: 12px; }
   .remote-screen-settings h4 { margin: 0 0 6px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
-  .remote-screen-settings p { margin: 6px 0 0; color: var(--tertiaryLabel); font-size: 11.5px; line-height: 16px; }
+  .remote-screen-settings p { margin: 6px 0 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
   .remote-screen-settings [role="radiogroup"]:not(.remote-screen-segments) { display: flex; flex-direction: column; gap: 1px; }
-  .remote-screen-settings [role="radiogroup"]:not(.remote-screen-segments) > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--label); text-align: left; cursor: default; }
+  .remote-screen-settings [role="radiogroup"]:not(.remote-screen-segments) > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--label); text-align: left; cursor: default; }
   .remote-screen-settings [role="radiogroup"]:not(.remote-screen-segments) > button:hover { background: var(--fill); }
   .remote-screen-settings [role="radiogroup"] > button > span { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .remote-screen-settings [role="radiogroup"] > button b { font-size: 13px; font-weight: 500; }
   .remote-screen-settings [role="radiogroup"] > button small { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   /* The app's segmented control: a recessed track, the chosen segment raised and lighter. */
-  .remote-screen-segments { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--fill); }
-  .remote-screen-segments > button { flex: 1; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--secondaryLabel); font-size: 12.5px; cursor: default; }
+  .remote-screen-segments { display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-card); background: var(--fill); }
+  .remote-screen-segments > button { flex: 1; height: 24px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; cursor: default; }
   .remote-screen-segments > button:hover:not([aria-checked="true"]) { color: var(--label); }
-  .remote-screen-segments > button[aria-checked="true"] { background: var(--card); color: var(--label); font-weight: 500; box-shadow: 0 0 0 .5px var(--separatorStrong), 0 1px 2px rgb(0 0 0 / .12); }
-  html[data-theme="dark"] .remote-screen-segments > button[aria-checked="true"] { background: rgb(255 255 255 / .14); }
+  .remote-screen-segments > button[aria-checked="true"] { background: var(--card); color: var(--label); font-weight: 500; box-shadow: 0 0 0 .5px var(--separatorStrong); }
+  html[data-theme="dark"] .remote-screen-segments > button[aria-checked="true"] { background: color-mix(in oklab, var(--label) 14%, var(--plain)); }
   .remote-screen-stats { display: grid; gap: 4px; margin: 0; padding-top: 12px; border-top: var(--hairline, 1px) solid var(--separator); font-size: 12px; }
   .remote-screen-stats > div { display: flex; justify-content: space-between; gap: 12px; }
   .remote-screen-stats dt { color: var(--tertiaryLabel); }
   .remote-screen-stats dd { margin: 0; color: var(--secondaryLabel); font-variant-numeric: tabular-nums; text-align: right; }
-  .remote-screen-shortcuts kbd { color: var(--tertiaryLabel); font-size: 12px; }
+  .remote-screen-shortcuts kbd { color: var(--tertiaryLabel); font-size: 11px; }
   /* A backtick is a speck at menu size: the key's own sign, drawn larger. */
-  .remote-screen-shortcuts kbd .remote-screen-grave { display: inline-block; font-size: 15px; font-weight: 600; line-height: 1; transform: translateY(1px); }
+  .remote-screen-shortcuts kbd .remote-screen-grave { display: inline-block; font-size: 16px; font-weight: 600; line-height: 1; transform: translateY(1px); }
 
   /* Full screen: the picture alone, the bar over it on demand. */
   .remote-screen-fullscreen { position: fixed; inset: 0; z-index: 60; background: #000; }
   /* Over the picture, which is often black too: a lighter glass and a drawn edge keep it apart. */
-  .remote-screen-fullscreen > .remote-screen-bar { position: absolute; top: 8px; left: 50%; width: auto; max-width: calc(100% - 24px); height: 40px; padding: 0 6px 0 4px; border: 0; border-radius: 12px; transform: translateX(-50%); color: #fff; background: rgb(44 44 48 / .84); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 12px 32px -8px rgb(0 0 0 / .7); transition: transform 220ms var(--ease-out, ease-out), opacity 180ms var(--ease-out, ease-out); }
+  .remote-screen-fullscreen > .remote-screen-bar { position: absolute; top: 8px; left: 50%; width: auto; max-width: calc(100% - 24px); height: 40px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-card); transform: translateX(-50%); color: #fff; background: rgb(44 44 48 / .84); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 12px 32px -8px rgb(0 0 0 / .7); transition: transform 220ms var(--ease-out, ease-out), opacity 180ms var(--ease-out, ease-out); }
   /* The icon sits as far in from the left edge as the last button's pill does from the right. */
   .remote-screen-fullscreen .remote-screen-title { padding-left: 2px; }
   .remote-screen-fullscreen .remote-screen-title > svg { margin-left: 6px; }

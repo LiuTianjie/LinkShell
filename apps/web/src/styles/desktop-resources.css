@@ -41,7 +41,7 @@ html[data-desktop] .desktop-main .resource-entry:has(.resource-entry-path) { hei
 html[data-desktop] .desktop-main .resource-entry:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .resource-entry[aria-current] { background: var(--fill); }
 html[data-desktop] .desktop-main .resource-entry > svg { width: 16px; height: 16px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .resource-entry-name { font-size: 13px; font-weight: 430; }
+html[data-desktop] .desktop-main .resource-entry-name { font-size: 13px; font-weight: 400; }
 html[data-desktop] .desktop-main .resource-entry-size { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .resource-list-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-top: 4px; padding: 0 12px; color: var(--tertiaryLabel); font-size: 12px; }
 /* In a narrow inspector the tree's rows are a little tighter and need no group frame. */
@@ -53,9 +53,9 @@ html[data-desktop] .desktop-main .file-browser[data-layout="panel"] .resource-en
 html[data-desktop] .desktop-main :is(.resource-reader-tools, .resource-editor-actions, .resource-preview-toolbar) { gap: 6px; }
 html[data-desktop] .desktop-main .resource-path { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.resource-caption, .resource-files-footer) { color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; }
-html[data-desktop] .desktop-main .resource-chip { border-radius: 999px; background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-chip { border-radius: var(--radius-small); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.file-reader, .resource-markdown, .resource-image-stage, .resource-edit-preview) { border: 0; border-radius: var(--radius-well); background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop] .desktop-main .resource-file-title { font-size: 14px; font-weight: 590; }
+html[data-desktop] .desktop-main .resource-file-title { font-size: 14px; font-weight: 600; }
 html[data-desktop] .desktop-main .resource-editor-status { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.cm-editor, .resource-markdown pre) { font-family: var(--mono); font-size: 12px; }
 
@@ -86,22 +86,22 @@ html[data-desktop] .desktop-main .ports-page[data-browsing] { gap: 0; }
 html[data-desktop] .port-new-tab { display: flex; flex-direction: column; gap: 8px; }
 html[data-desktop] .port-new-tab-services { display: flex; flex-direction: column; gap: 1px; max-height: 280px; margin: 0 -6px -6px; padding-top: 8px; overflow-y: auto; border-top: var(--hairline) solid var(--separator); }
 html[data-desktop] .port-new-tab-services > span { padding: 0 8px 4px; color: var(--tertiaryLabel); font-size: 12px; }
-html[data-desktop] .port-new-tab-service { display: flex; flex: none; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; }
+html[data-desktop] .port-new-tab-service { display: flex; flex: none; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: default; }
 html[data-desktop] .port-new-tab-service:hover { background: var(--fill); }
 html[data-desktop] .port-new-tab-service > svg { flex: none; width: 16px; height: 16px; color: var(--secondaryLabel); }
 html[data-desktop] .port-new-tab-service > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .port-new-tab-service > small { flex: none; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 /* The browser: one frame (its corners clip what is inside), the tabs, the address, the page. */
-html[data-desktop] .desktop-main .ports-page .resource-preview { border: var(--hairline) solid var(--separator); border-radius: var(--radius-panel); background: var(--plain); }
+html[data-desktop] .desktop-main .ports-page .resource-preview { border: var(--hairline) solid var(--separator); border-radius: var(--radius-card); background: var(--plain); }
 html[data-desktop] .desktop-main .port-preview-tab-bar { gap: 4px; padding-bottom: 8px; border-bottom: var(--hairline) solid var(--separator); }
 /* The tabs scroll sideways when there are many, without a bar of their own. */
 html[data-desktop] .desktop-main .port-preview-tabs { overflow-y: hidden; scrollbar-width: none; }
 html[data-desktop] .desktop-main .port-preview-tabs::-webkit-scrollbar { display: none; }
-html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] .desktop-main .port-preview-tab { height: 28px; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .port-preview-tab[data-active], html[data-desktop] .desktop-main .port-preview-tab[aria-selected="true"] { background: var(--fill); color: var(--label); }
 /* The address is a field across the bar, its globe inside it, as a browser's. */
 html[data-desktop] .desktop-main .resource-preview-toolbar { gap: 8px; padding: 0 6px 0 8px; background: transparent; }
-html[data-desktop] .desktop-main .resource-preview-address { flex: 1; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: color-mix(in srgb, var(--label) 5%, transparent); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .resource-preview-address { flex: 1; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: color-mix(in srgb, var(--label) 5%, transparent); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .desktop-main .resource-preview-address > span { overflow: hidden; color: var(--secondaryLabel); text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .port-frame { border: 0; border-radius: 0; }
 
@@ -110,7 +110,7 @@ html[data-desktop] .desktop-main .port-frame { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .worktrees-page { display: flex; flex-direction: column; gap: 12px; }
 /* The base list draws a rule above itself; in the group's frame (or when empty) it must not. */
 html[data-desktop] .desktop-main .worktree-list { border-top: 0; }
-html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: 12px; background: transparent; }
+html[data-desktop] .desktop-main .worktree-entry { position: relative; padding: 12px; border: 0; border-radius: var(--radius-row); background: transparent; }
 html[data-desktop] .desktop-main .worktree-entry + .worktree-entry::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
 html[data-desktop] .desktop-main .worktree-entry:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .worktree-info strong { font-family: var(--mono); font-size: 13px; font-weight: 500; }
@@ -120,21 +120,21 @@ html[data-desktop] .desktop-main .worktree-meta { color: var(--tertiaryLabel); f
 /* ── ACP connections (电脑与 Agent) ─────────────────────────────────────── */
 /* The same group as the page's other sections: its heading on the box's edge, then rows 16 px in
    on every side; the agent picker is a 28 px control at the right of its row, not a full-width field. */
-html[data-desktop] .desktop-main .acp-settings { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
-html[data-desktop][data-theme="dark"] .desktop-main .acp-settings { background: rgb(255 255 255 / .02); }
+html[data-desktop] .desktop-main .acp-settings { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop][data-theme="dark"] .desktop-main .acp-settings { background: color-mix(in oklab, var(--label) 2%, transparent); }
 html[data-desktop] .desktop-main .acp-group { display: flex; flex-direction: column; gap: 8px; }
 html[data-desktop] .desktop-main .acp-settings-heading { padding: 0; }
 html[data-desktop] .desktop-main .acp-settings-heading h3 { margin: 0; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 18px; }
 html[data-desktop] .desktop-main .acp-settings-heading p { margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .desktop-main .acp-agent-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 16px; }
-html[data-desktop] .desktop-main .acp-agent-field [data-slot="field-label"] { flex: none; font-size: 13px; font-weight: 510; }
+html[data-desktop] .desktop-main .acp-agent-field [data-slot="field-label"] { flex: none; font-size: 13px; font-weight: 500; }
 html[data-desktop] .desktop-main .acp-agent-field [data-slot="select-trigger"] { width: 220px; height: 28px; }
 html[data-desktop] .desktop-main .acp-settings > :is(form, .acp-section, details, [data-slot="alert"]) { margin: 0; }
 html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details) { position: relative; }
 html[data-desktop] .desktop-main .acp-settings > * + :is(form, .acp-section, details)::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
-html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) { gap: 12px; padding: 16px; border: 0; border-radius: 12px; background: transparent; }
-html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) > :is(h3, h4) { color: var(--label); font-size: 13px; font-weight: 510; }
-html[data-desktop] .desktop-main .acp-settings details > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 16px; border-radius: 12px; color: var(--label); font-size: 13px; font-weight: 510; list-style: none; transition: background var(--transition); }
+html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) { gap: 12px; padding: 16px; border: 0; border-radius: var(--radius-card); background: transparent; }
+html[data-desktop] .desktop-main :is(.acp-settings form, .acp-section) > :is(h3, h4) { color: var(--label); font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .acp-settings details > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 16px; border-radius: var(--radius-row); color: var(--label); font-size: 13px; font-weight: 500; list-style: none; transition: background var(--transition); }
 html[data-desktop] .desktop-main .acp-settings details > summary:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .acp-settings details > summary::-webkit-details-marker { display: none; }
 html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 16px 16px; }
@@ -149,9 +149,9 @@ html[data-desktop] .desktop-main .terminal-tab-bar { height: 36px; min-height: 3
    in from its edges, the shell's text on the toolbar's line, and no page scroll around it. */
 html[data-desktop] .desktop-main .live-overview:has(> .terminals-page) { --page-inline: 16px; padding-bottom: 12px; overflow: hidden; scrollbar-gutter: auto; }
 html[data-desktop] .desktop-main .live-overview > .terminals-page .terminal-session-panel > .terminal-live { padding: 8px 0 0; }
-/* Tabs name the shell in the interface's face (13 / 510), cut short with an ellipsis; the open one
+/* Tabs name the shell in the interface's face (13 / 500), cut short with an ellipsis; the open one
    is a tint of ink with no raised thumb, in both themes. */
-html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { max-width: 180px; font-family: inherit; font-weight: 510; box-shadow: none; }
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { max-width: 180px; font-family: inherit; font-weight: 500; box-shadow: none; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The open terminal's actions end the tab row, in its flow: the tabs shorten before they do. */
 html[data-desktop] .desktop-main .terminal-tab-actions { display: flex; flex: none; align-items: center; }
@@ -170,10 +170,10 @@ html[data-desktop] .terminal-actions [data-button][data-size="icon"]:hover:not(:
 html[data-desktop] .terminal-actions .terminal-connection { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--tertiaryLabel); font-size: 12px; white-space: nowrap; }
 html[data-desktop] .terminal-font-menu { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .terminal-font-menu > span:first-child { flex: 1; }
-html[data-desktop] .terminal-font-menu [data-button] { width: 28px; height: 28px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .terminal-font-menu [data-button] { width: 28px; height: 28px; border-radius: var(--radius-control); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .terminal-font-menu .terminal-font-value { width: 24px; color: var(--label); font-variant-numeric: tabular-nums; text-align: center; }
 html[data-desktop] .desktop-main .terminal-live { position: relative; }
-html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absolute; right: 16px; bottom: 16px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); transition: opacity var(--transition), translate var(--transition); }
+html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absolute; right: 16px; bottom: 16px; z-index: 3; width: 32px; height: 32px; border-radius: var(--radius-control); background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); transition: opacity var(--transition), translate var(--transition); }
 html[data-desktop] .desktop-main .terminal-bottom[data-hidden] { opacity: 0; translate: 0 4px; pointer-events: none; }
 html[data-desktop] .desktop-main .terminal-bottom[data-button]:hover { background: var(--plain); color: var(--label); }
 

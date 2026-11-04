@@ -5,7 +5,7 @@ import { useContentWidth } from "@/lib/content-width";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { Icon, type IconProps } from "./icon";
-import { LiveDot } from "./status";
+import { StatusDot } from "./status";
 
 type Glyph = Pick<IconProps, "sf" | "md">;
 
@@ -136,7 +136,7 @@ function IconButton({ icon, label, live, onPress }: { icon: Glyph; label: string
       <Icon {...icon} size={24} color={colors.label} />
       {live ? (
         <View pointerEvents="none" style={{ position: "absolute", top: 8, right: 6 }}>
-          <LiveDot size={6} />
+          <StatusDot />
         </View>
       ) : null}
     </Pressable>

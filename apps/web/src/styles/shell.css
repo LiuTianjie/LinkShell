@@ -8,7 +8,7 @@
     padding: 8px 14px;
     background: var(--card);
     border: 1px solid var(--accent);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     transform: translateY(-160%);
   }
   /* Only for the keyboard: focus put there by a click or by a window coming back stays out of sight. */
@@ -71,7 +71,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     line-height: 1.25;
   }
@@ -82,26 +82,25 @@
     height: 24px;
     padding-inline: 8px;
     color: var(--tertiaryLabel);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 12px;
+    font-weight: 500;
   }
+  /* Top-level navigation: 40 px rows at 14 px (the navigation size of the menu button). */
   .console-navigation-content [data-slot="sidebar-menu-button"] {
-    height: 28px;
+    height: 40px;
     padding-inline: 8px;
     gap: 8px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 500;
+    border-radius: var(--radius-row);
+    font-size: 14px;
+    font-weight: 400;
     color: var(--secondaryLabel);
     transition:
       background-color var(--transition),
       color var(--transition);
   }
   .console-navigation-content [data-slot="sidebar-menu-button"] svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     color: var(--secondaryLabel);
   }
   .console-navigation-content [data-slot="sidebar-menu-button"]:hover {
@@ -111,25 +110,11 @@
   .console-navigation-content [data-slot="sidebar-menu-button"]:hover svg {
     color: var(--label);
   }
-  /* Current item: neutral fill plus a short accent bar at the left edge, the
-     Linear way of showing "you are here". */
+  /* Current item: a neutral fill, as the desktop's; no coloured bar. */
   .console-navigation-content
     [data-slot="sidebar-menu-button"][data-active="true"] {
-    position: relative;
     background: var(--sidebarAccent);
     color: var(--label);
-  }
-  .console-navigation-content
-    [data-slot="sidebar-menu-button"][data-active="true"]::before {
-    content: "";
-    position: absolute;
-    left: -2px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 16px;
-    border-radius: 0 2px 2px 0;
-    background: var(--accent);
   }
   .console-navigation-content
     [data-slot="sidebar-menu-button"][data-active="true"]
@@ -145,7 +130,7 @@
   }
   .console-computer-picker > span {
     padding-inline: 8px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--tertiaryLabel);
   }
   .console-help {
@@ -154,7 +139,7 @@
     justify-content: flex-start;
     gap: 8px;
     padding-inline: 8px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--secondaryLabel);
   }
   .console-help > svg:last-child {
@@ -172,13 +157,10 @@
        on the app background, so the left gutter reads as one clean seam. */
     margin: 8px;
     border: 1px solid var(--separatorStrong);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--plain);
-    /* A whisper of shadow + a top inner highlight so the panel reads as
-       floating above the frame, not pasted onto it. */
-    box-shadow:
-      0 1px 2px rgb(0 0 0 / 0.04),
-      0 4px 16px rgb(0 0 0 / 0.04);
+    /* Flat: the hairline sets it off from the frame (shadows are only for what floats). */
+    box-shadow: none;
     /* The panel itself never scrolls; each page scrolls its own region so the
        composer and tool chrome can stay pinned. */
     overflow: hidden;
@@ -227,7 +209,7 @@
   .console-context [data-button][data-size="sm"] {
     height: 28px;
     margin-left: 4px;
-    font-size: 12px;
+    font-size: 13px;
   }
   .console-current-computer {
     display: flex;
@@ -236,7 +218,7 @@
     margin-right: 6px;
     padding: 0 8px;
     gap: 7px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     font-size: 12px;
   }
   .console-current-computer > span:not(.console-presence) {
@@ -246,14 +228,14 @@
     text-overflow: ellipsis;
   }
   .console-presence {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     flex-shrink: 0;
     border-radius: 50%;
     background: var(--tertiaryLabel);
   }
   .console-presence[data-online] {
-    background: var(--success);
+    background: var(--ok);
   }
 
   /* Pages */
@@ -366,8 +348,9 @@
   .console-main [data-slot="badge"][data-variant="info"] {
     color: var(--running);
   }
+  /* Done is the normal state: grey, as on the desktop. */
   .console-main [data-slot="badge"][data-variant="success"] {
-    color: var(--success);
+    color: var(--secondaryLabel);
   }
   .console-main [data-slot="badge"][data-variant="warning"] {
     color: var(--warning);
@@ -378,24 +361,23 @@
   .console-main [data-slot="badge"][data-variant="outline"] {
     padding: 0 6px;
     border: 1px solid var(--separator);
-    border-radius: 4px;
+    border-radius: var(--radius-small);
   }
+  /* Heights come from the primitives (32 for a field or a button on its own, 28 in a toolbar). */
   .console-main [data-slot="input-group"] {
-    height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: transparent;
     font-size: 13px;
   }
   .console-main [data-button][data-size="default"] {
-    height: 28px;
-    padding-inline: 10px;
-    border-radius: 6px;
+    padding-inline: 12px;
+    border-radius: var(--radius-control);
     font-size: 13px;
   }
   .console-main [data-button][data-size="icon"] {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
   }
   .console-main [data-slot="tabs-list"][data-variant="line"] {
     gap: 2px;
@@ -433,7 +415,7 @@
       padding-inline: 16px;
     }
     .page-heading h1 {
-      font-size: 18px;
+      font-size: 20px;
     }
   }
   @media (prefers-reduced-motion: reduce) {

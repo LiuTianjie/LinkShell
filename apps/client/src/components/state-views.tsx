@@ -27,19 +27,9 @@ export function EmptyState({
 }) {
   return (
     <View style={{ paddingVertical: 56, paddingHorizontal: 32, alignItems: "center", gap: 10 }}>
-      <View
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: 20,
-          borderCurve: "continuous",
-          backgroundColor: colors.fill,
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 4,
-        }}
-      >
-        <Icon {...icon} size={28} color={colors.secondaryLabel} />
+      {/* The symbol alone, as system empty states draw it: a tinted square behind it reads as decoration. */}
+      <View style={{ marginBottom: 4 }}>
+        <Icon {...icon} size={40} color={colors.secondaryLabel} />
       </View>
       <Text style={[type.headline, { color: colors.label, textAlign: "center" }]}>{title}</Text>
       {message ? (

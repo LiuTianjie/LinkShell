@@ -8,7 +8,7 @@ import Animated, { cubicBezier } from "react-native-reanimated";
 import { duration } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { Markdown } from "../markdown";
 import { Attachments, LinkChip } from "./attachments";
@@ -67,14 +67,14 @@ export const UserMessage = memo(function UserMessage({
     return (
       <View style={{ alignItems: "flex-end", gap: 6 }}>
         {view.shell?.command ? (
-          <View style={{ maxWidth: "86%", backgroundColor: colors.userBubble, borderRadius: 16, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 7 }}>
+          <View style={{ maxWidth: "86%", backgroundColor: colors.userBubble, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 7 }}>
             <Text selectable style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.label }}>
               <Text style={{ color: colors.secondaryLabel }}>! </Text>{view.shell.command}
             </Text>
           </View>
         ) : null}
         {output ? (
-          <View style={{ maxWidth: "86%", backgroundColor: colors.inset, borderRadius: 14, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 8 }}>
+          <View style={{ maxWidth: "86%", backgroundColor: colors.inset, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 8 }}>
             <Text selectable numberOfLines={expanded ? undefined : LONG_MESSAGE_LINES} onPress={() => setExpanded((value) => !value)} style={{ fontFamily: mono, fontSize: 12, lineHeight: 17, color: colors.secondaryLabel }}>{output}</Text>
           </View>
         ) : null}
@@ -86,7 +86,7 @@ export const UserMessage = memo(function UserMessage({
       {view.context.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 6, maxWidth: "86%" }}>
           {view.context.map((entry, index) => (
-            <View key={index} accessibilityLabel={entry.detail ? `${entry.label}，${entry.detail}` : entry.label} style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 220, paddingHorizontal: 8, height: 24, borderRadius: 8, backgroundColor: colors.inset }}>
+            <View key={index} accessibilityLabel={entry.detail ? `${entry.label}，${entry.detail}` : entry.label} style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 220, paddingHorizontal: 8, height: 24, borderRadius: radius.chip, borderCurve: "continuous", backgroundColor: colors.inset }}>
               <Icon sf={CONTEXT_GLYPHS[entry.kind].sf} md={CONTEXT_GLYPHS[entry.kind].md} size={11} color={colors.secondaryLabel} />
               <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, flexShrink: 1 }]}>{entry.label}</Text>
             </View>
@@ -111,8 +111,8 @@ export const UserMessage = memo(function UserMessage({
             style={{
               flexShrink: 1,
               backgroundColor: colors.userBubble,
-              borderRadius: 22,
-              borderBottomRightRadius: 8,
+              borderRadius: radius.card,
+              borderBottomRightRadius: radius.chip,
               borderCurve: "continuous",
               paddingHorizontal: 14,
               paddingVertical: 9,
@@ -219,11 +219,11 @@ function AsyncQuestions({ questions }: { questions: NonNullable<Of<"agent">["que
                       paddingHorizontal: 14,
                       borderRadius: 22,
                       borderCurve: "continuous",
-                      backgroundColor: chosen ? colors.accent : colors.fill,
+                      backgroundColor: chosen ? colors.accentFill : colors.fill,
                       opacity: done && !chosen ? 0.45 : pressed ? 0.6 : 1,
                     })}
                   >
-                    <Text style={[type.subhead, { color: chosen ? "#ffffff" : colors.label }]}>{option}</Text>
+                    <Text style={[type.subhead, { color: chosen ? colors.onAccent : colors.label }]}>{option}</Text>
                   </Pressable>
                 );
               })}
@@ -251,7 +251,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
         accessibilityRole="button"
         accessibilityLabel="复制这条回复"
         hitSlop={4}
-        style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+        style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}
       >
         <Icon sf={copied ? "checkmark" : "doc.on.doc"} md={copied ? "check" : "content_copy"} size={15} color={copied ? colors.ok : colors.secondaryLabel} />
       </Pressable>
@@ -264,7 +264,7 @@ function ReplyActions({ item }: { item: Of<"agent"> }) {
           accessibilityRole="button"
           accessibilityLabel="从这里分叉"
           hitSlop={4}
-          style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.5 : 1 })}
+          style={({ pressed }) => ({ width: 44, height: 44, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}
         >
           <Icon sf="arrow.triangle.branch" md="fork_right" size={15} color={colors.secondaryLabel} />
         </Pressable>
@@ -330,7 +330,7 @@ export const PlanCard = memo(function PlanCard({ item, active }: { item: Of<"pla
   const done = item.entries.filter((entry) => entry.status === "completed").length;
   const total = item.entries.length;
   return (
-    <View style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 14, gap: 10 }}>
+    <View style={{ backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", padding: 14, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Icon sf="checklist" md="checklist" size={15} color={colors.accent} />
         <Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>{item.title ?? "计划"}</Text>
@@ -419,8 +419,8 @@ export const Notice = memo(function Notice({ item, live = false }: { item: Of<"n
   const reconnect = reconnectOf(item.title, item.detail);
   if (reconnect)
     return (
+      // Reconnecting is a link being made: a spinner and grey words, not amber (that is for the user's turn).
       <CenterPill
-        tone={live && reconnect.busy ? "warn" : undefined}
         icon={live ? <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.7 }], width: 12, height: 12 }} /> : <Icon sf="arrow.clockwise" md="refresh" size={13} color={colors.secondaryLabel} />}
         text={reconnectLabel(reconnect, live)}
       />
@@ -450,10 +450,8 @@ export const ErrorCard = memo(function ErrorCard({ item }: { item: Of<"error"> }
     <View
       style={{
         backgroundColor: colors.dangerSoft,
-        borderRadius: 18,
+        borderRadius: radius.card,
         borderCurve: "continuous",
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: "rgba(255,69,58,0.28)",
         padding: 14,
         gap: 8,
       }}
@@ -530,8 +528,9 @@ export const TurnEnd = memo(function TurnEnd({ item }: { item: Of<"turn-end"> })
   if (!text) return null;
   return (
     <CenterPill
-      tone={item.stopReason === "cancelled" ? undefined : "warn"}
-      icon={<Icon sf="stop.circle" md="stop_circle" size={13} color={item.stopReason === "cancelled" ? colors.secondaryLabel : colors.waiting} />}
+      // Only an error is red; a stop, a cut-off or a refusal is news, not something waiting on the user.
+      tone={item.stopReason === "error" ? "danger" : undefined}
+      icon={<Icon sf="stop.circle" md="stop_circle" size={13} color={item.stopReason === "error" ? colors.danger : colors.secondaryLabel} />}
       text={text}
     />
   );
@@ -573,7 +572,8 @@ export const PermissionResult = memo(function PermissionResult({ item }: { item:
         sf={allowed ? "checkmark.shield.fill" : "xmark.shield.fill"}
         md={allowed ? "verified_user" : "gpp_bad"}
         size={14}
-        color={allowed ? colors.ok : colors.danger}
+        // A refusal is the user's choice, not a failure: grey, like the 拒绝 button that made it.
+        color={allowed ? colors.ok : colors.secondaryLabel}
       />
       <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
         {allowed ? "已允许" : "已拒绝"} · {item.title}

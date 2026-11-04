@@ -10,7 +10,7 @@ import { terminalState } from "@/lib/terminals";
 import { colors } from "@/theme/colors";
 import { Icon } from "./icon";
 import { ListRow, type RowPosition } from "./session-row";
-import { LiveDot } from "./status";
+import { StatusDot } from "./status";
 
 export function openTerminal(id: string) {
   router.push({ pathname: "/terminal/[id]", params: { id } });
@@ -35,7 +35,6 @@ function confirmDeleteTerminal(terminal: TerminalInfo, close: () => void) {
 /** A terminal's icon, sized like an agent tile: a console square. An ended one keeps its tile and greys its prompt. */
 export function TerminalTile({ size = 20, dimmed = false, busy = false }: { size?: number; dimmed?: boolean; busy?: boolean }) {
   const dark = useColorScheme() === "dark";
-  const dot = Math.max(6, Math.round(size * 0.22));
   return (
     <View style={{ width: size, height: size }}>
       <View
@@ -53,8 +52,8 @@ export function TerminalTile({ size = 20, dimmed = false, busy = false }: { size
         <Icon sf="chevron.right" md="chevron_right" size={size * 0.56} color={dimmed ? "#8b8d98" : "#7fddb4"} weight="bold" />
       </View>
       {busy ? (
-        <View style={{ position: "absolute", right: -4, bottom: -4, padding: 1.5, borderRadius: dot, backgroundColor: colors.card }}>
-          <LiveDot size={dot} />
+        <View style={{ position: "absolute", right: -4, bottom: -4, padding: 1.5, borderRadius: 6, backgroundColor: colors.card }}>
+          <StatusDot />
         </View>
       ) : null}
     </View>

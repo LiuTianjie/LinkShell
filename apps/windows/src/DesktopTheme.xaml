@@ -3,11 +3,14 @@
   <SolidColorBrush x:Key="Sidebar" Color="#0B0C0F"/>
   <SolidColorBrush x:Key="Primary" Color="#F0F1F3"/>
   <SolidColorBrush x:Key="Secondary" Color="#A8ADB5"/>
-  <SolidColorBrush x:Key="Accent" Color="#6872E5"/>
+  <!-- Dark values from apps/client/src/theme/brand-colors.json (the installer is dark only): Accent
+       for focus and words, AccentFill under white, which the paler Accent can't carry. -->
+  <SolidColorBrush x:Key="Accent" Color="#8D9BFF"/>
+  <SolidColorBrush x:Key="AccentFill" Color="#5263E8"/>
   <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF"/>
   <SolidColorBrush x:Key="Line" Color="#24262A"/>
   <SolidColorBrush x:Key="Selection" Color="#1B1D21"/>
-  <SolidColorBrush x:Key="Warning" Color="#F3B66B"/>
+  <SolidColorBrush x:Key="Danger" Color="#FF7B72"/>
   <Style TargetType="TextBlock">
     <Setter Property="Foreground" Value="{DynamicResource Primary}"/>
     <Setter Property="TextWrapping" Value="Wrap"/>
@@ -57,7 +60,7 @@
         </Border>
       </Grid>
       <ControlTemplate.Triggers>
-        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource Accent}"/><Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource OnAccent}"/><Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentFill}"/><Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource OnAccent}"/><Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/></Trigger>
         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource Primary}"/><Setter TargetName="Track" Property="BorderThickness" Value="1"/></Trigger>
         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
       </ControlTemplate.Triggers>

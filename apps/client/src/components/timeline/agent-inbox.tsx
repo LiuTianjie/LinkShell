@@ -7,7 +7,7 @@ import { Markdown } from "@/components/markdown";
 import { useClient } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "../icon";
 import { useTimelineSession } from "./context";
 
@@ -20,10 +20,8 @@ export function AgentInbox({ message }: { message: AgentInboxMessage }) {
   // Another session's message names it by the app's own id (the Claude app's local_…): its title now, and a way there.
   const sender = useClient((state) => message.sessionId ? Object.values(state.sessions).find((session) => session.appId === message.sessionId) : undefined);
   const label = inboxLabel(message, sender?.title || undefined);
-  const tint = message.color === "green" ? colors.ok : message.color === "red" ? colors.danger
-    : message.color === "yellow" || message.color === "orange" ? colors.waiting : colors.accent;
   return (
-    <View style={{ backgroundColor: colors.inset, borderRadius: 16, borderCurve: "continuous", padding: 14, gap: 10 }}>
+    <View style={{ backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", padding: 14, gap: 10 }}>
       <Pressable
         onPress={() => { haptics.selection(); setExpanded((value) => !value); }}
         accessibilityRole="button"
@@ -32,7 +30,8 @@ export function AgentInbox({ message }: { message: AgentInboxMessage }) {
         style={{ gap: 8, minHeight: 44, justifyContent: "center" }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Icon sf="bubble.left.fill" md="chat_bubble" size={14} color={tint} />
+          {/* Grey: a teammate's own colour, mapped onto green / amber / red, read as a state it isn't. */}
+          <Icon sf="bubble.left.fill" md="chat_bubble" size={14} color={colors.secondaryLabel} />
           <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel, fontWeight: "600" }]}>{label}</Text>
           <Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={12} color={colors.tertiaryLabel} />
         </View>

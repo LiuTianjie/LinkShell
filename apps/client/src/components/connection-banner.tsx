@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
 
 /** Shown while the host is unreachable; tapping opens the connection sheet. */
@@ -16,7 +16,7 @@ export function ConnectionBanner() {
   const outdated = useClient((state) => !!state.machine && (state.machine.protocol ?? 0) < HOST_PROTOCOL);
   if (status === "online" && outdated) {
     return (
-      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 20, borderCurve: "continuous", backgroundColor: colors.card }}>
+      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card }}>
         <Icon sf="arrow.down.circle" md="system_update" size={18} color={colors.secondaryLabel} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑上的 LinkShell 比 App 旧</Text>
@@ -32,7 +32,7 @@ export function ConnectionBanner() {
         onPress={() => router.push("/unlock")}
         accessibilityRole="button"
         accessibilityHint="输入访问密码"
-        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 20, borderCurve: "continuous", backgroundColor: colors.card }}
+        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card }}
       >
         <Icon sf="lock.fill" md="lock" size={18} color={colors.secondaryLabel} />
         <View style={{ flex: 1, gap: 2 }}>
@@ -56,15 +56,16 @@ export function ConnectionBanner() {
         alignItems: "center",
         gap: 12,
         padding: 14,
-        borderRadius: 20,
+        borderRadius: radius.card,
         borderCurve: "continuous",
-        backgroundColor: connecting ? colors.card : colors.waitingSoft,
+        backgroundColor: colors.card,
       }}
     >
+      {/* A connection that fails is an error (danger), not something waiting on the user (amber). */}
       {connecting ? (
         <ActivityIndicator color={colors.secondaryLabel} />
       ) : (
-        <Icon sf="wifi.exclamationmark" md="wifi_off" size={20} color={colors.waiting} />
+        <Icon sf="wifi.exclamationmark" md="wifi_off" size={20} color={colors.danger} />
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>

@@ -1,18 +1,18 @@
 import { stateLabel } from "./common";
 
+// The state table in docs/design/visual-system.md: colour only for running, waiting on the person and
+// errors. Idle and finished are the normal state and stay grey, as do offline and unknown.
+// Connection health is its own scale, where reachable is the one green.
 const tone = (state: string) =>
   ["error", "failed"].includes(state)
     ? "var(--danger)"
-    : ["waiting", "pending", "blocked"].includes(state)
-      ? "var(--warning)"
+    : ["waiting", "blocked"].includes(state)
+      ? "var(--waiting)"
       : ["running", "active"].includes(state)
         ? "var(--running)"
-        : ["idle", "completed", "complete"].includes(state)
-          ? "var(--idle, var(--success))"
-          // Reachable, signed in: the one state that is good news is green (a finished session is not).
-          : state === "online"
-            ? "var(--success)"
-            : "var(--tertiaryLabel)";
+        : state === "online"
+          ? "var(--ok)"
+          : "var(--idle)";
 
 /** Dot + text status; the colour comes only from semantic variables. */
 export function StatusText({
@@ -25,7 +25,7 @@ export function StatusText({
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-[var(--secondaryLabel)]">
       <span
-        className="size-1.5 shrink-0 rounded-full"
+        className="size-[8px] shrink-0 rounded-full"
         style={{ background: tone(state) }}
       />
       {label ?? stateLabel(state)}

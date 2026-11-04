@@ -3,48 +3,47 @@
    conversation. Only the desktop shell gets these rules. */
 
 /* ── Primitives, at Codex's values ───────────────────────────────────────── */
-/* Tooltips are inverted, as in Codex: ink with light text in the light theme, a raised grey in
-   the dark one; 13 px at a light weight, a soft corner and a long soft shadow. */
-html[data-desktop] [data-slot="tooltip-content"] { padding: 5px 12px; border: 0; border-radius: 12px; background: #1a1c1f; box-shadow: 0 8px 18px rgb(15 23 42 / .2); color: #fff; font-size: 13px; font-weight: 430; letter-spacing: -.15px; line-height: 18px; }
-html[data-desktop][data-theme="dark"] [data-slot="tooltip-content"] { background: #303030; box-shadow: 0 0 0 .5px rgb(255 255 255 / .08), 0 8px 18px rgb(0 0 0 / .4); color: #ececec; }
-html[data-desktop] [data-slot="tooltip-content"] kbd { height: 16px; margin-left: 6px; padding: 0 4px; border-radius: 4px; background: rgb(255 255 255 / .16); color: inherit; font-size: 11px; }
+/* Tooltips are inverted: ink with the page's colour as text in the light theme, a raised grey in
+   the dark one; 13 px, a control's 6 px corner and the floating shadow. */
+html[data-desktop] [data-slot="tooltip-content"] { padding: 5px 10px; border: 0; border-radius: var(--radius-control); background: var(--label); box-shadow: 0 8px 18px rgb(15 23 42 / .2); color: var(--plain); font-size: 13px; font-weight: 400; letter-spacing: -.15px; line-height: 18px; }
+html[data-desktop][data-theme="dark"] [data-slot="tooltip-content"] { background: var(--cardRaised); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 18px rgb(0 0 0 / .4); color: var(--label); }
+html[data-desktop] [data-slot="tooltip-content"] kbd { height: 16px; margin-left: 6px; padding: 0 4px; border-radius: var(--radius-small); background: color-mix(in oklab, currentColor 16%, transparent); color: inherit; font-size: 11px; }
 html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
-/* Switches: 32 × 20, the thumb 2 px in. Off is a dim track of the ink in either theme, so on (blue) reads at once. */
+/* Switches: 32 × 20, the thumb 2 px in. Off is a dim track of the ink in either theme, so on (the accent fill) reads at once. */
 html[data-desktop] [data-slot="switch"] { width: 32px; height: 20px; padding: 0; border: 0; background: color-mix(in oklab, var(--label) 14%, transparent); transition: background 150ms cubic-bezier(.23, 1, .32, 1); }
 html[data-desktop] [data-slot="switch"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 20%, transparent); }
-html[data-desktop] [data-slot="switch"][data-state="checked"] { background: #339cff; }
-html[data-desktop] [data-slot="switch-thumb"] { translate: none; width: 16px; height: 16px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
+html[data-desktop] [data-slot="switch"][data-state="checked"] { background: var(--accentFill); }
+html[data-desktop] [data-slot="switch-thumb"] { translate: none; width: 16px; height: 16px; background: var(--primaryForeground); box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
 html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transform: translateX(2px); }
-html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: #fff; transform: translateX(14px); }
-/* Segmented controls: a grey track 2 px deep, the chosen option a white thumb that casts a little. */
-html[data-desktop] [data-slot="tabs-list"] { --segment-track: #ededed; --segment-thumb: #fff; }
-html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: color-mix(in srgb, var(--label) 6%, transparent); --segment-thumb: #303030; }
-/* Badges: 4 px corners, semibold, 18 px tall. */
-html[data-desktop] [data-slot="badge"] { height: 18px; padding-inline: 6px; border-radius: 4px; font-size: 11.5px; font-weight: 590; }
+html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: var(--primaryForeground); transform: translateX(14px); }
+/* Segmented controls: a grey track 2 px deep, the chosen option a lighter step with a hairline. */
+html[data-desktop] [data-slot="tabs-list"] { --segment-track: color-mix(in oklab, var(--label) 7%, transparent); --segment-thumb: var(--plain); }
+html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track: color-mix(in oklab, var(--label) 6%, transparent); --segment-thumb: color-mix(in oklab, var(--label) 14%, var(--plain)); }
 
 /* ── Dialogs ─────────────────────────────────────────────────────────────── */
 html[data-desktop] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) { background: rgb(0 0 0 / .13); backdrop-filter: none; }
 html[data-desktop][data-theme="dark"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) { background: rgb(0 0 0 / .4); }
-/* Dialogs, as Codex's: 520 px, 30 px corners, the raised surface at 90 % with a blur, a half-pixel
-   ring; an 18 px title over a 14 px line; 20 px of room. */
-html[data-desktop] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { gap: 16px; padding: 20px; border: 0; border-radius: 30px; background: color-mix(in oklab, #fff 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); color: var(--label); font-size: 13px; }
-html[data-desktop][data-theme="dark"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { background: color-mix(in oklab, #282828 94%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 20px 40px -8px rgb(0 0 0 / .6); }
+/* Dialogs: 520 px, 12 px corners, the page's surface at 92 % with a blur, a half-pixel ring and
+   the floating shadow; a 16 px title over 14 px text; 20 px of room. */
+html[data-desktop] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { gap: 16px; padding: 20px; border: 0; border-radius: var(--radius-panel); background: color-mix(in oklab, var(--plain) 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); color: var(--label); font-size: 14px; }
+html[data-desktop][data-theme="dark"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { background: color-mix(in oklab, var(--cardRaised) 94%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 20px 40px -8px rgb(0 0 0 / .6); }
 /* A confirmation: 400 px, so its sentence fits on two lines (the base caps it at 320). */
-html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)); max-width: none; border-radius: 25px; }
+html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)); max-width: none; }
 html[data-desktop] [data-slot="dialog-content"]:not(.command-center) { width: min(520px, calc(100vw - 48px)); max-width: none; }
 html[data-desktop] [data-slot="dialog-content"].sm\:max-w-5xl { width: min(980px, calc(100vw - 48px)); }
 html[data-desktop] :is([data-slot="dialog-header"], [data-slot="alert-dialog-header"]) { gap: 2px; padding-right: 32px; text-align: left; place-items: start; }
-html[data-desktop] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"]) { font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 28px; }
+html[data-desktop] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"]) { font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
 html[data-desktop] :is([data-slot="dialog-description"], [data-slot="alert-dialog-description"]) { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; line-height: 20px; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"],
-html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 14px; right: 14px; display: grid; place-items: center; width: 36px; height: 36px; min-width: 0; border-radius: 50%; color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
+html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 18px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; min-width: 0; border-radius: var(--radius-control); color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"]:hover { background: var(--fill); color: var(--label); }
-/* Footers are a row of pills at the bottom right, not a grey band. */
+/* Footers are a row of buttons at the bottom right, not a grey band. */
 html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; flex-direction: row; justify-content: flex-end; gap: 12px; }
-/* Codex's dialog buttons: at least 36 px, 16 px in, 14 px text, round ends; 8 px between. */
+/* Dialog buttons are the default 32 px buttons, 12 px in, 6 px corners; 8 px between. Long
+   labels may wrap, so the height is a minimum. */
 html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { gap: 8px; }
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"], [data-slot="dialog-content"] .dialog-actions) [data-button] { height: auto; min-height: 36px; padding-inline: 16px; border-radius: 999px; font-size: 14px; }
-html[data-desktop] .modal-subtitle { margin-top: -10px; color: var(--secondaryLabel); font-size: 13px; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"], [data-slot="dialog-content"] .dialog-actions) [data-button] { height: auto; min-height: 32px; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
+html[data-desktop] .modal-subtitle { margin-top: -10px; color: var(--secondaryLabel); font-size: 14px; }
 /* Inside a dialog, a button set on its own line keeps its own width, aligned to the end. */
 html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], form, section) > [data-button],
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-button] { align-self: flex-end; width: auto; min-width: 96px; }
@@ -55,23 +54,23 @@ html[data-desktop] .new-session-form-footer { display: flex; justify-content: fl
 html[data-desktop] [data-slot="alert"] { gap: 2px 10px; padding: 12px 14px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); color: var(--label); }
 html[data-desktop] [data-slot="alert"] > svg { width: 16px; height: 16px; margin-top: 2px; color: var(--tertiaryLabel); }
 html[data-desktop] [data-slot="alert-title"] { font-size: 13px; font-weight: 600; line-height: 20px; }
-html[data-desktop] [data-slot="alert-description"] { color: var(--secondaryLabel); font-size: 12.5px; line-height: 19px; }
+html[data-desktop] [data-slot="alert-description"] { color: var(--secondaryLabel); font-size: 13px; line-height: 19px; }
 html[data-desktop] [data-slot="alert-description"] [data-button] { margin-top: 8px; }
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] { border-color: transparent; background: var(--dangerSoft); }
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] > svg,
 html[data-desktop] [data-slot="alert"][data-variant="destructive"] [data-slot="alert-title"] { color: var(--danger); }
 html[data-desktop] [data-slot="alert"][data-variant="warning"] { border-color: transparent; background: var(--waitingSoft); }
 html[data-desktop] [data-slot="alert"][data-variant="warning"] > svg,
-html[data-desktop] [data-slot="alert"][data-variant="warning"] [data-slot="alert-title"] { color: var(--warning); }
-html[data-desktop] [data-slot="alert"][data-variant="success"] > svg { color: var(--running); }
+html[data-desktop] [data-slot="alert"][data-variant="warning"] [data-slot="alert-title"] { color: var(--waiting); }
+html[data-desktop] [data-slot="alert"][data-variant="success"] > svg { color: var(--ok); }
 html[data-desktop] .form-error,
-html[data-desktop] .danger-text { color: var(--danger); font-size: 12.5px; }
+html[data-desktop] .danger-text { color: var(--danger); font-size: 12px; }
 
 /* ── Segmented tabs (default variant) ────────────────────────────────────── */
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) { height: 30px; padding: 2px; gap: 2px; border: 0; border-radius: 10px; background: var(--segment-track); }
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { height: 26px; padding-inline: 12px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background 150ms cubic-bezier(.23, 1, .32, 1), color 150ms cubic-bezier(.23, 1, .32, 1); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) { height: 28px; padding: 2px; gap: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 12px; border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background 150ms cubic-bezier(.23, 1, .32, 1), color 150ms cubic-bezier(.23, 1, .32, 1); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 1px 4px -1px rgb(0 0 0 / .2); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] svg { width: var(--icon-size); height: var(--icon-size); }
 
 /* ── Forms ───────────────────────────────────────────────────────────────── */
@@ -81,19 +80,19 @@ html[data-desktop] :is([data-slot="field-label"], [data-slot="label"]) { color: 
 html[data-desktop] :is([data-slot="field-label"], [data-slot="label"]) .muted { color: var(--tertiaryLabel); font-weight: 400; }
 html[data-desktop] [data-slot="field-description"],
 html[data-desktop] .field-hint { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
-html[data-desktop] :is(input[data-slot="input"], [data-slot="select-trigger"], select:not([class*="sr-only"])) { height: 34px; padding-inline: 12px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; color: var(--label); font-size: 13px; }
+html[data-desktop] :is(input[data-slot="input"], [data-slot="select-trigger"], select:not([class*="sr-only"])) { height: 32px; padding-inline: 12px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; color: var(--label); font-size: 13px; }
 html[data-desktop] [data-slot="textarea"] { min-height: 84px; padding: 10px 12px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; color: var(--label); font-size: 13px; line-height: 1.6; }
-html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], select):focus-visible { border-color: var(--tertiaryLabel); box-shadow: none; outline: none; }
+html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], select):focus-visible { border-color: var(--focus); box-shadow: none; outline: none; }
 html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"])::placeholder { color: var(--placeholder); }
 html[data-desktop] [data-slot="input-group"]:not(.composer) { border-color: var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; }
 html[data-desktop] [data-slot="input-group"]:not(.composer) input[data-slot="input-group-control"] { font-size: 13px; }
-html[data-desktop] [data-slot="input-group"]:not(.composer):focus-within { border-color: var(--tertiaryLabel); box-shadow: none; }
-html[data-desktop] :is(.code-input, .resource-path, .terminal-directory-input) { font-family: var(--mono); font-size: 12.5px; }
-/* Checkboxes and radios: a 16 pt mark, ink when on. */
-html[data-desktop] [data-slot="checkbox"] { width: 16px; height: 16px; border: 1px solid var(--separatorStrong); border-radius: 5px; background: var(--card); box-shadow: none; }
-html[data-desktop] [data-slot="checkbox"][data-state="checked"] { border-color: var(--accent); background: var(--accent); color: var(--primaryForeground); }
+html[data-desktop] [data-slot="input-group"]:not(.composer):focus-within { border-color: var(--focus); box-shadow: none; }
+html[data-desktop] :is(.code-input, .resource-path, .terminal-directory-input) { font-family: var(--mono); font-size: 12px; }
+/* Checkboxes and radios: a 16 pt mark, the accent fill (white on it) when on. */
+html[data-desktop] [data-slot="checkbox"] { width: 16px; height: 16px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-small); background: var(--card); box-shadow: none; }
+html[data-desktop] [data-slot="checkbox"][data-state="checked"] { border-color: var(--accentFill); background: var(--accentFill); color: var(--primaryForeground); }
 html[data-desktop] [data-slot="radio-group-item"] { width: 16px; height: 16px; border: 1px solid var(--separatorStrong); background: var(--card); box-shadow: none; }
-html[data-desktop] [data-slot="radio-group-item"][data-state="checked"] { border-color: var(--accent); background: var(--accent); }
+html[data-desktop] [data-slot="radio-group-item"][data-state="checked"] { border-color: var(--accentFill); background: var(--accentFill); }
 html[data-desktop] .choice-option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border: 1px solid var(--separator); border-radius: var(--radius-control); background: var(--card); font-size: 13px; font-weight: 400; cursor: default; }
 html[data-desktop] .choice-option:has([data-state="checked"]) { border-color: var(--separatorStrong); background: var(--sidebarAccent); }
 html[data-desktop] .choice-option + .choice-option { margin-top: 6px; }
@@ -102,20 +101,19 @@ html[data-desktop] [data-slot="separator"] { background: var(--separator); }
 /* ── Small primitives ────────────────────────────────────────────────────── */
 html[data-desktop] [data-slot="badge"][data-variant="default"] { background: var(--sidebarAccent); color: var(--label); }
 html[data-desktop] [data-slot="badge"][data-variant="outline"] { border-color: var(--separatorStrong); background: transparent; color: var(--secondaryLabel); }
-html[data-desktop] [data-slot="skeleton"] { border-radius: 6px; background: var(--fill); }
 html[data-desktop] [data-slot="table"] { font-size: 13px; }
 html[data-desktop] [data-slot="table-head"] { height: 34px; color: var(--tertiaryLabel); font-size: 12px; font-weight: 500; }
 html[data-desktop] [data-slot="table-row"] { border-color: var(--separator); }
 html[data-desktop] [data-slot="table-row"]:hover { background: var(--fill); }
 html[data-desktop] [data-slot="table-cell"] { font-variant-numeric: tabular-nums; }
 html[data-desktop] [data-slot="popover-content"] { padding: 6px; }
-html[data-desktop] [data-slot="command"]:not(.command-center [data-slot="command"]) { border-radius: 12px !important; background: transparent; }
-html[data-desktop] [data-slot="command-item"] { min-height: 32px; border-radius: 7px; font-size: 13px; }
+html[data-desktop] [data-slot="command"]:not(.command-center [data-slot="command"]) { border-radius: var(--radius-card) !important; background: transparent; }
+html[data-desktop] [data-slot="command-item"] { min-height: 32px; border-radius: var(--radius-control); font-size: 13px; }
 html[data-desktop] [data-slot="command-item"][data-selected="true"] { background: var(--sidebarAccent); }
 html[data-desktop] [data-slot="command-input-wrapper"] [data-slot="input-group"] { border-color: var(--separator) !important; background: var(--card) !important; }
 html[data-desktop] [data-slot="sheet-content"] { border-color: var(--separator); background: var(--plain); box-shadow: var(--float-shadow); }
 html[data-desktop] details > summary { cursor: default; }
-/* A primary repeated down a list is no longer the one primary: each row's action is a hairline pill. */
+/* A primary repeated down a list is no longer the one primary: each row's action is a hairline button. */
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
 
@@ -129,45 +127,44 @@ html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] .fiel
 
 /* ── Inspector panels ────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .side-panel-content > .muted:first-child,
-html[data-desktop] .desktop-main .side-panel-content > p.muted { color: var(--tertiaryLabel); font-size: 12.5px; }
+html[data-desktop] .desktop-main .side-panel-content > p.muted { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .side-panel-content h3 { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
 html[data-desktop] .desktop-main .settings-panel { gap: 16px; }
 html[data-desktop] .desktop-main .settings-panel > * + * { padding-top: 16px; border-top: 1px solid var(--separator); }
 /* Tasks, as Codex's background terminals: one grouped list, a row per task — the title, its state
-   as a dot and a word at the right, the command under it in mono — a stop pill beside a running
+   as a dot and a word at the right, the command under it in mono — a stop button beside a running
    one, and its output opening under the row in a well. No cards inside cards. */
 html[data-desktop] .desktop-main .tasks-panel { display: flex; flex-direction: column; gap: 12px; }
-html[data-desktop] .desktop-main .tasks-panel .activity-list { display: flex; flex-direction: column; border-radius: 16px; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] .desktop-main .tasks-panel .activity-list { display: flex; flex-direction: column; border-radius: var(--radius-card); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
 html[data-desktop] .desktop-main .tasks-panel .activity-list:empty { display: none; }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 4px; border: 0; border-radius: 0; background: transparent; }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article + article::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article:is(:hover, [data-selected]) { border: 0; background: transparent; }
-html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title state" "detail detail"; align-items: center; gap: 2px 12px; min-height: 0; padding: 8px 12px; border-radius: 12px; color: var(--label); text-align: left; }
+html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title state" "detail detail"; align-items: center; gap: 2px 12px; min-height: 0; padding: 8px 12px; border-radius: var(--radius-row); color: var(--label); text-align: left; }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child:hover { background: var(--fill); }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child > strong { grid-area: title; overflow: hidden; font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child > small { grid-area: detail; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article > button:first-child > [data-slot="badge"] { grid-area: state; gap: 6px; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
-/* The state's dot carries its colour (blue under way, orange waiting, red failed, green done); the word stays quiet. */
-html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"] .status-dot { width: 7px; height: 7px; background: var(--tertiaryLabel); }
+/* The state's dot carries its colour (under way, waiting, failed); done is the normal state and stays grey. */
+html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"] .status-dot { width: 8px; height: 8px; background: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"][data-variant="info"] .status-dot { background: var(--running); }
-html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"][data-variant="warning"] .status-dot { background: var(--warning); }
+html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"][data-variant="warning"] .status-dot { background: var(--waiting); }
 html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"][data-variant="destructive"] .status-dot { background: var(--danger); }
-html[data-desktop] .desktop-main .tasks-panel [data-slot="badge"][data-variant="success"] .status-dot { background: var(--success); }
 /* A running task's stop sits at the end of its first line, beside the state; the line leaves it room. */
 html[data-desktop] .desktop-main .tasks-panel .activity-list > article:has(> .task-stop) > button:first-child { padding-right: 80px; }
-html[data-desktop] .desktop-main .tasks-panel .task-stop[data-button] { position: absolute; top: 8px; right: 12px; height: 28px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
-html[data-desktop] .desktop-main .task-output { display: flex; flex-direction: column; margin: 2px 8px 8px; border: 0; border-radius: 12px; background: var(--fill); }
+html[data-desktop] .desktop-main .tasks-panel .task-stop[data-button] { position: absolute; top: 8px; right: 12px; height: 28px; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
+html[data-desktop] .desktop-main .task-output { display: flex; flex-direction: column; margin: 2px 8px 8px; border: 0; border-radius: var(--radius-card); background: var(--fill); }
 html[data-desktop] .desktop-main .task-output .browser-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 4px 0 12px; border: 0; background: transparent; }
 html[data-desktop] .desktop-main .task-output .browser-toolbar strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
 html[data-desktop] .desktop-main .task-output .browser-toolbar [data-button] { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .task-output pre { max-height: 320px; margin: 0; padding: 0 12px 12px; overflow: auto; border: 0; background: transparent; color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
 html[data-desktop] .desktop-main .task-output .task-output-earlier { align-self: flex-start; margin: 0 0 4px 6px; color: var(--secondaryLabel); }
-html[data-desktop] .desktop-main .service-status { border: 1px solid var(--separator); border-radius: 10px; background: var(--card); font-size: 12px; }
+html[data-desktop] .desktop-main .service-status { border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--card); font-size: 12px; }
 html[data-desktop] .desktop-main :is(.workflow-panel, .workflow-phase, .workflow-agent) { border-color: var(--separator); border-radius: var(--radius-well); background: var(--card); }
 
 /* ── Terminals ───────────────────────────────────────────────────────────── */
-/* Terminal tabs as Codex's tab strip: 28 px, 10 px corners, the open one a soft tint. */
-html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 10px !important; border-radius: 10px; color: var(--secondaryLabel); font-size: 13px; }
+/* Terminal tabs as a tab strip: 28 px, a control's 6 px corners, the open one a soft tint. */
+html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"] { height: 28px !important; padding-inline: 10px !important; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .terminal-tab-list [data-slot="tabs-trigger"][data-state="active"] { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-main .terminal-tab-number { color: var(--tertiaryLabel); font-family: var(--mono); font-size: 11px; }
 /* The terminal is the panel's own surface (desktop.css): no frame or darker block around it. */
@@ -175,20 +172,19 @@ html[data-desktop] .desktop-main :is(.terminal-live, .terminal-workspace .xterm-
 html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-live.terminal-fullscreen .xterm-mount { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-controls { gap: 4px; }
-html[data-desktop] .desktop-main .terminal-controls [data-button] { height: 28px; min-width: 28px; border-radius: 10px; font-family: var(--mono); font-size: 12px; }
+html[data-desktop] .desktop-main .terminal-controls [data-button] { height: 28px; min-width: 28px; border-radius: var(--radius-control); font-family: var(--mono); font-size: 12px; }
 
 /* ── Computers and agents ────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .computers-section .list-row-static [data-button][data-variant="ghost"] { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .computers-section .list-row-static > svg { color: var(--tertiaryLabel); }
 
 /* ── Remote desktop ──────────────────────────────────────────────────────── */
-html[data-desktop] .desktop-main .screen-row [data-slot="badge"] { height: 18px; padding-inline: 7px; }
 html[data-desktop] .desktop-main .screen-row :is(.screen-signal, .screen-metrics) { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .screen-toolbar { gap: 6px; border-bottom: 1px solid var(--separator); }
 html[data-desktop] .desktop-main .screen-start { gap: 10px; padding: 48px 24px; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .screen-start h3 { color: var(--label); font-size: 16px; font-weight: 600; }
 html[data-desktop] .desktop-main .screen-start-actions { gap: 8px; }
-html[data-desktop] .desktop-main .screen-connecting-steps { color: var(--tertiaryLabel); font-size: 12.5px; }
+html[data-desktop] .desktop-main .screen-connecting-steps { color: var(--tertiaryLabel); font-size: 12px; }
 
 /* ── Focus ───────────────────────────────────────────────────────────────── */
 /* One focus mark everywhere: a 2 pt ring that follows the control's own shape. Text fields show
@@ -203,9 +199,5 @@ html[data-desktop] [data-slot="dialog-content"] > :is([data-button]:not([data-sl
 /* An empty panel says so in quiet words in its middle, as every other empty state: no frame. */
 html[data-desktop] .desktop-main .side-panel-content > p:only-child { margin: auto; max-width: 280px; padding: 40px 16px; color: var(--tertiaryLabel); font-size: 13px; text-align: center; line-height: 1.55; }
 
-/* Skeletons, as Codex's: a 10 % tint with a band of light crossing it every three seconds. */
-html[data-desktop] [data-slot="skeleton"] { border-radius: 6px; background: linear-gradient(90deg, color-mix(in oklab, var(--label) 8%, transparent) 0 40%, color-mix(in oklab, var(--label) 14%, transparent) 50%, color-mix(in oklab, var(--label) 8%, transparent) 60% 100%) 0 0 / 300% 100%; animation: skeleton-sweep 3s linear infinite; }
-@keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { html[data-desktop] [data-slot="skeleton"] { animation: none; } }
 html[data-desktop] .management-usage-skeleton { display: flex; flex-direction: column; gap: 16px; }
 html[data-desktop] .management-usage-skeleton .management-fact { gap: 10px; }

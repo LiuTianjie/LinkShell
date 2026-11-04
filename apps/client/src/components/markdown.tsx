@@ -3,7 +3,7 @@ import { Platform, useColorScheme } from "react-native";
 import { openLink, useLinkBase } from "@/lib/links";
 import { EnrichedMarkdownText, type MarkdownStyle, type TextContextMenuItem, type TextSelectionMenuConfig } from "react-native-enriched-markdown";
 import { palette, type Palette } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 
 function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): MarkdownStyle {
   const body =
@@ -12,9 +12,9 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
       : { fontSize: type.chat.fontSize, lineHeight: type.chat.lineHeight, color: p.label };
   return {
     paragraph: { ...body, marginBottom: 10 },
-    h1: { ...body, fontSize: 22, lineHeight: 28, fontWeight: "700", marginTop: 6, marginBottom: 8 },
-    h2: { ...body, fontSize: 19, lineHeight: 25, fontWeight: "700", marginTop: 6, marginBottom: 6 },
-    h3: { ...body, fontSize: 17, lineHeight: 23, fontWeight: "600", marginTop: 4, marginBottom: 4 },
+    h1: { ...body, ...type.title, marginTop: 6, marginBottom: 8 },
+    h2: { ...body, ...type.title3, marginTop: 6, marginBottom: 6 },
+    h3: { ...body, ...type.headline, marginTop: 4, marginBottom: 4 },
     h4: { ...body, fontWeight: "600", marginBottom: 4 },
     h5: { ...body, fontWeight: "600", marginBottom: 4 },
     h6: { ...body, fontWeight: "600", color: p.secondaryLabel, marginBottom: 4 },
@@ -38,7 +38,7 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
       backgroundColor: p.code,
       borderColor: p.codeBorder,
       borderWidth: 1,
-      borderRadius: 14,
+      borderRadius: radius.control,
       padding: 12,
       marginBottom: 12,
       syntaxColors: dark
@@ -48,10 +48,10 @@ function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): 
     link: { color: p.accent, underline: false },
     strong: { color: variant === "thought" ? p.secondaryLabel : p.label },
     table: {
-      fontSize: 14,
+      fontSize: type.subhead.fontSize,
       color: p.label,
       borderColor: p.separator,
-      borderRadius: 12,
+      borderRadius: radius.control,
       headerBackgroundColor: p.tableHeader,
       // The library's defaults are light-only (white rows, near-black header text).
       headerTextColor: p.label,

@@ -3,7 +3,7 @@ import { Text, TextInput } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Glass } from "./glass";
 import { Icon, type IconProps } from "./icon";
 import { TopFade } from "./top-fade";
@@ -58,7 +58,7 @@ export function PageHeader({ title, actions = [], children, compact = false, nat
   return (
     <View style={{ paddingTop: compact ? 18 : insets.top + 12, gap: compact ? 10 : 6 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 4 }}>
-        <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, fontSize: compact ? 28 : 34, lineHeight: compact ? 35 : 41, fontWeight: "700", color: colors.label }}>
+        <Text accessibilityRole="header" numberOfLines={1} style={[compact ? type.title1 : type.largeTitle, { flex: 1, color: colors.label }]}>
           {title}
         </Text>
         {actions.map((action) => (
@@ -83,7 +83,7 @@ export function PageSearch({ value, onChangeText, placeholder, action }: { value
         gap: 8,
         minHeight: Math.max(44, Math.ceil(20 * fontScale) + 14),
         paddingHorizontal: 11,
-        borderRadius: 12,
+        borderRadius: radius.control,
         borderCurve: "continuous",
         backgroundColor: colors.fillStrong,
       }}
@@ -98,7 +98,7 @@ export function PageSearch({ value, onChangeText, placeholder, action }: { value
         autoCorrect={false}
         clearButtonMode="while-editing"
         returnKeyType="search"
-        style={[type.body, { flex: 1, fontSize: 16, color: colors.label, paddingVertical: 0 }]}
+        style={[type.callout, { flex: 1, color: colors.label, paddingVertical: 0 }]}
       />
     </View>
     {action ? <PageActionButton action={action} /> : null}

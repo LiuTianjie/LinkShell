@@ -3,7 +3,7 @@ import { Text } from "@/components/fixed-text";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon, type IconProps } from "./icon";
-import { PressableScale } from "./pressable-scale";
+import { PressableFeedback } from "./pressable-feedback";
 
 type Variant = "primary" | "tonal" | "plain" | "destructive" | "warning";
 type Size = "small" | "medium" | "large";
@@ -14,14 +14,14 @@ function fills(): Record<Variant, { background: ColorValue; foreground: ColorVal
     tonal: { background: colors.fill, foreground: colors.label },
     plain: { background: "transparent", foreground: colors.accent },
     destructive: { background: colors.dangerSoft, foreground: colors.danger },
-    warning: { background: colors.waiting, foreground: "#ffffff" },
+    warning: { background: colors.waitingFill, foreground: colors.onAccent },
   };
 }
 
-const sizes: Record<Size, { height: number; paddingHorizontal: number; font: typeof type.subhead; icon: number; radius: number }> = {
-  small: { height: 32, paddingHorizontal: 12, font: type.footnote, icon: 13, radius: 16 },
-  medium: { height: 40, paddingHorizontal: 16, font: type.subhead, icon: 15, radius: 20 },
-  large: { height: 50, paddingHorizontal: 20, font: type.headline, icon: 17, radius: 25 },
+const sizes: Record<Size, { height: number; paddingHorizontal: number; font: typeof type.subhead; icon: number }> = {
+  small: { height: 32, paddingHorizontal: 12, font: type.footnote, icon: 13 },
+  medium: { height: 40, paddingHorizontal: 16, font: type.subhead, icon: 15 },
+  large: { height: 50, paddingHorizontal: 20, font: type.headline, icon: 17 },
 };
 
 export function Button({
@@ -50,8 +50,10 @@ export function Button({
   const fill = fills()[variant];
   const metrics = sizes[size];
   const inactive = disabled || busy;
+  const height = Math.max(44, metrics.height);
   return (
-    <PressableScale
+    <PressableFeedback
+      feedback="button"
       onPress={onPress}
       disabled={inactive}
       accessibilityRole="button"
@@ -64,10 +66,11 @@ export function Button({
     >
       <View
         style={{
-          minHeight: Math.max(44, metrics.height),
+          minHeight: height,
           paddingHorizontal: metrics.paddingHorizontal,
           paddingVertical: size === "small" ? 6 : size === "large" ? 12 : 8,
-          borderRadius: metrics.radius,
+          // A capsule, as on iOS 26; a title that wraps keeps the same ends.
+          borderRadius: height / 2,
           borderCurve: "continuous",
           backgroundColor: fill.background,
           flexDirection: "row",
@@ -86,6 +89,6 @@ export function Button({
           {title}
         </Text>
       </View>
-    </PressableScale>
+    </PressableFeedback>
   );
 }

@@ -6,8 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useId, useMemo, useState } from "react";
 import {
+  permissionChoices,
   questionAnswerError,
   type PendingPermissionSummary,
+  type PermissionChoice,
   type Question,
   type QuestionAnswer,
 } from "@linkshell/wire";
@@ -99,6 +101,13 @@ export function Permission({
     )
     .find(Boolean);
   const asks = !!permission.questions;
+  // An approval reads the same on every end (docs/design/visual-system.md): the shared Chinese names
+  // in the fixed order 拒绝 → 允许 → 始终允许 → 停止, whatever order and language the agent used.
+  // A question's options are only its ways out, so they keep the question card's own names.
+  const choices: (Omit<PermissionChoice, "role"> & Partial<Pick<PermissionChoice, "role">>)[] = asks
+    ? permission.options.map((option) => ({ option, label: questionOptionName(option) }))
+    : permissionChoices(permission.options);
+  const primary = choices.find((choice) => choice.role === "allow")?.option;
   // A lone question is often the title too (Claude, Codex): say it once, in the heading.
   const repeated =
     permission.questions?.length === 1 &&
@@ -324,11 +333,11 @@ export function Permission({
         </form>
       )}
       <div className="permission-buttons">
-        {permission.options.map((option, index) => (
+        {choices.map(({ option, label }) => (
           <Button
             type="button"
-            // One primary: the first allow is the answer most people give; the rest stay secondary.
-            variant={index === permission.options.findIndex((entry) => entry.kind.startsWith("allow")) ? "default" : "outline"}
+            // One primary, 允许, the answer most people give; 拒绝 is an ordinary answer, not a danger.
+            variant={option === primary ? "default" : "outline"}
             className="h-auto min-h-9 whitespace-normal"
             key={option.optionId}
             disabled={disabled}
@@ -361,7 +370,7 @@ export function Permission({
               });
             }}
           >
-            {asks ? questionOptionName(option) : option.name}
+            {label}
           </Button>
         ))}
         {asks && (

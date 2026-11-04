@@ -57,12 +57,17 @@ const nativeColors = {
   onAccent: "#ffffff",
   accentSoft: brand("accentSoft"),
 
+  // Status colours are LinkShell's own on every platform, not iOS system
+  // orange/green/red: the desktop, web and Watch use the same values, and
+  // they keep 4.5:1 as text on both backgrounds.
   running: brand("running"),
-  waiting: system(Color.ios.systemOrange, "waiting", "#dc7100"),
+  waiting: brand("waiting"),
+  /** Behind white text; dark mode's `waiting` is a text colour, too light under it. */
+  waitingFill: brand("waitingFill"),
   waitingSoft: brand("waitingSoft"),
-  ok: system(Color.ios.systemGreen, "ok", "#0f9560"),
+  ok: brand("ok"),
   okSoft: brand("okSoft"),
-  danger: system(Color.ios.systemRed, "danger", "#dc3d3d"),
+  danger: brand("danger"),
   dangerSoft: brand("dangerSoft"),
 
   userBubble: brand("userBubble"),
@@ -94,7 +99,7 @@ export const palette = {
     label: "#101014",
     secondaryLabel: "#5e5f6a",
     tertiaryLabel: "#9394a0",
-    accent: "#4a6cf7",
+    accent: "#4c5fd5",
     code: "#f1f1f6",
     codeBorder: "rgba(16,16,28,0.08)",
     codeText: "#2a2b35",
@@ -108,7 +113,7 @@ export const palette = {
     label: "#f3f3f6",
     secondaryLabel: "#a6a7b3",
     tertiaryLabel: "#70717f",
-    accent: "#7d95ff",
+    accent: "#8d9bff",
     code: "#1c1c22",
     codeBorder: "rgba(255,255,255,0.08)",
     codeText: "#e4e4ec",

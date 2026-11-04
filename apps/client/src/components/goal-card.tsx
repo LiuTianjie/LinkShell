@@ -4,13 +4,13 @@ import { Pressable, View } from "react-native";
 import { Text } from "./fixed-text";
 import { Icon } from "./icon";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { compactNumber } from "@/lib/format";
 
 export const goalStatus: Record<SessionGoal["status"], string> = { active: "进行中", paused: "已暂停", blocked: "需要处理", usageLimited: "用量受限", budgetLimited: "预算已用完", complete: "已完成" };
 
 export function GoalCard({ sessionId, goal }: { sessionId: string; goal: SessionGoal }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`目标：${goal.objective}，${goalStatus[goal.status]}`} onPress={() => router.push({ pathname: "/session/[id]/goal", params: { id: sessionId } })} style={{ borderRadius: 18, padding: 12, gap: 6, backgroundColor: colors.inset }}>
+  return <Pressable accessibilityRole="button" accessibilityLabel={`目标：${goal.objective}，${goalStatus[goal.status]}`} onPress={() => router.push({ pathname: "/session/[id]/goal", params: { id: sessionId } })} style={({ pressed }) => ({ borderRadius: radius.card, borderCurve: "continuous", padding: 12, gap: 6, backgroundColor: colors.inset, opacity: pressed ? 0.6 : 1 })}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon sf="target" md="flag" size={16} color={colors.accent} />
       <Text style={[type.footnote, { flex: 1, color: colors.accent, fontWeight: "600" }]}>目标 · {goalStatus[goal.status]}</Text>

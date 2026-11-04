@@ -27,7 +27,7 @@
     min-width: 0;
   }
   .session-title h1 {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.35;
     letter-spacing: -0.01em;
@@ -58,8 +58,8 @@
     flex-shrink: 0;
   }
   .session-actions [data-button] svg {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
   }
   /* The toolbar button whose panel is open reads as selected (neutral fill). */
   .session-actions [data-button][data-active] {
@@ -163,7 +163,7 @@
     gap: 12px;
     margin: 24px 0;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
   }
   .timeline-divider::before,
   .timeline-divider::after {
@@ -179,7 +179,7 @@
     max-width: 90%;
     margin-left: auto;
     padding: 10px 14px;
-    border-radius: 14px 14px 4px 14px;
+    border-radius: var(--radius-panel);
     background: var(--userBubble);
     color: var(--label);
   }
@@ -232,8 +232,8 @@
     align-items: center;
     justify-content: flex-end;
     gap: 4px;
-    height: 24px;
-    min-height: 24px;
+    height: 28px;
+    min-height: 28px;
     margin-top: 6px;
     /* Shown on the message under the pointer (and the last reply), so reading isn't broken by
        a row of icons after every paragraph. The slot keeps its height either way. */
@@ -244,18 +244,18 @@
   .live-timeline > .assistant-message:last-of-type .message-actions { opacity: 1; }
   @media (hover: none) { .message-actions { opacity: 1; } }
   .message-actions [data-button] {
-    height: 22px;
-    min-height: 22px;
-    padding-inline: 6px;
-    font-size: 12px;
+    height: 28px;
+    min-height: 28px;
+    padding-inline: 8px;
+    font-size: 13px;
   }
   /* Copy and fork are icons alone; the name shows on hover. */
   .message-actions [data-button][data-size="icon-sm"] {
-    width: 24px;
-    height: 24px;
-    min-height: 24px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
     padding: 0;
-    border-radius: 7px;
+    border-radius: var(--radius-control);
     color: var(--tertiaryLabel);
   }
   .message-actions [data-button][data-size="icon-sm"]:hover {
@@ -263,8 +263,8 @@
     background: var(--fillStrong);
   }
   .message-actions [data-button][data-size="icon-sm"] svg {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
   }
   .user-message:hover .message-actions,
   .message-actions:hover,
@@ -278,7 +278,7 @@
   }
   .message-time {
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
     padding: 0 4px;
   }
@@ -329,13 +329,6 @@
     color: var(--secondaryLabel);
     font-size: 12px;
   }
-  .message-author .agent-mark {
-    animation: author-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes author-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-  }
 
   /* Agent-to-agent relay message, folded by default. */
   .agent-message > details {
@@ -382,7 +375,7 @@
     max-width: 260px;
     height: 24px;
     padding: 0 8px;
-    border-radius: 8px;
+    border-radius: var(--radius-control);
     background: color-mix(in oklab, var(--label) 6%, transparent);
     color: var(--secondaryLabel);
     font-size: 12px;
@@ -409,11 +402,11 @@
   }
   .user-shell-command {
     padding: 6px 12px;
-    border-radius: 12px;
+    border-radius: var(--radius-card);
     background: var(--userBubble);
     color: var(--label);
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -425,7 +418,7 @@
     margin: 0;
     overflow: auto;
     padding: 8px 12px;
-    border-radius: 12px;
+    border-radius: var(--radius-card);
     background: color-mix(in oklab, var(--label) 4%, transparent);
     color: var(--secondaryLabel);
     font-family: var(--mono);
@@ -458,8 +451,8 @@
     font-weight: 600;
     line-height: 1.4;
   }
-  .markdown h1 { font-size: 17px; }
-  .markdown h2 { font-size: 15px; }
+  .markdown h1 { font-size: 20px; }
+  .markdown h2 { font-size: 16px; }
   .markdown h3,
   .markdown h4 { font-size: 14px; }
   .markdown ul,
@@ -479,11 +472,11 @@
     text-decoration-color: var(--link);
   }
   .markdown :not(pre) > code {
-    font-size: 0.86em;
+    font-size: 13px;
     font-family: var(--font-mono);
     background: var(--fill);
     padding: 1px 5px;
-    border-radius: 5px;
+    border-radius: var(--radius-small);
   }
   .markdown blockquote {
     margin: 12px 0;
@@ -537,7 +530,7 @@
     padding: 0 6px 0 14px;
     border-bottom: 1px solid var(--separator);
     color: var(--secondaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-family: var(--font-mono);
   }
   .markdown .code-surface pre {
@@ -545,7 +538,7 @@
     padding: 14px;
     max-height: 520px;
     tab-size: 2;
-    font-size: 12.5px;
+    font-size: 12px;
     line-height: 1.7;
     color: var(--codeText);
   }
@@ -558,7 +551,7 @@
     max-width: 100%;
     max-height: 480px;
     object-fit: contain;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     margin: 12px 0;
     border: 1px solid var(--separator);
   }
@@ -568,7 +561,7 @@
     border: 0;
     background: none;
     cursor: zoom-in;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     transition: opacity var(--transition);
   }
   .message-image-trigger:hover {
@@ -583,7 +576,7 @@
     max-width: 92vw;
     max-height: 90vh;
     object-fit: contain;
-    border-radius: 12px;
+    border-radius: var(--radius-panel);
   }
   .image-lightbox-actions {
     position: absolute;
@@ -592,7 +585,7 @@
     display: inline-flex;
     gap: 4px;
     padding: 4px;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     background: var(--plain);
     box-shadow: var(--shadow-popover);
   }
@@ -675,14 +668,15 @@
     flex-shrink: 0;
     margin-left: -7px;
     color: var(--danger);
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
   }
   .steps-summary-diff {
     flex-shrink: 0;
     margin-left: auto;
-    font-size: 11px;
-    font-weight: 600;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
     font-variant-numeric: tabular-nums;
   }
   .steps-summary-diff .diff-add { color: var(--diffAddText); }
@@ -745,7 +739,7 @@
   .tool-record > summary > small {
     flex-shrink: 0;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
   }
   .tool-state {
     display: grid;
@@ -754,15 +748,16 @@
     height: 15px;
     flex-shrink: 0;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
   }
   .tool-state svg { width: 13px; height: 13px; stroke-width: 2.2; }
   .tool-record.in_progress .tool-state { color: var(--running); }
   /* Only the spinner turns, about its own centre; the row and its other icons stay still. */
-  .tool-state-spinner { transform-origin: 50% 50%; animation: spin 0.9s linear infinite; }
+  .tool-state-spinner { transform-origin: 50% 50%; animation: spin 1s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .tool-state-spinner { animation: none; } }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .tool-record.completed > summary > .tool-state { color: var(--success); }
+  /* Done is the normal state: its mark stays grey (green is for an explicit success). */
+  .tool-record.completed > summary > .tool-state { color: var(--tertiaryLabel); }
   .tool-record.failed > summary > .tool-state { color: var(--danger); }
   /* The opened body is padded; the folded row needs none. */
   .tool-record[open] > :not(summary) {
@@ -797,7 +792,7 @@
     line-height: 1.65;
     background: var(--code);
     color: var(--codeText);
-    border-radius: 6px;
+    border-radius: var(--radius-card);
   }
   .tool-output-text:first-of-type { margin-top: 0; }
 
@@ -836,7 +831,7 @@
   .tool-record > :is(summary, .tool-summary) > .diff-stat {
     flex-shrink: 0;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
   .tool-record > :is(summary, .tool-summary) > .diff-stat .diff-add { color: var(--diffAddText); }
@@ -844,13 +839,13 @@
   /* A command opened: the command, what it printed, how it ended. */
   .tool-terminal { display: flex; flex-direction: column; gap: 0; }
   .tool-record .tool-terminal > pre { margin: 0; border-radius: 0; }
-  .tool-record .tool-terminal > pre:first-child { border-radius: 6px 6px 0 0; }
-  .tool-record .tool-terminal > pre:last-of-type { border-radius: 0 0 6px 6px; }
-  .tool-record .tool-terminal > pre:only-of-type { border-radius: 6px; }
+  .tool-record .tool-terminal > pre:first-child { border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .tool-record .tool-terminal > pre:last-of-type { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+  .tool-record .tool-terminal > pre:only-of-type { border-radius: var(--radius-card); }
   .tool-record .tool-terminal-command { color: var(--label); max-height: 160px; }
   .tool-terminal-prompt { color: var(--tertiaryLabel); user-select: none; }
   .tool-record .tool-terminal > .tool-output-text { max-height: 280px; padding-top: 0; }
-  .tool-terminal-exit { align-self: flex-end; margin-top: 4px; color: var(--danger); font-size: 11px; }
+  .tool-terminal-exit { align-self: flex-end; margin-top: 4px; color: var(--danger); font-size: 12px; }
   .tool-terminal-exit[data-ok] { color: var(--tertiaryLabel); }
   .tool-questions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
   .tool-questions small { color: var(--tertiaryLabel); }
@@ -862,17 +857,17 @@
     gap: 8px;
     padding: 12px 14px;
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     background: var(--card);
   }
-  .wrap-up-label { color: var(--tertiaryLabel); font-size: 11px; }
+  .wrap-up-label { color: var(--tertiaryLabel); font-size: 12px; }
   .wrap-up-ask { margin: 0; color: var(--label); font-weight: 500; }
   .wrap-up-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-  .wrap-up-button { border-radius: 999px; }
+  .wrap-up-button { border-radius: var(--radius-control); }
   .wrap-up-chip {
     padding: 3px 10px;
     border: 1px solid var(--separator);
-    border-radius: 999px;
+    border-radius: var(--radius-small);
     color: var(--secondaryLabel);
     font-size: 12px;
   }
@@ -886,7 +881,7 @@
     margin: 2px 0;
     padding: 8px 12px;
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     background: var(--card);
     color: var(--secondaryLabel);
     font: inherit;
@@ -895,10 +890,10 @@
   }
   button.session-card { cursor: pointer; }
   button.session-card:hover { border-color: color-mix(in srgb, var(--link) 40%, var(--separator)); }
-  .session-card > svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .session-card > svg { width: 16px; height: 16px; flex-shrink: 0; }
   .session-card-text { display: grid; min-width: 0; }
   .session-card-text > strong { overflow: hidden; color: var(--label); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-  .session-card-text > small { color: var(--tertiaryLabel); font-size: 11px; }
+  .session-card-text > small { color: var(--tertiaryLabel); font-size: 12px; }
   .session-card[data-state="failed"] .session-card-text > small { color: var(--danger); }
   .timeline-divider > .tool-state-spinner { width: 12px; height: 12px; flex: none; }
   .timeline-chapter { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
@@ -927,7 +922,7 @@
   /* ---- Diff: a unified diff, numbered, what went and what came tinted ---- */
   .diff-block {
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     background: var(--code);
   }
@@ -974,13 +969,13 @@
   .diff-number { color: var(--quaternaryLabel); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
   .diff-sign { text-align: center; user-select: none; }
   .diff-line code { padding: 0; background: none; font: inherit; white-space: pre; }
-  .diff-skip { padding: 2px 12px 2px calc(8ch + 24px); color: var(--tertiaryLabel); font-family: inherit; font-size: 11px; background: var(--fill); user-select: none; }
+  .diff-skip { padding: 2px 12px 2px calc(8ch + 24px); color: var(--tertiaryLabel); font-family: inherit; font-size: 12px; background: var(--fill); user-select: none; }
 
   /* The inspector's changes: totals, then a row a file that opens to its diff. */
   .changes { display: flex; flex-direction: column; gap: 10px; }
   .changes-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px; font-size: 13px; }
-  .changes-head strong { font-weight: 590; }
-  .changes-files { border: 1px solid var(--separator); border-radius: 12px; overflow: hidden; }
+  .changes-head strong { font-weight: 600; }
+  .changes-files { border: 1px solid var(--separator); border-radius: var(--radius-card); overflow: hidden; }
   .changes-file + .changes-file { border-top: 1px solid var(--separator); }
   .changes-file-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 12px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
   .changes-file-row:hover { background: var(--fill); }
@@ -1025,7 +1020,8 @@
     border-radius: 50%;
     color: var(--plain);
   }
-  .plan-card li[data-status="completed"] .plan-mark { border-color: transparent; background: var(--success); }
+  /* A finished step is the normal state: its mark is ink, as on the desktop, not green. */
+  .plan-card li[data-status="completed"] .plan-mark { border-color: transparent; background: color-mix(in oklab, var(--label) 70%, transparent); }
   .plan-card li[data-status="pending"] .plan-mark { border-style: dashed; border-color: var(--tertiaryLabel); }
   .plan-mark svg { width: 9px; height: 9px; }
 
@@ -1059,7 +1055,7 @@
   /* ---- Async questions (Codex Desktop) ---- */
   .live-session .conversation > .async-questions:not(:empty) {
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     padding: 18px;
     background: var(--card);
     gap: 18px;
@@ -1110,13 +1106,13 @@
   .async-options button:hover:not(:disabled) { background: var(--fill); }
   .async-options button:disabled:not(.chosen) { opacity: 0.45; }
   .async-options button.chosen {
-    border-color: var(--accent);
-    background: var(--accent);
+    border-color: var(--accentFill);
+    background: var(--accentFill);
     color: var(--primaryForeground);
   }
   .async-options button[aria-pressed="true"] {
-    border-color: var(--accent);
-    background: var(--accent);
+    border-color: var(--accentFill);
+    background: var(--accentFill);
     color: var(--primaryForeground);
   }
   .async-actions {
@@ -1147,7 +1143,7 @@
   /* ---- Approval / permission card ---- */
   .approval-card {
     border: 1px solid var(--separator);
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     padding: 16px;
     background: var(--card);
   }
@@ -1160,11 +1156,11 @@
   .approval-icon {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
-    border-radius: 8px;
-    color: var(--warning);
+    border-radius: var(--radius-control);
+    color: var(--waiting);
     background: var(--waitingSoft);
   }
   .approval-heading > div {
@@ -1198,7 +1194,7 @@
     line-height: 1.65;
     color: var(--codeText);
     background: var(--code);
-    border-radius: 6px;
+    border-radius: var(--radius-card);
   }
   .approval-url,
   .approval-card > code {
@@ -1207,7 +1203,7 @@
   .question-required {
     margin-left: 8px;
     color: var(--secondaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
   }
@@ -1287,10 +1283,10 @@
     display: inline-block;
     margin-left: 6px;
     padding: 0 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-small);
     background: var(--fill);
     color: var(--secondaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     line-height: 16px;
     vertical-align: 1px;
@@ -1300,7 +1296,15 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 15px;
+    margin-top: 16px;
+  }
+  /* The approval card's buttons are 32 px with 6 px corners everywhere (visual-system.md); a long
+     option wraps, so the height is a minimum. Important: the markup's own min-height utility
+     outranks this layer. */
+  .permission-buttons [data-button] {
+    min-height: 32px !important;
+    padding-block: 5px;
+    border-radius: var(--radius-control);
   }
 
   /* ---- Turn activity line ---- */
@@ -1315,6 +1319,7 @@
     overflow-wrap: anywhere;
   }
   .conversation-activity { padding: 12px 0 4px; }
+  .conversation-activity[data-waiting] .conversation-activity-label { color: var(--waiting); font-weight: 500; }
   .conversation-history-top {
     display: flex;
     align-items: center;
@@ -1414,15 +1419,15 @@
     z-index: 2;
   }
   .conversation-jump button {
-    border-radius: 999px;
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-popover);
     white-space: nowrap;
   }
   .conversation-jump { transition: opacity 150ms cubic-bezier(.23, 1, .32, 1), transform 150ms cubic-bezier(.23, 1, .32, 1); }
   .conversation-jump[data-hidden] { opacity: 0; transform: translateX(-50%) translateY(4px); pointer-events: none; }
   .message-queue {
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     background: var(--accentSoft);
     font-size: 12px;
     max-height: 16dvh;
@@ -1432,7 +1437,7 @@
     display: block;
     margin-bottom: 8px;
     color: var(--link);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
   }
   .message-queue > div {
@@ -1518,9 +1523,9 @@
     max-width: 180px;
     height: 28px;
     padding: 0 8px;
-    border-radius: 8px;
+    border-radius: var(--radius-control);
     color: var(--secondaryLabel);
-    font-size: 12px;
+    font-size: 13px;
     white-space: nowrap;
   }
   .composer-chip > span { overflow: hidden; text-overflow: ellipsis; }
@@ -1532,7 +1537,7 @@
   .composer-chip-menu { min-width: 220px; max-width: 340px; max-height: 360px; overflow: auto; }
   .composer-chip-option { display: grid; gap: 1px; min-width: 0; }
   .composer-chip-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .composer-chip-option small { color: var(--tertiaryLabel); font-size: 11px; line-height: 1.35; }
+  .composer-chip-option small { color: var(--tertiaryLabel); font-size: 12px; line-height: 1.35; }
   .composer-place {
     display: inline-flex;
     align-items: center;
@@ -1546,11 +1551,11 @@
   .composer-place svg { width: 13px; height: 13px; flex: none; }
   .composer-place-branch {
     padding: 1px 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-small);
     background: var(--fill);
     color: var(--secondaryLabel);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1560,7 +1565,7 @@
     align-items: center;
     gap: 4px;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
   .context-ring svg { flex: none; }
@@ -1570,7 +1575,7 @@
   .context-ring[data-level="high"] circle + circle { stroke: var(--danger); }
   .context-ring[data-level="high"] { color: var(--danger); }
   .send-button {
-    border-radius: 8px;
+    border-radius: var(--radius-control);
   }
   .composer-caption {
     display: flex;
@@ -1578,7 +1583,7 @@
     gap: 12px;
     padding: 8px 4px 0;
     color: var(--tertiaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.5;
   }
   .composer-caption > span:last-child { flex-shrink: 0; }
@@ -1673,10 +1678,10 @@
     max-width: 100%;
     padding: 4px 10px;
     overflow: hidden;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--fill);
     color: var(--label);
-    font-size: 12px;
+    font-size: 13px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1775,12 +1780,12 @@
   }
   .activity-list small {
     color: var(--secondaryLabel);
-    font-size: 11px;
+    font-size: 12px;
     overflow-wrap: anywhere;
   }
   .activity-list details { margin-top: 10px; font-size: 12px; }
   .activity-list pre {
-    font-size: 11px;
+    font-size: 12px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -1811,7 +1816,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .conversation { scroll-behavior: auto; }
-    .message-author .agent-mark,
     .tool-record.in_progress .tool-state,
     .conversation-activity > svg,
     .composer-progress > svg,

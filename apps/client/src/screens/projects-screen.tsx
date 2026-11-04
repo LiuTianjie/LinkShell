@@ -24,7 +24,7 @@ import { colors } from "@/theme/colors";
 import { useFloatingTabInset } from "@/components/floating-tabs";
 import { NEW_SESSION } from "@/components/new-session-action";
 import { PageSearch, StatusBarFade } from "@/components/page-header";
-import { type } from "@/theme/type";
+import { type, radius } from "@/theme/type";
 
 function openProject(project: ProjectGroup, computerKey?: string) {
   if (computerKey) useComputers.getState().select(computerKey);
@@ -44,12 +44,12 @@ function ProjectCard({ project, now, computerKey }: { project: ProjectGroup; now
       accessibilityRole="button"
       accessibilityLabel={`${project.name}，${project.sessionCount} 个会话`}
       style={({ pressed }) => ({
-        padding: 20, gap: 18, minHeight: 188, borderRadius: 24, borderCurve: "continuous",
+        padding: 20, gap: 18, minHeight: 188, borderRadius: radius.card, borderCurve: "continuous",
         backgroundColor: pressed ? colors.fill : colors.card,
       })}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 44, height: 44, borderRadius: radius.control, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
           <Icon sf={project.generated ? "bubble.left.and.bubble.right.fill" : "square.stack.3d.up.fill"} md={project.generated ? "forum" : "stacks"} size={24} color={colors.accent} />
         </View>
         <Text style={[type.footnote, { flex: 1, textAlign: "right", color: colors.secondaryLabel }]}>{relativeTime(project.lastActiveAt, now)}</Text>
@@ -62,7 +62,7 @@ function ProjectCard({ project, now, computerKey }: { project: ProjectGroup; now
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: "auto" }}>
         <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{project.sessionCount} 个会话</Text>
         {activityOf(project) ? <Text style={[type.footnote, { color: colors.accent }]}>{activityOf(project)}</Text> : null}
-        {project.branch ? <BranchTag branch={project.branch} size={13} max={24} /> : null}
+        {project.branch ? <BranchTag branch={project.branch} font={type.footnote} max={24} /> : null}
       </View>
     </Pressable>
   );
@@ -78,7 +78,7 @@ function ProjectRow({ project, position, now, computerKey }: { project: ProjectG
     <ListRow
       leading={<Icon sf={project.generated ? "bubble.left.and.bubble.right.fill" : "square.stack.3d.up.fill"} md={project.generated ? "forum" : "stacks"} size={20} color={colors.accent} />}
       title={project.name}
-      titleTag={project.branch ? <BranchTag branch={project.branch} size={13} max={20} /> : undefined}
+      titleTag={project.branch ? <BranchTag branch={project.branch} font={type.footnote} max={20} /> : undefined}
       time={relativeTime(project.lastActiveAt, now)}
       // The folder it is in, not its own name again: enough to tell two of one name apart.
       detail={`${project.generated ? "Codex 自动创建" : parentOf(shortPath(project.cwd))} · ${project.sessionCount} 个会话${activityOf(project) ? ` · ${activityOf(project)}` : ""}`}
@@ -171,7 +171,7 @@ export function ProjectsScreen() {
       >
         {!inlineControls ? <HeaderActions actions={[{ ...NEW_SESSION, kind: "button" }]} /> : null}
         <PageSearch value={query} onChangeText={setQuery} placeholder="搜索项目" action={inlineControls ? NEW_SESSION : undefined} />
-        {computers.length > 1 ? <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: colors.fill, borderRadius: 12, padding: 3, marginTop: 12 }}>
+        {computers.length > 1 ? <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: colors.fill, borderRadius: radius.control, padding: 3, marginTop: 12 }}>
           {([ ["current", "当前电脑"], ["all", "所有电脑"] ] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: scope === value }} onPress={() => setScope(value)} style={{ flex: 1, minHeight: 40, borderRadius: 9, justifyContent: "center", alignItems: "center", backgroundColor: scope === value ? colors.card : "transparent" }}><Text style={[type.subhead, { color: scope === value ? colors.label : colors.secondaryLabel }]}>{label}</Text></Pressable>)}
         </View> : null}
         {scope === "current" ? <ConnectionBanner /> : null}

@@ -4,13 +4,13 @@ Read the repository's root `AGENTS.md` as well.
 
 ## Design direction
 
-The user has chosen **Linear's product UI** as the design reference for the entire web workspace, superseding the earlier Cloudflare direction. See the product screenshot in [Linear's official Concepts documentation](https://linear.app/docs/conceptual-model).
+Colours, radii, type sizes, motion and the shared components follow **[docs/design/visual-system.md](../../docs/design/visual-system.md)**, the one visual system for the app, the desktop, this web console and the site. It supersedes the earlier Linear and Codex references: they remain examples of restraint, not sources of colours or sizes. Change that document and `apps/client/src/theme/brand-colors.json` first, then every surface together.
 
 - Use shadcn/ui (Radix) primitives from `src/components/ui` for navigation, buttons, forms, menus, tabs, tables, dialogs, status badges, loading and empty states. Extend shared component variants when necessary; keep page-level classes focused on layout.
-- Use quiet cool neutrals, subtle borders and clear typography. Primary actions use restrained indigo with white text; navigation selection uses a neutral surface. Avoid orange/black buttons, vivid navigation stripes, oversized dashboard cards and heavy decorative shadows.
-- Keep colors in the semantic light/dark pairs in `src/theme.ts`. Check text, hover, selected, focus, disabled, warning and error states in both themes. Keep status colors consistent; do not use the primary action color for every icon or piece of metadata.
+- Use quiet neutrals, subtle borders and clear typography. Primary actions use LinkShell indigo (`accentFill`) with white text; navigation selection uses a neutral surface. Avoid pill-shaped buttons, vivid navigation stripes, oversized dashboard cards and heavy decorative shadows.
+- Brand and status colours come from `brand-colors.json` through `src/theme.ts`; only neutrals are defined there. Check text, hover, selected, focus, disabled, warning and error states in both themes. Do not use the primary action color for every icon or piece of metadata.
 - Use Lucide's rounded outlines throughout the workspace. Desktop icon weight and sizes come from the shared tokens in `desktop.css`: 1.75 stroke, 16px controls, 18px navigation and 12px carets. Avoid text glyphs for actions and local stroke overrides. Agent and provider brand marks retain their own artwork.
-- Composer settings use the shared `toolbar` button variant and `SessionConfigIcon` in both new and existing sessions. Keep labels visible when the toolbar wraps. CPU and memory keep the same semantic chart colors across visualization styles.
+- Composer settings use the shared `toolbar` button variant and `SessionConfigIcon` in both new and existing sessions. Keep labels visible when the toolbar wraps. Computer cards have one look (readings plus the recent history line); CPU uses the accent, memory a neutral grey.
 - Preserve LinkShell's branding and Chinese product copy. Prioritize legibility, useful information and clear actions over decorative detail.
 
 ## Sidebar and layout

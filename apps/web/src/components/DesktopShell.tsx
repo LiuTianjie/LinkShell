@@ -245,7 +245,7 @@ function SessionCountBadge({ connection }: { connection: Connection }) {
   const sessions = useStore(connection.store, (state) => state.sessions);
   const waiting = Object.values(sessions).filter((session) => !session.archived && sessionNeedsAttention(session)).length;
   if (!waiting) return null;
-  return <span className="desktop-nav-badge" title={`${waiting} 项需要你`}>{waiting}</span>;
+  return <span className="desktop-nav-badge" title={`${waiting} 项等你处理`}>{waiting}</span>;
 }
 
 function SessionRow({
@@ -281,7 +281,7 @@ function SessionRow({
       data-child={child || undefined}
       aria-current={active ? "page" : undefined}
       aria-expanded={fold ? fold.open : undefined}
-      title={`${titleOf(session)}${tone === "waiting" ? " · 需要你" : tone === "running" ? " · 进行中" : tone === "error" ? " · 出错" : ""}`}
+      title={`${titleOf(session)}${tone === "waiting" ? " · 等你处理" : tone === "running" ? " · 运行中" : tone === "error" ? " · 出错" : ""}`}
       onClick={() => navigate(session.id)}
       onKeyDown={fold && ((event) => {
         if ((event.key === "ArrowLeft" && fold.open) || (event.key === "ArrowRight" && !fold.open)) { event.preventDefault(); fold.toggle(); }
@@ -390,8 +390,8 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   return (
     <>
       {waiting.length > 0 && (
-        <section className="tree-section" aria-label="需要你">
-          <h2 className="tree-heading" data-tone="waiting">需要你<span>{waiting.length}</span></h2>
+        <section className="tree-section" aria-label="等你处理">
+          <h2 className="tree-heading" data-tone="waiting">等你处理<span>{waiting.length}</span></h2>
           {waiting.slice(0, 6).map((session) => (
             <SessionRow
               key={session.id}
@@ -448,7 +448,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
                   <ChevronRight size={13} aria-hidden />
                   <span>{group.name}</span>
                   {group.generated && <Badge variant="secondary">自动</Badge>}
-                  {group.running > 0 && <small className="tree-running" title={`${group.running} 个进行中`}>{group.running}</small>}
+                  {group.running > 0 && <small className="tree-running" title={`${group.running} 个运行中`}>{group.running}</small>}
                 </button>
                 {!background && !group.generated && <button
                   type="button"
@@ -499,7 +499,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
         })}
         {groups.length > PROJECTS_SHOWN && (
           <button type="button" className="tree-more tree-more-projects" onClick={() => setAllProjects((value) => !value)}>
-            {allProjects ? "只显示最近的项目" : `显示全部 ${groups.length} 个项目`}
+            {allProjects ? "收起" : `显示全部 ${groups.length} 个项目`}
           </button>
         )}
       </section>
@@ -762,10 +762,10 @@ function ConnectionFacts({ connection, name, navigate }: { connection: Connectio
       <span className="desktop-status-spacer" />
       {waiting > 0 && (
         <button type="button" className="desktop-status-item desktop-status-action" data-tone="waiting" onClick={() => navigate("home")}>
-          {waiting} 项需要你
+          {waiting} 项等你处理
         </button>
       )}
-      {running > 0 && <span className="desktop-status-item" data-tone="running">{running} 个进行中</span>}
+      {running > 0 && <span className="desktop-status-item" data-tone="running">{running} 个运行中</span>}
     </>
   );
 }

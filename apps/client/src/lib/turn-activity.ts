@@ -28,7 +28,7 @@ export function turnActivity({ session, progress, online, connecting, ready, has
   if (!ready) return { label: "正在同步会话…", tone: "muted", animated: true };
   // The request's own card sits right under the conversation and says it better.
   if (hasPermission) return undefined;
-  if (session.state === "waiting") return { label: "需要您的输入", tone: "waiting", animated: false };
+  if (session.state === "waiting") return { label: "等你处理", tone: "waiting", animated: false };
   if (progress) return { label: progress.phase === "sending" ? "正在发送…" : "已发送，等待 Agent 开始…", tone: "active", animated: true };
   if (session.state === "running") {
     if (view?.turnActive) {

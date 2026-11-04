@@ -2,12 +2,15 @@ import AppKit
 import SwiftUI
 
 /// One neutral system for LinkShell.app's own pages, matching the workspace page
-/// (apps/web/src/theme.ts, styles/desktop.css) and StupidMirror.
+/// (apps/web/src/theme.ts, styles/desktop.css) and docs/design/visual-system.md.
 ///
 /// The window is a grey ground; panels sit on it one lightness step away with a hairline;
 /// inside a panel a well holds rows and settings. No gradients, glows or resting shadows.
-/// Colour is state: mint while something runs, amber when it waits on the user, red when it
-/// failed. The one filled control on a page is inverted ink (white on dark, black on light).
+/// Colour says what can be done (indigo) and state (indigo running, amber waiting on the user,
+/// red failed, green online or a success). The one filled control on a page is the indigo fill.
+///
+/// The hues are copies of apps/client/src/theme/brand-colors.json (Swift can't read it at build
+/// time); apps/web/test/brand-colors.test.ts fails when they drift.
 enum DesktopStyle {
   private static func gray(_ light: CGFloat, _ dark: CGFloat) -> NSColor {
     NSColor(name: nil) { appearance in
@@ -48,39 +51,56 @@ enum DesktopStyle {
   static let primaryText = gray(0.07, 0.95)
   static let secondaryText = gray(0.30, 0.71)
   static let tertiaryText = gray(0.38, 0.59)
-  static let inkColor = gray(0.10, 0.95)
-  static let inkPressedColor = gray(0.26, 0.80)
-  static let onInkColor = gray(1.0, 0.06)
-  static let mintColor = hue(rgb(0x077a66), rgb(0x3ddbb9))
+
+  /// Text, icons and the chart's bars for what can be done or is running (`accent`, `running`).
+  static let accentColor = hue(rgb(0x4c5fd5), rgb(0x8d9bff))
+  /// The fill of the one primary control and of a switch that is on; white goes on it, which the
+  /// paler dark `accent` would not carry.
+  static let accentFillColor = hue(rgb(0x4c5fd5), rgb(0x5263e8))
+  static let accentHoverColor = hue(rgb(0x4254c7), rgb(0x4d5fe0))
+  static let onAccentColor = NSColor.white
+  /// Connection health (online, the host service up) and a success (granted, paired); a session
+  /// that runs is `running`, not this.
+  static let okColor = hue(rgb(0x187a4a), rgb(0x4cc38a))
+  static let waitingColor = hue(rgb(0xad5200), rgb(0xffad5c))
+  static let dangerColor = hue(rgb(0xc8322f), rgb(0xff7b72))
 
   static let primary = Color(nsColor: gray(0.07, 0.95))
   /// About 8:1 on its panel in both appearances.
   static let secondary = Color(nsColor: gray(0.30, 0.71))
   /// Meta text and units; at least 4.5:1 on every surface.
   static let tertiary = Color(nsColor: gray(0.38, 0.59))
-  /// The inverted fill of the one primary control, and the ink on it.
-  static let ink = Color(nsColor: gray(0.10, 0.95))
-  static let inkPressed = Color(nsColor: gray(0.26, 0.80))
-  static let onInk = Color(nsColor: gray(1.0, 0.06))
 
-  /// The one data hue (LinkShell's mint): running work, online, the chart's bars.
-  static let mint = Color(nsColor: hue(rgb(0x077a66), rgb(0x3ddbb9)))
-  static let accent = mint
-  static let waiting = Color(nsColor: hue(rgb(0x965c05), rgb(0xf2a33d)))
-  static let danger = Color(nsColor: hue(rgb(0xb3292b), rgb(0xe6576f)))
-  /// Kept for call sites that predate the ink primary.
-  static let onAccent = onInk
+  static let accent = Color(nsColor: accentColor)
+  static let running = accent
+  static let accentFill = Color(nsColor: accentFillColor)
+  static let accentHover = Color(nsColor: accentHoverColor)
+  static let onAccent = Color(nsColor: onAccentColor)
+  static let ok = Color(nsColor: okColor)
+  static let waiting = Color(nsColor: waitingColor)
+  static let danger = Color(nsColor: dangerColor)
+  // The light grounds under a state's own words. Drawn over a panel, never the window ground:
+  // there the amber and indigo words fall under 4.5:1.
+  static let accentSoft = Color(nsColor: hue(rgb(0x4c5fd5, 0.10), rgb(0x8d9bff, 0.16)))
+  static let waitingSoft = Color(nsColor: hue(rgb(0xad5200, 0.10), rgb(0xffad5c, 0.14)))
+  static let dangerSoft = Color(nsColor: hue(rgb(0xc8322f, 0.09), rgb(0xff7b72, 0.14)))
 
-  static let panelRadius: CGFloat = 16
-  static let wellRadius: CGFloat = 12
+  /// Dialogs, sheets and the panels on the window ground.
+  static let panelRadius: CGFloat = 12
+  /// Cards, wells, popovers, banners.
+  static let wellRadius: CGFloat = 8
+  /// Buttons, fields, menu items, list rows, segments.
+  static let controlRadius: CGFloat = 6
+  /// Key hints and badges.
+  static let smallRadius: CGFloat = 4
+  static let controlHeight: CGFloat = 32
+  static let compactControlHeight: CGFloat = 28
   static let gutter: CGFloat = 10
   static let topBarHeight: CGFloat = 46
   static let statusBarHeight: CGFloat = 30
   static let sidebarWidth: CGFloat = 264
 
   static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
-  /// A state hue on a tint of itself.
-  static func tint(_ color: Color) -> Color { color.opacity(0.15) }
 }
 
 extension View {
@@ -105,52 +125,54 @@ extension View {
   }
 }
 
-/// Pills: `.primary` is inverted ink and appears once per page; `.secondary` is a hairline pill;
-/// `.quiet` is text until hovered.
-struct DesktopPillStyle: ButtonStyle {
+/// Buttons: `.primary` is the indigo fill and appears once per page; `.secondary` has a hairline;
+/// `.quiet` is text until hovered. Not capsules: the desktop's buttons are rounded rectangles.
+struct DesktopButtonStyle: ButtonStyle {
   enum Kind { case primary, secondary, quiet }
   var kind: Kind = .secondary
   var compact = false
   init(_ kind: Kind = .secondary, compact: Bool = false) { self.kind = kind; self.compact = compact }
-  func makeBody(configuration: Configuration) -> some View { DesktopPillBody(configuration: configuration, kind: kind, compact: compact) }
+  func makeBody(configuration: Configuration) -> some View { DesktopButtonBody(configuration: configuration, kind: kind, compact: compact) }
 }
 
-private struct DesktopPillBody: View {
+private struct DesktopButtonBody: View {
   let configuration: ButtonStyleConfiguration
-  let kind: DesktopPillStyle.Kind
+  let kind: DesktopButtonStyle.Kind
   let compact: Bool
   @Environment(\.isEnabled) private var isEnabled
   @State private var hovered = false
   var body: some View {
+    let shape = RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous)
     configuration.label
       .font(.system(size: compact ? 12 : 13, weight: .medium))
       .lineLimit(1)
-      .padding(.horizontal, compact ? 11 : 14)
-      .frame(height: compact ? 26 : 30)
+      .padding(.horizontal, 12)
+      .frame(height: compact ? DesktopStyle.compactControlHeight : DesktopStyle.controlHeight)
       .foregroundStyle(foreground)
-      .background { Capsule().fill(fill) }
-      .overlay { if kind == .secondary { Capsule().strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) } }
-      .contentShape(Capsule())
+      .background { shape.fill(fill) }
+      .overlay { if kind == .secondary { shape.strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) } }
+      .contentShape(shape)
       .opacity(isEnabled ? 1 : 0.55)
       .onHover { hovered = $0 }
       .animation(.easeOut(duration: 0.12), value: hovered)
   }
   private var foreground: Color {
     switch kind {
-    case .primary: DesktopStyle.onInk
+    case .primary: DesktopStyle.onAccent
     case .secondary: DesktopStyle.primary
     case .quiet: hovered ? DesktopStyle.primary : DesktopStyle.secondary
     }
   }
   private var fill: Color {
     switch kind {
-    case .primary: configuration.isPressed ? DesktopStyle.inkPressed : DesktopStyle.ink
+    // The spec has one darker step for the fill; pressing shows it as hovering does.
+    case .primary: configuration.isPressed || hovered && isEnabled ? DesktopStyle.accentHover : DesktopStyle.accentFill
     case .secondary, .quiet: configuration.isPressed ? DesktopStyle.selection : hovered && isEnabled ? DesktopStyle.raised : .clear
     }
   }
 }
 
-/// A round icon-only control.
+/// An icon-only control.
 struct DesktopIconButtonStyle: ButtonStyle {
   var size: CGFloat = 28
   func makeBody(configuration: Configuration) -> some View { DesktopIconBody(configuration: configuration, size: size) }
@@ -166,8 +188,8 @@ private struct DesktopIconBody: View {
       .labelStyle(.iconOnly)
       .foregroundStyle(hovered ? DesktopStyle.primary : DesktopStyle.secondary)
       .frame(width: size, height: size)
-      .background(Circle().fill(configuration.isPressed ? DesktopStyle.selection : hovered ? DesktopStyle.raised : .clear))
-      .contentShape(Circle())
+      .background(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).fill(configuration.isPressed ? DesktopStyle.selection : hovered ? DesktopStyle.raised : .clear))
+      .contentShape(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
       .onHover { hovered = $0 }
   }
 }
@@ -185,18 +207,23 @@ struct DesktopGroupLabel: View {
   }
 }
 
-/// A dot and a word on a tint of the state's hue: the top bar's facts about this Mac.
+/// A dot and a word, on the state's own light ground when given one: the top bar's facts about
+/// this Mac.
 struct DesktopStatusPill: View {
   let text: String
   var tone: Color = DesktopStyle.tertiary
-  var tinted = false
+  var soft: Color?
   var body: some View {
-    HStack(spacing: 6) {
-      Circle().fill(tone).frame(width: 6, height: 6)
-      Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(tinted ? tone : DesktopStyle.secondary).lineLimit(1)
+    let shape = RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous)
+    HStack(spacing: 8) {
+      Circle().fill(tone).frame(width: 8, height: 8)
+      Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(soft == nil ? DesktopStyle.secondary : tone).lineLimit(1)
     }
-    .padding(.horizontal, 10).frame(height: 26)
-    .background(Capsule().fill(tinted ? DesktopStyle.tint(tone) : DesktopStyle.raised))
+    .padding(.horizontal, 12).frame(height: DesktopStyle.compactControlHeight)
+    .background {
+      // The soft ground goes over a panel: on the bare window ground its words lose contrast.
+      if let soft { shape.fill(DesktopStyle.panel).overlay(shape.fill(soft)) } else { shape.fill(DesktopStyle.raised) }
+    }
     .fixedSize()
   }
 }
@@ -213,8 +240,8 @@ struct WindowDragArea: NSViewRepresentable {
   }
 }
 
-/// The AppKit pill: the setup window's buttons, drawn like `DesktopPillStyle`.
-final class DesktopPillButton: NSButton {
+/// The AppKit button: the setup window's buttons, drawn like `DesktopButtonStyle`.
+final class DesktopButton: NSButton {
   enum Kind { case primary, secondary }
   var kind: Kind = .secondary { didSet { needsDisplay = true } }
   private var hovered = false { didSet { needsDisplay = true } }
@@ -233,7 +260,7 @@ final class DesktopPillButton: NSButton {
 
   override var intrinsicContentSize: NSSize {
     let text = (title as NSString).size(withAttributes: [.font: font ?? .systemFont(ofSize: 13)])
-    return NSSize(width: ceil(text.width) + 32, height: 30)
+    return NSSize(width: ceil(text.width) + 24, height: DesktopStyle.controlHeight)
   }
   override var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
 
@@ -247,28 +274,31 @@ final class DesktopPillButton: NSButton {
 
   override func draw(_ dirtyRect: NSRect) {
     effectiveAppearance.performAsCurrentDrawingAppearance {
-      let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: (bounds.height - 1) / 2, yRadius: (bounds.height - 1) / 2)
+      let radius = DesktopStyle.controlRadius
+      let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
       let pressed = isHighlighted
       switch kind {
       case .primary:
-        (pressed ? DesktopStyle.inkPressedColor : DesktopStyle.inkColor).setFill()
-        pill.fill()
+        (pressed || hovered ? DesktopStyle.accentHoverColor : DesktopStyle.accentFillColor).setFill()
+        box.fill()
       case .secondary:
-        if pressed { DesktopStyle.selectionColor.setFill(); pill.fill() } else if hovered { DesktopStyle.raisedColor.setFill(); pill.fill() }
+        if pressed { DesktopStyle.selectionColor.setFill(); box.fill() } else if hovered { DesktopStyle.raisedColor.setFill(); box.fill() }
         DesktopStyle.controlStrokeColor.setStroke()
-        pill.lineWidth = 1
-        pill.stroke()
+        box.lineWidth = 1
+        box.stroke()
       }
-      let attributes: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 13, weight: .medium), .foregroundColor: kind == .primary ? DesktopStyle.onInkColor : DesktopStyle.primaryText]
+      let attributes: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 13, weight: .medium), .foregroundColor: kind == .primary ? DesktopStyle.onAccentColor : DesktopStyle.primaryText]
       let size = (title as NSString).size(withAttributes: attributes)
       (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
     }
   }
-  override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill() }
+  override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: DesktopStyle.controlRadius, yRadius: DesktopStyle.controlRadius).fill() }
   override var focusRingMaskBounds: NSRect { bounds }
 }
 
-/// Pills in a recessed track; the chosen one is a grey step, never a hue.
+/// Segments in a recessed track; the chosen one is a grey step, never a hue (as the workspace's
+/// segmented controls). The track's radius is the segments' plus its 2 pt inset, so the corners
+/// stay concentric.
 struct DesktopSegmented<Value: Hashable>: View {
   let options: [(Value, String)]
   @Binding var selection: Value
@@ -278,24 +308,25 @@ struct DesktopSegmented<Value: Hashable>: View {
       ForEach(Array(options.enumerated()), id: \.offset) { _, option in
         let chosen = option.0 == selection
         Button { selection = option.0 } label: {
-          Text(option.1).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+          Text(option.1).font(.system(size: 12, weight: .medium)).lineLimit(1)
             .foregroundStyle(chosen ? DesktopStyle.primary : DesktopStyle.secondary)
-            .padding(.horizontal, 12).frame(height: 26)
-            .background(Capsule().fill(chosen ? DesktopStyle.selection : .clear))
-            .contentShape(Capsule())
+            .padding(.horizontal, 12).frame(height: DesktopStyle.compactControlHeight - 4)
+            .background(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).fill(chosen ? DesktopStyle.selection : .clear))
+            .contentShape(RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
         }.buttonStyle(.plain).accessibilityAddTraits(chosen ? [.isSelected] : [])
       }
     }
-    .padding(2).background(Capsule().fill(DesktopStyle.raised)).fixedSize()
+    .padding(2).background(RoundedRectangle(cornerRadius: DesktopStyle.wellRadius, style: .continuous).fill(DesktopStyle.raised)).fixedSize()
     .opacity(isEnabled ? 1 : 0.55)
   }
 }
 
-/// The switch used on every settings row: mint when on, like a running state.
+/// The switch used on every settings row: the indigo fill when on, with the white knob the
+/// fill is made to carry.
 struct DesktopSwitchStyle: ToggleStyle {
   func makeBody(configuration: Configuration) -> some View {
     Button { configuration.isOn.toggle() } label: {
-      Capsule().fill(configuration.isOn ? DesktopStyle.mint : DesktopStyle.controlStroke)
+      Capsule().fill(configuration.isOn ? DesktopStyle.accentFill : DesktopStyle.controlStroke)
         .frame(width: 34, height: 20)
         .overlay(alignment: configuration.isOn ? .trailing : .leading) {
           Circle().fill(Color.white).frame(width: 16, height: 16).padding(2)
@@ -312,7 +343,7 @@ extension View {
   /// A text field set into a well, matching the workspace's inputs.
   func desktopField() -> some View {
     textFieldStyle(.plain).font(.system(size: 13)).padding(.horizontal, 12).frame(height: 32)
-      .background(DesktopStyle.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) }
+      .background(DesktopStyle.card, in: RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous))
+      .overlay { RoundedRectangle(cornerRadius: DesktopStyle.controlRadius, style: .continuous).strokeBorder(DesktopStyle.controlStroke, lineWidth: 1) }
   }
 }

@@ -482,9 +482,9 @@ const sidebarMenuButtonVariants = cva(
       },
       size: {
         navigation:
-          "h-[40px] gap-3 rounded-lg px-3 text-[14px] hover:bg-muted data-[active=true]:hover:bg-sidebar-accent [&_svg]:size-[18px] [&_svg]:text-muted-foreground data-[active=true]:[&_svg]:text-sidebar-foreground",
+          "h-[40px] gap-3 rounded-md px-3 text-[14px] hover:bg-muted data-[active=true]:hover:bg-sidebar-accent [&_svg]:size-[18px] [&_svg]:text-muted-foreground data-[active=true]:[&_svg]:text-sidebar-foreground",
         default: "h-8 text-sm",
-        sm: "h-7 text-xs",
+        sm: "h-[28px] text-xs",
         lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
       },
     },
@@ -580,7 +580,7 @@ function SidebarMenuBadge({
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
       className={cn(
-        "pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
+        "pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
         className,
       )}
       {...props}

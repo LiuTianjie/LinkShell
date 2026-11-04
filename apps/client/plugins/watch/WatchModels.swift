@@ -307,7 +307,8 @@ public struct WatchAgentBadge: View {
             .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
           Image(systemName: "terminal.fill")
             .font(.system(size: size * 0.44, weight: .semibold))
-            .foregroundColor(.green)
+            // The phone's terminal tile draws its prompt in this green too.
+            .foregroundColor(WatchPalette.diffAdd)
         }
         .frame(width: size, height: size)
       } else {
@@ -327,14 +328,16 @@ public struct WatchAgentBadge: View {
 }
 
 /// The phone's colours in dark mode (`src/theme/brand-colors.json`), so a state reads the same
-/// on the wrist as in the app. `accentFill` is the light-mode accent: white text on it stays
-/// legible, which it does not on the paler dark-mode accent.
+/// on the wrist as in the app; the Watch is always dark. `accentFill` and `waitingFill` sit
+/// behind white text, which the paler `accent` and `waiting` can't carry.
+/// `apps/web/test/brand-colors.test.ts` checks that these copies match the JSON.
 public enum WatchPalette {
-  public static let accent = Color(red: 0x7d / 255, green: 0x95 / 255, blue: 0xff / 255)
-  public static let accentFill = Color(red: 0x4a / 255, green: 0x6c / 255, blue: 0xf7 / 255)
-  public static let waiting = Color(red: 1, green: 0x9f / 255, blue: 0x0a / 255)
-  public static let ok = Color(red: 0x30 / 255, green: 0xd1 / 255, blue: 0x58 / 255)
-  public static let danger = Color(red: 1, green: 0x45 / 255, blue: 0x3a / 255)
+  public static let accent = Color(red: 0x8d / 255, green: 0x9b / 255, blue: 0xff / 255)
+  public static let accentFill = Color(red: 0x52 / 255, green: 0x63 / 255, blue: 0xe8 / 255)
+  public static let waiting = Color(red: 1, green: 0xad / 255, blue: 0x5c / 255)
+  public static let waitingFill = Color(red: 0xb2 / 255, green: 0x56 / 255, blue: 0)
+  public static let ok = Color(red: 0x4c / 255, green: 0xc3 / 255, blue: 0x8a / 255)
+  public static let danger = Color(red: 1, green: 0x7b / 255, blue: 0x72 / 255)
   public static let diffAdd = Color(red: 0x7f / 255, green: 0xdd / 255, blue: 0xb4 / 255)
   public static let diffDel = Color(red: 1, green: 0x9a / 255, blue: 0x9a / 255)
 }
@@ -342,12 +345,12 @@ public enum WatchPalette {
 public enum WatchPhaseStyle {
   public static func label(for phase: String) -> String {
     switch phase {
-    case "waiting_for_approval": return "待确认"
-    case "waiting_for_input": return "待回答"
+    case "waiting_for_approval": return "等你确认"
+    case "waiting_for_input": return "等你回答"
     case "failed": return "出错"
     case "running": return "运行中"
     case "starting": return "启动中"
-    case "completed": return "已就绪"
+    case "completed": return "空闲"
     default: return "离线"
     }
   }
@@ -372,9 +375,8 @@ public enum WatchPhaseStyle {
       return WatchPalette.danger
     case "running", "starting":
       return WatchPalette.accent
-    case "completed":
-      return Color.white.opacity(0.72)
     default:
+      // Idle and done are the resting state: grey, as offline is.
       return Color.white.opacity(0.45)
     }
   }

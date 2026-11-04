@@ -1,6 +1,6 @@
 import AppKit
 
-/// A small dark capsule at the top of the full screen picture: 退出全屏, and the shortcut that does the same.
+/// A small dark bar at the top of the full screen picture: 退出全屏, and the shortcut that does the same.
 final class DesktopFullScreenBar: NSVisualEffectView {
   /// How close to the top edge the pointer has to come to bring it back.
   static let revealDepth: CGFloat = 72
@@ -15,7 +15,7 @@ final class DesktopFullScreenBar: NSVisualEffectView {
     state = .active
     appearance = NSAppearance(named: .darkAqua)
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = DesktopStyle.wellRadius
     layer?.masksToBounds = true
     button.target = self
     button.action = #selector(exit)

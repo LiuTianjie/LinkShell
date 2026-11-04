@@ -12,6 +12,7 @@ import { ScreenSessionProvider } from "@/lib/screen-session";
 import { IOSAttentionSync } from "@/components/ios-attention-sync";
 import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
 import { colors, palette } from "@/theme/colors";
+import { radius } from "@/theme/type";
 
 export const unstable_settings = {
   // Keep a home screen beneath Live Activity deep links, including cold launches.
@@ -59,7 +60,7 @@ export default function RootLayout() {
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.62, 1],
                     sheetInitialDetentIndex: 0,
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     sheetExpandsWhenScrolledToEdge: true,
                     contentStyle: sheetContent,
                     headerShown: true,
@@ -72,7 +73,7 @@ export default function RootLayout() {
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.62, 1],
                     sheetInitialDetentIndex: 0,
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     sheetExpandsWhenScrolledToEdge: true,
                     contentStyle: sheetContent,
                     headerShown: true,
@@ -86,24 +87,24 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.92],
                     // The list scrolls inside the sheet; the search field stays put.
                     sheetExpandsWhenScrolledToEdge: false,
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
                 />
-                <Stack.Screen name="session/[id]/task/[task]" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
+                <Stack.Screen name="session/[id]/task/[task]" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }} />
                 <Stack.Screen
                   name="session/[id]/goal"
-                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.92], sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }}
                 />
                 <Stack.Screen
                   name="session/[id]/side"
-                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.62, 0.92], sheetInitialDetentIndex: 1, sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.62, 0.92], sheetInitialDetentIndex: 1, sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }}
                 />
                 <Stack.Screen
                   name="session/[id]/settings"
                   // A few rows: the sheet is as tall as they are.
-                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: "fitToContents", sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }}
+                  options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: "fitToContents", sheetExpandsWhenScrolledToEdge: false, sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }}
                 />
                 <Stack.Screen
                   name="new"
@@ -112,7 +113,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.92],
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
@@ -125,7 +126,7 @@ export default function RootLayout() {
                     sheetAllowedDetents: [0.92],
                     // The list scrolls inside the sheet; the header stays put.
                     sheetExpandsWhenScrolledToEdge: false,
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
@@ -137,7 +138,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.92],
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
@@ -149,14 +150,14 @@ export default function RootLayout() {
                     presentation: "formSheet",
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: [0.42],
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
                 />
                 <Stack.Screen name="archived" options={{ title: "已归档" }} />
-                <Stack.Screen name="rename-computer" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
-                <Stack.Screen name="unlock" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: 28, contentStyle: sheetContent, headerShown: true }} />
+                <Stack.Screen name="rename-computer" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }} />
+                <Stack.Screen name="unlock" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }} />
                 <Stack.Screen name="screen" options={{ title: "屏幕" }} />
                 <Stack.Screen
                   name="ports"
@@ -165,7 +166,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: "fitToContents",
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}
@@ -178,7 +179,7 @@ export default function RootLayout() {
                     // As tall as the list: two computers don't need half the screen.
                     sheetAllowedDetents: "fitToContents",
                     sheetExpandsWhenScrolledToEdge: false,
-                    sheetCornerRadius: 32,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: false,
                   }}
@@ -191,7 +192,7 @@ export default function RootLayout() {
                     sheetExpandsWhenScrolledToEdge: false,
                     sheetGrabberVisible: true,
                     sheetAllowedDetents: Platform.OS === "ios" && Platform.isPad ? [0.92] : [0.6, 0.92],
-                    sheetCornerRadius: 28,
+                    sheetCornerRadius: radius.panel,
                     contentStyle: sheetContent,
                     headerShown: true,
                   }}

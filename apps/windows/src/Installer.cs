@@ -76,7 +76,7 @@ namespace LinkShell.Windows {
             var status = new StackPanel(); var row = new DockPanel();
             percent = Label("0%", 13, true, "Accent"); DockPanel.SetDock(percent, Dock.Right); row.Children.Add(percent);
             stage = Label("准备安装", 13); row.Children.Add(stage); status.Children.Add(row);
-            progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 7, Margin = new Thickness(0, 14, 0, 12), Foreground = Brush("Accent"), Background = Brush("Line"), BorderThickness = new Thickness(0) };
+            progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 7, Margin = new Thickness(0, 14, 0, 12), Foreground = Brush("AccentFill"), Background = Brush("Line"), BorderThickness = new Thickness(0) };
             progress.Template = (ControlTemplate)XamlReader.Parse("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ProgressBar'><Grid><Border x:Name='PART_Track' CornerRadius='3' Background='{TemplateBinding Background}'/><Border x:Name='PART_Indicator' HorizontalAlignment='Left' CornerRadius='3' Background='{TemplateBinding Foreground}'/></Grid></ControlTemplate>");
             AutomationProperties.SetName(progress, "安装进度"); status.Children.Add(progress);
             detail = Label("", 11, false, "Secondary"); detail.TextWrapping = TextWrapping.NoWrap; detail.TextTrimming = TextTrimming.CharacterEllipsis; status.Children.Add(detail);
@@ -87,7 +87,7 @@ namespace LinkShell.Windows {
             footer.Children.Add(new Border { Height = 1, Background = Brush("Line"), Margin = new Thickness(0, 18, 0, 18) });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             secondary = new Button { Content = "取消", MinWidth = 90, Margin = new Thickness(0, 0, 12, 0) }; secondary.Click += (s, e) => CancelOrClose(); buttons.Children.Add(secondary);
-            primary = new Button { Content = "安装", MinWidth = 124, Background = Brush("Accent"), Foreground = Brush("OnAccent"), FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0), IsDefault = true }; primary.Click += async (s, e) => { if (installed) Finish(); else await BeginInstall(); }; buttons.Children.Add(primary); footer.Children.Add(buttons);
+            primary = new Button { Content = "安装", MinWidth = 124, Background = Brush("AccentFill"), Foreground = Brush("OnAccent"), FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0), IsDefault = true }; primary.Click += async (s, e) => { if (installed) Finish(); else await BeginInstall(); }; buttons.Children.Add(primary); footer.Children.Add(buttons);
             Content = root;
             SourceInitialized += (s, e) => { int value = 1; try { DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref value, 4); } catch (DllNotFoundException) {} };
             Closing += (s, e) => { if (working) { e.Cancel = true; CancelOrClose(); } };
@@ -139,7 +139,7 @@ namespace LinkShell.Windows {
                 primary.Content = update == null ? "重新安装" : "重试更新"; secondary.Content = update == null ? "关闭" : "重新打开 LinkShell"; secondary.IsEnabled = true;
             } catch (Exception error) {
                 ExitCode = 1; heading.Text = "安装未完成"; description.Text = "解决下方问题后，可以重新尝试。";
-                stage.Text = "安装失败"; detail.Text = ""; result.Text = error.Message; result.Foreground = Brush("Warning");
+                stage.Text = "安装失败"; detail.Text = ""; result.Text = error.Message; result.Foreground = Brush("Danger");
                 primary.Content = update == null ? "重试安装" : "重试更新"; secondary.Content = update == null ? "关闭" : "重新打开 LinkShell"; secondary.IsEnabled = true;
             } finally { working = false; committing = false; primary.IsEnabled = true; cancellation.Dispose(); cancellation = null; }
             if (installed && update != null) Finish();
@@ -156,11 +156,11 @@ namespace LinkShell.Windows {
         }
         bool LaunchUpdated() {
             try { update.Launch(); return true; }
-            catch (Exception error) { result.Text = "无法打开 LinkShell：" + error.Message; result.Foreground = Brush("Warning"); return false; }
+            catch (Exception error) { result.Text = "无法打开 LinkShell：" + error.Message; result.Foreground = Brush("Danger"); return false; }
         }
         bool Open(string path) {
             try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); return true; }
-            catch (Exception error) { result.Text = "安装已完成，但无法打开：" + error.Message; result.Foreground = Brush("Warning"); return false; }
+            catch (Exception error) { result.Text = "安装已完成，但无法打开：" + error.Message; result.Foreground = Brush("Danger"); return false; }
         }
     }
 }

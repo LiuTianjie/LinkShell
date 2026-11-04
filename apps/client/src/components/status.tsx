@@ -1,38 +1,27 @@
 import type { SessionState } from "@linkshell/wire";
-import { View, type ColorValue } from "react-native";
-import Animated, { useReducedMotion } from "react-native-reanimated";
+import { ActivityIndicator, View, type ColorValue } from "react-native";
 import { colors } from "@/theme/colors";
 
-const ring = {
-  from: { transform: [{ scale: 1 }], opacity: 0.55 },
-  to: { transform: [{ scale: 2.6 }], opacity: 0 },
-};
-
-/** A dot that softly radiates while something is live. */
-export function LiveDot({ color = colors.running, size = 8, live = true }: { color?: ColorValue; size?: number; live?: boolean }) {
-  const reduceMotion = useReducedMotion();
-  return (
-    <View style={{ width: size, height: size }}>
-      {live && !reduceMotion ? (
-        <Animated.View
-          style={{
-            position: "absolute",
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: color,
-            animationName: ring,
-            animationDuration: "1600ms",
-            animationIterationCount: "infinite",
-            animationTimingFunction: "ease-out",
-          }}
-        />
-      ) : null}
-      <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />
-    </View>
-  );
+/** A session's or a link's state as a plain 8 pt dot; the colour says it all, so it never pulses. */
+export function StatusDot({ color = colors.running }: { color?: ColorValue }) {
+  return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />;
 }
 
+export type LinkHealth = "online" | "connecting" | "error" | "offline";
+
+/**
+ * A computer's or a service's connection, a scale of its own beside session
+ * states: online is the one good news a green dot carries; connecting is a
+ * spinner (next to `secondaryLabel` text), never a coloured dot.
+ */
+export function LinkDot({ health }: { health: LinkHealth }) {
+  if (health === "connecting") {
+    return <ActivityIndicator size="small" color={colors.secondaryLabel} style={{ width: 12, height: 12, transform: [{ scale: 0.6 }] }} />;
+  }
+  return <StatusDot color={health === "online" ? colors.ok : health === "error" ? colors.danger : colors.tertiaryLabel} />;
+}
+
+/** Idle and done are the normal resting state: grey, never green. */
 export function stateColor(state: SessionState): ColorValue {
   switch (state) {
     case "running":
@@ -41,20 +30,18 @@ export function stateColor(state: SessionState): ColorValue {
       return colors.waiting;
     case "error":
       return colors.danger;
-    case "offline":
-    case "unknown":
-      return colors.tertiaryLabel;
     default:
-      return colors.ok;
+      return colors.tertiaryLabel;
   }
 }
 
+/** `waiting` covers both approvals and questions; callers that know which say 等你确认 / 等你回答. */
 export function stateLabel(state: SessionState): string {
   switch (state) {
     case "running":
       return "运行中";
     case "waiting":
-      return "等待你";
+      return "等你处理";
     case "error":
       return "出错";
     case "offline":

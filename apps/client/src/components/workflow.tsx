@@ -10,9 +10,9 @@ import { haptics } from "@/lib/haptics";
 import { useNow } from "@/lib/use-now";
 import { workflowCounts, workflowCurrentPhase, workflowElapsed, workflowFromTool, workflowGroups, workflowStateText, type WorkflowGroup } from "@/lib/workflows";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
-import { PressableScale } from "./pressable-scale";
+import { PressableFeedback } from "./pressable-feedback";
 import { useTimelineSession } from "./timeline/context";
 
 export function openWorkflow(sessionId: string, call: string) {
@@ -24,7 +24,8 @@ export function WorkflowMark({ state, size = 16 }: { state?: WorkflowAgentState;
   if (state === "running") return <ActivityIndicator size="small" color={colors.accent} />;
   if (state === "completed") return <Icon sf="checkmark.circle.fill" md="check_circle" size={size} color={colors.ok} />;
   if (state === "failed") return <Icon sf="exclamationmark.circle.fill" md="error" size={size} color={colors.danger} />;
-  if (state === "paused") return <Icon sf="pause.circle" md="pause_circle" size={size} color={colors.waiting} />;
+  // Paused is not waiting on the user: amber is kept for what needs them.
+  if (state === "paused") return <Icon sf="pause.circle" md="pause_circle" size={size} color={colors.secondaryLabel} />;
   if (state === "stopped") return <Icon sf="stop.circle" md="stop_circle" size={size} color={colors.secondaryLabel} />;
   return <Icon sf={state === "unknown" ? "questionmark.circle" : "circle.dotted"} md={state === "unknown" ? "help_outline" : "radio_button_unchecked"} size={size} color={colors.tertiaryLabel} />;
 }
@@ -90,7 +91,7 @@ export const WorkflowAgentRow = memo(function WorkflowAgentRow({ agent, sessionI
         accessibilityRole={canOpen || hasResult ? "button" : undefined}
         accessibilityLabel={`${agent.title}，${state}`}
         accessibilityHint={canOpen ? "查看 Agent 的完整过程" : hasResult ? "展开结果" : undefined}
-        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 52, paddingVertical: compact ? 8 : 12, paddingHorizontal: compact ? 0 : 14, backgroundColor: pressed ? colors.fill : undefined, borderRadius: 10 })}
+        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 52, paddingVertical: compact ? 8 : 12, paddingHorizontal: compact ? 0 : 14, backgroundColor: pressed ? colors.fill : undefined, borderRadius: radius.control, borderCurve: "continuous" })}
       >
         <View style={{ width: 20, alignItems: "center" }}><WorkflowMark state={agent.state} /></View>
         <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -132,7 +133,7 @@ export function WorkflowPhaseSection({ group, sessionId }: { group: WorkflowGrou
         <Icon sf={open ? "chevron.down" : "chevron.right"} md={open ? "expand_more" : "chevron_right"} size={13} color={colors.secondaryLabel} />
       </Pressable>
       {open ? (
-        <View style={{ borderRadius: 16, borderCurve: "continuous", backgroundColor: colors.card, overflow: "hidden" }}>
+        <View style={{ borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card, overflow: "hidden" }}>
           {group.agents.length ? group.agents.slice(0, visibleCount).map((agent, index) => (
             <View key={agent.id}>
               {index > 0 ? <View style={{ height: 0.5, marginLeft: 44, backgroundColor: colors.separator }} /> : null}
@@ -171,13 +172,13 @@ export const WorkflowCard = memo(function WorkflowCard({ item }: { item: Extract
   const counts = workflowCounts(record.workflow);
   const state = record.workflow.state;
   return (
-    <PressableScale
+    <PressableFeedback
       disabled={!sessionId}
       onPress={() => openWorkflow(sessionId!, record.toolCallId)}
       accessibilityRole="button"
       accessibilityLabel={`查看工作流：${record.workflow.name ?? record.task}，${state ? workflowStateText[state] : "正在启动"}，${counts.completed} / ${counts.started} 个 Agent 已完成${counts.failed ? `，${counts.failed} 个失败` : ""}`}
       accessibilityHint="查看完整流程和各个 Agent 的过程"
-      style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, backgroundColor: colors.inset }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.inset }}
     >
       <WorkflowMark state={state} />
       <View style={{ flex: 1, gap: 3 }}>
@@ -188,13 +189,13 @@ export const WorkflowCard = memo(function WorkflowCard({ item }: { item: Extract
       </View>
       {counts.failed > 0 ? <Text style={[type.caption, { color: colors.danger }]}>{counts.failed} 个失败</Text> : null}
       <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />
-    </PressableScale>
+    </PressableFeedback>
   );
 });
 
 export function WorkflowCardContent({ record, sessionId }: { record: WorkflowRecord; sessionId?: string }) {
   return (
-    <View style={{ backgroundColor: colors.inset, borderRadius: 18, borderCurve: "continuous", padding: 14, gap: 9 }}>
+    <View style={{ backgroundColor: colors.inset, borderRadius: radius.card, borderCurve: "continuous", padding: 14, gap: 9 }}>
       <Pressable disabled={!sessionId} onPress={() => openWorkflow(sessionId!, record.toolCallId)} accessibilityRole="button" accessibilityLabel={`查看工作流：${record.workflow.name ?? record.task}`}>
         <WorkflowSummary record={record} compact />
       </Pressable>
@@ -212,18 +213,18 @@ export function LiveWorkflowsBar({ sessionId, subagentsRunning = 0 }: { sessionI
   const live = useMemo(() => Object.values(records ?? {}).filter((record) => workflowIsLive(record.workflow)), [records]);
   const taskRecords = useClient((state) => state.tasks[sessionId]);
   const taskCount = Object.values(taskRecords ?? {}).filter((task) => task.state === "running").length;
-  if (taskCount) return <PressableScale accessibilityRole="button" accessibilityLabel={`${taskCount} 个后台任务运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
+  if (taskCount) return <PressableFeedback accessibilityRole="button" accessibilityLabel={`${taskCount} 个后台任务运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
     <Icon sf="terminal" md="terminal" size={18} color={colors.running} />
     <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{taskCount} 个后台任务运行中{live.length ? ` · ${live.length} 个工作流` : subagentsRunning ? ` · ${subagentsRunning} 个子 Agent` : ""}</Text>
     <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
-  </PressableScale>;
+  </PressableFeedback>;
   if (!live.length) {
     if (!subagentsRunning) return null;
-    return <PressableScale accessibilityRole="button" accessibilityLabel={`${subagentsRunning} 个子 Agent 运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
+    return <PressableFeedback accessibilityRole="button" accessibilityLabel={`${subagentsRunning} 个子 Agent 运行中`} onPress={() => router.push({ pathname: "/session/[id]/agents", params: { id: sessionId } })} outerStyle={{ marginHorizontal: 12, marginBottom: 2 }} style={{ padding: 12, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}>
       <Icon sf="square.stack.3d.up" md="layers" size={18} color={colors.running} />
       <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.label, fontWeight: "600" }]}>{subagentsRunning} 个子 Agent 运行中</Text>
       <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
-    </PressableScale>;
+    </PressableFeedback>;
   }
   const first = live[0]!;
   const counts = workflowCounts(first.workflow);
@@ -234,13 +235,12 @@ export function LiveWorkflowsBar({ sessionId, subagentsRunning = 0 }: { sessionI
   }, { running: 0, paused: 0 });
   const activity = [activeCounts.running ? `${activeCounts.running} 个 Agent 运行中` : undefined, activeCounts.paused ? `${activeCounts.paused} 个已暂停` : undefined].filter(Boolean).join(" · ") || "等待 Agent 启动";
   return (
-    <PressableScale
-      pressedScale={0.99}
+    <PressableFeedback
       accessibilityRole="button"
       accessibilityLabel={live.length > 1 ? `查看 ${live.length} 个进行中的工作流` : `查看工作流：${first.workflow.name ?? first.task}`}
       onPress={() => live.length === 1 ? openWorkflow(sessionId, first.toolCallId) : router.push({ pathname: "/session/[id]/workflows", params: { id: sessionId } })}
       outerStyle={{ marginHorizontal: 12, marginBottom: 2 }}
-      style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}
+      style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.inset, flexDirection: "row", alignItems: "center", gap: 10 }}
     >
       <WorkflowMark state={first.workflow.state} />
       <View style={{ flex: 1, gap: 2 }}>
@@ -254,6 +254,6 @@ export function LiveWorkflowsBar({ sessionId, subagentsRunning = 0 }: { sessionI
         </Text>
       </View>
       <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} />
-    </PressableScale>
+    </PressableFeedback>
   );
 }

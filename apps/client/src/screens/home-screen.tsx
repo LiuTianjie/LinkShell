@@ -18,6 +18,7 @@ import { TerminalRow } from "@/components/terminal-row";
 import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
+import { LinkDot } from "@/components/status";
 import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { Welcome } from "@/components/welcome";
@@ -32,7 +33,7 @@ import {
 } from "@/lib/session-attention";
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { IOS_TAB_BAR_HEIGHT, useFloatingTabInset } from "@/components/floating-tabs";
 import { NEW_SESSION } from "@/components/new-session-action";
 import { PageSearch } from "@/components/page-header";
@@ -140,7 +141,7 @@ function buildItems(
 
   if (filter === "attention") {
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "待处理" });
+      items.push({ type: "header", key: "h-need", title: "等你处理" });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
@@ -176,7 +177,7 @@ function buildItems(
   } else {
     // Default "all" view: Attention-first hierarchy (Waiting > Failed > Running > Pinned > Day buckets)
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "待处理" });
+      items.push({ type: "header", key: "h-need", title: "等你处理" });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
@@ -244,7 +245,7 @@ function Summary({ small = false }: { small?: boolean }) {
   const { computer } = useConnection();
   const names = useComputerNames((state) => state.names);
   const name = computerDisplayName(computer, names);
-  const online = useClient((state) => state.status === "online");
+  const status = useConnectionStatus();
   return (
     <Pressable
       onPress={() => {
@@ -264,7 +265,7 @@ function Summary({ small = false }: { small?: boolean }) {
         opacity: pressed ? 0.6 : 1,
       })}
     >
-      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: online ? colors.ok : colors.tertiaryLabel }} />
+      <LinkDot health={status === "online" ? "online" : status === "connecting" ? "connecting" : "offline"} />
       <Text numberOfLines={1} style={[small ? type.footnote : type.subhead, { color: colors.secondaryLabel, flexShrink: 1 }]}>
         {name}
       </Text>
@@ -374,7 +375,7 @@ function HomeWorkspace() {
         <MountedMotionPane frame={sidebar} visible={showSidebar} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "row" ? activeSidebarWidth : width} style={{ zIndex: laptop ? 1 : 0 }}>
           <HomeList onSelect={select} selectedId={showDetail ? selected?.id : undefined} compact={split} inlineControls={inlineControls} />
         </MountedMotionPane>
-          <MountedMotionPane frame={detail} visible={detailVisible} action={motionAction} geometry={motionGeometry} style={{ borderRadius: split ? 28 : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
+          <MountedMotionPane frame={detail} visible={detailVisible} action={motionAction} geometry={motionGeometry} style={{ borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
             <SessionFoldLayoutContext value={foldLayout}>
             {selected && (showDetail || detailVisited) ? <>
               {Platform.OS !== "ios" ? <View style={{ paddingTop: split ? Math.max(18, insets.top + 4) : insets.top + 12, paddingBottom: 14, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 0.5, borderBottomColor: colors.separator }}>
@@ -387,7 +388,7 @@ function HomeWorkspace() {
                 </View>
                 {(["changes", "preview"] as const).map((panel) => (
                   <Pressable key={panel} onPress={() => toggleTool(panel)} accessibilityRole="button" accessibilityState={{ selected: tool === panel }} accessibilityLabel={panel === "changes" ? "查看改动" : "网页预览"} hitSlop={4}>
-                    <Glass interactive style={{ minHeight: 40, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, alignItems: "center", justifyContent: "center" }}>
+                    <Glass interactive style={{ minHeight: 40, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
                       <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{panel === "changes" ? "改动" : "预览"}</Text>
                     </Glass>
                   </Pressable>
@@ -397,7 +398,7 @@ function HomeWorkspace() {
             </> : null}
             </SessionFoldLayoutContext>
           </MountedMotionPane>
-          <MountedMotionPane frame={tools} visible={showTools} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "column" ? width : toolWidth} style={{ zIndex: laptop ? 2 : 0, borderRadius: split ? 28 : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
+          <MountedMotionPane frame={tools} visible={showTools} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "column" ? width : toolWidth} style={{ zIndex: laptop ? 2 : 0, borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
             {selected ? <SessionTools key={selected.id} sessionId={selected.id} panel={tool ?? "changes"} onPanel={openTool} onClose={closeTool} active={showTools} motionAction={motionAction} motionGeometry={motionGeometry} /> : null}
           </MountedMotionPane>
       </View>
@@ -483,7 +484,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
     ({ item }: { item: Item }) => {
       switch (item.type) {
         case "header":
-          return <SectionHeader title={item.title} count={item.count} tone={item.warn ? colors.waiting : undefined} />;
+          return <SectionHeader title={item.title} count={item.count} tone={item.warn ? colors.danger : undefined} />;
         case "need":
           return (
             <View style={{ paddingBottom: 12 }}>
@@ -577,11 +578,13 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                           gap: 4,
                           height: 32,
                           paddingHorizontal: 12,
+                          // A capsule, like every button.
                           borderRadius: 16,
                           borderCurve: "continuous",
                           borderWidth: StyleSheet.hairlineWidth,
                           borderColor: "transparent",
-                          backgroundColor: active ? colors.fillStrong : pressed ? colors.fill : "transparent",
+                          backgroundColor: active ? colors.fillStrong : "transparent",
+                          opacity: pressed ? 0.6 : 1,
                         })}
                       >
                         <Text
@@ -596,23 +599,8 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                           {chip.label}
                         </Text>
                         {chip.count !== undefined ? (
-                          <View
-                            style={{
-                              height: 18,
-                              borderRadius: 9,
-                              alignItems: "center",
-                              justifyContent: "center",
-                              backgroundColor: "transparent",
-                            }}
-                          >
-                            <Text
-                              style={{
-                                fontSize: 11,
-                                color: colors.secondaryLabel,
-                                fontWeight: "600",
-                                fontVariant: ["tabular-nums"],
-                              }}
-                            >
+                          <View style={{ height: 18, alignItems: "center", justifyContent: "center" }}>
+                            <Text style={[type.caption2, { color: colors.secondaryLabel, fontWeight: "600", fontVariant: ["tabular-nums"] }]}>
                               {chip.count}
                             </Text>
                           </View>

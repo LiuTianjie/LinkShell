@@ -6,13 +6,12 @@ import { Text } from "@/components/fixed-text";
 import { Segmented } from "@/components/segmented";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 const compact = (n: number) =>
   n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : n.toLocaleString();
-const BAR = "#36aa92";
 const CHART = 132;
-const card = { padding: 16, borderRadius: 20, borderCurve: "continuous", backgroundColor: colors.card } as const;
+const card = { padding: 16, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card } as const;
 const METRICS = [
   { value: "tokens", label: "Token" },
   { value: "records", label: "记录" },
@@ -22,9 +21,9 @@ function Stat({ label, value, unit }: { label: string; value: string; unit: stri
   return (
     <View accessible accessibilityLabel={`${label} ${value} ${unit}`} style={[card, { width: "47%", flexGrow: 1, gap: 6 }]}>
       <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{label}</Text>
-      <Text style={{ color: colors.label, fontSize: 26, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+      <Text style={[type.title1, { color: colors.label, fontVariant: ["tabular-nums"] }]}>
         {value}
-        <Text style={{ fontSize: 13, fontWeight: "500", color: colors.secondaryLabel }}> {unit}</Text>
+        <Text style={[type.footnote, { fontWeight: "500", color: colors.secondaryLabel }]}> {unit}</Text>
       </Text>
     </View>
   );
@@ -95,14 +94,15 @@ export function UsageDashboard({ report }: { report: UsageReport }) {
                             maxWidth: 32,
                             // A day with any use shows a sliver, so it doesn't read as none.
                             height: value ? Math.max(3, (value / maximum) * CHART) : 0,
-                            backgroundColor: BAR,
+                            // The one series on the page, so the accent (as the computer card's CPU line is).
+                            backgroundColor: colors.accent,
                             borderRadius: report.daily.length > 7 ? 2 : 5,
                             borderCurve: "continuous",
                             opacity: lit ? 1 : 0.3,
                           }}
                         />
                       </View>
-                      <Text numberOfLines={1} style={{ position: "absolute", top: CHART + 6, width: 44, textAlign: "center", fontSize: 10, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }}>
+                      <Text numberOfLines={1} style={[type.caption, { position: "absolute", top: CHART + 6, width: 44, textAlign: "center", color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>
                         {labelled(index) ? day.date.slice(5).replace("-", "/") : ""}
                       </Text>
                     </Pressable>
@@ -115,7 +115,7 @@ export function UsageDashboard({ report }: { report: UsageReport }) {
               {[1, 0.5, 0].map((share) => (
                 <Text
                   key={share}
-                  style={{ position: "absolute", top: (1 - share) * CHART - 7, height: 14, lineHeight: 14, fontSize: 10, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }}
+                  style={[type.caption, { position: "absolute", top: (1 - share) * CHART - type.caption.lineHeight / 2, height: type.caption.lineHeight, color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}
                 >
                   {compact(Math.round(maximum * share))}
                 </Text>
@@ -154,7 +154,7 @@ export function UsageDashboard({ report }: { report: UsageReport }) {
                   </View>
                   {/* Each model's share of the biggest one, so the list reads at a glance. */}
                   <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.fill, overflow: "hidden" }}>
-                    <View style={{ width: `${(entry.totalTokens / top) * 100}%`, height: 4, borderRadius: 2, backgroundColor: BAR }} />
+                    <View style={{ width: `${(entry.totalTokens / top) * 100}%`, height: 4, borderRadius: 2, backgroundColor: colors.accent }} />
                   </View>
                   <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
                     {labelOf(entry.agent)} · 输入 {compact(entry.inputTokens)} · 输出 {compact(entry.outputTokens)} · 缓存 {compact(entry.cacheReadTokens)}

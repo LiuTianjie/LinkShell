@@ -22,7 +22,7 @@ import { agentLook, tierCopy } from "@/theme/agents";
 import { SheetHeader } from "@/components/sheet-header";
 import { AgentInteractions } from "./acp-screen";
 import { colors } from "@/theme/colors";
-import { mono, type } from "@/theme/type";
+import { mono, type, radius } from "@/theme/type";
 import { optionLabel, valueHint, valueLabel } from "@/lib/labels";
 
 const LAST_AGENT_KEY = "new.agent";
@@ -60,7 +60,7 @@ function ChoiceCard({
         alignItems: "center",
         gap: 7,
         paddingVertical: 11,
-        borderRadius: 18,
+        borderRadius: radius.card,
         borderCurve: "continuous",
         backgroundColor: selected ? colors.accentSoft : colors.sheetCard,
         borderWidth: 1.5,
@@ -354,7 +354,7 @@ export function NewSessionScreen() {
                 gap: 12,
                 paddingHorizontal: 14,
                 paddingVertical: 12,
-                borderRadius: 18,
+                borderRadius: radius.card,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
               }}
@@ -365,7 +365,7 @@ export function NewSessionScreen() {
                   <Text numberOfLines={1} style={[type.body, { flexShrink: 1, fontSize: 16, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
                     {cwd ? baseName(cwd) : "选择项目"}
                   </Text>
-                  {branch ? <BranchTag branch={branch} size={13} max={20} /> : null}
+                  {branch ? <BranchTag branch={branch} font={type.footnote} max={20} /> : null}
                 </View>
                 {cwd ? (
                   <Text numberOfLines={1} style={[type.caption, { color: colors.tertiaryLabel }]}>
@@ -391,7 +391,7 @@ export function NewSessionScreen() {
                 gap: 12,
                 paddingHorizontal: 14,
                 paddingVertical: 10,
-                borderRadius: 18,
+                borderRadius: radius.card,
                 borderCurve: "continuous",
                 backgroundColor: colors.sheetCard,
               }}
@@ -435,7 +435,7 @@ export function NewSessionScreen() {
                 maxHeight: 200,
                 color: colors.label,
                 backgroundColor: colors.sheetCard,
-                borderRadius: 18,
+                borderRadius: radius.card,
                 borderCurve: "continuous",
                 paddingHorizontal: 14,
                 paddingTop: 12,
@@ -464,7 +464,7 @@ function ModelRow({ name, note, menu = false, label = "模型", category = "mode
     <View
       accessibilityRole={menu ? "button" : undefined}
       accessibilityLabel={`${label}：${name}${note && !menu ? `，${note}` : ""}`}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 18, borderCurve: "continuous", backgroundColor: colors.sheetCard }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.sheetCard }}
     >
       <Icon sf={category === "effort" ? "brain" : category === "mode" ? "lock.shield" : "cpu"} md={category === "effort" ? "psychology" : category === "mode" ? "shield" : "memory"} size={20} color={colors.accent} />
       <View style={{ flex: 1, gap: 1 }}>

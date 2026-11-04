@@ -88,7 +88,7 @@ describe("the live row", () => {
     view = applyEvents(view, events({ sessionUpdate: "ls_turn", state: "started" }));
     expect(view.turnStartedAt).toBe(started);
     view = applyEvents(view, events({ sessionUpdate: "ls_permission", requestId: "r", title: "Run?", options: [{ optionId: "a", name: "Allow", kind: "allow_once" }] }));
-    expect(liveActivity(view)).toMatchObject({ label: "需要您的输入", waiting: true });
+    expect(liveActivity(view)).toMatchObject({ label: "等你确认", waiting: true });
   });
 });
 

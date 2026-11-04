@@ -3,7 +3,7 @@ import AppKit
 /// The setup window's face (`--setup`; what it does is `Setup`): the app's icon, a title and a
 /// sentence, a row for each permission, and a button to leave it for later. It is drawn with the
 /// desktop app's own system (DesktopStyle): a grey ground, the rows on one panel, the thing to do
-/// next as the one ink pill, mint once a permission is on.
+/// next as the one indigo button, green (a success) once a permission is on.
 final class SetupWindow {
   static let width: CGFloat = 600
 
@@ -17,7 +17,7 @@ final class SetupWindow {
   private let title = Label(size: 20, weight: .semibold)
   private let sentence = Label(size: 13, wraps: true)
   private var rows: [Permission: SetupRow] = [:]
-  private let leave: DesktopPillButton
+  private let leave: DesktopButton
 
   init(text: SetupText) {
     self.text = text
@@ -37,11 +37,11 @@ final class SetupWindow {
     window.standardWindowButton(.miniaturizeButton)?.isHidden = true
     window.standardWindowButton(.zoomButton)?.isHidden = true
 
-    leave = DesktopPillButton(title: text.later, kind: .secondary, target: window, action: #selector(NSWindow.performClose(_:)))
+    leave = DesktopButton(title: text.later, kind: .secondary, target: window, action: #selector(NSWindow.performClose(_:)))
 
     done.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
     done.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 50, weight: .regular)
-    done.contentTintColor = DesktopStyle.mintColor
+    done.contentTintColor = DesktopStyle.okColor
     title.alignment = .center
     sentence.alignment = .center
     title.textColor = DesktopStyle.primaryText
@@ -190,7 +190,7 @@ final class SetupRow: NSView {
   private let purpose = Label(size: 12, wraps: true)
   private let hint = Label(size: 12, weight: .medium, wraps: true)
   private let note = Label(size: 11, wraps: true)
-  private let button: DesktopPillButton
+  private let button: DesktopButton
   /// The space between what the permission is for and what to do about it.
   private var below = NSLayoutConstraint()
 
@@ -198,7 +198,7 @@ final class SetupRow: NSView {
     self.text = text
     self.press = press
     tile = Tile(symbol: permission == .recording ? "rectangle.dashed.badge.record" : "accessibility")
-    button = DesktopPillButton(title: text.open, kind: .secondary, target: nil, action: nil)
+    button = DesktopButton(title: text.open, kind: .secondary, target: nil, action: nil)
     super.init(frame: .zero)
     button.target = self
     button.action = #selector(pressed)
@@ -265,11 +265,11 @@ final class SetupRow: NSView {
     name.textColor = faint ? DesktopStyle.secondaryText : DesktopStyle.primaryText
     purpose.textColor = faint ? DesktopStyle.tertiaryText : DesktopStyle.secondaryText
     mark.image = NSImage(systemSymbolName: granted ? "checkmark.circle.fill" : "circle", accessibilityDescription: nil)
-    mark.contentTintColor = granted ? DesktopStyle.mintColor : DesktopStyle.tertiaryText
+    mark.contentTintColor = granted ? DesktopStyle.okColor : DesktopStyle.tertiaryText
     state.stringValue = granted ? text.on : text.off
-    state.textColor = granted ? DesktopStyle.mintColor : DesktopStyle.tertiaryText
+    state.textColor = granted ? DesktopStyle.okColor : DesktopStyle.tertiaryText
     button.isHidden = granted
-    // The thing to do now is the window's one ink pill.
+    // The thing to do now is the window's one primary button.
     button.kind = first ? .primary : .secondary
     button.keyEquivalent = first ? "\r" : ""
     hint.isHidden = granted || !pressed
@@ -336,7 +336,7 @@ private final class Tile: NSView {
 
 /// The panel the rows are in: one step from the window ground, with a hairline around it.
 private final class Card: NSView {
-  private static let radius: CGFloat = 16
+  private static let radius = DesktopStyle.panelRadius
 
   func fill(with view: NSView) {
     view.translatesAutoresizingMaskIntoConstraints = false

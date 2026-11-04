@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { TerminalInfo } from "@linkshell/wire";
+import brandColors from "../../../client/src/theme/brand-colors.json";
 import { cn } from "@/lib/utils";
 import {
   ArrowDownToLine,
@@ -241,7 +242,8 @@ export function Terminal({
       red: "#e06c75",
       green: "#8cc265",
       yellow: "#d8b76c",
-      blue: "#7d95ff",
+      // The brand indigo, so the terminal's blue and the app's own never disagree on one screen.
+      blue: brandColors.accent[1]!,
       magenta: "#c792ea",
       cyan: "#5fb3c9",
       white: "#c7c7d1",
@@ -260,7 +262,7 @@ export function Terminal({
       red: "#c4374a",
       green: "#3f7f26",
       yellow: "#8a6200",
-      blue: "#3553c9",
+      blue: brandColors.accent[0]!,
       magenta: "#8a3fb8",
       cyan: "#17768c",
       white: "#6b6b76",

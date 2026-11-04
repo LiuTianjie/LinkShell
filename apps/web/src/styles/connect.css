@@ -31,7 +31,7 @@
 .welcome-live > img {
     width: 56px;
     height: 56px;
-    border-radius: 14px;
+    border-radius: var(--radius-panel);
   }
 .welcome-live h1 {
     font-size: 20px;
@@ -47,7 +47,7 @@
     overflow: auto;
     padding: 12px 14px;
     border: 1px solid var(--separator);
-    border-radius: 6px;
+    border-radius: var(--radius-card);
     background: var(--inset);
     font-size: 12px;
     line-height: 1.7;
@@ -72,18 +72,17 @@
   padding: 40px 24px;
   text-align: center;
 }
+/* A bare system icon in secondary ink, as every state view's: no disc behind it. */
 .access-unlock-mark {
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   margin-bottom: 4px;
-  border-radius: 50%;
-  background: var(--fill);
   color: var(--secondaryLabel);
 }
 .access-unlock h2 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--label);
 }
@@ -112,7 +111,7 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--fill);
   color: var(--tertiaryLabel);
 }

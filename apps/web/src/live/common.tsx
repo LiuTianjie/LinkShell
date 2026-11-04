@@ -62,11 +62,13 @@ export const baseName = (path: string) =>
   path.replace(/\/$/, "").split("/").pop() ?? path;
 export const titleOf = (session: { title?: string; cwd: string }) =>
   session.title || baseName(session.cwd) || "未命名会话";
+// Session states use the names every end shares (docs/design/visual-system.md); a task's or a
+// workflow's own outcomes (已完成, 失败, 等待中) keep theirs.
 export const stateLabel = (state: string) =>
   ({
-    idle: "已完成",
-    waiting: "需要你",
-    running: "进行中",
+    idle: "空闲",
+    waiting: "等你处理",
+    running: "运行中",
     error: "出错",
     offline: "离线",
     completed: "已完成",
@@ -135,23 +137,22 @@ export function AgentMark({
     </span>
   );
 }
-export function Badge({ state }: { state: string }) {
+/** A state as a badge, coloured like StatusText: only running, waiting on the person and errors. */
+export function Badge({ state, label }: { state: string; label?: string }) {
   return (
     <StatusBadge
       variant={
         ["error", "failed"].includes(state)
           ? "destructive"
-          : ["waiting", "pending", "blocked"].includes(state)
+          : ["waiting", "blocked"].includes(state)
             ? "warning"
             : ["running", "active"].includes(state)
               ? "info"
-              : ["idle", "completed", "complete"].includes(state)
-                ? "success"
-                : "secondary"
+              : "secondary"
       }
     >
       <span className="status-dot" />
-      {stateLabel(state)}
+      {label ?? stateLabel(state)}
     </StatusBadge>
   );
 }

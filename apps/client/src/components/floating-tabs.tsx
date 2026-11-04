@@ -3,10 +3,11 @@ import { TabList, TabSlot, Tabs, TabTrigger, type TabTriggerSlotProps } from "ex
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { Platform, Pressable, useColorScheme, View, type View as RNView } from "react-native";
 import { Text } from "@/components/fixed-text";
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import Animated, { Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
+import { type } from "@/theme/type";
 import { Icon, type IconProps } from "./icon";
 
 // A floating capsule tab bar for Android (and anywhere without native liquid
@@ -38,7 +39,8 @@ export interface FloatingTab {
   badge?: number;
 }
 
-const SPRING = { damping: 20, stiffness: 260, mass: 0.8 };
+/** A state change: short and ease-out, no overshoot. */
+const SLIDE = { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System };
 
 const TabButton = forwardRef<RNView, TabTriggerSlotProps & { tab: FloatingTab }>(function TabButton(
   { tab, isFocused, onPress, onLongPress, style: _style, ...props },
@@ -73,18 +75,19 @@ const TabButton = forwardRef<RNView, TabTriggerSlotProps & { tab: FloatingTab }>
               height: 18,
               paddingHorizontal: 5,
               borderRadius: 9,
-              backgroundColor: colors.danger,
+              // It counts sessions waiting on the user: their amber, not an error's red.
+              backgroundColor: colors.waitingFill,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Text style={{ color: "#ffffff", fontSize: 11, lineHeight: 13, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+            <Text style={[type.caption2, { color: colors.onAccent, fontWeight: "600", fontVariant: ["tabular-nums"] }]}>
               {tab.badge > 99 ? "99+" : tab.badge}
             </Text>
           </View>
         ) : null}
       </View>
-      <Text style={{ fontSize: 11, lineHeight: 13, fontWeight: isFocused ? "700" : "500", color: tint }}>{tab.label}</Text>
+      <Text style={[type.caption2, { fontWeight: isFocused ? "600" : "500", color: tint }]}>{tab.label}</Text>
     </Pressable>
   );
 });
@@ -97,7 +100,7 @@ function Capsule({ tabs, focused, blurTarget }: { tabs: FloatingTab[]; focused: 
   const x = useSharedValue(0);
 
   useEffect(() => {
-    if (slot > 0) x.value = withSpring(focused * slot, SPRING);
+    if (slot > 0) x.value = withTiming(focused * slot, SLIDE);
   }, [focused, slot, x]);
 
   const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));

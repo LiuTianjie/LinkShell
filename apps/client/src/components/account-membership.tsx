@@ -9,7 +9,7 @@ import { useAccount } from "@/lib/account";
 import { loadAccountMembership, redeemAccountCode } from "@/lib/account-membership";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 export function AccountMembership({ userId }: { userId: string }) {
   const [membership, setMembership] = useState<ProMembership>();
@@ -83,10 +83,11 @@ export function AccountMembership({ userId }: { userId: string }) {
   const pro = membership?.plan === "pro";
   return (
     <View style={{ gap: 4 }}>
-      <View style={{ backgroundColor: colors.sheetCard, borderRadius: 16, borderCurve: "continuous", padding: 16, gap: 14 }}>
+      <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", padding: 16, gap: 14 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" }}>
-            <Icon sf="sparkles" md="auto_awesome" size={16} color={colors.accent} />
+          {/* Membership is a plain fact, so its mark is grey like every other tile. */}
+          <View style={{ width: 30, height: 30, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>
+            <Icon sf="sparkles" md="auto_awesome" size={16} color={colors.label} />
           </View>
           <View style={{ flex: 1, gap: 3 }}>
             <Text style={[type.headline, { color: colors.label }]}>{pro ? "Pro 会员" : "LinkShell Pro"}</Text>
@@ -115,7 +116,7 @@ export function AccountMembership({ userId }: { userId: string }) {
               editable={!busy}
               returnKeyType="done"
               onSubmitEditing={() => void redeem()}
-              style={{ color: colors.label, backgroundColor: colors.fill, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, paddingHorizontal: 12, paddingVertical: 12, minHeight: 48, fontSize: 15 }}
+              style={[type.subhead, { color: colors.label, backgroundColor: colors.fill, borderRadius: radius.control, borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, paddingHorizontal: 12, paddingVertical: 12, minHeight: 48 }]}
             />
           </View>
           <Button title={busy ? "正在兑换…" : "兑换 Pro"} variant="primary" size="large" busy={busy} disabled={loading || !code.trim()} onPress={() => void redeem()} />

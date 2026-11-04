@@ -1,21 +1,19 @@
 import SwiftUI
 import UIKit
 
+/// The phone's press feedback: a held control drops to 60%, nothing scales.
 struct WatchPressableButtonStyle: ButtonStyle {
-  var scale: CGFloat = 0.96
-
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .scaleEffect(configuration.isPressed ? scale : 1.0)
-      .opacity(configuration.isPressed ? 0.84 : 1.0)
-      .animation(.spring(response: 0.20, dampingFraction: 0.75), value: configuration.isPressed)
+      .opacity(configuration.isPressed ? 0.6 : 1.0)
+      .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
   }
 }
 
 /// The one card look used everywhere: rounded, slightly raised from the black background.
 struct WatchCardBackground: ViewModifier {
   var tint: Color? = nil
-  var radius: CGFloat = 14
+  var radius: CGFloat = 16
 
   func body(content: Content) -> some View {
     content
@@ -28,7 +26,8 @@ struct WatchCardBackground: ViewModifier {
 }
 
 extension View {
-  func watchCard(tint: Color? = nil, radius: CGFloat = 14) -> some View {
+  /// Cards use the phone's card radius (16); pass `radius` only for a small tile (12).
+  func watchCard(tint: Color? = nil, radius: CGFloat = 16) -> some View {
     modifier(WatchCardBackground(tint: tint, radius: radius))
   }
 }
@@ -50,7 +49,7 @@ struct WatchStatusBadge: View {
         .frame(width: 9, height: 9)
         Text("\(plan.completed)/\(plan.total)").monospacedDigit()
       } else {
-        Circle().fill(color).frame(width: 5, height: 5)
+        Circle().fill(color).frame(width: 8, height: 8)
         Text(WatchPhaseStyle.label(for: session.phase))
       }
     }
@@ -77,7 +76,7 @@ struct WatchCommandSnippet: View {
     .font(.system(.footnote, design: .monospaced))
     .padding(.horizontal, 7)
     .padding(.vertical, 4)
-    .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .privacySensitive()
   }
 }
@@ -120,7 +119,7 @@ struct WatchSessionRowCard: View {
       }
       .padding(12)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(tint: session.needsAttention ? WatchPalette.waiting : nil, radius: 18)
+      .watchCard(tint: session.needsAttention ? WatchPalette.waiting : nil)
     }
     .buttonStyle(WatchPressableButtonStyle())
     .accessibilityHint(session.needsAttention ? "查看完整请求与处理选项" : "查看会话消息")
@@ -135,7 +134,7 @@ struct WatchTerminalRowCard: View {
     Button(action: onSelect) {
       VStack(alignment: .leading, spacing: 6) {
         HStack {
-          Image(systemName: "terminal").foregroundStyle(WatchPalette.ok)
+          Image(systemName: "terminal").foregroundStyle(.secondary)
           Text(terminal.title).font(.headline).lineLimit(1)
           Spacer(minLength: 0)
           Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
@@ -145,10 +144,10 @@ struct WatchTerminalRowCard: View {
           .multilineTextAlignment(.leading)
           .privacySensitive()
         Text(terminal.exitCode.map { "已退出 · \($0)" } ?? "运行中")
-          .font(.footnote).foregroundStyle(terminal.exitCode == nil ? WatchPalette.ok : Color.secondary)
+          .font(.footnote).foregroundStyle(terminal.exitCode == nil ? WatchPalette.accent : Color.secondary)
       }
       .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(radius: 18)
+      .watchCard()
     }
     .buttonStyle(WatchPressableButtonStyle())
   }
@@ -172,7 +171,7 @@ struct WatchCommandFeedback: ViewModifier {
         }
         .font(.footnote).fixedSize(horizontal: false, vertical: true)
         .padding(10).frame(maxWidth: .infinity)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
       }
     }
@@ -241,7 +240,7 @@ struct WatchWorkspaceHomeView: View {
         }
 
         if !attention.isEmpty {
-          Text("待处理 · \(attention.count)").font(.footnote).foregroundStyle(WatchPalette.waiting)
+          Text("等你处理 · \(attention.count)").font(.footnote).foregroundStyle(WatchPalette.waiting)
           ForEach(attention) { session in
             WatchSessionRowCard(session: session, store: store) { onOpenSession(session.id) }
           }
@@ -310,7 +309,7 @@ struct WatchDiffLineView: View {
       }
     }
     .padding(4.5)
-    .background(Color.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    .background(Color.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .privacySensitive()
   }
 }
@@ -404,7 +403,7 @@ struct WatchMessageText: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
       }
       if short != nil {
@@ -468,7 +467,7 @@ struct WatchTimelineItemCard: View {
         .resizable()
         .aspectRatio(contentMode: .fill)
         .frame(maxWidth: maxWidth ?? .infinity, maxHeight: maxHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
     .buttonStyle(WatchPressableButtonStyle())
     .accessibilityLabel("查看图片")
@@ -489,7 +488,7 @@ struct WatchTimelineItemCard: View {
           }
           .padding(.horizontal, 10)
           .padding(.vertical, 7)
-          .background(WatchPalette.accentFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .background(WatchPalette.accentFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
           .privacySensitive()
         }
       }
@@ -498,12 +497,12 @@ struct WatchTimelineItemCard: View {
       HStack(spacing: 0) {
         if (item.title ?? "").hasPrefix("你") { Spacer(minLength: 22) }
         VStack(alignment: .leading, spacing: 4) {
-          WatchItemHeader(icon: "photo.fill", title: item.title ?? "图片", color: .cyan)
+          WatchItemHeader(icon: "photo.fill", title: item.title ?? "图片", color: .secondary)
           if let image = decodedImage { picture(image, title: item.title ?? "图片", maxWidth: nil, maxHeight: 84) }
           Text(item.text).font(.footnote).foregroundStyle(.white)
         }
         .padding(8)
-        .watchCard(radius: 12)
+        .watchCard()
         .privacySensitive()
         if !(item.title ?? "").hasPrefix("你") { Spacer(minLength: 14) }
       }
@@ -534,7 +533,7 @@ struct WatchTimelineItemCard: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .watchCard(radius: 12)
+        .watchCard()
       }
       .buttonStyle(WatchPressableButtonStyle())
       .accessibilityHint(isExpanded ? "收起改动" : "展开改动")
@@ -561,13 +560,13 @@ struct WatchTimelineItemCard: View {
               .lineLimit(isExpanded ? 10 : 2)
               .padding(5)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(Color.black.opacity(0.40), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+              .background(Color.black.opacity(0.40), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
           }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .watchCard(tint: WatchPalette.accent, radius: 12)
+        .watchCard(tint: WatchPalette.accent)
         .privacySensitive()
       }
       .buttonStyle(WatchPressableButtonStyle())
@@ -600,13 +599,13 @@ struct WatchTimelineItemCard: View {
               .lineLimit(isExpanded ? 24 : 4)
               .padding(5)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+              .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
           }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .watchCard(radius: 12)
+        .watchCard()
         .privacySensitive()
       }
       .buttonStyle(WatchPressableButtonStyle())
@@ -624,14 +623,15 @@ struct WatchTimelineItemCard: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .privacySensitive()
       }
       .buttonStyle(WatchPressableButtonStyle())
 
     case "plan":
       VStack(alignment: .leading, spacing: 3.5) {
-        WatchItemHeader(icon: "checklist", title: item.title ?? "执行计划", color: WatchPalette.ok)
+        // A plan is not a success: neutral, as on the phone.
+        WatchItemHeader(icon: "checklist", title: item.title ?? "执行计划", color: .secondary)
         Text(item.text)
           .font(.footnote)
           .foregroundStyle(Color(white: 0.88))
@@ -640,7 +640,7 @@ struct WatchTimelineItemCard: View {
       .padding(.horizontal, 9)
       .padding(.vertical, 7)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(tint: WatchPalette.ok, radius: 12)
+      .watchCard()
       .privacySensitive()
 
     case "question":
@@ -659,7 +659,7 @@ struct WatchTimelineItemCard: View {
       .padding(.horizontal, 9)
       .padding(.vertical, 7)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(tint: answered ? WatchPalette.accent : WatchPalette.waiting, radius: 12)
+      .watchCard(tint: answered ? WatchPalette.accent : WatchPalette.waiting)
       .privacySensitive()
 
     case "permission":
@@ -672,7 +672,7 @@ struct WatchTimelineItemCard: View {
       .padding(.horizontal, 9)
       .padding(.vertical, 6)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
       .privacySensitive()
 
     case "notice":
@@ -704,7 +704,7 @@ struct WatchTimelineItemCard: View {
       .padding(.horizontal, 9)
       .padding(.vertical, 7)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .watchCard(tint: WatchPalette.danger, radius: 12)
+      .watchCard(tint: WatchPalette.danger)
 
     default:
       HStack(alignment: .top, spacing: 5) {
@@ -725,7 +725,7 @@ struct WatchTimelineItemCard: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .watchCard(radius: 14)
+        .watchCard()
         .privacySensitive()
         Spacer(minLength: 10)
       }
@@ -926,7 +926,7 @@ struct WatchSessionDetailView: View {
                 }
                 .padding(.horizontal, 8)
                 .frame(minHeight: 44)
-                .watchCard(radius: 12)
+                .watchCard()
                 .contentShape(Rectangle())
               }
               .buttonStyle(WatchPressableButtonStyle())
@@ -986,20 +986,18 @@ struct WatchSessionDetailView: View {
                         Image(systemName: isDestructive ? "xmark.circle.fill" : "checkmark.circle.fill")
                           .accessibilityHidden(true)
                       }
-                      .foregroundStyle(isDestructive ? WatchPalette.danger : .white)
+                      .foregroundStyle(.white)
                       .padding(.horizontal, 10)
                       .frame(maxWidth: .infinity, minHeight: 44)
-                      .background(
-                        isDestructive ? WatchPalette.danger.opacity(0.20) : WatchPalette.accentFill,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                      )
+                      // Only 允许 is filled; 拒绝 and 停止 are quiet like the rest, never red.
+                      .background(action.role == "allow" ? WatchPalette.accentFill : Color.white.opacity(0.14), in: Capsule())
                     }
                     .buttonStyle(WatchPressableButtonStyle())
                     .disabled(store.pendingCommandId != nil)
                   }
                 }
                 .padding(9)
-                .watchCard(tint: WatchPalette.waiting, radius: 12)
+                .watchCard(tint: WatchPalette.waiting)
               }
 
               if session.hasMoreActions == true {
@@ -1051,7 +1049,7 @@ struct WatchSessionDetailView: View {
               } label: {
                 Label("接管", systemImage: "applewatch.radiowaves.left.and.right")
               }
-              .tint(WatchPalette.waiting)
+              .tint(WatchPalette.accentFill)
               .disabled(store.pendingCommandId != nil)
               .accessibilityLabel("接管会话")
               .accessibilityHint("把会话从电脑终端接到腕表上处理")
@@ -1155,7 +1153,7 @@ struct WatchTerminalDetailView: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
-            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 5), GridItem(.flexible(), spacing: 5)], spacing: 5) {
               ForEach(quickCommands, id: \.cmd) { item in
@@ -1167,7 +1165,7 @@ struct WatchTerminalDetailView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .watchCard(radius: 10)
+                    .watchCard(radius: 12)
                 }
                 .buttonStyle(WatchPressableButtonStyle())
                 .disabled(store.pendingCommandId != nil)
@@ -1180,9 +1178,9 @@ struct WatchTerminalDetailView: View {
               } label: {
                 Text("Ctrl+C")
                   .font(.footnote.weight(.semibold))
-                  .foregroundStyle(WatchPalette.waiting)
+                  .foregroundStyle(.white)
                   .frame(maxWidth: .infinity, minHeight: 44)
-                  .background(WatchPalette.waiting.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                  .background(Color.white.opacity(0.14), in: Capsule())
               }
               .buttonStyle(WatchPressableButtonStyle())
               .accessibilityLabel("中断当前命令")
@@ -1194,7 +1192,7 @@ struct WatchTerminalDetailView: View {
                   .font(.footnote.weight(.semibold))
                   .foregroundStyle(WatchPalette.danger)
                   .frame(maxWidth: .infinity, minHeight: 44)
-                  .background(WatchPalette.danger.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                  .background(WatchPalette.danger.opacity(0.16), in: Capsule())
               }
               .buttonStyle(WatchPressableButtonStyle())
             }
@@ -1219,7 +1217,7 @@ struct WatchTerminalDetailView: View {
                 store.sendTerminalInput(terminalId: terminal.id, data: cmd + "\n")
               }
             }
-            .tint(WatchPalette.ok)
+            .tint(WatchPalette.accentFill)
             .accessibilityLabel("输入终端命令")
             #endif
           }
@@ -1266,7 +1264,7 @@ private struct WatchQuickAddRow: View {
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
     .frame(minHeight: 44)
-    .watchCard(radius: 14)
+    .watchCard()
     .accessibilityElement(children: .combine)
   }
 }
@@ -1419,7 +1417,7 @@ struct WatchNewSessionSheet: View {
               .font(.body.weight(.semibold))
               .foregroundStyle(.white)
               .frame(maxWidth: .infinity, minHeight: 44)
-              .background(WatchPalette.accentFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .background(WatchPalette.accentFill, in: Capsule())
           } onSubmit: { text in
             store.createSession(agent: activeAgent, cwd: activeCwd, prompt: text)
             dismiss()
@@ -1435,7 +1433,7 @@ struct WatchNewSessionSheet: View {
             Text("检查项目状态")
               .font(.footnote.weight(.medium))
               .frame(maxWidth: .infinity, minHeight: 44)
-              .watchCard(radius: 12)
+              .watchCard()
           }
           .buttonStyle(WatchPressableButtonStyle())
           .disabled(store.pendingCommandId != nil)
@@ -1483,14 +1481,15 @@ struct WatchNewTerminalSheet: View {
               selectedCwd = ws.path
             } label: {
               HStack(spacing: 6) {
-                Image(systemName: "folder.fill").foregroundStyle(isSelected ? WatchPalette.ok : .secondary)
+                // Selection is the accent, as everywhere; green is kept for a success.
+                Image(systemName: "folder.fill").foregroundStyle(isSelected ? WatchPalette.accent : .secondary)
                 Text(ws.name).font(.footnote.weight(.medium)).lineLimit(1)
                 Spacer(minLength: 0)
-                if isSelected { Image(systemName: "checkmark").foregroundStyle(WatchPalette.ok) }
+                if isSelected { Image(systemName: "checkmark").foregroundStyle(WatchPalette.accent) }
               }
               .padding(.horizontal, 10)
               .frame(minHeight: 44)
-              .background(isSelected ? WatchPalette.ok.opacity(0.18) : Color(white: 0.13), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .background(isSelected ? WatchPalette.accent.opacity(0.16) : Color(white: 0.13), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
               .accessibilityElement(children: .combine)
               .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
@@ -1504,9 +1503,9 @@ struct WatchNewTerminalSheet: View {
         } label: {
           Label("新建终端", systemImage: "terminal.fill")
             .font(.body.weight(.semibold))
-            .foregroundStyle(.black)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(WatchPalette.ok, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(WatchPalette.accentFill, in: Capsule())
         }
         .buttonStyle(WatchPressableButtonStyle())
         .disabled(store.pendingCommandId != nil)
@@ -1516,7 +1515,7 @@ struct WatchNewTerminalSheet: View {
           Text("新建并运行命令…")
             .font(.footnote.weight(.medium))
             .frame(maxWidth: .infinity, minHeight: 44)
-            .watchCard(radius: 12)
+            .watchCard()
         } onSubmit: { text in
           store.createTerminal(cwd: activeCwd, command: text)
           dismiss()

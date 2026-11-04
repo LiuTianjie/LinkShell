@@ -2,9 +2,16 @@
 @import "tw-animate-css";
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @theme inline {
-  --text-sm: 14px;
+  /* The type scale of docs/design/visual-system.md, in pixels: the root is 14 px, so the rem
+     defaults would land on half sizes. 11 is only for key hints and counts (text-[11px]). */
   --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-md--line-height: calc(1.25 / 0.875);
   --text-base: 16px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
   --color-background: var(--background);
   --color-foreground: var(--label);
   --color-card: var(--card);
@@ -12,6 +19,8 @@
   --color-popover: var(--card);
   --color-popover-foreground: var(--label);
   --color-primary: var(--accent);
+  /* White text sits on the fill, never on the accent text colour (lighter in the dark). */
+  --color-primary-fill: var(--accentFill);
   --color-primary-hover: var(--accentHover);
   --color-primary-foreground: var(--primaryForeground);
   --color-link: var(--link);
@@ -37,13 +46,14 @@
   /* Inputs and other framed controls use the stronger hairline. */
   --color-input: var(--separatorStrong);
   --color-ring: var(--accent);
+  /* Four corners only: 4 small parts, 6 controls, 8 containers, 12 dialogs and panels. */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: 10px;
+  --radius-xl: 12px;
   --radius-2xl: 12px;
-  /* One shared motion curve and a layered popover shadow (Linear-style). */
-  --transition: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* One shared motion curve (state changes ease out) and the one shadow, for what floats. */
+  --transition: 120ms cubic-bezier(0, 0, 0.2, 1);
   --shadow-popover:
     0 0 0 1px var(--separatorStrong), 0 2px 4px rgb(0 0 0 / 0.04),
     0 8px 24px rgb(0 0 0 / 0.12), 0 16px 48px rgb(0 0 0 / 0.1);
