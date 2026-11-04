@@ -15,6 +15,7 @@ import { processEnv, routingFrom, type ClaudeRouting } from "./routing.js";
 import { ClaudeTasks } from "./tasks.js";
 import { stopTaskGroup } from "./task-process.js";
 import { ClaudeActivity } from "./activity.js";
+import { ClaudeMcpApps } from "./mcp-apps.js";
 import { ClaudeAppSessions, claudeAppSessionRoots } from "./app-sessions.js";
 import {
   claudeConfigDir,
@@ -296,6 +297,15 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private readonly adapterMissing: boolean;
+  /** MCP tools with pages (StupidMirror, Figma), through the host's own connection to the user's servers. */
+  readonly mcpApps: ClaudeMcpApps = new ClaudeMcpApps({
+    env: () => this.env,
+    configDir: claudeConfigDir(this.options.env ?? process.env),
+    cwdOf: (nativeId) => this.sessions.get(nativeId)?.cwd,
+    lateDetail: (nativeId, toolCallId, detail, parentToolCallId) =>
+      this.host?.update(this.id, nativeId, { sessionUpdate: "tool_call_update", toolCallId, ...(parentToolCallId ? { parentToolCallId } : {}), detail }),
+    log: (message) => this.host?.log(message),
+  });
   /** Per session: the API of the Claude on the computer, where it isn't the host's (see followHolder). In memory only: it holds credentials. */
   private readonly routes = new Map<string, ClaudeRouting>();
   /** Sent from a device while another Claude was mid-turn in the session; goes out when that turn ends. */
@@ -327,6 +337,7 @@ export class ClaudeDriver extends AcpDriver {
     this.tasks.clear();
     this.unwrittenSessions.clear();
     this.transcriptIndex.invalidate();
+    await this.mcpApps.stop();
     await super.stop();
   }
 
@@ -403,7 +414,8 @@ export class ClaudeDriver extends AcpDriver {
       // happening now (after the history; the hub holds them until then), so
       // the session shows as working and results have a card to land on.
       const underway: SessionUpdate[] = [];
-      history = toHistory(mergeByTime(transcript.updates, nested), state.tracker, (update) => transcriptTimes.get(update), underway);
+      history = toHistory(mergeByTime(transcript.updates, nested), state.tracker, (update) => transcriptTimes.get(update), underway)
+        .map((item) => ({ ...item, updates: item.updates.map((update) => this.withPage(nativeId, update)) }));
       const working = (await this.discoveredState(nativeId, context.cwd)) === "running";
       for (const update of underway) {
         const call = (update as { parentToolCallId?: string; toolCallId?: string }).parentToolCallId ?? (update as { toolCallId?: string }).toolCallId;
@@ -1362,8 +1374,19 @@ export class ClaudeDriver extends AcpDriver {
     }
   }
 
+  /**
+   * An MCP call's page, where its tool has one: every update carrying the
+   * call's detail says it, or a later one would take the page away again.
+   */
+  private withPage(nativeId: string, update: SessionUpdate): SessionUpdate {
+    if ((update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") || update.detail?.type !== "mcp" || update.detail.app) return update;
+    const app = this.mcpApps.page(nativeId, update.toolCallId, update.detail, update.parentToolCallId);
+    return app ? { ...update, detail: { ...update.detail, app } } : update;
+  }
+
   /** Mirrors remote progress to the terminal that stepped aside. */
   protected override emit(nativeId: string, update: SessionUpdate): void {
+    update = this.withPage(nativeId, update);
     super.emit(nativeId, update);
     if (this.modes.get(nativeId) !== "remote") return;
     const desktop = this.host?.desktop(this.id, nativeId);

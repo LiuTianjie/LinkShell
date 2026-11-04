@@ -35,6 +35,8 @@ export const agentCapabilitiesSchema = z.object({
   fork: z.boolean(),
   /** The agent has a side conversation of its own (`sessions.side`). Absent from older hosts. */
   side: z.boolean().optional(),
+  /** The host can list, show and call the session's MCP Apps (`mcp.*`). Absent from older hosts (where only Codex had them). */
+  mcpApps: z.boolean().optional(),
   models: z.boolean(),
   modes: z.boolean(),
 });

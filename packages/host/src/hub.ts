@@ -467,7 +467,7 @@ export class SessionHub {
         version: status.version,
         problem: status.problem,
         auth: this.auth.get(driver.id)?.value,
-        capabilities: driver.capabilities,
+        capabilities: { ...driver.capabilities, ...(driver.mcpApps ? { mcpApps: true } : {}) },
       };
     });
   }

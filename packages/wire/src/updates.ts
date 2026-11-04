@@ -30,7 +30,7 @@ export const toolDetailSchema = z.discriminatedUnion("type", [
     tool: z.string(),
     /**
      * The tool has a page of its own (an MCP App), which `mcp.resource` reads.
-     * Codex sessions only. It may arrive in a later `tool_call_update` than the
+     * Codex and Claude sessions. It may arrive in a later `tool_call_update` than the
      * call's card, when the host had to look the tool up first. `connector`:
      * the Codex connector (server `codex_apps`) the page belongs to, which
      * `mcp.call` needs for that server.

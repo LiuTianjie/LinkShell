@@ -3,11 +3,12 @@ import { mcpAppDisplayModeSchema } from "./updates.js";
 
 // MCP Apps: an MCP tool can declare a page of its own (a `ui://` HTML
 // resource) that the client shows in a sandboxed frame, and that page can call
-// its server's tools back. Codex sessions only: Codex is the agent that tells
-// the host which tools have pages and lets a client read and call them. Other
-// agents' sessions are refused with `not_supported`; a Codex that isn't
+// its server's tools back. Codex and Claude sessions: Codex tells the host
+// which tools have pages and lets a client read and call them; for Claude the
+// host connects to the MCP servers in the user's Claude configuration itself.
+// Other agents' sessions are refused with `not_supported`; an agent that isn't
 // running with `agent_unavailable`. Hosts older than these methods answer
-// "method not found".
+// "method not found", and hosts before Claude support refuse Claude sessions.
 
 /** A tool Codex offers as an app of the thread (what its "插件和 MCP" menu lists). */
 export const mcpAppSchema = z.object({

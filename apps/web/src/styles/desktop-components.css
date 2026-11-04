@@ -230,3 +230,5 @@ html[data-desktop] .desktop-main .side-panel-content > p:only-child { margin: au
 
 html[data-desktop] .management-usage-skeleton { display: flex; flex-direction: column; gap: 16px; }
 html[data-desktop] .management-usage-skeleton .management-fact { gap: 10px; }
+/* Claude's /mcp answer is markdown, not a status dump: read as prose. */
+html[data-desktop] .desktop-main div.service-status { white-space: normal; font-size: 13px; color: var(--label); }

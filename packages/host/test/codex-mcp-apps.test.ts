@@ -235,8 +235,8 @@ describe("mcp.* handlers", () => {
   const hub = (agent: string, driver: unknown) => ({ sessionDriver: () => ({ session: { agent, nativeId: "native" }, driver }) }) as unknown as SessionHub;
 
   it("refuses a session whose agent has no MCP Apps", async () => {
-    const handlers = mcpHandlers(hub("claude", { label: "Claude", status: () => ({ installed: true }) }));
-    await expect(handlers["mcp.apps"]({ sessionId: "s" })).rejects.toMatchObject({ appCode: "not_supported", message: "插件页面（MCP App）只在 Codex 会话里可用" });
+    const handlers = mcpHandlers(hub("gemini", { label: "Gemini", status: () => ({ installed: true }) }));
+    await expect(handlers["mcp.apps"]({ sessionId: "s" })).rejects.toMatchObject({ appCode: "not_supported", message: "Gemini 会话不支持插件页面（MCP App），目前只有 Codex 和 Claude 支持" });
     expect(() => handlers["mcp.call"]({ sessionId: "s", server: "x", tool: "y" })).toThrow(RpcError);
   });
 

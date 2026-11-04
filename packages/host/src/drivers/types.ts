@@ -202,7 +202,7 @@ export interface AgentDriver {
   authenticate?(methodId?: string, logout?: boolean): Promise<{ terminalId?: string }>;
   respondInteraction?(requestId: string, response: { optionId?: string; answers?: QuestionAnswer[] }): Promise<void>;
   providers?(operation: "list" | "set" | "disable", config?: { providerId: string; apiType?: string; baseUrl?: string; headers?: Record<string, string> }): Promise<AcpProvider[]>;
-  /** MCP tools with pages of their own (`mcp.*`); only Codex offers them. */
+  /** MCP tools with pages of their own (`mcp.*`): Codex and Claude offer them. */
   readonly mcpApps?: McpAppsSupport;
 
   listSessions(limit: number): Promise<DiscoveredSession[]>;

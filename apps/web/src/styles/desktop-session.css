@@ -442,6 +442,9 @@ html[data-desktop] .desktop-main .assistant-message { position: relative; }
 html[data-desktop] .desktop-main .live-timeline > .assistant-message:not(:last-of-type) > .message-actions { position: absolute; top: 100%; left: 0; z-index: 1; margin-top: -2px; }
 html[data-desktop] .desktop-main .live-timeline > .assistant-message:has(+ .user-message) > .message-actions,
 html[data-desktop] .desktop-main .live-timeline > .assistant-message:last-child > .message-actions { position: static; opacity: 1; }
+/* The hanging row is 28 px plus its offset: what follows starts below it, never under it. */
+html[data-desktop] .desktop-main .live-timeline > .user-message + * { margin-top: 36px; }
+html[data-desktop] .desktop-main .live-timeline > .assistant-message:not(:last-of-type):not(:has(+ .user-message)) + * { margin-top: 32px; }
 
 /* The session title uses the shared 28 px toolbar icon targets; handoff status stays a text control. */
 html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }

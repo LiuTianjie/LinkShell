@@ -106,7 +106,7 @@ import {
 } from "./common";
 import { Permission } from "./Permission";
 import { AgentInteractions } from "./Acp";
-import { TimelineNavigation } from "./Timeline";
+import { StreamingText, TimelineNavigation } from "./Timeline";
 import { Conversation } from "./Conversation";
 import { LiveActivity } from "./LiveActivity";
 import { FileView, Files, fileBase64 } from "./Files";
@@ -199,6 +199,8 @@ export function Session({
   const agent = useClient((state) =>
     state.machine?.agents.find((agent) => agent.id === session.agent),
   );
+  // (Hosts before the flag had pages for Codex only.)
+  const hasApps = agent?.capabilities.mcpApps ?? session.agent === "codex";
   const queueing = useClient((state) => state.queueing[session.id]);
   const notices = useClient((state) => state.notices[session.id]);
   const commands = useMemo(
@@ -298,8 +300,8 @@ export function Session({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appCalls]);
   const appCatalog = useLoad(
-    () => (isDesktop && session.agent === "codex" ? connection.link.call("mcp.apps", { sessionId: session.id }).then((result) => result.apps) : Promise.resolve([])),
-    [connection.link, session.id, session.agent],
+    () => (isDesktop && hasApps ? connection.link.call("mcp.apps", { sessionId: session.id }).then((result) => result.apps) : Promise.resolve([])),
+    [connection.link, session.id, hasApps],
   );
   const appTitle = (tab: AppTab) =>
     appCatalog.value?.find((entry) => entry.server === tab.server && entry.resourceUri === tab.resourceUri)?.title ?? tab.title;
@@ -673,7 +675,8 @@ export function Session({
       const result = await actions.send(
         session.id,
         [{ type: "text", text: `/${name}` }],
-        { now: true },
+        // Codex answers these beside a turn; Claude would take them as a message into it.
+        { now: session.agent === "codex" },
       );
       if (result === "failed") throw new Error(`/${name} 执行失败`);
     });
@@ -1545,7 +1548,7 @@ export function Session({
               hasTasks={hasTasks}
               apps={apps.map((tab) => ({ id: tab.id as AppPanel, title: appTitle(tab) }))}
               closeApp={closeApp}
-              launcher={session.agent === "codex" ? (
+              launcher={hasApps ? (
                 <DropdownMenu onOpenChange={(open) => { if (open && appCatalog.error) appCatalog.reload(); }}>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="inspector-add" aria-label="打开插件" title="打开插件">
@@ -1633,20 +1636,24 @@ export function Session({
                     >
                       刷新 /{panel}
                     </Button>
-                    {view?.items
-                      .filter(
-                        (item) =>
-                          item.kind === "notice" && item.title === `/${panel}`,
-                      )
-                      .slice(-1)
-                      .map(
-                        (item) =>
-                          item.kind === "notice" && (
-                            <pre className="service-status" key={item.id}>
-                              {item.detail ?? "当前没有记录"}
-                            </pre>
-                          ),
-                      )}
+                    {(() => {
+                      // Codex says it as a notice; Claude answers the command as a reply of its own.
+                      const items = view?.items ?? [];
+                      let notice = -1;
+                      let asked = -1;
+                      items.forEach((item, at) => {
+                        if (item.kind === "notice" && item.title === `/${panel}`) notice = at;
+                        if (item.kind === "user" && item.blocks.length === 1 && item.blocks[0]?.type === "text" && item.blocks[0].text.trim() === `/${panel}`) asked = at;
+                      });
+                      const shown = items[notice];
+                      if (shown?.kind === "notice" && notice > asked)
+                        return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
+                      const reply = asked >= 0 ? items.slice(asked + 1).find((item) => item.kind === "agent") : undefined;
+                      if (reply?.kind === "agent")
+                        return <div className="service-status markdown"><StreamingText text={reply.text} streaming={!!reply.streaming && online} /></div>;
+                      if (shown?.kind === "notice") return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
+                      return null;
+                    })()}
                   </>
                 )}
               </div>
