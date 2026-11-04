@@ -359,6 +359,35 @@ describe("session history in pages", () => {
     expect(slimEvent(small)).toBe(small);
   });
 
+  it("loads sent images from Codex data URLs in existing history without truncating them", () => {
+    const data = Buffer.alloc(40_000, 7).toString("base64");
+    const uri = `data:image/png;base64,${data}`;
+    const event = store.appendEvent("fake:s1", { sessionUpdate: "ls_message", role: "user", messageId: "sent-image", content: [
+      { type: "image", mimeType: "image/*", uri, annotations: { audience: ["user"] } },
+      { type: "image", mimeType: "image/jpeg", data: PICTURE },
+    ] });
+    const original = hub.readEvent("fake:s1", event.seq)!;
+    const sent = slimEvent(original, { lazyImages: true });
+    expect(sent.update).toMatchObject({ content: [
+      { type: "image", mimeType: "image/png", uri: `linkshell-event:${event.seq}/0`, annotations: { audience: ["user"] } },
+      { type: "image", mimeType: "image/jpeg", uri: `linkshell-event:${event.seq}/1` },
+    ] });
+    expect(JSON.stringify(sent)).not.toContain(data.slice(0, 50));
+    expect(imageOf(original, 0)).toEqual({ mimeType: "image/png", data });
+    expect(imageOf(original, 1)).toEqual({ mimeType: "image/jpeg", data: PICTURE });
+    expect(original).toEqual(event);
+    expect(slimEvent(original).update).toMatchObject({ content: [{ type: "text", text: "[图片]" }, { type: "text", text: "[图片]" }] });
+  });
+
+  it("keeps small data URLs and remote image URLs inline", () => {
+    const event: SessionEvent = { sessionId: "s", seq: 3, ts: 1, update: { sessionUpdate: "ls_message", role: "user", messageId: "m", content: [
+      { type: "image", mimeType: "image/*", uri: "data:image/png;base64,AAAA" },
+      { type: "image", mimeType: "image/jpeg", uri: "https://example.com/image.jpg" },
+    ] } };
+    expect(slimEvent(event, { lazyImages: true })).toBe(event);
+    expect(imageOf(event, 0)).toBeUndefined();
+  });
+
   it("loads audio and binary resource payloads losslessly without cutting their base64", () => {
     const data = Buffer.alloc(40_000, 7).toString("base64");
     const event: SessionEvent = { sessionId: "s", seq: 3, ts: 1, update: { sessionUpdate: "ls_message", role: "agent", messageId: "m", content: [

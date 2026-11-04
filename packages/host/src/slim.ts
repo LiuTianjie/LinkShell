@@ -19,14 +19,22 @@ export interface SlimOptions {
 }
 
 type Json = unknown;
+type InlineMedia = { type: "image" | "audio"; mimeType: string; data: string };
 
-function isLargeImage(value: Json): value is { type: "image" | "audio"; mimeType: string; data: string } {
-  const block = value as { type?: unknown; data?: unknown; mimeType?: unknown };
-  return (block?.type === "image" || block?.type === "audio") && typeof block.data === "string" && block.data.length > INLINE_IMAGE && typeof block.mimeType === "string";
+function largeImage(value: Json): InlineMedia | undefined {
+  const block = value as { type?: unknown; data?: unknown; mimeType?: unknown; uri?: unknown };
+  if ((block?.type !== "image" && block?.type !== "audio") || typeof block.mimeType !== "string") return undefined;
+  if (typeof block.data === "string" && block.data) return block.data.length > INLINE_IMAGE ? value as InlineMedia : undefined;
+  if (typeof block.uri !== "string") return undefined;
+  // Codex echoes uploads as data URLs, including in old logs. Treat the payload as media
+  // before the generic text limit can cut it, and read its actual MIME type from the URL.
+  const prefix = /^data:((?:image|audio)\/[^;,]+);base64,/i.exec(block.uri);
+  if (!prefix || block.uri.length - prefix[0].length <= INLINE_IMAGE) return undefined;
+  return { ...block, type: block.type, mimeType: prefix[1]!, data: block.uri.slice(prefix[0].length) };
 }
 
 /** Visits every large picture in an update, in a fixed order; `replace` returns what takes its place. */
-function walk(value: Json, state: { images: number }, replace: (image: { type: "image" | "audio"; mimeType: string; data: string }, index: number) => Json, cut: boolean): Json {
+function walk(value: Json, state: { images: number }, replace: (image: InlineMedia, index: number) => Json, cut: boolean): Json {
   if (typeof value === "string") {
     if (!cut || value.length <= MAX_TEXT) return value;
     return `${value.slice(0, KEPT_TEXT)}\n… [已省略 ${Math.round((value.length - KEPT_TEXT) / 1024)} KB，完整内容在电脑上]`;
@@ -40,7 +48,8 @@ function walk(value: Json, state: { images: number }, replace: (image: { type: "
     return out ?? value;
   }
   if (value && typeof value === "object") {
-    if (isLargeImage(value)) return replace(value, state.images++);
+    const image = largeImage(value);
+    if (image) return replace(image, state.images++);
     const resource = value as { type?: unknown; resource?: { blob?: unknown; mimeType?: string } };
     if (resource.type === "resource" && typeof resource.resource?.blob === "string" && resource.resource.blob.length > INLINE_IMAGE) {
       const replacement = replace({ type: "audio", mimeType: resource.resource.mimeType ?? "application/octet-stream", data: resource.resource.blob }, state.images++) as { uri?: string; data?: string };
