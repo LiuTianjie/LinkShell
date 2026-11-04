@@ -1,6 +1,7 @@
 import { constants, openSync, closeSync, fstatSync, readSync, realpathSync } from "node:fs";
 import type { BackgroundTask } from "@linkshell/wire";
 import { outputRange } from "../../task-output.js";
+import { canFindTaskProcesses } from "./task-process.js";
 
 type Row = Record<string, unknown>;
 const obj = (v: unknown): Row => v && typeof v === "object" ? v as Row : {};
@@ -13,7 +14,9 @@ export class ClaudeTasks {
   private launches = new Map<string, { kind: "shell" | "monitor"; title: string; command?: string; ts: number }>();
   private paths = new Map<string, string>();
   private pending = new Map<string, { text: string; ts: number }>();
-  constructor(private readonly emit: (task: BackgroundTask) => void) {}
+  /** Tasks LinkShell stopped: Claude then reports the shell as failed, which it wasn't. */
+  private stoppedHere = new Set<string>();
+  constructor(private readonly emit: (task: BackgroundTask) => void, private readonly stoppable = canFindTaskProcesses) {}
 
   observe(raw: string): void {
     let line: Row;
@@ -38,7 +41,7 @@ export class ClaudeTasks {
       if (path) this.paths.set(id, path);
       // Fold a completion that arrived first into the initial snapshot.
       const { ts: startedAt, ...description } = launch;
-      this.records.set(id, { id, ...description, startedAt, toolCallId: call, state: "running", output: !!path });
+      this.records.set(id, { id, ...description, startedAt, toolCallId: call, state: "running", output: !!path, canStop: !!path && this.stoppable });
       const pending = this.pending.get(id) ?? this.pending.get(call);
       if (pending) { this.notification(pending.text, pending.ts); this.pending.delete(id); this.pending.delete(call); }
       else this.emit(this.records.get(id)!);
@@ -75,7 +78,13 @@ export class ClaudeTasks {
 
   private change(id: string, patch: Partial<BackgroundTask>): void {
     const old = this.records.get(id)!;
+    if (this.stoppedHere.has(id)) {
+      const { state: _state, exitCode: _code, ...rest } = patch;
+      patch = rest;
+    }
     const next = { ...old, ...patch };
+    // Stopping needs the output file: it is how the shell's process is found.
+    next.canStop = next.state === "running" && this.paths.has(id) && this.stoppable;
     if (JSON.stringify(old) === JSON.stringify(next)) return;
     this.records.set(id, next);
     this.emit(next);
@@ -85,15 +94,30 @@ export class ClaudeTasks {
     for (const [id, task] of this.records) if (task.state === "running") this.change(id, { state: "unknown", endedAt: Date.now() });
   }
 
-  output(nativeId: string, taskId: string, before: number | undefined, limit: number) {
+  /** A stop LinkShell made: the shell's exit Claude reports next doesn't change how it ended. */
+  stopped(id: string): void {
+    if (!this.records.has(id)) return;
+    this.change(id, { state: "stopped", endedAt: Date.now() });
+    this.stoppedHere.add(id);
+  }
+
+  /** The task's output file, only where Claude keeps the session's own tasks, resolved. */
+  file(nativeId: string, taskId: string): string | undefined {
     const path = this.paths.get(taskId);
     if (!path || !/^[\w-]+$/.test(nativeId) || !/^[\w-]+$/.test(taskId)) return undefined;
     const valid = (value: string) => value.includes("/claude-") && new RegExp(`/claude-\\d+/[^/]+/${nativeId}/tasks/${taskId}\\.output$`).test(value);
-    let fd: number | undefined;
     try {
       if (!valid(path)) return undefined;
       const resolved = realpathSync(path);
-      if (!valid(resolved)) return undefined;
+      return valid(resolved) ? resolved : undefined;
+    } catch { return undefined; }
+  }
+
+  output(nativeId: string, taskId: string, before: number | undefined, limit: number) {
+    const resolved = this.file(nativeId, taskId);
+    if (!resolved) return undefined;
+    let fd: number | undefined;
+    try {
       fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
       const stat = fstatSync(fd);
       if (!stat.isFile()) return undefined;

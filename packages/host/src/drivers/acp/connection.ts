@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { spawnAgent as spawn, stopAgent } from "../../process.js";
+import { trackChild } from "../../children.js";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
@@ -9,6 +10,8 @@ import WebSocket from "ws";
 import { RpcPeer, type RpcId } from "@linkshell/wire";
 
 export const ACP_PROTOCOL_VERSION = 1;
+// A new console window on Windows, not a process group.
+const grouped = process.platform !== "win32";
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json => value && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
 const supported = (value: unknown) => value !== undefined && value !== null && value !== false;
@@ -124,8 +127,11 @@ export class AcpConnection {
         ? createHttpStream(remote.url, { headers: remote.headers, maxMessageBytes: 32 * 1024 * 1024 })
         : createWebSocketStream<AnyWireMessage>(remote.url, { headers: remote.headers, WebSocket });
     } else {
-      const child = spawn(this.options.command, this.options.args, { env: this.options.env, cwd: this.options.cwd, stdio: ["pipe", "pipe", "pipe"] });
+      // Its own process group, so stopping it (or a later host reaping it) also
+      // ends what the agent started, such as the CLI an adapter drives.
+      const child = spawn(this.options.command, this.options.args, { env: this.options.env, cwd: this.options.cwd, stdio: ["pipe", "pipe", "pipe"], detached: grouped });
       this.child = child;
+      trackChild(child, "agent", this.options.command, this.options.args, grouped);
       // The SDK codec decodes incrementally: JSON lines and UTF-8 characters may
       // both span stdout buffers. The same codec accepts v2 JSON-RPC batches.
       // Filter non-JSON stdout banners (e.g. Antigravity's OAuth sign-in URL) before ndJsonStream.
@@ -238,6 +244,6 @@ export class AcpConnection {
     void this.writer?.close().catch(() => {});
     const child = this.child; this.child = undefined;
     if (!child || child.exitCode !== null) return;
-    await stopAgent(child);
+    await stopAgent(child, { group: grouped });
   }
 }

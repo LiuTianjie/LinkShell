@@ -35,7 +35,7 @@ import { BranchTag } from "@/components/branch-tag";
 import { branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth, type HeaderAction } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
 import { sessionTimelineItems } from "@/lib/workflows";
@@ -390,7 +390,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                 style={({ pressed }) => ({
                   paddingHorizontal: 13,
                   paddingVertical: 7,
-                  borderRadius: 16,
+                  borderRadius: radius.card,
                   borderCurve: "continuous",
                   backgroundColor: pressed ? colors.fillStrong : colors.fill,
                 })}

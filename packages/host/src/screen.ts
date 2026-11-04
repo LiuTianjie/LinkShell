@@ -428,13 +428,13 @@ export class ScreenShare {
       }
     }
     const supported = macAppSupported() || process.platform === "linux";
-    if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "controlling the screen needs macOS" };
+    if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "只有 macOS 支持控制屏幕" };
     const app = inputApp(this.log);
     if (!app) {
       const problem =
         supported
-          ? "LinkShell.app is missing from this installation (the optional package @linkshell/mac was not installed): reinstall with `npm install -g linkshell-cli`"
-          : "this Mac architecture is not supported";
+          ? "这次安装缺少 LinkShell.app（可选组件 @linkshell/mac 没有装上）。重新安装一次即可：npm install -g linkshell-cli"
+          : "不支持这台 Mac 的处理器架构";
       return { supported, ffmpeg: false, recording: null, control: null, problem };
     }
     try {

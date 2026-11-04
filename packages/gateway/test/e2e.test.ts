@@ -190,7 +190,7 @@ describe("gateway v2 end to end", () => {
     await until(() => output.includes("SECRET-42"));
 
     // Remote devices can't use the terminal shim's methods.
-    await expect(link.call("desktop.launch", { agent: "codex", args: [] })).rejects.toThrow(/only available locally/);
+    await expect(link.call("desktop.launch", { agent: "codex", args: [] })).rejects.toThrow(/只能在电脑本机上使用/);
 
     // The gateway routed plenty, but nothing readable.
     expect(routed.length).toBeGreaterThan(5);
@@ -206,7 +206,7 @@ describe("gateway v2 end to end", () => {
     const wrong = offer.code === "000000" ? "111111" : "000000";
     await expect(phone.relay.request("pair.claim", { code: wrong, proof: pairingProof(codeSecret(wrong), publicIdentity(phone.identity)) })).rejects.toThrow();
     // Right code, wrong proof: the machine refuses.
-    await expect(phone.relay.request("pair.claim", { code: offer.code, proof: pairingProof(codeSecret("999999"), publicIdentity(phone.identity)) })).rejects.toThrow(/refused/);
+    await expect(phone.relay.request("pair.claim", { code: offer.code, proof: pairingProof(codeSecret("999999"), publicIdentity(phone.identity)) })).rejects.toThrow(/拒绝/);
     const fresh = await local.call("pairing.start", {});
     const { machine } = await phone.relay.request("pair.claim", { code: fresh.code, proof: pairingProof(codeSecret(fresh.code), publicIdentity(phone.identity)) });
     const link = connect(phone.relay, phone.identity, machine);

@@ -272,7 +272,7 @@ function Intro({ agentName, how, quoting, disabled, onAsk }: { agentName: string
             accessibilityRole="button"
             accessibilityLabel={`问：${question}`}
             accessibilityState={{ disabled }}
-            style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, borderCurve: "continuous", backgroundColor: colors.fill, opacity: disabled ? 0.45 : pressed ? 0.7 : 1 })}
+            style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.fill, opacity: disabled ? 0.45 : pressed ? 0.7 : 1 })}
           >
             <Text style={[type.subhead, { color: colors.label }]}>{question}</Text>
           </Pressable>
@@ -307,7 +307,7 @@ function SideChip({ label, accessibilityLabel, picked, running, onPress }: { lab
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: picked, busy: running }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: picked ? colors.accentSoft : colors.fill }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: picked ? colors.accentSoft : colors.fill }}
     >
       {running ? <StatusDot /> : null}
       <Text numberOfLines={1} style={[type.footnote, { color: picked ? colors.accent : colors.label, fontWeight: "600", maxWidth: 160 }]}>{label}</Text>

@@ -88,30 +88,30 @@ const STYLE = String.raw`
   .choice:active { background: rgba(255,255,255,0.12); }
   .choice.on { background: rgba(255,255,255,0.16); }
   .choice b { display: block; font-weight: 600; font-size: calc(15px * var(--text-scale, 1)); }
-  .choice span { display: block; font-size: calc(12.5px * var(--text-scale, 1)); color: rgba(255,255,255,0.62); }
+  .choice span { display: block; font-size: calc(12px * var(--text-scale, 1)); color: rgba(255,255,255,0.62); }
   #widths { padding: 0 6px 6px; }
   #widths .group { padding-top: 4px; }
   #status { padding: 2px 10px 10px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5;
     color: rgba(255,255,255,0.5); white-space: pre-line; font-variant-numeric: tabular-nums; }
   #toast { position: absolute; left: 50%; max-width: min(86vw, 420px); width: max-content; transform: translateX(-50%); padding: 10px 16px; border-radius: 18px;
-    font-size: calc(13.5px * var(--text-scale, 1)); text-align: center; color: rgba(255,255,255,0.94); pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+    font-size: calc(13px * var(--text-scale, 1)); text-align: center; color: rgba(255,255,255,0.94); pointer-events: none; opacity: 0; transition: opacity 0.3s; }
   #toast.on { opacity: 1; }
   #keys { position: absolute; z-index: 4; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 4px; padding: 0 5px; overflow-x: auto; overscroll-behavior: contain; touch-action: pan-x;
     background: rgba(28,28,30,0.96); border-top: 0.5px solid rgba(255,255,255,0.14); }
   .key { flex: 1 0 44px; min-width: 44px; height: calc(44px * var(--text-scale, 1)); border-radius: 8px; display: flex; align-items: center; justify-content: center;
     background: rgba(255,255,255,0.13); color: #fff; font-size: calc(15px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
-  .key.word { font-size: calc(12.5px * var(--text-scale, 1)); }
+  .key.word { font-size: calc(12px * var(--text-scale, 1)); }
   .key svg { width: 20px; height: 20px; }
   .key:active { background: rgba(255,255,255,0.3); }
   .key.on { background: #fff; color: #111; }
   #sheet { position: absolute; z-index: 4; display: flex; flex-direction: column; border-radius: 24px; overflow: hidden; }
   #sheethead { display: flex; align-items: center; gap: 2px; padding: 8px 6px 4px 10px; }
   #compose { flex: 1; min-width: 0; min-height: 44px; margin-right: 4px; border-radius: 20px; display: flex; align-items: center; gap: 8px; padding: 0 14px;
-    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.62); font-size: calc(14.5px * var(--text-scale, 1)); white-space: nowrap; }
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.62); font-size: calc(14px * var(--text-scale, 1)); white-space: nowrap; }
   #compose:active { background: rgba(255,255,255,0.2); }
   #compose svg { width: 19px; height: 19px; flex: none; }
   #actions, #maker { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 0 10px 12px; }
-  .group { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px 7px; font-size: calc(12.5px * var(--text-scale, 1)); color: rgba(255,255,255,0.55); }
+  .group { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px 7px; font-size: calc(12px * var(--text-scale, 1)); color: rgba(255,255,255,0.55); }
   .group i { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; font-style: normal; padding: 4px 8px; margin: -4px -4px -4px 0; border-radius: 10px; color: rgba(255,255,255,0.86); }
   .group i:active { background: rgba(255,255,255,0.16); }
   .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
@@ -121,8 +121,8 @@ const STYLE = String.raw`
   #sheet.narrow .tiles.six { grid-template-columns: repeat(auto-fit, minmax(calc(44px * var(--text-scale, 1)), 1fr)); }
   .tile { position: relative; min-height: 52px; padding: 6px 3px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center;
     background: rgba(255,255,255,0.1); text-align: center; }
-  .tile b { max-width: 100%; overflow: hidden; white-space: normal; overflow-wrap: anywhere; font-weight: 500; font-size: calc(13.5px * var(--text-scale, 1)); line-height: 1.3; }
-  .tile span { font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.3; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
+  .tile b { max-width: 100%; overflow: hidden; white-space: normal; overflow-wrap: anywhere; font-weight: 500; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.3; }
+  .tile span { font-size: calc(11px * var(--text-scale, 1)); line-height: 1.3; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
   .tiles.six .tile { min-height: 44px; }
   .tile:active, .tile.hit { background: rgba(255,255,255,0.3); }
   .tile.on { background: #fff; color: #111; }

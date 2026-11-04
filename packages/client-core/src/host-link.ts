@@ -127,7 +127,7 @@ export class HostLink {
     this.setStatus("stopped");
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    this.peer?.close("stopped");
+    this.peer?.close("连接已停止");
     this.socket?.close();
     this.socket = undefined;
     for (const wake of this.waiters) wake();
@@ -144,7 +144,7 @@ export class HostLink {
     if (this.socket) {
       const stuck = this.socket;
       this.socket = undefined;
-      this.peer?.close("reconnecting");
+      this.peer?.close("正在重新连接");
       stuck.onclose = null;
       stuck.close();
     }
@@ -275,7 +275,7 @@ export class HostLink {
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
-      peer.close("connection closed");
+      peer.close("连接已断开");
       this.socket = undefined;
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       if (this.statusValue !== "stopped") this.scheduleReconnect(socketError ?? "连接已断开");

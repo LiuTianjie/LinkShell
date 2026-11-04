@@ -13,6 +13,7 @@ import type { DriverBehavior } from "../behavior.js";
 import { descendsFrom, isDesktopApp, sessionHolders, type SessionHolder } from "./holders.js";
 import { processEnv, routingFrom, type ClaudeRouting } from "./routing.js";
 import { ClaudeTasks } from "./tasks.js";
+import { stopTaskGroup } from "./task-process.js";
 import { ClaudeActivity } from "./activity.js";
 import { ClaudeAppSessions, claudeAppSessionRoots } from "./app-sessions.js";
 import {
@@ -859,7 +860,7 @@ export class ClaudeDriver extends AcpDriver {
     // The desktop has it (or nobody): choosing a model mustn't take the session
     // from the terminal. Remember it; it applies when the phone next drives.
     const option = this.template?.find((entry) => entry.id === optionId);
-    if (!option || !option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown setting ${optionId}=${value}`);
+    if (!option || !option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `未知设置：${optionId}=${value}`);
     if (option.category === "mode" && (await this.elsewhere(nativeId))?.working) {
       throw RpcError.app("not_supported", "这一轮由电脑上的另一个 Claude 窗口运行，无法从这里立即切换权限；请在那个窗口修改，或等本轮结束后再切换。");
     }
@@ -1177,6 +1178,23 @@ export class ClaudeDriver extends AcpDriver {
    */
   taskOutput(nativeId: string, taskId: string, before: number | undefined, limit: number) {
     return this.tasks.get(nativeId)?.output(nativeId, taskId, before, limit);
+  }
+
+  /**
+   * Claude's own per-task stop (`_session/async_task/stop`) is offered only to
+   * JetBrains AIR, so the shell is ended the way Claude's TaskStop ends it: its
+   * process group. That group is found by the task's output file (the shell's
+   * stdout) and must belong to a Claude process that has this session open.
+   */
+  async stopTask(nativeId: string, taskId: string): Promise<void> {
+    const tasks = this.tasks.get(nativeId);
+    const task = tasks?.records.get(taskId);
+    if (!tasks || !task) throw RpcError.app("not_found", "这个后台任务已经不在运行列表里");
+    const file = tasks.file(nativeId, taskId);
+    if (!file || !task.canStop) throw RpcError.app("not_supported", "这个任务不能在手机上停止");
+    const parents = new Set(sessionHolders(this.configDir, nativeId).map((holder) => holder.pid));
+    if (parents.size === 0 || !(await stopTaskGroup(file, parents))) throw RpcError.app("busy", "没找到这个任务的进程，它可能已经结束了");
+    tasks.stopped(taskId);
   }
 
   private async watchRemoteSessions(): Promise<void> {

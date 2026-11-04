@@ -67,7 +67,7 @@ export class RpcPeer {
   constructor(private readonly options: RpcPeerOptions) {}
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
-    if (this.closed) return Promise.reject(new RpcError(RPC_APP_ERROR, `connection closed (${method})`));
+    if (this.closed) return Promise.reject(new RpcError(RPC_APP_ERROR, `连接已断开（${method}）`));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const entry: Pending = { resolve: resolve as (v: unknown) => void, reject, method };
@@ -75,7 +75,7 @@ export class RpcPeer {
       if (limit > 0) {
         entry.timer = setTimeout(() => {
           this.pending.delete(id);
-          reject(new RpcError(RPC_APP_ERROR, `${method} timed out after ${limit}ms`, { code: "timeout" }));
+          reject(new RpcError(RPC_APP_ERROR, `请求超时（${method}，${limit} ms）`, { code: "timeout" }));
         }, limit);
       }
       this.pending.set(id, entry);
@@ -110,7 +110,7 @@ export class RpcPeer {
   }
 
   /** Rejects every in-flight request; later calls fail immediately. */
-  close(reason = "connection closed"): void {
+  close(reason = "连接已断开"): void {
     if (this.closed) return;
     this.closed = true;
     for (const [id, entry] of this.pending) {
@@ -178,7 +178,7 @@ export class RpcPeer {
     try {
       this.options.send(JSON.stringify(message));
     } catch {
-      this.close("send failed");
+      this.close("发送失败");
     }
   }
 }

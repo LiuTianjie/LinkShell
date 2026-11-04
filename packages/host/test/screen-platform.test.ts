@@ -42,7 +42,7 @@ describe("the universal Mac screen helper", () => {
     const { ScreenShare } = await import("../src/screen.js");
     const access = await new ScreenShare(() => {}).access(false);
     expect(access).toMatchObject({ supported: true, ffmpeg: false, recording: null, control: null });
-    expect(access.problem).toContain("@linkshell/mac was not installed");
+    expect(access.problem).toContain("@linkshell/mac 没有装上");
   });
 
   it("still honors an explicitly disabled helper on Intel", async () => {

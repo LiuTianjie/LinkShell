@@ -30,6 +30,7 @@ import {
   type CodexThreadState,
 } from "./mapper.js";
 import { nestHistory, nestUnder } from "../nesting.js";
+import { inOrder } from "../queue.js";
 import { configOptions, effective, newThreadModels, settingsFrom, settingsFromConfig, settingsFromTurnContext, turnOverrides, type CodexModel, type CodexOverrides, type CodexSettings } from "./settings.js";
 import { COMMANDS, INIT_PROMPT, commandOf, type CodexSkill } from "./commands.js";
 import { DesktopUnconfirmed, desktopBusSocket, interruptThroughDesktop, startThroughDesktop, steerThroughDesktop, updateSettingsThroughDesktop } from "./desktop-ipc.js";
@@ -260,6 +261,8 @@ export class CodexDriver implements AgentDriver {
   private readonly fullAccessTurns = new Set<string>();
   /** Sub-agent thread → the parent thread and the spawnAgent call its work nests under. */
   private readonly children = new Map<string, { threadId: string; toolCallId: string; path?: string; stamp?: string }>();
+  /** Each spawnAgent call's card detail, so the sub-agent's running state can be added to it without losing the rest. */
+  private readonly spawnDetails = new Map<string, Extract<ToolDetail, { type: "subagent" }>>();
   /** Threads Codex reported as sub-agents (parentThreadId set); never shown as sessions. */
   private readonly subThreads = new Set<string>();
   /** Each thread's working directory: where its skills are looked up. */
@@ -505,7 +508,7 @@ export class CodexDriver implements AgentDriver {
       if (error instanceof Error && /no rollout/i.test(error.message)) {
         // Opened in another client but no turn yet, so not on disk. A turn can
         // still be started on it; after that it can be joined.
-        throw RpcError.app("not_ready", "this Codex session has no messages yet");
+        throw RpcError.app("not_ready", "这个 Codex 会话还没有消息");
       }
       if (!heldElsewhere(error)) throw error;
       // A Codex process that takes no other clients has it: what it writes can still be read.
@@ -565,7 +568,7 @@ export class CodexDriver implements AgentDriver {
       if (home === "shared" && !(await this.connectShared())) continue;
       try {
         const server = home === "shared" ? this.shared : this.server;
-        if (!server) throw RpcError.app("agent_unavailable", "Codex is not running");
+        if (!server) throw RpcError.app("agent_unavailable", "Codex 没有在运行");
         const resumed = await server.request<Record<string, unknown>>("thread/resume", { threadId });
         if (home === "shared") this.inShared.add(threadId);
         else this.inShared.delete(threadId);
@@ -832,6 +835,23 @@ export class CodexDriver implements AgentDriver {
     // (Already started over there: then it runs, and shows as any message does.)
     void this.rpc("thread/queue/delete", { threadId: nativeId, queuedSubmissionId: entry.submissionId }).catch(() => {});
     return true;
+  }
+
+  /**
+   * Puts what waits in Codex's own queue in the order the user set: Codex
+   * starts its queue in order, so that is the order they are sent. Where
+   * Codex can't reorder (an older build), its own order is shown again.
+   */
+  reorderQueue(nativeId: string, clientMessageIds: string[]): void {
+    const waiting = this.waiting.get(nativeId);
+    if (!waiting || waiting.length < 2) return;
+    const ordered = inOrder(waiting, clientMessageIds);
+    if (ordered.every((entry, index) => entry === waiting[index])) return;
+    this.setWaiting(nativeId, ordered);
+    void this.rpc("thread/queue/reorder", { threadId: nativeId, queuedSubmissionIds: ordered.map((entry) => entry.submissionId) }).catch((error: unknown) => {
+      this.host?.log(`[codex] couldn't reorder the queue of ${nativeId}: ${error instanceof Error ? error.message : String(error)}`);
+      void this.syncWaiting(nativeId);
+    });
   }
 
   /**
@@ -1114,6 +1134,9 @@ export class CodexDriver implements AgentDriver {
               const result = await this.rpcFor<{ thread: CodexThread }>(threadId, "thread/read", { threadId: child, includeTurns: true });
               known.path = result.thread.path ?? undefined;
               known.stamp = stamp;
+              const spawn = history.find((item) => item.itemId === `tool:${callId}` || item.itemId === callId)?.updates
+                .find((update) => update.sessionUpdate === "tool_call" && update.detail?.type === "subagent");
+              this.settleSubagent(threadId, callId, result.thread, spawn?.sessionUpdate === "tool_call" && spawn.detail?.type === "subagent" ? spawn.detail : undefined);
               return nestHistory(subagentHistory(result.thread, this.mcpApps.lookup(child)), callId);
             } catch {
               // A just-started child may not have written its rollout yet.
@@ -1253,7 +1276,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   private async send(nativeId: string, input: unknown[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
-    if (input.length === 0) throw RpcError.app("invalid_params", "nothing to send");
+    if (input.length === 0) throw RpcError.app("invalid_params", "没有可发送的内容");
     const watch = this.observed.get(nativeId);
     if (watch?.running && questionReplies(textOf(input as Record<string, unknown>[]))) {
       try {
@@ -1334,7 +1357,7 @@ export class CodexDriver implements AgentDriver {
     const next: CodexOverrides = { ...this.overridesOf(nativeId) };
     if (optionId === "model") {
       if (!models.some((m) => m.model === value) && value !== current.model) {
-        throw RpcError.app("invalid_params", `unknown model ${value}`);
+        throw RpcError.app("invalid_params", `未知模型：${value}`);
       }
       next.model = value;
       // Keep the effort only if the new model supports it.
@@ -1343,18 +1366,18 @@ export class CodexDriver implements AgentDriver {
       if (next.effort && !supported.includes(next.effort)) delete next.effort;
     } else if (optionId === "effort") {
       if (current.info?.supportedReasoningEfforts && !current.info.supportedReasoningEfforts.some((e) => e.reasoningEffort === value)) {
-        throw RpcError.app("invalid_params", `unsupported reasoning effort ${value}`);
+        throw RpcError.app("invalid_params", `不支持的思考强度：${value}`);
       }
       next.effort = value;
     } else if (optionId === "permissions") {
       const option = configOptions(base, this.overridesOf(nativeId), models).find((entry) => entry.id === "permissions");
-      if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown permission mode ${value}`);
+      if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `未知的权限模式：${value}`);
       if (value === "custom") delete next.permissions;
       else next.permissions = value;
     } else if (optionId === "plan") {
       next.plan = value === "on";
     } else {
-      throw RpcError.app("not_supported", `Codex has no setting ${optionId}`);
+      throw RpcError.app("not_supported", `Codex 没有设置项 ${optionId}`);
     }
     const running = this.stateOf(nativeId).activeTurnId ?? this.observed.get(nativeId)?.turnId;
     if (optionId === "permissions" && running && value !== (current.permissions ?? "custom")) {
@@ -1767,7 +1790,7 @@ export class CodexDriver implements AgentDriver {
   async respondPermission(nativeId: string, requestId: string, optionId: string): Promise<void> {
     const pending = this.approvals.get(requestId);
     if (!pending || pending.threadId !== nativeId) {
-      throw RpcError.app("not_found", "this permission request is no longer pending");
+      throw RpcError.app("not_found", "这个请求已经处理过或已失效");
     }
     if (optionId === "cancel" && pending.request.cancel) return this.cancel(nativeId);
     this.approvals.delete(requestId);
@@ -1827,7 +1850,7 @@ export class CodexDriver implements AgentDriver {
       this.current = {
         installed: true,
         version: this.current.version,
-        problem: `Codex app-server failed to start: ${error instanceof Error ? error.message : String(error)}`,
+        problem: `Codex app-server 启动失败：${error instanceof Error ? error.message : String(error)}`,
       };
       this.scheduleRestart();
     }
@@ -1894,7 +1917,7 @@ export class CodexDriver implements AgentDriver {
     this.startedHere.clear();
     this.fresh.clear();
     this.kept.clear();
-    this.current = { installed: true, version: this.current.version, problem: "Codex app-server restarting" };
+    this.current = { installed: true, version: this.current.version, problem: "Codex app-server 正在重启" };
     this.scheduleRestart();
   }
 
@@ -2002,7 +2025,7 @@ export class CodexDriver implements AgentDriver {
       if (frame) this.host?.preview?.(this.id, threadId, frame);
     }
     for (const mapped of mapNotification(method, params, (id) => this.stateOf(id), (id) => this.mcpApps.lookup(id))) {
-      const update =
+      let update: SessionUpdate =
         from === "shared" && mapped.update.sessionUpdate === "ls_permission_resolved"
           ? { ...mapped.update, requestId: sharedRequestId(mapped.update.requestId) }
           : mapped.update;
@@ -2016,12 +2039,14 @@ export class CodexDriver implements AgentDriver {
           pending.abandon();
         }
       }
+      update = this.rememberSpawn(update);
       const parent = this.children.get(mapped.threadId);
       if (parent) {
         const nested = nestUnder(update, parent.toolCallId);
         if (nested && this.attached.has(parent.threadId)) {
           this.host?.update(this.id, parent.threadId, nested, mapped.itemId && `sub:${parent.toolCallId}:${mapped.itemId}`);
         }
+        if (update.sessionUpdate === "ls_turn") this.subagentTurn(mapped.threadId, parent, update);
         continue;
       }
       if (!this.attached.has(mapped.threadId)) continue;
@@ -2032,6 +2057,62 @@ export class CodexDriver implements AgentDriver {
       if (update.state === "started") this.fresh.delete(mapped.threadId);
       else { void this.syncTasks(mapped.threadId); this.considerRelease(mapped.threadId); }
     }
+  }
+
+  /** Keeps a spawn card's detail; a later report of the call keeps the running state already said on it. */
+  private rememberSpawn(update: SessionUpdate): SessionUpdate {
+    if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return update;
+    if (update.detail?.type !== "subagent" || update.detail.action !== "spawn") return update;
+    const known = this.spawnDetails.get(update.toolCallId);
+    const detail = { ...update.detail, ...(known?.state ? { state: known.state, nativeSessionId: known.nativeSessionId, canCancel: known.canCancel } : {}) };
+    this.spawnDetails.delete(update.toolCallId);
+    this.spawnDetails.set(update.toolCallId, detail);
+    if (this.spawnDetails.size > 200) this.spawnDetails.delete(this.spawnDetails.keys().next().value!);
+    return { ...update, detail };
+  }
+
+  /**
+   * A sub-agent's turn started or ended: its spawn card says whether it is
+   * running, and while it is, that it can be stopped on its own
+   * (`turn/interrupt` on its thread). Only for a turn seen starting here, so
+   * the button never outlives what this host can see.
+   */
+  private subagentTurn(childId: string, parent: { threadId: string; toolCallId: string }, update: Extract<SessionUpdate, { sessionUpdate: "ls_turn" }>): void {
+    const detail = this.spawnDetails.get(parent.toolCallId);
+    // Several agents under one call can't be told apart on its card.
+    const siblings = [...this.children.values()].filter((child) => child.toolCallId === parent.toolCallId).length;
+    if (!detail || siblings !== 1 || !this.attached.has(parent.threadId)) return;
+    const running = update.state === "started";
+    const state = running ? "running" as const : update.stopReason === "cancelled" ? "stopped" as const : update.stopReason === "error" ? "failed" as const : "completed" as const;
+    const next = { ...detail, nativeSessionId: childId, canCancel: running && !this.observed.has(parent.threadId), state };
+    this.spawnDetails.set(parent.toolCallId, next);
+    // Said running, it must be said ended too, even after a restart (see `settleSubagents`).
+    this.host?.state(this.id, parent.threadId).set(`subagent:${parent.toolCallId}`, running ? childId : "");
+    this.host?.update(this.id, parent.threadId, { sessionUpdate: "tool_call_update", toolCallId: parent.toolCallId, detail: next });
+  }
+
+  /** A sub-agent said to be running when this host last saw it: what its thread says now. */
+  private settleSubagent(threadId: string, callId: string, child: CodexThread, detail: Extract<ToolDetail, { type: "subagent" }> | undefined): void {
+    const memory = this.host?.state(this.id, threadId);
+    const childId = memory?.get(`subagent:${callId}`);
+    if (!childId || childId !== child.id || turnUnderWay(child.turns?.at(-1))) return;
+    memory!.set(`subagent:${callId}`, "");
+    const last = child.turns?.at(-1);
+    const state = last?.status === "interrupted" ? "stopped" as const : last?.status === "failed" ? "failed" as const : "completed" as const;
+    const next = { type: "subagent" as const, action: "spawn" as const, ...detail, nativeSessionId: childId, canCancel: false, state };
+    this.spawnDetails.set(callId, next);
+    this.host?.update(this.id, threadId, { sessionUpdate: "tool_call_update", toolCallId: callId, detail: next });
+  }
+
+  /** Stops one sub-agent's running turn, leaving the session's own turn and the other agents alone. */
+  async cancelSubagent(nativeId: string, childId: string): Promise<void> {
+    const child = this.children.get(childId);
+    if (!child || child.threadId !== nativeId) throw RpcError.app("not_found", "这个子代理不在这个会话里");
+    if (this.observed.has(nativeId)) throw this.refused(nativeId, "会话开在电脑的另一个 Codex 里 · 子代理要在那边停止", HELD_COMMAND);
+    const turnId = this.stateOf(childId).activeTurnId;
+    if (!turnId) throw RpcError.app("busy", "这个子代理现在没有在运行");
+    // A sub-agent's thread lives in the server its parent is in.
+    await this.rpcFor(nativeId, "turn/interrupt", { threadId: childId, turnId });
   }
 
   /** Remembers which spawnAgent call each new sub-agent thread belongs to. */
@@ -2102,7 +2183,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   private rpc<T = unknown>(method: string, params: unknown): Promise<T> {
-    if (!this.server) return Promise.reject(RpcError.app("agent_unavailable", "Codex is not running"));
+    if (!this.server) return Promise.reject(RpcError.app("agent_unavailable", "Codex 没有在运行"));
     return this.server.request<T>(method, params);
   }
 

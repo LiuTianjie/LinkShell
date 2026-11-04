@@ -11,9 +11,14 @@ export function killTreeOnWindows(pid: number): void {
   execFile(join(process.env.SystemRoot || "C:\\Windows", "System32/taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, () => {});
 }
 
-/** npm's Windows shim owns a cmd.exe parent; killing only that parent leaks the agent. */
-export async function stopAgent(child: ChildProcess): Promise<void> {
+/**
+ * npm's Windows shim owns a cmd.exe parent; killing only that parent leaks the agent.
+ * `group`: the child leads its own process group (spawned `detached`), and the
+ * whole group is ended, so what the agent started itself does not outlive it.
+ */
+export async function stopAgent(child: ChildProcess, options: { group?: boolean } = {}): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (options.group && process.platform !== "win32") return stopGroup(child, child.pid);
   if (process.platform === "win32") {
     await new Promise<void>(resolve => {
       execFile(join(process.env.SystemRoot || "C:\\Windows", "System32/taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, () => {
@@ -28,6 +33,32 @@ export async function stopAgent(child: ChildProcess): Promise<void> {
     child.once("exit", () => { clearTimeout(timer); resolve(); });
     child.kill("SIGTERM");
   });
+}
+
+async function stopGroup(child: ChildProcess, pid: number): Promise<void> {
+  const signal = (name: NodeJS.Signals | 0) => {
+    try {
+      process.kill(-pid, name);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const running = () => child.exitCode === null && child.signalCode === null;
+  if (!signal("SIGTERM")) child.kill("SIGTERM");
+  // The leader may exit first while the rest of its group (say, the CLI an
+  // adapter drives) is still writing out its state: the group gets the same three seconds.
+  const deadline = Date.now() + 3000;
+  while (running() || signal(0)) {
+    if (Date.now() >= deadline) {
+      // A group id is not reused while any member lives, so this still reaches only ours.
+      signal("SIGKILL");
+      if (running()) child.kill("SIGKILL");
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (running()) await new Promise<void>((resolve) => { child.once("exit", () => resolve()); setTimeout(resolve, 1000).unref(); });
 }
 
 export function probeAgent(command: string, args: string[], options: { env?: NodeJS.ProcessEnv; timeout?: number } = {}): Promise<{ stdout: string; stderr: string }> {

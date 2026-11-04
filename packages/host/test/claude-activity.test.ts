@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sessionUpdateSchema, type SessionUpdate } from "@linkshell/wire";
 import { ClaudeActivity } from "../src/drivers/claude/activity.js";
 import { normalizeAcpUpdate } from "../src/drivers/acp/mapper.js";
@@ -131,6 +131,24 @@ describe("Claude workflow lifecycle", () => {
     f.follower.poll();
     expect(latest(f.updates, "workflow:wf_run:a1")).toMatchObject({ status: "completed", detail: { state: "stopped" } });
     expect(f.follower.isRunning("wf-call")).toBe(false);
+  });
+
+  it("stops a killed run's worker that never reports an end, once it has been quiet", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const f = fixture();
+      appendFileSync(f.transcript, launch());
+      writeFileSync(join(f.run, "journal.jsonl"), line({ type: "started", agentId: "a1" }));
+      appendFileSync(f.transcript, line({ type: "system", subtype: "task_notification", task_id: "task-wf", status: "stopped" }));
+      f.follower.poll();
+      expect(latest(f.updates, "workflow:wf_run:a1")).toMatchObject({ status: "in_progress", detail: { state: "running" } });
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      f.follower.poll();
+      expect(latest(f.updates, "workflow:wf_run:a1")).toMatchObject({ status: "completed", detail: { state: "stopped" } });
+      expect(f.follower.isRunning("wf-call")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("groups live progress before a final file exists, and joins provisional agents to their later transcript ids", () => {

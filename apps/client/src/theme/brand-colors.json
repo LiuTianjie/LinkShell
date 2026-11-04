@@ -80,11 +80,11 @@
     "#FFFFFF"
   ],
   "secondaryLabel": [
-    "rgba(60,60,67,0.6)",
+    "rgba(60,60,67,0.86)",
     "rgba(235,235,245,0.6)"
   ],
   "tertiaryLabel": [
-    "rgba(60,60,67,0.3)",
+    "rgba(60,60,67,0.75)",
     "rgba(235,235,245,0.3)"
   ],
   "placeholder": [

@@ -151,7 +151,7 @@ export class RelayClient {
     this.sendFrame({ t: "ping" });
     this.probeTimer = setTimeout(() => {
       this.probeTimer = undefined;
-      if (this.socket === socket && this.heardAt < since) this.drop(socket, "no answer from the gateway");
+      if (this.socket === socket && this.heardAt < since) this.drop(socket, "网关没有响应");
     }, timeoutMs);
   }
 
@@ -164,7 +164,7 @@ export class RelayClient {
     const socket = this.socket;
     this.socket = undefined;
     socket?.close(1000, "signing in again");
-    this.failPending("connection closed");
+    this.failPending("与网关的连接断开了");
     this.open();
   }
 
@@ -185,12 +185,12 @@ export class RelayClient {
 
   async request<M extends RelayMethod>(method: M, params: RelayMethods[M]["params"], timeoutMs?: number): Promise<RelayMethods[M]["result"]> {
     const limit = timeoutMs ?? this.options.requestTimeoutMs ?? 20_000;
-    if (!(await this.waitOnline(limit))) throw new RelayRequestError("offline", "not connected to the gateway");
+    if (!(await this.waitOnline(limit))) throw new RelayRequestError("offline", "没有连上网关");
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new RelayRequestError("timeout", `${method} timed out`));
+        reject(new RelayRequestError("timeout", `网关没有及时响应（${method}）`));
       }, limit);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       this.sendFrame({ t: "req", id, method, params });
@@ -300,14 +300,14 @@ export class RelayClient {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.stopPinging();
-      this.failPending("connection closed");
+      this.failPending("与网关的连接断开了");
       if (this.statusValue === "stopped") return;
       // Another connection with our identity took over: don't fight it.
       if (event.code === 4000) {
-        this.setStatus("offline", { code: "replaced", message: "connected elsewhere with this identity" });
+        this.setStatus("offline", { code: "replaced", message: "这台设备已在别处连上网关" });
         return;
       }
-      this.scheduleReconnect(fatal ?? { code: "disconnected", message: event.reason || "connection lost" });
+      this.scheduleReconnect(fatal ?? { code: "disconnected", message: event.reason || "与网关的连接断开了" });
     };
   }
 
@@ -326,7 +326,7 @@ export class RelayClient {
       // Generous: while a gateway holds this connection back (a slow receiver) it reads none of
       // it, pings included, for up to a minute. Sleeps and suspensions are caught sooner, above.
       if (now - this.heardAt > every * 5) {
-        this.drop(socket, "no answer from the gateway");
+        this.drop(socket, "网关没有响应");
         return;
       }
       if (slept) this.probe();
@@ -358,7 +358,7 @@ export class RelayClient {
     } catch {
       // Already closed.
     }
-    this.failPending("connection closed");
+    this.failPending("与网关的连接断开了");
     if (this.statusValue === "stopped") return;
     this.attempt = 0;
     this.scheduleReconnect({ code: "disconnected", message });

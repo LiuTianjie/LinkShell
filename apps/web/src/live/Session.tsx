@@ -110,6 +110,7 @@ import { TimelineNavigation } from "./Timeline";
 import { Conversation } from "./Conversation";
 import { LiveActivity } from "./LiveActivity";
 import { FileView, Files, fileBase64 } from "./Files";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, shrinkImage } from "./attachments";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
@@ -211,6 +212,7 @@ export function Session({
   const [attachmentError, setAttachmentError] = useState<string>();
   const [dragging, setDragging] = useState(false);
   const [sendingFile, setSendingFile] = useState<string>();
+  const uploaded = useRef(new WeakMap<File, string>());
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
   const [panel, commitPanel] = useState<Panel>(null);
   const [file, setFile] = useState<string>();
@@ -452,13 +454,20 @@ export function Session({
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, [draft, panel]);
-  function addFiles(incoming: File[]) {
+  function addFiles(picked: File[]) {
+    void (async () => {
+      // A photo is usually far bigger than it needs to be: made smaller first, it fits.
+      const incoming = await Promise.all(picked.map((file) => shrinkImage(file)));
+      takeFiles(incoming);
+    })();
+  }
+  function takeFiles(incoming: File[]) {
     const rejected = incoming.filter(
-      (file) => file.size > 30_000_000 || file.name.length > 255,
+      (file) => file.size > MAX_ATTACHMENT_BYTES || file.name.length > 255,
     );
     setAttachmentError(
       rejected.length
-        ? `未添加 ${rejected.map((file) => `「${file.name}」`).join("、")}。单个附件不能超过 30 MB，文件名不能超过 255 个字符。`
+        ? `未添加 ${rejected.map((file) => `「${file.name}」`).join("、")}。单个附件不能超过 ${MAX_ATTACHMENT_LABEL}（图片会先自动压缩），文件名不能超过 255 个字符。`
         : undefined,
     );
     setFiles((previous) => {
@@ -618,14 +627,21 @@ export function Session({
           },
         });
       else {
-        const result = await link.call(
-          "fs.upload",
-          { dir: session.cwd, name: file.name, data },
-          180000,
-        );
+        // A send that fails after this file went up is retried with the same file: reuse the
+        // copy on the computer rather than writing "name 2.ext" beside it.
+        const path =
+          uploaded.current.get(file) ??
+          (
+            await link.call(
+              "fs.upload",
+              { dir: session.cwd, name: file.name, data },
+              180000,
+            )
+          ).path;
+        uploaded.current.set(file, path);
         content.push({
           type: "resource_link",
-          uri: result.path,
+          uri: path,
           name: file.name,
         });
       }
@@ -1398,7 +1414,7 @@ export function Session({
                                 <Icon name="attach" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="top">添加附件 · 单个文件最多 30 MB</TooltipContent>
+                            <TooltipContent side="top">添加附件 · 单个文件最多 {MAX_ATTACHMENT_LABEL}，图片会自动压缩</TooltipContent>
                           </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>

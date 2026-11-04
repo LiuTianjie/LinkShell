@@ -41,7 +41,7 @@
     background: var(--accentSoft);
     padding: 4px 8px;
     margin: 4px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     overflow-wrap: anywhere;
   }
 .live-timeline .resource-chip {
@@ -436,7 +436,7 @@
     flex: 1;
     min-height: 0;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     background: var(--plain);
   }

@@ -43,7 +43,7 @@ import {
 import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
-import { sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
+import { optionDescription, sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
 
 const KNOWN_CATEGORIES = new Set(["mode", "model", "effort"]);
 import { isDesktop } from "./desktop";
@@ -139,7 +139,7 @@ export function Settings({
             {/* The common settings get a Chinese name of their own; the agent's English line
                 under them ("AI model to use") only repeats it. Others keep the agent's words. */}
             {option.description && !KNOWN_CATEGORIES.has(option.category ?? "") && (
-              <p className="muted">{option.description}</p>
+              <p className="muted">{optionDescription(option.description)}</p>
             )}
             {option.type === "boolean" ? (
               <Checkbox
@@ -159,7 +159,7 @@ export function Settings({
             ) : (
               <Choice
                 id={`config-${option.id}`}
-                label={option.name}
+                label={sessionConfigLabel(option)}
                 value={option.current}
                 disabled={!online || job.busy}
                 onValueChange={(value) =>
@@ -869,7 +869,7 @@ export function Worktrees() {
   return (
     <section className="worktrees-page">
       <PageHeader
-        title="Worktree"
+        title="工作树"
         actions={<>
       <Button
         variant="ghost"

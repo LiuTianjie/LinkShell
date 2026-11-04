@@ -260,7 +260,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
 
       {commentList.length > 0 ? (
         <View style={{ position: "absolute", left: 16, right: 16, bottom: 20 }}>
-          <Glass style={{ borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Glass style={{ borderRadius: radius.panel, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
             <Icon sf="text.bubble.fill" md="comment" size={16} color={colors.accent} />
             <Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
               已添加 {commentList.length} 条批注

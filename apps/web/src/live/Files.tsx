@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichText, TimelineNavigation } from "./Timeline";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL } from "./attachments";
 import {
   InputGroup,
   InputGroupAddon,
@@ -70,7 +71,7 @@ import {
 } from "./file-content";
 
 export async function fileBase64(file: File): Promise<string> {
-  if (file.size > 30_000_000) throw new Error(`${file.name} 超过 30 MB`);
+  if (file.size > MAX_ATTACHMENT_BYTES) throw new Error(`${file.name} 超过 ${MAX_ATTACHMENT_LABEL}`);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("文件读取失败"));
@@ -481,8 +482,8 @@ export function Files({
     setNotice("");
     void job.run(async () => {
       for (const candidate of files)
-        if (candidate.size > 30_000_000)
-          throw new Error(`${candidate.name} 超过 30 MB，尚未上传任何文件。`);
+        if (candidate.size > MAX_ATTACHMENT_BYTES)
+          throw new Error(`${candidate.name} 超过 ${MAX_ATTACHMENT_LABEL}，尚未上传任何文件。`);
       let done = 0;
       try {
         for (const candidate of files) {
@@ -683,7 +684,7 @@ export function Files({
             <Button variant="ghost" size="sm" disabled={!changeable} onClick={() => void makeDirectory()}>
               <FolderPlus data-icon="inline-start" />新建目录
             </Button>
-            <Button size="sm" disabled={!changeable} title="单个文件最大 30 MB" onClick={chooseUpload}>
+            <Button size="sm" disabled={!changeable} title={`单个文件最大 ${MAX_ATTACHMENT_LABEL}`} onClick={chooseUpload}>
               <Upload data-icon="inline-start" />上传文件
             </Button>
           </>}
@@ -861,7 +862,7 @@ export function Files({
               新建目录
             </Button>
           </div>
-          <span className="resource-caption">单个文件最大 30 MB</span>
+          <span className="resource-caption">单个文件最大 {MAX_ATTACHMENT_LABEL}</span>
         </div>
       )}
       <ErrorNotice error={job.error} />

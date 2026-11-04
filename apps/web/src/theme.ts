@@ -45,8 +45,9 @@ const consoleNeutrals: Palette = {
   cardRaised: ["#ffffff", "#16171a"],
   inset: ["#f1f1f4", "#0b0c0d"],
   label: ["#17181b", "#f0f1f3"],
-  secondaryLabel: ["#5c5f68", "#a0a3ab"],
-  tertiaryLabel: ["#8a8d96", "#70737b"],
+  // Light-mode text keeps 4.5:1 on every light surface, secondary a clear step darker.
+  secondaryLabel: ["#51545d", "#a0a3ab"],
+  tertiaryLabel: ["#65686f", "#70737b"],
   quaternaryLabel: ["#aeb0b8", "#4e5059"],
   // Hairlines: translucent, and the container frame one tier stronger than
   // the row dividers it holds.
@@ -98,8 +99,8 @@ const desktopNeutrals: Palette = {
   "sheetCard": ["#f9f9f9", "#181818"],
   "sidebarAccent": ["#1a1c1f14", "#ffffff14"],
   "label": ["#1a1c1f", "#dfdfdf"],
-  "secondaryLabel": ["#1a1c1fb3", "#ffffffb3"],
-  "tertiaryLabel": ["#1a1c1f80", "#ffffff80"],
+  "secondaryLabel": ["#1a1c1fbf", "#ffffffb3"],
+  "tertiaryLabel": ["#1a1c1fa3", "#ffffff80"],
   "quaternaryLabel": ["#1a1c1f59", "#ffffff4d"],
   "placeholder": ["#1a1c1f73", "#ffffff66"],
   "separator": ["#1a1c1f14", "#ffffff14"],

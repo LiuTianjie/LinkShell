@@ -57,7 +57,7 @@ const groups: {
       { id: "terminals", title: "终端", icon: "terminal" },
       { id: "files", title: "文件", icon: "file" },
       { id: "ports", title: "端口预览", icon: "globe" },
-      { id: "worktrees", title: "Worktree", icon: "branch" },
+      { id: "worktrees", title: "工作树", icon: "branch" },
     ],
   },
 ];

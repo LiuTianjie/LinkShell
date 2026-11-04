@@ -9,6 +9,7 @@ import { spawn, type IPty } from "node-pty";
 import { RpcError, type TerminalInfo } from "@linkshell/wire";
 import type { HostStore, TerminalRecord } from "./store.js";
 import { TerminalState } from "./terminal-state.js";
+import { trackPid } from "./children.js";
 
 // Plain shells on the host, kept open while devices come and go: any command,
 // like an SSH session that survives the phone locking.
@@ -182,7 +183,7 @@ class Terminal {
   }
 
   write(data: string): void {
-    if (!this.running) throw RpcError.app("not_ready", "this terminal has exited");
+    if (!this.running) throw RpcError.app("not_ready", "这个终端已经退出");
     this.pty.write(data);
   }
 
@@ -335,9 +336,9 @@ export class TerminalManager {
   }
 
   create(options: { cwd?: string; command?: string; cols: number; rows: number; sessionId?: string; launch?: { command: string; args: string[]; env?: Record<string, string> } }): TerminalInfo {
-    if (this.terminals.size >= MAX_TERMINALS) throw RpcError.app("busy", `at most ${MAX_TERMINALS} terminals can run at once`);
+    if (this.terminals.size >= MAX_TERMINALS) throw RpcError.app("busy", `最多同时运行 ${MAX_TERMINALS} 个终端`);
     const cwd = options.cwd ?? homedir();
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `no such directory: ${cwd}`);
+    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `找不到文件夹：${cwd}`);
     const base = this.env ?? process.env;
     const shell = options.launch?.command ?? (process.platform === "win32" ? "powershell.exe" : base.SHELL || "/bin/zsh");
     const env: Record<string, string> = {};
@@ -354,7 +355,8 @@ export class TerminalManager {
     // setting wins.
     env.CLAUDE_CODE_DECSTBM ??= "1";
     Object.assign(env, options.launch?.env);
-    const pty = spawn(shell, options.launch?.args ?? (process.platform === "win32" ? ["-NoLogo", "-NoProfile"] : ["-l"]), {
+    const args = options.launch?.args ?? (process.platform === "win32" ? ["-NoLogo", "-NoProfile"] : ["-l"]);
+    const pty = spawn(shell, args, {
       name: "xterm-256color",
       cols: options.cols,
       rows: options.rows,
@@ -364,6 +366,11 @@ export class TerminalManager {
       // AttachConsole probe that fails for hidden hosts and leaves shells alive.
       ...(process.platform === "win32" ? { useConptyDll: true } : {}),
     });
+    // A pty's shell leads its own session. When a crashed host's end of the pty
+    // closes, the kernel hangs the shell up and the shell hangs up its jobs;
+    // recorded for a shell that survives that. Jobs the user put out of reach
+    // (`nohup`, `disown`) run in groups of their own and are left alone.
+    pty.onExit(trackPid(pty.pid, "terminal", shell, args, true));
     const command = options.command?.trim() || undefined;
     const terminal = new Terminal(pty, cwd, shell, options.cols, options.rows, command, (t) => {
       // Closed (or the host stopping): it's gone; its shell exiting is no news.
@@ -481,7 +488,7 @@ export class TerminalManager {
     const live = this.terminals.get(id);
     if (live) return { terminal: live.info(), ...live.attach(listener, fromSeq) };
     const ended = this.history.get(id);
-    if (!ended) throw RpcError.app("not_found", "no such terminal");
+    if (!ended) throw RpcError.app("not_found", "找不到这个终端");
     return { terminal: recordInfo(ended.record, ended.interrupted), replay: ended.record.buffer, reset: true, seq: 0 };
   }
 
@@ -505,7 +512,7 @@ export class TerminalManager {
   close(id: string): void {
     const terminal = this.terminals.get(id);
     const ended = this.history.get(id);
-    if (!terminal && !ended) throw RpcError.app("not_found", "no such terminal");
+    if (!terminal && !ended) throw RpcError.app("not_found", "找不到这个终端");
     const info = terminal ? terminal.info() : recordInfo(ended!.record, ended!.interrupted);
     terminal?.close();
     this.terminals.delete(id);
@@ -537,7 +544,7 @@ export class TerminalManager {
   private live(id: string): Terminal {
     const terminal = this.terminals.get(id);
     if (terminal) return terminal;
-    if (this.history.has(id)) throw RpcError.app("not_ready", "this terminal has ended");
-    throw RpcError.app("not_found", "no such terminal");
+    if (this.history.has(id)) throw RpcError.app("not_ready", "这个终端已经结束");
+    throw RpcError.app("not_found", "找不到这个终端");
   }
 }

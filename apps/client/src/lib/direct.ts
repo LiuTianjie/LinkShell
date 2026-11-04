@@ -38,7 +38,7 @@ export const directConnector: DirectConnector = (iceServers) => {
         });
       }
       const sdp = connection.localDescription?.sdp;
-      if (!sdp) throw new Error("no offer could be made");
+      if (!sdp) throw new Error("无法建立直连通道");
       return sdp;
     },
     accept: (answer) => connection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answer })),

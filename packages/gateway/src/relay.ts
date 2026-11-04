@@ -222,7 +222,7 @@ export class Gateway {
         parsed = undefined;
       }
       if (!parsed?.success) {
-        send({ t: "error", code: "bad_frame", message: "unreadable frame" });
+        send({ t: "error", code: "bad_frame", message: "无法解析的消息" });
         return;
       }
       const frame = parsed.data;
@@ -281,16 +281,16 @@ export class Gateway {
 
   private async authenticate(frame: Extract<import("@linkshell/wire").ClientFrame, { t: "auth" }>, nonce: string, socket: GatewaySocket) {
     const { identity, role } = frame;
-    if (idOf(identity.signKey) !== identity.id) throw new RelayError("bad_identity", "id doesn't match key");
+    if (idOf(identity.signKey) !== identity.id) throw new RelayError("bad_identity", "身份标识和密钥对不上");
     if (!verifySignature(identity.signKey, gatewayChallengeMessage(nonce), frame.signature)) {
-      throw new RelayError("bad_signature", "signature check failed");
+      throw new RelayError("bad_signature", "签名校验失败");
     }
     const existing = this.store.peer(identity.id);
-    if (existing && existing.role !== role) throw new RelayError("bad_identity", "this key is registered with another role");
+    if (existing && existing.role !== role) throw new RelayError("bad_identity", "这把密钥已经以另一种身份登记过");
     let userId: string | undefined;
     let email: string | undefined;
     if (frame.token) {
-      if (!this.options.verifyToken) throw new RelayError("accounts_disabled", "this gateway doesn't support accounts");
+      if (!this.options.verifyToken) throw new RelayError("accounts_disabled", "这个网关不支持账号登录");
       const account = await this.options.verifyToken(frame.token);
       if (account) {
         userId = account.userId;
@@ -300,14 +300,14 @@ export class Gateway {
         // token later expires or fails to refresh while the computer is unattended.
         userId = existing.userId;
       } else {
-        throw new RelayError("token_invalid", "account token is invalid or expired");
+        throw new RelayError("token_invalid", "账号登录已失效，请重新登录");
       }
     } else if (existing?.userId && this.options.verifyToken) {
       userId = existing.userId;
     }
     const refusal = await this.options.admit?.({ role: role as PeerRole, userId });
     if (refusal) throw new RelayError("not_admitted", refusal);
-    if (socket.readyState !== WebSocket.OPEN) throw new RelayError("closed", "connection closed during authentication");
+    if (socket.readyState !== WebSocket.OPEN) throw new RelayError("closed", "认证过程中连接断开了");
     const record: PeerRecord = {
       id: identity.id,
       role: role as PeerRole,
@@ -434,7 +434,7 @@ export class Gateway {
   private async handle(peer: Peer, method: string, params: Record<string, unknown>): Promise<unknown> {
     const role = peer.record.role;
     const need = (wanted: PeerRole) => {
-      if (role !== wanted) throw new RelayError("forbidden", `${method} is for ${wanted}s`);
+      if (role !== wanted) throw new RelayError("forbidden", `${method} 只能由${wanted === "machine" ? "电脑" : "设备"}调用`);
     };
     switch (method) {
       case "pair.offer": {
@@ -450,7 +450,7 @@ export class Gateway {
       case "pair.decide": {
         need("machine");
         const pending = this.decisions.get(String(params.requestId));
-        if (!pending || pending.machineId !== peer.record.id) throw new RelayError("not_found", "no such pairing request");
+        if (!pending || pending.machineId !== peer.record.id) throw new RelayError("not_found", "找不到这次配对请求");
         pending.resolve(params.accept === true);
         return {};
       }
@@ -462,7 +462,7 @@ export class Gateway {
         need("machine");
         const now = Date.now();
         const recent = (this.turnTimes.get(peer.record.id) ?? []).filter((t) => now - t < 60_000);
-        if (recent.length >= 30) throw new RelayError("rate_limited", "too many credential requests, wait a minute");
+        if (recent.length >= 30) throw new RelayError("rate_limited", "请求凭据太频繁了，请稍等一分钟");
         this.turnTimes.set(peer.record.id, [...recent, now]);
         return this.options.turn ? turnCredentials(this.options.turn, peer.record.id, now) : { servers: [], ttl: 0 };
       }
@@ -477,7 +477,7 @@ export class Gateway {
       case "machines.update": {
         need("machine");
         if (typeof params.name !== "string" || !params.name.trim() || params.name.length > 120) {
-          throw new RelayError("invalid_params", "name must contain 1 to 120 characters");
+          throw new RelayError("invalid_params", "名称需要 1 到 120 个字符");
         }
         const name = params.name.trim();
         const newlyConfigured = params.namingConfigured === true && !this.namingConfigured.has(peer.record.id);
@@ -531,7 +531,7 @@ export class Gateway {
         return {};
       }
       default:
-        throw new RelayError("unknown_method", `unknown method ${method}`);
+        throw new RelayError("unknown_method", `未知方法 ${method}`);
     }
   }
 
@@ -539,7 +539,7 @@ export class Gateway {
     // Throttle guessing: a handful of claims per device per minute.
     const now = Date.now();
     const recent = (this.claimTimes.get(device.record.id) ?? []).filter((t) => now - t < 60_000);
-    if (recent.length >= 6) throw new RelayError("rate_limited", "too many pairing attempts, wait a minute");
+    if (recent.length >= 6) throw new RelayError("rate_limited", "尝试配对太频繁了，请稍等一分钟");
     this.claimTimes.set(device.record.id, [...recent, now]);
 
     const code = typeof params.code === "string" ? params.code.replace(/\D/g, "") : undefined;
@@ -549,14 +549,14 @@ export class Gateway {
       : [...this.offers.values()].find((candidate) => candidate.machineId === machineId);
     if (!offer || offer.expiresAt < now) {
       if (offer) this.offers.delete(offer.code);
-      throw new RelayError("pairing_expired", "this pairing code is wrong or has expired");
+      throw new RelayError("pairing_expired", "配对码不对或已过期");
     }
     if (++offer.attempts > MAX_CLAIM_ATTEMPTS) {
       this.offers.delete(offer.code);
-      throw new RelayError("pairing_expired", "too many attempts on this code; start pairing again");
+      throw new RelayError("pairing_expired", "这个配对码尝试次数过多，请在电脑上重新开始配对");
     }
     const machine = this.peers.get(offer.machineId);
-    if (!machine) throw new RelayError("machine_offline", "the computer is offline");
+    if (!machine) throw new RelayError("machine_offline", "电脑现在不在线");
 
     // The machine checks the proof (it holds the QR secret) and decides.
     const requestId = randomUUID();
@@ -582,7 +582,7 @@ export class Gateway {
     });
     if (!accepted) {
       this.event(machine.record.id, "pair.done", { requestId, accepted: false });
-      throw new RelayError("pairing_refused", "the computer refused this pairing");
+      throw new RelayError("pairing_refused", "电脑拒绝了这次配对");
     }
     this.offers.delete(offer.code);
     this.store.link(machine.record.id, device.record.id);

@@ -58,7 +58,7 @@ export function SessionLookup({
     >
       <ErrorNotice
         error={
-          /not found/i.test(lookup.error)
+          /not found|找不到会话/i.test(lookup.error)
             ? "当前电脑上找不到此会话。"
             : lookup.error
         }

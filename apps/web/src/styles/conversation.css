@@ -333,7 +333,7 @@
   /* Agent-to-agent relay message, folded by default. */
   .agent-message > details {
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 10px 12px;
     background: var(--card);
     font-size: 13px;
@@ -518,7 +518,7 @@
   .code-surface {
     margin: 14px 0;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     background: var(--code);
   }
@@ -644,7 +644,7 @@
     color: var(--secondaryLabel);
     font-size: 13px;
     text-align: left;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     transition: color 120ms ease;
   }
   .steps-summary:hover {
@@ -698,7 +698,7 @@
      folded; a hairline frame appears only once it's open. ---- */
   .tool-record {
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius-card);
   }
   .tool-record[open] {
     border-color: var(--separator);
@@ -711,7 +711,7 @@
     min-height: 26px;
     padding: 3px 6px;
     margin: 0 -6px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     cursor: pointer;
     list-style: none;
     color: var(--secondaryLabel);
@@ -725,7 +725,7 @@
   .tool-record[open] > summary {
     margin: 0;
     border-bottom: 1px solid var(--separator);
-    border-radius: 8px 8px 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
   }
   .tool-record > summary > strong {
     flex: 1;
@@ -907,7 +907,7 @@
     max-width: 100%;
     padding: 4px 9px;
     border: 1px solid var(--separator);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--plain);
     color: var(--secondaryLabel);
     font-size: 12px;
@@ -989,7 +989,7 @@
   /* ---- Plan card ---- */
   .plan-card {
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 14px 16px;
     background: var(--card);
     font-size: 13px;
@@ -1028,7 +1028,7 @@
   /* ---- Notice / alert cards ---- */
   .notice-card {
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 14px 16px;
     background: var(--card);
     overflow-wrap: anywhere;
@@ -1097,7 +1097,7 @@
     min-height: 32px;
     padding: 0 14px;
     border: 1px solid var(--separator);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--plain);
     color: var(--label);
     font-size: 13px;
@@ -1209,7 +1209,7 @@
   }
   .approval-card .choice-option {
     border: 1px solid var(--separator);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     padding: 10px 12px;
     margin: 0;
     cursor: pointer;
@@ -1240,7 +1240,7 @@
   .task-output pre:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: var(--radius-small);
   }
   .question-form {
     display: flex;
@@ -1607,7 +1607,7 @@
     max-width: 100%;
     padding: 4px 6px 4px 8px;
     border: 1px solid var(--separator);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--card);
     color: var(--label);
     font-size: 12px;
@@ -1638,7 +1638,7 @@
   .inline-terminal {
     margin: 0 16px 12px;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     overflow: hidden;
   }
 
@@ -1753,7 +1753,7 @@
     margin: 10px 0;
     padding: 12px;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     background: var(--card);
     transition: border-color var(--transition), background var(--transition);
   }

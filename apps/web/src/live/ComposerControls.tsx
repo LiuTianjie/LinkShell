@@ -24,12 +24,51 @@ export function SessionConfigIcon({ category, value = "" }: { category: SessionC
   return <Icon name={name} data-icon="inline-start" />;
 }
 
+/** Settings outside model, effort and mode that shipped drivers report, by id or by English name. */
+const OPTION_NAMES: Record<string, string> = {
+  plan: "计划模式",
+  "plan mode": "计划模式",
+  fast: "快速模式",
+  "fast mode": "快速模式",
+  agent: "Agent 角色",
+  "approval policy": "审批策略",
+  approval_policy: "审批策略",
+  sandbox: "沙盒",
+  "sandbox mode": "沙盒模式",
+};
+
 export function sessionConfigLabel(option: SessionConfigOption): string {
   if (option.category === "model") return "模型";
   if (option.category === "effort") return "推理强度";
-  if (option.id === "plan") return "计划模式";
+  const known = OPTION_NAMES[option.id] ?? OPTION_NAMES[option.name.trim().toLowerCase()];
+  if (known) return known;
   return option.category === "mode" ? "权限模式" : option.name;
 }
+
+/** What those settings say about themselves, in Chinese; an agent's own wording stays as given. */
+const OPTION_DESCRIPTIONS: Record<string, string> = {
+  "faster responses on supported models": "在支持的模型上回复更快，额度消耗更多",
+  "main-thread agent persona": "主对话使用的 Agent 角色",
+  "session permission mode": "会话的权限模式",
+  "available effort levels for this model": "这个模型可选的推理强度",
+  "ai model to use": "使用的模型",
+};
+export function optionDescription(text: string): string {
+  const trimmed = text.trim();
+  // Claude appends why fast mode is unavailable: "… — not available on the free plan".
+  const [head, reason] = trimmed.split(/\s+—\s+/, 2);
+  const base = OPTION_DESCRIPTIONS[(head ?? trimmed).toLowerCase()];
+  if (!base) return text;
+  return reason ? `${base}（${FAST_MODE_REASONS[reason.toLowerCase()] ?? reason}）` : base;
+}
+const FAST_MODE_REASONS: Record<string, string> = {
+  "not available on the free plan": "免费套餐不可用",
+  "requires extra usage to be enabled for this account": "需要为账号开启额外用量",
+  "not available for the selected model": "当前模型不支持",
+  "not available on this api provider": "当前 API 服务商不支持",
+  "disabled by environment configuration": "已被环境配置关闭",
+  "eligibility could not be verified (network error)": "网络错误，无法确认是否可用",
+};
 
 /**
  * The settings people change mid-conversation, on the composer itself: mode, model and effort,
@@ -62,6 +101,14 @@ const VALUE_NAMES: Record<string, string> = {
   "high": "高",
   "xhigh": "很高",
   "max": "最高",
+  "ultra": "极高",
+  "none": "关闭",
+  "on": "开",
+  "off": "关",
+  "custom": "自定义",
+  // Gemini's approval modes.
+  "auto edit": "自动编辑",
+  "yolo": "全部自动批准",
 };
 export function valueName(name: string): string {
   return VALUE_NAMES[name.trim().toLowerCase()] ?? displayModelName(name);
@@ -78,6 +125,20 @@ const DESCRIPTIONS: Record<string, string> = {
   "edits and runs commands in the workspace; asks before anything else": "在工作区内编辑和运行命令，其他操作会问你",
   "edits and runs anything without asking": "编辑和运行任何东西都不问",
   "discuss and plan first; no changes until the plan is agreed": "先讨论和计划，计划确认前不做改动",
+  "set in codex's own config": "按 Codex 自己的配置",
+  "standard claude code agent": "标准的 Claude Code Agent",
+  // Codex's reasoning efforts.
+  "fast responses with lighter reasoning": "回复快，思考较浅",
+  "balances speed and reasoning depth for everyday tasks": "兼顾速度和思考深度，适合日常任务",
+  "greater reasoning depth for complex problems": "思考更深，适合复杂问题",
+  "extra high reasoning depth for complex problems": "思考很深，适合复杂问题",
+  "maximum reasoning depth for the hardest problems": "最深的思考，适合最难的问题",
+  "maximum reasoning with automatic task delegation": "最深的思考，并自动分派子任务",
+  // Gemini's approval modes.
+  "prompts for approval": "每次操作前询问",
+  "auto-approves edit tools": "自动批准编辑，其他操作仍会询问",
+  "auto-approves all tools": "自动批准所有操作",
+  "read-only mode": "只读，先出计划",
 };
 export function valueDescription(text: string): string {
   return DESCRIPTIONS[text.trim().toLowerCase()] ?? text;

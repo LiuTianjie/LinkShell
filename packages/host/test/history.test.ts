@@ -158,6 +158,22 @@ describe("session history in pages", () => {
     } }]);
   });
 
+  it("sends a running workflow worker's finished workflow call with it, so it has a named card to go under", async () => {
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "wf", title: "Workflow: review", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", workflow: {} } });
+    driver.emit({ sessionUpdate: "tool_call", toolCallId: "worker", parentToolCallId: "wf", title: "review:ui", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn", task: "review:ui", state: "running" } });
+    driver.emit({ sessionUpdate: "ls_turn", parentToolCallId: "worker", state: "started" });
+    driver.emit({ sessionUpdate: "tool_call_update", toolCallId: "wf", status: "completed", detail: { type: "subagent", action: "spawn", task: "Review everything", workflow: { state: "stopped" } } });
+    const seq = store.getSession("fake:s1")!.lastSeq;
+    for (let n = 1; n <= 30; n++) turn(n, 10);
+    const client = collector();
+    const { startSeq } = await hub.subscribe("fake:s1", 0, client.subscriber);
+    expect(startSeq).toBeGreaterThan(seq);
+    const before = client.events.filter((event) => event.seq <= startSeq).map((event) => event.update);
+    expect(before).toContainEqual(expect.objectContaining({ sessionUpdate: "tool_call", toolCallId: "wf" }));
+    expect(before).toContainEqual(expect.objectContaining({ sessionUpdate: "tool_call_update", toolCallId: "wf", status: "completed" }));
+    expect(before).toContainEqual(expect.objectContaining({ sessionUpdate: "tool_call", toolCallId: "worker" }));
+  });
+
   it("sends a short session whole", async () => {
     turn(1, 2);
     turn(2, 2);

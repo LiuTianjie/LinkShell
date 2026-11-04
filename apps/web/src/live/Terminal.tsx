@@ -50,6 +50,7 @@ import { createPortal } from "react-dom";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL } from "./attachments";
 import {
   ErrorNotice,
   EmptyState,
@@ -167,8 +168,8 @@ export function Terminal({
     if (!target || !readyForInput.current || endedRef.current)
       throw new Error("终端尚不能接收输入，请恢复连接后再上传。");
     // Validate the batch before saving anything, so an oversized later file is not a partial upload.
-    const oversized = files.find((file) => file.size > 30_000_000);
-    if (oversized) throw new Error(`${oversized.name} 超过 30 MB`);
+    const oversized = files.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+    if (oversized) throw new Error(`${oversized.name} 超过 ${MAX_ATTACHMENT_LABEL}`);
     const result = await link.call("terminals.list", {});
     const terminal = result.terminals.find((item) => item.id === id);
     if (!terminal || terminal.exitCode != null || terminal.interrupted)
@@ -902,7 +903,7 @@ export function Terminal({
         <div className="terminal-drop-target">
           <Upload size={24} />
           <strong>{canInput ? "松开以上传文件" : "终端恢复后才能上传"}</strong>
-          <span>保存到工作目录，路径填入终端 · 单个文件最多 30 MB</span>
+          <span>保存到工作目录，路径填入终端 · 单个文件最多 {MAX_ATTACHMENT_LABEL}</span>
         </div>
       )}
     </div>

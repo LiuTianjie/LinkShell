@@ -19,6 +19,7 @@ import { TerminalManager } from "./terminals.js";
 import { LiveActivityRelay } from "./live-activities.js";
 import { isNamedPipe, windowsPipe } from "./local-transport.js";
 import { MachineName } from "./machine-name.js";
+import { openChildRegistry, reapOrphans } from "./children.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
@@ -139,6 +140,10 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   if (await isHostRunning(paths.hostSocket)) {
     throw new Error(`a LinkShell host is already running (${paths.hostSocket})`);
   }
+  // Before any driver starts: an agent an earlier host left can still hold what
+  // a new one needs (a session's lock, a socket), besides running on unwatched.
+  await reapOrphans(paths.runDir, log);
+  const children = openChildRegistry(paths.runDir);
 
   const machineId = loadMachineId(paths.home);
   const machineName = new MachineName(paths.home, options.gateway?.name ?? (process.env.LINKSHELL_MACHINE_NAME || hostname()).replace(/\.local$/, ""));
@@ -269,6 +274,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
         await server.stop();
         terminals.stop();
         await hub.stop();
+        await children.close(log);
         store.close();
       })();
       return stopping;

@@ -30,8 +30,8 @@ function brand(name: BrandName): ColorValue {
 
 const nativeColors = {
   label: system(Color.ios.label, "label", "#101014"),
-  secondaryLabel: system(Color.ios.secondaryLabel, "secondaryLabel", "#5e5f6a"),
-  tertiaryLabel: system(Color.ios.tertiaryLabel, "tertiaryLabel", "#9394a0"),
+  secondaryLabel: system(Color.ios.secondaryLabel, "secondaryLabel", "#4f505b"),
+  tertiaryLabel: system(Color.ios.tertiaryLabel, "tertiaryLabel", "#696a76"),
   placeholder: system(Color.ios.placeholderText, "placeholder", "#9394a0"),
   separator: system(Color.ios.separator, "separator", "#d9d9e0"),
 
@@ -97,8 +97,8 @@ export const colors: typeof nativeColors = Platform.OS === "android"
 export const palette = {
   light: {
     label: "#101014",
-    secondaryLabel: "#5e5f6a",
-    tertiaryLabel: "#9394a0",
+    secondaryLabel: "#4f505b",
+    tertiaryLabel: "#696a76",
     accent: "#4c5fd5",
     code: "#f1f1f6",
     codeBorder: "rgba(16,16,28,0.08)",

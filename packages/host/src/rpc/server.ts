@@ -300,12 +300,12 @@ export class HostRpcServer {
       },
       "gateway.status": () => this.gateway?.status() ?? { status: "off" as const, devices: [] },
       "gateway.refresh": (_params: P<"gateway.refresh">, context) => {
-        if (!context.local) throw RpcError.app("forbidden", "the gateway is chosen on the computer itself");
+        if (!context.local) throw RpcError.app("forbidden", "网关只能在电脑上设置");
         return this.refreshGateway?.() ?? this.gateway?.status() ?? { status: "off" as const, devices: [] };
       },
       "pairing.start": (_params: P<"pairing.start">, context) => {
-        if (!context.local) throw RpcError.app("forbidden", "pairing starts on the computer itself");
-        if (!this.gateway) throw RpcError.app("not_supported", "no gateway: run linkshell login for the official one, or linkshell host --gateway <url>");
+        if (!context.local) throw RpcError.app("forbidden", "配对只能在电脑上发起：在电脑上运行 linkshell pair");
+        if (!this.gateway) throw RpcError.app("not_supported", "还没有设置网关：运行 linkshell login 使用官方网关，或运行 linkshell host --gateway <地址> 使用自己的网关");
         return this.gateway.startPairing();
       },
       "access.unlock": (params: P<"access.unlock">, context) => {
@@ -591,12 +591,12 @@ export class HostRpcServer {
   private async dispatch(method: string, params: unknown, context: ConnectionContext): Promise<unknown> {
     if (!isMethodName(method)) throw new RpcError(RPC_METHOD_NOT_FOUND, `unknown method ${method}`);
     // The terminal shim's methods launch local processes with a given environment: never over the network.
-    if (method.startsWith("desktop.") && !context.local) throw RpcError.app("forbidden", `${method} is only available locally`);
+    if (method.startsWith("desktop.") && !context.local) throw RpcError.app("forbidden", `${method} 只能在电脑本机上使用`);
     // Older apps can't unlock: the message is what they show.
     if (!context.unlocked && method !== "machine.info" && method !== "access.unlock") throw RpcError.app("locked", "这台电脑设置了访问密码，请更新 App 后输入密码");
     const parsed = methods[method].params.safeParse(params ?? {});
     if (!parsed.success) {
-      throw new RpcError(RPC_INVALID_PARAMS, `invalid params for ${method}`, {
+      throw new RpcError(RPC_INVALID_PARAMS, `参数无效（${method}）`, {
         code: "invalid_params",
         issues: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
       });

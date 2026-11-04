@@ -601,7 +601,7 @@ export class SessionHub {
 
   getSession(sessionId: string): SessionSummary {
     const summary = this.store.getSession(sessionId);
-    if (!summary) throw RpcError.app("not_found", `session ${sessionId} not found`);
+    if (!summary) throw RpcError.app("not_found", `找不到会话 ${sessionId}`);
     if (this.store.isNativeMissing(sessionId)) throw RpcError.app("not_found", "这个会话的原始记录已不存在，已从列表隐藏；本地缓存仍保留。");
     return this.decorate(summary);
   }
@@ -1175,10 +1175,23 @@ export class SessionHub {
     }
     // Sub-agents still working were started before the window: their calls, so
     // what they do next has its card to go under.
+    // A workflow's worker is nested under the workflow's call, which may itself be finished and
+    // out of the window: without it the client invents a nameless "running" card for the parent.
+    // So each one's ancestors go too, with their latest state.
+    const sent = new Set<string>();
+    const withAncestors = (toolCallId: string) => {
+      for (let id: string | undefined = toolCallId; id && !sent.has(id); ) {
+        sent.add(id);
+        const call: SessionEvent | undefined = this.store.toolEvents(sessionId, id)[0];
+        if (!call || call.seq > seq) break;
+        events.push(call);
+        const latest = this.store.toolDetail(sessionId, id);
+        if (latest && latest.seq !== call.seq && latest.seq <= seq) events.push(latest);
+        id = (call.update as { parentToolCallId?: string }).parentToolCallId;
+      }
+    };
     for (const [toolCallId, state] of this.subagentsOf(sessionId, live)) {
-      if (!subagentRunning(state)) continue;
-      const call = this.store.toolEvents(sessionId, toolCallId)[0];
-      if (call && call.seq <= seq) events.push(call);
+      if (subagentRunning(state)) withAncestors(toolCallId);
     }
     return events.sort((a, b) => a.seq - b.seq);
   }
@@ -1487,9 +1500,9 @@ export class SessionHub {
   async respondPermission(sessionId: string, requestId: string, optionId: string): Promise<void> {
     const summary = this.getSession(sessionId);
     const request = this.live.get(sessionId)?.permissions.get(requestId);
-    if (!request) throw RpcError.app("not_found", "this permission request is no longer pending");
+    if (!request) throw RpcError.app("not_found", "这个请求已经处理过或已失效");
     if (!request.options.some((option) => option.optionId === optionId)) {
-      throw RpcError.app("invalid_params", `unknown option ${optionId}`);
+      throw RpcError.app("invalid_params", `未知选项 ${optionId}`);
     }
     await this.requireDriver(summary.agent).respondPermission(summary.nativeId, requestId, optionId);
   }
@@ -1524,7 +1537,7 @@ export class SessionHub {
     context: DesktopLaunchContext,
   ): Promise<LaunchSpec & { sessionId?: string }> {
     const driver = this.requireDriver(agent);
-    if (!driver.desktopLaunch) throw RpcError.app("not_supported", `${driver.label} has no desktop mode`);
+    if (!driver.desktopLaunch) throw RpcError.app("not_supported", `${driver.label} 没有桌面模式`);
     const nativeId = sessionId ? this.getSession(sessionId).nativeId : undefined;
     const launch = await driver.desktopLaunch(args, nativeId, context);
     if (!launch.nativeId) return { command: launch.command, args: launch.args, env: launch.env };
@@ -1567,7 +1580,7 @@ export class SessionHub {
   async reclaim(sessionId: string, context: DesktopLaunchContext): Promise<LaunchSpec> {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
-    if (!driver.reclaim) throw RpcError.app("not_supported", `${driver.label} has no desktop mode`);
+    if (!driver.reclaim) throw RpcError.app("not_supported", `${driver.label} 没有桌面模式`);
     return driver.reclaim(summary.nativeId, { cwd: summary.cwd, ...context });
   }
 
@@ -1582,7 +1595,7 @@ export class SessionHub {
   async setConfig(sessionId: string, optionId: string, value: string): Promise<void> {
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
-    if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} settings can't be changed remotely yet`);
+    if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} 的设置暂时不能远程修改`);
     const live = this.liveFor(sessionId);
     const stopGeneration = live.stopGeneration ?? 0;
     const changing = (live.settingsChange ?? Promise.resolve()).catch(() => {}).then(async () => {
@@ -1609,9 +1622,9 @@ export class SessionHub {
 
   private requireDriver(agent: string): AgentDriver {
     const driver = this.drivers.get(agent);
-    if (!driver) throw RpcError.app("not_found", `unknown agent ${agent}`);
+    if (!driver) throw RpcError.app("not_found", `未知的 Agent：${agent}`);
     const status = driver.status();
-    if (!status.installed) throw RpcError.app("agent_unavailable", `${driver.label} is not installed`);
+    if (!status.installed) throw RpcError.app("agent_unavailable", `电脑上没有安装 ${driver.label}`);
     if (status.problem) throw RpcError.app("agent_unavailable", status.problem);
     return driver;
   }

@@ -55,7 +55,7 @@ export class TunnelSocket implements SocketLike {
             try {
               text = this.channel.open(frame.box);
             } catch {
-              this.fail("the connection was tampered with");
+              this.fail("收到的数据校验失败，连接已断开");
               return;
             }
             this.onmessage?.({ data: text });

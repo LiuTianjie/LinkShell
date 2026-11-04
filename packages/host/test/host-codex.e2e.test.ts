@@ -167,6 +167,24 @@ describe("host + Codex driver (fake app-server)", () => {
     await phone.client.call("sessions.stopTask", { sessionId, taskId: remaining[1]!.id });
   });
 
+  it("stops one running sub-agent on its own and says on its card when it can be stopped", async () => {
+    const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
+    const sessionId = session.id;
+    await phone.client.call("sessions.subscribe", { sessionId, fromSeq: 0 });
+    await phone.client.call("sessions.prompt", { sessionId, clientMessageId: "spawn", content: text("SPAWN a helper") });
+    const spawnDetail = () => phone.of(sessionId).flatMap((e) =>
+      (e.update.sessionUpdate === "tool_call" || e.update.sessionUpdate === "tool_call_update") && e.update.detail?.type === "subagent" && e.update.detail.action === "spawn" ? [e.update.detail] : []);
+    const running = await waitFor(() => spawnDetail().find((detail) => detail.state === "running" && detail.canCancel && detail.nativeSessionId));
+    // Only the session's own sub-agents.
+    await expect(phone.client.call("sessions.cancelSubagent", { sessionId, nativeSessionId: "someone-else" })).rejects.toMatchObject({ appCode: "not_found" });
+    await phone.client.call("sessions.cancelSubagent", { sessionId, nativeSessionId: running.nativeSessionId! });
+    await waitFor(() => spawnDetail().some((detail) => detail.state === "stopped" && detail.canCancel === false));
+    // The parent's turn goes on and ends normally.
+    await waitFor(() => phone.turnsEnded(sessionId).some((e) => e.update.sessionUpdate === "ls_turn" && !e.update.parentToolCallId && e.update.stopReason === "end_turn"));
+    expect(phone.agentText(sessionId)).toContain("echo: SPAWN");
+    await expect(phone.client.call("sessions.cancelSubagent", { sessionId, nativeSessionId: running.nativeSessionId! })).rejects.toMatchObject({ appCode: "busy" });
+  });
+
   it("manages goals through RPC and slash commands and restores state for another client", async () => {
     const { session } = await phone.client.call("sessions.create", { agent: "codex", cwd: home });
     const id = session.id;
@@ -542,7 +560,7 @@ describe("host + Codex driver (fake app-server)", () => {
     await waitFor(() => host.hub.getSession(other.session.id).state === "idle" && host.hub.getSession(other.session.id).lastSeq > 2);
     await tui.peer.request("thread/delete", { threadId: other.session.nativeId });
     await waitFor(() => removed.includes(other.session.id));
-    expect(() => host.hub.getSession(other.session.id)).toThrow(/not found/);
+    expect(() => host.hub.getSession(other.session.id)).toThrow(/找不到会话/);
     tui.close();
   }, 15_000);
 

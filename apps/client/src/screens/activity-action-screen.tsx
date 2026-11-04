@@ -142,7 +142,7 @@ function ActivityTaskList({ initialFilter }: { initialFilter: ActivityFilter }) 
   return <View style={{ flex: 1, backgroundColor: colors.background }}>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
       {filters.map(([value, title]) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: value === filter }} onPress={() => setFilter(value)}
-        style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: value === filter ? colors.accentSoft : colors.card }}>
+        style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: value === filter ? colors.accentSoft : colors.card }}>
         <Text style={{ color: value === filter ? colors.accent : colors.secondaryLabel, fontSize: 14, fontWeight: "600" }}>{title}</Text>
       </Pressable>)}
     </ScrollView>

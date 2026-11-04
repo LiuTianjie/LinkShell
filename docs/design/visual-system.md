@@ -32,7 +32,7 @@
 
 文字色的值在浅色背景和深色背景上对比度都不低于 4.5:1；白字只放在 `accentFill`、`waitingFill`、`danger`（浅色）上，不放在深色模式的文字色上。
 
-中性色按平台：iOS 用系统语义色（`colors.ts` 已经这样做），Android 用 `brand-colors.json` 里同名的字面值，桌面和网页控制台用 `theme.ts` 里各自的中性色。
+中性色按平台：iOS 用系统语义色（`colors.ts` 已经这样做），Android 用 `brand-colors.json` 里同名的字面值，桌面和网页控制台用 `theme.ts` 里各自的中性色。浅色模式下 `secondaryLabel` 和 `tertiaryLabel` 在每一种浅色底上都不低于 4.5:1，`secondaryLabel` 明显深于 `tertiaryLabel`（`apps/web/test/theme.test.ts` 检查）；iOS 的系统色由系统决定。
 
 ### 状态
 

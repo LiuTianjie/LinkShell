@@ -1,5 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { killTreeOnWindows, spawnAgent } from "../../process.js";
+import { trackChild } from "../../children.js";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { RpcError, type AcpMcpServer, type RpcId } from "@linkshell/wire";
@@ -23,6 +24,7 @@ export class AcpMcpBridge {
     const serverId = randomUUID();
     // spawnAgent: npx/npm-installed servers are .cmd shims on Windows, and a hidden console.
     const child = spawnAgent(config.command, config.args, { cwd, env: { ...this.options.env, ...config.env }, detached: process.platform !== "win32", stdio: "pipe" }) as ChildProcessWithoutNullStreams;
+    trackChild(child, "MCP server", config.command, config.args, process.platform !== "win32");
     const server: Server = { child, pending: new Map(), buffer: "", decoder: new StringDecoder("utf8"), stopped: false };
     this.servers.set(serverId, server);
     child.stdout.on("data", (data: Buffer) => {

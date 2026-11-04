@@ -7,8 +7,8 @@ import * as ImagePicker from "expo-image-picker";
 // Sending a file from the phone to the computer: pick it, then write it into
 // a directory there (never over an existing file).
 
-/** What `fs.upload` accepts in one call. */
-export const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
+/** What one upload may be: the file travels base64'd, and through a gateway sealed and base64'd again, so 20 MB stays under the gateway's 48 MB frame and the host's 32 MB. */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export interface Picked {
   uri: string;
@@ -35,7 +35,7 @@ export class UploadTooLarge extends Error {}
 /** Writes `file` into `dir` on the computer; resolves to where it landed. */
 export async function upload(link: HostLink, file: Picked, dir: string): Promise<string> {
   const bytes = await new File(file.uri).arrayBuffer();
-  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new UploadTooLarge(`${file.name} 超过 30 MB`);
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new UploadTooLarge(`${file.name} 超过 20 MB`);
   const data = Buffer.from(bytes).toString("base64");
   const result = await link.call("fs.upload", { dir, name: file.name, data }, 180_000);
   return result.path;

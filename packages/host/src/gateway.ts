@@ -298,7 +298,7 @@ export class GatewayLink {
   /** Opens a pairing window; the returned link goes in the QR code. */
   async startPairing(): Promise<{ link: string; code: string; expiresAt: number; gateway: string }> {
     if (!(await this.relay.waitOnline(8000))) {
-      throw RpcError.app("offline", `can't reach the gateway (${this.options.url})${this.relay.lastError ? `: ${this.relay.lastError.message}` : ""}`);
+      throw RpcError.app("offline", `连不上网关（${this.options.url}）${this.relay.lastError ? `: ${this.relay.lastError.message}` : ""}`);
     }
     const offer = await this.relay.request("pair.offer", {});
     const secret = toBase64(randomBytes(16));
@@ -349,14 +349,14 @@ export class GatewayLink {
       case "hello": {
         const device = this.authorize(from, via);
         if (!device) {
-          this.relay.send(from.id, { k: "refuse", ch: frame.ch, code: "not_paired", message: "this device isn't paired with this computer" });
+          this.relay.send(from.id, { k: "refuse", ch: frame.ch, code: "not_paired", message: "这台设备没有和这台电脑配对" });
           return;
         }
         let answer;
         try {
           answer = answerTunnel(this.identity, device, frame);
         } catch {
-          this.relay.send(from.id, { k: "refuse", ch: frame.ch, code: "bad_hello", message: "handshake failed" });
+          this.relay.send(from.id, { k: "refuse", ch: frame.ch, code: "bad_hello", message: "加密握手失败，请重新配对" });
           return;
         }
         const previous = this.tunnels.get(key);

@@ -168,7 +168,7 @@ html[data-desktop] .desktop-status-meta { font-family: var(--mono); font-size: 1
 html[data-desktop] .desktop-status-spacer { flex: 1; }
 html[data-desktop] .desktop-status-item[data-tone="waiting"] { color: var(--waiting); }
 html[data-desktop] .desktop-status-item[data-tone="running"] { color: var(--running); }
-html[data-desktop] .desktop-status-action { height: 22px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: default; }
+html[data-desktop] .desktop-status-action { height: 22px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; cursor: default; }
 html[data-desktop] .desktop-status-action:hover { background: var(--fill); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-status-bar > .desktop-status-action:last-child { margin-left: 0; }
 /* Status dots are 8 px and solid (visual-system.md); online is the health scale's green. */

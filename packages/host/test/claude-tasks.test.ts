@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BackgroundTask } from "@linkshell/wire";
 import { ClaudeTasks } from "../src/drivers/claude/tasks.js";
+import { canFindTaskProcesses, stdoutWriters, stopTaskGroup } from "../src/drivers/claude/task-process.js";
 import { outputRange } from "../src/task-output.js";
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -64,6 +66,45 @@ describe("Claude shell task records", () => {
     expect(f.tasks.output("session", "../b1", undefined, 64)).toBeUndefined();
     const outside = join(dir, "secret"); writeFileSync(outside, "secret"); rmSync(path); symlinkSync(outside, path);
     expect(f.tasks.output("session", "b1", undefined, 64)).toBeUndefined();
+  });
+  it("offers a stop only for a running shell whose output file is known, and keeps a stop made here", () => {
+    const updates: BackgroundTask[] = [];
+    const tasks = new ClaudeTasks((task) => updates.push(task), true);
+    const launch = (id: string, path?: string) => {
+      tasks.observe(line({ type: "assistant", message: { content: [{ type: "tool_use", id: `c-${id}`, name: "Bash", input: { command: "sleep 60" } }] } }));
+      tasks.observe(line({ type: "user", toolUseResult: { backgroundTaskId: id }, message: { content: [{ type: "tool_result", tool_use_id: `c-${id}`, content: path ? `Output is being written to: ${path}. ok` : "started" }] } }));
+    };
+    launch("b1", "/tmp/claude-501/p/s/tasks/b1.output"); launch("b2");
+    expect(tasks.records.get("b1")?.canStop).toBe(true);
+    expect(tasks.records.get("b2")?.canStop).toBe(false);
+    tasks.stopped("b1");
+    expect(tasks.records.get("b1")).toMatchObject({ state: "stopped", canStop: false });
+    // Claude then reports the killed shell as failed; it was stopped.
+    tasks.observe(line({ content: notification("b1", "failed", "exit code 143") }));
+    expect(tasks.records.get("b1")).toMatchObject({ state: "stopped", canStop: false });
+    expect(tasks.records.get("b1")?.exitCode).toBeUndefined();
+    // Without a way to find the process, nothing offers a stop.
+    const blind = new ClaudeTasks(() => {}, false);
+    blind.observe(line({ type: "assistant", message: { content: [{ type: "tool_use", id: "c", name: "Bash", input: { command: "x" } }] } }));
+    blind.observe(line({ type: "user", toolUseResult: { backgroundTaskId: "b9" }, message: { content: [{ type: "tool_result", tool_use_id: "c", content: "Output is being written to: /tmp/claude-1/p/s/tasks/b9.output. ok" }] } }));
+    expect(blind.records.get("b9")?.canStop).toBe(false);
+  });
+  it.runIf(canFindTaskProcesses)("ends only the process group writing the task file, and only under the given parent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "task-stop-")); dirs.push(dir);
+    const path = join(dir, "b1.output"); writeFileSync(path, "");
+    const out = openSync(path, "a");
+    // Like Claude's background shell: its own group, stdout and stderr on the task file.
+    const shell = spawn("/bin/sh", ["-c", "sleep 30 & wait"], { detached: true, stdio: ["ignore", out, out] });
+    closeSync(out);
+    const exited = new Promise((resolve) => shell.once("exit", resolve));
+    const deadline = Date.now() + 3000;
+    while ((await stdoutWriters(path)).length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+    // Some other process as the parent: nothing is signalled.
+    expect(await stopTaskGroup(path, new Set([1]), { graceMs: 200 })).toBe(false);
+    expect(shell.exitCode).toBeNull();
+    expect(await stopTaskGroup(path, new Set([process.pid]), { graceMs: 2000 })).toBe(true);
+    await exited;
+    expect(await stdoutWriters(path)).toEqual([]);
   });
   it("paginates UTF-8 output backwards without duplication or broken characters", () => {
     const text = "前缀 hello 世界\n"; const bytes = Buffer.from(text);

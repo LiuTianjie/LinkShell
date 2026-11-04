@@ -128,10 +128,10 @@ describe("fs.list", () => {
     expect(readFileSync(first.path, "utf8")).toBe("hello");
     // A name can't climb out of the directory.
     expect((await uploadFile({ dir: root, name: "../escape.txt", data })).path).toBe(join(root, ".._escape.txt"));
-    await expect(uploadFile({ dir: join(root, "missing"), name: "a", data })).rejects.toThrow(/no such directory/);
+    await expect(uploadFile({ dir: join(root, "missing"), name: "a", data })).rejects.toThrow(/找不到文件夹/);
 
     expect(await makeDirectory({ parent: root, name: "assets" })).toEqual({ path: join(root, "assets") });
-    await expect(makeDirectory({ parent: root, name: "assets" })).rejects.toThrow(/already exists/);
-    await expect(makeDirectory({ parent: root, name: ".." })).rejects.toThrow(/invalid name/);
+    await expect(makeDirectory({ parent: root, name: "assets" })).rejects.toThrow(/已经有同名/);
+    await expect(makeDirectory({ parent: root, name: ".." })).rejects.toThrow(/名称无效/);
   });
 });

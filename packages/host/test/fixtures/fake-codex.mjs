@@ -297,6 +297,22 @@ async function runTurn(thread, turn, text) {
     });
     text = `answers ${JSON.stringify(answers)}`;
   }
+  // "SPAWN": a sub-agent thread runs a slow turn of its own while this turn waits for it.
+  if (text.includes("SPAWN")) {
+    const child = newThread(thread.meta.cwd, { parentThreadId: threadId });
+    child.subscribers = new Set(thread.subscribers);
+    broadcast("thread/started", { thread: view(child, false) });
+    const spawn = { type: "collabAgentToolCall", id: randomUUID(), tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: [child.meta.id], prompt: "look around", model: null, reasoningEffort: null, agentsStates: {} };
+    notifyThread(thread, "item/started", { threadId, turnId: turn.id, item: { ...spawn, status: "inProgress" } });
+    const childTurn = { id: randomUUID(), items: [], status: "inProgress", startedAt: nowSeconds(), completedAt: null };
+    child.turns.push(childTurn);
+    child.active = childTurn;
+    notifyThread(child, "turn/started", { threadId: child.meta.id, turn: { id: childTurn.id, items: [], status: "inProgress" } });
+    turn.items.push(spawn);
+    notifyThread(thread, "item/completed", { threadId, turnId: turn.id, item: spawn });
+    for (let i = 0; i < 100 && !childTurn.interrupted && !turn.interrupted; i++) await sleep(20);
+    finishTurn(child, childTurn, childTurn.interrupted ? "interrupted" : "completed");
+  }
   const slow = text.includes("SLOW");
   const prefix = thread.side ? `side[${thread.side.sandbox}/${thread.side.approvalPolicy}/${thread.side.injected.length}/${thread.turns.length}]: ` : "echo: ";
   const chunks = slow ? Array.from({ length: 40 }, (_, i) => `w${i} `) : [prefix, ...text.split(/(\s+)/).filter(Boolean)];
@@ -479,6 +495,16 @@ const handlers = {
     return { queuedSubmission };
   },
   "thread/queue/list": (params) => ({ data: queued(params.threadId), nextCursor: null }),
+  // FAKE_CODEX_NO_REORDER=1: an older Codex without it.
+  ...(process.env.FAKE_CODEX_NO_REORDER === "1" ? {} : {
+    "thread/queue/reorder": (params) => {
+      const entries = queued(params.threadId);
+      const byId = new Map(entries.map((entry) => [entry.id, entry]));
+      if (params.queuedSubmissionIds.length !== entries.length || params.queuedSubmissionIds.some((id) => !byId.has(id))) throw { code: -32602, message: "queue changed" };
+      setQueued(params.threadId, params.queuedSubmissionIds.map((id) => byId.get(id)));
+      return {};
+    },
+  }),
   "thread/backgroundTerminals/list": (params) => {
     const thread = threads.get(params.threadId);
     if (!thread?.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };

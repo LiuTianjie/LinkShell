@@ -74,9 +74,9 @@ async function filesIn(path: string, hidden: boolean, limit: number): Promise<{ 
 
 export async function listDirectory(input: { path?: string; hidden: boolean; files?: boolean }) {
   const path = expand(input.path);
-  if (!existsSync(path) || !(await stat(path)).isDirectory()) throw RpcError.app("not_found", `no such directory: ${path}`);
+  if (!existsSync(path) || !(await stat(path)).isDirectory()) throw RpcError.app("not_found", `找不到文件夹：${path}`);
   const { entries } = await subdirectories(path, input.hidden).catch(() => {
-    throw RpcError.app("not_found", `can't read ${path}`);
+    throw RpcError.app("not_found", `无法读取 ${path}`);
   });
   const parent = dirname(path);
   const base = { path, parent: parent === path ? undefined : parent, home: homedir() };
@@ -171,9 +171,9 @@ export async function readFile(input: { path: string; offset?: number; maxBytes:
   try {
     info = await stat(path);
   } catch {
-    throw RpcError.app("not_found", `no such file: ${path}`);
+    throw RpcError.app("not_found", `找不到文件：${path}`);
   }
-  if (!info.isFile()) throw RpcError.app("invalid_params", `not a file: ${path}`);
+  if (!info.isFile()) throw RpcError.app("invalid_params", `这不是文件：${path}`);
   const extension = path.split(".").pop()?.toLowerCase() ?? "";
   const image = IMAGE_TYPES[extension];
   const base = { path, size: info.size, modifiedAt: info.mtimeMs };
@@ -228,14 +228,14 @@ export async function downloadFile(input: { path: string; offset: number; maxByt
 /** A single path component: no separators, no `.`/`..`, nothing a shell or filesystem would choke on. */
 function safeName(name: string): string {
   const cleaned = name.replace(/[/\\\0]/g, "_").trim();
-  if (!cleaned || cleaned === "." || cleaned === "..") throw RpcError.app("invalid_params", "invalid name");
+  if (!cleaned || cleaned === "." || cleaned === "..") throw RpcError.app("invalid_params", "名称无效");
   return cleaned;
 }
 
 async function existingDirectory(path: string): Promise<string> {
   const dir = resolve(path.replace(/^~(?=$|\/)/, homedir()));
   const info = await stat(dir).catch(() => undefined);
-  if (!info?.isDirectory()) throw RpcError.app("not_found", `no such directory: ${path}`);
+  if (!info?.isDirectory()) throw RpcError.app("not_found", `找不到文件夹：${path}`);
   return dir;
 }
 
@@ -256,7 +256,7 @@ export async function uploadFile(input: { dir: string; name: string; data: strin
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
-  throw RpcError.app("busy", "too many files with this name");
+  throw RpcError.app("busy", "同名文件太多了，请换个名字");
 }
 
 export async function makeDirectory(input: { parent: string; name: string }) {
@@ -265,7 +265,7 @@ export async function makeDirectory(input: { parent: string; name: string }) {
   try {
     await mkdir(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw RpcError.app("invalid_params", "a file or folder with this name already exists");
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw RpcError.app("invalid_params", "已经有同名的文件或文件夹");
     throw error;
   }
   return { path };

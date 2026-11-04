@@ -208,7 +208,7 @@ export function openTunnel(device: Identity, machine: PublicIdentity, channel: s
     /** Checks the machine's answer and returns the channel, or throws. */
     accept(welcome: Extract<TunnelFrame, { k: "welcome" }>): SecureChannel {
       if (!verifySignature(machine.signKey, helloMessage("welcome", channel, machine.id, device.id, welcome.eph), welcome.sig)) {
-        throw new Error("the computer's key doesn't match: refusing to connect");
+        throw new Error("电脑的密钥对不上，已拒绝连接：请重新配对");
       }
       return new SecureChannel(
         channelKeys({ initiator: true, local: device, localEphemeral: eph.secret, remoteBoxKey: machine.boxKey, remoteEphemeral: welcome.eph }),
@@ -220,7 +220,7 @@ export function openTunnel(device: Identity, machine: PublicIdentity, channel: s
 /** Machine side: answer a device's hello. Throws when the signature is wrong. */
 export function answerTunnel(machine: Identity, device: PublicIdentity, hello: Extract<TunnelFrame, { k: "hello" }>) {
   if (!verifySignature(device.signKey, helloMessage("hello", hello.ch, device.id, machine.id, hello.eph), hello.sig)) {
-    throw new Error("bad hello signature");
+    throw new Error("设备的握手签名无效");
   }
   const eph = ephemeralKey();
   const welcome: TunnelFrame = {

@@ -2795,7 +2795,7 @@ export class AntigravityDriver extends AcpDriver {
       .join("\n")
       .trim();
     const imageBlocks = content.filter((block): block is Extract<ContentBlock, { type: "image" }> => block.type === "image");
-    if (!text && imageBlocks.length === 0) throw RpcError.app("invalid_params", "nothing to send");
+    if (!text && imageBlocks.length === 0) throw RpcError.app("invalid_params", "没有可发送的内容");
 
     let watcher = this.desktopWatchers.get(nativeId);
     if (!watcher) {

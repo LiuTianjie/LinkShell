@@ -180,12 +180,12 @@ export class ProxyStreams {
 
   /** Opens a stream to `port`. `channel` is its number on the direct channel when it goes there. */
   async open(port: number, wantDirect = false): Promise<{ streamId: string; channel?: number }> {
-    if (this.streams.size >= MAX_STREAMS) throw RpcError.app("busy", "too many open preview connections");
+    if (this.streams.size >= MAX_STREAMS) throw RpcError.app("busy", "打开的预览连接太多了，请先关掉一些");
     let socket: Socket;
     try {
       socket = await connectLoopback(port);
     } catch (error) {
-      throw RpcError.app("not_found", `nothing is listening on port ${port}`, { cause: String(error) });
+      throw RpcError.app("not_found", `端口 ${port} 上没有服务在监听`, { cause: String(error) });
     }
     const streamId = randomUUID();
     this.streams.set(streamId, socket);
@@ -232,7 +232,7 @@ export class ProxyStreams {
 
   write(streamId: string, data: string): void {
     const socket = this.streams.get(streamId);
-    if (!socket) throw RpcError.app("not_found", "this preview connection has closed");
+    if (!socket) throw RpcError.app("not_found", "这个预览连接已关闭");
     socket.write(Buffer.from(data, "base64"));
   }
 

@@ -392,6 +392,12 @@ describe("a Codex thread held by a Codex that can't be joined (the desktop app)"
       { clientMessageId: "d0", text: "never mind", images: 0 },
       { clientMessageId: "d1", text: "from the phone", images: 0 },
     ]);
+    // Reordered in Codex's own queue, which is the order that Codex starts them in.
+    await phone.client.call("sessions.reorderQueue", { sessionId: id, clientMessageIds: ["d1", "d0"] });
+    expect(host.hub.getSession(id).queue?.map((entry) => entry.clientMessageId)).toEqual(["d1", "d0"]);
+    await waitFor(() => desk.queue().map((entry) => entry.clientUserMessageId).join() === "d1,d0");
+    await phone.client.call("sessions.reorderQueue", { sessionId: id, clientMessageIds: ["d0", "d1"] });
+    await waitFor(() => desk.queue().map((entry) => entry.clientUserMessageId).join() === "d0,d1");
     // Taken back before it started.
     expect(await phone.client.call("sessions.unqueue", { sessionId: id, clientMessageId: "d0" })).toEqual({ removed: true });
     await waitFor(() => desk.queue().length === 1);

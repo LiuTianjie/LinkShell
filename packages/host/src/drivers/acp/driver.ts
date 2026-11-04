@@ -80,14 +80,9 @@ export interface AcpAgentSpec {
   discover?: boolean;
 }
 
-/** `items` with the ones named in `ids` first, in that order; the rest keep theirs. */
-export function inOrder<T extends { clientMessageId: string }>(items: T[], ids: string[]): T[] {
-  const rank = new Map(ids.map((id, index) => [id, index]));
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => (rank.get(a.item.clientMessageId) ?? ids.length) - (rank.get(b.item.clientMessageId) ?? ids.length) || a.index - b.index)
-    .map((entry) => entry.item);
-}
+// Kept here too: the Claude driver and tests import it from this module.
+export { inOrder } from "../queue.js";
+import { inOrder } from "../queue.js";
 
 interface PendingPrompt {
   content: ContentBlock[];
@@ -641,13 +636,13 @@ export class AcpDriver implements AgentDriver {
 
   async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued"> {
     const state = this.sessions.get(nativeId);
-    if (!state?.loaded) throw RpcError.app("not_ready", "session is not open");
+    if (!state?.loaded) throw RpcError.app("not_ready", "会话还没有打开");
     if (state.reportedState === "unknown") throw RpcError.app("not_ready", "Agent 尚未确认当前执行状态，请刷新会话或停止后重试");
     for (const block of content) {
       if (block.type === "image" && !this.capabilities.images || block.type === "audio" && !this.capabilities.audio || block.type === "resource" && !this.capabilities.embeddedContext) throw RpcError.app("not_supported", `${this.label} 未声明支持这种附件`);
     }
     const prompt = toAcpPrompt(content);
-    if (prompt.length === 0) throw RpcError.app("invalid_params", "nothing to send");
+    if (prompt.length === 0) throw RpcError.app("invalid_params", "没有可发送的内容");
     if (state.turnActive) {
       if (this.acpBehavior.busyInput === "concurrent-prompt") {
         this.echoUserMessage(nativeId, content, clientMessageId);
@@ -697,7 +692,7 @@ export class AcpDriver implements AgentDriver {
       return;
     }
     const pending = owner?.state.permissions.get(requestId);
-    if (!pending) throw RpcError.app("not_found", "this permission request is no longer pending");
+    if (!pending) throw RpcError.app("not_found", "这个请求已经处理过或已失效");
     owner!.state.permissions.delete(requestId);
     pending.resolve({ outcome: { outcome: "selected", optionId } });
     this.publish(owner!.id, { sessionUpdate: "ls_permission_resolved", requestId, optionId });
@@ -706,8 +701,8 @@ export class AcpDriver implements AgentDriver {
   async setConfig(nativeId: string, optionId: string, value: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     const option = state?.config.find((entry) => entry.id === optionId);
-    if (!state || !option) throw RpcError.app("not_found", `unknown setting ${optionId}`);
-    if (!option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `unknown value ${value}`);
+    if (!state || !option) throw RpcError.app("not_found", `未知设置项：${optionId}`);
+    if (!option.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `未知取值：${value}`);
     // Modes and legacy model lists predate configOptions and have their own methods.
     if (option.source === "modes") {
       const revision = state.modeRevision;
@@ -822,7 +817,7 @@ export class AcpDriver implements AgentDriver {
       this.current = {
         installed: true,
         version: this.current.version,
-        problem: `${this.label} failed to start: ${error instanceof Error ? error.message : String(error)}`,
+        problem: `${this.label} 启动失败：${error instanceof Error ? error.message : String(error)}`,
       };
       if (!(error instanceof AcpProtocolError)) this.scheduleRestart();
     }
@@ -882,7 +877,7 @@ export class AcpDriver implements AgentDriver {
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "offline" });
       this.host?.detached(this.id, nativeId);
     }
-    this.current = { installed: true, version: this.current.version, problem: `${this.label} restarting` };
+    this.current = { installed: true, version: this.current.version, problem: `${this.label} 正在重启` };
     this.scheduleRestart();
   }
 
@@ -1317,7 +1312,7 @@ export class AcpDriver implements AgentDriver {
   protected async rpc<T = unknown>(method: string, params: unknown, timeoutMs?: number): Promise<T> {
     if (!this.stopped && this.current.installed) await this.ensureStarted();
     if (!this.connection?.alive) {
-      throw RpcError.app("agent_unavailable", this.current.problem ?? `${this.label} is not running`);
+      throw RpcError.app("agent_unavailable", this.current.problem ?? `${this.label} 没有在运行`);
     }
     const connection = this.connection;
     const opensSession = ["session/new", "session/load", "session/resume", "session/fork"].includes(method);

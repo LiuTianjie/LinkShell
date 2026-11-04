@@ -301,7 +301,7 @@
     width: 64px;
     height: 64px;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     background: var(--plain);
   }
 .screen-start h3 {
@@ -404,7 +404,7 @@
     flex: 1;
     min-height: 480px;
     border: 1px solid var(--separator);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     overflow: hidden;
   }
 .screen-detail-page > .screen-page.screen-focused,

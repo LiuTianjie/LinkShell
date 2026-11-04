@@ -5,6 +5,9 @@ import { nestUnder } from "../nesting.js";
 import { transcriptLine, TranscriptTail, type TranscriptLineResult } from "./transcript.js";
 import { ClaudeChildIndex, ownedFile, readClaudeTeam, type ClaudeChild } from "./children.js";
 
+/** How long a worker of a finished run may stay silent before it counts as stopped. */
+const STOPPED_QUIET_MS = 2 * 60_000;
+
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json | undefined => value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined;
 const string = (value: unknown) => typeof value === "string" ? value : undefined;
@@ -345,6 +348,17 @@ export class ClaudeActivity {
         });
         child.tail.poll();
         revision = child.revision;
+      }
+      // A stopped run can leave workers that never report an end (their process went with the
+      // run, or Claude wrote no final file). Once the run is over and a worker's transcript has
+      // been quiet for a while, it is stopped: otherwise it shows as running for ever.
+      if (terminal && active(worker.state)) {
+        const touched = childPath && ownedFile(sessionDir, childPath) ? statSync(childPath).mtimeMs : 0;
+        const since = Math.max(run.endedAt ?? 0, touched);
+        if (since > 0 && Date.now() - since > STOPPED_QUIET_MS) {
+          worker.state = "stopped";
+          worker.endedAt ??= since;
+        }
       }
       if (runDir && !worker.model) {
         const metaPath = join(runDir, `agent-${worker.agentId}.meta.json`);

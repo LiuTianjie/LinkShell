@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { killTreeOnWindows, spawnAgent } from "../../process.js";
+import { trackChild } from "../../children.js";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -91,6 +92,7 @@ export class AcpClientServices {
       }
       if (p.outputByteLimit != null && (!Number.isSafeInteger(p.outputByteLimit) || Number(p.outputByteLimit) < 0)) throw invalid("终端输出上限必须是非负整数");
       const child = spawnAgent(p.command, (p.args ?? []) as string[], { cwd, env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+      trackChild(child, "agent command", p.command, (p.args ?? []) as string[], process.platform !== "win32");
       const terminalId = randomUUID();
       let finish!: (status: AcpTerminalSnapshot["exitStatus"]) => void;
       const terminal: Terminal = { sessionId: String(p.sessionId), child, output: "", truncated: false,

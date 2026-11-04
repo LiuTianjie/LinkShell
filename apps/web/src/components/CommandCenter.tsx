@@ -51,7 +51,7 @@ const places = [
   { id: "terminals", title: "终端", icon: Terminal },
   { id: "files", title: "文件", icon: File },
   { id: "ports", title: "端口预览", icon: Globe },
-  { id: "worktrees", title: "Worktree", icon: GitBranch },
+  { id: "worktrees", title: "工作树", icon: GitBranch },
   { id: "computers", title: "电脑与 Agent", icon: Laptop },
   { id: "archive", title: "已归档会话", icon: Archive },
 ];

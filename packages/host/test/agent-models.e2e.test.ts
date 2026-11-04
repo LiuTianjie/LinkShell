@@ -103,7 +103,7 @@ describe("agents.models", () => {
     expect(selected.current).toBe("gpt-mini");
     expect(selected.config?.find((option) => option.id === "effort")?.values.map((option) => option.value)).toEqual(["low", "medium"]);
     expect(selected.config?.find((option) => option.id === "permissions")?.values.some((option) => option.value === "read-only")).toBe(true);
-    await expect(client.call("agents.models", { agent: "nobody" })).rejects.toThrow("unknown agent nobody");
+    await expect(client.call("agents.models", { agent: "nobody" })).rejects.toThrow("未知的 Agent：nobody");
 
     // The model picked goes to thread/start; none picked leaves Codex to choose, as before.
     const { session } = await client.call("sessions.create", { agent: "codex", cwd: "/projects/app", model: "gpt-big" });

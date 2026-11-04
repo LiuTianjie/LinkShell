@@ -95,6 +95,6 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")("
     const { port, child } = await devServer(dir);
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
-    await expect(client.call("proxy.open", { port })).rejects.toThrow(/nothing is listening/);
+    await expect(client.call("proxy.open", { port })).rejects.toThrow(/没有服务在监听/);
   });
 });
