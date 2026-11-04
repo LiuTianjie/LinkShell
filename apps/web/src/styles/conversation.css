@@ -1493,6 +1493,8 @@
     gap: 2px;
     min-width: 0;
   }
+  .composer-controls, .composer-tools, .composer-options { display: flex; align-items: center; gap: 2px; min-width: 0; }
+  .composer-tools { flex: none; }
   .composer-agent {
     max-width: 210px;
     overflow: hidden;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, SessionSummary } from "@linkshell/wire";
-import { ArrowUp, Check, ChevronDown, Cpu, FolderOpen, GitBranch, LoaderCircle } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import { Modal } from "./common";
 import { AgentMark, ErrorNotice, useActions, useClient, useConnection, useJob, useLoad } from "./common";
 import { AgentInteractions } from "./Acp";
 import { configToCreate, creationOptions, modelName, modelToCreate, useAgentModels } from "./agent-models";
+import { SessionConfigIcon } from "./ComposerControls";
 import { NewSessionConfig } from "./NewSessionConfig";
 import { Files } from "./Files";
 import { useStore } from "zustand";
@@ -116,116 +117,117 @@ export function NewSessionPage({
             }}
           />
           <div className="new-session-bar">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} aria-label="选择 Agent">
-                  {selected && <AgentMark agent={selected.id} />}
-                  <span>{selected?.label ?? "选择 Agent"}</span>
-                  <ChevronDown className="new-session-caret" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
-                <DropdownMenuLabel>Agent</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={agent} onValueChange={setAgent}>
-                  {(machine?.agents ?? []).map((entry) => (
-                    <DropdownMenuRadioItem key={entry.id} value={entry.id} disabled={!usableAgent(entry)}>
-                      <AgentMark agent={entry.id} />
-                      <span className="new-session-option">
-                        <span>{entry.label}</span>
-                        {!usableAgent(entry) && (
-                          <small>
-                            {!entry.installed ? "未安装" : entry.auth?.state === "missing" ? "未登录" : entry.tier === "terminal" ? "请从终端打开" : entry.problem}
-                          </small>
-                        )}
-                      </span>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {online && usable && !models && (
-              <span className="new-session-pill new-session-pill-static" role="status"><LoaderCircle className="animate-spin" /><span>正在读取模型与设置…</span></span>
-            )}
-            {models && !models.models.length && !models.error && (
-              <Button type="button" variant="ghost" size="sm" className="new-session-pill" aria-label="重新读取默认模型" title="Agent 尚未提供可预选的模型；点击重新读取" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>
-                <Cpu />
-                <span>默认模型</span>
-              </Button>
-            )}
-            {!!models?.models.length && (
+            <div className="new-session-controls">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} title={shownModel ? `模型：${shownModel.name}` : "模型"} aria-label="选择模型">
-                    <Cpu />
-                    <span>{shownModel ? modelName(shownModel) : "默认模型"}</span>
-                    <ChevronDown className="new-session-caret" />
+                  <Button type="button" variant="toolbar" size="sm" className="new-session-pill" disabled={job.busy} aria-label="选择 Agent">
+                    {selected && <AgentMark agent={selected.id} />}
+                    <span>{selected?.label ?? "选择 Agent"}</span>
+                    <ChevronDown data-icon="inline-end" className="new-session-caret" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
-                  <DropdownMenuLabel>模型</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ store, agent, model: value })}>
-                    {models.models.map((entry) => {
-                      const name = modelName(entry);
-                      // Claude's own default already reads 默认（推荐）.
-                      const note = [entry.value === models.current && !name.startsWith("默认") ? "默认" : undefined, entry.description].filter(Boolean).join(" · ");
-                      return (
-                        <DropdownMenuRadioItem key={entry.value} value={entry.value}>
-                          <span className="new-session-option">
-                            <span>{name}</span>
-                            {note && <small>{note}</small>}
-                          </span>
-                        </DropdownMenuRadioItem>
-                      );
-                    })}
+                  <DropdownMenuLabel>Agent</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={agent} onValueChange={setAgent}>
+                    {(machine?.agents ?? []).map((entry) => (
+                      <DropdownMenuRadioItem key={entry.id} value={entry.id} disabled={!usableAgent(entry)}>
+                        <AgentMark agent={entry.id} />
+                        <span className="new-session-option">
+                          <span>{entry.label}</span>
+                          {!usableAgent(entry) && (
+                            <small>
+                              {!entry.installed ? "未安装" : entry.auth?.state === "missing" ? "未登录" : entry.tier === "terminal" ? "请从终端打开" : entry.problem}
+                            </small>
+                          )}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
                   </DropdownMenuRadioGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
-            )}
-            <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } })} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">
-                  <FolderOpen />
-                  <span>{place}</span>
-                  <ChevronDown className="new-session-caret" />
+              {online && usable && !models && (
+                <span className="new-session-pill new-session-pill-static" role="status"><LoaderCircle className="animate-spin" /><span>正在读取模型与设置…</span></span>
+              )}
+              {models && !models.models.length && !models.error && (
+                <Button type="button" variant="toolbar" size="sm" className="new-session-pill" aria-label="重新读取默认模型" title="Agent 尚未提供可预选的模型；点击重新读取" disabled={job.busy} onClick={() => setModelsRevision((value) => value + 1)}>
+                  <SessionConfigIcon category="model" />
+                  <span>默认模型</span>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
-                <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
-                {projects.slice(0, 8).map((entry) => (
-                  <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>
-                    <span className="new-session-option">
-                      <span>{entry.name}</span>
-                      <small>{entry.cwd}</small>
-                    </span>
-                    {entry.cwd === cwd && <Check className="ml-auto" />}
+              )}
+              {!!models?.models.length && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="toolbar" size="sm" className="new-session-pill" disabled={job.busy} title={shownModel ? `模型：${shownModel.name}` : "模型"} aria-label="选择模型">
+                      <SessionConfigIcon category="model" />
+                      <span>{shownModel ? modelName(shownModel) : "默认模型"}</span>
+                      <ChevronDown data-icon="inline-end" className="new-session-caret" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
+                    <DropdownMenuLabel>模型</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ store, agent, model: value })}>
+                      {models.models.map((entry) => {
+                        const name = modelName(entry);
+                        // Claude's own default already reads 默认（推荐）.
+                        const note = [entry.value === models.current && !name.startsWith("默认") ? "默认" : undefined, entry.description].filter(Boolean).join(" · ");
+                        return (
+                          <DropdownMenuRadioItem key={entry.value} value={entry.value}>
+                            <span className="new-session-option">
+                              <span>{name}</span>
+                              {note && <small>{note}</small>}
+                            </span>
+                          </DropdownMenuRadioItem>
+                        );
+                      })}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } })} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="toolbar" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">
+                    <FolderOpen data-icon="inline-start" />
+                    <span>{place}</span>
+                    <ChevronDown data-icon="inline-end" className="new-session-caret" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
+                  <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
+                  {projects.slice(0, 8).map((entry) => (
+                    <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>
+                      <span className="new-session-option">
+                        <span>{entry.name}</span>
+                        <small>{entry.cwd}</small>
+                      </span>
+                      {entry.cwd === cwd && <Check className="ml-auto" />}
+                    </DropdownMenuItem>
+                  ))}
+                  {!projects.length && <p className="new-session-menu-empty">还没有项目</p>}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem disabled={!online} onSelect={() => setBrowse(true)}>
+                    <FolderOpen data-icon="inline-start" />浏览电脑上的目录…
                   </DropdownMenuItem>
-                ))}
-                {!projects.length && <p className="new-session-menu-empty">还没有项目</p>}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem disabled={!online} onSelect={() => setBrowse(true)}>
-                  <FolderOpen />浏览电脑上的目录…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {git.value && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="new-session-pill"
-                data-active={worktree || undefined}
-                aria-pressed={worktree}
-                aria-label={worktree ? "独立 worktree" : "当前分支"}
-                disabled={job.busy}
-                title="基于当前 Git 仓库创建独立工作目录"
-                onClick={() => setWorktree((value) => !value)}
-              >
-                <GitBranch />
-                <span>{worktree ? "独立 worktree" : "当前分支"}</span>
-              </Button>
-            )}
-            <span className="new-session-spacer" />
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {git.value && (
+                <Button
+                  type="button"
+                  variant="toolbar"
+                  size="sm"
+                  className="new-session-pill"
+                  data-active={worktree || undefined}
+                  aria-pressed={worktree}
+                  aria-label={worktree ? "独立 worktree" : "当前分支"}
+                  disabled={job.busy}
+                  title="基于当前 Git 仓库创建独立工作目录"
+                  onClick={() => setWorktree((value) => !value)}
+                >
+                  <GitBranch data-icon="inline-start" />
+                  <span>{worktree ? "独立 worktree" : "当前分支"}</span>
+                </Button>
+              )}
+            </div>
             <Button type="submit" size="icon" className="send-button" disabled={!ready} aria-label="开始会话" title="开始 · Enter（Shift Enter 换行）">
               {job.busy ? <LoaderCircle className="animate-spin" /> : <ArrowUp />}
             </Button>

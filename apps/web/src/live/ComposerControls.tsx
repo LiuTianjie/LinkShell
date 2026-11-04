@@ -1,10 +1,11 @@
 import { displayModelName, type SessionConfigOption, type SessionSummary } from "@linkshell/wire";
-import { Brain, ChevronDown, Cpu, FolderGit2, Settings2, ShieldCheck } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronDown, Folder, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Icon } from "../icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -14,11 +15,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useActions, useJob } from "./common";
 
-const ICONS: Partial<Record<SessionConfigOption["category"], ReactNode>> = {
-  mode: <ShieldCheck />,
-  model: <Cpu />,
-  effort: <Brain />,
-};
+/** Keep settings recognisable in both the new-session form and an existing conversation. */
+export function SessionConfigIcon({ category, value = "" }: { category: SessionConfigOption["category"]; value?: string }) {
+  const name = category === "model" ? "model"
+    : category === "effort" ? "effort"
+    : /plan/i.test(value) ? "plan"
+    : /bypass|full|yolo|never/i.test(value) ? "unlocked" : "shield";
+  return <Icon name={name} data-icon="inline-start" />;
+}
+
+export function sessionConfigLabel(option: SessionConfigOption): string {
+  if (option.category === "model") return "模型";
+  if (option.category === "effort") return "推理强度";
+  if (option.id === "plan") return "计划模式";
+  return option.category === "mode" ? "权限模式" : option.name;
+}
 
 /**
  * The settings people change mid-conversation, on the composer itself: mode, model and effort,
@@ -68,33 +79,35 @@ export function ComposerConfig({
 }) {
   const actions = useActions();
   const job = useJob();
-  const shown = (["mode", "model", "effort"] as const)
+  const shown = (["model", "effort", "mode"] as const)
     .map((category) => config.find((option) => option.category === category && option.type !== "boolean" && option.values.length > 1))
     .filter((option): option is SessionConfigOption => !!option);
   return (
     <>
       {shown.map((option) => {
         const current = option.values.find((value) => value.value === option.current);
+        const label = sessionConfigLabel(option);
         return (
           <DropdownMenu key={option.id}>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="ghost"
-                size="plain"
+                variant="toolbar"
+                size="sm"
                 className="composer-chip"
                 data-category={option.category}
                 // Running without asking is worth seeing at a glance.
                 data-risky={option.category === "mode" && /bypass|full|yolo|never/i.test(option.current) ? "" : undefined}
                 disabled={disabled || job.busy}
-                title={`${option.name}：${current?.name ?? option.current}`}
+                aria-label={`${label}：${valueName(current?.name ?? option.current)}`}
+                title={`${label}：${valueName(current?.name ?? option.current)}`}
               >
-                {ICONS[option.category]}
+                <SessionConfigIcon category={option.category} value={option.current} />
                 <span>{valueName(current?.name ?? option.current)}</span>
-                <ChevronDown className="composer-chip-caret" />
+                <ChevronDown data-icon="inline-end" className="composer-chip-caret" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="composer-chip-menu" side="top" align="start" sideOffset={8}>
-              <DropdownMenuLabel>{option.name}</DropdownMenuLabel>
+              <DropdownMenuLabel>{label}</DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={option.current}
                 onValueChange={(value) => void job.run(() => actions.setConfig(session.id, option.id, value))}
@@ -109,16 +122,18 @@ export function ComposerConfig({
                 ))}
               </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={openSettings}>
-                <Settings2 />全部会话设置
-              </DropdownMenuItem>
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={openSettings}>
+                  <Settings2 data-icon="inline-start" />全部会话设置
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         );
       })}
       {!shown.length && (
-        <Button variant="ghost" size="plain" className="composer-chip" title="模型与权限" onClick={openSettings}>
-          <Settings2 />
+        <Button variant="toolbar" size="sm" className="composer-chip" title="模型与权限" onClick={openSettings}>
+          <Settings2 data-icon="inline-start" />
           <span>{session.model ?? "模型与权限"}</span>
         </Button>
       )}
@@ -132,7 +147,7 @@ export function ComposerPlace({ session }: { session: SessionSummary }) {
   const name = project.split(/[\\/]/).filter(Boolean).pop() ?? project;
   return (
     <span className="composer-place" title={session.cwd}>
-      <FolderGit2 />
+      <Folder aria-hidden />
       <span>{name}</span>
       {session.worktree && <span className="composer-place-branch">{session.worktree.branch}</span>}
     </span>

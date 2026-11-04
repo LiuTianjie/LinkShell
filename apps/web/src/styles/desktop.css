@@ -6,7 +6,7 @@
    - Hairlines are translucent ink (8 % of the text), half a pixel on Retina displays. Nothing
      at rest casts a shadow; menus, dialogs and the floating composer do, softly.
    - Colour is state: blue while an agent works, amber when it waits on you, red when it failed.
-     The one filled control on a screen is ink.
+     Primary actions use restrained indigo; navigation and utility icons stay neutral.
    - One face (the system font): 14 px reading text, 13 px controls at weight 510, 12 px meta.
      Paths, branches, ports and versions are monospace; nothing else is.
    - Motion follows Codex's curves: 150 ms ease-out for hover and press, a damped spring for
@@ -17,8 +17,14 @@
 html[data-desktop] {
   --radius-panel: 12px;
   --radius-well: 10px;
-  --radius-row: 10px;
-  --radius-control: 10px;
+  --radius-row: 8px;
+  --radius-control: 8px;
+  --radius-composer: 18px;
+  --icon-stroke: 1.75;
+  --icon-size: 16px;
+  --icon-small: 14px;
+  --icon-navigation: 18px;
+  --icon-caret: 12px;
   --gutter: 8px;
   --hairline: 1px;
   --toolbar: 46px;
@@ -28,12 +34,12 @@ html[data-desktop] {
   --ease-spring: linear(0, .086, .2539, .428, .5786, .698, .7879, .8534, .8998, .9323, .9546, .9697, .98, .9868, .9913, .9943, .9963, .9976, .9985, 1);
   --transition: 150ms var(--ease-out);
   --float-shadow: 0 0 0 .5px var(--separatorStrong), 0 4px 8px -2px rgb(0 0 0 / .1), 0 8px 16px -4px rgb(0 0 0 / .12);
-  --composer-shadow: 0 0 0 1px rgb(0 0 0 / .04), 0 2px 8px rgb(0 0 0 / .04), 0 4px 80px 8px rgb(0 0 0 / .024);
+  --composer-shadow: 0 0 0 1px var(--separatorStrong), 0 4px 16px -6px color-mix(in srgb, var(--label) 12%, transparent);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-synthesis-weight: none;
 }
-html[data-desktop][data-theme="dark"] { --composer-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 4px 24px rgb(0 0 0 / .32); }
+html[data-desktop][data-theme="dark"] { --composer-shadow: 0 0 0 1px var(--separatorStrong), 0 6px 20px -6px rgb(0 0 0 / .32); }
 @media (min-resolution: 2dppx) { html[data-desktop] { --hairline: .5px; } }
 /* The window's frames cut off what overflows them with `clip`, not `hidden`: a hidden box can
    still be scrolled by a scrollIntoView or a focus deep inside it, which shifts the toolbar and
@@ -68,9 +74,9 @@ html[data-desktop] * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb
   html[data-desktop] *:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--secondaryLabel) 26%, transparent); }
   html[data-desktop] *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--secondaryLabel) 42%, transparent); }
 }
-/* One stroke for every icon, as one drawn set: lucide's default 2 px reads heavier than the 1.65 the
-   sidebar and toolbars use. Icons given a weight of their own (a bold check) keep it. */
-html[data-desktop] svg.lucide[stroke-width="2"] { stroke-width: 1.65; }
+/* One outline family, including portal menus. A tiny completed check retains its heavier mark. */
+html[data-desktop] svg.lucide { flex-shrink: 0; stroke-linecap: round; stroke-linejoin: round; }
+html[data-desktop] svg.lucide:not([stroke-width="3"]) { stroke-width: var(--icon-stroke); }
 html[data-desktop] :focus-visible { outline: 2px solid var(--focus, var(--link)); outline-offset: 1px; }
 
 /* ── Frame ──────────────────────────────────────────────────────────────────
@@ -126,7 +132,7 @@ html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -w
 html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; display: flex; align-items: center; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop] .desktop-floating-titlebar > button { -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; padding-left: 16px; }
-html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStrong); }
 /* Page title rows can drag the window too, where they have room to spare. */
@@ -173,7 +179,7 @@ html[data-desktop] .desktop-presence { display: inline-block; flex: none; width:
 html[data-desktop] .desktop-presence[data-online] { background: var(--success); }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
-/* Rows are 30 px with a 10 px corner, an icon column at x 18 and the text column at x 44. */
+/* Navigation rows keep a 40 px target and align their icons with the project tree. */
 html[data-desktop] .desktop-sidebar-header { flex: none; gap: 2px; padding: 4px 8px 6px; }
 html[data-desktop] .desktop-root:not([data-shell="electron"]) .desktop-sidebar-header { padding-top: 10px; }
 html[data-desktop] .desktop-computer-picker { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 40px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); text-align: left; font: inherit; cursor: default; transition: background var(--transition); }
@@ -194,9 +200,9 @@ html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow
 html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 11px; }
 html[data-desktop] .desktop-menu-empty { min-width: 0; max-width: 230px; padding: 10px; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-sidebar-actions { display: flex; gap: 4px; }
-html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-new-session > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-new-session > svg { flex: none; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-new-session > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-new-session kbd { flex: none; margin-left: auto; opacity: 0; transition: opacity var(--transition); }
 html[data-desktop] .desktop-new-session:hover kbd,
 html[data-desktop] .desktop-new-session:focus-visible kbd { opacity: 1; }
@@ -214,8 +220,8 @@ html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(-
 @keyframes navigation-scrolled { to { --navigation-fade: 16px; } }
 html[data-desktop] .desktop-navigation { gap: 0; min-width: 0; padding: 0 8px 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); animation: navigation-scrolled linear both; animation-timeline: scroll(self); animation-range: 0 24px; }
 html[data-desktop] .desktop-places { display: grid; gap: 1px; }
-html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
-html[data-desktop] .desktop-place > svg { flex: none; color: var(--secondaryLabel); }
+html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 430; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-place > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-place:hover { background: var(--fill); }
 html[data-desktop] .desktop-place:active { background: var(--fillStrong); }
@@ -301,12 +307,11 @@ html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electron"]) .desktop-sidebar { display: none; }
 
 /* ── Controls ────────────────────────────────────────────────────────────── */
-/* The one primary per screen: ink. Everything else is quiet until hovered. */
+/* Primary actions, utility controls and navigation have distinct, shared states. */
 html[data-desktop] [data-button] { font-weight: 500; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
-/* Codex's variants: primary is ink (hover: ink at 80 %); secondary a 5 % tint of ink (10 % on
-   hover); outline a hairline; ghost nothing until hovered. */
+/* Primary actions share the indigo accent; secondary and ghost actions use neutral surfaces. */
 html[data-desktop] [data-button][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accent); box-shadow: none; color: var(--primaryForeground); }
-html[data-desktop] [data-button][data-variant="default"]:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 80%, transparent); }
+html[data-desktop] [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--accentHover); }
 html[data-desktop] [data-button][data-variant="default"]:active:not(:disabled) { opacity: .8; }
 html[data-desktop] [data-button][data-variant="default"]:disabled { background: var(--accent); color: var(--primaryForeground); opacity: .4; }
 html[data-desktop] [data-button][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
@@ -324,22 +329,37 @@ html[data-desktop] [data-button][data-variant="ghost"]:hover:not(:disabled),
 html[data-desktop] [data-button][data-variant="ghost"][data-state="open"] { background: var(--fill); }
 html[data-desktop] [data-button][data-variant="ghost"]:active:not(:disabled) { background: var(--fillStrong); }
 html[data-desktop] [data-button][data-variant="destructive"] { border-radius: var(--radius-control); box-shadow: none; }
+/* A single focus outline replaces the primitive's border and inset ring. */
+html[data-desktop] [data-button][data-variant]:focus-visible { border-color: transparent; box-shadow: none; outline: 2px solid var(--focus); outline-offset: 2px; }
 html[data-desktop] [data-button]:disabled { cursor: default; }
 /* Disabled controls fade, as Codex's (40 %), instead of turning grey. */
 html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4; }
 /* Interactive things keep the arrow, as in a native app. */
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, a.desktop-place, .list-row, [cmdk-item]) { cursor: default; }
-/* Sizes, Codex's: every button is 28 px with a 10 px corner (toolbars, rows, cards, empty
-   states); `lg` (32 px) is for the one action that ends a form; dialogs have their own pills. */
+/* Text controls are 28 px; icon targets and form actions are 32 px. Toolbar labels can wrap. */
 html[data-desktop] .desktop-main [data-button]:is([data-size="default"], [data-size="sm"]):not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
 html[data-desktop] .desktop-main [data-button][data-size="lg"] { height: 32px; padding-inline: 12px; gap: 6px; font-size: 13px; }
 html[data-desktop] .desktop-main [data-button][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
-html[data-desktop] .desktop-main [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-control); }
-html[data-desktop] .desktop-main [data-button] svg:not([class*="size-"]) { width: 16px; height: 16px; }
-html[data-desktop] .desktop-main [data-button][data-size="sm"] svg:not([class*="size-"]),
-html[data-desktop] .desktop-main [data-button][data-size="xs"] svg:not([class*="size-"]) { width: 14px; height: 14px; }
+html[data-desktop] .desktop-main [data-button][data-size="icon"] { width: 32px; height: 32px; border-radius: var(--radius-control); }
+html[data-desktop] .desktop-main [data-button] svg:not([class*="size-"]) { width: var(--icon-size); height: var(--icon-size); }
+html[data-desktop] .desktop-main [data-button][data-size="xs"] svg:not([class*="size-"]) { width: var(--icon-small); height: var(--icon-small); }
 html[data-desktop] .desktop-main [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
 html[data-desktop] .desktop-main [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
+
+/* Selectable toolbar options share their geometry in new and existing conversations. */
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 30px; height: auto; padding: 5px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:is(:hover, [data-state="open"]):not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:active:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg { width: var(--icon-size); height: var(--icon-size); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg[data-icon="inline-end"] { width: var(--icon-caret); height: var(--icon-caret); margin-left: 1px; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-risky] > svg[data-icon="inline-start"] { color: var(--warning); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] { background: var(--accentSoft); color: var(--link); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] > svg { color: inherit; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > span:not(.agent-mark) { min-width: 0; overflow-wrap: anywhere; white-space: normal; text-align: left; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:disabled { opacity: .45; }
+html[data-desktop] .desktop-titlebar-button > svg { width: var(--icon-navigation); height: var(--icon-navigation); }
+html[data-desktop] :is([data-slot="dropdown-menu-sub-trigger"], [data-slot="select-trigger"]) > svg:last-child { width: var(--icon-caret); height: var(--icon-caret); }
+
 
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
 html[data-desktop] .desktop-main [data-slot="select-trigger"],
@@ -370,14 +390,12 @@ html[data-desktop] [data-slot="badge"][data-variant="destructive"] { background:
 html[data-desktop] [data-slot="badge"][data-variant="success"],
 html[data-desktop] [data-slot="badge"][data-variant="secondary"] { background: var(--fill); color: var(--secondaryLabel); }
 
-/* Floating surfaces, at Codex's values: the raised surface at 90 % with a blur, a half-pixel
-   ring and one soft shadow. Menus appear at once (Codex turns their animation off); they are
-   20 px boxes with 4 px of room, rows 5 × 8 px with 15 px corners. */
+/* Floating surfaces share a subtle edge and shadow; 12 px panels contain 8 px menu rows. */
 html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"],
 html[data-desktop] [data-slot="popover-content"],
-html[data-desktop] [data-slot="context-menu-content"] { padding: 4px; border: 0; border-radius: 20px; background: color-mix(in oklab, var(--sheetSolid, #fff) 90%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12); color: var(--label); animation: none !important; }
-html[data-desktop][data-theme="dark"] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"]) { background: color-mix(in oklab, #282828 92%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 8px 24px -4px rgb(0 0 0 / .5); }
+html[data-desktop] [data-slot="context-menu-content"] { padding: 6px; border: 0; border-radius: 12px; background: color-mix(in oklab, var(--sheetSolid, #fff) 96%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12); color: var(--label); animation: none !important; }
+html[data-desktop][data-theme="dark"] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"]) { background: color-mix(in oklab, var(--cardRaised) 96%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 8px 24px -4px rgb(0 0 0 / .5); }
 html[data-desktop] [data-slot="popover-content"] { padding: 12px; }
 html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
 html[data-desktop] [data-slot="dropdown-menu-item"],
@@ -385,7 +403,7 @@ html[data-desktop] [data-slot="dropdown-menu-radio-item"],
 html[data-desktop] [data-slot="dropdown-menu-checkbox-item"],
 html[data-desktop] [data-slot="dropdown-menu-sub-trigger"],
 html[data-desktop] [data-slot="context-menu-item"],
-html[data-desktop] [data-slot="select-item"] { min-height: 31px; padding: 5px 8px; gap: 8px; border-radius: 16px; color: var(--label); font-size: 13px; font-weight: 430; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 31px; }
+html[data-desktop] [data-slot="select-item"] { min-height: 32px; padding: 6px 8px; gap: 8px; border-radius: 8px; color: var(--label); font-size: 13px; font-weight: 430; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 32px; }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"])[data-highlighted] { background: var(--fill); color: var(--label); }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="select-item"]) svg:not([class*="size-"]) { width: 16px; height: 16px; color: var(--secondaryLabel); }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"])[data-disabled] { opacity: .4; }

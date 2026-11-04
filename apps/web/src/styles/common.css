@@ -1,4 +1,12 @@
 @layer components {
+a > .external-link-icon {
+    display: inline-block;
+    flex: none;
+    width: var(--icon-small, 14px);
+    height: var(--icon-small, 14px);
+    margin-left: 3px;
+    vertical-align: -2px;
+  }
 .secondary {
     background: var(--fill);
     color: var(--label);

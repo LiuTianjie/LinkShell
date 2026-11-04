@@ -54,7 +54,7 @@ function WaveHistory({ history }: { history: MachineMetrics[] }) {
       return <g key={index} data-tone={kind}>
         {kind === "cpu" && points.length > 1 && <path className="computer-wave-fill" d={`${path} L${last.x} 99 L${first.x} 99 Z`} />}
         <path className="computer-wave-line" d={path} />
-        <rect x={last.x - 2} y={last.y - 2} width="4" height="4" />
+        <circle cx={last.x} cy={last.y} r="2.25" />
       </g>;
     });
   };

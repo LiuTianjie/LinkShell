@@ -599,7 +599,7 @@ function DesktopNavigation({
       aria-current={activeView === item.id ? "page" : undefined}
       onClick={() => go(item.id)}
     >
-      <item.icon size={16} strokeWidth={1.65} aria-hidden />
+      <item.icon size={16} aria-hidden />
       <span>{item.title}</span>
       {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
     </button>
@@ -614,7 +614,7 @@ function DesktopNavigation({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
-                <PanelLeft size={16} strokeWidth={1.65} />
+                <PanelLeft size={16} />
               </button>
             </TooltipTrigger>
             <TooltipContent>隐藏侧栏 · {shortcutText(desktopShortcuts.toggleSidebar)}</TooltipContent>
@@ -622,7 +622,7 @@ function DesktopNavigation({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="搜索与命令" onClick={openPalette}>
-                <Search size={16} strokeWidth={1.65} />
+                <Search size={16} />
               </button>
             </TooltipTrigger>
             <TooltipContent>搜索与命令 · {shortcutText(desktopShortcuts.palette)}</TooltipContent>
@@ -633,7 +633,7 @@ function DesktopNavigation({
         <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
         <div className="desktop-sidebar-actions">
           <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
-            <SquarePen size={16} strokeWidth={1.65} aria-hidden />
+            <SquarePen size={16} aria-hidden />
             <span>新建会话</span>
             <kbd>{shortcutText(desktopShortcuts.newSession)}</kbd>
           </button>
@@ -710,7 +710,7 @@ function ManageEntry({ active, open }: { active: boolean; open: () => void }) {
   return (
     <nav className="desktop-places desktop-manage-entry" aria-label="本机">
       <button type="button" className="desktop-place" data-active={active || undefined} aria-current={active ? "page" : undefined} onClick={open}>
-        <Settings2 size={16} strokeWidth={1.65} aria-hidden />
+        <Settings2 size={16} aria-hidden />
         <span>本机管理</span>
         {(update || problem) && <span className="desktop-manage-dot" data-tone={problem ? "warning" : undefined} aria-label={problem ? "本机服务需要处理" : "有新版本"} />}
         <kbd>⌘2</kbd>
@@ -934,7 +934,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         {isElectronDesktop && sidebarHidden && (
           <div className="desktop-floating-titlebar">
             <button type="button" className="desktop-titlebar-button" aria-label="显示侧栏" title="显示侧栏" onClick={toggleSidebar}>
-              <PanelLeft size={16} strokeWidth={1.65} />
+              <PanelLeft size={16} />
             </button>
           </div>
         )}

@@ -67,7 +67,6 @@ import {
   Paperclip,
   Plus,
   X,
-  SquareSlash,
   Target,
   Plug,
   Blocks,
@@ -1166,7 +1165,7 @@ export function Session({
                           })
                         }
                       >
-                        ↑
+                        <Icon name="send" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -1373,43 +1372,55 @@ export function Session({
                       align="block-end"
                       className="composer-toolbar justify-between"
                     >
-                      <div>
-                        <Input
-                          ref={upload}
-                          type="file"
-                          multiple
-                          hidden
-                          onChange={(event) => {
-                            addFiles(Array.from(event.target.files ?? []));
-                            event.target.value = "";
-                          }}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label="添加附件"
-                          title="添加附件 · 单个文件最多 30 MB"
-                          onClick={() => upload.current?.click()}
-                        >
-                          <Icon name="attach" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label="打开命令面板"
-                          title="命令与技能 · /"
-                          onClick={() => setPanel("commands")}
-                        >
-                          <SquareSlash />
-                        </Button>
-                        <ComposerConfig
-                          session={session}
-                          config={view?.config ?? []}
-                          disabled={!online}
-                          openSettings={() => setPanel("settings")}
-                        />
+                      <div className="composer-controls">
+                        <div className="composer-tools">
+                          <Input
+                            ref={upload}
+                            type="file"
+                            multiple
+                            hidden
+                            onChange={(event) => {
+                              addFiles(Array.from(event.target.files ?? []));
+                              event.target.value = "";
+                            }}
+                          />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="添加附件"
+                                onClick={() => upload.current?.click()}
+                              >
+                                <Icon name="attach" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">添加附件 · 单个文件最多 30 MB</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="打开命令面板"
+                                onClick={() => setPanel("commands")}
+                              >
+                                <Icon name="commands" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">命令与技能 · /</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <div className="composer-options">
+                          <ComposerConfig
+                            session={session}
+                            config={view?.config ?? []}
+                            disabled={!online}
+                            openSettings={() => setPanel("settings")}
+                          />
+                        </div>
                       </div>
-                      <div>
+                      <div className="composer-meta">
                         <ComposerPlace session={session} />
                         {view?.usage?.contextWindow ? (
                           <ContextRing
@@ -1418,7 +1429,7 @@ export function Session({
                           />
                         ) : null}
                       </div>
-                      <div>
+                      <div className="composer-actions">
                         {(() => {
                           // As Codex: while a turn runs and nothing is typed, the send button is the
                           // stop button; typing turns it back into send (to the queue), with 插话

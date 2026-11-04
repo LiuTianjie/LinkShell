@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ArrowUpRight, LoaderCircle } from "lucide-react";
 import { PRO_CODE_SHOP_URL, type ProMembership } from "@linkshell/client-core";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -149,7 +149,7 @@ export function AccountMembership({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                前往链动小铺 ↗
+                前往链动小铺 <ArrowUpRight className="external-link-icon" aria-hidden />
               </a>
             </FieldDescription>
           </FieldGroup>

@@ -867,7 +867,7 @@ export function ManagementNav({ page, navigate, back }: { page: ManagePage; navi
   return (
     <nav className="management-nav" aria-label="本机管理">
       <button type="button" className="desktop-place management-back" onClick={back}>
-        <ArrowLeft size={16} strokeWidth={1.65} aria-hidden />
+        <ArrowLeft size={16} aria-hidden />
         <span>返回工作台</span>
         <kbd>{shortcutText(desktopModeShortcuts.workspace)}</kbd>
       </button>
@@ -890,7 +890,7 @@ export function ManagementNav({ page, navigate, back }: { page: ManagePage; navi
             aria-current={page === id ? "page" : undefined}
             onClick={() => navigate(id)}
           >
-            <Icon size={16} strokeWidth={1.65} aria-hidden />
+            <Icon size={16} aria-hidden />
             <span>{managePageTitles[id]}</span>
             {id === "updates" && facts.newVersion && <span className="management-dot" aria-label="有新版本" />}
           </button>

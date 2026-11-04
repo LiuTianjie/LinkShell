@@ -9,6 +9,8 @@ The user has chosen **Linear's product UI** as the design reference for the enti
 - Use shadcn/ui (Radix) primitives from `src/components/ui` for navigation, buttons, forms, menus, tabs, tables, dialogs, status badges, loading and empty states. Extend shared component variants when necessary; keep page-level classes focused on layout.
 - Use quiet cool neutrals, subtle borders and clear typography. Primary actions use restrained indigo with white text; navigation selection uses a neutral surface. Avoid orange/black buttons, vivid navigation stripes, oversized dashboard cards and heavy decorative shadows.
 - Keep colors in the semantic light/dark pairs in `src/theme.ts`. Check text, hover, selected, focus, disabled, warning and error states in both themes. Keep status colors consistent; do not use the primary action color for every icon or piece of metadata.
+- Use Lucide's rounded outlines throughout the workspace. Desktop icon weight and sizes come from the shared tokens in `desktop.css`: 1.75 stroke, 16px controls, 18px navigation and 12px carets. Avoid text glyphs for actions and local stroke overrides. Agent and provider brand marks retain their own artwork.
+- Composer settings use the shared `toolbar` button variant and `SessionConfigIcon` in both new and existing sessions. Keep labels visible when the toolbar wraps. CPU and memory keep the same semantic chart colors across visualization styles.
 - Preserve LinkShell's branding and Chinese product copy. Prioritize legibility, useful information and clear actions over decorative detail.
 
 ## Sidebar and layout

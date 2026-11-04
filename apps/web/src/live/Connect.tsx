@@ -1,3 +1,4 @@
+import { ArrowUpRight } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Field,
@@ -235,7 +236,7 @@ export function Connect({ close }: { close: () => void }) {
             target="_blank"
             rel="noreferrer"
           >
-            注册 iTool 账号 ↗
+            注册 iTool 账号 <ArrowUpRight className="external-link-icon" aria-hidden />
           </a>
         </p>
       </FieldGroup>

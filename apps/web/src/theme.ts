@@ -39,15 +39,11 @@ const desktopColors: Record<string, [string, string]> = {
   info: ["#5260c5", "#9aa5ff"],
   running: ["#5260c5", "#9aa5ff"],
   danger: ["#c03e48", "#f08891"],
-  monitorCpu: ["#936b27", "#ecd093"],
-  monitorMemory: ["#975684", "#ce8fb9"],
-  monitorWave: ["#287d68", "#83c8b2"],
-  monitorDial: ["#476fac", "#96b5ea"],
-  monitorMeter: ["#916536", "#d4ad80"],
-  monitorRing: ["#9b5848", "#df9c87"],
-  monitorColumn: ["#427ca1", "#91c8e8"],
-  monitorTower: ["#737835", "#c3cc8c"],
-  monitorBlock: ["#397b83", "#88c5cb"],
+  // A metric keeps its colour when the person switches chart styles.
+  monitorCpu: ["#5e6ad2", "#9aa4f3"],
+  monitorMemory: ["#3d827d", "#7bbab1"],
+  composerSurface: ["#ffffff", "#232428"],
+  composerToolbar: ["#f7f8fa", "#ffffff04"],
 };
 const variables = (index: 0 | 1) =>
   Object.entries({ ...brandColors, ...desktopColors, ...codeColors })
@@ -82,16 +78,16 @@ export const themeStyles = `
 // The desktop app's own system, after Codex's desktop app (docs/design/codex-reference.md):
 // neutral greys, text and hairlines as translucent ink so they sit on any surface, a
 // translucent sidebar over the window's vibrancy and a solid main surface beside it. Colour is
-// kept for state (blue running, amber waiting on you, red failed); the one filled control is ink.
+// kept for state and restrained indigo primary actions.
 const nativeDesktopColors: Record<string, [string, string]> = {
   // The window's ground where vibrancy is off (unfocused, 4K, "opaque window"); the sidebar is
   // see-through over it, the main surface is not.
-  "background": ["#f3f3f3", "#1d1d1d"],
-  "plain": ["#ffffff", "#181818"],
-  "sidebarBackground": ["#ededed66", "#21212166"],
-  "card": ["#ffffff", "#181818"],
-  "cardRaised": ["#ffffff", "#212121"],
-  "inset": ["#f3f3f3", "#131313"],
+  "background": ["#f3f4f6", "#1c1d20"],
+  "plain": ["#ffffff", "#18191c"],
+  "sidebarBackground": ["#edeef266", "#20212666"],
+  "card": ["#ffffff", "#18191c"],
+  "cardRaised": ["#ffffff", "#232428"],
+  "inset": ["#f3f4f6", "#131417"],
   "sheet": ["#ffffffb3", "#212121f5"],
   "sheetCard": ["#f9f9f9", "#181818"],
   "sidebarAccent": ["#1a1c1f14", "#ffffff14"],
@@ -105,13 +101,12 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   // Codex's ghost hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
   "fill": ["#1a1c1f0d", "#ffffff14"],
   "fillStrong": ["#1a1c1f1f", "#ffffff29"],
-  // The filled control is the text's own colour, its label the surface's (Codex's primary-solid).
-  "accent": ["#1a1c1f", "#dfdfdf"],
-  "accentHover": ["#303030", "#ededed"],
-  "accentSoft": ["#1a1c1f0d", "#ffffff0d"],
-  "primaryForeground": ["#ffffff", "#0d0d0d"],
+  "accent": ["#5e6ad2", "#6872e5"],
+  "accentHover": ["#515dc0", "#7681ec"],
+  "accentSoft": ["#5e6ad214", "#6872e524"],
+  "primaryForeground": ["#ffffff", "#ffffff"],
   "link": ["#0169cc", "#339cff"],
-  "focus": ["#339cff", "#339cffb3"],
+  "focus": ["#5e6ad2", "#9aa4f3"],
   "running": ["#0285ff", "#339cff"],
   "runningSoft": ["#0285ff1a", "#339cff24"],
   "info": ["#0285ff", "#339cff"],
@@ -120,16 +115,16 @@ const nativeDesktopColors: Record<string, [string, string]> = {
   "okSoft": ["#00a2401a", "#40c97724"],
   // A finished session is the normal state, not news: it stays grey.
   "idle": ["#1a1c1f80", "#ffffff80"],
-  "warning": ["#e25507", "#ff8549"],
-  "waiting": ["#e25507", "#ff8549"],
-  "waitingSoft": ["#e255071a", "#ff854924"],
+  "warning": ["#946a23", "#d8b76c"],
+  "waiting": ["#946a23", "#d8b76c"],
+  "waitingSoft": ["#946a2310", "#d8b76c14"],
   "danger": ["#e02e2a", "#fa423e"],
   "dangerSoft": ["#e02e2a14", "#fa423e24"],
   "userBubble": ["#1a1c1f0d", "#ffffff0d"],
   "code": ["#f9f9f9", "#131313"],
   "codeText": ["#1a1c1f", "#dfdfdf"],
   // The terminal is the panel itself, as Codex's: no darker block inside it.
-  "terminal": ["#ffffff", "#181818"],
+  "terminal": ["#ffffff", "#18191c"],
   "diffAdd": ["#00a24026", "#40c9773b"],
   "diffDel": ["#e02e2a26", "#fa423e3b"],
   "diffAddText": ["#3a843f", "#83d197"],

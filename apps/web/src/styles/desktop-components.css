@@ -72,7 +72,7 @@ html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) { height: 
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { height: 26px; padding-inline: 12px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 590; transition: background 150ms cubic-bezier(.23, 1, .32, 1), color 150ms cubic-bezier(.23, 1, .32, 1); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"]:hover { color: var(--label); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 1px 4px -1px rgb(0 0 0 / .2); }
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] svg { width: 15px; height: 15px; }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] svg { width: var(--icon-size); height: var(--icon-size); }
 
 /* ── Forms ───────────────────────────────────────────────────────────────── */
 html[data-desktop] [data-slot="field-group"] { gap: 16px; }
@@ -195,7 +195,7 @@ html[data-desktop] .desktop-main .screen-connecting-steps { color: var(--tertiar
    focus by their edge instead, so typing never sits inside a white frame. */
 html[data-desktop] [data-button]:focus-visible,
 html[data-desktop] [role="tab"]:focus-visible,
-html[data-desktop] [role="menuitem"]:focus-visible { box-shadow: none; outline: 2px solid color-mix(in srgb, var(--label) 55%, transparent); outline-offset: 2px; }
+html[data-desktop] [role="menuitem"]:focus-visible { box-shadow: none; outline: 2px solid color-mix(in srgb, var(--focus) 65%, transparent); outline-offset: 2px; }
 html[data-desktop] :is(input, textarea, select, [cmdk-input]):focus-visible { outline: none; box-shadow: none; }
 html[data-desktop] [data-slot="input-group"]:has(:focus-visible) { box-shadow: none; }
 /* A dialog's own action sits at the end of the dialog, at its own width. */

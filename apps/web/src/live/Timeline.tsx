@@ -1,3 +1,4 @@
+import { ArrowUpRight } from "lucide-react";
 import { AsyncQuestions } from "./AsyncQuestions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -272,7 +273,7 @@ const markdownComponents: Components = {
   a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
   img: ({ src, alt }) => (
     <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer">
-      {alt || "查看图片"} ↗
+      {alt || "查看图片"} <ArrowUpRight className="external-link-icon" aria-hidden />
     </a>
   ),
 };
@@ -559,7 +560,7 @@ export function Blocks({
             rel="noreferrer"
             className="resource-chip"
           >
-            {block.name} ↗
+            {block.name} <ArrowUpRight className="external-link-icon" aria-hidden />
           </a>
         ) : (
           <Button

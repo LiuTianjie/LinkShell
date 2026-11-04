@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { LucideProps } from "lucide-react";
 import {
   LayoutGrid,
   Plus,
@@ -12,7 +12,12 @@ import {
   Check,
   X,
   Settings2,
-  ShieldCheck,
+  LockKeyhole,
+  LockKeyholeOpen,
+  Box,
+  Gauge,
+  ListTodo,
+  Command,
   CircleHelp,
   Terminal,
   FileText,
@@ -41,7 +46,12 @@ const icons = {
   check: Check,
   close: X,
   settings: Settings2,
-  shield: ShieldCheck,
+  shield: LockKeyhole,
+  unlocked: LockKeyholeOpen,
+  model: Box,
+  effort: Gauge,
+  plan: ListTodo,
+  commands: Command,
   question: CircleHelp,
   terminal: Terminal,
   file: FileText,
@@ -60,21 +70,17 @@ export type IconName = keyof typeof icons;
 export function Icon({
   name,
   size = 18,
-  style,
   ...props
-}: {
+}: Omit<LucideProps, "name"> & {
   name: IconName;
-  size?: number;
-  style?: CSSProperties;
   "data-icon"?: string;
 }) {
   const Component = icons[name];
   return (
     <Component
       size={size}
-      strokeWidth={1.65}
+      strokeWidth={1.75}
       aria-hidden="true"
-      style={style}
       {...props}
     />
   );
