@@ -20,6 +20,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DetailsHTMLAttributes,
   type ReactNode,
 } from "react";
 import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
@@ -113,6 +114,46 @@ export function StepsSummary({
       <DiffStat added={t.added} removed={t.removed} className="steps-summary-diff" />
       <ChevronRight className="steps-summary-chevron" aria-hidden="true" />
     </button>
+  );
+}
+
+/**
+ * A `<details>` whose body is built the first time it's opened, then kept. A
+ * long session has hundreds of folded tool calls, thoughts and sub-agent
+ * transcripts; built up front they were about half of the page's elements.
+ */
+/** Folds build their bodies up front (a static render, which can't open one). */
+export const FoldsBuilt = createContext(false);
+
+function Fold({
+  summary,
+  children,
+  className,
+  defaultOpen = false,
+  ...rest
+}: {
+  summary: ReactNode;
+  children: ReactNode;
+  className?: string;
+  defaultOpen?: boolean;
+} & Omit<DetailsHTMLAttributes<HTMLElement>, "open" | "onToggle" | "children">) {
+  const [opened, setOpened] = useState(defaultOpen);
+  const built = useContext(FoldsBuilt);
+  return (
+    <details
+      className={className}
+      open={defaultOpen || undefined}
+      // On the summary's click, so the body is there before the row opens and its height
+      // animates to the full size; toggle covers opening any other way (find in page).
+      onClick={(event) => {
+        if ((event.target as Element).closest("summary")?.parentElement === event.currentTarget) setOpened(true);
+      }}
+      onToggle={(event) => event.currentTarget.open && setOpened(true)}
+      {...rest}
+    >
+      {summary}
+      {(opened || built) && children}
+    </details>
   );
 }
 
@@ -963,10 +1004,9 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "thought")
           return (
-            <details className="thought-block" key={item.id}>
-              <summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>
+            <Fold className="thought-block" key={item.id} summary={<summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>}>
               <StreamingText text={item.text} streaming={item.streaming && online} />
-            </details>
+            </Fold>
           );
         if (item.kind === "error") return <ErrorCard key={item.id} item={item} />;
         if (item.kind === "notice") {
@@ -1316,8 +1356,7 @@ function ToolRecord({
       </div>
     );
   return (
-    <details className={`tool-record ${item.status}`} data-action={action}>
-      <summary>{summary}</summary>
+    <Fold className={`tool-record ${item.status}`} data-action={action} summary={<summary>{summary}</summary>}>
       {cancel ? (
         <Button
           variant="outline"
@@ -1375,21 +1414,19 @@ function ToolRecord({
             </Button>
           ))}
           {item.rawInput !== undefined && (
-            <details>
-              <summary>工具参数</summary>
+            <Fold summary={<summary>工具参数</summary>}>
               <pre tabIndex={0}>{typeof item.rawInput === "string" ? item.rawInput : JSON.stringify(item.rawInput, null, 2)}</pre>
-            </details>
+            </Fold>
           )}
           {item.rawOutput !== undefined && (
-            <details>
-              <summary>原始结果</summary>
+            <Fold summary={<summary>原始结果</summary>}>
               <pre tabIndex={0}>{typeof item.rawOutput === "string" ? item.rawOutput : JSON.stringify(item.rawOutput, null, 2)}</pre>
-            </details>
+            </Fold>
           )}
         </>
       )}
       {item.sub && <Timeline items={item.sub.items} sessionId={sessionId} agent={agent} onFile={onFile} onTerminal={onTerminal} />}
-    </details>
+    </Fold>
   );
 }
 

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TimelineItem } from "@linkshell/client-core";
 import type { Connection } from "../src/live/engine";
 import { Runtime } from "../src/live/common";
-import { OpenWrapUp, Timeline, TimelineNavigation } from "../src/live/Timeline";
+import { FoldsBuilt, OpenWrapUp, Timeline, TimelineNavigation } from "../src/live/Timeline";
 
 vi.mock("../src/live/engine", async () => ({ engine: { state: (await import("zustand/vanilla")).createStore(() => ({})) } }));
 
@@ -18,7 +18,8 @@ function render(items: TimelineItem[], findSession?: (appId: string) => { title:
   const connection = { store: createStore(() => ({ status: "online" })), link: {} } as unknown as Connection;
   const timeline = createElement(OpenWrapUp.Provider, { value: openBox }, createElement(Timeline, { items, sessionId: "s", agent: "claude", onFile: () => {} }));
   const navigation = createElement(TimelineNavigation.Provider, { value: { cwd: "/w", open: () => {}, findSession } }, timeline);
-  return renderToStaticMarkup(createElement(Runtime.Provider, { value: connection }, navigation));
+  // What each row shows once opened, too.
+  return renderToStaticMarkup(createElement(Runtime.Provider, { value: connection }, createElement(FoldsBuilt.Provider, { value: true }, navigation)));
 }
 
 describe("conversation rows as the Claude app words them", () => {

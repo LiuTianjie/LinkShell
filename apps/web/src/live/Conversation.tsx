@@ -149,7 +149,7 @@ export function Conversation({
     if (!scroller || !rows) return;
     // The row the reader has at the top of the view, where it sits, and the scrollTop that was
     // measured at — so a correction can tell its own writes from the reader's and from a resize.
-    let anchor: { node: Element; offset: number; fromBottom: number; scrollTop: number } | undefined;
+    let anchor: { node: Element; offset: number; fromBottom: number; scrollTop: number; height: number } | undefined;
     const note = () => {
       const viewTop = scroller.getBoundingClientRect().top;
       const node = topRow(rows, viewTop);
@@ -159,6 +159,7 @@ export function Conversation({
             offset: node.getBoundingClientRect().top - viewTop,
             fromBottom: scroller.scrollHeight - scroller.scrollTop,
             scrollTop: scroller.scrollTop,
+            height: scroller.scrollHeight,
           }
         : undefined;
     };
@@ -170,26 +171,40 @@ export function Conversation({
       initialResize = false;
       // At the bottom the newest message stays in view; use-stick-to-bottom owns that.
       if (state.isAtBottom) return note();
-      // The reader scrolled since the anchor was taken (events can lag a resize): re-take it first,
-      // or the correction would undo their scroll by that much.
-      if (!anchor || Math.abs(scroller.scrollTop - anchor.scrollTop) > 1) note();
-      if (!anchor) return;
-      const moved = anchor.node.isConnected
+      if (!anchor) return note();
+      // The reader may have scrolled since the anchor was taken (events can lag a resize). Their
+      // scroll is counted out rather than the anchor taken again: taken again now, it would be
+      // measured in a layout that already holds this frame's growth (a row above still opening),
+      // and the correction would miss that growth and undo part of their scroll.
+      const byReader = scroller.scrollTop - anchor.scrollTop;
+      const moved = byReader + (anchor.node.isConnected
         ? anchor.node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset
         : // The row was replaced (a folded run regrouped at a page boundary): hold the distance from the end.
-          scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom;
+          scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom);
       // Through the hook's state, so its own scroll handler doesn't read this as the reader scrolling.
       if (Math.abs(moved) >= 0.5) state.scrollTop = scroller.scrollTop + moved;
       note();
     };
     note();
-    scroller.addEventListener("scroll", note, { passive: true });
+    // Only the reader's scrolls move the anchor. A correction's own scroll event comes a frame
+    // late, after an animating row (a tool call opening above) has grown again: re-taken then,
+    // the anchor would swallow that growth and the view would creep by it. For the same reason a
+    // reader's scroll that lands while the content has grown and isn't corrected yet only moves
+    // the anchor by what they scrolled; the correction that follows takes it afresh.
+    const scrolled = () => {
+      if (!anchor) return note();
+      const byReader = scroller.scrollTop - anchor.scrollTop;
+      if (Math.abs(byReader) <= 1) return;
+      if (scroller.scrollHeight === anchor.height) return note();
+      anchor = { ...anchor, offset: anchor.offset - byReader, fromBottom: anchor.fromBottom - byReader, scrollTop: scroller.scrollTop };
+    };
+    scroller.addEventListener("scroll", scrolled, { passive: true });
     // Fires after layout, before paint, so the correction is never seen. The content box is
     // watched, not the rows: the history loader above the rows changes height too.
     const observer = new ResizeObserver(keep);
     observer.observe(scroller.firstElementChild ?? rows);
     return () => {
-      scroller.removeEventListener("scroll", note);
+      scroller.removeEventListener("scroll", scrolled);
       observer.disconnect();
     };
   }, [scrollRef, state]);
