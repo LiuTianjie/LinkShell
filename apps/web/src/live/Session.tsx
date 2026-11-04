@@ -1244,7 +1244,7 @@ export function Session({
                 </PopoverContent>
                 <PopoverAnchor asChild>
                   <InputGroup
-                    className="composer rounded-xl bg-[var(--plain)] dark:bg-[var(--plain)]"
+                    className="composer rounded-[var(--radius-composer)] bg-[var(--plain)] dark:bg-[var(--plain)]"
                     data-dragging={dragging || undefined}
                     onDragOver={(event) => {
                       if (!event.dataTransfer.types.includes("Files")) return;

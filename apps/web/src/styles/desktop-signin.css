@@ -1,19 +1,19 @@
-/* The iTool account sign-in panel (SignIn.tsx), in the desktop's system: one primary button on
-   the accent fill, providers on a 5 % ink fill, 32 px controls. Plain elements with their own
-   classes, so the shared button and dialog rules don't reach in. */
+/* The iTool account sign-in panel (SignIn.tsx), visual-system.md 登录: one centred column,
+   providers as outlined secondary buttons, the email sign-in the only solid one, outlined fields.
+   Plain elements with their own classes, so the shared button and dialog rules don't reach in. */
 
-html[data-desktop] .signin { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 380px; margin-inline: auto; color: var(--label); font-size: 13px; line-height: 18px; }
-/* In a dialog the panel is the dialog's body: it takes the width its title and text already have. */
-html[data-desktop] [data-slot="dialog-content"] .signin { max-width: none; }
+html[data-desktop] .signin { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 360px; margin-inline: auto; color: var(--label); font-size: 13px; line-height: 18px; }
+/* In a dialog it stays a column of its own width, centred under the dialog's heading. */
+html[data-desktop] [data-slot="dialog-content"] .signin { max-width: 360px; }
 html[data-desktop] .signin-header { display: grid; gap: 4px; text-align: center; }
 html[data-desktop] .signin-header h2 { font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
-html[data-desktop] .signin-header p { color: var(--secondaryLabel); }
+html[data-desktop] .signin-header p { color: var(--secondaryLabel); font-size: 12px; }
 
-html[data-desktop] .signin-providers { display: grid; gap: 8px; }
-html[data-desktop] .signin-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius-control); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition), opacity var(--transition); }
+html[data-desktop] .signin-providers { display: grid; gap: 10px; }
+html[data-desktop] .signin-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; padding: 0 14px; border: 0; border-radius: var(--radius-card); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition), opacity var(--transition); }
 html[data-desktop] .signin-button svg { width: 16px; height: 16px; flex: none; }
-html[data-desktop] .signin-button[data-kind="provider"] { background: var(--fill); color: var(--label); }
-html[data-desktop] .signin-button[data-kind="provider"]:hover:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .signin-button[data-kind="provider"] { background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
+html[data-desktop] .signin-button[data-kind="provider"]:hover:not(:disabled) { background: var(--fill); }
 html[data-desktop] .signin-button[data-kind="primary"] { background: var(--accentFill); color: var(--primaryForeground); }
 html[data-desktop] .signin-button[data-kind="primary"]:hover:not(:disabled) { background: var(--accentHover); }
 html[data-desktop] .signin-button[data-kind="quiet"] { background: transparent; color: var(--secondaryLabel); }
@@ -31,10 +31,10 @@ html[data-desktop] .signin-divider::after { content: ""; flex: 1; height: var(--
 html[data-desktop] .signin-form { display: grid; gap: 12px; margin: 0; }
 html[data-desktop] .signin-field { display: grid; gap: 6px; }
 html[data-desktop] .signin-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; line-height: 16px; }
-html[data-desktop] .signin-input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); font: inherit; font-size: 13px; outline: none; transition: background var(--transition), box-shadow var(--transition); }
+html[data-desktop] .signin-input { width: 100%; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); font: inherit; font-size: 13px; outline: none; transition: background var(--transition), box-shadow var(--transition); }
 html[data-desktop] .signin-input::placeholder { color: var(--placeholder); opacity: 1; }
 /* Scoped to the panel: desktop-components.css clears every input's focus shadow at the same weight. */
-html[data-desktop] .signin .signin-input:focus-visible { background: var(--plain); box-shadow: inset 0 0 0 1px var(--focus); outline: none; }
+html[data-desktop] .signin .signin-input:focus-visible { background: transparent; box-shadow: inset 0 0 0 1px var(--focus); outline: none; }
 html[data-desktop] .signin .signin-input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger); }
 html[data-desktop] .signin-input:disabled { opacity: .4; }
 html[data-desktop] .signin-error { color: var(--danger); font-size: 12px; line-height: 17px; -webkit-user-select: text; user-select: text; }

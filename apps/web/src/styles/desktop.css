@@ -30,7 +30,8 @@ html[data-desktop] {
   --transition: 150ms var(--ease-out);
   --float-shadow: 0 0 0 .5px var(--separatorStrong), 0 4px 8px -2px rgb(0 0 0 / .1), 0 8px 16px -4px rgb(0 0 0 / .12);
   /* The composer and the cards in the conversation are flat: a hairline, no shadow. */
-  --composer-shadow: 0 0 0 1px var(--separatorStrong);
+  --composer-shadow: 0 0 0 1px var(--separatorStrong), 0 4px 16px -8px color-mix(in srgb, var(--label) 10%, transparent);
+  --composer-shadow-focus: 0 0 0 1px color-mix(in srgb, var(--label) 22%, transparent), 0 4px 16px -8px color-mix(in srgb, var(--label) 10%, transparent);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-synthesis-weight: none;

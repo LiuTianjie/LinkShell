@@ -49,6 +49,22 @@ html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], f
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-button] { align-self: flex-end; width: auto; min-width: 96px; }
 html[data-desktop] .new-session-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
+/* The connect dialog (Connect.tsx): a narrow centred dialog; the local computer as one quiet
+   line, the ways in as two underlined tabs. */
+html[data-desktop] [data-slot="dialog-content"].connect-dialog:not(.command-center) { width: min(440px, calc(100vw - 48px)); padding: 28px 28px 24px; }
+/* A form people read and type into: an opaque surface, so a coloured card behind it cannot tint it through the blur. */
+html[data-desktop] [data-slot="dialog-content"].connect-dialog { background: var(--plain); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].connect-dialog { background: var(--cardRaised); }
+html[data-desktop] .connect-dialog [data-slot="dialog-header"] { place-items: center; padding-right: 0; text-align: center; }
+html[data-desktop] .connect-dialog [data-slot="dialog-title"] { font-size: 20px; line-height: 28px; }
+html[data-desktop] .connect-dialog .modal-subtitle { margin-top: -12px; color: var(--secondaryLabel); font-size: 13px; text-align: center; }
+html[data-desktop] .connect-dialog .connect-local { margin: -8px 0 4px; }
+html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] { justify-content: center; gap: 24px; width: min(360px, 100%); height: 32px; margin-inline: auto; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { flex: none; height: 32px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
+html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { color: var(--label); box-shadow: inset 0 -2px 0 var(--accent); }
+html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
+html[data-desktop] .connect-dialog [data-slot="tabs-content"] { padding-top: 24px; }
+
 /* ── Notices (Alert) ─────────────────────────────────────────────────────── */
 /* A notice is a well: no coloured bar down its edge; the state shows in the icon and a tint. */
 html[data-desktop] [data-slot="alert"] { gap: 2px 10px; padding: 12px 14px; border: 1px solid var(--separator); border-radius: var(--radius-well); background: var(--card); color: var(--label); }

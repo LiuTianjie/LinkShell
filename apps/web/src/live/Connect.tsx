@@ -19,7 +19,6 @@ import { accountClient } from "./account";
 import { signInWithAccountOAuth } from "./account-oauth";
 import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
-import { Icon } from "../icons";
 import { Scan } from "./Scan";
 import { AccountMembership } from "./AccountMembership";
 import { desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
@@ -80,7 +79,7 @@ export function Connect({ close }: { close: () => void }) {
       <SignIn
         {...signIn}
         disabled={blocked}
-        description="登录 iTool 账号，即可访问同一账号下的电脑。电脑接入官方网关需要 Pro 订阅。"
+        description="使用 iTool 账号。电脑接入官方网关需要 Pro。"
       />
     )
   ) : state.account ? (
@@ -360,21 +359,17 @@ export function Connect({ close }: { close: () => void }) {
     </form>
   );
   return (
-    <Modal title="连接你的电脑" close={close}>
+    <Modal title="连接你的电脑" close={close} className="connect-dialog">
       <p className="muted modal-subtitle">
-        {isDesktop ? "从这台电脑继续对话、审批和控制远程电脑。" : "电脑保持运行，网页即可继续你的会话。"}
+        {isDesktop ? "登录后，同一账号下的电脑都会出现在这里。" : "电脑保持运行，网页即可继续你的会话。"}
       </p>
+      {/* The local computer needs no account: one quiet line, not a card competing with the form. */}
       {isDesktop && (
-        <Alert className="mb-4">
-          <AlertTitle>本机工作台无需登录</AlertTitle>
-          <AlertDescription>
-            <p>{state.localError ?? "本机服务已连接，可以直接管理这台电脑的会话。"}</p>
-            <div className="mt-2 flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={openDesktopManagement}>本机服务</Button>
-              {state.localError && <Button type="button" variant="ghost" size="sm" disabled={job.busy} onClick={() => void job.run(() => engine.refreshLocal())}>重新检测</Button>}
-            </div>
-          </AlertDescription>
-        </Alert>
+        <p className="connect-local" data-error={state.localError ? true : undefined}>
+          <span>{state.localError ?? "这台电脑无需登录，已直接连接。"}</span>
+          <button type="button" className="connect-local-link" onClick={openDesktopManagement}>本机服务</button>
+          {state.localError && <button type="button" className="connect-local-link" disabled={job.busy} onClick={() => void job.run(() => engine.refreshLocal())}>重新检测</button>}
+        </p>
       )}
       {state.locked && (
         <Alert>
@@ -402,14 +397,12 @@ export function Connect({ close }: { close: () => void }) {
             setInvalid({});
           }}
         >
-          <TabsList className="w-full" aria-label="连接方式">
+          <TabsList variant="line" className="connect-tabs w-full" aria-label="连接方式">
             <TabsTrigger value="official" disabled={job.busy}>
-              <Icon name="globe" />
-              官方账号
+              账号登录
             </TabsTrigger>
             <TabsTrigger value="self-hosted" disabled={job.busy}>
-              <Icon name="server" />
-              配对电脑
+              配对码
             </TabsTrigger>
           </TabsList>
           <TabsContent value="official" className="pt-4">

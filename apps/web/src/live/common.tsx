@@ -198,12 +198,14 @@ export function Modal({
   close,
   wide = false,
   returnFocus,
+  className,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   wide?: boolean;
   returnFocus?: () => void;
+  className?: string;
 }) {
   // These dialogs are mounted directly, so Radix has no trigger to restore.
   const [opener] = useState(() =>
@@ -225,6 +227,7 @@ export function Modal({
         className={cn(
           "max-h-[85dvh] overflow-y-auto p-6 sm:max-w-xl",
           wide && "sm:max-w-5xl",
+          className,
         )}
       >
         <DialogHeader>

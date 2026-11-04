@@ -32,7 +32,8 @@
     --radius-card: 8px;
     --radius-well: 8px;
     --radius-panel: 12px;
-    --radius-composer: 12px;
+    /* The composer alone is rounder, as Codex's (visual-system.md, 输入框). */
+    --radius-composer: 24px;
     /* One considered mono stack for code, terminals and diffs; Ghostty's bundled
        face (Berkeley-like) is preferred where present. */
     --font-mono:

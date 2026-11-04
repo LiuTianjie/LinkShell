@@ -284,18 +284,19 @@ html[data-desktop] .desktop-main .conversation-jump [data-button]:hover { backgr
 /* As wide as the reading column above it, so the two edges line up. */
 html[data-desktop] .desktop-main .composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; padding: 24px max(24px, calc((100% - 768px) / 2)) 16px; border: 0; background: linear-gradient(to bottom, transparent, var(--plain) 24px); pointer-events: none; }
 html[data-desktop] .desktop-main .composer-wrap > * { pointer-events: auto; }
-html[data-desktop] .desktop-main .composer { height: auto; min-height: 120px; overflow: clip; border: 0; border-radius: var(--radius-composer); background: var(--composerSurface); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 180ms var(--ease-out); }
-html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px color-mix(in srgb, var(--focus) 32%, transparent); }
-html[data-desktop] .desktop-main .composer textarea { min-height: 76px; padding: 16px 18px 12px; font-size: 14px; line-height: 22px; }
+/* As Codex: one rounded surface, the text and its tools on the same ground (visual-system.md, 输入框). */
+html[data-desktop] .desktop-main .composer { height: auto; min-height: 112px; overflow: clip; border: 0; border-radius: var(--radius-composer); background: var(--composerSurface); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 180ms var(--ease-out); }
+html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow-focus); }
+html[data-desktop] .desktop-main .composer textarea { min-height: 64px; padding: 16px 18px 4px 18px; font-size: 14px; line-height: 22px; }
 html[data-desktop] .desktop-main .composer textarea::placeholder { color: var(--placeholder); }
-html[data-desktop] .desktop-main .composer-toolbar { align-items: flex-end; gap: 8px; padding: 8px; border-top: var(--hairline) solid var(--separator); background: var(--composerToolbar); }
+html[data-desktop] .desktop-main .composer-toolbar { align-items: center; gap: 8px; padding: 4px 10px 10px 10px; border: 0; background: transparent; }
 html[data-desktop] .desktop-main .composer-toolbar > div { gap: 6px; }
-html[data-desktop] .desktop-main .composer-tools { display: inline-flex; flex: none; align-items: center; gap: 2px; padding-right: 6px; border-right: var(--hairline) solid var(--separatorStrong); }
-html[data-desktop] .desktop-main .composer-toolbar [data-button][data-variant="ghost"] { height: 28px; border-radius: var(--radius-control); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .composer-tools { display: inline-flex; flex: none; align-items: center; gap: 2px; padding-right: 2px; border: 0; }
+html[data-desktop] .desktop-main .composer-toolbar [data-button][data-variant="ghost"] { height: 28px; border-radius: 999px; color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .composer-toolbar [data-button][data-variant="ghost"]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-main .composer-toolbar [data-button][data-size="icon"]:not(.send-button) { width: 28px; }
 html[data-desktop] .desktop-main .composer-chip { max-width: 100%; }
-html[data-desktop] .desktop-main .composer [data-button].send-button { width: 32px; height: 32px; padding: 0; border-radius: var(--radius-control); background: var(--accentFill); color: var(--primaryForeground); }
+html[data-desktop] .desktop-main .composer [data-button].send-button { width: 32px; height: 32px; padding: 0; border-radius: 999px; background: var(--accentFill); color: var(--primaryForeground); }
 html[data-desktop] .desktop-main .composer [data-button].send-button:hover:not(:disabled) { background: var(--accentHover); color: var(--primaryForeground); }
 html[data-desktop] .desktop-main .composer [data-button].send-button:disabled { background: var(--fillStrong); color: var(--tertiaryLabel); opacity: .6; }
 html[data-desktop] .desktop-main .composer [data-button].send-button svg { width: 18px; height: 18px; }
@@ -305,7 +306,10 @@ html[data-desktop] .desktop-main .composer [data-button].send-button .composer-s
 html[data-desktop] .desktop-main .composer [data-button].composer-stop:disabled { opacity: .5; }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small .composer-stop-glyph { width: 10px; height: 10px; }
-html[data-desktop] .desktop-main .composer [data-button].composer-steer { height: 28px; padding-inline: 10px; border-radius: var(--radius-control); font-size: 13px; }
+html[data-desktop] .desktop-main .composer [data-button].composer-steer { height: 28px; padding-inline: 12px; border-radius: 999px; font-size: 13px; }
+/* The mode, model and effort read as words until pointed at, like Codex's. */
+html[data-desktop] .desktop-main .composer-toolbar [data-button][data-variant="toolbar"],
+html[data-desktop] .new-session-bar [data-button][data-variant="toolbar"] { gap: 4px; border-radius: 999px; padding-inline: 8px; font-weight: 400; }
 html[data-desktop] .desktop-main .context-ring { gap: 6px; padding: 0 4px; color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .context-ring circle { stroke-width: 1.5; }
 html[data-desktop] .desktop-main .context-ring circle + circle { transition: stroke-dasharray 180ms var(--ease-out); }
@@ -319,7 +323,7 @@ html[data-desktop] .composer-chip-option small { font-size: 12px; line-height: 1
 html[data-desktop] .command-option-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 html[data-desktop] .command-option-name strong { font-weight: 600; }
 html[data-desktop] .command-option-name small { overflow: hidden; color: var(--tertiaryLabel); font-family: var(--mono); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-main .message-queue { padding: 8px 12px; border: 0; border-radius: var(--radius-card); background: var(--plain); box-shadow: var(--composer-shadow); font-size: 13px; }
+html[data-desktop] .desktop-main .message-queue { padding: 8px 14px; border: 0; border-radius: 16px; background: var(--plain); box-shadow: var(--composer-shadow); font-size: 13px; }
 html[data-desktop] .desktop-main .message-queue strong { color: var(--secondaryLabel); font-weight: 500; }
 
 /* The inspector: a second panel beside the conversation, its tools as tabs in its toolbar. */
@@ -383,17 +387,22 @@ html[data-desktop] .desktop-main > .new-session-page { position: relative; displ
 html[data-desktop] .new-session-stage { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(680px, calc(100% - 48px)); margin: auto; padding: 48px 0 18vh; }
 html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label); font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 30px; text-align: center; }
 html[data-desktop] .new-session-composer { display: flex; flex-direction: column; overflow: clip; border-radius: var(--radius-composer); background: var(--composerSurface); box-shadow: var(--composer-shadow); transition: box-shadow 180ms var(--ease-out); }
-html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow), 0 0 0 1px color-mix(in srgb, var(--focus) 32%, transparent); }
-html[data-desktop] .new-session-composer textarea { min-height: 92px; max-height: 40vh; padding: 16px 18px 12px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 22px; resize: none; outline: none; field-sizing: content; }
+html[data-desktop] .new-session-composer:focus-within { box-shadow: var(--composer-shadow-focus); }
+/* The page opens focused on its composer: no ring until it is typed into, so it does not open outlined. */
+html[data-desktop] .new-session-composer:not(:has(textarea:not(:placeholder-shown))):focus-within { box-shadow: var(--composer-shadow); }
+html[data-desktop] .new-session-composer textarea { min-height: 56px; max-height: 40vh; padding: 16px 18px 4px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 14px; line-height: 22px; resize: none; outline: none; field-sizing: content; }
 html[data-desktop] .new-session-composer textarea::placeholder { color: var(--placeholder); }
 /* Settings wrap before the primary action, keeping every label and the send target available. */
-html[data-desktop] .new-session-bar { display: flex; align-items: flex-end; min-width: 0; gap: 8px; padding: 8px; border-top: var(--hairline) solid var(--separator); background: var(--composerToolbar); }
-html[data-desktop] .new-session-controls { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; gap: 4px 2px; }
+html[data-desktop] .new-session-bar { display: flex; align-items: center; min-width: 0; gap: 8px; padding: 4px 10px 10px 10px; border: 0; background: transparent; }
+html[data-desktop] .new-session-controls { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; gap: 4px 0; }
 html[data-desktop] .new-session-pill { flex: none; min-width: 0; max-width: 100%; }
+html[data-desktop] .new-session-place { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; margin-top: -4px; padding-inline: 10px; }
+html[data-desktop] .new-session-place [data-button][data-variant="toolbar"] { gap: 4px; padding-inline: 8px; border-radius: 999px; color: var(--tertiaryLabel); font-size: 12px; font-weight: 400; }
+html[data-desktop] .new-session-place [data-button][data-variant="toolbar"] > svg { color: var(--tertiaryLabel); }
 html[data-desktop] .new-session-pill-static { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 8px; color: var(--secondaryLabel); font-size: 13px; cursor: default; }
 html[data-desktop] .new-session-pill-static svg { width: var(--icon-size); height: var(--icon-size); }
 html[data-desktop] .new-session-pill .agent-mark { flex: none; width: 16px; height: 16px; border-radius: 4px; }
-html[data-desktop] .new-session-composer [data-button].send-button { flex: none; width: 32px; height: 32px; padding: 0; border-radius: var(--radius-control); background: var(--accentFill); color: var(--primaryForeground); }
+html[data-desktop] .new-session-composer [data-button].send-button { flex: none; width: 32px; height: 32px; padding: 0; border-radius: 999px; background: var(--accentFill); color: var(--primaryForeground); }
 html[data-desktop] .new-session-composer [data-button].send-button:hover:not(:disabled) { background: var(--accentHover); }
 html[data-desktop] .new-session-composer [data-button].send-button:disabled { background: var(--fillStrong); color: var(--tertiaryLabel); opacity: .6; }
 html[data-desktop] .new-session-composer [data-button].send-button svg { width: 18px; height: 18px; }

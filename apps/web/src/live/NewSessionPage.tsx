@@ -184,55 +184,58 @@ export function NewSessionPage({
                 </DropdownMenu>
               )}
               <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } })} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="toolbar" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">
-                    <FolderOpen data-icon="inline-start" />
-                    <span>{place}</span>
-                    <ChevronDown data-icon="inline-end" className="new-session-caret" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
-                  <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
-                  {projects.slice(0, 8).map((entry) => (
-                    <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>
-                      <span className="new-session-option">
-                        <span>{entry.name}</span>
-                        <small>{entry.cwd}</small>
-                      </span>
-                      {entry.cwd === cwd && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  ))}
-                  {!projects.length && <p className="new-session-menu-empty">还没有项目</p>}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem disabled={!online} onSelect={() => setBrowse(true)}>
-                    <FolderOpen data-icon="inline-start" />浏览电脑上的目录…
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {git.value && (
-                <Button
-                  type="button"
-                  variant="toolbar"
-                  size="sm"
-                  className="new-session-pill"
-                  data-active={worktree || undefined}
-                  aria-pressed={worktree}
-                  aria-label={worktree ? "独立 worktree" : "当前分支"}
-                  disabled={job.busy}
-                  title="基于当前 Git 仓库创建独立工作目录"
-                  onClick={() => setWorktree((value) => !value)}
-                >
-                  <GitBranch data-icon="inline-start" />
-                  <span>{worktree ? "独立 worktree" : "当前分支"}</span>
-                </Button>
-              )}
             </div>
             <Button type="submit" size="icon" className="send-button" disabled={!ready} aria-label="开始会话" title="开始 · Enter（Shift Enter 换行）">
               {job.busy ? <LoaderCircle className="animate-spin" /> : <ArrowUp />}
             </Button>
           </div>
         </form>
+        {/* Where the work happens sits under the box, as in Codex; the box holds who answers and how. */}
+        <div className="new-session-place">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="toolbar" size="sm" className="new-session-pill" disabled={job.busy} title={cwd} aria-label="选择工作目录">
+                <FolderOpen data-icon="inline-start" />
+                <span>{place}</span>
+                <ChevronDown data-icon="inline-end" className="new-session-caret" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
+              <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
+              {projects.slice(0, 8).map((entry) => (
+                <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>
+                  <span className="new-session-option">
+                    <span>{entry.name}</span>
+                    <small>{entry.cwd}</small>
+                  </span>
+                  {entry.cwd === cwd && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              ))}
+              {!projects.length && <p className="new-session-menu-empty">还没有项目</p>}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!online} onSelect={() => setBrowse(true)}>
+                <FolderOpen data-icon="inline-start" />浏览电脑上的目录…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {git.value && (
+            <Button
+              type="button"
+              variant="toolbar"
+              size="sm"
+              className="new-session-pill"
+              data-active={worktree || undefined}
+              aria-pressed={worktree}
+              aria-label={worktree ? "独立 worktree" : "当前分支"}
+              disabled={job.busy}
+              title="基于当前 Git 仓库创建独立工作目录"
+              onClick={() => setWorktree((value) => !value)}
+            >
+              <GitBranch data-icon="inline-start" />
+              <span>{worktree ? "独立 worktree" : "当前分支"}</span>
+            </Button>
+          )}
+        </div>
         <ErrorNotice error={job.error} />
         {unavailableModel && <p className="new-session-note" role="status">此前选择的模型已不可用，将使用 Agent 的默认模型；也可以重新选择。</p>}
         {models?.error && (

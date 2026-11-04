@@ -1404,7 +1404,6 @@
     flex-shrink: 0;
     padding: 12px max(16px, calc((100% - 820px) / 2)) 14px;
     background: var(--plain);
-    border-top: 1px solid var(--separator);
   }
   /* ErrorNotice renders nothing when empty — don't let it add a gap row. */
   .composer-wrap > :empty {
@@ -1463,7 +1462,8 @@
   /* Sizing/scroll the utilities don't cover; padding + font come from the
      textarea's own utility classes. */
   .composer textarea {
-    min-height: 46px;
+    min-height: 52px;
+    padding-inline: 16px;
     max-height: min(240px, 28dvh);
     overflow-y: auto;
     field-sizing: fixed;
@@ -1490,8 +1490,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 2px 8px 8px;
+    padding: 2px 10px 10px;
   }
+  .composer-toolbar [data-button][data-size="icon"] { border-radius: 999px; }
   .composer-toolbar > div {
     display: flex;
     align-items: center;
@@ -1522,8 +1523,8 @@
     gap: 5px;
     max-width: 180px;
     height: 28px;
-    padding: 0 8px;
-    border-radius: var(--radius-control);
+    padding: 0 10px;
+    border-radius: 999px;
     color: var(--secondaryLabel);
     font-size: 13px;
     white-space: nowrap;
@@ -1574,8 +1575,9 @@
   .context-ring[data-level="warm"] circle + circle { stroke: var(--warning); }
   .context-ring[data-level="high"] circle + circle { stroke: var(--danger); }
   .context-ring[data-level="high"] { color: var(--danger); }
+  /* The composer's own round controls (visual-system.md, 输入框). */
   .send-button {
-    border-radius: var(--radius-control);
+    border-radius: 999px;
   }
   .composer-caption {
     display: flex;
