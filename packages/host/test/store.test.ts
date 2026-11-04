@@ -65,8 +65,27 @@ describe("HostStore", () => {
     expect(page.map((s) => s.id)).toEqual(["codex:4", "codex:3"]);
     expect(store.listSessions({ limit: 2, before: page[1]!.updatedAt }).map((s) => s.id)).toEqual(["codex:2", "codex:1"]);
     expect(store.listProjects()).toEqual([
-      { cwd: "/b", name: "b", lastActiveAt: 1004, sessionCount: 2 },
-      { cwd: "/a", name: "a", lastActiveAt: 1002, sessionCount: 3 },
+      { cwd: "/b", name: "b", createdAt: 1000, lastActiveAt: 1004, sessionCount: 2 },
+      { cwd: "/a", name: "a", createdAt: 1000, lastActiveAt: 1002, sessionCount: 3 },
+    ]);
+  });
+
+  it("keeps project creation anchored across activity, worktrees, archives and reloads", () => {
+    store.saveWorktree({ path: "/trees/old", branch: "old", source: "/work/app", sourceCwd: "/work/app", base: "main", createdAt: 100 });
+    store.upsertSession({ ...base, id: "codex:old", nativeId: "old", cwd: "/trees/old", createdAt: 100, updatedAt: 100 });
+    store.upsertSession({ ...base, id: "codex:new", nativeId: "new" });
+    store.upsertSession({ ...base, id: "codex:archived", nativeId: "archived", cwd: "/archived" });
+    store.patchSession("codex:archived", { archived: true });
+    expect(store.listProjects()).toEqual([
+      { cwd: "/work/app", name: "app", createdAt: 100, lastActiveAt: 1000, sessionCount: 2 },
+    ]);
+
+    store.appendEvent("codex:new", { sessionUpdate: "ls_status", state: "running" }, 5000);
+    store.patchSession("codex:old", { archived: true });
+    store.close();
+    store = new HostStore(join(dir, "state.db"));
+    expect(store.listProjects()).toEqual([
+      { cwd: "/work/app", name: "app", createdAt: 100, lastActiveAt: 5000, sessionCount: 1 },
     ]);
   });
 

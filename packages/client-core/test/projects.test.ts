@@ -26,3 +26,22 @@ it("recognizes Windows chat directories while leaving paths and real worktree at
   expect(groups[0]!.sessions).toEqual([session]);
   expect(session.cwd).toBe("/worktrees/one");
 });
+
+it("retains the first project creation across grouped chats and partial session lists", () => {
+  const root = "/Users/me/Documents/Codex";
+  const first = `${root}/2026-10-29/new-chat`;
+  const second = `${root}/2026-10-30/fix-shell`;
+  const summaries = [
+    { ...project(first), createdAt: 100 },
+    { ...project(second), createdAt: 200 },
+    project("/legacy"),
+  ];
+  const sessions = [
+    { id: "recent", cwd: second, createdAt: 400, updatedAt: 900 },
+    { id: "legacy", cwd: "/legacy", createdAt: 150, updatedAt: 800 },
+  ] as SessionSummary[];
+  const creation = (entries: SessionSummary[]) => Object.fromEntries(groupProjects(summaries, entries).map((group) => [group.cwd, group.createdAt]));
+  expect(creation(sessions)).toEqual({ [root]: 100, "/legacy": 150 });
+  expect(creation(sessions.map((session) => ({ ...session, updatedAt: session.updatedAt + 1000 })).reverse()))
+    .toEqual({ [root]: 100, "/legacy": 150 });
+});

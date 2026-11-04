@@ -15,6 +15,7 @@ Colours, radii, type sizes, motion and the shared components follow **[docs/desi
 
 ## Sidebar and layout
 
+- Keep desktop projects, session families and their children ordered by creation time, newest first, with stable key tie-breaks. Activity belongs in the separate 活跃会话 section; progress, responses and attention changes must never reorder existing rows. Project creation comes from its earliest recorded session, including archived history.
 - The desktop sidebar is 264px wide. Navigation rows use the shared `navigation` variant: an actual 40px height, 14px text and 18px icons. Use clear group separation and generous horizontal padding.
 - The main workspace fills its parent below the global header; do not apply `100dvh` to it on narrow screens, which makes the shell overflow and lets focus scrolling hide the header.
 - Sidebar chrome sits below the 56px global header. Use explicit pixels or a shared dimension for this offset: the root font size is 14px, so `top-14` is only 49px.

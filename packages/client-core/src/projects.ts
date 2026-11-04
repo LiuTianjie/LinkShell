@@ -26,6 +26,7 @@ export function groupProjects(projects: ProjectSummary[], sessions: SessionSumma
         branch: location.generated ? undefined : project.branch, paths: [], sessions: [], sessionCount: 0, lastActiveAt: 0 };
       groups.set(key, group);
     }
+    if (project.createdAt !== undefined) group.createdAt = Math.min(group.createdAt ?? project.createdAt, project.createdAt);
     if (!group.paths.includes(project.cwd)) {
       group.paths.push(project.cwd);
       group.sessionCount += project.sessionCount;
@@ -37,7 +38,7 @@ export function groupProjects(projects: ProjectSummary[], sessions: SessionSumma
   for (const session of sessions) {
     if (session.archived) continue;
     const cwd = session.worktree?.source ?? session.cwd;
-    const group = ensure({ cwd, name: cwd.replace(/[\\/]$/, "").split(/[\\/]/).pop() || cwd, sessionCount: 0, lastActiveAt: session.updatedAt });
+    const group = ensure({ cwd, name: cwd.replace(/[\\/]$/, "").split(/[\\/]/).pop() || cwd, sessionCount: 0, createdAt: session.createdAt, lastActiveAt: session.updatedAt });
     group.sessions.push(session);
     group.sessionCount = Math.max(group.sessionCount, group.sessions.length);
   }

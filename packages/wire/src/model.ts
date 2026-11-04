@@ -325,6 +325,8 @@ export type WorktreeEntry = z.infer<typeof worktreeEntrySchema>;
 export const projectSummarySchema = z.object({
   cwd: z.string(),
   name: z.string(),
+  /** Its first recorded session, including archived history. Absent from older hosts. */
+  createdAt: z.number().optional(),
   lastActiveAt: z.number(),
   sessionCount: z.number().int().nonnegative(),
   /** For a git repository: the branch checked out there now (or the abbreviated commit, on a detached HEAD). */

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
-import { groupProjects } from "@linkshell/client-core";
+import type { ProjectGroup } from "@linkshell/client-core";
 import {
   BookOpen,
   Check,
@@ -49,7 +49,8 @@ import {
   opensNewSessions,
 } from "../live/desktop-commands";
 import { screenComputerKey } from "../live/screen-route";
-import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
+import { sessionGroup, sessionNeedsAttention, sessionPreview } from "../live/session-list";
+import { desktopSessionTree, sessionFamilies } from "../live/desktop-session-tree";
 import { compactTime } from "../live/session-time";
 import { readLocal, saveLocal } from "../live/storage";
 import { projectScope, useProjectConnection } from "../live/project-overview";
@@ -103,6 +104,7 @@ const navigationItems: NavigationItem[] = [
 ];
 const PROJECTS_SHOWN = 8;
 const SESSIONS_SHOWN = 5;
+const ACTIVE_SESSIONS_SHOWN = 6;
 
 function connectionLabel(status: string): string {
   return status === "online" ? "已连接" : status === "locked" ? "需要密码" : status === "connecting" ? "连接中" : status === "reconnecting" ? "正在恢复" : "未连接";
@@ -252,7 +254,7 @@ function SessionRow({
   session,
   active,
   navigate,
-  project,
+  detail,
   menuOpen,
   openMenu,
   child,
@@ -261,7 +263,7 @@ function SessionRow({
   session: SessionSummary;
   active: boolean;
   navigate: (view: string) => void;
-  project?: string;
+  detail?: string;
   /** Its right-click menu is showing: the row stays marked, as a native list's does. */
   menuOpen?: boolean;
   openMenu?: (at: { x: number; y: number }) => void;
@@ -300,47 +302,14 @@ function SessionRow({
             </span>
           )}
         </span>
-        {project && <small>{project}</small>}
+        {detail && <small title={detail}>{detail}</small>}
       </span>
       <time dateTime={new Date(session.updatedAt).toISOString()}>{compactTime(session.updatedAt)}</time>
     </button>
   );
 }
 
-interface ProjectGroup { key: string; cwd: string; name: string; generated: boolean; sessions: SessionSummary[]; latest: number; running: number }
-interface Family { root: SessionSummary; children: SessionSummary[]; latest: number }
-
-/**
- * A project's sessions as the Claude app's sidebar nests them: each with the sessions started from
- * it or forked off it, flattened under the oldest ancestor still in the list (an archived parent
- * lets its children stand alone), the family placed by its newest activity.
- */
-function families(sessions: SessionSummary[]): Family[] {
-  const byId = new Map(sessions.map((session) => [session.id, session]));
-  const rootOf = (session: SessionSummary) => {
-    const seen = new Set([session.id]);
-    let current = session;
-    for (;;) {
-      const up = current.parentId ?? current.forkedFrom;
-      const parent = up ? byId.get(up) : undefined;
-      if (!parent || seen.has(parent.id)) return current;
-      seen.add(parent.id);
-      current = parent;
-    }
-  };
-  const byRoot = new Map<string, Family>();
-  for (const session of sessions) {
-    const root = rootOf(session);
-    const family = byRoot.get(root.id) ?? { root, children: [], latest: 0 };
-    if (session !== root) family.children.push(session);
-    family.latest = Math.max(family.latest, session.updatedAt);
-    byRoot.set(root.id, family);
-  }
-  for (const family of byRoot.values()) family.children.sort((a, b) => b.updatedAt - a.updatedAt);
-  return [...byRoot.values()].sort((a, b) => b.latest - a.latest);
-}
-
-/** The sidebar's working set: what waits on you, then each project with its recent sessions. */
+/** Live work stays separate from the project tree's stable creation order. */
 function SessionTree({ connection, view, navigate, background = false, scopeMenu, hideHeading = false }: { connection: Connection; view: string; navigate: (view: string) => void; background?: boolean; scopeMenu?: ReactNode; hideHeading?: boolean }) {
   const sessions = useStore(connection.store, (state) => state.sessions);
   const projects = useStore(connection.store, (state) => state.projects);
@@ -363,16 +332,8 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
     try { saveLocal(foldKey, next); } catch { /* The tree still works without storage. */ }
   };
   const [allProjects, setAllProjects] = useState(false);
-  const { waiting, groups } = useMemo(() => {
-    const live = Object.values(sessions).filter((session) => !session.archived);
-    return {
-      waiting: live.filter(sessionNeedsAttention).sort((a, b) => b.updatedAt - a.updatedAt),
-      groups: groupProjects(projects, live).map((project) => ({ ...project,
-        latest: project.lastActiveAt,
-        running: project.sessions.filter((session) => sessionGroup(session) === "running").length,
-      })),
-    };
-  }, [sessions, projects]);
+  const [allActive, setAllActive] = useState(false);
+  const { active, groups } = useMemo(() => desktopSessionTree(projects, Object.values(sessions)), [sessions, projects]);
   const currentProject = groups.find((group) => group.sessions.some((session) => session.id === view))?.key;
   const isOpen = (group: ProjectGroup, index: number) =>
     open[group.key] ?? (group.key === currentProject || index === 0);
@@ -381,7 +342,9 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
     setOpen(next);
     try { saveLocal(storageKey, next); } catch { /* The tree still works without storage. */ }
   };
-  const shown = allProjects ? groups : groups.slice(0, PROJECTS_SHOWN);
+  // Creation order puts an old project you're working in past the first eight, and an old session
+  // past a project's first five: the one open stays in its place in the tree regardless.
+  const shown = allProjects ? groups : groups.filter((group, index) => index < PROJECTS_SHOWN || group.key === currentProject);
   const dialogs = useDialogs();
   const [menuFor, setMenuFor] = useState<string>();
   const withMenu = (key: string, open: (at: { x: number; y: number }) => Promise<void>) =>
@@ -389,20 +352,25 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   const sessionMenu = (session: SessionSummary) => withMenu(session.id, (at) => openSessionMenu(session, { connection, dialogs, navigate, at }));
   return (
     <>
-      {waiting.length > 0 && (
-        <section className="tree-section" aria-label="等你处理">
-          <h2 className="tree-heading" data-tone="waiting">等你处理<span>{waiting.length}</span></h2>
-          {waiting.slice(0, 6).map((session) => (
+      {active.length > 0 && (
+        <section className="tree-section" aria-label="活跃会话">
+          <h2 className="tree-heading">活跃会话<span>{active.length}</span></h2>
+          {(allActive ? active : active.slice(0, ACTIVE_SESSIONS_SHOWN)).map((session) => (
             <SessionRow
               key={session.id}
               session={session}
               active={view === session.id}
               navigate={navigate}
-              project={baseName(session.worktree?.source ?? session.cwd)}
+              detail={`${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : sessionPreview(session) || "运行中"}`}
               menuOpen={menuFor === session.id}
               openMenu={sessionMenu(session)}
             />
           ))}
+          {active.length > ACTIVE_SESSIONS_SHOWN && (
+            <button type="button" className="tree-more" onClick={() => setAllActive((value) => !value)}>
+              {allActive ? "收起" : `显示其余 ${active.length - ACTIVE_SESSIONS_SHOWN} 个活跃会话`}
+            </button>
+          )}
         </section>
       )}
       <section className="tree-section" aria-label="项目">
@@ -426,8 +394,9 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
         {loaded && !groups.length && <p className="tree-note">还没有会话。按 {shortcutText(desktopShortcuts.newSession)} 开始第一个任务。</p>}
         {shown.map((group, index) => {
           const expanded = isOpen(group, index);
-          const all = families(group.sessions);
-          const list = more[group.key] ? all.slice(0, 40) : all.slice(0, SESSIONS_SHOWN);
+          const all = sessionFamilies(group.sessions);
+          const limit = more[group.key] ? 40 : SESSIONS_SHOWN;
+          const list = all.filter((family, index) => index < limit || family.root.id === view || family.children.some((child) => child.id === view));
           return (
             <div className="tree-project" key={group.key}>
               <div
@@ -477,13 +446,13 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
                       />
                     ));
                   })}
-                  {all.length > SESSIONS_SHOWN && (
+                  {(more[group.key] || Math.min(all.length, 40) > list.length) && (
                     <button
                       type="button"
                       className="tree-more"
                       onClick={() => setMore((state) => ({ ...state, [group.key]: !state[group.key] }))}
                     >
-                      {more[group.key] ? "收起" : `显示其余 ${Math.min(all.length, 40) - SESSIONS_SHOWN} 个`}
+                      {more[group.key] ? "收起" : `显示其余 ${Math.min(all.length, 40) - list.length} 个`}
                     </button>
                   )}
                   {/* The sidebar stops at 40; the project's page has them all. */}
@@ -497,7 +466,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
             </div>
           );
         })}
-        {groups.length > PROJECTS_SHOWN && (
+        {groups.length > PROJECTS_SHOWN && (allProjects || groups.length > shown.length) && (
           <button type="button" className="tree-more tree-more-projects" onClick={() => setAllProjects((value) => !value)}>
             {allProjects ? "收起" : `显示全部 ${groups.length} 个项目`}
           </button>

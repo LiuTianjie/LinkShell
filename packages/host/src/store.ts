@@ -562,20 +562,24 @@ export class HostStore {
 
   listProjects(limit = 50): ProjectSummary[] {
     const rows = this.db
-      .prepare(`SELECT cwd, MAX(updated_at) AS last_active_at, COUNT(*) AS session_count FROM sessions WHERE archived = 0
-        AND NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1') GROUP BY cwd`)
-      .all() as { cwd: string; last_active_at: number; session_count: number }[];
+      .prepare(`SELECT cwd, MIN(created_at) AS created_at,
+        MAX(CASE WHEN archived = 0 THEN updated_at ELSE 0 END) AS last_active_at,
+        SUM(CASE WHEN archived = 0 THEN 1 ELSE 0 END) AS session_count FROM sessions
+        WHERE NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1') GROUP BY cwd`)
+      .all() as { cwd: string; created_at: number; last_active_at: number; session_count: number }[];
     // A session in a worktree belongs to the project the worktree was made from.
     const worktrees = this.listWorktrees();
     const projects = new Map<string, ProjectSummary>();
     for (const row of rows) {
       const cwd = projectOf(row.cwd, worktrees);
-      const project = projects.get(cwd) ?? { cwd, name: basename(cwd) || cwd, lastActiveAt: 0, sessionCount: 0 };
+      const project = projects.get(cwd) ?? { cwd, name: basename(cwd) || cwd, createdAt: row.created_at, lastActiveAt: 0, sessionCount: 0 };
+      // Archiving an old session must not make its project appear newly created.
+      project.createdAt = Math.min(project.createdAt ?? row.created_at, row.created_at);
       project.lastActiveAt = Math.max(project.lastActiveAt, row.last_active_at);
       project.sessionCount += row.session_count;
       projects.set(cwd, project);
     }
-    return [...projects.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, limit);
+    return [...projects.values()].filter((project) => project.sessionCount > 0).sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, limit);
   }
 
   // ── worktrees ─────────────────────────────────────────────────────
