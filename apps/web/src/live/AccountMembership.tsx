@@ -1,24 +1,59 @@
-import { useEffect, useRef } from "react";
-import { ArrowUpRight, LoaderCircle, RefreshCw } from "lucide-react";
-import { ITOOL_MEMBERSHIP_URL, membershipTierLabel } from "@linkshell/client-core";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useRef, type ReactNode } from "react";
+import { LoaderCircle, RefreshCw } from "lucide-react";
+import { ITOOL_MEMBERSHIP_URL, membershipTierLabel, type ProMembership } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
-import { FieldDescription, FieldGroup } from "@/components/ui/field";
-import { Separator } from "@/components/ui/separator";
 import { accountMembership } from "./account";
-import { LoadState, useLoad } from "./common";
+import { useLoad } from "./common";
+import { isDesktop, openDesktopExternal } from "./desktop";
 
-export function AccountMembership({
+function expiry(at: string): string {
+  return new Date(at).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+}
+
+/**
+ * The signed-in account as one row: initial, address, membership on the line under it, and
+ * sign-out at the end. Membership refreshes on its own when the person comes back from paying.
+ */
+export function AccountSummary({
+  email,
   userId,
   disabled,
+  signOutLabel = "退出",
+  onSignOut,
+  membership,
 }: {
-  userId: string;
+  email?: string;
+  userId?: string;
   disabled: boolean;
+  signOutLabel?: string;
+  onSignOut(): void;
+  /** Replaces the live lookup; for previews of each state. */
+  membership?: ReactNode;
 }) {
+  const initial = (email ?? "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div className="flex min-w-0 items-center gap-3" aria-label="iTool 账号">
+      <span
+        className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
+        aria-hidden
+      >
+        {initial}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium" title={email}>{email ?? "已登录"}</span>
+        {membership ?? (userId ? <MembershipLine key={userId} userId={userId} disabled={disabled} /> : null)}
+      </div>
+      <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onSignOut}>
+        {signOutLabel}
+      </Button>
+    </div>
+  );
+}
+
+function MembershipLine({ userId, disabled }: { userId: string; disabled: boolean }) {
   const status = useLoad(() => accountMembership(userId), [userId]);
   const membership = status.value;
-  // After a trip to itool.tech to pay, coming back to this tab is when the answer may change.
+  // After a trip to itool.tech to pay, coming back to this window is when the answer may change.
   const visitedShop = useRef(false);
   const reload = useRef(status.reload);
   reload.current = status.reload;
@@ -37,72 +72,83 @@ export function AccountMembership({
   }, []);
 
   return (
-    <section className="flex min-w-0 flex-col gap-4" aria-label="iTool 会员">
-      <Separator />
-      {status.loading && !membership ? (
-        <LoadState loading />
-      ) : status.error && !membership ? (
-        <Alert variant="destructive">
-          <AlertTitle>暂时无法获取会员状态</AlertTitle>
-          <AlertDescription className="flex flex-col items-start gap-2">
-            <p>{status.error}</p>
-            <Button type="button" variant="outline" onClick={status.reload}>
-              重试
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : membership?.plan === "pro" ? (
-        <Alert variant="success" role="status">
-          <AlertTitle>{membershipTierLabel(membership.tier)}</AlertTitle>
-          <AlertDescription>
-            {membership.expiresAt
-              ? `LinkShell 有效期至 ${new Date(membership.expiresAt).toLocaleDateString(
-                  "zh-CN",
-                  { year: "numeric", month: "long", day: "numeric" },
-                )}`
-              : "会员权益已生效"}
-          </AlertDescription>
-        </Alert>
-      ) : membership ? (
-        <FieldGroup>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-medium">开通 iTool 会员</span>
-            <Badge variant="secondary">普通账户</Badge>
-          </div>
-          <FieldDescription>
-            月度会员 ¥9.9 包含 LinkShell 官方网关和 iTool 网站，年度会员 ¥99 包含全部 iTool 产品。在 itool.tech 用同一账号开通，支付宝付款。
-          </FieldDescription>
-          <Button asChild disabled={disabled}>
-            <a
-              href={ITOOL_MEMBERSHIP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => { visitedShop.current = true; }}
-            >
-              开通 iTool 会员 <ArrowUpRight data-icon="inline-end" aria-hidden />
-            </a>
-          </Button>
-        </FieldGroup>
-      ) : null}
-      {membership && (
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled || status.loading}
-          onClick={status.reload}
-        >
-          {status.loading ? (
-            <LoaderCircle data-icon="inline-start" className="animate-spin" />
-          ) : (
-            <RefreshCw data-icon="inline-start" />
-          )}
-          {membership.plan === "pro" ? "刷新会员状态" : "已付款？刷新会员状态"}
-        </Button>
-      )}
-      {status.error && membership && (
-        <p className="field-hint" role="alert">{status.error}</p>
-      )}
-      <Separator />
-    </section>
+    <MembershipStatus
+      membership={membership}
+      loading={status.loading}
+      disabled={disabled}
+      onRefresh={status.reload}
+      onShop={() => { visitedShop.current = true; }}
+    />
+  );
+}
+
+export function MembershipStatus({
+  membership,
+  loading,
+  disabled,
+  onRefresh,
+  onShop,
+}: {
+  membership?: ProMembership;
+  loading: boolean;
+  disabled: boolean;
+  onRefresh(): void;
+  onShop?(): void;
+}) {
+  if (loading && !membership) return <span className="text-xs text-muted-foreground" role="status">正在查询会员…</span>;
+
+  const refresh = (
+    <button
+      type="button"
+      className="inline-grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+      aria-label="刷新会员状态"
+      title="刷新会员状态"
+      disabled={disabled || loading}
+      onClick={onRefresh}
+    >
+      {loading ? <LoaderCircle className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+    </button>
+  );
+
+  if (!membership) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-destructive" role="alert">
+        会员状态获取失败 {refresh}
+      </span>
+    );
+  }
+
+  if (membership.plan === "pro") {
+    return (
+      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+        <span className="truncate">
+          {membershipTierLabel(membership.tier)}
+          {membership.expiresAt ? ` · ${expiry(membership.expiresAt)}到期` : ""}
+        </span>
+        {refresh}
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+      <span>未开通会员 ·</span>
+      <a
+        className="text-link hover:underline"
+        href={ITOOL_MEMBERSHIP_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(event) => {
+          onShop?.();
+          if (isDesktop) {
+            event.preventDefault();
+            openDesktopExternal(ITOOL_MEMBERSHIP_URL);
+          }
+        }}
+      >
+        开通
+      </a>
+      {refresh}
+    </span>
   );
 }

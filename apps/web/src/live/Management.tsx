@@ -538,8 +538,8 @@ function Membership({ state }: { state: ManagementState }) {
       <SettingRow
         title="会员"
         detail={membership.kind === "pro"
-          ? `LinkShell 有效期至 ${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}`
-          : membership.kind === "free" ? "开通 iTool 会员后，可通过官方网关在任何网络连接" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
+          ? `${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}到期`
+          : membership.kind === "free" ? "官方网关需要 iTool 会员" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
       >
         {/* Membership is not a state: a neutral badge. */}
         {membership.kind === "pro" ? <Badge variant="secondary">{membershipTierLabel(membership.tier)}</Badge> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
@@ -557,7 +557,7 @@ function Membership({ state }: { state: ManagementState }) {
       {membership.kind === "free" && (
         <SettingRow
           title="开通 iTool 会员"
-          detail="月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。在浏览器里用同一账号付款，回到这里会自动刷新。"
+          detail="月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品"
         >
           <Button size="sm" variant="secondary" onClick={openMembershipPage}>开通 iTool 会员</Button>
         </SettingRow>

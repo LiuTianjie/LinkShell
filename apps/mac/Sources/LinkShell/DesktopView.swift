@@ -425,7 +425,7 @@ struct DesktopView: View {
           // A membership is a neutral badge: colour is kept for what can be done and for state.
           Text(tier.label).fontWeight(.medium).foregroundStyle(DesktopStyle.primary).padding(.horizontal, 8).frame(height: 20)
             .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
-          Text("有效期至 \(expiresAt.formatted(date: .abbreviated, time: .omitted))").foregroundStyle(DesktopStyle.secondary)
+          Text("\(expiresAt.formatted(date: .abbreviated, time: .omitted)) 到期").foregroundStyle(DesktopStyle.secondary)
         case .free:
           Text("普通账户").foregroundStyle(DesktopStyle.secondary)
         default:
@@ -442,7 +442,7 @@ struct DesktopView: View {
         Button("开通 iTool 会员") { model.openMembershipPage() }
           .buttonStyle(DesktopButtonStyle(.primary))
           .disabled(model.busy || model.preview)
-        Text("月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。在浏览器里用同一账号付款，回到这里会自动刷新。")
+        Text("月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。")
           .font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }

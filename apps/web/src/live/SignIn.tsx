@@ -190,10 +190,10 @@ export function SignIn(props: SignInProps) {
         </button>
       </form>
       <footer className="signin-footer">
-        <p>没有账号？<ExternalLink href={SIGN_UP_URL}>注册 iTool 账号</ExternalLink></p>
         <p>
-          已在浏览器登录 iTool？
-          <button type="button" className="signin-link" disabled={blocked} onClick={onBrowser}>在浏览器中授权</button>
+          <ExternalLink href={SIGN_UP_URL}>注册账号</ExternalLink>
+          <span aria-hidden> · </span>
+          <button type="button" className="signin-link" disabled={blocked} onClick={onBrowser}>用浏览器登录</button>
         </p>
       </footer>
     </div>
