@@ -76,9 +76,9 @@ export function Welcome() {
 
       <View style={{ gap: 10 }}>
         <Button title="扫码添加电脑" variant="primary" size="large" wide onPress={() => router.push("/pair")} />
-        <Button title={account ? "账号与电脑" : "登录 Pro 账号"} variant="tonal" size="large" wide onPress={() => router.push("/account")} />
+        <Button title={account ? "账号与电脑" : "登录 iTool 账号"} variant="tonal" size="large" wide onPress={() => router.push("/account")} />
         <Text style={[type.footnote, { color: colors.tertiaryLabel, textAlign: "center", paddingHorizontal: 12 }]}>
-          扫码：打开桌面版的配对码，或在电脑运行 linkshell pair。Pro：桌面版或 CLI 登录同一账号后，电脑自动出现。
+          扫码：打开桌面版的配对码，或在电脑运行 linkshell pair。会员：桌面版或 CLI 登录同一账号后，电脑自动出现。
         </Text>
       </View>
     </View>

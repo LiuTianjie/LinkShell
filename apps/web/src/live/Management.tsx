@@ -19,7 +19,7 @@ import {
   Smartphone,
   type LucideIcon,
 } from "lucide-react";
-import { PRO_CODE_SHOP_URL } from "@linkshell/client-core";
+import { membershipTierLabel } from "@linkshell/client-core";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,7 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { desktopInvoke, isWindowsDesktop, openDesktopExternal, reportDesktopError, revealOnDesktop, THIS_COMPUTER_SPACED, THIS_COMPUTER, REVEAL_IN_FILES } from "./desktop";
+import { desktopInvoke, isWindowsDesktop, reportDesktopError, revealOnDesktop, THIS_COMPUTER_SPACED, THIS_COMPUTER, REVEAL_IN_FILES } from "./desktop";
 import { desktopModeShortcuts, shortcutText } from "./desktop-commands";
 import { useDesktopAppearance, type Appearance } from "./desktop-appearance";
 import {
@@ -73,7 +73,7 @@ import {
   openSetup,
   pollManagement,
   readLog,
-  redeemPro,
+  openMembershipPage,
   refreshAccount,
   refreshManagement,
   serviceAction,
@@ -313,7 +313,7 @@ function Overview({ facts, confirm, navigate }: { facts: Facts; confirm: (action
     ?? (!healthy ? "本机服务运行后可用"
       : gateway?.status === "online" ? "不在同一网络也能连上"
       : gateway?.status === "connecting" ? "正在连接网关…"
-      : signedIn ? "只能在同一网络内连接；可接入官方网关（需要 Pro）" : "只能在同一网络内连接；登录后可接入官方网关");
+      : signedIn ? "只能在同一网络内连接；可接入官方网关（需要 iTool 会员）" : "只能在同一网络内连接；登录后可接入官方网关");
   const activity = state.activity.slice(0, 5);
   const [choosingGateway, setChoosingGateway] = useState(false);
   return (
@@ -394,7 +394,7 @@ function Account({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
       <div className="management-rows">
         <SettingRow
           title={signedIn ? <span className="management-selectable">{account?.email ?? account?.userId}</span> : "未登录"}
-          detail={signedIn ? `手机登录同一账号，即可连接${THIS_COMPUTER}` : `登录后，在手机上用同一账号连接${THIS_COMPUTER}。官方网关需要 Pro；自建网关仍可配对使用。`}
+          detail={signedIn ? `手机登录同一账号，即可连接${THIS_COMPUTER}` : `登录后，在手机上用同一账号连接${THIS_COMPUTER}。官方网关需要 iTool 会员；自建网关仍可配对使用。`}
         >
           {state.signingIn ? (
             <>
@@ -410,9 +410,6 @@ function Account({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
         {signedIn && <Membership state={state} />}
       </div>
       {state.accountMessage && <Note>{state.accountMessage}</Note>}
-      {signedIn && state.redemptionMessage && (
-        <Note tone={state.redemptionIsError ? "warning" : "success"} role="status">{state.redemptionMessage}</Note>
-      )}
       <SignInDialog open={signingIn && !signedIn} close={() => setSigningIn(false)} />
     </Group>
   );
@@ -425,7 +422,7 @@ const sameGateway = (a: string, b: string) => {
 
 /**
  * Where phones reach this Mac from outside its network: the official gateway (an account finds
- * it, Pro), one's own (`linkshell gateway` or the Docker image; phones pair by code), or none.
+ * it, an iTool membership), one's own (`linkshell gateway` or the Docker image; phones pair by code), or none.
  */
 function GatewayDialog({ open, close, signedIn }: { open: boolean; close: () => void; signedIn: boolean }) {
   const state = useStore(management);
@@ -445,7 +442,7 @@ function GatewayDialog({ open, close, signedIn }: { open: boolean; close: () => 
     if (await setGateway(kind === "own" ? { kind, url: url.trim() } : { kind })) close();
   };
   const options: { value: GatewayChoice["kind"]; title: string; detail: string; disabled?: boolean }[] = [
-    { value: "official", title: "官方网关", detail: signedIn ? `手机登录同一账号即可发现${THIS_COMPUTER}，需要 Pro` : "登录账号后可用", disabled: !signedIn },
+    { value: "official", title: "官方网关", detail: signedIn ? `手机登录同一账号即可发现${THIS_COMPUTER}，需要 iTool 会员` : "登录账号后可用", disabled: !signedIn },
     { value: "own", title: "自建网关", detail: "用 linkshell gateway 或 Docker 镜像部署，手机扫码或输入配对码连接" },
     { value: "off", title: "关闭", detail: "只在同一网络内连接" },
   ];
@@ -516,7 +513,7 @@ function SignInDialog({ open, close }: { open: boolean; close: () => void }) {
       >
         <DialogHeader>
           <DialogTitle>登录 iTool 账号</DialogTitle>
-          <DialogDescription>手机登录同一账号，即可通过官方网关连接{THIS_COMPUTER}（需要 Pro）。</DialogDescription>
+          <DialogDescription>手机登录同一账号，即可通过官方网关连接{THIS_COMPUTER}（需要 iTool 会员）。</DialogDescription>
         </DialogHeader>
         <SignIn
           pending={state.signingIn ? state.signInMethod : undefined}
@@ -536,18 +533,16 @@ function SignInDialog({ open, close }: { open: boolean; close: () => void }) {
 
 function Membership({ state }: { state: ManagementState }) {
   const membership = membershipOf(state.snapshot?.account);
-  const [code, setCode] = useState("");
-  const redeem = async () => { if (await redeemPro(code)) setCode(""); };
   return (
     <>
       <SettingRow
         title="会员"
         detail={membership.kind === "pro"
-          ? `有效期至 ${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}`
-          : membership.kind === "free" ? "兑换 Pro 后，可通过官方网关在任何网络连接" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
+          ? `LinkShell 有效期至 ${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}`
+          : membership.kind === "free" ? "开通 iTool 会员后，可通过官方网关在任何网络连接" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
       >
         {/* Membership is not a state: a neutral badge. */}
-        {membership.kind === "pro" ? <Badge variant="secondary">Pro</Badge> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
+        {membership.kind === "pro" ? <Badge variant="secondary">{membershipTierLabel(membership.tier)}</Badge> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
         {state.checkingMembership
           ? <LoaderCircle className="animate-spin management-muted" size={16} aria-hidden />
           : (
@@ -561,21 +556,10 @@ function Membership({ state }: { state: ManagementState }) {
       </SettingRow>
       {membership.kind === "free" && (
         <SettingRow
-          title="兑换 Pro"
-          detail={<>没有激活码？<Button variant="link" size="plain" onClick={() => openDesktopExternal(PRO_CODE_SHOP_URL)}>前往链动小铺</Button></>}
+          title="开通 iTool 会员"
+          detail="月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。在浏览器里用同一账号付款，回到这里会自动刷新。"
         >
-          <form className="management-inline-form" onSubmit={(event) => { event.preventDefault(); void redeem(); }}>
-            <Input
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="输入激活码"
-              aria-label="Pro 激活码"
-              autoComplete="off"
-              spellCheck={false}
-              disabled={state.busy}
-            />
-            <Button type="submit" size="sm" variant="secondary" disabled={state.busy || !code.trim()}>{state.redeeming ? "正在兑换…" : "兑换"}</Button>
-          </form>
+          <Button size="sm" variant="secondary" onClick={openMembershipPage}>开通 iTool 会员</Button>
         </SettingRow>
       )}
     </>
@@ -589,7 +573,7 @@ function Devices({ facts }: { facts: Facts }) {
     <>
       <Group title="添加设备">
         <ManagementPairing devices={devices} disabled={state.busy} />
-        <Note>用同一账号登录的手机会自动发现{THIS_COMPUTER}，配对不需要账号。不登录配对需要自建网关；官方网关需要 Pro。</Note>
+        <Note>用同一账号登录的手机会自动发现{THIS_COMPUTER}，配对不需要账号。不登录配对需要自建网关；官方网关需要 iTool 会员。</Note>
       </Group>
       <Group title="已配对设备" trailing={devices.length ? `${devices.length} 台` : undefined}>
         <div className="management-rows">

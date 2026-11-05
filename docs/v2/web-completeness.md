@@ -49,6 +49,8 @@ Web 采用 Linear 产品界面的视觉方向，使用现有 shadcn/ui（Radix�
 
 此功能已通过网页构建、lint、67 项测试及模拟接口的浏览器状态验证，包含未登录、普通/Pro 账户、无效码、重复提交、兑换成功、刷新失败和请求中切换账号；检查浅色/深色桌面与 375px 窄屏。没有消耗真实激活码，也没有验证生产 OAuth 或线上兑换。上线依赖 iTool 同步部署 Bearer 鉴权和无凭据 CORS 支持；当前代码完成不代表该后端已部署。
 
+2026-11-05 激活码兑换已移除：账户区改为显示 iTool 会员档位与有效期，普通账户看到「开通 iTool 会员」按钮（打开 itool.tech/pro?from=linkshell）和刷新按钮，会员读取改用 `itool_entitlement('linkshell')`。见[会员](pro-redemption.md)。
+
 2026-10-28 桌面版新增登录面板（`SignIn.tsx`，本机管理的账号行与工作台「连接你的电脑」共用）：GitHub/Google、邮箱密码、忘记密码与注册跳转 itool.tech、「在浏览器中授权」沿用 `linkshell login` 流程。令牌只经 CLI 写入 `~/.linkshell/auth.json`，页面不持有 refresh token。GitHub/Google 走 PKCE，浏览器回到 `http://127.0.0.1:<端口>/linkshell/callback`，等待 5 分钟。邮箱密码与 PKCE 交换先走 `https://itool.tech/api/linkshell/auth`，不可达或 404 时直连 Supabase。已通过 CLI/Web 单元测试与静态渲染的明暗截图；没有真实登录，没有在 Electron 窗口里操作，本文撰写时 itool-tech 仓库还没有 `/api/linkshell/auth`（另行实现），在它上线前会回退直连。
 
 2026-10-30 修复普通网页 Google/GitHub 登录：点击时同步打开独立窗口，使用固定回调；原标签页按该次 Supabase `flowId` 交换 PKCE code。随机同源 BroadcastChannel 绑定每个窗口，即使提供商的 COOP 移除 opener 仍可返回。回调先清除地址栏 code，不启动工作台、不抢占连接。等待支持取消和五分钟期限，实际账号 HTTP 请求有三十秒中止期限；关闭旧登录面板后，其迟到结果不会关闭新面板。官方网关精确白名单 `https://gateway.itool.tech/?linkshell-auth-callback=1` 已追加，原九条及 Site URL 保留。真实 Google 授权取消的 HTTP 对照验证该 URL 返回 gateway，而根路径和错误 marker 仍被拒绝。Chrome 中本地代码通过实际 Google 已有登录态完成授权、PKCE 交换、弹窗关闭、账号电脑在线发现以及刷新后登录续存；未输入密码或操作账号选择。Web 构建、lint 和 237 项测试通过（含 11 项新增 OAuth 生命周期用例），独立 Review 通过。该证据验证本地新代码与生产认证/网关链路；官方网页新代码尚未部署，GitHub 成功授权与长时间 token 续期未在此次实测。

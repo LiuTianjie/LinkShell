@@ -79,7 +79,7 @@ export function Connect({ close }: { close: () => void }) {
       <SignIn
         {...signIn}
         disabled={blocked}
-        description="使用 iTool 账号。电脑接入官方网关需要 Pro。"
+        description="使用 iTool 账号。电脑接入官方网关需要 iTool 会员。"
       />
     )
   ) : state.account ? (
@@ -88,7 +88,7 @@ export function Connect({ close }: { close: () => void }) {
         <AlertTitle className="break-words">{state.account}</AlertTitle>
         <AlertDescription>
           在电脑运行 <code>linkshell login</code>
-          ，使用同一账号即可发现电脑。电脑接入官方网关需要 Pro 订阅。
+          ，使用同一账号即可发现电脑。电脑接入官方网关需要 iTool 会员。
         </AlertDescription>
       </Alert>
       {state.accountUserId && (

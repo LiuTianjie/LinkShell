@@ -29,7 +29,6 @@ vi.mock("@linkshell/client-core", () => ({
   pairByCode: vi.fn(),
   pairByLink: vi.fn(),
   fetchProMembership: vi.fn(),
-  redeemProCode: vi.fn(),
 }));
 vi.mock("@linkshell/wire", () => ({
   RELAY_PATH: "/v2/connect",

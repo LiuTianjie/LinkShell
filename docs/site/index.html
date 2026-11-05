@@ -124,10 +124,10 @@
         },
         {
           "@type": "Offer",
-          "name": "Pro (monthly)",
+          "name": "iTool membership (monthly)",
           "price": "9.9",
           "priceCurrency": "CNY",
-          "url": "https://linkshell.itool.tech/pricing/",
+          "url": "https://itool.tech/pro?from=linkshell",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
             "price": "9.9",
@@ -137,10 +137,10 @@
         },
         {
           "@type": "Offer",
-          "name": "Pro (yearly)",
+          "name": "iTool membership (yearly)",
           "price": "99",
           "priceCurrency": "CNY",
-          "url": "https://linkshell.itool.tech/pricing/",
+          "url": "https://itool.tech/pro?from=linkshell",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
             "price": "99",
@@ -925,7 +925,7 @@
           </div>
           <div class="step">
             <h3>连接手机</h3>
-            <p>Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</p>
+            <p>iTool 会员：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</p>
             <pre><code><span class="cm"># Pro</span>
 <span class="pr">$ </span>linkshell login
 <span class="cm"># 自建网关</span>
@@ -952,7 +952,7 @@
           <dl class="more">
             <div><dt>你的电脑</dt><dd>电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。</dd></div>
             <div><dt>网关</dt><dd>只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</dd></div>
-            <div><dt>官方或自建</dt><dd>Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</dd></div>
+            <div><dt>官方或自建</dt><dd>iTool 会员用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</dd></div>
             <div><dt>屏幕和预览</dt><dd>能直连时点对点传输，网关只负责牵线；打不通时，屏幕视频经官方 TURN 中继，仍是端到端加密。</dd></div>
           </dl>
         </div>
@@ -1172,10 +1172,8 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: Liandong Xiaopu codes activate the shared Pro membership in LinkShell or iTool. -->
+  <!-- Pricing: one iTool membership, bought on itool.tech; the toggle only shows the two tiers. -->
   <script>
-    const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
-    const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
     let pricingCycle = 'monthly';
 
     function setPricingCycle(cycle) {
@@ -1185,7 +1183,6 @@
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      document.getElementById('buy-link').href = cycle === 'yearly' ? BUY_YEARLY : BUY_MONTHLY;
     }
 
     function initPricing() {

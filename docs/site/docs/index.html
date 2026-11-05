@@ -677,7 +677,7 @@
         <p>要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</p>
 
         <h2 id="d-desktop">Mac 桌面版与更新</h2>
-        <p>总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 Pro。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</p>
+        <p>总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 iTool 会员。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</p>
         <p>App、CLI、Host 和 Node 整体更新。自动检查只检查版本，安装需确认，可能中断正在运行的任务；完成后恢复本 App 托管的 Host，保留机器身份、配对和历史。已有 npm / Homebrew 安装不会被覆盖。设置可选安装终端命令，该命令随 App 更新。</p>
         <p>本机数据默认在 <code>~/.linkshell</code>，不在 App 内。完整说明见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">桌面版使用说明</a>。</p>
 
@@ -691,7 +691,7 @@
         <h3>Pro：官方网关</h3>
         <pre><code><span class="pr">$ </span>linkshell login
 <span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
-        <p>在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 Pro</a>。</p>
+        <p>在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 iTool 会员</a>。</p>
         <h3>自建网关：配对</h3>
         <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
 <span class="pr">$ </span>linkshell pair</code></pre>
@@ -961,10 +961,8 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: Liandong Xiaopu codes activate the shared Pro membership in LinkShell or iTool. -->
+  <!-- Pricing: one iTool membership, bought on itool.tech; the toggle only shows the two tiers. -->
   <script>
-    const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
-    const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
     let pricingCycle = 'monthly';
 
     function setPricingCycle(cycle) {
@@ -974,7 +972,6 @@
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      document.getElementById('buy-link').href = cycle === 'yearly' ? BUY_YEARLY : BUY_MONTHLY;
     }
 
     function initPricing() {

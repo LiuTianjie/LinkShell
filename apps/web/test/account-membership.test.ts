@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountMembership, redeemAccountProCode } from "../src/live/account";
+import { accountMembership } from "../src/live/account";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   refreshSession: vi.fn(),
   fetchProMembership: vi.fn(),
-  redeemProCode: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -18,7 +17,6 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 vi.mock("@linkshell/client-core", () => ({
   fetchProMembership: mocks.fetchProMembership,
-  redeemProCode: mocks.redeemProCode,
 }));
 
 const now = Date.parse("2026-10-19T00:00:00Z");
@@ -60,13 +58,6 @@ const operations = [
         userId: "user-a",
       },
     ],
-  },
-  {
-    name: "redemption",
-    run: () => redeemAccountProCode("user-a", "TEST-CODE"),
-    request: mocks.redeemProCode,
-    response: { expiresAt: "2027-10-19T00:00:00Z", idempotent: false },
-    requestArguments: (accessToken: string) => [accessToken, "TEST-CODE"],
   },
 ];
 

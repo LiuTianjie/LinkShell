@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchProMembership, redeemProCode } from "@linkshell/client-core";
+import { fetchProMembership } from "@linkshell/client-core";
 import { desktopAccount, isDesktop } from "./desktop";
 
 // The same public Supabase project as the CLI and mobile app.
@@ -97,14 +97,4 @@ export async function accountMembership(expectedUserId: string) {
   });
   await currentAccountSession(expectedUserId);
   return membership;
-}
-
-export async function redeemAccountProCode(
-  expectedUserId: string,
-  code: string,
-) {
-  const accessToken = await boundAccountToken(expectedUserId);
-  const redemption = await redeemProCode(accessToken, code);
-  await currentAccountSession(expectedUserId);
-  return redemption;
 }

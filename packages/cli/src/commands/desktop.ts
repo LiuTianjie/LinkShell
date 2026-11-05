@@ -12,7 +12,7 @@ import { prepareDesktopUpdate, recoverDesktopUpdate, stopDesktopUpdateHost } fro
 import { sep, join } from "node:path";
 import { ensureHostRunning, silenceSqliteWarning, withRunningHost } from "./host.js";
 import { linkshellDir, readHostLaunch, readHostOwner, readPid, stopDaemonAndWait } from "../utils/daemon.js";
-import { cachedMembership, redeemDesktopPro, refreshMembership } from "../pro-membership.js";
+import { cachedMembership, refreshMembership } from "../pro-membership.js";
 import { accessPasswordEnabled, applyAccessPassword } from "./password.js";
 
 export function installationSource(path: string): "homebrew" | "npm" {
@@ -104,52 +104,14 @@ async function credentialsInput(input: AsyncIterable<string | Buffer>): Promise<
   throw new Error("请输入邮箱和密码。");
 }
 
-async function redemptionInput(input: AsyncIterable<string | Buffer>): Promise<{ code: string; userId: string }> {
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of input) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    length += buffer.length;
-    if (length > 4096) throw new Error("激活码内容过长，请检查后重试");
-    chunks.push(buffer);
-  }
-  try {
-    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (typeof value?.code === "string" && typeof value?.userId === "string" && value.userId.trim()) return { code: value.code, userId: value.userId };
-  } catch { /* Never echo an input that contains the activation code. */ }
-  throw new Error("激活码请求无效，请刷新账号后重试");
-}
-
 export async function runDesktop(version: string, action: string, input: AsyncIterable<string | Buffer> = process.stdin, options: { provider?: string } = {}): Promise<void> {
   silenceSqliteWarning();
   try {
-    if (action === "redeem-pro") {
-      const { code, userId } = await redemptionInput(input);
-      const result = await redeemDesktopPro(code, userId);
-      if (loadAuth()?.userId === userId) {
-        try {
-          const gateway = await refreshGateway(15_000);
-          if (gateway && gateway.status !== "online" && gateway.status !== "off") result.accountWarning ??= "兑换已成功，网关尚未连接，请稍后重新连接";
-        } catch {
-          result.accountWarning ??= "兑换已成功，本机服务暂未刷新，请稍后重新连接网关";
-        }
-      }
-      // A host query failing cannot turn a confirmed redemption into a failed redemption.
-      const snapshot = await desktopSnapshot(version).catch(() => {
-        result.accountWarning ??= "兑换已成功，本机服务状态暂时无法读取，请稍后刷新";
-        return { schema: 1, cliVersion: version, status: "unknown", account: desktopAccount() };
-      });
-      snapshot.account = desktopAccount();
-      if (snapshot.account.state === "signed-in" && "userId" in snapshot.account && snapshot.account.userId === userId) Object.assign(snapshot.account, { plan: "pro", planExpiresAt: result.redemption.planExpiresAt });
-      else result.accountWarning = "兑换已成功，登录账号已变更，请切回兑换时的账号查看会员状态";
-      process.stdout.write(`${JSON.stringify({ ...snapshot, ...result })}\n`);
-      return;
-    }
     if (action === "account-refresh") await followAccountGateway((await refreshMembership()).plan);
     else if (action === "pair" || action === "pair-qr") {
       const result = await withRunningHost(async client => {
         const gateway = await client.call("gateway.status", {});
-        if (gateway.status !== "online") throw new Error("请先连接网关。官方网关需要登录 Pro 账号；自建网关可以免登录配对。");
+        if (gateway.status !== "online") throw new Error("请先连接网关。官方网关需要登录 iTool 会员账号；自建网关可以免登录配对。");
         return client.call("pairing.start", {}, 20_000);
       });
       if (!result) throw new Error("请先启动本机服务");

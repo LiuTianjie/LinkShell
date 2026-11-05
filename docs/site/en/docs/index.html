@@ -677,7 +677,7 @@
         <p>Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</p>
 
         <h2 id="d-desktop">Mac desktop app and updates</h2>
-        <p>Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires Pro. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</p>
+        <p>Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires an iTool membership. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</p>
         <p>The app, CLI, Host and Node update together. Automatic checks only check versions; installation requires confirmation and may interrupt active work. The app restores its owned Host and preserves identity, pairings and history. Existing npm / Homebrew installations are not overwritten. Settings can install an optional terminal command that follows app updates.</p>
         <p>Local data stays in <code>~/.linkshell</code>, outside the app. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">desktop guide</a>.</p>
 
@@ -691,7 +691,7 @@
         <h3>Pro: the official gateway</h3>
         <pre><code><span class="pr">$ </span>linkshell login
 <span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
-        <p>Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="en/pricing/">About Pro</a>.</p>
+        <p>Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="en/pricing/">About the iTool membership</a>.</p>
         <h3>Your own gateway: pairing</h3>
         <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
 <span class="pr">$ </span>linkshell pair</code></pre>
@@ -961,10 +961,8 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: Liandong Xiaopu codes activate the shared Pro membership in LinkShell or iTool. -->
+  <!-- Pricing: one iTool membership, bought on itool.tech; the toggle only shows the two tiers. -->
   <script>
-    const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
-    const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
     let pricingCycle = 'monthly';
 
     function setPricingCycle(cycle) {
@@ -974,7 +972,6 @@
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      document.getElementById('buy-link').href = cycle === 'yearly' ? BUY_YEARLY : BUY_MONTHLY;
     }
 
     function initPricing() {

@@ -750,7 +750,7 @@
           </div>
           <div class="step">
             <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span></h3>
-            <p><span lang="zh">Pro：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Pro: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
+            <p><span lang="zh">iTool 会员：电脑上登录，App 里登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">iTool members: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span></p>
             <pre><code><span class="cm"># Pro</span>
 <span class="pr">$ </span>linkshell login
 <span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span></span>
@@ -777,7 +777,7 @@
           <dl class="more">
             <div><dt><span lang="zh">你的电脑</span><span lang="en">Your computer</span></dt><dd><span lang="zh">电脑上的 LinkShell 持有所有会话，保存历史，决定此刻由谁来驱动。</span><span lang="en">LinkShell on your computer holds every session, keeps its history and decides who is driving right now.</span></dd></div>
             <div><dt><span lang="zh">网关</span><span lang="en">The gateway</span></dt><dd><span lang="zh">只转发密文，官方网关和自建网关都看不到你的代码和对话。配对一次长期有效。</span><span lang="en">Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</span></dd></div>
-            <div><dt><span lang="zh">官方或自建</span><span lang="en">Official or your own</span></dt><dd><span lang="zh">Pro 用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">Pro uses the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></dd></div>
+            <div><dt><span lang="zh">官方或自建</span><span lang="en">Official or your own</span></dt><dd><span lang="zh">iTool 会员用官方网关，登录即用；也可以用一条命令或 Docker 自建网关，完全免费。</span><span lang="en">iTool members use the official gateway: sign in and go. Or run your own with one command or Docker, free.</span></dd></div>
             <div><dt><span lang="zh">屏幕和预览</span><span lang="en">Screen and previews</span></dt><dd><span lang="zh">能直连时点对点传输，网关只负责牵线；打不通时，屏幕视频经官方 TURN 中继，仍是端到端加密。</span><span lang="en">They go peer to peer when they can; the gateway only introduces the two sides. Where they can't, the screen's video goes through the official TURN relay, still encrypted end to end.</span></dd></div>
           </dl>
         </div>
@@ -855,7 +855,7 @@
         <p><span lang="zh">要用的 Agent 需要你自己安装并在电脑上登录好（比如 <code>claude</code>、<code>codex login</code>、<code>gemini</code>、<code>copilot login</code>）。手机 App：<a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>。</span><span lang="en">Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</span></p>
 
         <h2 id="d-desktop"><span lang="zh">Mac 桌面版与更新</span><span lang="en">Mac desktop app and updates</span></h2>
-        <p><span lang="zh">总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 Pro。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</span><span lang="en">Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires Pro. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</span></p>
+        <p><span lang="zh">总览和设置提供“登录 / 注册”、当前账号和退出登录。登录会打开系统浏览器，完成后自动刷新；官方网关需要 iTool 会员。账号已登录与网关在线是两个独立状态。关闭窗口后 App 留在菜单栏，退出界面不会停止后台服务。</span><span lang="en">Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires an iTool membership. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</span></p>
         <p><span lang="zh">App、CLI、Host 和 Node 整体更新。自动检查只检查版本，安装需确认，可能中断正在运行的任务；完成后恢复本 App 托管的 Host，保留机器身份、配对和历史。已有 npm / Homebrew 安装不会被覆盖。设置可选安装终端命令，该命令随 App 更新。</span><span lang="en">The app, CLI, Host and Node update together. Automatic checks only check versions; installation requires confirmation and may interrupt active work. The app restores its owned Host and preserves identity, pairings and history. Existing npm / Homebrew installations are not overwritten. Settings can install an optional terminal command that follows app updates.</span></p>
         <p><span lang="zh">本机数据默认在 <code>~/.linkshell</code>，不在 App 内。完整说明见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">桌面版使用说明</a>。</span><span lang="en">Local data stays in <code>~/.linkshell</code>, outside the app. See the <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/mac-desktop.md">desktop guide</a>.</span></p>
 
@@ -869,7 +869,7 @@
         <h3><span lang="zh">Pro：官方网关</span><span lang="en">Pro: the official gateway</span></h3>
         <pre><code><span class="pr">$ </span>linkshell login
 <span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
-        <p><span lang="zh">在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 Pro</a>。</span><span lang="en">Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="pricing/">About Pro</a>.</span></p>
+        <p><span lang="zh">在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码。<a href="pricing/">了解 iTool 会员</a>。</span><span lang="en">Sign in to the app with the same account and the computer shows up under Computers; no QR code needed. <a href="pricing/">About the iTool membership</a>.</span></p>
         <h3><span lang="zh">自建网关：配对</span><span lang="en">Your own gateway: pairing</span></h3>
         <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
 <span class="pr">$ </span>linkshell pair</code></pre>
@@ -969,7 +969,7 @@
     <div class="wrap pricing">
       <div class="text">
         <h1><span lang="zh">所有功能都免费</span><span lang="en">Every feature is free</span></h1>
-        <p class="lead"><span lang="zh">Pro 只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">Pro adds one thing: the official gateway, so you don't run a server.</span></p>
+        <p class="lead"><span lang="zh">iTool 会员只多一件事：用官方网关，不用自己部署服务器。</span><span lang="en">An iTool membership adds one thing: the official gateway, so you don't run a server.</span></p>
       </div>
 
       <div class="plans">
@@ -987,13 +987,13 @@
       </section>
 
       <section class="plan pro">
-        <h2>Pro</h2>
+        <h2><span lang="zh">iTool 会员</span><span lang="en">iTool membership</span></h2>
         <div id="price-monthly" class="price">¥9.9<small><span lang="zh">/月</span><span lang="en">/mo</span></small></div>
         <div id="price-yearly" class="price" style="display:none">¥99<small><span lang="zh">/年</span><span lang="en">/yr</span></small></div>
-        <p class="per"><span id="price-alt-monthly"><span lang="zh">或年付 ¥99</span><span lang="en">or ¥99 billed yearly</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">相当于 ¥8.25/月</span><span lang="en">works out to ¥8.25/month</span></span></p>
+        <p class="per"><span id="price-alt-monthly"><span lang="zh">月度会员：iTool 网站 + LinkShell</span><span lang="en">Monthly: the iTool site + LinkShell</span></span><span id="price-alt-yearly" style="display:none"><span lang="zh">年度会员：全部 iTool 产品</span><span lang="en">Yearly: every iTool product</span></span></p>
         <div class="cycle">
-          <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月付</span><span lang="en">Monthly</span></button>
-          <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年付</span><span lang="en">Yearly</span></button>
+          <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')"><span lang="zh">月度</span><span lang="en">Monthly</span></button>
+          <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')"><span lang="zh">年度</span><span lang="en">Yearly</span></button>
         </div>
         <ul>
           <li><span lang="zh">Free 的全部功能</span><span lang="en">Everything in Free</span></li>
@@ -1004,13 +1004,12 @@
 
         <div id="pricing-buy">
           <ol>
-            <li><span lang="zh">在链动小铺买一张激活码，微信或支付宝付款。</span><span lang="en">Buy an activation code on Liandong Xiaopu, with WeChat Pay or Alipay.</span></li>
-            <li><span lang="zh">用普通账户登录 LinkShell，在手机 App、Mac App 或网页版的账号区域输入激活码兑换；Apple Watch 独立模式下，在「连接设置 → 会员与激活码」兑换。成功后会更新 Pro 状态与到期时间。</span><span lang="en">Sign in to LinkShell with a Free account and redeem the code in the phone app, Mac app or web workspace's account controls. On Apple Watch, use Connection Settings → Membership &amp; activation codes in independent mode. Pro status and expiry update after redemption.</span></li>
+            <li><span lang="zh">在 itool.tech 用 LinkShell 的同一个 iTool 账号登录，选择月度或年度会员，用支付宝付款。</span><span lang="en">On itool.tech, sign in with the same iTool account you use in LinkShell, pick monthly or yearly, and pay with Alipay.</span></li>
+            <li><span lang="zh">回到 LinkShell 刷新会员状态（Mac / Windows 桌面版或网页版的账号区域；手机 App 打开账户页即会刷新）。电脑重新连接后就在官方网关上了。</span><span lang="en">Back in LinkShell, refresh the membership (the account section of the Mac / Windows desktop app or the web workspace; on the phone, the Account page refreshes when opened). The computer then reconnects through the official gateway.</span></li>
           </ol>
-          <a id="buy-link" href="https://pay.ldxp.cn/item/7lgv1s" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary"><span lang="zh">购买激活码 ↗</span><span lang="en">Buy a code ↗</span></a>
-          <a lang="zh" href="https://itool.tech/zh/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">也可在 iTool 兑换或续期 ↗</a>
-          <a lang="en" href="https://itool.tech/en/settings" target="_blank" rel="noopener noreferrer" class="auth-btn">Redeem or renew on iTool ↗</a>
-          <p><span lang="zh">LinkShell Pro 就是 iTool Pro：同一个账号，同一份会员，iTool 里的 Pro 功能也一起开通。已有 Pro 的账户可在 iTool「设置 → 升级 Pro」兑换续期，时长会在剩余时间上叠加。</span><span lang="en">LinkShell Pro is iTool Pro: one account, one membership, and iTool's Pro features come with it. To renew an active Pro membership, redeem another code under iTool Settings → Upgrade to Pro; its duration adds to the time you have left.</span></p>
+          <a lang="zh" href="https://itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">开通 iTool 会员 ↗</a>
+          <a lang="en" href="https://itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">Get iTool membership ↗</a>
+          <p><span lang="zh">一份 iTool 会员覆盖多个产品：月度会员包含 iTool 网站和 LinkShell；年度会员包含全部 iTool 产品。续费时有效期在剩余时间上顺延。</span><span lang="en">One iTool membership covers several products: monthly includes the iTool site and LinkShell; yearly includes every iTool product. Renewing extends the time you have left.</span></p>
         </div>
       </section>
 
@@ -1019,13 +1018,15 @@
       <section class="faq text">
         <h2><span lang="zh">常见问题</span><span lang="en">Questions</span></h2>
         <h3><span lang="zh">免费版有什么限制？</span><span lang="en">What does Free leave out?</span></h3>
-        <p><span lang="zh">没有功能限制，只是需要自己运行一个网关。Pro 提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; Pro gives you the hosted one instead.</span></p>
+        <p><span lang="zh">没有功能限制，只是需要自己运行一个网关。iTool 会员提供官方托管网关，省去部署和维护。</span><span lang="en">No features. You just run a gateway yourself; an iTool membership gives you the hosted one instead.</span></p>
         <h3><span lang="zh">官方网关能看到我的代码吗？</span><span lang="en">Can the official gateway see my code?</span></h3>
         <p><span lang="zh">不能。手机和电脑之间端到端加密，网关只转发密文。</span><span lang="en">No. Phone and computer are encrypted end to end; the gateway only relays ciphertext.</span></p>
-        <h3><span lang="zh">Pro 到期后会怎样？</span><span lang="en">What happens when Pro ends?</span></h3>
+        <h3><span lang="zh">会员到期后会怎样？</span><span lang="en">What happens when the membership ends?</span></h3>
         <p><span lang="zh">回到 Free：功能一个不少，改用自建网关就能继续连接。</span><span lang="en">You are back on Free: every feature stays, and you connect through your own gateway.</span></p>
         <h3><span lang="zh">支持哪些支付方式？</span><span lang="en">How can I pay?</span></h3>
-        <p><span lang="zh">在链动小铺买激活码，支持微信和支付宝。普通账户可直接在 LinkShell 手机 App、Mac App、网页版或 Apple Watch 独立模式里兑换；也可在 iTool 用同一账号兑换。</span><span lang="en">Buy an activation code on Liandong Xiaopu with WeChat Pay or Alipay. Free accounts can redeem it directly in the LinkShell phone app, Mac app, web workspace or Apple Watch independent mode, or on iTool with the same account.</span></p>
+        <p><span lang="zh">在 itool.tech 用支付宝付款，开通的会员直接记在你的 iTool 账号上，LinkShell 读取同一账号的会员状态，不用另外兑换。手机 App 里不提供购买，请在电脑浏览器打开 itool.tech/pro。</span><span lang="en">Pay with Alipay on itool.tech. The membership lands on your iTool account, and LinkShell reads it from the same account; nothing else to enter. The phone app doesn't sell it: open itool.tech/pro in a browser on your computer.</span></p>
+        <h3><span lang="zh">月度和年度有什么区别？</span><span lang="en">Monthly or yearly?</span></h3>
+        <p><span lang="zh">两档都包含 LinkShell 的官方网关。月度 ¥9.9 另含 iTool 网站；年度 ¥99 包含全部 iTool 产品。</span><span lang="en">Both include LinkShell's official gateway. Monthly (¥9.9) also covers the iTool site; yearly (¥99) covers every iTool product.</span></p>
       </section>
     </div>
   </main>
@@ -1205,10 +1206,8 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: Liandong Xiaopu codes activate the shared Pro membership in LinkShell or iTool. -->
+  <!-- Pricing: one iTool membership, bought on itool.tech; the toggle only shows the two tiers. -->
   <script>
-    const BUY_MONTHLY = 'https://pay.ldxp.cn/item/7lgv1s';
-    const BUY_YEARLY = 'https://pay.ldxp.cn/item/yw2vbl';
     let pricingCycle = 'monthly';
 
     function setPricingCycle(cycle) {
@@ -1218,7 +1217,6 @@
       document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
       document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
       document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      document.getElementById('buy-link').href = cycle === 'yearly' ? BUY_YEARLY : BUY_MONTHLY;
     }
 
     function initPricing() {

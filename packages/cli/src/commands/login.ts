@@ -161,7 +161,7 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
         res.writeHead(200);
         res.end("ok");
 
-        const planLabel = result.plan === "pro" ? "\x1b[32mPro\x1b[0m" : "Free";
+        const planLabel = result.plan === "pro" ? `\x1b[32m${result.tier === "yearly" ? "iTool yearly member" : "iTool monthly member"}\x1b[0m` : "Free";
         process.stderr.write(
           `  \x1b[32m✓\x1b[0m Logged in as ${result.email || result.userId} (${planLabel})\n\n`,
         );

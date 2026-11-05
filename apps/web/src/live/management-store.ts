@@ -1,10 +1,9 @@
 import { createStore } from "zustand/vanilla";
-import { desktopInvoke, isElectronDesktop, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
+import { ITOOL_MEMBERSHIP_URL } from "@linkshell/client-core";
+import { desktopInvoke, isElectronDesktop, openDesktopExternal, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
 import {
-  membershipOf,
   newerVersion,
   passwordProblem,
-  redemptionProblem,
   type DesktopAbout,
   type DesktopSettings,
   type DesktopSnapshot,
@@ -41,9 +40,6 @@ export interface ManagementState {
   passwordMessage: string;
   passwordIsError: boolean;
   savingPassword: boolean;
-  redemptionMessage: string;
-  redemptionIsError: boolean;
-  redeeming: boolean;
   commandMessage: string;
   log: string;
   /** `checkedAt`: when a check last finished, said beside its result. */
@@ -74,9 +70,6 @@ export const management = createStore<ManagementState>(() => ({
   passwordMessage: "",
   passwordIsError: false,
   savingPassword: false,
-  redemptionMessage: "",
-  redemptionIsError: false,
-  redeeming: false,
   commandMessage: "",
   log: "",
   update: { checking: false, installing: false, available: false, message: "尚未检查更新" },
@@ -108,7 +101,7 @@ function applySnapshot(next: DesktopSnapshot) {
   const before = get().snapshot;
   if (before?.account?.userId !== next.account?.userId) {
     lastAccountRefresh = 0;
-    set({ redemptionMessage: "", redemptionIsError: false, accountMessage: "" });
+    set({ accountMessage: "" });
   }
   set({ snapshot: next });
 }
@@ -127,6 +120,7 @@ export function startManagement(): void {
   set({ started: true });
   window.addEventListener(DESKTOP_UPDATE_EVENT, receiveUpdate);
   window.addEventListener(DESKTOP_LOGIN_EVENT, receiveLoginLink);
+  window.addEventListener("focus", returnedFromShop);
   // A renderer reload must recover a download already running in the Windows main process.
   void desktopInvoke<ManagementState["update"] | undefined>("updateStatus").then((update) => { if (update) set({ update }); }, () => undefined);
   void Promise.all([desktopInvoke<DesktopAbout>("about"), loadSettings()]).then(([about]) => {
@@ -231,7 +225,7 @@ function signIn(method: SignInMethod, run: () => Promise<DesktopSnapshot>) {
       const next = await run();
       if (next.error) throw new Error(next.error);
       applySnapshot(next);
-      set({ accountMessage: `登录成功。手机登录同一账号后，可通过官方网关连接${THIS_COMPUTER}（需要 Pro）。` });
+      set({ accountMessage: `登录成功。手机登录同一账号后，可通过官方网关连接${THIS_COMPUTER}（需要 iTool 会员）。` });
       managementEvent("账号已登录");
     } catch (error) {
       set({ signInError: loginCancelled ? "" : messageOf(error) });
@@ -292,6 +286,20 @@ export function refreshAccount() {
   }, { checkingMembership: true });
 }
 
+// Membership is bought in the browser on itool.tech; coming back to the window is when it may have changed.
+let visitedShop = false;
+
+export function openMembershipPage() {
+  visitedShop = true;
+  openDesktopExternal(ITOOL_MEMBERSHIP_URL);
+}
+
+function returnedFromShop() {
+  if (!visitedShop) return;
+  visitedShop = false;
+  refreshAccount();
+}
+
 /** Sets, or with `null` removes, this computer's access password. Resolves true when it took. */
 export async function setAccessPassword(password: string | null): Promise<boolean> {
   if (get().busy) return false;
@@ -339,36 +347,6 @@ export async function setGateway(choice: GatewayChoice): Promise<boolean> {
 export function clearGatewayMessage() { set({ gatewayMessage: "" }); }
 
 export function clearPasswordMessage() { set({ passwordMessage: "", passwordIsError: false }); }
-
-/** Resolves true when the code was redeemed for the signed-in account. */
-export async function redeemPro(code: string): Promise<boolean> {
-  const state = get();
-  const userId = state.snapshot?.account?.userId;
-  if (state.busy || !userId || membershipOf(state.snapshot?.account).kind !== "free") return false;
-  const problem = redemptionProblem(code);
-  if (problem) { set({ redemptionMessage: problem, redemptionIsError: true }); return false; }
-  let redeemed = false;
-  await mutate(async () => {
-    try {
-      const next = await desktopInvoke<DesktopSnapshot>("action", { name: "redeem-pro", input: { code: code.trim(), userId } });
-      if (get().snapshot?.account?.userId !== userId) return;
-      applySnapshot(next);
-      if (next.account?.userId !== userId) return;
-      if (next.redemption?.userId !== userId || membershipOf(next.account).kind !== "pro")
-        throw new Error("尚未确认 Pro 有效期，请刷新会员状态后重试。");
-      redeemed = true;
-      lastAccountRefresh = Date.now();
-      set({
-        redemptionMessage: next.redemption.idempotent ? "该激活码已为当前账号兑换，Pro 会员状态已更新。" : "兑换成功，Pro 会员已开通。",
-        accountMessage: next.accountWarning ?? "",
-      });
-      managementEvent("Pro 会员状态已更新");
-    } catch (error) {
-      if (get().snapshot?.account?.userId === userId) set({ redemptionMessage: messageOf(error), redemptionIsError: true });
-    } finally { set({ redeeming: false }); }
-  }, { redeeming: true, redemptionMessage: "", redemptionIsError: false });
-  return redeemed;
-}
 
 export async function readLog() {
   try { set({ log: (await desktopInvoke<{ text: string }>("log")).text }); }

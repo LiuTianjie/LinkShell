@@ -2,8 +2,7 @@ import * as http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { saveAuth, SUPABASE_ANON_KEY, SUPABASE_URL, type AuthTokens } from "../auth.js";
-import { cacheMembership, type DesktopMembership } from "../pro-membership.js";
-import { fetchProMembership } from "../../../client-core/src/pro-membership.js";
+import { cacheMembership, lookupMembership, type DesktopMembership } from "../pro-membership.js";
 import { isDefinitiveAccountError, oauthErrorCode, tokenErrorCode } from "../../../client-core/src/account-errors.js";
 import { LoginError } from "./login-error.js";
 
@@ -17,6 +16,8 @@ import { LoginError } from "./login-error.js";
 export interface LoginResult {
   success: boolean;
   plan: "pro" | "free";
+  /** The iTool membership tier when `plan` is "pro". */
+  tier?: "monthly" | "yearly";
   email: string;
   userId: string;
   accessToken: string;
@@ -81,10 +82,9 @@ async function fetchUser(accessToken: string, signal?: AbortSignal): Promise<{ i
 export async function completeLogin(grant: SessionGrant, options: { signal?: AbortSignal } = {}): Promise<LoginResult> {
   if (options.signal?.aborted) throw new LoginError("cancelled");
   const user = grant.user ?? await fetchUser(grant.accessToken, options.signal);
-  let membership: DesktopMembership = { plan: "unknown", planExpiresAt: null };
+  let membership: DesktopMembership = { plan: "unknown", planExpiresAt: null, tier: null };
   try {
-    const profile = await fetchProMembership({ userId: user.id, accessToken: grant.accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, signal: options.signal });
-    membership = { plan: profile.plan, planExpiresAt: profile.expiresAt ?? null };
+    membership = await lookupMembership(grant.accessToken, options.signal);
   } catch { /* Unknown until the next refresh. */ }
   // The owner gave up while this was in flight: an existing login must stay as it was.
   if (options.signal?.aborted) throw new LoginError("cancelled");
@@ -98,7 +98,7 @@ export async function completeLogin(grant: SessionGrant, options: { signal?: Abo
   };
   saveAuth(tokens);
   try { cacheMembership(user.id, membership); } catch { /* A cache write cannot invalidate a completed login. */ }
-  return { success: true, plan: membership.plan === "pro" ? "pro" : "free", email, userId: user.id, accessToken: grant.accessToken };
+  return { success: true, plan: membership.plan === "pro" ? "pro" : "free", ...(membership.plan === "pro" && membership.tier ? { tier: membership.tier } : {}), email, userId: user.id, accessToken: grant.accessToken };
 }
 
 function parseGrant(body: unknown): SessionGrant | undefined {

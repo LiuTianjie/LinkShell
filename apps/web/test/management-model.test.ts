@@ -9,7 +9,6 @@ import {
   newerVersion,
   parseHostLog,
   passwordProblem,
-  redemptionProblem,
   serviceLabel,
   splitPath,
 } from "../src/live/management-model";
@@ -34,17 +33,15 @@ it("reads membership the way the native dashboard did", () => {
   // An expired Pro is a free account; a current one carries its date.
   expect(membershipOf({ state: "signed-in", plan: "pro", planExpiresAt: "2026-10-01T00:00:00Z" }, now)).toEqual({ kind: "free" });
   const pro = membershipOf({ state: "signed-in", plan: "pro", planExpiresAt: "2026-12-01T00:00:00.000Z" }, now);
-  expect(pro.kind).toBe("pro");
+  expect(pro).toMatchObject({ kind: "pro", tier: "monthly" });
+  expect(membershipOf({ state: "signed-in", plan: "pro", tier: "yearly", planExpiresAt: "2027-12-01T00:00:00.000Z" }, now)).toMatchObject({ kind: "pro", tier: "yearly" });
 });
 
-it("checks passwords and activation codes before they leave the page", () => {
+it("checks passwords before they leave the page", () => {
   expect(passwordProblem("abc")).toBeDefined();
   expect(passwordProblem("abcd")).toBeUndefined();
   expect(passwordProblem("x".repeat(128))).toBeUndefined();
   expect(passwordProblem("x".repeat(129))).toBeDefined();
-  expect(redemptionProblem("   ")).toBeDefined();
-  expect(redemptionProblem(" CODE-1 ")).toBeUndefined();
-  expect(redemptionProblem("码".repeat(200))).toBeDefined();
 });
 
 it("labels the service and gateway, unknown unless healthy", () => {

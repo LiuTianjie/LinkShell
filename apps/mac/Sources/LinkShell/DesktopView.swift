@@ -50,13 +50,14 @@ struct DesktopView: View {
     }
     .background(DesktopStyle.background).foregroundStyle(DesktopStyle.primary)
     .preferredColorScheme(model.colorScheme).frame(minWidth: 880, minHeight: model.preview ? 560 : 520)
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.returnedFromMembershipPage() }
     .alert(confirm == "remove-password" ? "移除访问密码？" : confirm == "logout" ? "退出当前账号？" : confirm == "connect-gateway" ? "连接官方网关？" : confirm == "upgrade" ? "安装更新？" : "\(confirm == "stop" ? "停止" : "重启")本机服务？", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
       Button("取消", role: .cancel) { confirm = nil }
       Button("继续", role: .destructive) {
         if let action = confirm { if action == "remove-password" { model.setAccessPassword(nil) } else if action == "upgrade" { model.upgrade() } else if action == "logout" || action == "connect-gateway" { model.accountAction(action) } else { model.action(action) } }
         confirm = nil
       }
-    } message: { Text(confirm == "remove-password" ? "其他设备将可以直接打开这台 Mac，不再需要输入密码。" : confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 Pro，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
+    } message: { Text(confirm == "remove-password" ? "其他设备将可以直接打开这台 Mac，不再需要输入密码。" : confirm == "logout" ? "当前电脑将退出账号，账号关联的远程连接可能断开。本机会话和配对记录会保留。" : confirm == "connect-gateway" ? "将切换到官方网关，手机登录同一账号即可发现这台 Mac。官方网关需要 iTool 会员，现有远程连接可能断开。" : "正在执行的代理任务、终端与远程连接可能中断。会话记录和配对信息会保留。") }
   }
 
   private var sidebar: some View {
@@ -401,10 +402,6 @@ struct DesktopView: View {
       if !model.accountMessage.isEmpty { Text(model.accountMessage).font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary).textSelection(.enabled) }
       if model.signedIn {
         accountMembership
-        if !model.redemptionMessage.isEmpty {
-          Text(model.redemptionMessage).font(.system(size: 12))
-            .foregroundStyle(model.redemptionIsError ? DesktopStyle.danger : DesktopStyle.ok).textSelection(.enabled)
-        }
         HStack {
           Text("网关：\(model.gatewayLabel)").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
           if model.snapshot?.gateway?.status != "online" {
@@ -413,7 +410,7 @@ struct DesktopView: View {
         }
         if let error = model.snapshot?.gateway?.error?.message { Text(error).font(.system(size: 12)).foregroundStyle(DesktopStyle.danger).textSelection(.enabled) }
       } else {
-        Text("官方网关需要 Pro；自建网关仍可通过配对使用。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+        Text("官方网关需要 iTool 会员；自建网关仍可通过配对使用。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
       }
     }
     .desktopCard()
@@ -424,9 +421,9 @@ struct DesktopView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         switch model.membership {
-        case .pro(let expiresAt):
+        case .pro(let expiresAt, let tier):
           // A membership is a neutral badge: colour is kept for what can be done and for state.
-          Text("Pro 账户").fontWeight(.medium).foregroundStyle(DesktopStyle.primary).padding(.horizontal, 8).frame(height: 20)
+          Text(tier.label).fontWeight(.medium).foregroundStyle(DesktopStyle.primary).padding(.horizontal, 8).frame(height: 20)
             .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
           Text("有效期至 \(expiresAt.formatted(date: .abbreviated, time: .omitted))").foregroundStyle(DesktopStyle.secondary)
         case .free:
@@ -442,19 +439,11 @@ struct DesktopView: View {
         }
       }.font(.system(size: 12))
       if model.membership == .free {
-        HStack(spacing: 8) {
-          TextField("输入激活码", text: $model.redemptionCode)
-            .desktopField().disableAutocorrection(true).frame(maxWidth: 280)
-            .disabled(model.busy || model.preview).onSubmit { model.redeemPro() }
-            .accessibilityLabel("Pro 激活码")
-          Button(model.redeeming ? "正在兑换…" : "兑换 Pro") { model.redeemPro() }
-            .buttonStyle(DesktopButtonStyle(.primary))
-            .disabled(!model.canRedeem)
-        }
-        HStack(spacing: 3) {
-          Text("没有激活码？").foregroundStyle(DesktopStyle.secondary)
-          SwiftUI.Link("前往链动小铺", destination: URL(string: "https://pay.ldxp.cn/item/7lgv1s")!).foregroundStyle(DesktopStyle.secondary)
-        }.font(.system(size: 11))
+        Button("开通 iTool 会员") { model.openMembershipPage() }
+          .buttonStyle(DesktopButtonStyle(.primary))
+          .disabled(model.busy || model.preview)
+        Text("月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。在浏览器里用同一账号付款，回到这里会自动刷新。")
+          .font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }
   }

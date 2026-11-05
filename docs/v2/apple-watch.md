@@ -17,10 +17,11 @@ same mobile product, not a separate App Store product.
   default. Sign in with an existing iTool email/password, or run `linkshell pair`
   on the computer and enter its six-digit code on the watch. Third-party-only
   accounts can use pairing; the watch does not implement browser OAuth.
-- Signed-in free accounts can redeem a Pro activation code under **连接设置 →
-  会员与激活码**, with a small link to Liandong Xiaopu. Existing Pro accounts see
-  their expiry date. The watch verifies membership through the same iTool account
-  service; codes and account tokens are never sent through the paired phone.
+- **连接设置 → iTool 会员** shows the account's tier (monthly / yearly) and
+  LinkShell's expiry, read from `https://itool.tech/api/membership/entitlement?product=linkshell`
+  with the watch's own token. Free accounts see only the text 「在电脑浏览器打开
+  itool.tech/pro 开通会员」: the watch sells nothing and has no link (App Store
+  rules). Account tokens are never sent through the paired phone.
 - Account tokens and device private keys stay in the watch's Keychain using
   `AfterFirstUnlockThisDeviceOnly`; widgets only read display snapshots. Refresh
   requests are serialized. Logout removes the account identity because gateway

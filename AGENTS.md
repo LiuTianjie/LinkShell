@@ -105,8 +105,8 @@ Agents run as the user with the login shell's environment; LinkShell never handl
 
 - WebSocket `/v2/connect`, `GET /healthz` → `{ ok, version, relay, memoryMb }` (`relay`: connected peers), and the bundled current-protocol web client at `/`. `/config.js` selects account or pairing-only mode from gateway settings; unknown paths remain 404.
 - Data: one SQLite file (peers' public keys and account, machine↔device links). `RELAY_DATA_PATH`, default `./data/relay.db`; the Docker image uses `/data/relay.db`; `linkshell gateway` uses `~/.linkshell/relay.db`. Losing it unpairs every phone.
-- Env: `PORT` (8787), `LOG_LEVEL`, `RELAY_DATA_PATH`, `TRUSTED_PROXIES` (IPs whose `X-Forwarded-For` is believed), `WS_CONNECT_RATE_LIMIT_MAX` / `WS_CONNECT_RATE_LIMIT_WINDOW_MS` (20 connects a minute per IP, loopback exempt), `SUPABASE_URL` + `SUPABASE_ANON_KEY` (account tokens are verified), `AUTH_REQUIRED` + `SUPABASE_SERVICE_ROLE_KEY` (a computer needs an active Pro account), `TURN_SECRET` + `TURN_URLS` (coturn's static-auth-secret and its `stun:`/`turn:` URLs; `TURN_TTL_SECONDS`, `TURN_MAX_KBPS`).
-- Official vs self-hosted: the same code. A self-hosted gateway has no Supabase variables: pairing only. The official one (`gateway.itool.tech`, `luma-gateway.yml`) adds account verification and, through `admit`, the Pro check for computers — at connect only; a failed lookup admits.
+- Env: `PORT` (8787), `LOG_LEVEL`, `RELAY_DATA_PATH`, `TRUSTED_PROXIES` (IPs whose `X-Forwarded-For` is believed), `WS_CONNECT_RATE_LIMIT_MAX` / `WS_CONNECT_RATE_LIMIT_WINDOW_MS` (20 connects a minute per IP, loopback exempt), `SUPABASE_URL` + `SUPABASE_ANON_KEY` (account tokens are verified), `AUTH_REQUIRED` + `SUPABASE_SERVICE_ROLE_KEY` (a computer needs an active iTool membership), `TURN_SECRET` + `TURN_URLS` (coturn's static-auth-secret and its `stun:`/`turn:` URLs; `TURN_TTL_SECONDS`, `TURN_MAX_KBPS`).
+- Official vs self-hosted: the same code. A self-hosted gateway has no Supabase variables: pairing only. The official one (`gateway.itool.tech`, `luma-gateway.yml`) adds account verification and, through `admit`, the membership check for computers — at connect only; a failed lookup admits.
 
 ### CLI commands
 
@@ -140,7 +140,7 @@ Install channels: `npm i -g linkshell-cli`, `brew install LiuTianjie/linkshell/l
 ## Auth & Backend
 
 - Supabase project `mkbeusztkzffnzjdwmqk`, shared with iTool. Sign-in happens at `https://itool.tech/en/auth/linkshell`; the CLI keeps the tokens in `~/.linkshell/auth.json`, the app in the Keychain.
-- Subscription: iTool's `profiles` table, `plan = 'pro'` and `plan_expires_at` in the future. `linkshell login` reads it with the user's token (to say Pro or Free); the official gateway reads it with the service-role key, and its answer is the one that counts.
+- Membership: one iTool membership, bought with Alipay at `https://itool.tech/pro?from=linkshell` only (monthly ¥9.9 = iTool site + LinkShell, yearly ¥99 = every product). LinkShell's product key is `linkshell` (required tier `monthly`). Clients read `itool_entitlement('linkshell')` with the user's token, through `GET https://itool.tech/api/membership/entitlement?product=linkshell` (bearer; for networks that block supabase.co) or the RPC directly; the official gateway calls `itool_entitlement_for(uid, 'linkshell')` with the service-role key, and its answer is the one that counts. No activation codes; the phone app and the watch never link to the buy page (App Store rules), they only say to open itool.tech/pro on a computer.
 - The gateway verifies an account token against `${SUPABASE_URL}/auth/v1/user`.
 - The `linkshell_*` tables in that project are left from 1.x. No code reads them; don't drop them.
 

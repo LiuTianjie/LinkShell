@@ -66,7 +66,7 @@ async function setUpPhone(out: (line?: string) => void, interactive: boolean): P
     out("  Not connected to a phone yet: linkshell login (LinkShell account), or your own gateway and linkshell pair.");
     return false;
   }
-  out("  Your phone reaches this computer through your LinkShell account (Pro), from anywhere.");
+  out("  Your phone reaches this computer through your LinkShell account (iTool membership), from anywhere.");
   const answer = await ask("  Sign in now? It opens your browser. [Y/n] ");
   if (answer === "n" || answer === "no") {
     out(dim("    Later: linkshell login — or with your own gateway: linkshell host --gateway <url>, then linkshell pair"));

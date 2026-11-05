@@ -21,7 +21,7 @@ struct WatchConnectionView: View {
           if store.direct.signedIn {
             Text(store.direct.email ?? "已登录").font(.caption)
             if let account = store.direct.account {
-              NavigationLink("会员与激活码") { WatchMembershipView(account: account) }
+              NavigationLink("iTool 会员") { WatchMembershipView(account: account) }
             }
             Button("退出账号", role: .destructive) { confirmLogout = true }
           } else {
@@ -43,7 +43,6 @@ struct WatchConnectionView: View {
 
 struct WatchMembershipView: View {
   @ObservedObject var account: WatchAccount
-  @State private var code = ""
 
   var body: some View {
     List {
@@ -54,29 +53,19 @@ struct WatchMembershipView: View {
             Text(account.membershipLoading ? "正在查询…" : "会员状态未确认").font(.caption)
           case .free:
             Label("普通账户", systemImage: "person.crop.circle")
-          case .pro(let expiry):
-            Label("Pro 会员", systemImage: "checkmark.seal.fill")
+          case .pro(let expiry, let yearly):
+            Label(yearly ? "iTool 年度会员" : "iTool 月度会员", systemImage: "checkmark.seal.fill")
             Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")
               .font(.caption).foregroundStyle(.secondary)
           }
           Button(account.membershipLoading ? "正在刷新…" : "刷新会员状态") {
             Task { await account.refreshMembership() }
-          }.disabled(account.membershipLoading || account.redeeming)
+          }.disabled(account.membershipLoading)
         }
         if account.membership == .free {
-          Section("激活 Pro") {
-            TextField("输入激活码", text: $code)
-              .textInputAutocapitalization(.never).autocorrectionDisabled()
-              .disabled(account.redeeming || account.membershipLoading)
-            Button(account.redeeming ? "正在兑换…" : "兑换激活码") {
-              Task { if await account.redeemProCode(code) { code = "" } }
-            }.disabled(account.redeeming || account.membershipLoading || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Link("没有激活码？前往链动小铺", destination: URL(string: "https://pay.ldxp.cn/item/7lgv1s")!)
-              .font(.caption2).foregroundStyle(.secondary)
-          }
-        }
-        if let notice = account.redemptionNotice {
-          Text(notice).font(.caption).foregroundStyle(WatchPalette.ok)
+          // Text only: the watch sells nothing (App Store rules).
+          Text("在电脑浏览器打开 itool.tech/pro 开通会员")
+            .font(.caption2).foregroundStyle(.secondary)
         }
         if let error = account.membershipError {
           Text(error).font(.caption).foregroundStyle(WatchPalette.danger)
@@ -85,12 +74,10 @@ struct WatchMembershipView: View {
         Text("请先登录账号").font(.caption).foregroundStyle(.secondary)
       }
     }
-    .navigationTitle("Pro 会员")
+    .navigationTitle("iTool 会员")
     .task(id: account.session?.userID) {
-      code = ""
       await account.refreshMembership()
     }
-    .onDisappear { code = "" }
   }
 }
 

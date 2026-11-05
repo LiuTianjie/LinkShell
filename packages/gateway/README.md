@@ -2,7 +2,7 @@
 
 LinkShell 网关：手机和电脑之间的中继。它用密钥认证两端，在允许互相访问的手机和电脑之间转发**端到端加密**的数据帧（网关读不了内容），并负责配对（二维码或 6 位配对码）。
 
-官方网关（`gateway.itool.tech`）和自建网关运行的是同一份代码。区别只在配置：自建网关没有账号，靠配对；官方网关另外校验账号和 Pro 订阅。
+官方网关（`gateway.itool.tech`）和自建网关运行的是同一份代码。区别只在配置：自建网关没有账号，靠配对；官方网关另外校验账号和 iTool 会员。
 
 需要 Node.js 22.13 或更新版本（数据用 Node 自带的 SQLite 保存）。完整的自建步骤（HTTPS、反向代理、连接手机）见[部署指南](https://github.com/LiuTianjie/LinkShell/blob/main/docs/deploy.md)。
 
@@ -98,7 +98,7 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
 - 账号令牌通过 `${SUPABASE_URL}/auth/v1/user` 校验。
-- 订阅查的是 `profiles` 表：`plan` 为 `pro` 且 `plan_expires_at` 晚于当前时间才算有效。
+- 会员查的是 iTool 的 `itool_entitlement_for(uid, 'linkshell')`（service-role key）：`active` 为 true 才算有效。月度、年度会员都包含 LinkShell，在 https://itool.tech/pro?from=linkshell 开通。
 - 只在电脑连接时检查一次；查询本身失败（网络、配置问题）时放行，不会因为一次查询失败把用户挡在外面。
 
 ## 接口

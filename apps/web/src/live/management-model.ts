@@ -17,6 +17,8 @@ export interface DesktopAccount {
   userId?: string;
   plan?: string;
   planExpiresAt?: string;
+  /** The iTool membership tier behind "pro" (CLI 0.10.94+); older CLIs leave it out. */
+  tier?: string | null;
 }
 export interface DesktopSnapshot {
   schema?: number;
@@ -28,7 +30,6 @@ export interface DesktopSnapshot {
   home?: string;
   access?: { password: boolean };
   account?: DesktopAccount;
-  redemption?: { userId: string; idempotent: boolean };
   accountWarning?: string;
   machine?: { hostname: string; hostVersion: string };
   gateway?: { status: string; url?: string; devices: DesktopDevice[]; error?: { message: string } };
@@ -49,7 +50,7 @@ export type Membership =
   | { kind: "signed-out" }
   | { kind: "unknown" }
   | { kind: "free" }
-  | { kind: "pro"; expiresAt: Date };
+  | { kind: "pro"; expiresAt: Date; tier: "monthly" | "yearly" };
 
 export function isManageView(view: string): boolean {
   return view === "manage" || view.startsWith("manage:");
@@ -76,18 +77,12 @@ export function membershipOf(account: DesktopAccount | undefined, now = Date.now
   if (account.plan !== "pro" || !account.planExpiresAt) return { kind: "unknown" };
   const expiresAt = new Date(account.planExpiresAt);
   if (Number.isNaN(expiresAt.getTime())) return { kind: "unknown" };
-  return expiresAt.getTime() > now ? { kind: "pro", expiresAt } : { kind: "free" };
+  return expiresAt.getTime() > now ? { kind: "pro", expiresAt, tier: account.tier === "yearly" ? "yearly" : "monthly" } : { kind: "free" };
 }
 
 /** The CLI checks the same bounds; checking here keeps the password off the wire when it can't pass. */
 export function passwordProblem(password: string): string | undefined {
   return password.length < 4 || password.length > 128 ? "密码需要 4 到 128 位。" : undefined;
-}
-
-export function redemptionProblem(code: string): string | undefined {
-  const trimmed = code.trim();
-  if (!trimmed) return "请输入激活码。";
-  return new TextEncoder().encode(trimmed).length > 512 ? "激活码格式不正确，请检查后重试。" : undefined;
 }
 
 export function serviceLabel(snapshot: DesktopSnapshot | undefined, problem: string | undefined): string {

@@ -24,4 +24,4 @@
 
 ## Pricing
 
-Every feature is free with a self-hosted gateway. Pro (¥9.9 a month or ¥99 a year) adds the official gateway: no server to run, sign in with the same account on both sides.
+Every feature is free with a self-hosted gateway. An iTool membership adds the official gateway: no server to run, sign in with the same account on both sides. Monthly (¥9.9) covers the iTool site and LinkShell; yearly (¥99) covers every iTool product. Buy it with Alipay at https://itool.tech/pro?from=linkshell.

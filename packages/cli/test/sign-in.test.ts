@@ -34,14 +34,14 @@ afterEach(() => {
 });
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
-/** Remote requests go to `handler`; the loopback stays real. Profiles answer "free" unless the handler does. */
+/** Remote requests go to `handler`; the loopback stays real. The entitlement route answers a yearly member. */
 function remote(handler: Handler) {
   const calls: { url: string; body?: unknown }[] = [];
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("http://127.0.0.1:")) return realFetch(input, init);
     calls.push({ url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
-    if (url.includes("/rest/v1/profiles")) return Response.json([{ plan: "pro", plan_expires_at: new Date(Date.now() + 86_400_000).toISOString() }]);
+    if (url.includes("/api/membership/entitlement")) return Response.json({ ok: true, product: "linkshell", active: true, tier: "yearly", valid_until: new Date(Date.now() + 86_400_000).toISOString(), server_time: new Date().toISOString() });
     return handler(url, init);
   });
   return calls;
@@ -75,7 +75,7 @@ describe("email and password", () => {
   it("signs in through the proxy and keeps the session in a private auth.json, without asking who the user is", async () => {
     const calls = remote(() => Response.json(session()));
     const result = await signIn.loginWithPassword({ email: "  new@example.com ", password: "secret pw" });
-    expect(result).toEqual({ success: true, plan: "pro", email: "new@example.com", userId: "u-new", accessToken: "access-new" });
+    expect(result).toEqual({ success: true, plan: "pro", tier: "yearly", email: "new@example.com", userId: "u-new", accessToken: "access-new" });
     expect(calls[0]).toEqual({ url: PROXY, body: { grant_type: "password", email: "new@example.com", password: "secret pw" } });
     expect(calls.some(({ url }) => url.includes("/auth/v1/user"))).toBe(false);
     const file = join(home, "auth.json");
@@ -84,7 +84,7 @@ describe("email and password", () => {
     expect(saved.expiresAt).toBeGreaterThan(Date.now() + 3_500_000);
     expect(Object.keys(saved).sort()).toEqual(["accessToken", "email", "expiresAt", "refreshToken", "userId"]);
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(join(home, "account-pro.json"), "utf8"))).toMatchObject({ userId: "u-new", plan: "pro" });
+    expect(JSON.parse(readFileSync(join(home, "account-pro.json"), "utf8"))).toMatchObject({ userId: "u-new", plan: "pro", tier: "yearly" });
   });
 
   it("goes to Supabase directly when the proxy is unreachable, missing or temporarily unavailable", async () => {

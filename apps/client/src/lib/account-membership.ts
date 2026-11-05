@@ -1,4 +1,4 @@
-import { fetchProMembership, redeemProCode } from "@linkshell/client-core";
+import { fetchProMembership } from "@linkshell/client-core";
 import accountConfig from "../../config/account.json";
 import { useAccount } from "./account";
 
@@ -18,8 +18,4 @@ export async function loadAccountMembership(userId: string) {
     accessToken: await tokenFor(userId),
     userId,
   });
-}
-
-export async function redeemAccountCode(userId: string, code: string) {
-  return redeemProCode(await tokenFor(userId), code);
 }

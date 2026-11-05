@@ -48,9 +48,9 @@ META = {
         "image_alt": "LinkShell：在手机上继续电脑里的编程 Agent",
     },
     ("zh", "pricing"): {
-        "title": "LinkShell 定价 | 免费使用，Pro 提供官方网关",
-        "description": "LinkShell 全部功能免费，自建网关即可使用。Pro 每月 ¥9.9 或每年 ¥99，提供官方网关：不用部署服务器，登录同一账号即可连接，连接始终端到端加密。",
-        "keywords": "LinkShell 定价, LinkShell Pro, 官方网关, 免费, 自建网关",
+        "title": "LinkShell 定价 | 免费使用，iTool 会员提供官方网关",
+        "description": "LinkShell 全部功能免费，自建网关即可使用。iTool 会员提供官方网关：月度 ¥9.9 含 iTool 网站和 LinkShell，年度 ¥99 含全部 iTool 产品，在 itool.tech 用支付宝开通。连接始终端到端加密。",
+        "keywords": "LinkShell 定价, iTool 会员, 官方网关, 免费, 自建网关",
         "image_alt": "LinkShell：在手机上继续电脑里的编程 Agent",
     },
     ("en", "home"): {
@@ -66,9 +66,9 @@ META = {
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
     ("en", "pricing"): {
-        "title": "LinkShell Pricing: Free, or Pro for ¥9.9 a Month",
-        "description": "Every LinkShell feature is free with your own gateway. Pro, ¥9.9 a month or ¥99 a year, adds the official gateway: no server to run, just sign in.",
-        "keywords": "LinkShell pricing, LinkShell Pro, official gateway, free, self-hosted gateway",
+        "title": "LinkShell Pricing: Free, or the iTool Membership from ¥9.9 a Month",
+        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: ¥9.9 a month with the iTool site, or ¥99 a year with every iTool product.",
+        "keywords": "LinkShell pricing, iTool membership, official gateway, free, self-hosted gateway",
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
 }
@@ -241,11 +241,11 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "offers": [
                 {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "CNY", "url": pricing},
                 {
-                    "@type": "Offer", "name": "Pro (monthly)", "price": "9.9", "priceCurrency": "CNY", "url": pricing,
+                    "@type": "Offer", "name": "iTool membership (monthly)", "price": "9.9", "priceCurrency": "CNY", "url": "https://itool.tech/pro?from=linkshell",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": "9.9", "priceCurrency": "CNY", "billingDuration": "P1M"},
                 },
                 {
-                    "@type": "Offer", "name": "Pro (yearly)", "price": "99", "priceCurrency": "CNY", "url": pricing,
+                    "@type": "Offer", "name": "iTool membership (yearly)", "price": "99", "priceCurrency": "CNY", "url": "https://itool.tech/pro?from=linkshell",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": "99", "priceCurrency": "CNY", "billingDuration": "P1Y"},
                 },
             ],

@@ -23,7 +23,7 @@ interface HostConfig {
   setup?: "done";
 }
 
-/** LinkShell's own gateway: a Pro account's computers are reachable there. */
+/** LinkShell's own gateway: an iTool member's computers are reachable there. */
 export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
 
 /** Whether two gateway addresses name the same one, however they were typed (scheme, trailing slash). */
@@ -208,7 +208,7 @@ export function describeGateway(gateway: GatewayStatus): string {
 
 /** After `linkshell login`: this computer joins the gateway its account is for. */
 /**
- * A signed-in Pro account's computer belongs on the official gateway: nobody should have to find
+ * A signed-in member's computer belongs on the official gateway: nobody should have to find
  * a button for it before their phone can see this computer. A gateway of one's own (a URL) is kept;
  * "off" is not. A stopped host is left stopped. True when the host was asked to reconnect.
  */
@@ -244,7 +244,7 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   if (!chosen && plan !== "pro") {
     // A running host now gets the gateway's own answer, instead of an old login's.
     await refreshGateway(0);
-    out("The official gateway needs a Pro subscription: https://liutianjie.github.io/LinkShell/pricing/");
+    out("The official gateway needs an iTool membership (monthly or yearly): https://itool.tech/pro?from=linkshell");
     out("Or use your own gateway: linkshell host --gateway <url>, then linkshell pair\n");
     return;
   }

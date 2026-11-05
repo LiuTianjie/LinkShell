@@ -231,7 +231,7 @@ function useConnectionContext(): ConnectionContextValue {
   return value;
 }
 
-/** False until the first computer is added (pairing or a Pro account). */
+/** False until the first computer is added (pairing or a member account). */
 export function useHasComputer(): boolean {
   return useConnectionContext().connection.key !== NO_COMPUTER_KEY;
 }

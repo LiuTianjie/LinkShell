@@ -4,7 +4,7 @@
 
 自建网关和官方网关是同一个程序，只是没有账号：不用登录，每台手机和电脑配对一次（扫码或输入 6 位配对码）。
 
-> 不想自己部署？Pro 订阅提供官方网关：电脑上 `linkshell login`，App 里登录同一账号即可。
+> 不想自己部署？iTool 会员提供官方网关：电脑上 `linkshell login`，App 里登录同一账号即可。
 
 ## 1. 运行网关
 
@@ -177,4 +177,4 @@ Host 的 `LINKSHELL_ICE_SERVERS` 设置 STUN 列表；`off` 禁用通用 DataCha
 
 ## 独立 Mac App 连接自建网关
 
-独立 App 已内置 CLI。可在设置安装可选命令入口，再按本文运行 `linkshell host --gateway wss://你的网关 --daemon` 与 `linkshell pair`。自建网关不要求官方网关的 Pro 订阅。独立 App 的更新只更新本机配套运行环境，不修改远端网关容器或数据库；详见[桌面版说明](mac-desktop.md)。
+独立 App 已内置 CLI。可在设置安装可选命令入口，再按本文运行 `linkshell host --gateway wss://你的网关 --daemon` 与 `linkshell pair`。自建网关不要求官方网关的 iTool 会员。独立 App 的更新只更新本机配套运行环境，不修改远端网关容器或数据库；详见[桌面版说明](mac-desktop.md)。

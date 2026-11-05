@@ -17,7 +17,7 @@ linkshell setup
 
 Connect your phone one of two ways:
 
-- **Pro — the official gateway.** `linkshell login`, then sign in to the app with the same account. The computer shows up by itself.
+- **iTool membership — the official gateway.** `linkshell login`, then sign in to the app with the same account. The computer shows up by itself.
 - **Your own gateway.** Run one (below), then:
 
   ```bash
@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-Signed-in Free accounts can redeem a Pro activation code in the LinkShell phone app, Mac app or web workspace's account controls, or under Connection Settings → Membership & activation codes in Apple Watch independent mode. [Buy a code on Liandong Xiaopu](https://pay.ldxp.cn/item/7lgv1s). [iTool Settings → Upgrade to Pro](https://itool.tech/en/settings) remains available with the same account, including for renewing an active Pro membership.
+The official gateway needs an iTool membership on the account: [get it on itool.tech](https://itool.tech/en/pro?from=linkshell) with Alipay (monthly ¥9.9 covers the iTool site and LinkShell, yearly ¥99 covers every iTool product). `linkshell login` says which tier the account has; the desktop app refreshes it after you pay.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 
@@ -66,7 +66,7 @@ a 120 fps request does not establish sustained 120 fps or stable 4K/60.
 | `linkshell host --gateway <url>` | Choose the gateway (`off` to disconnect, `default` for the official one); applies to a running host |
 | `linkshell pair` | Pair a phone through your own gateway |
 | `linkshell devices` | Paired phones; `linkshell devices remove <name>` unpairs one |
-| `linkshell login` / `logout` | Pro account: join or leave the official gateway, without restarting the host |
+| `linkshell login` / `logout` | iTool account: join or leave the official gateway, without restarting the host |
 | `linkshell claude` / `linkshell codex` | The agent's own UI, shareable with the phone (arguments pass through) |
 | `linkshell gateway [--port 8787] [--daemon]` | Run a gateway (`gateway status`, `gateway stop`) |
 | `linkshell screen` | Set up watching and controlling the screen (`--check` only reports) |
@@ -90,7 +90,7 @@ or with Docker: `nickname4th/linkshell-gateway` (see the [self-hosting guide](ht
 ├── state.db              sessions and their history
 ├── identity.json         this computer's keys
 ├── paired-devices.json   phones paired with it
-├── auth.json             the Pro login, if any
+├── auth.json             the iTool account login, if any
 ├── config.json           the chosen gateway
 ├── host.log              the host's log
 ├── worktrees/            git worktrees made for sessions started (or forked) into one

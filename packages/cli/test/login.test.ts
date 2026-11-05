@@ -39,7 +39,11 @@ function accountService(plan: { plan: string; plan_expires_at: string | null } |
     const url = String(input);
     if (url.startsWith("http://localhost:")) return realFetch(input, init);
     if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u1", email: "me@example.com" }));
-    if (url.includes("/rest/v1/profiles")) return Promise.resolve(Response.json(plan ? [plan] : []));
+    if (url.includes("/api/membership/entitlement")) {
+      const until = plan?.plan === "pro" ? plan.plan_expires_at : null;
+      const active = !!until && Date.parse(until) > Date.now();
+      return Promise.resolve(Response.json({ ok: true, product: "linkshell", required_tier: "monthly", active, valid_until: until, tier: active ? "monthly" : "free", server_time: new Date().toISOString() }));
+    }
     return Promise.reject(new Error(`unexpected request to ${url}`));
   });
 }
@@ -96,6 +100,7 @@ describe("linkshell login", () => {
     expect(await login.result).toMatchObject({ success: true, plan: "pro", email: "me@example.com", userId: "u1", accessToken: "a1" });
     expect(auth.loadAuth()).toMatchObject({ accessToken: "a1", refreshToken: "r1", userId: "u1" });
     expect(login.said()).toContain("Logged in as me@example.com");
+    expect(login.said()).toContain("iTool monthly member");
     // The five-minute limit must not outlive the login: it would keep the command running.
     const limit = started.mock.results[started.mock.calls.findIndex(([, delay]) => delay === 5 * 60 * 1000)]?.value;
     expect(limit).toBeDefined();
@@ -114,7 +119,7 @@ describe("linkshell login", () => {
     expect(await login.result).toMatchObject({ success: true });
   });
 
-  it("takes an expired Pro plan, or none, for Free", async () => {
+  it("takes an ended membership, or none, for Free", async () => {
     accountService({ plan: "pro", plan_expires_at: new Date(Date.now() - 86_400_000).toISOString() });
     const login = startLogin();
     const base = await login.callback;

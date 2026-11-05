@@ -54,7 +54,7 @@ struct DesktopPairingView: View {
           }
         }
       } else if !paired {
-        Text("同账号登录可自动发现；设备配对独立于账号。免登录配对需连接自建网关，官方网关需要 Pro 账号。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
+        Text("同账号登录可自动发现；设备配对独立于账号。免登录配对需连接自建网关，官方网关需要 iTool 会员。").font(.system(size: 12)).foregroundStyle(DesktopStyle.secondary)
       }
     }.desktopCard(padding: 18)
       .task {

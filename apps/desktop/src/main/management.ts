@@ -4,7 +4,7 @@ import type { Runtime } from "./runtime.js";
 
 /**
  * This Mac's service: the same `linkshell desktop` JSON the native dashboard used. Mutations
- * take input on stdin (passwords, activation codes), never on the command line.
+ * take input on stdin (passwords), never on the command line.
  */
 export class Management {
   private login?: AbortController;
@@ -87,7 +87,7 @@ export class Management {
   action(name: string, input?: unknown) {
     const allowed: Record<string, number> = {
       start: 45_000, stop: 45_000, restart: 45_000, logout: 60_000, "connect-gateway": 60_000,
-      "account-refresh": 60_000, "set-gateway": 60_000, "set-password": 45_000, "remove-password": 45_000, "redeem-pro": 90_000,
+      "account-refresh": 60_000, "set-gateway": 60_000, "set-password": 45_000, "remove-password": 45_000,
       "prepare-update": 45_000, "recover-update": 45_000, "stop-update-host": 45_000, pair: 30_000, "pair-qr": 30_000,
     };
     if (!(name in allowed)) return Promise.reject(new Error("不支持的操作"));

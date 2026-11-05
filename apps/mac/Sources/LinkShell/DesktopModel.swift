@@ -22,8 +22,12 @@ struct DesktopDevice: Decodable, Identifiable {
   let name: String
   let online: Bool
 }
+enum DesktopMembershipTier: Equatable {
+  case monthly, yearly
+  var label: String { self == .yearly ? "iTool 年度会员" : "iTool 月度会员" }
+}
 enum DesktopMembership: Equatable {
-  case signedOut, unknown, free, pro(Date)
+  case signedOut, unknown, free, pro(Date, DesktopMembershipTier)
 }
 struct DesktopSnapshot: Decodable {
   struct Machine: Decodable { let hostname: String; let hostVersion: String }
@@ -43,6 +47,8 @@ struct DesktopSnapshot: Decodable {
     let userId: String?
     let plan: String?
     let planExpiresAt: String?
+    /// The iTool membership tier behind "pro"; older CLIs leave it out (read as monthly).
+    let tier: String?
 
     func membership(at now: Date = Date()) -> DesktopMembership {
       guard state == "signed-in" else { return .signedOut }
@@ -53,12 +59,10 @@ struct DesktopSnapshot: Decodable {
       let fractional = formatter.date(from: planExpiresAt)
       formatter.formatOptions = [.withInternetDateTime]
       guard let expiresAt = fractional ?? formatter.date(from: planExpiresAt) else { return .unknown }
-      return expiresAt > now ? .pro(expiresAt) : .free
+      return expiresAt > now ? .pro(expiresAt, tier == "yearly" ? .yearly : .monthly) : .free
     }
   }
-  struct Redemption: Decodable { let userId: String; let idempotent: Bool }
   let account: Account?
-  let redemption: Redemption?
   let accountWarning: String?
   let status: String
   let cliVersion: String?
@@ -152,7 +156,6 @@ enum DesktopCommand {
     didSet {
       if oldValue?.account?.userId != snapshot?.account?.userId {
         accountGeneration = UUID()
-        redemptionCode = ""; redemptionMessage = ""; redemptionIsError = false
         accountMessage = ""; lastAccountRefresh = .distantPast
       }
     }
@@ -167,13 +170,9 @@ enum DesktopCommand {
   @Published var checking = false
   @Published var signingIn = false
   @Published var accountMessage = ""
-  @Published var redemptionCode = ""
   @Published var passwordMessage = ""
   @Published var passwordIsError = false
   @Published var savingPassword = false
-  @Published var redemptionMessage = ""
-  @Published var redemptionIsError = false
-  @Published var redeeming = false
   @Published var checkingMembership = false
   private var accountGeneration = UUID()
   private var lastAccountRefresh = Date.distantPast
@@ -229,7 +228,8 @@ enum DesktopCommand {
   var signedIn: Bool { snapshot?.account?.state == "signed-in" }
   var accountLabel: String { snapshot?.account?.email ?? snapshot?.account?.userId ?? "未登录" }
   var membership: DesktopMembership { snapshot?.account?.membership() ?? .signedOut }
-  var canRedeem: Bool { membership == .free && !redemptionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !busy && !preview }
+  /// Set when the buy page was opened, so coming back to the app asks again.
+  private var visitedMembershipPage = false
   var home: String { snapshot?.home ?? DesktopRuntime.home }
   var standalone: Bool { DesktopRuntime.bundled }
   var externalHost: Bool { standalone && healthy && snapshot?.hostOwner != Bundle.main.bundlePath }
@@ -398,7 +398,7 @@ enum DesktopCommand {
       do {
         let data = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "login"], timeout: 350, control: control) }.value
         snapshot = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
-        accountMessage = "登录成功。手机登录同一账号后，可通过官方网关连接这台 Mac（需要 Pro）。"
+        accountMessage = "登录成功。手机登录同一账号后，可通过官方网关连接这台 Mac（需要 iTool 会员）。"
         event("账号已登录")
       } catch { accountMessage = loginCancelled ? "已取消登录" : error.localizedDescription }
       signingIn = false; busy = false; loginControl = nil; refresh()
@@ -468,39 +468,18 @@ enum DesktopCommand {
     }
   }
 
-  func redeemPro() {
-    guard canRedeem, let userId = snapshot?.account?.userId else { return }
-    let code = redemptionCode.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard code.utf8.count <= 512 else {
-      redemptionMessage = "激活码格式不正确，请检查后重试。"; redemptionIsError = true
-      return
-    }
-    guard let input = try? JSONSerialization.data(withJSONObject: ["code": code, "userId": userId]) else { return }
-    let generation = accountGeneration
-    busy = true; redeeming = true; redemptionMessage = ""; redemptionIsError = false
-    Task {
-      defer { redeeming = false; busy = false; refresh() }
-      do {
-        let data = try await Task.detached { try DesktopCommand.run(["desktop", "--action", "redeem-pro"], timeout: 90, input: input) }.value
-        guard generation == accountGeneration else { return }
-        let next = try JSONDecoder().decode(DesktopSnapshot.self, from: data)
-        snapshot = next
-        guard next.account?.userId == userId else { return }
-        guard let redemption = next.redemption, redemption.userId == userId,
-              case .pro = next.account?.membership() ?? .unknown else {
-          throw NSError(domain: "LinkShell", code: 1, userInfo: [NSLocalizedDescriptionKey: "尚未确认 Pro 有效期，请刷新会员状态后重试。"])
-        }
-        redemptionCode = ""
-        redemptionMessage = redemption.idempotent ? "该激活码已为当前账号兑换，Pro 会员状态已更新。" : "兑换成功，Pro 会员已开通。"
-        accountMessage = next.accountWarning ?? ""
-        lastAccountRefresh = Date()
-        event("Pro 会员状态已更新")
-      } catch {
-        if generation == accountGeneration {
-          redemptionMessage = error.localizedDescription; redemptionIsError = true
-        }
-      }
-    }
+  /// Membership is bought in the browser on itool.tech with the same account; LinkShell only reads it.
+  func openMembershipPage() {
+    guard !preview, let url = URL(string: "https://itool.tech/pro?from=linkshell") else { return }
+    visitedMembershipPage = true
+    NSWorkspace.shared.open(url)
+  }
+
+  /// Back from the browser: the purchase may have gone through.
+  func returnedFromMembershipPage() {
+    guard visitedMembershipPage else { return }
+    visitedMembershipPage = false
+    refreshAccount()
   }
 
   func installCommand() {
