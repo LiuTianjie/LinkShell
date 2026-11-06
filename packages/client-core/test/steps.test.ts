@@ -56,7 +56,7 @@ describe("the summary of a run of steps", () => {
 
   it("says how many failed or were stopped", () => {
     const t = tallySteps([bash("false", { status: "failed" }), bash("x", { status: "failed", output: "The user doesn't want to proceed with this tool use." }), bash("ls")]);
-    expect(describeFailures(t)).toBe("（1 项失败，1 项已停止）");
+    expect(describeFailures(t)).toBe("（1 次工具未成功，1 项已停止）");
     expect(describeFailures(tallySteps([bash("ls"), bash("pwd")]))).toBeUndefined();
     // A command that worked and printed those words (a log it read) was neither stopped nor declined.
     expect(describeFailures(tallySteps([bash("grep -r rejected logs", { output: "app.log: The user rejected the change; interrupted by user" })]))).toBeUndefined();

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import { groupProjects } from "@linkshell/client-core";
+import type { SessionSummary } from "@linkshell/wire";
 import { Layers3, MessageSquare, GitBranch, Plus, Search, ChevronDown, RefreshCw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,15 +21,15 @@ import {
   useActions,
   useClient,
   useJob,
-  Runtime,
 } from "./common";
 import { sessionNeedsAttention, sessionPreview, waitingLabel } from "./session-list";
 import { sessionTime } from "./session-time";
 import { StatusText } from "./StatusText";
 import { PageHeader } from "../components/PageHeader";
-import { engine, type Computer, type Connection } from "./engine";
+import type { Computer } from "./engine";
 import { computerName, computerNames } from "./computer-names";
-import { ProjectScopeChoice, projectScope, useProjectConnection } from "./project-overview";
+import { ProjectOverview, ProjectScopeChoice, projectScope, type ProjectSource } from "./project-overview";
+import type { CrossComputerProject } from "./cross-computer-projects";
 import "../styles/projects.css";
 
 export function Projects({
@@ -44,34 +45,95 @@ export function Projects({
   return scope === "all" ? <AllProjects openComputerView={openComputerView} /> : <ProjectList create={create} navigate={navigate} scopeChoice />;
 }
 
-/** The all-computer index is independent of the currently selected computer's access state. */
+/** The all-computer index is independent of the selected computer's access state. */
 export function AllProjects({ openComputerView }: { openComputerView: (computer: Computer, view: string) => void }) {
-  const computers = useStore(engine.state, (state) => state.computers);
-  return <div className="projects-overview flex min-w-0 flex-col gap-5">
-      <PageHeader title="所有电脑的项目" actions={<ProjectScopeChoice />} />
-      {computers.map((computer) => <ComputerProjects key={computer.key} computer={computer} openComputerView={openComputerView} />)}
-      {!computers.length && <EmptyState icon={<Layers3 />} title="还没有电脑" description="连接电脑后，它的项目和会话会按电脑分组显示在这里。" />}
+  return <ProjectOverview>{(sources, projects) => <AllProjectList sources={sources} projects={projects} openComputerView={openComputerView} />}</ProjectOverview>;
+}
+
+function AllProjectList({ sources, projects, openComputerView }: {
+  sources: ProjectSource[]; projects: CrossComputerProject[]; openComputerView: (computer: Computer, view: string) => void;
+}) {
+  const names = useStore(computerNames.store);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const job = useJob();
+  const needle = query.trim().toLocaleLowerCase();
+  const byKey = new Map(sources.map((source) => [source.computer.key, source]));
+  const shown = projects.filter((project) => !needle || project.members.some((member) =>
+    `${project.name} ${member.project.cwd} ${member.project.branch ?? ""} ${computerName(byKey.get(member.computerKey)!.computer, names)}`.toLocaleLowerCase().includes(needle) ||
+    member.project.sessions.some((session) => titleOf(session).toLocaleLowerCase().includes(needle))));
+  const open = (computer: Computer) => openComputerView(computer, "projects");
+  const online = sources.filter((source) => source.state?.status === "online" && source.connection);
+  const pending = sources.some((source) => source.computer.machine.online && !source.state?.sessionsLoaded && !source.error && source.state?.status !== "locked" && !source.state?.sessionsError);
+  return <div className="projects-overview projects-page flex min-w-0 flex-col gap-4">
+    <PageHeader title="所有电脑的项目" detail={`${shown.length} 个项目`} actions={<>
+      <ProjectScopeChoice />
+      <InputGroup className="page-search">
+        <InputGroupAddon><Search /></InputGroupAddon>
+        <InputGroupInput aria-label="搜索项目" placeholder="搜索项目、电脑或会话" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {query && <InputGroupAddon align="inline-end"><InputGroupButton aria-label="清除项目搜索" size="icon-xs" onClick={() => setQuery("")}><X /></InputGroupButton></InputGroupAddon>}
+      </InputGroup>
+      <Button variant="ghost" size="icon" aria-label="刷新项目" disabled={job.busy || !online.length}
+        onClick={() => void job.run(() => Promise.all(online.map((source) => source.connection!.store.getState().refresh())))}>
+        <RefreshCw className={job.busy ? "animate-spin" : undefined} />
+      </Button>
+    </>} />
+    <ErrorNotice error={job.error} />
+    <div className="project-list">
+      {shown.map((project) => <section key={project.key} className="project-group" aria-label={project.name}>
+        <div className="project-row">
+          {project.generated ? <MessageSquare className="project-icon" aria-hidden /> : <Layers3 className="project-icon" aria-hidden />}
+          <div className="project-copy"><h2>{project.name} {project.generated && <Badge variant="secondary">自动创建</Badge>}</h2></div>
+          <span className="project-meta">{new Set(project.members.map((member) => member.computerKey)).size} 台电脑</span>
+        </div>
+        {project.members.map((member) => {
+          const source = byKey.get(member.computerKey)!;
+          const memberKey = `${member.computerKey}:${member.project.key}`;
+          const sessions = needle || expanded[memberKey] ? member.project.sessions : member.project.sessions.slice(0, 3);
+          return <div key={memberKey} className="project-computer">
+            <div className="project-computer-heading">
+              <Button variant="ghost" size="sm" onClick={() => open(source.computer)}>{computerName(source.computer, names)}</Button>
+              <span className="project-computer-path" title={member.project.cwd}>{member.project.cwd}</span>
+              {member.project.branch && <span className="project-branch"><GitBranch aria-hidden />{member.project.branch}</span>}
+            </div>
+            {sessions.length ? <div className="project-sessions">
+              {sessions.map((session) => <ProjectSession key={session.id} session={session} navigate={(id) => openComputerView(source.computer, id)} />)}
+              {!needle && member.project.sessions.length > 3 && <button type="button" className="project-more" aria-expanded={!!expanded[memberKey]}
+                onClick={() => setExpanded((current) => ({ ...current, [memberKey]: !current[memberKey] }))}>
+                <ChevronDown aria-hidden data-open={expanded[memberKey] || undefined} />{expanded[memberKey] ? "收起" : `其余 ${member.project.sessions.length - 3} 个会话`}
+              </button>}
+            </div> : <p className="project-empty">已加载的记录里没有这个项目的会话。</p>}
+          </div>;
+        })}
+      </section>)}
+    </div>
+    {sources.map((source) => {
+      const issue = source.error ?? (source.state?.status === "locked" ? "需要输入访问密码" : source.state?.sessionsError ?? (!source.computer.machine.online ? "电脑离线" : !source.state?.sessionsLoaded ? "正在读取项目…" : undefined));
+      const more = source.state?.sessionsNextBefore !== undefined;
+      if (!issue && !more) return null;
+      return <div key={source.computer.key} className="project-computer-status">
+        <span>{computerName(source.computer, names)}{issue && ` · ${issue}`}</span>
+        {issue && <Button variant="outline" size="sm" onClick={() => open(source.computer)}>{source.state?.status === "locked" ? "输入访问密码" : "打开电脑"}</Button>}
+        {more && <Button variant="outline" size="sm" disabled={job.busy || source.state?.status !== "online"}
+          onClick={() => void job.run(() => source.connection!.store.getState().loadMoreSessions())}>加载更早的会话</Button>}
+      </div>;
+    })}
+    {!shown.length && !pending && <EmptyState icon={needle ? <Search /> : <Layers3 />} title={needle ? "没有找到项目" : sources.length ? "还没有项目" : "还没有电脑"}
+      description={needle ? "试试项目名称、电脑名称或会话标题。" : "连接电脑并新建会话后，项目会显示在这里。"}>
+      {needle && <Button variant="outline" onClick={() => setQuery("")}>清除搜索</Button>}
+    </EmptyState>}
   </div>;
 }
 
-function ComputerProjects({ computer, openComputerView }: { computer: Computer; openComputerView: (computer: Computer, view: string) => void }) {
-  const names = useStore(computerNames.store);
-  const retained = useProjectConnection(computer);
-  const name = computerName(computer, names);
-  if (!retained?.connection || !computer.machine.online) return <section className="flex flex-col gap-2">
-    <PageHeader title={name} actions={<Button variant="outline" size="sm" onClick={() => openComputerView(computer, "home")}>打开电脑</Button>} />
-    <p className="text-sm text-muted-foreground" role="status">{retained?.error ?? (computer.machine.online ? "正在读取项目…" : "电脑离线，重新连接后可读取项目")}</p>
-  </section>;
-  return <ConnectedComputerProjects connection={retained.connection} name={name} open={() => openComputerView(computer, "home")} navigate={(id) => openComputerView(computer, id)} />;
-}
-
-function ConnectedComputerProjects({ connection, name, open, navigate }: { connection: Connection; name: string; open: () => void; navigate: (id: string) => void }) {
-  const status = useStore(connection.store, (state) => state.status);
-  if (status === "locked") return <section className="flex flex-col gap-2">
-    <PageHeader title={name} actions={<Button variant="outline" size="sm" onClick={open}>输入访问密码</Button>} />
-    <p className="text-sm text-muted-foreground">这台电脑需要解锁后才能查看项目。</p>
-  </section>;
-  return <Runtime value={connection}><ProjectList title={name} navigate={navigate} openComputer={open} /></Runtime>;
+function ProjectSession({ session, navigate }: { session: SessionSummary; navigate: (id: string) => void }) {
+  return <button type="button" className="project-session" onClick={() => navigate(session.id)}>
+    <AgentMark agent={session.agent} />
+    <span className="project-session-title" title={titleOf(session)}>{titleOf(session)}</span>
+    <span className="project-session-detail">{sessionPreview(session)}</span>
+    {sessionNeedsAttention(session) ? <StatusText state="waiting" label={waitingLabel(session)} />
+      : session.state !== "idle" ? <StatusText state={session.state} /> : <span />}
+    <time dateTime={new Date(session.updatedAt).toISOString()}>{sessionTime(session.updatedAt)}</time>
+  </button>;
 }
 
 function ProjectList({ create, navigate, title = "项目", scopeChoice = false, openComputer }: {
@@ -190,19 +252,7 @@ function ProjectList({ create, navigate, title = "项目", scopeChoice = false, 
               {shown.length ? (
                 <div className="project-sessions">
                   {shown.map((session) => (
-                    <button key={session.id} type="button" className="project-session" onClick={() => navigate(session.id)}>
-                      <AgentMark agent={session.agent} />
-                      <span className="project-session-title" title={titleOf(session)}>{titleOf(session)}</span>
-                      <span className="project-session-detail">
-                        {sessionPreview(session)}
-                      </span>
-                      {sessionNeedsAttention(session) ? (
-                        <StatusText state="waiting" label={waitingLabel(session)} />
-                      ) : session.state !== "idle" ? (
-                        <StatusText state={session.state} />
-                      ) : <span />}
-                      <time dateTime={new Date(session.updatedAt).toISOString()}>{sessionTime(session.updatedAt)}</time>
-                    </button>
+                    <ProjectSession key={session.id} session={session} navigate={navigate} />
                   ))}
                   {project.sessions.length > 3 && !query.trim() && (
                     <button

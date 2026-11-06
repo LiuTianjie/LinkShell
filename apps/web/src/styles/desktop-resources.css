@@ -172,7 +172,6 @@ html[data-desktop] .terminal-font-menu { display: flex; align-items: center; gap
 html[data-desktop] .terminal-font-menu > span:first-child { flex: 1; }
 html[data-desktop] .terminal-font-menu [data-button] { width: 28px; height: 28px; border-radius: var(--radius-control); font-family: var(--mono); font-size: 12px; }
 html[data-desktop] .terminal-font-menu .terminal-font-value { width: 24px; color: var(--label); font-variant-numeric: tabular-nums; text-align: center; }
-html[data-desktop] .desktop-main .terminal-live { position: relative; }
 html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absolute; right: 16px; bottom: 16px; z-index: 3; width: 32px; height: 32px; border-radius: var(--radius-control); background: var(--plain); box-shadow: var(--float-shadow); color: var(--secondaryLabel); transition: opacity var(--transition), translate var(--transition); }
 html[data-desktop] .desktop-main .terminal-bottom[data-hidden] { opacity: 0; translate: 0 4px; pointer-events: none; }
 html[data-desktop] .desktop-main .terminal-bottom[data-button]:hover { background: var(--plain); color: var(--label); }

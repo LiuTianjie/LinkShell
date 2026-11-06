@@ -272,6 +272,8 @@ export class CodexDriver implements AgentDriver {
   private readonly goalRevision = new Map<string, number>();
   private skillsRevision = 0;
   private models?: Promise<CodexModel[]>;
+  private modelsLoadedAt?: number;
+  private lastModels: CodexModel[] = [];
   private restartTimer?: ReturnType<typeof setTimeout>;
   private restartDelay: number;
   private stopped = false;
@@ -356,6 +358,7 @@ export class CodexDriver implements AgentDriver {
     for (const timer of this.taskPolls.values()) clearTimeout(timer);
     this.taskPolls.clear();
     this.stopped = true;
+    this.clearModels();
     if (this.restartTimer) clearTimeout(this.restartTimer);
     for (const timer of this.followRetries.values()) clearTimeout(timer);
     this.followRetries.clear();
@@ -967,6 +970,9 @@ export class CodexDriver implements AgentDriver {
   watched(nativeId: string, open: boolean): void {
     if (open) {
       this.watching.add(nativeId);
+      // The hub can keep a session attached after its last viewer leaves.
+      // Reopening it must also refresh the choices sent in ls_config.
+      if (this.attached.has(nativeId) || this.observed.has(nativeId)) void this.announceConfig(nativeId);
       void this.syncTasks(nativeId);
       this.cancelRelease(nativeId);
     } else {
@@ -1649,9 +1655,9 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  /** From the app-server the driver keeps running: its model list (cached) and the configuration a thread started in `cwd` reads. */
+  /** Refresh when a client opens the picker; a long-running host must pick up models added since its first session. */
   async listModels(cwd?: string, model?: string): Promise<import("@linkshell/wire").MethodResult<"agents.models">> {
-    const [models, configured] = await Promise.all([this.loadModels(true), this.configuredSettings(cwd)]);
+    const [models, configured] = await Promise.all([this.loadModels(true, true), this.configuredSettings(cwd)]);
     const listed = newThreadModels(models, configured.model);
     const selected = model && listed.models.some((entry) => entry.value === model) ? model : undefined;
     return { ...listed, config: configOptions(configured, selected ? { model: selected } : {}, models).filter((option) => option.category === "mode" || option.category === "effort") };
@@ -1669,31 +1675,62 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  private loadModels(strict = false): Promise<CodexModel[]> {
-    this.models ??= (async () => {
-      const models: CodexModel[] = [];
-      const cursors = new Set<string>();
-      let cursor: string | undefined;
-      do {
-        const result = await this.rpc<{ data: CodexModel[]; nextCursor?: string | null }>("model/list", { includeHidden: false, ...(cursor ? { cursor } : {}) });
-        models.push(...result.data);
-        cursor = result.nextCursor ?? undefined;
-        if (cursor && cursors.has(cursor)) throw new Error("Codex 返回了重复的模型分页，请重试");
-        if (cursor) cursors.add(cursor);
-      } while (cursor);
-      return models;
-    })()
-      .catch((error: unknown) => {
-        this.models = undefined;
-        this.host?.log(`[codex] model/list failed: ${error instanceof Error ? error.message : String(error)}`);
-        if (error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND) return [];
-        throw error;
-      });
-    return strict ? this.models : this.models.catch(() => []);
+  private loadModels(strict = false, refresh = false): Promise<CodexModel[]> {
+    // Concurrent pickers share the same request. Internal configuration updates can
+    // reuse its result, while the next explicit listing reads the agent again.
+    if (this.modelsLoadedAt !== undefined && (refresh || Date.now() - this.modelsLoadedAt >= 60_000)) this.models = undefined;
+    if (!this.models) {
+      this.modelsLoadedAt = undefined;
+      const loading: Promise<CodexModel[]> = (async () => {
+        const models: CodexModel[] = [];
+        const cursors = new Set<string>();
+        let cursor: string | undefined;
+        do {
+          const result = await this.rpc<{ data: CodexModel[]; nextCursor?: string | null }>("model/list", { includeHidden: false, ...(cursor ? { cursor } : {}) });
+          models.push(...result.data);
+          cursor = result.nextCursor ?? undefined;
+          if (cursor && cursors.has(cursor)) throw new Error("Codex 返回了重复的模型分页，请重试");
+          if (cursor) cursors.add(cursor);
+        } while (cursor);
+        return models;
+      })()
+        .then((models) => {
+          if (this.models === loading) {
+            this.modelsLoadedAt = Date.now();
+            this.lastModels = models;
+            // An existing composer reads ls_config, not agents.models. Keep its
+            // current selection while publishing newly discovered choices.
+            for (const nativeId of this.watching) {
+              if (this.attached.has(nativeId) || this.observed.has(nativeId)) this.publishConfig(nativeId, models);
+            }
+          }
+          return models;
+        })
+        .catch((error: unknown) => {
+          if (this.models === loading) this.models = undefined;
+          this.host?.log(`[codex] model/list failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND) return [];
+          throw error;
+        });
+      this.models = loading;
+    }
+    return strict ? this.models : this.models.catch(() => this.lastModels);
   }
 
   private async announceConfig(nativeId: string): Promise<void> {
+    // Permissions and Plan still come from this session when the catalogue
+    // is unavailable; keep its last model choices while publishing new settings.
     const models = await this.loadModels();
+    if (!this.stopped) this.publishConfig(nativeId, models);
+  }
+
+  private clearModels(): void {
+    this.models = undefined;
+    this.modelsLoadedAt = undefined;
+    this.lastModels = [];
+  }
+
+  private publishConfig(nativeId: string, models: CodexModel[]): void {
     const options = configOptions(this.settings.get(nativeId) ?? {}, this.overridesOf(nativeId), models);
     if (options.length > 0 && this.isNews(`config:${nativeId}`, options)) this.host?.update(this.id, nativeId, { sessionUpdate: "ls_config", options });
   }
@@ -1891,7 +1928,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   private onDown(reason: string): void {
-    this.models = undefined;
+    this.clearModels();
     this.skills.clear();
     if (this.stopped) return;
     this.host?.log(`[codex] ${reason}`);

@@ -17,6 +17,7 @@ import {
   questionOptionName,
   questionTitle,
   recommendedLabel,
+  permissionContent,
 } from "@linkshell/client-core";
 import {
   ErrorNotice,
@@ -26,7 +27,7 @@ import {
   useJob,
   useSessionOnline,
 } from "./common";
-import { Diff, Blocks } from "./Timeline";
+import { Diff, Blocks, RichText } from "./Timeline";
 import { Icon } from "../icons";
 
 type QuestionOption = NonNullable<Question["options"]>[number];
@@ -101,6 +102,7 @@ export function Permission({
     )
     .find(Boolean);
   const asks = !!permission.questions;
+  const body = permissionContent(permission);
   // An approval reads the same on every end (docs/design/visual-system.md): the shared Chinese names
   // in the fixed order 拒绝 → 允许 → 始终允许 → 停止, whatever order and language the agent used.
   // A question's options are only its ways out, so they keep the question card's own names.
@@ -127,15 +129,16 @@ export function Permission({
           <span>{asks ? "Agent 在等你的回答" : "请确认是否允许此操作"}</span>
         </div>
       </div>
-      {permission.detail && <pre tabIndex={0}>{permission.detail}</pre>}
+      {body.detail && <pre tabIndex={0}>{body.detail}</pre>}
+      {body.markdown && <RichText text={body.markdown} />}
       {permission.url && (
         <p className="muted approval-url">{permission.url.url}</p>
       )}
-      {permission.tool?.rawInput !== undefined && (
+      {body.rawInput !== undefined && (
         <pre tabIndex={0} aria-label="待批准的工具参数">
-          {typeof permission.tool.rawInput === "string"
-            ? permission.tool.rawInput
-            : JSON.stringify(permission.tool.rawInput, null, 2)}
+          {typeof body.rawInput === "string"
+            ? body.rawInput
+            : JSON.stringify(body.rawInput, null, 2)}
         </pre>
       )}
       {permission.tool?.locations?.map((location, index) => (
@@ -144,7 +147,7 @@ export function Permission({
           {location.line === undefined ? "" : `:${location.line}`}
         </code>
       ))}
-      {permission.tool?.content?.map((content, index) =>
+      {body.content.map((content, index) =>
         content.type === "diff" || content.type === "patch" ? (
           <Diff key={index} change={content} />
         ) : content.type === "content" ? (

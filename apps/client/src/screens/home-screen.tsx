@@ -320,7 +320,7 @@ function HomeWorkspace() {
     }
   }, [split, selected]);
   const showDetail = !!selected && (split || detailOpened);
-  const inlineControls = homeUsesInlineControls(systemInsets, split, showDetail);
+  const inlineControls = homeUsesInlineControls(systemInsets, showDetail);
   const navigationLayout = homeNavigationLayout(insets, systemInsets, headerHeight, !inlineControls);
   useEffect(() => { if (showDetail) setDetailVisited(true); }, [showDetail]);
   const showTools = !!selected && tool !== null;

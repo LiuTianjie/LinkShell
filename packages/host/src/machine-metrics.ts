@@ -1,11 +1,15 @@
-import { cpus, freemem, totalmem, type CpuInfo } from "node:os";
+import { cpus, freemem, homedir, totalmem, type CpuInfo } from "node:os";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import type { BigIntStatsFs } from "node:fs";
+import { readFile, statfs } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout, clearTimeout } from "node:timers";
 import { promisify } from "node:util";
 import { MACHINE_METRICS_HISTORY_LIMIT, MACHINE_METRICS_INTERVAL_MS, type MachineMetrics, type MachineMetricsSnapshot } from "@linkshell/wire";
 
 type CpuSample = { at: number; cores: CpuInfo[] };
+type DiskMetrics = NonNullable<MachineMetrics["disk"]>;
+const DISK_INTERVAL_MS = 30_000;
 const run = promisify(execFile);
 
 export function macMemoryUsedBytes(output: string): number | null {
@@ -43,6 +47,18 @@ async function memoryUsage(): Promise<MachineMetrics["memory"]> {
   return { totalBytes, usedBytes: Math.max(0, Math.min(totalBytes, usedBytes ?? totalBytes - freemem())), includesCache: usedBytes === null };
 }
 
+export function diskUsageBytes(stats: Pick<BigIntStatsFs, "bsize" | "blocks" | "bfree" | "bavail">): Pick<DiskMetrics, "totalBytes" | "usedBytes" | "availableBytes"> | undefined {
+  if (stats.bsize <= 0n || stats.blocks <= 0n || stats.bfree < 0n || stats.bfree > stats.blocks || stats.bavail > stats.bfree) return undefined;
+  const totalBytes = Number(stats.blocks * stats.bsize);
+  if (!Number.isSafeInteger(totalBytes)) return undefined;
+  return {
+    totalBytes,
+    usedBytes: Number((stats.blocks - stats.bfree) * stats.bsize),
+    // Reserved free space is neither occupied data nor space the current user can write.
+    availableBytes: Number((stats.bavail < 0n ? 0n : stats.bavail) * stats.bsize),
+  };
+}
+
 export function cpuUsage(previous: CpuInfo[], current: CpuInfo[]): number | null {
   if (!current.length || previous.length !== current.length) return null;
   let idle = 0, total = 0;
@@ -65,6 +81,9 @@ export class MachineMetricsSampler {
   private pending?: Promise<MachineMetrics>;
   private history: MachineMetrics[] = [];
   private timer?: ReturnType<typeof setInterval>;
+  private disk?: DiskMetrics;
+  private diskCheckedAt = -Infinity;
+  private diskPending?: Promise<DiskMetrics | undefined>;
 
   start(): void {
     if (this.timer) return;
@@ -100,6 +119,27 @@ export class MachineMetricsSampler {
     return this.pending;
   }
 
+  private async sampleDisk(): Promise<DiskMetrics | undefined> {
+    const age = Date.now() - this.diskCheckedAt;
+    if (this.diskPending || age >= 0 && age < DISK_INTERVAL_MS) return this.disk;
+    this.diskCheckedAt = Date.now();
+    this.disk = undefined;
+    const path = homedir();
+    this.diskPending = statfs(path, { bigint: true }).then((stats) => {
+      const usage = diskUsageBytes(stats);
+      this.disk = usage && { path, sampledAt: Date.now(), ...usage };
+      return this.disk;
+    }).catch(() => undefined).finally(() => { this.diskPending = undefined; });
+    // A disconnected network home must not hold up CPU/memory, or queue more filesystem requests.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.diskPending,
+        new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 1000); timer.unref(); }),
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
   private async collect(): Promise<MachineMetrics> {
     let before = this.previous;
     // Startup or waking from sleep needs a fresh window, not an average across the gap.
@@ -109,13 +149,14 @@ export class MachineMetricsSampler {
     }
     const after = { at: performance.now(), cores: cpus() };
     const sampledAt = Date.now();
-    const memory = await memoryUsage();
+    const [memory, disk] = await Promise.all([memoryUsage(), this.sampleDisk()]);
     this.previous = after;
     this.cached = {
       sampledAt,
       sampleIntervalMs: Math.round(after.at - before.at),
       cpu: { usage: cpuUsage(before.cores, after.cores), cores: after.cores.length, model: after.cores[0]?.model ?? "" },
       memory,
+      ...(disk ? { disk } : {}),
     };
     this.history = [...this.history.filter((entry) => entry.sampledAt < sampledAt && entry.sampledAt > sampledAt - MACHINE_METRICS_INTERVAL_MS * MACHINE_METRICS_HISTORY_LIMIT), this.cached].slice(-MACHINE_METRICS_HISTORY_LIMIT);
     return this.cached;

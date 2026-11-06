@@ -15,6 +15,7 @@ import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/com
 import { useClient, useConnection } from "@/lib/client";
 import { baseName, fileSize, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { useFilePreferences } from "@/lib/file-preferences";
 import { openFile } from "@/lib/links";
 import { branchOf, useGitInfo } from "@/lib/worktree";
 import { ContentPane, useContentWidth } from "@/lib/content-width";
@@ -135,11 +136,11 @@ export function FilesScreen() {
   const headerTitleWidth = useHeaderTitleWidth(selected ? 2 : 1);
   const showList = !selected || (wide && !collapsed);
   const listWidth = wide ? Math.min(340, Math.round(width * 0.36)) : width;
-  const params = useLocalSearchParams<{ path?: string; hidden?: string }>();
+  const params = useLocalSearchParams<{ path?: string }>();
   const { link } = useConnection();
   const online = useClient((state) => state.status === "online");
   const offline = useClient((state) => unreachable(state.status));
-  const [hidden, setHidden] = useState(params.hidden === "1");
+  const { hidden, setHidden } = useFilePreferences();
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
@@ -168,7 +169,7 @@ export function FilesScreen() {
       if (wide) setSelected(entry.path);
       else openFile({ path: entry.path });
     }
-    else router.push({ pathname: "/files", params: { path: entry.path, ...(hidden ? { hidden: "1" } : {}) } });
+    else router.push({ pathname: "/files", params: { path: entry.path } });
   };
 
   return (
@@ -191,7 +192,7 @@ export function FilesScreen() {
               {
                 title: hidden ? "不显示隐藏文件" : "显示隐藏文件",
                 icon: hidden ? { sf: "eye.slash", md: "visibility_off" } : { sf: "eye", md: "visibility" },
-                onPress: () => setHidden((value) => !value),
+                onPress: () => setHidden(!hidden),
               },
               { title: "刷新", icon: { sf: "arrow.clockwise", md: "refresh" }, onPress: () => setRound((value) => value + 1) },
             ],

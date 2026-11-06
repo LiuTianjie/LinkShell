@@ -11,16 +11,17 @@ export function memoryDescription(metrics: MachineMetrics) {
     ? "整机已用物理内存，扣除可回收缓存；包含系统和压缩内存，不等同于内存压力。"
     : "整机物理内存使用量，包含系统和缓存；不等同于应用内存或内存压力。";
 }
-function Readings({ metrics }: { metrics: MachineMetrics }) {
-  return <div className="computer-readings">
-    <div className="computer-cpu" title={`${metrics.cpu.model} · ${metrics.cpu.cores} 个逻辑核心`}>
-      <strong>{metricPercent(metrics.cpu.usage)}</strong><div><span>%</span><span className="computer-metric-label">CPU</span></div>
-    </div>
-    <div className="computer-memory" title={memoryDescription(metrics)}>
-      <span className="computer-metric-label">内存</span><div><strong>{metricPercent(memoryPercent(metrics))}</strong><span>%</span></div>
-      <small>{memorySize(metrics)}</small>
-    </div>
-  </div>;
+const size = (bytes: number) => `${(bytes / 1024 ** 3).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} GB`;
+const percent = (value: number | null | undefined) => value == null ? "—" : `${metricPercent(value)}%`;
+function diskPercent(disk: MachineMetrics["disk"]) {
+  return disk && disk.totalBytes > 0 ? Math.min(100, Math.max(0, disk.usedBytes / disk.totalBytes * 100)) : null;
+}
+export function ComputerResourceReadings({ metrics }: { metrics?: MachineMetrics }) {
+  return <dl className="computer-resource-readings">
+    <div title={metrics ? `${metrics.cpu.model} · ${metrics.cpu.cores} 个逻辑核心` : undefined}><dt>CPU</dt><dd>{percent(metrics?.cpu.usage)}</dd></div>
+    <div title={metrics ? `已用 ${memorySize(metrics)}` : undefined}><dt>内存</dt><dd>{percent(metrics && memoryPercent(metrics))}</dd></div>
+    <div title={metrics?.disk ? `主目录磁盘已用 ${size(metrics.disk.usedBytes)} / ${size(metrics.disk.totalBytes)}；可用 ${size(metrics.disk.availableBytes)}` : "此电脑端未提供磁盘读数"}><dt>磁盘</dt><dd>{percent(diskPercent(metrics?.disk))}</dd></div>
+  </dl>;
 }
 function WaveHistory({ history }: { history: MachineMetrics[] }) {
   const samples = historySamples(history);
@@ -48,9 +49,19 @@ function WaveHistory({ history }: { history: MachineMetrics[] }) {
     {series("cpu")}{series("memory")}
   </svg>;
 }
-/** The one computer card (docs/design/visual-system.md): CPU and memory now, and their last two minutes. */
+/** The list stays compact; full capacity information and history are shown only on request. */
 export function ComputerMetricsVisual({ metrics, history }: { metrics: MachineMetrics; history: MachineMetrics[] }) {
-  return <><Readings metrics={metrics} /><div className="computer-history-frame" title="最近 2 分钟，从左到右为时间，从下到上为 0–100%。未采集的时段留空。">
-    <WaveHistory history={history} />
-  </div></>;
+  const disk = metrics.disk;
+  return <>
+    <dl className="computer-resource-details">
+      <div><dt>CPU</dt><dd>{metrics.cpu.model || "处理器"} · {metrics.cpu.cores} 个逻辑核心</dd></div>
+      <div><dt>物理内存</dt><dd>已用 {memorySize(metrics)}<small>{memoryDescription(metrics)}</small></dd></div>
+      <div><dt>主目录磁盘</dt><dd>{disk ? <>已用 {size(disk.usedBytes)} / {size(disk.totalBytes)} · 可用 {size(disk.availableBytes)}<small>{disk.path} · 每 30 秒更新</small></> : "此电脑端未提供磁盘读数"}</dd></div>
+    </dl>
+    <div className="computer-history">
+      <div className="computer-history-heading"><span>最近 2 分钟</span><span><i data-tone="cpu" />CPU<i data-tone="memory" />内存</span></div>
+      <div className="computer-history-frame" title="从左到右为时间，从下到上为 0–100%。未采集的时段留空。"><WaveHistory history={history} /></div>
+      <div className="computer-history-caption"><span>2 分钟前</span><span>现在</span></div>
+    </div>
+  </>;
 }

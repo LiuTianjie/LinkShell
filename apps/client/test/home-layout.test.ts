@@ -3,14 +3,13 @@ import { homeNavigationLayout, homeUsesInlineControls } from "../src/lib/home-la
 import { workspaceLayout } from "../src/lib/workspace-layout";
 
 describe("Home native header geometry", () => {
-  it("puts root controls beside search only for a compact list without a side toolbar", () => {
+  it("keeps list controls inline until a detail or native side toolbar needs the header", () => {
     const phone = { top: 62, left: 0, right: 0, bottom: 34 };
-    expect(homeUsesInlineControls(phone, false, false)).toBe(true);
-    expect(homeUsesInlineControls(phone, false, true)).toBe(false);
-    expect(homeUsesInlineControls(phone, true, false)).toBe(false);
-    expect(homeUsesInlineControls({ ...phone, top: 0, left: 62, right: 62 }, false, false)).toBe(true);
-    expect(homeUsesInlineControls({ ...phone, right: 84 }, false, false)).toBe(false);
-    expect(homeUsesInlineControls({ ...phone, left: 84 }, false, false)).toBe(false);
+    expect(homeUsesInlineControls(phone, false)).toBe(true);
+    expect(homeUsesInlineControls(phone, true)).toBe(false);
+    expect(homeUsesInlineControls({ ...phone, top: 0, left: 62, right: 62 }, false)).toBe(true);
+    expect(homeUsesInlineControls({ ...phone, right: 84 }, false)).toBe(false);
+    expect(homeUsesInlineControls({ ...phone, left: 84 }, false)).toBe(false);
   });
   it("clears the status bar rather than reserving a hidden root toolbar", () => {
     const phone = { top: 62, left: 0, right: 0, bottom: 83 };

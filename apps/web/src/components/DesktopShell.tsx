@@ -53,7 +53,8 @@ import { sessionGroup, sessionNeedsAttention, sessionPreview } from "../live/ses
 import { desktopSessionTree, sessionFamilies } from "../live/desktop-session-tree";
 import { compactTime } from "../live/session-time";
 import { readLocal, saveLocal } from "../live/storage";
-import { projectScope, useProjectConnection } from "../live/project-overview";
+import { ProjectOverview, projectScope, setProjectScope, type ProjectSource } from "../live/project-overview";
+import type { CrossComputerProject } from "../live/cross-computer-projects";
 import { Badge } from "./ui/badge";
 import { useApplyDesktopAppearance, useDesktopAppearance, type Appearance } from "../live/desktop-appearance";
 import type { ConsoleShellProps } from "./ConsoleShell";
@@ -252,6 +253,7 @@ function SessionCountBadge({ connection }: { connection: Connection }) {
 
 function SessionRow({
   session,
+  computerKey,
   active,
   navigate,
   detail,
@@ -261,6 +263,7 @@ function SessionRow({
   fold,
 }: {
   session: SessionSummary;
+  computerKey: string;
   active: boolean;
   navigate: (view: string) => void;
   detail?: string;
@@ -278,6 +281,7 @@ function SessionRow({
       type="button"
       className="tree-session"
       data-session-id={session.id}
+      data-computer-key={computerKey}
       data-active={active || undefined}
       data-menu-open={menuOpen || undefined}
       data-child={child || undefined}
@@ -310,7 +314,10 @@ function SessionRow({
 }
 
 /** Live work stays separate from the project tree's stable creation order. */
-function SessionTree({ connection, view, navigate, background = false, scopeMenu, hideHeading = false }: { connection: Connection; view: string; navigate: (view: string) => void; background?: boolean; scopeMenu?: ReactNode; hideHeading?: boolean }) {
+function SessionTree({ connection, view, navigate, background = false, scopeMenu, hideHeading = false, projectKey }: {
+  connection: Connection; view: string; navigate: (view: string) => void; background?: boolean;
+  scopeMenu?: ReactNode; hideHeading?: boolean; projectKey?: string;
+}) {
   const sessions = useStore(connection.store, (state) => state.sessions);
   const projects = useStore(connection.store, (state) => state.projects);
   const loaded = useStore(connection.store, (state) => state.sessionsLoaded);
@@ -333,10 +340,12 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   };
   const [allProjects, setAllProjects] = useState(false);
   const [allActive, setAllActive] = useState(false);
-  const { active, groups } = useMemo(() => desktopSessionTree(projects, Object.values(sessions)), [sessions, projects]);
+  const tree = useMemo(() => desktopSessionTree(projects, Object.values(sessions)), [sessions, projects]);
+  const active = projectKey ? [] : tree.active;
+  const groups = projectKey ? tree.groups.filter((group) => group.key === projectKey) : tree.groups;
   const currentProject = groups.find((group) => group.sessions.some((session) => session.id === view))?.key;
   const isOpen = (group: ProjectGroup, index: number) =>
-    open[group.key] ?? (group.key === currentProject || index === 0);
+    projectKey !== undefined || (open[group.key] ?? (group.key === currentProject || index === 0));
   const toggle = (group: ProjectGroup, index: number) => {
     const next = { ...open, [group.key]: !isOpen(group, index) };
     setOpen(next);
@@ -359,6 +368,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
             <SessionRow
               key={session.id}
               session={session}
+              computerKey={engine.computerForKey(connection.computer.key)?.key ?? connection.computer.key}
               active={view === session.id}
               navigate={navigate}
               detail={`${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : sessionPreview(session) || "运行中"}`}
@@ -373,7 +383,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
           )}
         </section>
       )}
-      <section className="tree-section" aria-label="项目">
+      <section className={projectKey ? "tree-project-member-sessions" : "tree-section"} aria-label="项目">
         {!hideHeading && <h2 className="tree-heading">
           <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => navigate("projects")}>
             项目
@@ -399,7 +409,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
           const list = all.filter((family, index) => index < limit || family.root.id === view || family.children.some((child) => child.id === view));
           return (
             <div className="tree-project" key={group.key}>
-              <div
+              {!projectKey && <div
                 className="tree-project-row"
                 data-menu-open={menuFor === `project:${group.key}` || undefined}
                 onContextMenu={isElectronDesktop && !background && !group.generated ? (event) => {
@@ -428,7 +438,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
                 >
                   <SquarePen size={13} />
                 </button>}
-              </div>
+              </div>}
               {expanded && (
                 <div className="tree-sessions">
                   {list.map(({ root, children }) => {
@@ -437,6 +447,7 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
                       <SessionRow
                         key={session.id}
                         session={session}
+                        computerKey={engine.computerForKey(connection.computer.key)?.key ?? connection.computer.key}
                         active={view === session.id}
                         navigate={navigate}
                         menuOpen={menuFor === session.id}
@@ -476,54 +487,116 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   );
 }
 
-function ComputerProjectTree({ computer, view, openComputerView }: { computer: Computer; view: string; openComputerView: ConsoleShellProps["openComputerView"] }) {
-  const names = useStore(computerNames.store);
-  const selectedConnection = useStore(engine.state, (state) => state.connection);
-  const selectedKey = selectedConnection?.computer.key;
-  const retained = useProjectConnection(computer);
-  const selected = selectedKey !== undefined && engine.computerForKey(selectedKey)?.key === computer.key;
-  const name = computerName(computer, names);
-  return <section className="tree-section" aria-label={`${name}的项目`}>
-    <h2 className="tree-heading">
-      <button type="button" className="tree-heading-link" title={`打开 ${name} 的项目`} onClick={() => openComputerView(computer, "projects")}>
-        <span className="desktop-presence" data-online={computer.machine.online || undefined} /> {name}
-      </button>
-      {selected && <Badge variant="secondary">当前</Badge>}
-    </h2>
-    {!computer.machine.online ? <p className="tree-note">电脑离线</p>
-      : retained?.error ? <p className="tree-note" role="alert">{retained.error}</p>
-      : retained?.connection ? <ProjectTreeConnection connection={retained.connection} selectedConnection={selected ? selectedConnection : undefined} view={selected ? view : ""} navigate={(id) => openComputerView(computer, id)} />
-      : <p className="tree-note">正在读取项目…</p>}
-  </section>;
+function AllProjectTree({ view, openComputerView, navigate, scopeMenu }: {
+  view: string; openComputerView: ConsoleShellProps["openComputerView"];
+  navigate: (view: string) => void; scopeMenu: ReactNode;
+}) {
+  return <ProjectOverview>{(sources, projects) => <CrossProjectTree sources={sources} projects={projects}
+    view={view} openComputerView={openComputerView} navigate={navigate} scopeMenu={scopeMenu} />}</ProjectOverview>;
 }
 
-function ProjectTreeConnection({ connection, selectedConnection, view, navigate }: {
-  connection: Connection;
-  selectedConnection?: Connection;
-  view: string;
-  navigate: (id: string) => void;
+function CrossProjectTree({ sources, projects, view, openComputerView, navigate, scopeMenu }: {
+  sources: ProjectSource[]; projects: CrossComputerProject[]; view: string;
+  openComputerView: ConsoleShellProps["openComputerView"]; navigate: (view: string) => void; scopeMenu: ReactNode;
 }) {
-  const selectedStatus = useStore(selectedConnection?.store ?? connection.store, (state) => state.status);
-  // A newly discovered local alias must not replace the still-live relay conversation's actions.
-  // If that route failed, keep the available route read-only until navigation explicitly selects it.
-  const active = selectedConnection && (selectedConnection === connection || selectedStatus === "online");
-  const shown = active ? selectedConnection : connection;
-  return <SessionTree key={shown.computer.key} connection={shown} view={view} navigate={navigate} background={!active} hideHeading />;
+  const names = useStore(computerNames.store);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => readLocal("desktopTree.all", {}));
+  const [showAll, setShowAll] = useState(false);
+  const [showAllActive, setShowAllActive] = useState(false);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((value) => value + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const dialogs = useDialogs();
+  const [menuFor, setMenuFor] = useState<string>();
+  const sessionMenu = (source: ProjectSource, session: SessionSummary) => isElectronDesktop && source.selected && source.connection
+    ? (at: { x: number; y: number }) => {
+      const key = `${source.computer.key}:${session.id}`;
+      setMenuFor(key);
+      void openSessionMenu(session, { connection: source.connection!, dialogs, at, navigate: (id) => openComputerView(source.computer, id) }).finally(() => setMenuFor(undefined));
+    } : undefined;
+  const byKey = new Map(sources.map((source) => [source.computer.key, source]));
+  const active = sources.flatMap((source) => source.state && source.state.status !== "locked"
+    ? desktopSessionTree(source.state.projects, Object.values(source.state.sessions)).active.map((session) => ({ source, session })) : [])
+    .sort((a, b) => b.session.createdAt - a.session.createdAt || a.source.computer.key.localeCompare(b.source.computer.key) || a.session.id.localeCompare(b.session.id));
+  const containsCurrent = (project: CrossComputerProject) => project.members.some((member) =>
+    byKey.get(member.computerKey)?.selected && member.project.sessions.some((session) => session.id === view));
+  const shown = showAll ? projects : projects.filter((project, index) => index < PROJECTS_SHOWN || containsCurrent(project));
+  return <>
+    {!!active.length && <section className="tree-section" aria-label="活跃会话">
+      <h2 className="tree-heading">活跃会话<span>{active.length}</span></h2>
+      {(showAllActive ? active : active.slice(0, ACTIVE_SESSIONS_SHOWN)).map(({ source, session }) => <SessionRow
+        key={`${source.computer.key}:${session.id}`} session={session} computerKey={source.computer.key} active={!!source.selected && view === session.id}
+        navigate={(id) => openComputerView(source.computer, id)} menuOpen={menuFor === `${source.computer.key}:${session.id}`} openMenu={sessionMenu(source, session)}
+        detail={`${computerName(source.computer, names)} · ${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : sessionPreview(session) || "运行中"}`} />)}
+      {active.length > ACTIVE_SESSIONS_SHOWN && <button type="button" className="tree-more" onClick={() => setShowAllActive((value) => !value)}>
+        {showAllActive ? "收起" : `显示其余 ${active.length - ACTIVE_SESSIONS_SHOWN} 个活跃会话`}
+      </button>}
+    </section>}
+    <section className="tree-section" aria-label="所有电脑的项目">
+      <h2 className="tree-heading tree-projects-heading">
+        <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => navigate("projects")}>项目</button>
+        {scopeMenu}
+      </h2>
+      {shown.map((project, index) => {
+        const open = expanded[project.key] ?? (index === 0 || containsCurrent(project));
+        return <div key={project.key} className="tree-project">
+          <button type="button" className="tree-project-toggle" aria-expanded={open} onClick={() => {
+            const next = { ...expanded, [project.key]: !open };
+            setExpanded(next);
+            try { saveLocal("desktopTree.all", next); } catch { /* The tree still works without storage. */ }
+          }}>
+            <ChevronRight size={13} aria-hidden /><span>{project.name}</span>
+            {project.generated && <Badge variant="secondary">自动</Badge>}
+          </button>
+          {open && project.members.map((member) => {
+            const source = byKey.get(member.computerKey)!;
+            return <div key={`${member.computerKey}:${member.project.key}`} className="tree-project-member">
+              <div className="tree-project-row" onContextMenu={isElectronDesktop && source.selected && source.connection && !member.project.generated ? (event) => {
+                event.preventDefault();
+                void openProjectMenu({ ...member.project, key: member.project.cwd }, { connection: source.connection!, dialogs, at: { x: event.clientX, y: event.clientY }, navigate: (id) => openComputerView(source.computer, id) });
+              } : undefined}>
+              <button type="button" className="tree-project-computer" title={`${computerName(source.computer, names)} · ${member.project.cwd}`}
+                onClick={() => openComputerView(source.computer, "projects")}>
+                <span className="desktop-presence" data-online={source.state?.status === "online" || undefined} />
+                <span>{computerName(source.computer, names)}</span>
+                {source.selected && <Badge variant="secondary">当前</Badge>}
+              </button>
+              {source.selected && !member.project.generated && <button type="button" className="tree-project-new" aria-label={`在 ${project.name} 中新建会话`}
+                onClick={() => sendDesktopCommand({ command: "new-session", cwd: member.project.cwd })}><SquarePen size={13} /></button>}
+              </div>
+              <p className="tree-project-path" title={member.project.cwd}>{member.project.cwd}</p>
+              {source.connection && <SessionTree connection={source.connection} projectKey={member.project.key}
+                view={source.selected ? view : ""} navigate={(id) => openComputerView(source.computer, id)} background={!source.selected} hideHeading />}
+            </div>;
+          })}
+        </div>;
+      })}
+      {projects.length > PROJECTS_SHOWN && (showAll || projects.length > shown.length) && <button type="button" className="tree-more" onClick={() => setShowAll((value) => !value)}>
+        {showAll ? "收起" : `显示全部 ${projects.length} 个项目`}
+      </button>}
+      {sources.filter((source) => !source.state?.sessionsLoaded || source.state.status === "locked" || source.state.sessionsError).map((source) =>
+        <button key={source.computer.key} type="button" className="tree-more tree-project-status" onClick={() => openComputerView(source.computer, "home")}>{computerName(source.computer, names)} · {source.error ?? (source.state?.status === "locked" ? "输入访问密码" : source.state?.sessionsError ?? (!source.computer.machine.online ? "电脑离线" : "正在读取项目…"))}</button>)}
+      {!projects.length && sources.length > 0 && sources.every((source) => source.state?.sessionsLoaded && source.state.status !== "locked" && !source.state.sessionsError) &&
+        <p className="tree-note">还没有项目。</p>}
+      {!sources.length && <p className="tree-note">连接电脑后可查看项目。</p>}
+    </section>
+  </>;
 }
 
 function ProjectScopeMenu({ value }: { value: "current" | "all" }) {
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
       <Button variant="ghost" size="xs" className="tree-scope-menu" aria-label={`项目范围：${value === "all" ? "所有电脑" : "当前电脑"}`}>
-        <span>{value === "all" ? "全部" : "当前"}</span><ChevronDown data-icon="inline-end" aria-hidden />
+        <span>{value === "all" ? "所有电脑" : "当前电脑"}</span><ChevronDown data-icon="inline-end" aria-hidden />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" sideOffset={4}>
       <DropdownMenuLabel>项目范围</DropdownMenuLabel>
       <DropdownMenuRadioGroup value={value} onValueChange={(value) => {
         const next = value === "all" ? "all" : "current";
-        projectScope.setState({ value: next });
-        try { saveLocal("projectScope", next); } catch { /* The current view still changes without storage. */ }
+        setProjectScope(next);
       }}>
         <DropdownMenuRadioItem value="current">当前电脑</DropdownMenuRadioItem>
         <DropdownMenuRadioItem value="all">所有电脑</DropdownMenuRadioItem>
@@ -549,8 +622,8 @@ function DesktopNavigation({
   const state = useStore(engine.state);
   const scope = useStore(projectScope, (state) => state.value);
   const multipleComputers = state.computers.length > 1;
-  const showAllProjects = multipleComputers && scope === "all";
-  const scopeMenu = multipleComputers ? <ProjectScopeMenu value={scope} /> : undefined;
+  const showAllProjects = scope === "all";
+  const scopeMenu = multipleComputers || showAllProjects ? <ProjectScopeMenu value={scope} /> : undefined;
   const { setOpenMobile } = useSidebar();
   const go = (id: string) => { navigate(id); setOpenMobile(false); };
   // Management takes the sidebar for its own pages, as Codex's settings do.
@@ -627,16 +700,10 @@ function DesktopNavigation({
         <nav className="desktop-places" aria-label="工作台">
           {navigationItems.map(place)}
         </nav>
-        {showAllProjects && <h2 className="tree-heading tree-projects-heading">
-          <button type="button" className="tree-heading-link" title="打开项目列表" onClick={() => go("projects")}>项目</button>
-          {scopeMenu}
-        </h2>}
-        {showAllProjects ? state.computers.map((computer) => <ComputerProjectTree
-          key={computer.key}
-          computer={computer}
-          view={view}
-          openComputerView={(target, id) => { openComputerView(target, id); setOpenMobile(false); }}
-        />) : state.connection && <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} scopeMenu={scopeMenu} />}
+        {showAllProjects ? <AllProjectTree view={view} navigate={go} scopeMenu={scopeMenu}
+          openComputerView={(target, id) => { openComputerView(target, id); setOpenMobile(false); }} />
+          : state.connection ? <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} scopeMenu={scopeMenu} />
+          : <h2 className="tree-heading"><span>项目</span>{scopeMenu}</h2>}
       </SidebarContent>
       {isElectronDesktop && <ManageEntry active={false} open={() => go(manageView())} />}
       </>)}
@@ -795,11 +862,17 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   });
   useEffect(() => {
     const step = (direction: 1 | -1) => {
-      const rows = [...document.querySelectorAll<HTMLElement>(".desktop-sidebar .tree-session[data-session-id]")];
-      const ids = [...new Set(rows.map((row) => row.dataset.sessionId!))];
-      if (!ids.length) return;
-      const at = ids.indexOf(props.view);
-      props.navigate(ids[at < 0 ? 0 : (at + direction + ids.length) % ids.length]);
+      const seen = new Set<string>();
+      const rows = [...document.querySelectorAll<HTMLButtonElement>(".desktop-sidebar .tree-session[data-session-id]")].filter((row) => {
+        const key = JSON.stringify([row.dataset.computerKey, row.dataset.sessionId]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (!rows.length) return;
+      const at = rows.findIndex((row) => row.dataset.active === "true");
+      // The row owns its computer route and unsaved-change guard, as it does on a click.
+      rows[at < 0 ? 0 : (at + direction + rows.length) % rows.length]!.click();
     };
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || keysBelongToContent()) return;

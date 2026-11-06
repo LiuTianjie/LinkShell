@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RPC_METHOD_NOT_FOUND, RpcError, type SessionSummary } from "@linkshell/wire";
 import { HostLink } from "../src/host-link.js";
-import { createClientStore } from "../src/store.js";
+import { createClientStore, type ClientStoreOptions } from "../src/store.js";
+import { createSessionPreferences } from "../src/session-preferences.js";
 
 const session: SessionSummary = { id: "codex:one", nativeId: "one", agent: "codex", cwd: "/work", state: "idle", pendingPermissions: 0, createdAt: 1, updatedAt: 1, lastSeq: 0, archived: false };
 
-function setup() {
+function setup(options: ClientStoreOptions = {}) {
   const link = new HostLink({ url: "ws://unused" });
   const call = vi.spyOn(link, "call");
-  const store = createClientStore(link);
+  const store = createClientStore(link, options);
   return { store, call };
 }
 
@@ -50,5 +51,45 @@ describe("models for a new session", () => {
     expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: "gpt-mini" }, 60_000);
     await store.getState().createSession({ agent: "codex", cwd: "/work" });
     expect(call.mock.lastCall?.[1]).toMatchObject({ model: undefined });
+  });
+
+  it("restores validated preferences for shortcut creation and gives explicit settings priority", async () => {
+    const saved = new Map<string, string>();
+    const preferences = createSessionPreferences({ getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => { saved.set(key, value); } });
+    preferences.remember("mac", "codex", { model: "gpt-big", config: { effort: "high", permissions: "read-only", removed: "on" } });
+    const { store, call } = setup({ sessionPreferences: preferences });
+    store.setState({ machine: { machineId: "mac", hostname: "Mac", platform: "darwin", hostVersion: "test", agents: [] } });
+    const listed = {
+      models: [{ value: "gpt-big", name: "GPT Big" }, { value: "gpt-mini", name: "GPT Mini" }],
+      config: [
+        { id: "effort", name: "Effort", category: "effort", current: "low", values: [{ value: "high", name: "High" }, { value: "low", name: "Low" }] },
+        { id: "permissions", name: "Permissions", category: "mode", current: "auto", values: [{ value: "read-only", name: "Read only" }] },
+      ],
+    };
+    call.mockImplementation(async (method) => method === "agents.models" ? listed : { session });
+    await store.getState().createSession({ agent: "codex", cwd: "/work" });
+    expect(call).toHaveBeenLastCalledWith("sessions.create", expect.objectContaining({ model: "gpt-big", config: { effort: "high", permissions: "read-only" } }), 60_000);
+    await store.getState().createSession({ agent: "codex", cwd: "/work", model: "gpt-mini", config: { effort: "low" } });
+    expect(call).toHaveBeenCalledWith("agents.models", { agent: "codex", cwd: "/work", model: "gpt-mini" });
+    expect(call).toHaveBeenLastCalledWith("sessions.create", expect.objectContaining({ model: "gpt-mini", config: { effort: "low", permissions: "read-only" } }), 60_000);
+    preferences.remember("mac", "codex", { model: "gone", config: { effort: "ultra", permissions: "removed" } });
+    await store.getState().createSession({ agent: "codex", cwd: "/work" });
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: undefined }, 60_000);
+  });
+
+  it("creates with explicit input or defaults when remembered choices cannot be checked", async () => {
+    const saved = new Map<string, string>();
+    const preferences = createSessionPreferences({ getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => { saved.set(key, value); } });
+    preferences.remember("mac", "codex", { model: "gpt-big", config: { effort: "high", permissions: "full-access" } });
+    const { store, call } = setup({ sessionPreferences: preferences });
+    store.setState({ machine: { machineId: "mac", hostname: "Mac", platform: "darwin", hostVersion: "test", agents: [] } });
+    call.mockImplementation(async (method) => {
+      if (method === "agents.models") throw RpcError.app("model_list_failed", "模型列表暂时不可用");
+      return { session };
+    });
+    await expect(store.getState().createSession({ agent: "codex", cwd: "/work" })).resolves.toEqual(session);
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: undefined }, 60_000);
+    await store.getState().createSession({ agent: "codex", cwd: "/work", model: "gpt-mini", config: { effort: "low" } });
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: "gpt-mini", config: { effort: "low" } }, 60_000);
   });
 });

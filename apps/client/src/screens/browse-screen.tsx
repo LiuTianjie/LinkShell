@@ -11,6 +11,7 @@ import { useClient, useConnection } from "@/lib/client";
 import { pickDirectory } from "@/lib/directory-pick";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { useFilePreferences } from "@/lib/file-preferences";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
 import { type, radius } from "@/theme/type";
@@ -95,6 +96,7 @@ export function BrowseScreen() {
   const online = useClient((state) => state.status === "online");
   const insets = usePageInsets();
   const [path, setPath] = useState<string | undefined>(undefined);
+  const { hidden, setHidden } = useFilePreferences();
   const [listing, setListing] = useState<{ path: string; parent?: string; home: string; entries: DirectoryEntry[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
@@ -109,7 +111,7 @@ export function BrowseScreen() {
     let cancelled = false;
     setError(null);
     link
-      .call("fs.list", { path })
+      .call("fs.list", { path, hidden })
       .then((result) => {
         if (cancelled) return;
         setListing(result);
@@ -119,7 +121,7 @@ export function BrowseScreen() {
     return () => {
       cancelled = true;
     };
-  }, [link, online, path, round]);
+  }, [link, online, path, hidden, round]);
 
   // Search as you type, after a short pause.
   useEffect(() => {
@@ -264,6 +266,11 @@ export function BrowseScreen() {
                 );
               })}
             </ScrollView>
+          </View>
+        ) : null}
+        {!searchMode ? (
+          <View style={{ alignSelf: "flex-start" }}>
+            <Button title={hidden ? "不显示隐藏文件夹" : "显示隐藏文件夹"} variant="plain" size="small" icon={hidden ? { sf: "eye.slash", md: "visibility_off" } : { sf: "eye", md: "visibility" }} onPress={() => { haptics.selection(); setHidden(!hidden); }} />
           </View>
         ) : null}
       </View>

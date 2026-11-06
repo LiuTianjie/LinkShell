@@ -137,7 +137,7 @@ html[data-desktop] .desktop-main .tool-record > summary > .tool-command { flex: 
 html[data-desktop] .desktop-main .tool-state { width: 16px; height: 16px; color: inherit; opacity: .6; }
 html[data-desktop] .desktop-main .tool-state svg { width: var(--icon-size); height: var(--icon-size); }
 html[data-desktop] .desktop-main .tool-record.completed > summary > .tool-state { color: inherit; }
-html[data-desktop] .desktop-main .tool-record.failed > summary > .tool-state { color: var(--danger); opacity: 1; }
+html[data-desktop] .desktop-main .tool-record[data-agent-failed] > :is(summary, .tool-summary) > .tool-state { color: var(--danger); opacity: 1; }
 html[data-desktop] .desktop-main .tool-record.in_progress .tool-state { color: var(--running); opacity: 1; }
 html[data-desktop] .desktop-main .tool-state-spinner { animation: spin 1s linear infinite; }
 html[data-desktop] .desktop-main .tool-record-chevron { flex: none; width: 14px; height: 14px; margin-left: -2px; opacity: 0; transition: opacity 150ms var(--ease-out), transform 200ms var(--ease-out); }
@@ -166,7 +166,8 @@ html[data-desktop] .desktop-main .steps-summary[aria-expanded="true"] .steps-sum
    right after them, nothing pushed to the far edge. */
 html[data-desktop] .desktop-main .steps-summary { max-width: 100%; }
 html[data-desktop] .desktop-main .steps-summary-label { flex: 0 1 auto; }
-html[data-desktop] .desktop-main .steps-summary-failed { margin-left: -6px; color: var(--danger); font-size: 14px; font-weight: 400; }
+html[data-desktop] .desktop-main .steps-summary-failed { margin-left: -6px; color: var(--secondaryLabel); font-size: 14px; font-weight: 400; }
+html[data-desktop] .desktop-main .steps-summary-failed[data-agent-failed] { color: var(--danger); }
 html[data-desktop] .desktop-main .steps-summary-diff { font-family: var(--mono); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-add { color: var(--diffAddText); }
 html[data-desktop] .desktop-main .steps-summary-diff .diff-del { color: var(--diffDelText); }
@@ -452,8 +453,10 @@ html[data-desktop] .desktop-main .session-actions { gap: 6px; }
 html[data-desktop] .desktop-main .session-actions .session-handoff[data-button] { height: 28px; margin-right: 2px; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
 
 /* The inspector eases in from the right; the conversation gives way with it. */
-html[data-desktop] .desktop-main .live-side-panel { animation: inspector-in 200ms var(--ease-out) both; }
+html[data-desktop] .desktop-main .live-side-panel { animation: inspector-in 200ms var(--ease-out); }
 @keyframes inspector-in { from { opacity: 0; transform: translateX(24px); } }
+/* In-flight transforms trap fixed children; the narrow inspector's stacking must also yield. */
+html[data-desktop] .desktop-main .live-side-panel:has(.terminal-fullscreen) { animation: none; transform: none; z-index: auto; }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .live-side-panel { animation: none; } }
 /* A changed file: its name whole, its folder shortened from the left (…/src/) when the row is narrow. */
 html[data-desktop] .desktop-main .changes-file-name { display: flex; min-width: 0; overflow: hidden; }

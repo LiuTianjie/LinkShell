@@ -1,4 +1,4 @@
-import { compactionLabel, exitNote, isQuietTool, proposedPlan, startedSession, toolAction, toolCommand, toolLabel, toolOutput, wrapUpOf, type TimelineItem } from "@linkshell/client-core";
+import { compactionLabel, exitNote, isQuietTool, proposedPlan, startedSession, toolAction, toolCommand, toolLabel, toolOutput, toolOutcome, wrapUpOf, type TimelineItem, type ToolOutcome } from "@linkshell/client-core";
 import type { ContentBlock } from "@linkshell/wire";
 import { memo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
@@ -184,10 +184,11 @@ export function DiffView({
 /** Width of the glyph column; bodies indent to the text after it. */
 export const GLYPH = 18;
 
-function StatusGlyph({ status, waiting }: { status: ToolItem["status"]; waiting: boolean }) {
+function StatusGlyph({ outcome, waiting }: { outcome: ToolOutcome; waiting: boolean }) {
   if (waiting) return <Text style={[type.footnote, { color: colors.waiting, fontWeight: "600" }]}>等你确认</Text>;
-  if (status === "in_progress" || status === "pending") return <ActivityIndicator size="small" color={colors.secondaryLabel} />;
-  if (status === "failed") return <Icon sf="xmark.circle.fill" md="cancel" size={15} color={colors.danger} />;
+  if (outcome === "running") return <ActivityIndicator size="small" color={colors.secondaryLabel} />;
+  if (outcome === "declined" || outcome === "stopped") return <Icon sf="minus.circle" md="do_not_disturb_on" size={15} color={colors.secondaryLabel} />;
+  if (outcome === "failed") return <Icon sf="exclamationmark.circle" md="error_outline" size={15} color={colors.secondaryLabel} />;
   return null;
 }
 
@@ -327,7 +328,7 @@ function ToolRow({ item }: { item: ToolItem }) {
   const running = item.status === "in_progress" || item.status === "pending";
   // Held for permission, it isn't running: no spinner, the waiting colour instead.
   const waiting = running && held;
-  const failed = item.status === "failed";
+  const outcome = toolOutcome(item);
   const media = mediaOf(item);
   const images = media.filter((block) => block.type !== "resource_link");
   const links = media.filter((block) => block.type === "resource_link");
@@ -346,7 +347,7 @@ function ToolRow({ item }: { item: ToolItem }) {
       : (collapsedImages && images.length > 0) || described.changes.length > 0 || !!output || !!command || !!plan || links.length > 0 || params.length > 0 || (terminal && !output);
   const added = described.changes.reduce((sum, c) => sum + c.added, 0);
   const removed = described.changes.reduce((sum, c) => sum + c.removed, 0);
-  const tone = failed ? colors.danger : waiting ? colors.waiting : running ? colors.running : colors.secondaryLabel;
+  const tone = waiting ? colors.waiting : running ? colors.running : colors.secondaryLabel;
 
   return (
     <View style={{ gap: 6 }}>
@@ -358,7 +359,7 @@ function ToolRow({ item }: { item: ToolItem }) {
         }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${described.verb}${described.subject}`}
+        accessibilityLabel={`${described.verb}${described.subject}${described.suffix ?? ""}`}
         style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28 }}
       >
         {/* A bare glyph, not a tile: a run of tool calls should read as lines, not a stack of boxes. */}
@@ -376,20 +377,20 @@ function ToolRow({ item }: { item: ToolItem }) {
           >
             {described.subject}
           </Text>
-          {described.suffix ? <Text style={{ color: colors.danger }}>{described.suffix}</Text> : null}
+          {described.suffix ? <Text style={{ color: colors.secondaryLabel }}>{described.suffix}</Text> : null}
         </Text>
         {added || removed ? (
           <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>
             <DiffStat added={added} removed={removed} />
           </Text>
         ) : exitCode !== undefined ? (
-          <Text style={[type.footnote, { color: colors.danger, fontVariant: ["tabular-nums"] }]}>退出码 {exitCode}</Text>
+          <Text style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>退出码 {exitCode}</Text>
         ) : described.note ? (
           <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{described.note}</Text>
         ) : action !== "command" && item.endedTs && item.endedTs - item.ts >= 2000 ? (
           <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{duration(item.endedTs - item.ts)}</Text>
         ) : null}
-        {exitCode === undefined ? <StatusGlyph status={item.status} waiting={waiting} /> : null}
+        {exitCode === undefined ? <StatusGlyph outcome={outcome} waiting={waiting} /> : null}
         {hasBody && !running ? (
           <Animated.View
             style={{

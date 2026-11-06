@@ -26,6 +26,7 @@ import { mono, radius, type } from "@/theme/type";
 import { useFloatingTabInset } from "@/components/floating-tabs";
 import { ComputerList } from "@/components/computer-list";
 import { ComputerArt } from "@/components/computer-art";
+import { ComputerMetrics } from "@/components/computer-metrics";
 import { PortRow } from "@/components/port-row";
 import { ListRow } from "@/components/session-row";
 import { usePorts } from "@/lib/ports";
@@ -492,6 +493,7 @@ export function ComputerScreen() {
           </View>
         </View>
 
+        <ComputerMetrics key={computer.key} />
         {online ? <ListRow
           leading={<Icon sf="chart.bar" md="bar_chart" size={20} color={colors.accent} />}
           title="用量统计"

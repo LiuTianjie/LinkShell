@@ -43,7 +43,7 @@ describe("conversation rows as the Claude app words them", () => {
       { kind: "thought", id: "th", text: "**Looking**", streaming: false, ts: 0 },
       tool({ toolKind: "execute", title: "pwd", rawInput: { command: "pwd" }, status: "failed" }),
     ]);
-    expect(markup).toContain('<span class="steps-summary-label">已运行 2 个命令</span><span class="steps-summary-failed">（1 项失败）</span>');
+    expect(markup).toContain('<span class="steps-summary-label">已运行 2 个命令</span><span class="steps-summary-failed">（1 次工具未成功）</span>');
     expect(markup).not.toContain("thought-block");
   });
 

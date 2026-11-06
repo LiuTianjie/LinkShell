@@ -10,7 +10,7 @@ Colours, radii, type sizes, motion and the shared components follow **[docs/desi
 - Use quiet neutrals, subtle borders and clear typography. Primary actions use LinkShell indigo (`accentFill`) with white text; navigation selection uses a neutral surface. Avoid pill-shaped buttons, vivid navigation stripes, oversized dashboard cards and heavy decorative shadows.
 - Brand and status colours come from `brand-colors.json` through `src/theme.ts`; only neutrals are defined there. Check text, hover, selected, focus, disabled, warning and error states in both themes. Do not use the primary action color for every icon or piece of metadata.
 - Use Lucide's rounded outlines throughout the workspace. Desktop icon weight and sizes come from the shared tokens in `desktop.css`: 1.75 stroke, 16px controls, 18px navigation and 12px carets. Avoid text glyphs for actions and local stroke overrides. Agent and provider brand marks retain their own artwork.
-- Composer settings use the shared `toolbar` button variant and `SessionConfigIcon` in both new and existing sessions. Keep labels visible when the toolbar wraps. Computer cards have one look (readings plus the recent history line); CPU uses the accent, memory a neutral grey.
+- Composer settings use the shared `toolbar` button variant and `SessionConfigIcon` in both new and existing sessions. Keep labels visible when the toolbar wraps. Computers use compact list rows with resource readings and actions; history and capacity details are collapsed until requested. Only the expanded CPU history uses the accent; memory uses a neutral grey.
 - Preserve LinkShell's branding and Chinese product copy. Prioritize legibility, useful information and clear actions over decorative detail.
 
 ## Sidebar and layout

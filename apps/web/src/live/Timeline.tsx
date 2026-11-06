@@ -23,7 +23,7 @@ import {
   type DetailsHTMLAttributes,
   type ReactNode,
 } from "react";
-import { Check, CircleAlert, CircleDashed, CircleHelp, Copy, GitFork, LoaderCircle } from "lucide-react";
+import { Check, CircleAlert, CircleDashed, CircleHelp, CircleMinus, Copy, GitFork, LoaderCircle } from "lucide-react";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
 import { diffLines, diffStat, hunks, parsePatch, type DiffLine } from "./line-diff";
@@ -53,6 +53,7 @@ import {
   toolLabelParts,
   toolLabelText,
   toolOutput,
+  toolOutcome,
   wrapUpOf,
   inboxLabel,
   questionReplies,
@@ -110,7 +111,7 @@ export function StepsSummary({
     >
       <Layers className="steps-summary-icon" aria-hidden="true" />
       <span className="steps-summary-label">{label}</span>
-      {failures && <span className="steps-summary-failed">{failures}</span>}
+      {failures && <span className="steps-summary-failed" data-agent-failed={t.failedAgents > 0 || undefined}>{failures}</span>}
       <DiffStat added={t.added} removed={t.removed} className="steps-summary-diff" />
       <ChevronRight className="steps-summary-chevron" aria-hidden="true" />
     </button>
@@ -1121,10 +1122,13 @@ function ErrorCard({ item }: { item: Extract<TimelineItem, { kind: "error" }> })
 }
 
 function ToolState({ item }: { item: ToolItem }) {
+  const outcome = toolOutcome(item);
   return (
     <span className="tool-state" aria-hidden>
       {item.detail?.type === "subagent" && item.detail.state === "unknown" ? (
         <CircleHelp />
+      ) : outcome === "declined" || outcome === "stopped" ? (
+        <CircleMinus />
       ) : item.status === "completed" ? (
         <Check />
       ) : item.status === "failed" ? (
@@ -1303,6 +1307,7 @@ function ToolRecord({
       ? !!toolOutput(item)
       : !!command || !!plan || questions.length > 0 || !!cancel || !!item.output || item.content.length > 0 || !!item.locations?.length || item.rawInput !== undefined || item.rawOutput !== undefined || !!item.sub;
   const meta = item.detail?.type === "subagent" && item.detail.state ? SUBAGENT_STATES[item.detail.state] : null;
+  const agentFailed = item.detail?.type === "subagent" && label.outcome === "failed";
   const summary = (
     <>
       <ToolState item={item} />
@@ -1327,7 +1332,7 @@ function ToolRecord({
             <span className="tool-subject">{parts.subject}</span>
           ))}
       </strong>
-      {/* Outside the label, so a long command cut short still says it failed. */}
+      {/* Keep the outcome visible when the command itself is truncated. */}
       {parts.suffix && <span className="tool-suffix">{parts.suffix}</span>}
       {label.note && <small className="tool-note">{label.note}</small>}
       <DiffStat added={stat.added} removed={stat.removed} />
@@ -1351,12 +1356,12 @@ function ToolRecord({
   );
   if (!hasBody)
     return (
-      <div className={`tool-record tool-line ${item.status}`} data-action={action}>
+      <div className={`tool-record tool-line ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined}>
         <div className="tool-summary">{summary}</div>
       </div>
     );
   return (
-    <Fold className={`tool-record ${item.status}`} data-action={action} summary={<summary>{summary}</summary>}>
+    <Fold className={`tool-record ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} summary={<summary>{summary}</summary>}>
       {cancel ? (
         <Button
           variant="outline"

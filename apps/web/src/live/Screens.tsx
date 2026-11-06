@@ -50,7 +50,7 @@ export function Screens({
   connect,
   open,
 }: {
-  /** False while the window is hidden: the page stays, sampling and card connections stop. */
+  /** False while the window is hidden: the page stays, sampling and row connections stop. */
   live?: boolean;
   connect: () => void;
   open: (computer: Computer) => void;
@@ -106,13 +106,12 @@ export function Screens({
         </>}
       />
       {!ready ? (
-        <div className="computer-grid" role="status" aria-label="正在加载电脑">
+        <div className="computer-list" role="status" aria-label="正在加载电脑">
           {[0, 1, 2].map((key) => (
-            <div key={key} className="computer-card computer-card-loading">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-20 w-28" />
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-7 w-28 self-end" />
+            <div key={key} className="computer-list-row computer-list-loading">
+              <Skeleton className="h-9 w-40" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-7 w-28 justify-self-end" />
             </div>
           ))}
           <p className="screen-list-wait">
@@ -121,7 +120,7 @@ export function Screens({
           </p>
         </div>
       ) : computers.length ? (
-        <div className="computer-grid">
+        <div className="computer-list">
           {!found && (
             <EmptyState
               icon={<Search />}
@@ -134,7 +133,7 @@ export function Screens({
             </EmptyState>
           )}
           {computers.map((computer) => (
-            <ScreenCard
+            <ComputerRow
               key={computer.key}
               computer={computer}
               live={live && visible}
@@ -162,7 +161,7 @@ export function Screens({
   );
 }
 
-function ScreenCard({
+function ComputerRow({
   computer,
   live,
   hidden,
@@ -184,15 +183,15 @@ function ScreenCard({
   const { forget, forgetting } = useForget(computer);
   return (
     <section
-      className="computer-card"
+      className="computer-list-row"
       hidden={hidden}
       data-current={selected || undefined}
       data-offline={!computer.machine.online || undefined}
       aria-label={name}
     >
-      <header className="computer-card-header">
-        <span className="computer-card-icon"><Icon name="computer" size={18} /></span>
-        <div className="computer-card-name">
+      <header className="computer-list-header">
+        <Icon name="computer" size={18} />
+        <div className="computer-list-name">
           <h2 title={name}>{name}</h2>
           <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computer.key === DESKTOP_LOCAL ? "本机" : computerIdentity(computer)}</span>
         </div>
@@ -204,7 +203,7 @@ function ScreenCard({
       ) : (
         <ComputerMetrics status={!computer.machine.online ? "电脑离线" : error ? "暂时无法连接" : live ? "正在连接电脑…" : "刷新已暂停"} detail={error} />
       )}
-      <footer className="computer-card-footer">
+      <footer className="computer-list-actions">
         {connection && computer.machine.online && watching ? (
           <Runtime value={connection}>
             <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />

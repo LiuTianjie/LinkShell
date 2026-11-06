@@ -21,6 +21,7 @@ import {
   type SideChat,
 } from "@linkshell/wire";
 import type { HostLink, LinkStatus } from "./host-link.js";
+import { resolveSessionPreferences, type SessionPreferencesStore } from "./session-preferences.js";
 import { applyTaskEvent, mergeTaskList, type TaskRecords } from "./tasks.js";
 import { reconnectOf } from "./errors.js";
 import { applyWorkflowEvent, mergeWorkflowList, type WorkflowRecords } from "./workflows.js";
@@ -205,6 +206,7 @@ function eventForSubagent(view: SessionView, call: string, event: SessionEvent):
 }
 
 export interface ClientStoreOptions {
+  sessionPreferences?: SessionPreferencesStore;
   /** Generates client message ids; defaults to crypto.randomUUID when available. */
   newId?: () => string;
   /** The link was created with `lazyImages`: ask for history the same way. */
@@ -641,7 +643,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async setConfig(sessionId, optionId, value) {
+        const state = get();
+        const session = state.sessions[sessionId];
+        const option = state.views[sessionId]?.config.find((entry) => entry.id === optionId);
         await link.call("sessions.setConfig", { sessionId, optionId, value });
+        if (session && option && ["model", "effort", "mode"].includes(option.category ?? "")) {
+          options.sessionPreferences?.remember(state.machine?.machineId, session.agent,
+            option.category === "model" ? { model: value } : { config: { [optionId]: value } });
+        }
       },
 
       async unqueue(sessionId, clientMessageId) {
@@ -876,7 +885,11 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async createSession(input) {
-        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: input.model, ...(input.config ? { config: input.config } : {}) }, 60_000);
+        const machineId = get().machine?.machineId;
+        const chosen = await resolveSessionPreferences(input, options.sessionPreferences?.read(machineId).agents[input.agent],
+          (model) => get().agentModels(input.agent, input.cwd, model));
+        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: chosen.model, ...(chosen.config ? { config: chosen.config } : {}) }, 60_000);
+        options.sessionPreferences?.remember(machineId, input.agent, { ...(chosen.model ? { model: chosen.model } : {}), config: chosen.config });
         set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
         get().openSession(session.id);
         if (input.prompt && input.prompt.length > 0) await get().send(session.id, input.prompt);

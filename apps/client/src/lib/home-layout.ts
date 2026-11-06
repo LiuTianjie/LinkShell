@@ -2,8 +2,9 @@ import type { ContentInsets } from "./adaptive-insets";
 
 export const hasSideToolbar = (insets: ContentInsets) => Math.max(insets.left, insets.right) >= 80;
 
-export function homeUsesInlineControls(systemInsets: ContentInsets, split: boolean, detailVisible: boolean) {
-  return !split && !detailVisible && !hasSideToolbar(systemInsets);
+export function homeUsesInlineControls(systemInsets: ContentInsets, detailVisible: boolean) {
+  // A fold report can briefly change `split`; an empty list still has no native title or actions.
+  return !detailVisible && !hasSideToolbar(systemInsets);
 }
 
 /** Keep native header geometry stable while a rotated frame waits for its hinge report. */

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "../components/Choice";
+import { useAgentModels } from "./agent-models";
 import {
   Command as CommandUI,
   CommandInput,
@@ -125,6 +126,7 @@ export function Settings({
       ? `~${session.cwd.slice(home.length)}`
       : session.cwd;
   const [advanced, setAdvanced] = useState(false);
+  const models = useAgentModels(session.agent, session.cwd, online);
   return (
     <div className="settings-panel">
       <p className="muted settings-panel-place" title={session.cwd}>
@@ -188,7 +190,7 @@ export function Settings({
       {!view?.config.length && (
         <p className="muted">当前 Agent 尚未提供可调整的配置。</p>
       )}
-      <ErrorNotice error={job.error} />
+      <ErrorNotice error={job.error ?? models?.error} />
       {view?.usage?.tokens && (
         <p className="muted">
           输入 {view.usage.tokens.inputTokens.toLocaleString()} · 输出{" "}

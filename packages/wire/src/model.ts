@@ -372,6 +372,16 @@ export const machineMetricsSchema = z.object({
     /** Absent on older hosts, whose usedBytes includes caches. */
     includesCache: z.boolean().optional(),
   }),
+  /** The filesystem containing the host user's home; absent on older hosts or when its counters are unavailable. */
+  disk: z.object({
+    path: z.string(),
+    /** Disk capacity changes less often than CPU and memory, so hosts may sample it separately. */
+    sampledAt: z.number().nonnegative(),
+    totalBytes: z.number().nonnegative(),
+    usedBytes: z.number().nonnegative(),
+    /** Space available to this user; excludes filesystem reservations. */
+    availableBytes: z.number().nonnegative(),
+  }).optional(),
 });
 export type MachineMetrics = z.infer<typeof machineMetricsSchema>;
 

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentTile } from "@/components/agent-tile";
@@ -589,9 +589,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         style={[{ position: "absolute", left: 0, right: 0, bottom: 0 }, composerKeyboardStyle]}
       >
         {!atEnd && items.length > 0 ? (
-          <Animated.View
-            entering={FadeIn.duration(160)}
-            exiting={FadeOut.duration(120)}
+          <View
             pointerEvents="box-none"
             style={{ alignItems: "center", paddingBottom: 2 }}
           >
@@ -600,7 +598,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                 <Icon sf="arrow.down" md="arrow_downward" size={16} color={colors.label} weight="semibold" />
               </Glass>
             </Pressable>
-          </Animated.View>
+          </View>
         ) : null}
         <View onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}>
         <Composer

@@ -6,62 +6,67 @@
     gap: 16px;
     padding: 24px max(20px, calc((100% - 1440px) / 2)) 32px;
   }
-.computer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); align-items: stretch; gap: 16px; }
-.computer-grid:has(> section.computer-card) { grid-auto-rows: 1fr; }
-.computer-grid > [data-slot="empty"], .computer-grid > .screen-list-wait { grid-column: 1 / -1; }
-/* A card is flat: a hairline that strengthens under the pointer, no shadow. */
-.computer-card { display: flex; flex-direction: column; min-width: 0; min-height: 372px; padding: 16px; border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--card); transition: border-color 150ms ease-out; }
-.computer-card[hidden] { display: none; }
-.computer-card:hover, .computer-card:focus-within { border-color: var(--separatorStrong); }
-.computer-card-header { display: flex; align-items: center; min-width: 0; gap: 10px; }
-.computer-card-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-card); color: var(--secondaryLabel); background: var(--inset); }
-.computer-card-name { flex: 1; min-width: 0; }
-.computer-card-name h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; line-height: 22px; }
-.computer-card-name > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; }
-.computer-card-header [data-slot="badge"] { flex: none; }
-.computer-card-header [title="给电脑命名"] { width: 24px; height: 24px; color: var(--tertiaryLabel); }
-/* Keep the plot in its native aspect ratio: each sample is a column of square cells. */
-.computer-telemetry { flex: none; container-type: inline-size; margin: 16px 0 14px; --metric-cpu: var(--monitorCpu); }
-.computer-visual-body { display: flex; flex: none; flex-direction: column; justify-content: space-between; height: 190px; }
-/* Two readings on one line, at the type scale's 24 px (no display numerals): CPU in the accent at
-   the left, memory in grey at the right; each unit at 13, its name at 12. */
-.computer-readings { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
-.computer-metric-label { display: block; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
-.computer-cpu { display: flex; align-items: baseline; gap: 2px; color: var(--metric-cpu); }
-.computer-cpu strong { font-size: 24px; font-weight: 500; letter-spacing: -.02em; line-height: 32px; }
-.computer-cpu > div { display: flex; align-items: baseline; gap: 6px; }
-.computer-cpu > div > span:first-child { font-size: 13px; }
-.computer-memory { display: flex; align-items: baseline; gap: 6px; color: var(--monitorMemory); text-align: right; }
-.computer-memory .computer-metric-label { display: inline; }
-.computer-memory > div { display: inline-flex; align-items: baseline; gap: 2px; }
-.computer-memory strong { font-size: 24px; font-weight: 500; letter-spacing: -.02em; line-height: 32px; }
-.computer-memory > div > span { font-size: 13px; }
-.computer-memory small { color: var(--secondaryLabel); font-size: 12px; }
-.computer-history-frame { flex: 1; min-height: 0; margin-top: 14px; }
+.computer-list { display: flex; flex-direction: column; container: computers / inline-size; border-top: 1px solid var(--separator); }
+.computer-list-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, .85fr) minmax(240px, 1fr); align-items: center; column-gap: 24px; row-gap: 12px; min-width: 0; min-height: 88px; padding: 16px 0; border-bottom: 1px solid var(--separator); }
+.computer-list-row[hidden] { display: none; }
+.computer-list-header { grid-column: 1; grid-row: 1; display: flex; align-items: center; min-width: 0; gap: 12px; }
+.computer-list-header > svg { flex: none; color: var(--secondaryLabel); }
+.computer-list-name { flex: 1; min-width: 0; }
+.computer-list-name h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; line-height: 22px; }
+.computer-list-name > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+.computer-list-header [data-slot="badge"] { flex: none; }
+.computer-list-header [title="给电脑命名"] { flex: none; color: var(--tertiaryLabel); }
+.computer-list-row[data-offline] .computer-list-header > svg { color: var(--quaternaryLabel); }
+.computer-telemetry { display: contents; }
+.computer-telemetry-summary { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.computer-telemetry-readings { flex: 1; min-width: 0; }
+.computer-resource-readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.computer-resource-readings > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.computer-resource-readings dt { color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+.computer-resource-readings dd { margin: 0; color: var(--label); font-size: 13px; font-weight: 500; line-height: 20px; }
+.computer-resource-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.computer-telemetry-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+.computer-list-actions { grid-column: 3; grid-row: 1; min-width: 0; }
+.computer-list-actions :is(.screen-page.screen-is-idle, .screen-idle) { gap: 12px; }
+.computer-list-actions .screen-idle-status { flex: 1; min-width: 0; }
+.computer-list-actions .screen-idle-status > div { max-width: 100%; }
+.computer-list-actions .screen-idle-actions { justify-content: flex-end; margin-left: auto; }
+.computer-list-loading { min-height: 88px; }
+.computer-telemetry-details { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .8fr); gap: 12px 32px; min-width: 0; padding: 16px 0 4px; border-top: 1px solid var(--separator); }
+.computer-resource-details { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; font-size: 12px; line-height: 18px; }
+.computer-resource-details > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; }
+.computer-resource-details dt { color: var(--secondaryLabel); }
+.computer-resource-details dd { min-width: 0; margin: 0; color: var(--label); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.computer-resource-details small { display: block; margin-top: 4px; color: var(--secondaryLabel); font-size: inherit; }
+.computer-history { min-width: 0; }
+.computer-history-heading, .computer-history-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--secondaryLabel); font-size: 12px; line-height: 18px; }
+.computer-history-heading > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
+.computer-history-heading i { display: inline-block; width: 12px; border-top: 2px solid var(--monitorCpu); }
+.computer-history-heading i[data-tone="memory"] { margin-left: 6px; border-color: var(--monitorMemory); border-top-style: dashed; }
+.computer-history-frame { height: 92px; margin: 8px 0 4px; }
 .computer-wave { display: block; width: 100%; height: 100%; overflow: visible; }
 .computer-wave-guide { stroke: var(--separator); stroke-width: 1; stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
-.computer-wave [data-tone="cpu"] { color: var(--metric-cpu); }
+.computer-wave [data-tone="cpu"] { color: var(--monitorCpu); }
 .computer-wave [data-tone="memory"] { color: var(--monitorMemory); }
 .computer-wave circle { fill: currentColor; }
 .computer-wave-line { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.computer-wave [data-tone="memory"] .computer-wave-line { stroke-width: 1.75; stroke-dasharray: 4 3; opacity: .85; }
-.computer-wave-fill { fill: currentColor; opacity: .08; }
-.computer-telemetry-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 16px; margin-top: 6px; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
-.computer-telemetry-empty .computer-visual-body { justify-content: center; }
-.computer-telemetry-caption > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.computer-telemetry-caption > button { flex: none; }
-.computer-empty-readings { display: flex; gap: 28px; color: var(--tertiaryLabel); font-size: 12px; }
-.computer-empty-readings > span { display: flex; align-items: center; gap: 8px; }
-.computer-empty-readings b { color: var(--quaternaryLabel); font-size: 24px; font-weight: 400; }
-.computer-card-footer { display: flex; flex-direction: column; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--separator); }
-.computer-card-footer :is(.screen-page.screen-is-idle, .screen-idle) { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px; }
-.computer-card-footer .screen-idle-status { flex: 1; min-width: 0; min-height: 38px; }
-.computer-card-footer .screen-idle-status > div { max-width: 100%; }
-.computer-card-footer .screen-idle-status strong { font-size: 12px; }
-.computer-card-footer .screen-idle-status span { font-size: 12px; }
-.computer-card-footer .screen-idle-actions { justify-content: flex-end; min-height: 28px; margin-left: auto; }
-.computer-card-loading { gap: 24px; min-height: 340px; }
-.computer-card[data-offline] .computer-card-icon { color: var(--quaternaryLabel); }
+.computer-wave [data-tone="memory"] .computer-wave-line { stroke-dasharray: 4 3; opacity: .85; }
+.computer-wave-fill { fill: currentColor; opacity: .05; }
+.computer-telemetry-note { grid-column: 1 / -1; margin: 0; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
+@container computers (max-width: 840px) {
+  .computer-list-row { grid-template-columns: minmax(0, 1fr) minmax(240px, 1fr); }
+  .computer-telemetry-summary { grid-column: 1 / -1; grid-row: 2; max-width: 400px; }
+  .computer-list-actions { grid-column: 2; }
+  .computer-telemetry-details { grid-row: 3; }
+}
+@container computers (max-width: 540px) {
+  .computer-list-row { grid-template-columns: minmax(0, 1fr); }
+  .computer-list-actions { grid-column: 1; grid-row: 3; }
+  .computer-telemetry-details { grid-row: 4; grid-template-columns: minmax(0, 1fr); }
+  .computer-resource-details > div { grid-template-columns: 64px minmax(0, 1fr); }
+  .computer-list-loading > :nth-child(2) { grid-row: 2; }
+  .computer-list-loading > :last-child { grid-row: 3; }
+}
 .screen-note { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--tertiaryLabel); font-size: 12px; }
 .screen-row {
     display: grid;

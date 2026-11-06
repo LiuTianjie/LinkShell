@@ -40,7 +40,7 @@ export const StepsSummary = memo(function StepsSummary({ steps, open, onToggle }
       </View>
       <Text numberOfLines={1} style={[type.subhead, { flex: 1, color: colors.secondaryLabel }]}>
         {label}
-        {failures ? <Text style={{ color: colors.danger }}>{failures}</Text> : null}
+        {failures ? <Text style={{ color: t.failedAgents > 0 ? colors.danger : colors.secondaryLabel }}>{failures}</Text> : null}
       </Text>
       {t.added || t.removed ? (
         <Text style={[type.footnote, { fontVariant: ["tabular-nums"], fontWeight: "600" }]}>

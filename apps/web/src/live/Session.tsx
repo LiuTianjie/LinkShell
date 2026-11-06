@@ -115,6 +115,7 @@ import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
+import { finishComposerSend, useComposerDraft } from "./composer-draft";
 import { ComputerPreview } from "./Video";
 import { McpAppView, appTabId, type AppTab } from "./McpApp";
 import { isDesktop } from "./desktop";
@@ -209,7 +210,7 @@ export function Session({
     [session.agent, view?.commands, view?.config, agent?.capabilities.side],
   );
   const draftKey = `draft.${connection.computer.key}.${session.id}`;
-  const [draft, setDraft] = useState(() => readLocal(draftKey, ""));
+  const { text: draft, setText: setDraft, readText: readDraft, clearSubmitted: clearDraft } = useComposerDraft(draftKey);
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string>();
   const [dragging, setDragging] = useState(false);
@@ -397,8 +398,6 @@ export function Session({
       actions.openSession(session.id);
     }
   };
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   const [dismissedSuggestions, setDismissedSuggestions] = useState<string>();
   const query =
     dismissedSuggestions === draft ? undefined : commandQuery(draft);
@@ -431,13 +430,6 @@ export function Session({
     store.getState().openSession(session.id);
     return () => store.getState().closeSession(session.id);
   }, [store, session.id]);
-  useEffect(() => {
-    try {
-      saveLocal(draftKey, draft);
-    } catch {
-      /* A full store must never prevent writing or sending. */
-    }
-  }, [draftKey, draft]);
   useEffect(() => {
     setChoice(0);
   }, [query]);
@@ -583,8 +575,9 @@ export function Session({
     if (command.action && !canInteract) return;
     if (!(await setPanel(null))) return;
     if (command.action) {
+      const submittedDraft = readDraft();
       const executed = await job.run(() => execute(`/${command.name}`));
-      if (executed) setDraft("");
+      if (executed) clearDraft(submittedDraft);
     } else {
       setDraft(`/${command.name} `);
       composer.current?.focus();
@@ -592,10 +585,11 @@ export function Session({
   }
   async function send(now = false) {
     setSendingFile(undefined);
-    const text = normalizeCommandText(draftRef.current).trim();
+    const submittedDraft = readDraft();
+    const text = normalizeCommandText(submittedDraft).trim();
     if (!canInteract || (!text && !files.length && !blocks.length)) return;
     if (!files.length && !blocks.length && (await execute(text))) {
-      if (draftRef.current === draft) setDraft("");
+      clearDraft(submittedDraft);
       return;
     }
     const content: ContentBlock[] = [...blocks];
@@ -658,15 +652,14 @@ export function Session({
     const current = store.getState();
     if (current.status !== "online" || !current.ready[session.id])
       throw new Error("会话连接正在恢复，输入和附件已保留，请同步完成后重试");
-    const result = await actions.send(session.id, content, { now: immediate });
-    if (result === "failed")
-      throw new Error("发送失败，消息可在会话中重试；输入已保留");
-    if (draftRef.current.trim() === draft.trim()) setDraft("");
-    setFiles((current) => current.filter((file) => !files.includes(file)));
-    setBlocks((current) => current.filter((block) => !blocks.includes(block)));
-    setAttachmentError(undefined);
-    composer.current?.focus();
-    // The conversation scrolls to the message just sent (Conversation.tsx).
+    await finishComposerSend(actions.send(session.id, content, { now: immediate }), () => {
+      clearDraft(submittedDraft);
+      setFiles((current) => current.filter((file) => !files.includes(file)));
+      setBlocks((current) => current.filter((block) => !blocks.includes(block)));
+      setAttachmentError(undefined);
+      composer.current?.focus();
+      // The conversation scrolls to the message just sent (Conversation.tsx).
+    });
   }
   async function nativePanel(name: "mcp" | "apps") {
     if (!canInteract) return;

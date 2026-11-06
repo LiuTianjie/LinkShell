@@ -14,7 +14,8 @@ import { baseName, shortPath } from "@/lib/format";
 import { openTerminal, TerminalTile } from "@/components/terminal-row";
 import { AppMenu } from "@/components/app-menu";
 import { onDirectoryPicked } from "@/lib/directory-pick";
-import { BROWSE_DIRECTORY_ACTION, newSessionDirectory } from "@/lib/new-session-directory";
+import { BROWSE_DIRECTORY_ACTION, QUICK_SESSION_ACTION, newSessionDirectory } from "@/lib/new-session-directory";
+import { sessionPreferences } from "@/lib/session-preferences";
 import { haptics } from "@/lib/haptics";
 import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
@@ -101,12 +102,11 @@ export function NewSessionScreen() {
   const { createSession, send, agentModels } = useActions();
 
   const agents = useMemo(() => (machine?.agents ?? []).filter((agent) => agent.installed && agent.tier !== "terminal"), [machine]);
-  const [agentId, setAgentId] = useState<string | null>(() => {
-    const remembered = lastAgent();
-    if (remembered === TERMINAL) return TERMINAL;
-    const pick = agents.find((a) => a.id === remembered && usable(a)) ?? agents.find(usable);
-    return pick?.id ?? null;
-  });
+  const remembered = sessionPreferences.read(machine?.machineId);
+  const [agentPick, setAgentPick] = useState<{ machineId?: string; agent: string }>();
+  const preferredAgent = agentPick?.machineId === machine?.machineId ? agentPick?.agent ?? remembered.agent ?? lastAgent() : remembered.agent ?? lastAgent();
+  const agentId = preferredAgent === TERMINAL ? TERMINAL : (agents.find((a) => a.id === preferredAgent && usable(a)) ?? agents.find(usable))?.id;
+  const setAgentId = (agent: string) => { setAgentPick({ machineId: machine?.machineId, agent }); sessionPreferences.remember(machine?.machineId, agent); };
   const terminal = agentId === TERMINAL;
   const selectedAgent = terminal ? undefined : (agents.find((agent) => agent.id === agentId) ?? agents.find(usable));
   const { link } = useConnection();
@@ -121,7 +121,8 @@ export function NewSessionScreen() {
     return list;
   }, [projects, picked]);
   const [selectedCwd, setCwd] = useState<string | undefined>(params.cwd);
-  const cwd = newSessionDirectory(selectedCwd, projects, machine?.home);
+  const cwd = newSessionDirectory(selectedCwd, machine?.home);
+  const quick = !!machine?.home && cwd === machine.home;
   useEffect(
     () =>
       onDirectoryPicked((path) => {
@@ -145,7 +146,7 @@ export function NewSessionScreen() {
   const [configPick, setConfigPick] = useState<{ link: typeof link; key: string; values: Record<string, string> }>();
   const [modelsRevision, setModelsRevision] = useState(0);
   const agentKey = !terminal && selectedAgent && usable(selectedAgent) ? selectedAgent.id : undefined;
-  const selectedModel = pickedModel?.link === link && pickedModel.agent === agentKey ? pickedModel.model : undefined;
+  const selectedModel = pickedModel?.link === link && pickedModel.agent === agentKey ? pickedModel.model : agentKey ? remembered.agents[agentKey]?.model : undefined;
   const modelsKey = JSON.stringify([agentKey, cwd, selectedModel, modelsRevision]);
   useEffect(() => {
     if (!online || !agentKey) return;
@@ -162,7 +163,7 @@ export function NewSessionScreen() {
   const shownModel = models?.models.find((entry) => entry.value === model);
   const modelLabel = (entry: MethodResult<"agents.models">["models"][number]) => (entry.group ? `${entry.group} · ${displayModelName(entry.name)}` : displayModelName(entry.name));
   const configKey = JSON.stringify([agentKey, cwd]);
-  const pickedConfig = configPick?.link === link && configPick.key === configKey ? configPick.values : {};
+  const pickedConfig = { ...(agentKey ? remembered.agents[agentKey]?.config : undefined), ...(configPick?.link === link && configPick.key === configKey ? configPick.values : {}) };
   const configOptions = (models?.config ?? []).filter((option) => (option.category === "mode" || option.category === "effort") && option.values.length > 0).map((option) => ({
     ...option,
     current: option.values.some((value) => value.value === pickedConfig[option.id]) ? pickedConfig[option.id]! : option.current,
@@ -173,6 +174,7 @@ export function NewSessionScreen() {
   const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent) && !!listing && !listing.error)) && targetCwd.length > 0 && !busy;
 
   const remember = (id: string) => {
+    sessionPreferences.remember(machine?.machineId, id);
     try {
       Storage.setItemSync(LAST_AGENT_KEY, id);
     } catch {
@@ -298,7 +300,11 @@ export function NewSessionScreen() {
                   state: entry.value === model ? ("on" as const) : ("off" as const),
                   attributes: { disabled: busy },
                 }))}
-                onPressAction={({ nativeEvent }) => agentKey && setPickedModel({ link, agent: agentKey, model: nativeEvent.event })}
+                onPressAction={({ nativeEvent }) => {
+                  if (!agentKey) return;
+                  setPickedModel({ link, agent: agentKey, model: nativeEvent.event });
+                  sessionPreferences.remember(machine?.machineId, agentKey, { model: nativeEvent.event });
+                }}
               >
                 <ModelRow name={shownModel ? modelLabel(shownModel) : "默认模型"} note={shownModel?.description} menu />
               </AppMenu>
@@ -318,7 +324,10 @@ export function NewSessionScreen() {
               shouldOpenOnLongPress={false}
               onOpenMenu={() => haptics.selection()}
               actions={option.values.map((entry) => ({ id: entry.value, title: valueLabel(option, entry.value), subtitle: valueHint(option, entry.value), state: entry.value === option.current ? ("on" as const) : ("off" as const), attributes: { disabled: busy } }))}
-              onPressAction={({ nativeEvent }) => setConfigPick({ link, key: configKey, values: { ...pickedConfig, [option.id]: nativeEvent.event } })}
+              onPressAction={({ nativeEvent }) => {
+                setConfigPick({ link, key: configKey, values: { ...pickedConfig, [option.id]: nativeEvent.event } });
+                if (agentKey) sessionPreferences.remember(machine?.machineId, agentKey, { config: { [option.id]: nativeEvent.event } });
+              }}
             >
               <ModelRow label={optionLabel(option)} category={option.category === "effort" ? "effort" : "mode"} name={valueLabel(option, option.current)} note={valueHint(option, option.current)} menu />
             </AppMenu>
@@ -332,6 +341,7 @@ export function NewSessionScreen() {
             shouldOpenOnLongPress={false}
             onOpenMenu={() => haptics.selection()}
             actions={[
+              { id: QUICK_SESSION_ACTION, title: "快速会话", subtitle: "无需选择项目，在个人目录中开始", image: "bubble.left.and.bubble.right", state: quick ? "on" : "off", attributes: { disabled: !machine?.home } },
               ...recent.map((project) => ({
                 id: project.cwd,
                 title: project.name,
@@ -342,12 +352,13 @@ export function NewSessionScreen() {
             ]}
             onPressAction={({ nativeEvent }) => {
               if (nativeEvent.event === BROWSE_DIRECTORY_ACTION) router.push("/browse");
+              else if (nativeEvent.event === QUICK_SESSION_ACTION) setCwd(undefined);
               else setCwd(nativeEvent.event);
             }}
           >
             <View
               accessibilityRole="button"
-              accessibilityLabel={`项目：${cwd ? baseName(cwd) : "未选择"}`}
+              accessibilityLabel={`项目：${quick ? "快速会话" : cwd ? baseName(cwd) : "未选择"}`}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -363,7 +374,7 @@ export function NewSessionScreen() {
               <View style={{ flex: 1, gap: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Text numberOfLines={1} style={[type.body, { flexShrink: 1, fontSize: 16, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
-                    {cwd ? baseName(cwd) : "选择项目"}
+                    {quick ? "快速会话" : cwd ? baseName(cwd) : "选择项目"}
                   </Text>
                   {branch ? <BranchTag branch={branch} font={type.footnote} max={20} /> : null}
                 </View>

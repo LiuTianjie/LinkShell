@@ -557,13 +557,13 @@ export function toolLabelParts(label: ToolLabel): { verb: string; subject?: stri
   const subject = label.subject;
   // "已搜索网页：" with nothing to say after it reads "已搜索网页".
   const verb = !subject ? label.verb.replace(/[：:]$/, "") : /[：:]$/.test(label.verb) ? label.verb : `${label.verb} `;
-  if (label.outcome === "failed") return { verb, subject, suffix: "（失败）" };
+  if (label.outcome === "failed") return { verb, subject, suffix: label.action === "agent" || label.action === "workflow" ? "（失败）" : "（工具未成功）" };
   if (label.outcome === "declined") return subject ? { verb: "已拒绝 ", subject } : { verb, suffix: "（已拒绝）" };
   if (label.outcome === "stopped") return subject ? { verb: "已停止 ", subject } : { verb, suffix: "（已停止）" };
   return { verb, subject };
 }
 
-/** The row as one line of text: "已读取 foo.ts"、"已运行 npm test（失败）"。 */
+/** The row as one line of text: "已读取 foo.ts"、"已运行 npm test（工具未成功）"。 */
 export function toolLabelText(label: ToolLabel, options: { note?: boolean } = {}): string {
   const parts = toolLabelParts(label);
   const line = `${parts.verb}${parts.subject ?? ""}${parts.suffix ?? ""}`;

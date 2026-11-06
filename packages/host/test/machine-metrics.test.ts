@@ -1,9 +1,9 @@
 import { expect, it } from "vitest";
-import { cpus, totalmem, tmpdir, type CpuInfo } from "node:os";
+import { cpus, homedir, totalmem, tmpdir, type CpuInfo } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { machineMetricsSchema, machineMetricsSnapshotSchema } from "@linkshell/wire";
-import { cpuUsage, linuxMemoryAvailableBytes, macMemoryUsedBytes } from "../src/machine-metrics.js";
+import { cpuUsage, diskUsageBytes, linuxMemoryAvailableBytes, macMemoryUsedBytes } from "../src/machine-metrics.js";
 import { startHost } from "../src/host.js";
 import { connectHost } from "../src/rpc/client.js";
 
@@ -43,6 +43,20 @@ it("uses Linux available memory, which includes reclaimable cache, rather than M
   expect(linuxMemoryAvailableBytes("MemFree: 10000 kB\n")).toBeNull();
 });
 
+it("keeps reserved filesystem space separate from occupied data and user-available space", () => {
+  const stats = { bsize: 4096n, blocks: 1000n, bfree: 300n, bavail: 250n };
+  expect(diskUsageBytes(stats)).toEqual({ totalBytes: 4096000, usedBytes: 2867200, availableBytes: 1024000 });
+  expect(diskUsageBytes({ ...stats, bavail: -1n })?.availableBytes).toBe(0);
+});
+
+it("does not report empty or invalid filesystem counters as a healthy disk", () => {
+  const stats = { bsize: 4096n, blocks: 1000n, bfree: 300n, bavail: 250n };
+  expect(diskUsageBytes({ ...stats, blocks: 0n, bfree: 0n, bavail: 0n })).toBeUndefined();
+  expect(diskUsageBytes({ ...stats, bfree: 1001n })).toBeUndefined();
+  expect(diskUsageBytes({ ...stats, bavail: 301n })).toBeUndefined();
+  expect(diskUsageBytes({ ...stats, blocks: BigInt(Number.MAX_SAFE_INTEGER) })).toBeUndefined();
+});
+
 it("serves real system measurements over RPC and shares one initial sample between viewers", async () => {
   const home = await mkdtemp(join(tmpdir(), "ls-machine-metrics-"));
   const host = await startHost({ home, version: "test", env: {}, drivers: () => [], discoveryIntervalMs: 0, iceServers: false, log: () => {} });
@@ -55,6 +69,10 @@ it("serves real system measurements over RPC and shares one initial sample betwe
     expect(a.cpu.cores).toBe(cpus().length);
     expect(a.memory.totalBytes).toBe(totalmem());
     expect(a.memory.usedBytes).toBeLessThanOrEqual(a.memory.totalBytes);
+    if (a.disk) {
+      expect(a.disk.path).toBe(homedir());
+      expect(a.disk.usedBytes + a.disk.availableBytes).toBeLessThanOrEqual(a.disk.totalBytes);
+    }
     if (["darwin", "linux", "win32"].includes(process.platform)) expect(a.memory.includesCache).toBe(false);
     expect(a.sampleIntervalMs).toBeGreaterThanOrEqual(200);
     expect(await first.call("machine.metrics", {})).toEqual(a);

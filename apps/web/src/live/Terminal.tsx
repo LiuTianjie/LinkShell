@@ -128,9 +128,16 @@ export function Terminal({
   const fullscreenRequest = useCallback((enabled: boolean) => {
     if (!enabled && !ownsFullscreen.current && !fullscreenRef.current) return;
     ownsFullscreen.current = enabled;
+    // Leaving the terminal (including a cached tab) restores its layout immediately;
+    // the native window's later answer no longer belongs to this terminal.
+    if (!enabled) {
+      fullscreenRef.current = false;
+      setFullscreen(false);
+    }
     const native = setDesktopScreenFullScreen(enabled);
     if (!native) {
       ownsFullscreen.current = false;
+      fullscreenRef.current = enabled;
       setFullscreen(enabled);
     }
   }, []);
@@ -139,6 +146,7 @@ export function Terminal({
       if (!ownsFullscreen.current) return;
       const value = (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true;
       if (!value) ownsFullscreen.current = false;
+      fullscreenRef.current = value;
       setFullscreen(value);
     };
     window.addEventListener(DESKTOP_FULLSCREEN_EVENT, changed);

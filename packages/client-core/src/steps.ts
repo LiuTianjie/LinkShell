@@ -66,6 +66,7 @@ export interface StepTally {
   thoughts: number;
   steps: number;
   failed: number;
+  failedAgents: number;
   /** Interrupted or declined. */
   stopped: number;
   added: number;
@@ -100,7 +101,7 @@ function keyOf(step: Extract<Step, { kind: "tool" }>, kind: PartKind): string[] 
 
 export function tallySteps(steps: Step[]): StepTally {
   const parts = new Map<PartKind, Part>();
-  const t: StepTally = { parts: [], thoughts: 0, steps: steps.length, failed: 0, stopped: 0, added: 0, removed: 0 };
+  const t: StepTally = { parts: [], thoughts: 0, steps: steps.length, failed: 0, failedAgents: 0, stopped: 0, added: 0, removed: 0 };
   steps.forEach((step, index) => {
     if (step.kind === "thought") {
       t.thoughts += 1;
@@ -109,10 +110,12 @@ export function tallySteps(steps: Step[]): StepTally {
     const outcome = toolOutcome(step);
     const subagent = step.detail?.type === "subagent" && step.detail.action === "spawn" ? step.detail : undefined;
     const failed = subagent
-      ? (subagent.workflow?.state ?? subagent.state) === "failed" || step.status === "failed" || !!subagent.workflow?.agents?.some((agent) => agent.state === "failed")
+      ? (subagent.workflow?.state ?? subagent.state) === "failed" || outcome === "failed" || !!subagent.workflow?.agents?.some((agent) => agent.state === "failed")
       : outcome === "failed";
-    if (failed) t.failed += 1;
-    else if (outcome === "declined" || outcome === "stopped" || (subagent && (subagent.workflow?.state ?? subagent.state) === "stopped")) t.stopped += 1;
+    if (failed) {
+      t.failed += 1;
+      if (subagent) t.failedAgents += 1;
+    } else if (outcome === "declined" || outcome === "stopped" || (subagent && (subagent.workflow?.state ?? subagent.state) === "stopped")) t.stopped += 1;
     const kind = PART_OF[toolAction(step)] ?? "tool";
     const part = parts.get(kind) ?? { kind, keys: new Set<string>(), steps: 0, first: index };
     for (const key of keyOf(step, kind)) part.keys.add(key);
@@ -202,9 +205,10 @@ export function describeSteps(t: StepTally): string {
   return [...sentence.slice(0, SHOWN_PARTS).map((part) => part.text), `以及另外 ${rest} 项操作`].join("，");
 }
 
-/** "（2 项失败）", "（1 项已停止）", both, or nothing. */
+/** Tool attempts stay distinct from an agent that could not finish its work. */
 export function describeFailures(t: StepTally): string | undefined {
-  const said = [t.failed ? `${t.failed} 项失败` : "", t.stopped ? `${t.stopped} 项已停止` : ""].filter(Boolean);
+  const tools = t.failed - t.failedAgents;
+  const said = [tools ? `${tools} 次工具未成功` : "", t.failedAgents ? `${t.failedAgents} 个智能体失败` : "", t.stopped ? `${t.stopped} 项已停止` : ""].filter(Boolean);
   return said.length ? `（${said.join("，")}）` : undefined;
 }
 

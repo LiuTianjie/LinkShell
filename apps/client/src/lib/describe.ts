@@ -115,7 +115,7 @@ export interface ToolDescription {
   verb: string;
   /** The object of the verb: a file name, command or query. */
   subject: string;
-  /** "（失败）", "（已停止）": how it ended, when not well. */
+  /** "（工具未成功）", "（已停止）": how it ended, when not well. */
   suffix?: string;
   /** Show `subject` in the monospace face. */
   code: boolean;

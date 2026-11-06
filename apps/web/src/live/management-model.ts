@@ -43,7 +43,7 @@ export interface DesktopAbout {
   bundle?: string;
   home: string;
 }
-export interface DesktopSettings { opaqueWindow: boolean; autoCheck: boolean; updateChannel: "stable" | "beta" }
+export interface DesktopSettings { opaqueWindow: boolean; autoCheck: boolean; updateChannel: "stable" | "beta"; keepAwake?: boolean }
 export interface PairingOffer { code: string; link: string; gateway: string; expiresAt: number; qr?: boolean[][] }
 
 export type Membership =

@@ -24,7 +24,7 @@ describe("tool rows", () => {
   it("word commands by their description, else their first line, with how long they took", () => {
     expect(line(tool({ toolKind: "execute", title: "Run the tests", rawInput: { command: "npm test", description: "Run the tests" }, endedTs: 3200 }))).toBe("已运行 Run the tests · 用时 3 秒");
     // Codex: the title is the command.
-    expect(line(tool({ toolKind: "execute", title: "rg -n foo src", rawInput: { command: "rg -n foo src" }, rawOutput: { exitCode: 1, durationMs: 400 }, status: "failed" }))).toBe("已运行 rg -n foo src（失败）");
+    expect(line(tool({ toolKind: "execute", title: "rg -n foo src", rawInput: { command: "rg -n foo src" }, rawOutput: { exitCode: 1, durationMs: 400 }, status: "failed" }))).toBe("已运行 rg -n foo src（工具未成功）");
     expect(line(tool({ toolKind: "execute", title: "npm test", rawInput: { command: "npm test" }, status: "in_progress" }))).toBe("正在运行 npm test");
     expect(line(tool({ toolKind: "execute", title: "rm -rf x", rawInput: { command: "rm -rf x" }, rawOutput: { declined: true }, status: "failed" }))).toBe("已拒绝 rm -rf x");
     expect(exitNote(tool({ toolKind: "execute", rawOutput: { exitCode: 0 } }))).toBe("成功");

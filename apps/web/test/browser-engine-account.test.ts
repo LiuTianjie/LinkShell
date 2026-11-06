@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Computer } from "../src/live/engine";
+vi.mock("../src/live/session-preferences", () => ({ sessionPreferences: { read: () => ({ agents: {} }), remember: vi.fn() } }));
 
 const mocks = vi.hoisted(() => ({
   saved: new Map<string, unknown>(),

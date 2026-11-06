@@ -26,6 +26,7 @@ import {
 } from "../config";
 import { accountClient, accountToken } from "./account";
 import { browserIdentity, readLocal, saveLocal } from "./storage";
+import { sessionPreferences } from "./session-preferences";
 import { browserDirect } from "./direct";
 import { ComputerConnections } from "./computer-connections";
 import { computerNames } from "./computer-names";
@@ -521,7 +522,7 @@ export class BrowserEngine {
       createSocket: () => local ? desktopHostSocket() as unknown as SocketLike : new TunnelSocket(relay!, identity, computer.machine),
       lazyImages: true,
     });
-    const store = createClientStore(link, { lazyImages: true });
+    const store = createClientStore(link, { lazyImages: true, sessionPreferences });
     const streams = new HostStreams(link, {
       connector: local ? undefined : browserDirect,
       iceServers: () => store.getState().machine?.direct?.iceServers,

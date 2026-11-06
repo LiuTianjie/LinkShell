@@ -20,8 +20,7 @@ export function MountedMotionPane({
   fixedWidth?: number;
 }) {
   const { left, top, width, height } = frame;
-  const opacity = visible ? 1 : 0;
-  const position = useSharedValue({ left, top, opacity });
+  const position = useSharedValue({ left, top });
   const dimensions = useSharedValue({ width, height });
   const previousPosition = useRef({ action, geometry });
   const previousDimensions = useRef({ action, geometry });
@@ -32,13 +31,13 @@ export function MountedMotionPane({
     const previous = previousPosition.current;
     const animate = previous.action !== action && previous.geometry === geometry;
     previousPosition.current = { action, geometry };
-    const next = { left, top, opacity };
+    const next = { left, top };
     if (animate) position.value = withSpring(next, PANE_SPRING);
     else {
       if (previous.geometry !== geometry) cancelAnimation(position);
       position.value = next;
     }
-  }, [action, geometry, left, top, opacity, position]);
+  }, [action, geometry, left, top, position]);
 
   // A child's measured viewport can follow its parent's size without resetting its slide.
   useLayoutEffect(() => {
@@ -58,15 +57,16 @@ export function MountedMotionPane({
     top: position.value.top,
     width: Math.max(0, dimensions.value.width),
     height: Math.max(0, dimensions.value.height),
-    opacity: Math.max(0, Math.min(1, position.value.opacity)),
   }));
+  // iOS glass cannot recover after an ancestor fades to zero. Keep panes mounted
+  // for their drafts and previews, but hide their native view without fading it.
   return (
     <Animated.View
       pointerEvents={visible ? "auto" : "none"}
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? "auto" : "no-hide-descendants"}
       onLayout={(event) => { const next = event.nativeEvent.layout.width; if (fixedWidth === undefined && next > 0) setMeasuredWidth(next); }}
-      style={[{ position: "absolute", overflow: "hidden", minWidth: 0 }, style, animated]}
+      style={[{ position: "absolute", overflow: "hidden", minWidth: 0 }, style, animated, { display: visible ? "flex" : "none" }]}
     >
       <View style={{ width: fixedWidth ?? "100%", height: "100%" }}><ContentWidth value={fixedWidth ?? measuredWidth}>{children}</ContentWidth></View>
     </Animated.View>

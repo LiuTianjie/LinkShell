@@ -25,7 +25,7 @@
     min-width: 0;
     width: 100%;
   }
-.inline-terminal .terminal-live {
+.inline-terminal .terminal-live:not(.terminal-fullscreen) {
     height: 200px;
     min-height: 160px;
   }
@@ -101,7 +101,7 @@
     min-height: 0;
     margin: 0;
   }
-.terminal-session-panel > .terminal-live {
+.terminal-session-panel > .terminal-live:not(.terminal-fullscreen) {
     flex: 1;
     height: auto;
     padding: 8px 12px 12px;
@@ -237,4 +237,13 @@
       flex-basis: 100%;
     }
 }
+}
+
+/* Browser terminal dialogs keep their focus trap, while the terminal fills the viewport.
+   These overrides sit above utility layers, including the dialog's centering translate. */
+:is([data-slot="dialog-content"], [data-slot="sheet-content"]):has(.terminal-fullscreen) {
+  animation: none;
+  transform: none;
+  translate: none;
+  overflow: visible;
 }

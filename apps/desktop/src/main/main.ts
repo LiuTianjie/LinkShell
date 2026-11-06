@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerSaveBlocker, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
+import { KeepAwake } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
@@ -20,6 +21,7 @@ const runtime = new Runtime(app.getAppPath(), launch);
 const management = new Management(runtime);
 const server = new WorkspaceServer(runtime);
 const settings = new Map<string, unknown>();
+const keepAwake = new KeepAwake(powerSaveBlocker);
 
 // Codex's window: the toolbar row is 46px; the traffic lights sit centred on its 44px chrome.
 const TOOLBAR = 44;
@@ -218,7 +220,8 @@ function createWindow() {
     if (wantedFullScreen === true && !fullScreenAsked) wantedFullScreen = false;
     fullScreenAsked = false;
     send("linkshell-desktop-window", { fullscreen: false });
-    send("linkshell-desktop-fullscreen", { fullscreen: false });
+    // A different terminal may already be entering while the old leave animation finishes.
+    if (wantedFullScreen !== true) send("linkshell-desktop-fullscreen", { fullscreen: false });
     reconcileFullScreen();
   });
   web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { pageReady = false; nativeModule?.screenStop(); setNativeScreenShown(false); } });
@@ -519,12 +522,16 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       clipboard.writeText(path);
       return { path };
     }
-    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable" };
+    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", ...(MAC ? { keepAwake: settings.get("keepAwake") === true } : {}) };
     case "setSetting": {
       const key = String(params.key ?? "");
-      if (!["opaqueWindow", "autoCheck", "updateChannel"].includes(key)) throw new Error("未知设置");
+      if (!["opaqueWindow", "autoCheck", "updateChannel", ...(MAC ? ["keepAwake"] : [])].includes(key)) throw new Error("未知设置");
       if (key === "updateChannel" && !["stable", "beta"].includes(String(params.value))) throw new Error("未知更新通道");
       if (key === "updateChannel" && WINDOWS && (windowsUpdate.checking || windowsUpdate.installing)) throw new Error("更新正在进行，请稍后再切换通道");
+      if (key === "keepAwake") {
+        if (typeof params.value !== "boolean") throw new Error("无效的保持唤醒设置");
+        keepAwake.set(params.value);
+      }
       settings.set(key, params.value);
       if (key === "updateChannel" && WINDOWS) {
         // Invalidate the old channel before yielding to the settings write or another UI request.
@@ -604,6 +611,7 @@ app.on("before-quit", (event) => {
 
 app.on("activate", () => showWindow());
 app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });
+app.on("will-quit", () => keepAwake.set(false));
 
 // ── Native pieces ─────────────────────────────────────────────────────────────────────────
 
@@ -909,6 +917,7 @@ function saveSettings(): Promise<void> {
 
 async function ready() {
   await loadSettings();
+  if (MAC) keepAwake.set(settings.get("keepAwake") === true);
   // Sparkle relaunches with no arguments: keep the chosen state directory, never credentials.
   if (launch.home) { settings.set("home", launch.home); void saveSettings(); }
   else if (typeof settings.get("home") === "string" && runtime.standalone) process.env.LINKSHELL_HOME = settings.get("home") as string;

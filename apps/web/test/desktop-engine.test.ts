@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   supabase: vi.fn(),
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: mocks.supabase }));
+vi.mock("../src/live/session-preferences", () => ({ sessionPreferences: { read: () => ({ agents: {} }), remember: vi.fn() } }));
 vi.mock("@linkshell/client-core", () => ({
   HostLink: class {
     constructor(readonly options: { createSocket(): unknown }) { mocks.links.push(this); }

@@ -38,6 +38,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
 import { NewSessionPage } from "./live/NewSessionPage";
+import { sessionPreferences } from "./live/session-preferences";
 import { configToCreate, creationOptions, modelName, modelToCreate, useAgentModels } from "./live/agent-models";
 import { creationOptionLabel } from "./live/NewSessionConfig";
 import { valueName } from "./live/ComposerControls";
@@ -86,7 +87,7 @@ import type { Computer } from "./live/engine";
 import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { AllProjects, Projects } from "./live/Projects";
-import { projectScope } from "./live/project-overview";
+import { projectScope, setProjectScope } from "./live/project-overview";
 import { isDesktop, isElectronDesktop, openDesktopManagement, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./live/desktop";
 import { Management } from "./live/Management";
 import { isManageView, managePage, manageView } from "./live/management-model";
@@ -146,8 +147,9 @@ function LiveApp() {
     if (id !== view) void guard(() => commitView(id));
   }
   function selectComputer(computer: Computer) {
-    if (computer.key === state.connection?.computer.key) return;
+    if (computer.key === state.connection?.computer.key) { setProjectScope("current"); return; }
     void guard(() => {
+      setProjectScope("current");
       engine.select(computer);
       if (screenComputerKey(view)) commitView(screenView(computer.key));
       else if (view !== "screen") commitView("home");
@@ -155,6 +157,7 @@ function LiveApp() {
   }
   function openComputerView(computer: Computer, id: string) {
     void guard(() => {
+      if (id === "projects" || id === "home") setProjectScope("current");
       const selected = engine.state.getState().connection?.computer;
       const target = engine.computerForKey(computer.key) ?? computer;
       if (selected?.key !== target.key) engine.select(target);
@@ -849,27 +852,23 @@ function NewSession({
   created: (session: SessionSummary) => void;
 }) {
   const machine = useClient((state) => state.machine);
-  const projects = useClient((state) => state.projects);
   const actions = useActions();
   const { store } = useConnection();
   const online = useClient((state) => state.status === "online");
   const job = useJob();
-  const [agent, setAgent] = useState(
-    machine?.agents.find(
-      (agent) =>
-        agent.installed &&
-        !agent.problem &&
-        agent.auth?.state !== "missing" &&
-        agent.tier !== "terminal",
-    )?.id ?? "",
-  );
-  const [cwd, setCwd] = useState(
-    initialDirectory ?? projects[0]?.cwd ?? machine?.home ?? "",
-  );
+  const remembered = sessionPreferences.read(machine?.machineId);
+  const [agentPick, setAgentPick] = useState<{ machineId?: string; agent: string }>();
+  const preferredAgent = agentPick?.machineId === machine?.machineId ? agentPick?.agent ?? remembered.agent : remembered.agent;
+  const usableAgent = (entry: NonNullable<typeof machine>["agents"][number]) => entry.installed && !entry.problem && entry.auth?.state !== "missing" && entry.tier !== "terminal";
+  const agent = machine?.agents.find((entry) => entry.id === preferredAgent && usableAgent(entry))?.id ?? machine?.agents.find(usableAgent)?.id ?? "";
+  const setAgent = (value: string) => { setAgentPick({ machineId: machine?.machineId, agent: value }); sessionPreferences.remember(machine?.machineId, value); };
+  const [directory, setCwd] = useState(initialDirectory);
+  const cwd = directory ?? machine?.home ?? "";
+  const quick = !!machine?.home && cwd === machine.home;
   const [prompt, setPrompt] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
-  // Picked per agent: another agent starts from its own default.
+  // Each computer and agent retains its own explicit model and mode choices.
   const [picked, setPicked] = useState<{ store: typeof store; agent: string; model: string }>();
   const [configPick, setConfigPick] = useState<{ store: typeof store; key: string; values: Record<string, string> }>();
   const [modelsRevision, setModelsRevision] = useState(0);
@@ -892,14 +891,14 @@ function NewSession({
     selectedAgent.auth?.state !== "missing" &&
     selectedAgent.tier !== "terminal";
   // Asked about the directory once typing pauses, like git.
-  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : undefined;
+  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : remembered.agents[agent]?.model;
   const models = useAgentModels(agent, gitPath, online && usable, pickedModel, modelsRevision);
   const model = modelToCreate(
     models,
     pickedModel,
   );
   const configKey = JSON.stringify([agent, cwd.trim()]);
-  const pickedConfig = configPick?.store === store && configPick.key === configKey ? configPick.values : {};
+  const pickedConfig = { ...remembered.agents[agent]?.config, ...(configPick?.store === store && configPick.key === configKey ? configPick.values : {}) };
   const options = creationOptions(models?.config, pickedConfig);
   const unavailableModel = pickedModel && models && !models.error && !models.models.some((entry) => entry.value === pickedModel);
   const ready = !job.busy && online && usable && !!cwd.trim() && gitPath === cwd && !!models && !models.error;
@@ -1013,7 +1012,7 @@ function NewSession({
                   placeholder="默认模型"
                   value={model ?? models.current ?? ""}
                   disabled={job.busy}
-                  onValueChange={(value) => setPicked({ store, agent, model: value })}
+                  onValueChange={(value) => { setPicked({ store, agent, model: value }); sessionPreferences.remember(machine?.machineId, agent, { model: value }); }}
                   options={models.models.map((entry) => {
                     const name = modelName(entry);
                     return {
@@ -1035,7 +1034,7 @@ function NewSession({
                   label={creationOptionLabel(option)}
                   value={option.current}
                   disabled={job.busy || gitPath !== cwd}
-                  onValueChange={(value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [option.id]: value } })}
+                  onValueChange={(value) => { setConfigPick({ store, key: configKey, values: { ...pickedConfig, [option.id]: value } }); sessionPreferences.remember(machine?.machineId, agent, { config: { [option.id]: value } }); }}
                   options={option.values.map((entry) => ({ value: entry.value, label: valueName(entry.name) }))}
                 />
                 {option.values.find((entry) => entry.value === option.current)?.description && <FieldDescription>{option.values.find((entry) => entry.value === option.current)?.description}</FieldDescription>}
@@ -1057,6 +1056,9 @@ function NewSession({
             )}
             <Field data-disabled={job.busy}>
               <FieldLabel htmlFor="new-session-cwd">工作目录</FieldLabel>
+              <Button type="button" variant={quick ? "secondary" : "outline"} className="self-start" disabled={job.busy || !machine?.home} aria-pressed={quick} onClick={() => setCwd(undefined)}>
+                <MessageSquarePlus data-icon="inline-start" />快速会话
+              </Button>
               <div className="new-session-directory">
                 <Input
                   id="new-session-cwd"
@@ -1080,7 +1082,7 @@ function NewSession({
                 </Button>
               </div>
               <FieldDescription>
-                Agent 会在此目录中读取文件并执行任务。
+                {quick ? "无需选择项目，在电脑的个人目录中开始。" : "Agent 会在此目录中读取文件并执行任务。"}
               </FieldDescription>
             </Field>
             {git.value && gitPath === cwd && (

@@ -667,10 +667,11 @@
   .steps-summary-failed {
     flex-shrink: 0;
     margin-left: -7px;
-    color: var(--danger);
+    color: var(--secondaryLabel);
     font-size: 13px;
     font-weight: 500;
   }
+  .steps-summary-failed[data-agent-failed] { color: var(--danger); }
   .steps-summary-diff {
     flex-shrink: 0;
     margin-left: auto;
@@ -758,7 +759,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   /* Done is the normal state: its mark stays grey (green is for an explicit success). */
   .tool-record.completed > summary > .tool-state { color: var(--tertiaryLabel); }
-  .tool-record.failed > summary > .tool-state { color: var(--danger); }
+  .tool-record[data-agent-failed] > :is(summary, .tool-summary) > .tool-state { color: var(--danger); }
   /* The opened body is padded; the folded row needs none. */
   .tool-record[open] > :not(summary) {
     margin: 12px;
@@ -826,7 +827,8 @@
   }
   .tool-label .tool-file:hover { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
   .tool-label .tool-subject-code { font-family: var(--font-mono); font-size: 12px; }
-  .tool-record > :is(summary, .tool-summary) > .tool-suffix { flex: none; margin-left: -8px; color: var(--danger); }
+  .tool-record > :is(summary, .tool-summary) > .tool-suffix { flex: none; margin-left: -8px; color: var(--secondaryLabel); }
+  .tool-record[data-agent-failed] > :is(summary, .tool-summary) > .tool-suffix { color: var(--danger); }
   .tool-record > :is(summary, .tool-summary) > .tool-note,
   .tool-record > :is(summary, .tool-summary) > .diff-stat {
     flex-shrink: 0;

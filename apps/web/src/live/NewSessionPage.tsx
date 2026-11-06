@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, SessionSummary } from "@linkshell/wire";
-import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch, LoaderCircle } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, FolderOpen, GitBranch, LoaderCircle, MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,6 +22,7 @@ import { Files } from "./Files";
 import { useStore } from "zustand";
 import { engine } from "./engine";
 import { computerName, computerNames } from "./computer-names";
+import { sessionPreferences } from "./session-preferences";
 
 const usableAgent = (entry: AgentInfo) =>
   entry.installed && !entry.problem && entry.auth?.state !== "missing" && entry.tier !== "terminal";
@@ -48,35 +49,37 @@ export function NewSessionPage({
   const engineState = useStore(engine.state);
   const names = useStore(computerNames.store);
   const job = useJob();
-  const [agent, setAgent] = useState(() => machine?.agents.find(usableAgent)?.id ?? "");
-  const [cwd, setCwd] = useState(initialDirectory ?? projects[0]?.cwd ?? machine?.home ?? "");
+  const remembered = sessionPreferences.read(machine?.machineId);
+  const [agentPick, setAgentPick] = useState<{ machineId?: string; agent: string }>();
+  const preferredAgent = agentPick?.machineId === machine?.machineId ? agentPick?.agent ?? remembered.agent : remembered.agent;
+  const agent = machine?.agents.find((entry) => entry.id === preferredAgent && usableAgent(entry))?.id ?? machine?.agents.find(usableAgent)?.id ?? "";
+  const setAgent = (value: string) => { setAgentPick({ machineId: machine?.machineId, agent: value }); sessionPreferences.remember(machine?.machineId, value); };
+  const [directory, setCwd] = useState(initialDirectory);
+  const cwd = directory ?? machine?.home ?? "";
+  const quick = !!machine?.home && cwd === machine.home;
   const [prompt, setPrompt] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
-  // Picked per agent: choosing another agent starts from that agent's own default.
+  // Explicit choices are checked against this computer's current agent capabilities.
   const [picked, setPicked] = useState<{ store: typeof store; agent: string; model: string }>();
   const [configPick, setConfigPick] = useState<{ store: typeof store; key: string; values: Record<string, string> }>();
   const [modelsRevision, setModelsRevision] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
-  // The agent list arrives after the page: choose the first usable one once it does.
-  useEffect(() => {
-    if (!agent && machine) setAgent(machine.agents.find(usableAgent)?.id ?? "");
-  }, [machine, agent]);
   useEffect(() => { setWorktree(false); }, [cwd]);
   const git = useLoad(() => (cwd.trim() ? actions.gitInfo(cwd) : Promise.resolve(undefined)), [store, cwd]);
   const selected = machine?.agents.find((entry) => entry.id === agent);
   const usable = !!selected && usableAgent(selected);
-  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : undefined;
+  const pickedModel = picked?.store === store && picked.agent === agent ? picked.model : remembered.agents[agent]?.model;
   const models = useAgentModels(agent, cwd, online && usable, pickedModel, modelsRevision);
   const ready = online && usable && !!cwd.trim() && !job.busy && !!models && !models.error;
   const model = modelToCreate(models, pickedModel);
   const shownModel = models?.models.find((entry) => entry.value === (model ?? models.current));
   const configKey = JSON.stringify([agent, cwd.trim()]);
-  const pickedConfig = configPick?.store === store && configPick.key === configKey ? configPick.values : {};
+  const pickedConfig = { ...remembered.agents[agent]?.config, ...(configPick?.store === store && configPick.key === configKey ? configPick.values : {}) };
   const options = creationOptions(models?.config, pickedConfig);
   const unavailableModel = pickedModel && models && !models.error && !models.models.some((entry) => entry.value === pickedModel);
   const project = projects.find((entry) => entry.cwd === cwd);
-  const place = project?.name ?? (cwd.split(/[\\/]/).filter(Boolean).pop() || cwd || "选择目录");
+  const place = quick ? "快速会话" : project?.name ?? (cwd.split(/[\\/]/).filter(Boolean).pop() || cwd || "选择目录");
   const computer = engineState.connection?.computer;
   const start = () => {
     if (!ready) return;
@@ -165,7 +168,7 @@ export function NewSessionPage({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
                     <DropdownMenuLabel>模型</DropdownMenuLabel>
-                    <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => setPicked({ store, agent, model: value })}>
+                    <DropdownMenuRadioGroup value={shownModel?.value ?? ""} onValueChange={(value) => { setPicked({ store, agent, model: value }); sessionPreferences.remember(machine?.machineId, agent, { model: value }); }}>
                       {models.models.map((entry) => {
                         const name = modelName(entry);
                         // Claude's own default already reads 默认（推荐）.
@@ -183,7 +186,7 @@ export function NewSessionPage({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } })} />
+              <NewSessionConfig options={options} disabled={job.busy} onChange={(id, value) => { setConfigPick({ store, key: configKey, values: { ...pickedConfig, [id]: value } }); sessionPreferences.remember(machine?.machineId, agent, { config: { [id]: value } }); }} />
             </div>
             <Button type="submit" size="icon" className="send-button" disabled={!ready} aria-label="开始会话" title="开始 · Enter（Shift Enter 换行）">
               {job.busy ? <LoaderCircle className="animate-spin" /> : <ArrowUp />}
@@ -201,6 +204,12 @@ export function NewSessionPage({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" sideOffset={8} collisionPadding={12} className="new-session-menu">
+              <DropdownMenuItem disabled={!machine?.home} onSelect={() => setCwd(undefined)}>
+                <MessageSquarePlus data-icon="inline-start" />
+                <span className="new-session-option"><span>快速会话</span><small>无需选择项目，在个人目录中开始</small></span>
+                {quick && <Check className="ml-auto" />}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuLabel>最近的项目</DropdownMenuLabel>
               {projects.slice(0, 8).map((entry) => (
                 <DropdownMenuItem key={entry.cwd} onSelect={() => setCwd(entry.cwd)}>

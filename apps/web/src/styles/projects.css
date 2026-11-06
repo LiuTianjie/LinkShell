@@ -32,6 +32,11 @@
 .console-main .project-more { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border-top: 1px solid var(--separator); color: var(--secondaryLabel); font-size: 12px; }
 .console-main .project-more svg { width: 14px; height: 14px; }
 .console-main .project-more svg[data-open] { rotate: 180deg; }
+.console-main .project-computer + .project-computer { margin-top: 12px; }
+.console-main .project-computer-heading { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 4px; color: var(--secondaryLabel); font-size: 12px; }
+.console-main .project-computer-heading > button { margin-left: -8px; }
+.console-main .project-computer-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-main .project-computer-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--secondaryLabel); font-size: 12px; }
 @media (max-width: 800px) {
   .console-main .project-meta { display: none; }
   .console-main .project-session { grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 8px; }

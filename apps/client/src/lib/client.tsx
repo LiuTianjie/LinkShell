@@ -1,4 +1,5 @@
 import { setHostHome } from "@/lib/format";
+import { sessionPreferences } from "./session-preferences";
 import { deleteSecret, readSecret, writeSecret } from "./secure";
 import { createContext, use, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
@@ -86,7 +87,7 @@ function createConnection(computer: Computer): Connection {
         });
   const url = computer.kind === "direct" ? computer.url : computer.gateway;
   // Pictures in history come as references and load when shown (`useImage`).
-  const store = createClientStore(link, { newId: randomUUID, lazyImages: true });
+  const store = createClientStore(link, { newId: randomUUID, lazyImages: true, sessionPreferences });
   // Paths render as ~/… with this computer's home, set before anything renders them.
   setHostHome(undefined);
   const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });

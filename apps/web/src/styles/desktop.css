@@ -247,6 +247,12 @@ html[data-desktop] .tree-scope-menu > span { min-width: 0; overflow: hidden; tex
 html[data-desktop] .tree-scope-menu > svg { flex: none; }
 html[data-desktop] .tree-scope-menu:is(:hover, [aria-expanded="true"]) { background: var(--fill); color: var(--label); }
 html[data-desktop] .tree-scope-menu + .tree-heading-action { margin-left: 0; }
+html[data-desktop] .tree-project-member { margin-left: 12px; }
+html[data-desktop] .tree-project-computer { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; min-height: 28px; padding: 4px 30px 4px 8px; border-radius: var(--radius-row); color: var(--secondaryLabel); font-size: 12px; text-align: left; }
+html[data-desktop] .tree-project-computer:hover { background: var(--fill); }
+html[data-desktop] .tree-project-computer > span:not(.desktop-presence) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-project-path { overflow: hidden; margin: 0 8px 4px; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-project-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-note { min-width: 0; padding: 4px 10px 8px 36px; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 1.55; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .tree-project-row { position: relative; display: flex; align-items: center; min-width: 0; }
 html[data-desktop] .tree-project-toggle { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 30px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition); }

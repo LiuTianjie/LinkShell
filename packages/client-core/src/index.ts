@@ -2,6 +2,7 @@ export * from "./timeline.js";
 export * from "./steps.js";
 export * from "./tool-labels.js";
 export * from "./question-wording.js";
+export * from "./permission-content.js";
 export * from "./errors.js";
 export * from "./activity.js";
 export * from "./line-diff.js";
@@ -17,6 +18,7 @@ export * from "./streams.js";
 export * from "./computer-preview.js";
 export * from "./pro-membership.js";
 export * from "./account-errors.js";
+export * from "./session-preferences.js";
 
 export * from "./tasks.js";
 export * from "./projects.js";

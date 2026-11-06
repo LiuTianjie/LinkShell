@@ -798,6 +798,16 @@ function SettingsPage({ facts }: { facts: Facts }) {
         {state.loginItemMessage && <Note tone="warning">{state.loginItemMessage}</Note>}
         <Note>窗口关闭后，LinkShell 留在{isWindowsDesktop ? "任务栏的通知区域" : "菜单栏"}。退出界面不会停止 Host 或代理任务。</Note>
       </Group>
+      {typeof state.settings.keepAwake === "boolean" && (
+        <Group title="保持在线">
+          <div className="management-rows">
+            <SettingRow title="运行时保持唤醒" detail="LinkShell 留在菜单栏时防止 Mac 因闲置而睡眠，显示器仍可自动熄屏">
+              <Switch checked={state.settings.keepAwake} onCheckedChange={(value) => void setDesktopSetting("keepAwake", value)} aria-label="运行时保持唤醒" />
+            </SettingRow>
+          </div>
+          <Note>关闭此开关或退出 LinkShell 后恢复系统休眠设置。不能阻止手动睡眠、低电量或合盖触发的睡眠；合盖使用需满足 Mac 的外接显示器与供电条件。</Note>
+        </Group>
+      )}
       <Group title={`让手机查看和控制${THIS_COMPUTER}`}>
         {isWindowsDesktop ? (
           <>

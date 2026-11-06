@@ -35,6 +35,8 @@ import {
   WrapText,
   X,
   Ellipsis,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -398,7 +400,7 @@ export function Files({
   const [searching, setSearching] = useState(false);
   const { link } = useConnection();
   const [path, setPath] = useState(start);
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useState(() => readLocal<unknown>("filesShowHidden", false) === true);
   const [file, setFile] = useState<string>();
   const [fileLine, setFileLine] = useState<number>();
   const [dirty, setDirty] = useState(false);
@@ -412,6 +414,7 @@ export function Files({
   };
   const foldList = keep("desktopFilesListFolded", setListFolded);
   const sizeList = keep("desktopFilesListWidth", setListWidth);
+  const showHidden = keep("filesShowHidden", setHidden);
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
@@ -635,7 +638,7 @@ export function Files({
   };
   const hiddenToggle = (
     <Label className="resource-hidden-toggle">
-      <Checkbox checked={hidden} onCheckedChange={(checked) => setHidden(checked === true)} />
+      <Checkbox checked={hidden} onCheckedChange={(checked) => showHidden(checked === true)} />
       显示隐藏项目
     </Label>
   );
@@ -681,6 +684,9 @@ export function Files({
               <FolderOpen />
             </Button>
             {refresh}
+            <Button variant="ghost" size="icon" aria-pressed={hidden} title={hidden ? "不显示隐藏项目" : "显示隐藏项目"} aria-label={hidden ? "不显示隐藏项目" : "显示隐藏项目"} onClick={() => { clearSearch(); showHidden(!hidden); }}>
+              {hidden ? <EyeOff /> : <Eye />}
+            </Button>
             <Button variant="ghost" size="sm" disabled={!changeable} onClick={() => void makeDirectory()}>
               <FolderPlus data-icon="inline-start" />新建目录
             </Button>
@@ -720,7 +726,7 @@ export function Files({
                 <DropdownMenuItem disabled={!changeable} onSelect={() => void makeDirectory()}><FolderPlus />新建目录</DropdownMenuItem>
                 <DropdownMenuItem disabled={job.busy} onSelect={() => void goTo()}><FolderOpen />前往目录…</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem checked={hidden} onCheckedChange={(checked) => setHidden(checked === true)}>
+                <DropdownMenuCheckboxItem checked={hidden} onCheckedChange={(checked) => { clearSearch(); showHidden(checked === true); }}>
                   显示隐藏项目
                 </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
@@ -996,7 +1002,7 @@ export function Files({
                   <span>{summary}</span>
                   {submitted ? (
                     <Button variant="link" size="sm" onClick={clearSearch}>返回当前目录</Button>
-                  ) : page ? hiddenToggle : null}
+                  ) : null}
                 </p>
               )}
               {active.value?.truncated && (

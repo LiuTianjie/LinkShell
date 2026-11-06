@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useActions, useJob } from "./common";
+import { ErrorNotice, useActions, useJob } from "./common";
 
 /** Keep settings recognisable in both the new-session form and an existing conversation. */
 export function SessionConfigIcon({ category, value = "" }: { category: SessionConfigOption["category"]; value?: string }) {
@@ -166,7 +166,9 @@ export function ComposerConfig({
         const current = option.values.find((value) => value.value === option.current);
         const label = sessionConfigLabel(option);
         return (
-          <DropdownMenu key={option.id}>
+          <DropdownMenu key={option.id} onOpenChange={(open) => {
+            if (open && option.category === "model") void job.run(() => actions.agentModels(session.agent, session.cwd));
+          }}>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="toolbar"
@@ -185,13 +187,13 @@ export function ComposerConfig({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="composer-chip-menu" side="top" align="start" sideOffset={8}>
-              <DropdownMenuLabel>{label}</DropdownMenuLabel>
+              <DropdownMenuLabel>{option.category === "model" && job.busy ? "正在更新模型…" : label}</DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={option.current}
                 onValueChange={(value) => void job.run(() => actions.setConfig(session.id, option.id, value))}
               >
                 {option.values.map((value) => (
-                  <DropdownMenuRadioItem key={value.value} value={value.value}>
+                  <DropdownMenuRadioItem key={value.value} value={value.value} disabled={job.busy}>
                     <span className="composer-chip-option">
                       <span>{value.group ? `${value.group} · ${valueName(value.name)}` : valueName(value.name)}</span>
                       {value.description && <small>{valueDescription(value.description)}</small>}
@@ -215,6 +217,7 @@ export function ComposerConfig({
           <span>{session.model ?? "模型与权限"}</span>
         </Button>
       )}
+      <ErrorNotice error={job.error} />
     </>
   );
 }

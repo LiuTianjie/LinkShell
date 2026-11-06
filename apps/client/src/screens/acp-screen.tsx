@@ -28,7 +28,7 @@ export function AgentInteractions({ agent }: { agent: string }) {
   };
   return <>{requests?.map((request) => request.questions?.length
     ? <QuestionCard key={request.requestId} sessionId={`agent:${agent}`} contained request={{ ...request, ts: 0 }} count={requests.length} agentName={name} disabled={!online} onChoose={choose} onAnswer={async (requestId, answers) => { await link.call("agents.respond", { agent, requestId, answers }); }} />
-    : <AcpSection key={request.requestId} title="等你确认"><View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}><Icon sf="hand.raised" md="front_hand" size={20} color={colors.waiting} /><Text style={[type.headline, { flex: 1, color: colors.label }]}>{request.title}</Text></View>{request.detail ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{request.detail}</Text> : null}<PermissionContext request={request} /><PermissionActions options={request.options} disabled={!online} onChoose={(optionId) => choose(request.requestId, optionId)} /></AcpSection>)}</>;
+    : <AcpSection key={request.requestId} title="等你确认"><View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}><Icon sf="hand.raised" md="front_hand" size={20} color={colors.waiting} /><Text style={[type.headline, { flex: 1, color: colors.label }]}>{request.title}</Text></View><PermissionContext request={request} /><PermissionActions options={request.options} disabled={!online} onChoose={(optionId) => choose(request.requestId, optionId)} /></AcpSection>)}</>;
 }
 
 export function AcpScreen() {

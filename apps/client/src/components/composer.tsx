@@ -358,9 +358,6 @@ export function Composer(props: ComposerProps) {
                   <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{permissionCount}</Text>
                 ) : null}
               </View>
-              {permission.detail ? (
-                <PermissionDetail key={`detail:${permission.requestId}`} detail={permission.detail} />
-              ) : null}
               <PermissionContext request={permission} />
               <PermissionActions
                 key={permission.requestId}
@@ -445,7 +442,7 @@ export function Composer(props: ComposerProps) {
 
       <View onLayout={(event) => setInputHeight(event.nativeEvent.layout.height)}>
       {desktopDriving && !blocked ? (
-        <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
+        <View>
           {/* Room for the glass shadow inside the scroll view's clip, as for the cards. */}
           <ScrollView
             style={{ maxHeight: Math.max(0, viewport.available - bottomInset - 14) + CARD_SHADOW.top + CARD_SHADOW.bottom, marginHorizontal: -CARD_SHADOW.side, marginTop: -CARD_SHADOW.top, marginBottom: -CARD_SHADOW.bottom }}
@@ -455,7 +452,7 @@ export function Composer(props: ComposerProps) {
           >
             <TakeoverPanel onTakeover={props.onTakeover} onStop={turnActive ? stop : undefined} stopping={stopping} />
           </ScrollView>
-        </Animated.View>
+        </View>
       ) : (
         <Glass style={{ borderRadius: radius.panel, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 8 }}>
           <View style={{ flexDirection: compact && !voice.recording ? "row" : "column", alignItems: compact && !voice.recording ? "center" : "stretch", gap: compact && !voice.recording ? 4 : 0 }}>
@@ -553,38 +550,6 @@ export function Composer(props: ComposerProps) {
         </Glass>
       )}
       </View>
-    </View>
-  );
-}
-
-function PermissionDetail({ detail }: { detail: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const textStyle = { fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText };
-  return (
-    <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", padding: 10, overflow: "hidden" }}>
-      {/* Measure the full text at the same width so wrapped lines also offer expansion. */}
-      <Text
-        accessible={false}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        pointerEvents="none"
-        onTextLayout={(event) => setOverflows(event.nativeEvent.lines.length > 6)}
-        style={[textStyle, { position: "absolute", top: 10, left: 10, right: 10, opacity: 0 }]}
-      >
-        {detail}
-      </Text>
-      <Text selectable numberOfLines={expanded ? undefined : 6} style={textStyle}>{detail}</Text>
-      {overflows ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded }}
-          onPress={() => setExpanded((value) => !value)}
-          style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start" }}
-        >
-          <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>{expanded ? "收起" : "展开完整内容"}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }

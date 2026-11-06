@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/button";
 import { Alert, Platform, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { Text } from "@/components/fixed-text";
@@ -22,9 +23,21 @@ export function SessionSettingsScreen() {
   const heldElsewhere = tier === "multi_client" && driver === "desktop";
   const online = useClient((state) => state.status === "online");
   const actions = useActions();
+  const [modelsError, setModelsError] = useState<string>();
+  const [modelsRevision, setModelsRevision] = useState(0);
+  useEffect(() => {
+    if (!online || !summary?.agent) return;
+    let alive = true;
+    void actions.agentModels(summary.agent, summary.cwd).then(
+      () => { if (alive) setModelsError(undefined); },
+      (error: unknown) => { if (alive) setModelsError(error instanceof Error ? error.message : String(error)); },
+    );
+    return () => { alive = false; };
+  }, [actions, online, summary?.agent, summary?.cwd, id, modelsRevision]);
   const options = [...(config ?? [])].sort((a, b) => Number(b.id === selected) - Number(a.id === selected));
   return <ScrollView contentContainerStyle={{ padding: 16, paddingTop: Platform.OS === "android" ? 24 : 16, gap: 12 }} keyboardShouldPersistTaps="handled">
     <SheetHeader title="会话设置" />
+    {modelsError ? <View style={{ gap: 8 }}><Text style={[type.footnote, { color: colors.danger }]}>模型更新失败：{modelsError}</Text><Button title="重试读取模型" onPress={() => setModelsRevision((value) => value + 1)} /></View> : null}
     {heldElsewhere ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>会话同时开在电脑的另一个 Codex 里，修改将同步到下一轮对话。</Text> : null}
     {/* One grouped list, as Settings draws one: a label and its value per row. */}
     {options.length ? <View style={{ borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.sheetCard, overflow: "hidden" }}>

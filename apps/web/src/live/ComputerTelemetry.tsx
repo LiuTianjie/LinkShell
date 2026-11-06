@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { MachineMetrics } from "@linkshell/wire";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClient, useConnection } from "./common";
 import { observeMachineMetrics, type MachineMetricsState } from "./machine-metrics";
 
-import { ComputerMetricsVisual } from "./ComputerMetricsVisuals";
+import { ComputerMetricsVisual, ComputerResourceReadings } from "./ComputerMetricsVisuals";
 
 export function ComputerMetrics({ metrics, history = [], status, detail, retry }: {
   metrics?: MachineMetrics;
@@ -13,19 +14,21 @@ export function ComputerMetrics({ metrics, history = [], status, detail, retry }
   detail?: string;
   retry?: () => void;
 }) {
-  if (!metrics) return (
-    <div className="computer-telemetry computer-telemetry-empty" title={detail}>
-      <div className="computer-visual-body"><div className="computer-empty-readings"><span>CPU <b>—</b></span><span>内存 <b>—</b></span></div></div>
-      <div className="computer-telemetry-caption"><span>{status}</span>{retry && <Button variant="ghost" size="plain" onClick={retry}>重试</Button>}</div>
-    </div>
-  );
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
   return (
     <div className="computer-telemetry">
-      <div className="computer-visual-body"><ComputerMetricsVisual metrics={metrics} history={history} /></div>
-      {/* Under the chart the caption is its time axis; the sampling status moves to the tooltip. */}
-      <div className="computer-telemetry-caption" title={detail}>
-        <span>最近 2 分钟</span><span title={status}>现在</span>
+      <div className="computer-telemetry-summary">
+        <div className="computer-telemetry-readings">
+          <ComputerResourceReadings metrics={metrics} />
+          {!metrics && <div className="computer-telemetry-status" title={detail}>{status}{retry && <Button variant="ghost" size="plain" onClick={retry}>重试</Button>}</div>}
+        </div>
+        {metrics && <Button variant="toolbar" size="icon" className="computer-resource-toggle" title={expanded ? "收起资源详情" : "展开资源详情"} aria-label={expanded ? "收起资源详情" : "展开资源详情"} aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded((value) => !value)}><ChevronDown /></Button>}
       </div>
+      {metrics && expanded && <div id={detailsId} className="computer-telemetry-details" role="region" aria-label="资源使用详情">
+        <ComputerMetricsVisual metrics={metrics} history={history} />
+        <p className="computer-telemetry-note">{status}。{detail}</p>
+      </div>}
     </div>
   );
 }
