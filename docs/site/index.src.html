@@ -48,8 +48,11 @@
       }
     })();
   </script>
+  <link rel="stylesheet" href="assets/family.css" />
   <link rel="stylesheet" href="assets/duo/viewer.css?v=20261008-transparent-stage" />
   <style>
+    /* Shapes and motion follow the iTool family skeleton (assets/family.css: 6/8/12 corners, one
+       easing, no marquee); the hues stay LinkShell's own. */
     /* LinkShell's site. Dark zinc ground, one teal accent, the product's own recordings as the
        pictures. Surfaces are told apart by a step in tone, never a line or a shadow; the only
        outlines belong to the product fragments (data-ui) and to code. Five type steps:
@@ -85,7 +88,7 @@
       --lead: 20px;
       --body: 17px;
       --small: 14px;
-      --ease: cubic-bezier(.22, 1, .36, 1);
+      --ease: var(--fam-ease);
       color-scheme: dark;
     }
 
@@ -148,9 +151,9 @@
     .brand:hover { text-decoration: none; }
     .brand img { width: 28px; height: 28px; border-radius: 7px; }
     .nav nav { display: flex; }
-    .nav nav a { padding: 8px 12px; border-radius: 999px; color: var(--text-sec); font-size: var(--small); transition: color .15s, background-color .15s; }
+    .nav nav a { padding: 8px 12px; border-radius: var(--fam-r-md); color: var(--text-sec); font-size: var(--small); transition: color .15s, background-color .15s; }
     .nav nav a.active, .nav nav a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
-    .nav button, .nav .lang-switch { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
+    .nav button, .nav .lang-switch { display: grid; place-items: center; height: 36px; min-width: 36px; padding: 0 9px; border: 0; border-radius: var(--fam-r-md); background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
     .nav button:hover, .nav .lang-switch:hover { color: var(--text); background: var(--surface); text-decoration: none; }
     .nav button svg { width: 17px; height: 17px; }
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
@@ -160,7 +163,7 @@
 
     /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
     .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: 999px; font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
+    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: var(--fam-r-md); font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
     .btn:hover { text-decoration: none; }
     .btn:active { transform: scale(.97); }
     .btn-p { background: var(--accent-fill); color: var(--accent-ink); }
@@ -170,29 +173,29 @@
     .btn svg { width: 18px; height: 18px; flex: none; }
 
     /* commands: real code, so the code face and its own frame */
-    pre { margin: 0; background: var(--code-bg); color: var(--text); border-radius: 14px; padding: 18px 20px; font-size: var(--small); line-height: 1.85; overflow-x: auto; }
+    pre { margin: 0; background: var(--code-bg); color: var(--text); border-radius: var(--fam-r-lg); padding: 18px 20px; font-size: var(--small); line-height: 1.85; overflow-x: auto; }
     pre .cm { color: var(--text-sec); }
     pre .pr { color: var(--accent); user-select: none; }
     .code { position: relative; }
     .code pre { padding-right: 60px; }
-    .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
+    .copy { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: var(--fam-r-sm); background: none; color: var(--text-sec); cursor: pointer; transition: color .15s, background-color .15s; }
     .copy:hover { color: var(--text); background: var(--surface-3); }
     .copy.ok { color: var(--success); }
     .copy svg { width: 16px; height: 16px; }
     .code .copy { position: absolute; top: 10px; right: 10px; background: var(--code-bg); }
     .code .copy:hover { background: var(--surface-3); }
-    .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 7px 0 18px; border-radius: 999px; background: var(--surface); font: var(--small) var(--mono); }
+    .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; height: 48px; padding: 0 7px 0 18px; border-radius: var(--fam-r-md); background: var(--surface); font: var(--small) var(--mono); }
     .cmd i { color: var(--accent); font-style: normal; user-select: none; }
     .cmd code { background: none; padding: 0; font-size: 1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     html:not(.js) .copy { display: none; }
     @media (max-width: 480px) { .cmd { display: flex; } .cmd code { flex: 1; } }
 
     /* the film: a still with its clip over it, set on a panel one tone up */
-    .stage { margin: 0; padding: 14px; border-radius: 34px; background: var(--surface); }
-    .media { position: relative; margin: 0; border-radius: 22px; overflow: hidden; background: #000; }
+    .stage { margin: 0; padding: 14px; border-radius: var(--fam-r-lg); background: var(--surface); }
+    .media { position: relative; margin: 0; border-radius: var(--fam-r-md); overflow: hidden; background: #000; }
     .media img { width: 100%; aspect-ratio: 16 / 9; }
     .media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } .stage { padding: 8px; border-radius: 26px; } .media { border-radius: 20px; } }
+    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } .stage { padding: 8px; border-radius: var(--fam-r-lg); } .media { border-radius: var(--fam-r-md); } }
 
     /* A phone's screen recording, with the phone drawn around it: upright, or on its side for the computer's screen. */
     .phone { position: relative; margin: 40px 0 0; width: min(100%, 340px); border: 9px solid var(--surface-3); border-radius: 54px; overflow: hidden; background: #000; }
@@ -258,9 +261,9 @@
     .feature-stage { display: flex; justify-content: center; margin-top: 44px; padding: 56px 32px; }
     .feature-stage .phone, .feature-stage .pair { margin: 0; }
     .feature-stage .phone.side { width: min(100%, 940px); }
-    @media (max-width: 700px) { .feature-stage { padding: 28px 16px; border-radius: 26px; } }
+    @media (max-width: 700px) { .feature-stage { padding: 28px 16px; border-radius: var(--fam-r-lg); } }
     .duo-figure { margin: 40px 0 0; }
-    .duo-figure img { display: block; width: 100%; height: auto; border-radius: 24px; background: #000; }
+    .duo-figure img { display: block; width: 100%; height: auto; border-radius: var(--fam-r-lg); background: #000; }
     .duo-figure figcaption { margin-top: 14px; color: var(--text-sec); font-size: var(--small); }
 
     /* sections: a large gap between them, a heading on each */
@@ -285,7 +288,7 @@
     .text:has(> dl.more:not(.points)), #agents .text { max-width: none; }
     .text:has(> dl.more:not(.points)) > :is(h2, p), #agents .text > p { max-width: var(--measure); }
     dl.more:not(.points) { gap: 0; margin-top: 36px; }
-    dl.more:not(.points) > div, .agent { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px 40px; align-items: baseline; margin: 0; padding: 22px 28px; border-radius: 18px; }
+    dl.more:not(.points) > div, .agent { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px 40px; align-items: baseline; margin: 0; padding: 22px 28px; border-radius: var(--fam-r-lg); }
     dl.more:not(.points) > div:nth-child(odd), .agent:nth-of-type(odd) { background: var(--surface); }
     dl.more:not(.points) dd { margin: 0; }
     #agents .agent:first-of-type { margin-top: 36px; }
@@ -310,7 +313,7 @@
 
     /* support: who backs it, and how to say thanks, side by side so neither half is empty */
     .support-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
-    .support { padding: 32px; border-radius: 28px; background: var(--surface); }
+    .support { padding: 32px; border-radius: var(--fam-r-lg); background: var(--surface); }
     .sec .support h3 { font-size: var(--lead); margin-bottom: 8px; letter-spacing: -.015em; }
     .support p { color: var(--text-sec); }
     .sponsor { margin-top: 20px; font-size: var(--lead); color: var(--text) !important; }
@@ -322,12 +325,12 @@
 
     /* the close: one large field a tone up, the page's last word at display size */
     .close { padding-block: 168px 0; }
-    .close-card { padding: clamp(40px, 7vw, 96px); border-radius: 36px; background: var(--surface); }
+    .close-card { padding: clamp(40px, 7vw, 96px); border-radius: var(--fam-r-lg); background: var(--surface); }
     .close-card h2 { max-width: 13em; font-size: var(--display); letter-spacing: -.05em; line-height: 1; }
     html[lang^="zh"] .close-card h2 { letter-spacing: -.02em; line-height: 1.12; }
     .close-card p { margin-top: 24px; color: var(--text-sec); font-size: var(--lead); }
     .close .btns { margin-top: 40px; }
-    @media (max-width: 700px) { .close-card { margin-inline: calc(var(--gutter) * -1); padding: 44px 20px; border-radius: 28px; } }
+    @media (max-width: 700px) { .close-card { margin-inline: calc(var(--gutter) * -1); padding: 44px 20px; border-radius: var(--fam-r-lg); } }
 
     /* the footer: the name returns at full width */
     footer { padding-top: 120px; overflow: hidden; }
@@ -353,7 +356,7 @@
     /* docs */
     .docs { display: grid; grid-template-columns: 200px minmax(0, 720px); gap: 80px; padding-block: 72px 128px; }
     .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: var(--small); }
-    .toc a { padding: 6px 12px; border-radius: 999px; color: var(--text-sec); transition: color .15s, background-color .15s; }
+    .toc a { padding: 6px 12px; border-radius: var(--fam-r-md); color: var(--text-sec); transition: color .15s, background-color .15s; }
     .toc a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
     .toc a.on { color: var(--text); background: var(--surface-2); }
     .doc h1 { font-size: var(--heading); margin-bottom: 18px; }
@@ -369,7 +372,7 @@
     .doc dt code { white-space: normal; background: none; padding: 0; color: var(--text); }
     .doc dt:first-child { margin-top: 0; }
     .doc dd { margin: 4px 0 0; }
-    .note { padding: 16px 20px; border-radius: 16px; background: var(--surface); color: var(--text); }
+    .note { padding: 16px 20px; border-radius: var(--fam-r-lg); background: var(--surface); color: var(--text); }
     @media (max-width: 860px) {
       .docs { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-block: 44px 88px; }
       .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; }
@@ -382,14 +385,14 @@
     html[lang^="zh"] .pricing h1 { letter-spacing: -.02em; line-height: 1.12; }
     .pricing .lead { margin-top: 24px; }
     .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 72px; }
-    .plan { max-width: none; padding: 36px; border-radius: 30px; background: var(--surface); }
+    .plan { max-width: none; padding: 36px; border-radius: var(--fam-r-lg); background: var(--surface); }
     .plan.pro { background: var(--surface-2); }
     .plan h2 { font-size: var(--lead); letter-spacing: -.015em; }
     .price { margin-top: 18px; font-size: clamp(56px, 6vw, 80px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
-    .cycle { display: inline-flex; gap: 2px; margin-top: 20px; padding: 3px; border-radius: 999px; background: var(--surface-3); }
-    .cycle-btn { height: 34px; padding: 0 18px; border: 0; border-radius: 999px; background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
+    .cycle { display: inline-flex; gap: 2px; margin-top: 20px; padding: 3px; border-radius: var(--fam-r-md); background: var(--surface-3); }
+    .cycle-btn { height: 34px; padding: 0 18px; border: 0; border-radius: var(--fam-r-sm); background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
     .cycle-btn.active { background: var(--ink); color: var(--ink-fg); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
@@ -397,7 +400,7 @@
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
     #pricing-buy p { margin-top: 16px; font-size: var(--small); color: var(--text-sec); }
-    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: 999px; background: var(--surface-3); color: var(--text); font: 500 var(--body) var(--sans); cursor: pointer; text-decoration: none !important; transition: background-color .15s; }
+    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: var(--fam-r-md); background: var(--surface-3); color: var(--text); font: 500 var(--body) var(--sans); cursor: pointer; text-decoration: none !important; transition: background-color .15s; }
     .auth-btn:hover { background: color-mix(in srgb, var(--surface-3) 80%, var(--text)); }
     .auth-btn-primary { background: var(--accent-fill); color: var(--accent-ink); }
     .auth-btn-primary:hover { background: var(--accent-hover); }
@@ -458,13 +461,10 @@
     .install-intro { position: sticky; top: 112px; align-self: start; }
     .install-steps > .step:first-child { margin-top: 0; }
     /* The agents, passing by: every supported agent's own mark and name. */
-    .agent-strip { margin: 8px 0 32px; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); } /* taste-skill-ignore: a mask that fades the moving strip at its two ends, not a fill */
-    .agent-track { display: flex; gap: 12px; width: max-content; animation: agents 38s linear infinite; }
-    .agent-chip { display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px 0 12px; border-radius: 999px; background: var(--surface); color: var(--text); font-size: var(--body); font-weight: 500; white-space: nowrap; }
+    .agent-strip { margin: 8px 0 32px; }
+    .agent-track { display: flex; flex-wrap: wrap; gap: 10px; }
+    .agent-chip { display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px 0 12px; border-radius: var(--fam-r-md); background: var(--surface); color: var(--text); font-size: var(--body); font-weight: 500; white-space: nowrap; }
     .agent-chip .av { width: 30px; height: 30px; }
-    .agent-strip:hover .agent-track { animation-play-state: paused; }
-    @keyframes agents { to { transform: translateX(-50%); } }
-    @media (prefers-reduced-motion: reduce) { .agent-strip { mask-image: none; } .agent-track { animation: none; flex-wrap: wrap; width: auto; } .agent-chip.again { display: none; } }
     @media (max-width: 960px) {
       .feature.split, .feature.intro-row > .text, #install .text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
       .feature.split.flip > .text, .feature.split.flip > .stage { order: 0; }
@@ -1239,7 +1239,7 @@
     })();
 
 
-    // ── The agents strip: each agent's mark and name, twice over so the loop never shows a seam ──
+    // ── The agents row: each agent's mark and name, once ──
     (() => {
       const track = document.querySelector('.agent-track');
       if (!track) return;
@@ -1253,7 +1253,6 @@
         return chip;
       });
       chips.forEach((chip) => track.append(chip));
-      chips.forEach((chip) => { const copy = chip.cloneNode(true); copy.classList.add('again'); track.append(copy); });
     })();
 
     // ── Motion: the film opens once; the parts of each section rise in once, in order ──

@@ -364,7 +364,7 @@ def build(source: str, lang: str, view: str) -> str:
     depth = (LANGS[lang]["prefix"] + VIEWS[view]).count("/")
     page = replace_one(
         r'<html lang="zh-CN" data-lang="zh">',
-        f'<html lang="{LANGS[lang]["html"]}" data-lang="{lang}" data-prefix="{LANGS[lang]["prefix"]}" data-alt="{rel(other, view)}">',
+        f'<html lang="{LANGS[lang]["html"]}" data-lang="{lang}" data-product="linkshell" data-prefix="{LANGS[lang]["prefix"]}" data-alt="{rel(other, view)}">',
         page,
     )
     if depth:
