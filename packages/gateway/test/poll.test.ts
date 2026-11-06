@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, publicIdentity, sign, gatewayChallengeMessage, RelayClient, type RelaySocket } from "@linkshell/wire";
 import { startGateway, type StartGatewayOptions } from "../src/serve.js";
 
@@ -63,9 +63,9 @@ function machineOn(base: string) {
 }
 
 async function until(check: () => boolean, ms = 3000) {
-  const deadline = Date.now() + ms;
+  const deadline = performance.now() + ms;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error("timed out");
+    if (performance.now() > deadline) throw new Error("timed out");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -228,6 +228,10 @@ describe("HTTPS transport for the v2 relay", () => {
   });
 
   it("bounds what transports may hold, each and together, and drops one whose watch stopped polling", async () => {
+    // CI scheduling must not expire a receiver before the queue-limit assertions run.
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    cleanup.push(() => { clock.mockRestore(); });
     const { base, gateway, transport } = await setup({ maxQueue: 300_000, maxQueuedTotal: 500_000, staleMs: 300 });
     const machine = machineOn(base);
     expect(await machine.waitOnline(5000)).toBe(true);
@@ -254,7 +258,7 @@ describe("HTTPS transport for the v2 relay", () => {
     // Acknowledged frames leave the budget.
     await first.exchange();
     expect(gateway.poll.stats.queuedBytes).toBeLessThan(10_000);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    now += 400;
     machine.send(first.identity.id, { k: "data", ch: "c", box: "late" });
     await until(() => gateway.poll.stats.lingering === 3);
     expect((await first.exchange([], 1000)).closed).toBe("receiver gone");
