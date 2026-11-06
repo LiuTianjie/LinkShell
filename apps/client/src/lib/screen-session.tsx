@@ -11,7 +11,7 @@ import { useClient, useConnection, useStreamPath } from "./client";
 import { forwardPort, type Forward } from "./preview";
 import { ScreenSessionLease, ScreenSessionPauseWatchdog } from "./screen-session-lease";
 import type { ScreenPlaybackMode } from "./screen-playback";
-import { isScreenWidth, loadScreenMode, loadScreenWidth, saveScreenMode, saveScreenWidth, type ScreenMode } from "./settings";
+import { isScreenPacing, isScreenWidth, loadScreenMode, loadScreenPacing, loadScreenWidth, saveScreenMode, saveScreenPacing, saveScreenWidth, type ScreenMode } from "./settings";
 
 export interface ScreenViewport { x: number; y: number; width: number; height: number }
 
@@ -22,6 +22,7 @@ export interface ScreenPageMessage {
   kind?: string;
   list?: unknown;
   width?: unknown;
+  pacing?: unknown;
   reason?: string;
   session?: { t?: string; configure?: boolean; pause?: boolean; paused?: boolean; version?: number };
 }
@@ -91,6 +92,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const [display, setDisplay] = useState<number | null>(null);
   const [width, setWidth] = useState(loadScreenWidth);
   const [mode, setMode] = useState(loadScreenMode);
+  // Read when a viewer starts: a new choice is a new negotiation, so it takes a new viewer.
+  const pacing = useRef(loadScreenPacing());
   const [playback, setPlayback] = useState(initialPlayback);
   const [presentation, setPresentation] = useState<ScreenPresentation | null>(null);
   const [origin, setOrigin] = useState({ x: 0, y: 0 });
@@ -202,6 +205,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         const query = new URLSearchParams({ token, video: playback === "relay" ? "0" : "1", display: String(targetDisplay), width: target.width, mode: desired.current.mode });
         if (via === "relay" && computer.kind !== "direct") query.set("q", "low");
         if (Platform.OS === "ios" && playback !== "relay") query.set("fallback", "relay");
+        // Read by the page's own receiver and by the native one, which both make the answer.
+        if (pacing.current === "smooth") query.set("pacing", "smooth");
         // This app keeps an idle end final and takes a TURN login: the host may lend the picture its relay.
         query.set("turn", "1");
         const initialChrome = route.current?.chrome ?? "{}";
@@ -290,6 +295,13 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         desired.current.width = message.width;
         setWidth(message.width);
         if (configurable.current === false) reset();
+      }
+    } else if (message.type === "pacing" && isScreenPacing(message.pacing)) {
+      saveScreenPacing(message.pacing);
+      if (pacing.current !== message.pacing) {
+        pacing.current = message.pacing;
+        // A new viewer the same way the picture came (playback is kept): only the answer changes.
+        reset();
       }
     } else if (message.type === "mode" || message.type === "ready") {
       if (message.type === "mode" && (message.mode === "view" || message.mode === "trackpad" || message.mode === "touch")) {

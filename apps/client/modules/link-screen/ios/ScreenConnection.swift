@@ -39,6 +39,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private var disconnectedAt: Double?
   private var receivedPicture = false
   private var diagnosing = false
+  /// Declines the sender's playout-delay header (0/0): libwebrtc's adaptive jitter buffer then paces the
+  /// frames evenly, about +50 ms on Wi-Fi (apps/mac ScreenPacing.swift has the measurements).
+  private let smooth: Bool
+  private static let playoutDelayURI = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"
   private static let initialize: Void = { RTCInitializeSSL() }()
 
   init?(url: String, maxFps: Int, renderer: ScreenMetalView, metrics: ScreenMetrics) {
@@ -53,6 +57,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       // The same picture in fewer bits; a host or Mac app that doesn't know it sends H.264.
       + (HEVCDecoder.available ? [URLQueryItem(name: "codec", value: "hevc")] : [])
     guard let address = target.url else { return nil }
+    // The viewer's choice (`pacing=smooth` in the page's address): even pacing over the lowest latency.
+    smooth = target.queryItems?.contains { $0.name == "pacing" && $0.value == "smooth" } == true
     self.url = address; self.maxFps = maxFps; self.renderer = renderer; self.metrics = metrics
     super.init()
   }
@@ -284,6 +290,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           for candidate in self.candidates { peer.add(candidate) { _ in } }
           self.candidates.removeAll()
           self.attachTrack(peer)
+          if self.smooth, let video = peer.transceivers.first(where: { $0.mediaType == .video }) { self.declinePlayoutDelay(video) }
           peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { [weak self, weak peer] answer, error in
             guard let self, let peer else { return }
             self.queue.async {
@@ -310,6 +317,14 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     case "off": fail("当前网络无法建立视频直连")
     default: break
     }
+  }
+
+  /// After the offer is set and before the answer is made. An older sender offers no such header: nothing to decline.
+  private func declinePlayoutDelay(_ transceiver: RTCRtpTransceiver) {
+    let extensions = transceiver.headerExtensionsToNegotiate
+    guard let offered = extensions.first(where: { $0.uri == Self.playoutDelayURI }), offered.direction != .stopped else { return }
+    offered.direction = .stopped
+    try? transceiver.setHeaderExtensionsToNegotiate(extensions)
   }
 
   private func attachTrack(_ peer: RTCPeerConnection) {

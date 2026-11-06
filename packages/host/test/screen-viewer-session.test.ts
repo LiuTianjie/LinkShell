@@ -18,7 +18,7 @@ class Events {
 }
 
 /** Run the complete shipped script; only browser facilities are replaced, never viewer functions. */
-function viewer({ framed = false, native = false, relayFallback = false, platform = "darwin", search = "" }: { framed?: boolean; native?: boolean; relayFallback?: boolean; platform?: NodeJS.Platform; search?: string } = {}) {
+function viewer({ framed = false, native = false, relayFallback = false, platform = "darwin", search = "", chrome = {} }: { framed?: boolean; native?: boolean; relayFallback?: boolean; platform?: NodeJS.Platform; search?: string; chrome?: Message } = {}) {
   const page = viewerPage(platform);
   let now = 0, serial = 0;
   const timers = new Map<number, { at: number; action: () => void; interval?: number }>();
@@ -194,7 +194,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
     WebSocket: Socket, RTCPeerConnection: Peer,
     MediaStream: class { constructor(readonly tracks: unknown[]) {} },
     ReactNativeWebView: { postMessage: (data: string) => reports.push(JSON.parse(data)) },
-    __linkshellChrome: { video: true, nativePicture: native, relayFallback },
+    __linkshellChrome: { video: true, nativePicture: native, relayFallback, ...chrome },
     ...(framed ? { __linkshellReload: (state: Message) => reloads.push(state) } : {}),
     ...(native ? { webkit: { messageHandlers: { linkshellScreen: { postMessage: (message: Message) => nativeMessages.push(message) } } } } : {}),
   });
@@ -228,7 +228,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
       }
       await settle();
     },
-    async ready() {
+    async ready(offerSdp = "offer") {
       if (!native) sockets[0]!.open();
       receive({ session: { t: "capabilities", version: 1, configure: true, pause: true, retainMs: 120000 } });
       await settle();
@@ -236,7 +236,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
       receive({ control: { available: true, trusted: true } });
       if (!native) {
         receive({ rtc: { t: "config", iceServers: [] } });
-        receive({ rtc: { t: "offer", sdp: "offer" } });
+        receive({ rtc: { t: "offer", sdp: offerSdp } });
         await settle();
         pcs[0]!.connect();
         const video = elements.get("video")!;
@@ -418,6 +418,42 @@ describe("the running viewer screen session", () => {
     expect(ui.pcs).toHaveLength(1);
     expect(ui.pcs[0]!.closeCount).toBe(0);
     expect(ui.reports).toContainEqual({ type: "width", width: "2560" });
+  });
+
+  const offer = ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time", "a=extmap:9 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay", "a=rtpmap:96 H264/90000", ""].join("\r\n");
+
+  it("keeps the sender's playout-delay header and a zero jitter buffer by default", async () => {
+    const ui = viewer(); await ui.ready(offer);
+    expect(ui.pcs[0]!.offers[0]!.sdp).toContain("playout-delay");
+    const receiver: Message = { jitterBufferTarget: null, playoutDelayHint: null };
+    ui.pcs[0]!.ontrack?.({ receiver, track: {}, streams: [{ id: "again" }] });
+    expect(receiver).toEqual({ jitterBufferTarget: 0, playoutDelayHint: 0 });
+  });
+
+  it("declines the playout-delay header and keeps the adaptive buffer when smooth pacing was chosen", async () => {
+    const ui = viewer({ search: "&pacing=smooth" }); await ui.ready(offer);
+    const sdp = ui.pcs[0]!.offers[0]!.sdp as string;
+    expect(sdp).not.toContain("playout-delay");
+    expect(sdp).toContain("abs-send-time");
+    expect(sdp).toContain("a=rtpmap:96 H264/90000");
+    const receiver: Message = { jitterBufferTarget: null, playoutDelayHint: null };
+    ui.pcs[0]!.ontrack?.({ receiver, track: {}, streams: [{ id: "again" }] });
+    expect(receiver).toEqual({ jitterBufferTarget: null, playoutDelayHint: null });
+  });
+
+  it("asks an app that reconnects for it to change the pacing, and no other app", async () => {
+    const capable = viewer({ chrome: { canPace: true } }); await capable.ready();
+    const tiles = capable.elements.get("pacing")!.querySelectorAll(".tile");
+    expect(tiles.find((tile) => tile.dataset.pacing === "immediate")!.classList.contains("on")).toBe(true);
+    const smooth = tiles.find((tile) => tile.dataset.pacing === "smooth")!;
+    smooth.emit("pointerdown"); smooth.emit("pointerup"); await capable.settle();
+    expect(capable.reports).toContainEqual({ type: "pacing", pacing: "smooth" });
+    expect(capable.reloads).toEqual([]);
+
+    const older = viewer(); await older.ready();
+    const tile = older.elements.get("pacing")!.querySelectorAll(".tile").find((element) => element.dataset.pacing === "smooth")!;
+    tile.emit("pointerdown"); tile.emit("pointerup"); await older.settle();
+    expect(older.reports.some((report) => report.type === "pacing")).toBe(false);
   });
 
   it("only restores input for the latest acknowledged state and valid generation", async () => {

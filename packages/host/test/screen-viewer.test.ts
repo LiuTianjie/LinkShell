@@ -29,10 +29,18 @@ interface Logic {
   modsOf(names: unknown): string[];
   comboSign(k: string, m: string[]): string;
   cleanShortcuts(list: unknown): { name: string; k: string; m: string[] }[];
+  withoutPlayoutDelay(sdp: string): string;
 }
 
 // The page's own text, run as the page runs it.
-const logic = new Function(`${VIEWER_LOGIC}; return { videoCodec, interactionViewport, controlsMorph, sheetPresentation, presentationSpring, presentationFlip, usableViewport, containedBox, anchoredPanel, fromGray, stripTime, lateness, summary, synced, ownEcho, laneOf, keyboardIsUp, pieces, typingOf, keyKnown, modsOf, comboSign, cleanShortcuts };`)() as Logic;
+const logic = new Function(`${VIEWER_LOGIC}; return { videoCodec, interactionViewport, controlsMorph, sheetPresentation, presentationSpring, presentationFlip, usableViewport, containedBox, anchoredPanel, fromGray, stripTime, lateness, summary, synced, ownEcho, laneOf, keyboardIsUp, pieces, typingOf, keyKnown, modsOf, comboSign, cleanShortcuts, withoutPlayoutDelay };`)() as Logic;
+
+describe("even pacing", () => {
+  it("takes only the playout-delay header out of an offer", () => {
+    const sdp = ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time", "a=extmap:9/sendonly http://www.webrtc.org/experiments/rtp-hdrext/playout-delay", "a=extmap:10 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay-other", "a=rtpmap:96 H264/90000", ""].join("\r\n");
+    expect(logic.withoutPlayoutDelay(sdp)).toBe(["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time", "a=extmap:10 http://www.webrtc.org/experiments/rtp-hdrext/playout-delay-other", "a=rtpmap:96 H264/90000", ""].join("\r\n"));
+  });
+});
 
 describe("the negotiated video format", () => {
   it("distinguishes browser High, native Constrained High and Baseline", () => {

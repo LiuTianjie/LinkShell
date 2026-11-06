@@ -108,6 +108,8 @@ export function ScreenScreen() {
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: !relayOnly,
         nativePicture: playback === "native",
+        // This app starts a new viewer for a new pacing choice (`pacing` in the address).
+        canPace: true,
         relayFallback: Platform.OS === "ios" && !relayOnly,
         clear: null,
         // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,

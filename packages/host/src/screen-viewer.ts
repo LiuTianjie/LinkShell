@@ -89,8 +89,9 @@ const STYLE = String.raw`
   .choice.on { background: rgba(255,255,255,0.16); }
   .choice b { display: block; font-weight: 600; font-size: calc(15px * var(--text-scale, 1)); }
   .choice span { display: block; font-size: calc(12px * var(--text-scale, 1)); color: rgba(255,255,255,0.62); }
-  #widths { padding: 0 6px 6px; }
-  #widths .group { padding-top: 4px; }
+  #widths, #pacing { padding: 0 6px 6px; }
+  #widths .group, #pacing .group { padding-top: 4px; }
+  #pacing .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #status { padding: 2px 10px 10px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5;
     color: rgba(255,255,255,0.5); white-space: pre-line; font-variant-numeric: tabular-nums; }
   #toast { position: absolute; left: 50%; max-width: min(86vw, 420px); width: max-content; transform: translateX(-50%); padding: 10px 16px; border-radius: 18px;
@@ -421,6 +422,15 @@ function comboSign(k, m) {
  * The user's own shortcuts, from wherever they were kept (the app, the browser): only those the computer
  * would take, 24 at most, each with a name (the shortcut itself when it was given none).
  */
+/**
+ * The offer without the playout-delay extension, for a receiver that chose even pacing. The sender writes
+ * 0/0 into that header (show each frame the moment it is decoded); an answer that never agreed to it leaves
+ * the receiver its adaptive jitter buffer. Taken out of the remote offer, so the answer stays the browser's own.
+ */
+function withoutPlayoutDelay(sdp) {
+  return String(sdp).split(/\r\n/).filter((line) => !/^a=extmap:\d+(?:\/\w+)?\s+http:\/\/www\.webrtc\.org\/experiments\/rtp-hdrext\/playout-delay(?:\s|$)/.test(line)).join("\r\n");
+}
+
 function cleanShortcuts(list) {
   const out = [];
   for (const one of Array.isArray(list) ? list : []) {
@@ -745,6 +755,14 @@ if (session.desired().maxFps) asked.set("maxFps", String(session.desired().maxFp
 const framed = document.URL === "about:srcdoc";
 const reloadVia = framed && typeof window.__linkshellReload === "function" ? window.__linkshellReload : null;
 const canChooseWidth = !framed || !!reloadVia;
+// How the receiver paces the picture: "immediate" shows each frame as it is decoded (the default, most
+// responsive); "smooth" leaves the receiver its jitter buffer, about +50 ms on Wi-Fi (ScreenPacing.swift).
+// A new choice needs a new negotiation: an app says it in the address and reconnects; a plain browser reloads.
+let keptPacing = null;
+try { keptPacing = localStorage.getItem("linkshell.screen.pacing"); } catch {}
+const pacing = query.get("pacing") === "smooth" || (!app && query.get("pacing") === null && keptPacing === "smooth") ? "smooth" : "immediate";
+// An app that reconnects for it says so; a srcdoc page has no address to load again.
+const canChoosePacing = () => (app ? chrome.canPace === true : !framed);
 const ws = nativePicture
   ? { readyState: 1, send: (data) => nativePost({ kind: "signal", message: JSON.parse(data) }) }
   : new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/stream?" + asked);
@@ -931,8 +949,9 @@ function signal(message) {
     tried = true;
     patience = setTimeout(() => connectionPatience(mine), patienceSeconds * 1000);
     if (failAfter) setTimeout(() => { if (rtc === mine) giveUp("asked to (failAfter)"); }, failAfter * 1000);
-    // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it.
-    mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: message.sdp })
+    // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it,
+    // unless the viewer chose even pacing, which is not agreeing to that header at all.
+    mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: pacing === "smooth" ? withoutPlayoutDelay(message.sdp) : message.sdp })
       .then(() => mine.pc.createAnswer())
       .then((answer) => mine.pc.setLocalDescription(answer))
       .then(() => { if (rtc === mine) send({ t: "rtc.answer", sdp: mine.pc.localDescription.sdp }); });
@@ -956,8 +975,11 @@ function connect(iceServers) {
   };
   pc.ontrack = ({ receiver, track, streams }) => {
     // No waiting beyond what decoding takes. Safari has neither knob: there the sender's playout-delay header does it.
-    if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
-    if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
+    // Even pacing keeps the browser's adaptive buffer.
+    if (pacing !== "smooth") {
+      if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
+      if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
+    }
     video.srcObject = streams[0] || new MediaStream([track]);
     // The <video> starts either way: it is what shows the picture where this page cannot present
     // the frames itself, and what it falls back to if the presenter stops. Taking the frames is
@@ -2632,6 +2654,12 @@ async function status() {
     $("widths").classList.toggle("gone", !choosing);
     layout();
   }
+  // Only a video track has a jitter buffer to keep; the socket's picture is paced by this page.
+  const pacingShown = live && !windowsHost && canChoosePacing();
+  if ($("pacing").classList.contains("gone") === pacingShown) {
+    $("pacing").classList.toggle("gone", !pacingShown);
+    layout();
+  }
   const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
   if (windowsHost && !live && content.w) {
     const stats = jpegVitals();
@@ -2690,6 +2718,23 @@ for (const tile of $("widths").querySelectorAll(".tile")) {
     try { localStorage.setItem("linkshell.screen.width", chosen); } catch {}
     tellApp({ type: "width", width: chosen });
     window.linkshellSession({ width: chosen });
+  });
+}
+for (const tile of $("pacing").querySelectorAll(".tile")) {
+  tile.classList.toggle("on", tile.dataset.pacing === pacing);
+  tile.setAttribute("aria-pressed", String(tile.dataset.pacing === pacing));
+  pressable(tile, () => {
+    const chosen = tile.dataset.pacing;
+    if (chosen === pacing || !canChoosePacing()) return;
+    try { localStorage.setItem("linkshell.screen.pacing", chosen); } catch {}
+    hint(chosen === "smooth" ? "流畅优先：画面更均匀，Wi-Fi 下延迟约多 50 毫秒" : "延迟优先：最跟手，网络抖动时会短暂停顿", 2500);
+    if (app) return tellApp({ type: "pacing", pacing: chosen });
+    const next = new URLSearchParams(location.search);
+    next.set("pacing", chosen);
+    next.set("width", width);
+    next.set("display", String(session.desired().display));
+    next.set("mode", mode);
+    location.replace(location.pathname + "?" + next);
   });
 }
 pressable($("full"), () => {
@@ -3220,6 +3265,13 @@ ${SCREEN_LOADING_HTML}
       <div class="tile" role="button" aria-label="标准，1920 宽" data-width="1920"><b>标准</b><span>1920</span></div>
       <div class="tile" role="button" aria-label="高清，2560 宽" data-width="2560"><b>高清</b><span>2560</span></div>
       <div class="tile" role="button" aria-label="原生，屏幕本身的分辨率" data-width="native"><b>原生</b><span>最高 4K</span></div>
+    </div>
+  </div>
+  <div id="pacing" class="gone">
+    <div class="group"><span>画面节奏</span></div>
+    <div class="tiles">
+      <div class="tile" role="button" aria-label="延迟优先，最跟手，网络抖动时会短暂停顿" data-pacing="immediate"><b>延迟优先</b><span>最跟手</span></div>
+      <div class="tile" role="button" aria-label="流畅优先，画面更均匀，Wi-Fi 下延迟约多 50 毫秒，适合只观看" data-pacing="smooth"><b>流畅优先</b><span>适合观看</span></div>
     </div>
   </div>
 </div>

@@ -81,6 +81,30 @@ export function saveScreenWidth(width: ScreenWidth): void {
   }
 }
 
+const SCREEN_PACING_KEY = "screen.pacing";
+
+/**
+ * How the screen's video is paced on the phone: "immediate" shows each frame the moment it is decoded
+ * (most responsive, the default); "smooth" keeps WebRTC's jitter buffer, about +50 ms on Wi-Fi, for watching.
+ */
+export type ScreenPacing = "immediate" | "smooth";
+
+export function isScreenPacing(value: unknown): value is ScreenPacing {
+  return value === "immediate" || value === "smooth";
+}
+
+export function loadScreenPacing(): ScreenPacing {
+  return read(SCREEN_PACING_KEY) === "smooth" ? "smooth" : "immediate";
+}
+
+export function saveScreenPacing(pacing: ScreenPacing): void {
+  try {
+    Storage.setItemSync(SCREEN_PACING_KEY, pacing);
+  } catch {
+    // The viewer then starts with the lowest latency.
+  }
+}
+
 const SCREEN_SHORTCUTS_KEY = "screen.shortcuts";
 const SHORTCUT_MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 // The keys the computer knows by name (apps/mac, Keys.swift).
