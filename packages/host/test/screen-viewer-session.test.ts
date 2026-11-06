@@ -456,6 +456,19 @@ describe("the running viewer screen session", () => {
     expect(older.reports.some((report) => report.type === "pacing")).toBe(false);
   });
 
+  it("offers the pacing choice over the native picture and leaves the receiving to the native side", async () => {
+    const ui = viewer({ native: true, chrome: { canPace: true } }); await ui.ready();
+    await ui.advance(2000);
+    expect(ui.pcs).toHaveLength(0);
+    const info = ui.elements.get("info")!;
+    info.emit("pointerdown"); info.emit("pointerup"); await ui.settle();
+    const tile = ui.elements.get("pacing")!.querySelectorAll(".tile").find((element) => element.dataset.pacing === "smooth")!;
+    expect(ui.elements.get("pacing")!.classList.contains("gone")).toBe(false);
+    tile.emit("pointerdown"); tile.emit("pointerup"); await ui.settle();
+    expect(ui.reports).toContainEqual({ type: "pacing", pacing: "smooth" });
+    expect(ui.pcs).toHaveLength(0);
+  });
+
   it("only restores input for the latest acknowledged state and valid generation", async () => {
     const ui = viewer();
     await ui.ready();
