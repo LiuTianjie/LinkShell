@@ -52,7 +52,9 @@
 
   /* Motion */
   --fam-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --fam-enter: 220ms;
+  --fam-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --fam-enter: 240ms;
+  --fam-reveal: 480ms;
   --fam-quick: 140ms;
 
   color-scheme: dark;
@@ -104,8 +106,8 @@ html[data-theme="light"][data-product]:not([data-product="itool"]) { --fam-accen
   cursor: pointer;
   transition: background-color var(--fam-quick) var(--fam-ease), border-color var(--fam-quick) var(--fam-ease), transform var(--fam-quick) var(--fam-ease);
 }
-.fam-btn:hover { background: var(--fam-raised); }
-.fam-btn:active { transform: translateY(1px); }
+.fam-btn:hover { background: var(--fam-raised); border-color: color-mix(in srgb, var(--fam-text) 22%, transparent); }
+.fam-btn:active { transform: translateY(1px) scale(0.985); }
 .fam-btn:focus-visible { outline: 2px solid var(--fam-accent); outline-offset: 2px; }
 .fam-btn[data-variant="primary"] {
   background: var(--fam-text);
@@ -114,6 +116,25 @@ html[data-theme="light"][data-product]:not([data-product="itool"]) { --fam-accen
 }
 .fam-btn[data-variant="primary"]:hover { background: #ffffff; }
 html[data-theme="light"] .fam-btn[data-variant="primary"]:hover { background: #27272a; }
+
+/* Hairline ledger: replaces boxed card grids and badge clouds across the family. */
+.fam-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  border-top: 1px solid var(--fam-line);
+}
+.fam-ledger > * {
+  padding: 24px 24px 0 0;
+}
+.fam-ledger > * + * {
+  padding-left: 24px;
+  border-left: 1px solid var(--fam-line);
+}
+@media (max-width: 760px) {
+  .fam-ledger { grid-template-columns: 1fr; }
+  .fam-ledger > * { padding: 20px 0; }
+  .fam-ledger > * + * { padding-left: 0; border-left: 0; border-top: 1px solid var(--fam-line); }
+}
 
 /* The hero's second phrase carries the product hue. */
 .fam-hue { color: var(--fam-accent); }
