@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
-import { ITOOL_MEMBERSHIP_URL, membershipTierLabel, type ProMembership } from "@linkshell/client-core";
+import { ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MONTHLY_UPGRADE_COPY, membershipTierLabel, type ProMembership } from "@linkshell/client-core";
 import { Button } from "@/components/ui/button";
 import { accountMembership } from "./account";
 import { useLoad } from "./common";
@@ -120,35 +120,50 @@ export function MembershipStatus({
 
   if (membership.plan === "pro") {
     return (
-      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        <span className="truncate">
-          {membershipTierLabel(membership.tier)}
-          {membership.expiresAt ? ` · ${expiry(membership.expiresAt)}到期` : ""}
+      <>
+        <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          <span className="truncate">
+            {membershipTierLabel(membership.tier)}
+            {membership.expiresAt ? ` · ${expiry(membership.expiresAt)}到期` : ""}
+          </span>
+          {refresh}
         </span>
-        {refresh}
-      </span>
+        {membership.tier === "monthly" && (
+          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <span className="truncate">{MONTHLY_UPGRADE_COPY.zh.unlocked} ·</span>
+            <ShopLink url={ITOOL_YEARLY_UPGRADE_URL} onShop={onShop}>{MONTHLY_UPGRADE_COPY.zh.action}</ShopLink>
+          </span>
+        )}
+      </>
     );
   }
 
   return (
     <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
       <span>未开通会员 ·</span>
-      <a
-        className="text-link hover:underline"
-        href={ITOOL_MEMBERSHIP_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(event) => {
-          onShop?.();
-          if (isDesktop) {
-            event.preventDefault();
-            openDesktopExternal(ITOOL_MEMBERSHIP_URL);
-          }
-        }}
-      >
-        开通
-      </a>
+      <ShopLink url={ITOOL_MEMBERSHIP_URL} onShop={onShop}>开通</ShopLink>
       {refresh}
     </span>
+  );
+}
+
+/** A link to itool.tech's buy page: a new tab in a browser, the default browser on the desktop. */
+function ShopLink({ url, onShop, children }: { url: string; onShop?(): void; children: ReactNode }) {
+  return (
+    <a
+      className="shrink-0 text-link hover:underline"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => {
+        onShop?.();
+        if (isDesktop) {
+          event.preventDefault();
+          openDesktopExternal(url);
+        }
+      }}
+    >
+      {children}
+    </a>
   );
 }

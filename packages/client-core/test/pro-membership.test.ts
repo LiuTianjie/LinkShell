@@ -3,6 +3,10 @@ import {
   fetchProMembership,
   ITOOL_ENTITLEMENT_URL,
   ITOOL_MEMBERSHIP_URL,
+  ITOOL_YEARLY_UPGRADE_URL,
+  MEMBERSHIP_PRODUCT_TOTAL,
+  MONTHLY_PRODUCT_COUNT,
+  monthlyUpgradeLabel,
   MembershipError,
   membershipFromEntitlement,
   membershipTierLabel,
@@ -70,6 +74,10 @@ describe("entitlement mapping", () => {
     expect(membershipTierLabel("monthly")).toBe("iTool 月度会员");
     expect(membershipTierLabel("yearly")).toBe("iTool 年度会员");
     expect(ITOOL_MEMBERSHIP_URL).toBe("https://itool.tech/pro?from=linkshell");
+    expect(ITOOL_YEARLY_UPGRADE_URL).toBe("https://www.itool.tech/pro?from=linkshell&checkout=yearly");
+    expect(monthlyUpgradeLabel()).toBe("已解锁 2/7 款产品 · 升级年度");
+    expect(monthlyUpgradeLabel("en")).toBe("2 of 7 products unlocked · Go yearly");
+    expect([MONTHLY_PRODUCT_COUNT, MEMBERSHIP_PRODUCT_TOTAL]).toEqual([2, 7]);
   });
 });
 

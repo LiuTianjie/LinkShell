@@ -438,6 +438,15 @@ struct DesktopView: View {
             .disabled(model.busy || model.preview).help("刷新会员状态").accessibilityLabel("刷新会员状态")
         }
       }.font(.system(size: 12))
+      if case .pro(_, .monthly) = model.membership {
+        // Monthly covers two of the iTool products: one quiet line, the way to the rest at its end.
+        HStack(spacing: 4) {
+          Text("\(ITool.monthlyUnlocked) ·").foregroundStyle(DesktopStyle.secondary)
+          Button(ITool.upgradeAction) { model.openMembershipPage(upgrade: true) }
+            .buttonStyle(.plain).foregroundStyle(DesktopStyle.accent)
+            .disabled(model.busy || model.preview)
+        }.font(.system(size: 12))
+      }
       if model.membership == .free {
         Button("开通 iTool 会员") { model.openMembershipPage() }
           .buttonStyle(DesktopButtonStyle(.primary))

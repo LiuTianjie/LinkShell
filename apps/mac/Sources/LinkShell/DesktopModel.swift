@@ -26,6 +26,18 @@ enum DesktopMembershipTier: Equatable {
   case monthly, yearly
   var label: String { self == .yearly ? "iTool 年度会员" : "iTool 月度会员" }
 }
+/// The iTool membership's addresses and products. Mirrors packages/client-core/src/pro-membership.ts
+/// (ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MEMBERSHIP_PRODUCT_TOTAL, MONTHLY_PRODUCT_COUNT,
+/// MONTHLY_UPGRADE_COPY), which Swift can't import: change them there and here together.
+enum ITool {
+  static let membershipURL = "https://itool.tech/pro?from=linkshell"
+  /// itool.tech opens the yearly checkout once signed in when `checkout=yearly` is present.
+  static let yearlyUpgradeURL = "https://www.itool.tech/pro?from=linkshell&checkout=yearly"
+  static let productTotal = 7
+  static let monthlyProductCount = 2
+  static let monthlyUnlocked = "已解锁 \(monthlyProductCount)/\(productTotal) 款产品"
+  static let upgradeAction = "升级年度"
+}
 enum DesktopMembership: Equatable {
   case signedOut, unknown, free, pro(Date, DesktopMembershipTier)
 }
@@ -469,8 +481,9 @@ enum DesktopCommand {
   }
 
   /// Membership is bought in the browser on itool.tech with the same account; LinkShell only reads it.
-  func openMembershipPage() {
-    guard !preview, let url = URL(string: "https://itool.tech/pro?from=linkshell") else { return }
+  /// `upgrade` is for monthly members: the page opens on the yearly checkout.
+  func openMembershipPage(upgrade: Bool = false) {
+    guard !preview, let url = URL(string: upgrade ? ITool.yearlyUpgradeURL : ITool.membershipURL) else { return }
     visitedMembershipPage = true
     NSWorkspace.shared.open(url)
   }

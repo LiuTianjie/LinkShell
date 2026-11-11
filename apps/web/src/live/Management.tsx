@@ -19,7 +19,7 @@ import {
   Smartphone,
   type LucideIcon,
 } from "lucide-react";
-import { membershipTierLabel } from "@linkshell/client-core";
+import { MONTHLY_UPGRADE_COPY, membershipTierLabel } from "@linkshell/client-core";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -74,6 +74,7 @@ import {
   pollManagement,
   readLog,
   openMembershipPage,
+  openYearlyUpgradePage,
   refreshAccount,
   refreshManagement,
   serviceAction,
@@ -554,6 +555,12 @@ function Membership({ state }: { state: ManagementState }) {
             </Tooltip>
           )}
       </SettingRow>
+      {membership.kind === "pro" && membership.tier === "monthly" && (
+        // Monthly covers two of the iTool products: one quiet row, the way to the rest at its end.
+        <SettingRow title={MONTHLY_UPGRADE_COPY.zh.unlocked} onClick={openYearlyUpgradePage}>
+          <span className="text-link">{MONTHLY_UPGRADE_COPY.zh.action}</span>
+        </SettingRow>
+      )}
       {membership.kind === "free" && (
         <SettingRow
           title="开通 iTool 会员"

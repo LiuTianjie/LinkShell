@@ -32,6 +32,27 @@ export const LINKSHELL_PRODUCT = "linkshell";
 export const ITOOL_MEMBERSHIP_URL = "https://itool.tech/pro?from=linkshell";
 export const ITOOL_ENTITLEMENT_URL = `https://itool.tech/api/membership/entitlement?product=${LINKSHELL_PRODUCT}`;
 
+/** iTool products a membership can unlock: yearly unlocks all of them, monthly the iTool site and LinkShell. */
+export const MEMBERSHIP_PRODUCT_TOTAL = 7;
+export const MONTHLY_PRODUCT_COUNT = 2;
+/**
+ * For monthly members: with `checkout=yearly`, itool.tech opens the yearly checkout once the
+ * person is signed in. Like the buy page, phones must not link to it (App Store rules).
+ * apps/mac mirrors this and the counts in `DesktopModel.swift` (`ITool`).
+ */
+export const ITOOL_YEARLY_UPGRADE_URL = "https://www.itool.tech/pro?from=linkshell&checkout=yearly";
+
+/** The upgrade row monthly members see on the computer: what they have, and the way to the rest. */
+export const MONTHLY_UPGRADE_COPY = {
+  zh: { unlocked: `已解锁 ${MONTHLY_PRODUCT_COUNT}/${MEMBERSHIP_PRODUCT_TOTAL} 款产品`, action: "升级年度" },
+  en: { unlocked: `${MONTHLY_PRODUCT_COUNT} of ${MEMBERSHIP_PRODUCT_TOTAL} products unlocked`, action: "Go yearly" },
+} as const;
+
+export function monthlyUpgradeLabel(lang: keyof typeof MONTHLY_UPGRADE_COPY = "zh"): string {
+  const copy = MONTHLY_UPGRADE_COPY[lang];
+  return `${copy.unlocked} · ${copy.action}`;
+}
+
 const REQUEST_TIMEOUT_MS = 15_000;
 const LOGIN_REQUIRED = "登录已失效，请重新登录后再试";
 const MALFORMED = "会员状态返回异常，请稍后重试";
