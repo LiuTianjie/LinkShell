@@ -14,7 +14,7 @@ export async function runLogout(): Promise<void> {
   clearAuth();
   if (loadAuth()?.accessToken) throw new Error("Could not remove the local account credentials; logout did not finish.");
   let unbound = before !== undefined && before.status !== "off" && !before.account && !sameGateway(before.url, OFFICIAL_GATEWAY);
-  let disconnected = true;
+  let disconnected: boolean;
   let replacedWithoutRevoking = false;
   let after: Awaited<ReturnType<typeof refreshGateway>>;
   try {
