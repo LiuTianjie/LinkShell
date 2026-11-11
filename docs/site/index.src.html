@@ -25,27 +25,28 @@
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
   <script>
     // Before first paint: the theme (?theme=, then the saved choice; dark otherwise) and that
-    // scripts run. Each language has its own address (data-alt is the other one's, against
-    // <base>): the visitor's choice (?lang=, then the saved one) leads there, and with no
-    // choice yet a Chinese page (the root is x-default) follows the browser's language, but
-    // never for a crawler, which must see both versions where they are.
+    // scripts run. Each language has its own address (against <base>: data-alt is the other of
+    // Chinese and English, data-alt-<lang> any further one a view has): the visitor's choice
+    // (?lang=, then the saved one) leads there, and with no choice yet a Chinese page (the root
+    // is x-default) follows the browser's language, but never for a crawler, which must see
+    // every version where it is. A view without Japanese is read in English.
     (function () {
       var root = document.documentElement, query = new URLSearchParams(location.search);
-      var theme = query.get('theme'), lang = query.get('lang'), saved = null;
+      var theme = query.get('theme'), lang = query.get('lang'), saved = null, known = /^(zh|en|ja)$/;
       try {
         if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme');
         saved = localStorage.getItem('linkshell-lang');
-        if (lang === 'en' || lang === 'zh') localStorage.setItem('linkshell-lang', lang);
+        if (known.test(lang)) localStorage.setItem('linkshell-lang', lang);
       } catch (e) { }
       root.dataset.theme = theme === 'light' ? 'light' : 'dark';
       root.classList.add('js');
-      if (lang !== 'en' && lang !== 'zh') lang = saved;
-      if (lang !== 'en' && lang !== 'zh' && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
-        lang = /^zh/i.test(navigator.language) ? 'zh' : 'en';
+      if (!known.test(lang)) lang = saved;
+      if (!known.test(lang) && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
+        lang = /^zh/i.test(navigator.language) ? 'zh' : /^ja/i.test(navigator.language) ? 'ja' : 'en';
       }
-      if ((lang === 'en' || lang === 'zh') && lang !== root.dataset.lang && root.dataset.alt) {
-        location.replace(new URL(root.dataset.alt, document.baseURI).href + location.hash);
-      }
+      if (lang === 'ja' && root.dataset.lang !== 'ja' && !root.dataset.altJa) lang = 'en';
+      var alt = known.test(lang) && lang !== root.dataset.lang && (root.getAttribute('data-alt-' + lang) || root.dataset.alt);
+      if (alt) location.replace(new URL(alt, document.baseURI).href + location.hash);
     })();
   </script>
   <link rel="stylesheet" href="assets/family.css" />
@@ -130,8 +131,8 @@
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     button { font: inherit; color: inherit; }
 
-    /* one language at a time */
-    html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
+    /* one language at a time (the language switches carry the language they lead to) */
+    html[data-lang="zh"] [lang="en"]:not(.lang-switch), html[data-lang="en"] [lang="zh"]:not(.lang-switch) { display: none !important; }
 
     /* one page at a time (all three when scripts don't run) */
     .js .page:not(.visible) { display: none; }
@@ -159,6 +160,7 @@
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
     :root[data-theme="light"] .theme .moon { display: block; }
     @media (max-width: 460px) { .nav nav a.wide { display: none; } .nav nav a { padding-inline: 9px; } }
+    @media (max-width: 760px) { .nav nav a.intent { display: none; } }
     @media (max-width: 480px) { .btns .btn { flex: 1 1 auto; justify-content: center; } }
 
     /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
@@ -493,6 +495,23 @@
       .ask-result .spin { animation: none; }
     }
   </style>
+  <style data-views="claude-code codex">
+    /* The landing pages: the home page's parts, Japanese type, and a third language switch. */
+    html[lang="ja"] { --sans: "Geist", -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, "Segoe UI", sans-serif; }
+    html[lang="ja"] :is(h1, h2, h3) { letter-spacing: -.01em; line-height: 1.25; }
+    html[lang="ja"] :is(.hero h1, .close-card h2) { letter-spacing: -.02em; line-height: 1.15; }
+    html[lang="ja"] :is(h1, h2, h3, .lead, dt) { word-break: auto-phrase; }
+    .nav .lang-switch + .lang-switch { margin-left: -2px; }
+    @media (max-width: 460px) { .nav .lang-more { display: none; } }
+    .sec .plans { margin-top: 40px; }
+    .plan .btn { margin-top: 4px; }
+    /* (Scripts wrap each <pre> in .code.) */
+    .feature.intro-row > .text > :is(pre, .code) { grid-column: 1 / -1; }
+    html[lang="ja"] .hero h1 { font-size: clamp(40px, 5.4vw, 72px); }
+    /* Three short points run the column's width, as on the home page. */
+    .sec > .wrap > .text:has(> dl.points) { max-width: none; }
+    .sec > .wrap > .text:has(> dl.points) > h2 { max-width: var(--measure); }
+  </style>
 </head>
 
 <body>
@@ -500,8 +519,10 @@
     <div class="wrap">
       <a class="brand" href="./" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="28" height="28" />LinkShell</a>
       <nav>
-        <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span></a>
-        <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a class="intent" href="claude-code/" data-page-link="claude-code">Claude Code</a>
+        <a class="intent" href="codex/" data-page-link="codex">Codex</a>
+        <a href="docs/" data-page-link="docs"><span lang="zh">文档</span><span lang="en">Docs</span><span lang="ja">Docs</span></a>
+        <a href="pricing/" data-page-link="pricing"><span lang="zh">定价</span><span lang="en">Pricing</span><span lang="ja">料金</span></a>
         <a class="wide" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
       </nav>
       <button class="theme" id="theme-toggle" type="button" aria-label="Toggle light / dark">
@@ -1031,16 +1052,458 @@
     </div>
   </main>
 
+  <!-- ═════════════════════════ CLAUDE-CODE ═════════════════════════ -->
+  <main class="page" data-page="claude-code">
+    <section class="hero">
+      <div class="wrap">
+        <div class="hero-top">
+          <div>
+            <h1><span lang="zh"><span class="nb">在手机上</span><span class="nb">用 Claude Code。</span></span><span lang="en">Claude Code, <span class="nb">from your phone.</span></span><span lang="ja"><span class="nb">Claude Code を、</span><span class="nb">iPhone から。</span></span></h1>
+            <p class="lead">
+              <span lang="zh">Claude Code 留在电脑上跑。回复、改动和权限请求实时到手机，在 iPhone、Android 或 Apple Watch 上点一下就能批准，也能往正在跑的这一轮里插话。</span>
+              <span lang="en">Claude Code keeps running on your computer. Its replies, edits and permission requests reach your phone as they happen: approve with a tap on iPhone, Android or Apple Watch, or send a message into the running turn.</span>
+              <span lang="ja">Claude Code はパソコンで動かしたまま。返信や変更、権限リクエストがすぐにスマホに届き、iPhone・Android・Apple Watch からワンタップで承認できます。実行中のターンにメッセージを送ることもできます。</span>
+            </p>
+            <div class="btns">
+              <a class="btn btn-p" href="https://apps.apple.com/app/id6761547516">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+                <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span><span lang="ja">iPhone 版を入手</span>
+              </a>
+              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+                Android APK
+              </a>
+              <a class="btn btn-s" href="#setup"><span lang="zh">电脑端设置</span><span lang="en">Set up your computer</span><span lang="ja">パソコンの準備</span></a>
+            </div>
+          </div>
+
+          <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="手机上收到的审批请求 / A request on your phone / スマホに届いた承認リクエスト">
+            <div class="ask-head"><span class="av" style="--bl:#F4F1EA;--bd:#2A2926;width:22px;height:22px"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span><b>Claude</b><span>weather-app</span><time><span lang="zh">刚刚</span><span lang="en">now</span><span lang="ja">たった今</span></time></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
+            <div class="ask-card">
+              <div class="ask-title"><i aria-hidden="true"></i><span><span lang="zh">运行测试，确认样式改动没有回归</span><span lang="en">Run the tests to check the style change broke nothing</span><span lang="ja">テストを実行して、スタイル変更の影響を確認</span></span></div>
+              <p class="ask-meta"><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span><span lang="ja">承認が必要です</span></p>
+              <p class="ask-cmd">npm test</p>
+              <div class="ask-actions">
+                <button type="button" class="deny"><span lang="zh">拒绝</span><span lang="en">Deny</span><span lang="ja">拒否</span></button>
+                <button type="button" class="allow"><span lang="zh">允许</span><span lang="en">Allow</span><span lang="ja">許可</span></button>
+              </div>
+              <div class="ask-result" aria-live="polite">
+                <span class="spin" aria-hidden="true"></span>
+                <span data-show="running"><span lang="zh">正在电脑上运行 npm test…</span><span lang="en">Running npm test on your computer…</span><span lang="ja">パソコンで npm test を実行中…</span></span>
+                <span data-show="done"><svg class="tick" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> <span lang="zh">42 项测试通过，Claude 接着干</span><span lang="en">42 tests passed. Claude carries on.</span><span lang="ja">42 件のテストに合格。Claude は作業を続けます</span></span>
+                <span data-show="denied"><span lang="zh">已拒绝，Claude 会换个办法</span><span lang="en">Denied. Claude will try another way.</span><span lang="ja">拒否しました。Claude は別の方法を試します</span></span>
+                <button type="button" class="again"><span lang="zh">再来一次</span><span lang="en">Again</span><span lang="ja">もう一度</span></button>
+              </div>
+            </div>
+            <p class="ask-foot"><span lang="zh">这就是手机上收到的请求。点一下试试。</span><span lang="en">This is the request your phone gets. Try it.</span><span lang="ja">スマホに届くリクエストはこんな形です。タップして試せます。</span></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+
+        <article class="feature split">
+          <div class="text">
+            <h2><span lang="zh">每一步，实时看到</span><span lang="en">Every step, live</span><span lang="ja">作業の様子をリアルタイムで</span></h2>
+            <p><span lang="zh">回复逐字出现；读了哪些文件、改了什么、跑了什么命令实时更新，每个文件的改动都能看 diff。计划、子 Agent 和后台命令也都在。</span><span lang="en">Replies stream in word by word. What it read, changed and ran updates live, with a diff for every file, alongside its plan, sub-agents and background commands.</span><span lang="ja">返信は一文字ずつ表示され、読んだファイル、変更、実行したコマンドもその場で更新されます。ファイルごとの差分、プラン、サブエージェント、バックグラウンドのコマンドも確認できます。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <figure class="phone">
+            <img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="手机上的会话：Agent 读文件、改代码、列计划，然后请求运行测试的权限 / A session on the phone: the agent reads files, edits code and lays out a plan, then asks permission to run the tests / スマホのセッション画面：エージェントがファイルを読み、コードを直し、プランを立ててから、テスト実行の許可を求めています" />
+            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video>
+          </figure>
+          </div>
+        </article>
+
+        <article class="feature band center">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span><span lang="ja"><span class="nb">ロック画面と</span><span class="nb">Apple Watch で承認</span></span></h2>
+            <p><span lang="zh">实时活动在锁屏和灵动岛上显示进度；Claude 要权限时，卡片上直接给出「拒绝」和「允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps Claude&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span><span lang="ja">ライブアクティビティがロック画面と Dynamic Island に進み具合を表示します。Claude が許可を求めると、カードに「拒否」「許可」ボタンが出ます。Apple Watch でもセッションを確認し、リクエストに応答し、短い返信を送れます。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <div class="pair">
+            <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的请求，带拒绝和允许按钮 / A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny and Allow buttons / iPhone のロック画面に表示された LinkShell のライブアクティビティ：確認待ちのリクエストと「拒否」「許可」ボタン" /></figure>
+            <figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="Apple Watch 上的 LinkShell：一条待确认的请求，带拒绝和允许按钮 / LinkShell on Apple Watch: a pending request with Deny and Allow / Apple Watch の LinkShell：確認待ちのリクエストと「拒否」「許可」ボタン" /></figure>
+          </div>
+          </div>
+          <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span><span lang="ja">ライブアクティビティは iOS 16.2 以降、カード上のボタンは iOS 17 以降、Apple Watch アプリは watchOS 10 以降で使えます。</span></p>
+        </article>
+
+        <article class="feature split flip">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">它正忙，</span><span class="nb">照样能插话</span></span><span lang="en">Cut in while it is busy</span><span lang="ja">作業中でも指示を送れる</span></h2>
+            <p><span lang="zh">忙的时候发的消息先排队：调整顺序、取回重写，或者立即发送，直接插进 Claude 当前这一轮。电脑上正在跑的那一轮，手机上也能停。</span><span lang="en">Messages sent mid-turn wait in a queue: reorder them, take one back to rewrite, or send it now, straight into Claude&#39;s running turn. A turn running on the computer can be stopped from the phone.</span><span lang="ja">作業中に送ったメッセージはキューに入ります。順番を入れ替えたり、取り消して書き直したり、すぐに送って Claude の実行中のターンに加えたりできます。パソコンで実行中のターンをスマホから止めることもできます。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <figure class="phone">
+            <img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="Agent 正在构建时，一条排队的消息被立即发送，插进了当前这一轮 / While the agent is building, a queued message is sent at once and joins the current turn / ビルド中に、キューのメッセージをすぐに送信して実行中のターンに加えたところ" />
+            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video>
+          </figure>
+          </div>
+        </article>
+
+        <article class="feature intro-row">
+          <div class="text">
+            <h2><span lang="zh">终端和手机之间接力</span><span lang="en">Hand it between terminal and phone</span><span lang="ja">ターミナルとスマホで引き継ぐ</span></h2>
+            <p><span lang="zh">用 <code>linkshell claude</code> 启动，电脑上就是 Claude 自己的界面。手机上发一条消息即接管，回到电脑按任意键收回，上下文不丢。普通 <code>claude</code> 和 Claude 桌面 App 里开的会话，手机上也能跟进。</span><span lang="en">Start it with <code>linkshell claude</code> and you get Claude&#39;s own UI at your desk. A message from the phone takes over; any key at the computer takes it back, context intact. Sessions from a plain <code>claude</code> or the Claude desktop app can be followed too.</span><span lang="ja"><code>linkshell claude</code> で起動すると、パソコンでは Claude 本来の画面のまま使えます。スマホからメッセージを送ると操作が移り、パソコンで任意のキーを押すと戻ります。文脈はそのままです。通常の <code>claude</code> や Claude デスクトップアプリで開いたセッションも、スマホから追えます。</span></p>
+            <pre><code><span class="pr">$ </span>linkshell claude
+<span class="cm"># <span lang="zh">参数原样传给 claude</span><span lang="en">arguments pass through to claude</span><span lang="ja">引数はそのまま claude に渡ります</span></span>
+<span class="pr">$ </span>linkshell claude --resume</code></pre>
+            <dl class="more">
+              <div><dt><span lang="zh">用 /btw 旁支提问</span><span lang="en">Side questions with /btw</span><span lang="ja">/btw で横から質問</span></dt><dd><span lang="zh">不打断正在跑的这一轮，问答不进入会话。</span><span lang="en">Ask without interrupting the running turn; nothing of it enters the session.</span><span lang="ja">実行中のターンを止めずに質問でき、やり取りはセッションに残りません。</span></dd></div>
+              <div><dt><span lang="zh">子 Agent 与 Workflow</span><span lang="en">Sub-agents and Workflows</span><span lang="ja">サブエージェントとワークフロー</span></dt><dd><span lang="zh">按阶段跟进 Claude Workflow，打开每个子 Agent 的对话和工具结果。</span><span lang="en">Follow a Claude Workflow by phase and open each sub-agent&#39;s conversation and tool results.</span><span lang="ja">Claude のワークフローをフェーズごとに追い、各サブエージェントの会話とツールの結果を開けます。</span></dd></div>
+              <div><dt><span lang="zh">回答提问，切换计划模式</span><span lang="en">Questions and plan mode</span><span lang="ja">質問への回答とプランモード</span></dt><dd><span lang="zh">Claude 的提问直接在手机上作答；计划模式是权限模式之一，随时切换。</span><span lang="en">Answer Claude&#39;s questions on the phone; plan mode is one of the permission modes you can switch to.</span><span lang="ja">Claude の質問にスマホから答えられます。プランモードは権限モードの一つとして切り替えられます。</span></dd></div>
+              <div><dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span><span lang="ja">スラッシュコマンドとスキル</span></dt><dd><span lang="zh">输入 <code>/</code> 列出 Claude 自己的命令和你的 skills。</span><span lang="en">Type <code>/</code> for Claude&#39;s own commands and your skills.</span><span lang="ja"><code>/</code> を入力すると、Claude のコマンドとあなたのスキルが一覧で出ます。</span></dd></div>
+              <div><dt><span lang="zh">后台命令</span><span lang="en">Background commands</span><span lang="ja">バックグラウンドのコマンド</span></dt><dd><span lang="zh">Bash 和 Monitor 的后台任务，状态和输出都能看。</span><span lang="en">Check the status and output of Bash and Monitor tasks.</span><span lang="ja">Bash や Monitor のタスクの状態と出力を確認できます。</span></dd></div>
+              <div><dt><span lang="zh">分叉和 worktree</span><span lang="en">Forks and worktrees</span><span lang="ja">フォークと worktree</span></dt><dd><span lang="zh">从任意一条回复分叉出新会话，可以放进新的 git worktree。</span><span lang="en">Fork a new session from any reply, in a new git worktree if you like.</span><span lang="ja">どの返信からでも新しいセッションに分岐でき、新しい git worktree にも置けます。</span></dd></div>
+            </dl>
+          </div>
+        </article>
+
+        <article class="feature center">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">改完了，</span><span class="nb">在手机上打开 Mac 桌面</span></span><span lang="en">Done? <span class="nb">Open the Mac&#39;s desktop</span></span><span lang="ja"><span class="nb">終わったら、</span><span class="nb">Mac のデスクトップで確認</span></span></h2>
+            <p><span lang="zh">Claude 改完代码，在手机上打开电脑的真实桌面：看网页、操作编辑器、处理弹窗。也能开终端，或者直接在手机里打开电脑上的 <code>localhost</code>。（完整控制支持 macOS 13 及以上）</span><span lang="en">When Claude is done, open the computer&#39;s actual desktop on the phone to check a page, work in the editor or close a dialog. Or open a terminal, or the computer&#39;s <code>localhost</code>, right on the phone. (Full control on macOS 13 or later.)</span><span lang="ja">Claude の作業が終わったら、パソコンの実際のデスクトップをスマホで開き、ページを確かめたり、エディタを操作したり、ダイアログを閉じたりできます。ターミナルや、パソコンの <code>localhost</code> をスマホで開くこともできます（フル操作は macOS 13 以降）。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <figure class="phone side">
+            <img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="手机横屏显示电脑屏幕：浏览器里的页面和终端，切到触控板模式后出现指针 / The computer&#39;s screen on a phone held sideways: a web page and a terminal, with a pointer once trackpad mode is on / 横向きのスマホに映したパソコンの画面：ブラウザのページとターミナル。トラックパッドモードにするとポインタが出ます" />
+            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video>
+          </figure>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">代码和 Claude Code 都留在你的电脑上</span><span lang="en">Your code and Claude Code stay on your computer</span><span lang="ja">コードも Claude Code もパソコンの中に</span></h2>
+          <dl class="more points">
+            <div><dt><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span><span lang="ja">エンドツーエンド暗号化</span></dt><dd><span lang="zh">X25519 交换密钥，每一帧用 XChaCha20-Poly1305 加密。网关只转发密文。</span><span lang="en">Keys are agreed with X25519 and every frame is sealed with XChaCha20-Poly1305. The gateway relays ciphertext only.</span><span lang="ja">X25519 で鍵を交換し、すべてのフレームを XChaCha20-Poly1305 で暗号化します。ゲートウェイが中継するのは暗号文だけです。</span></dd></div>
+            <div><dt><span lang="zh">用你自己的 Claude Code 登录</span><span lang="en">Your own Claude Code sign-in</span><span lang="ja">Claude Code のログインはそのまま</span></dt><dd><span lang="zh">Claude Code 以你的用户身份、用它自己的登录运行，LinkShell 不经手账号和密钥。</span><span lang="en">Claude Code runs as your user with its own sign-in. LinkShell never handles your accounts or API keys.</span><span lang="ja">Claude Code はあなたのユーザーとして、自身のログインで動きます。LinkShell がアカウントや API キーに触れることはありません。</span></dd></div>
+            <div><dt><span lang="zh">不用同一个 Wi-Fi</span><span lang="en">No shared Wi-Fi needed</span><span lang="ja">同じ Wi-Fi でなくても</span></dt><dd><span lang="zh">手机经网关连进电脑，不用开放端口；网关用官方的或自建的都行。</span><span lang="en">The phone reaches the computer through a gateway with no open ports: the official one or your own.</span><span lang="ja">スマホはゲートウェイ経由でつながるので、ポートを開ける必要はありません。公式のゲートウェイでも、自分で立てたものでも使えます。</span></dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="setup">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">三步开始</span><span lang="en">Three steps</span><span lang="ja">3 ステップで始める</span></h2>
+          <div class="step">
+            <h3><span lang="zh">在电脑上安装</span><span lang="en">Install on your computer</span><span lang="ja">パソコンにインストール</span></h3>
+            <p><span lang="zh">Mac 和 Windows 可以下载桌面 App，自带 CLI；macOS 和 Linux 也可以装 CLI，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, the desktop app brings its own CLI. On macOS or Linux you can install the CLI instead, with Node.js 22.13 or newer.</span><span lang="ja">Mac と Windows では、CLI 入りのデスクトップアプリを使えます。macOS と Linux では CLI だけでも使えます（Node.js 22.13 以降）。</span></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest"><span lang="zh">下载桌面 App</span><span lang="en">Download the desktop app</span><span lang="ja">デスクトップアプリをダウンロード</span></a></p>
+            <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
+<span class="cm"># <span lang="zh">或</span><span lang="en">or</span><span lang="ja">または</span></span>
+<span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
+<span class="pr">$ </span>linkshell setup</code></pre>
+          </div>
+          <div class="step">
+            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span><span lang="ja">スマホをつなぐ</span></h3>
+            <p><span lang="zh">iTool 会员：电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">iTool members: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">iTool メンバー：パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
+            <pre><code><span class="cm"># iTool</span>
+<span class="pr">$ </span>linkshell login
+<span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span><span lang="ja">自前のゲートウェイ</span></span>
+<span class="pr">$ </span>docker run -d -p 8787:8787 -v linkshell-gateway:/data nickname4th/linkshell-gateway
+<span class="pr">$ </span>linkshell host --gateway wss://gw.you
+<span class="pr">$ </span>linkshell pair</code></pre>
+          </div>
+          <div class="step">
+            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span><span lang="ja">使い始める</span></h3>
+            <pre><code><span class="pr">$ </span>linkshell claude</code></pre>
+            <p><span lang="zh">更多细节在<a href="docs/">文档</a>里。</span><span lang="en">The <a href="docs/">docs</a> have the details.</span><span lang="ja">詳しくは<a href="docs/">ドキュメント（英語）</a>をご覧ください。</span></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+      <h2><span lang="zh">价格</span><span lang="en">Pricing</span><span lang="ja">料金</span></h2>
+      <div class="plans">
+      <section class="plan">
+        <h2>Free</h2>
+        <div class="price">¥0</div>
+        <p class="per"><span lang="zh">全部功能，用自建网关</span><span lang="en">Every feature, with your own gateway</span><span lang="ja">全機能を、自前のゲートウェイで</span></p>
+        <ul>
+          <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span><span lang="ja">すべてのエージェント、引き継ぎ、承認、ターミナル、プレビュー</span></li>
+          <li><span lang="zh">自建网关：一条命令或 Docker</span><span lang="en">Self-hosted gateway: one command or Docker</span><span lang="ja">ゲートウェイはコマンド 1 つか Docker で</span></li>
+        </ul>
+        <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span><span lang="ja">セルフホストの手順（英語）</span></a>
+      </section>
+      <section class="plan pro">
+        <h2><span lang="zh">iTool 会员</span><span lang="en">iTool membership</span><span lang="ja">iTool メンバーシップ</span></h2>
+        <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
+        <p class="per"><span lang="zh">国际信用卡 US$3.19/月</span><span lang="en">US$3.19 a month by international card</span><span lang="ja">海外のカードなら月額 US$3.19</span></p>
+        <ul>
+          <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span><span lang="ja">公式ゲートウェイ。サーバーは不要</span></li>
+          <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span><span lang="ja">同じアカウントでログインするだけ。QR コードは不要</span></li>
+          <li><span lang="zh">年度 ¥99，含全部 iTool 产品</span><span lang="en">Or ¥99 a year with every iTool product</span><span lang="ja">年額 ¥99 なら iTool の全製品つき</span></li>
+        </ul>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 iTool 会员 ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">iTool メンバーシップに登録 ↗</a>
+      </section>
+      </div>
+      </div>
+    </section>
+
+    <div class="wrap">
+      <section class="faq text">
+        <h2><span lang="zh">常见问题</span><span lang="en">Questions</span><span lang="ja">よくある質問</span></h2>
+        <h3><span lang="zh">手机要和电脑连同一个 Wi-Fi 吗？</span><span lang="en">Does my phone need the same Wi-Fi as the computer?</span><span lang="ja">スマホとパソコンは同じ Wi-Fi につなぐ必要がありますか？</span></h3>
+        <p><span lang="zh">不用。手机经网关连到电脑，在外面用蜂窝网络也行，也不用开放端口。</span><span lang="en">No. The phone reaches the computer through a gateway, over cellular too, with no open ports.</span><span lang="ja">いいえ。スマホはゲートウェイ経由でつながるので、外出先のモバイル回線でも使えます。ポートを開ける必要もありません。</span></p>
+        <h3><span lang="zh">Claude 的账号和 API Key 会经过 LinkShell 吗？</span><span lang="en">Does LinkShell see my Claude account or API key?</span><span lang="ja">Claude のアカウントや API キーは LinkShell を経由しますか？</span></h3>
+        <p><span lang="zh">不会。Claude Code 用电脑上已经登录的那一份运行，LinkShell 不经手账号和密钥。</span><span lang="en">No. Claude Code runs with the sign-in already on your computer; LinkShell never handles accounts or keys.</span><span lang="ja">いいえ。Claude Code はパソコンでログイン済みのものをそのまま使います。LinkShell がアカウントやキーを扱うことはありません。</span></p>
+        <h3><span lang="zh">不打开 App 能批准权限请求吗？</span><span lang="en">Can I approve a permission request without opening the app?</span><span lang="ja">アプリを開かずに権限リクエストを承認できますか？</span></h3>
+        <p><span lang="zh">能。iPhone 锁屏的实时活动带「拒绝」和「允许」按钮（iOS 17 及以上），Apple Watch 上也能回复请求（watchOS 10 及以上）。</span><span lang="en">Yes. The Live Activity on the iPhone Lock Screen carries Deny and Allow (iOS 17 or later), and Apple Watch can answer requests too (watchOS 10 or later).</span><span lang="ja">はい。iPhone のロック画面のライブアクティビティに「拒否」「許可」ボタンが出ます（iOS 17 以降）。Apple Watch からもリクエストに応答できます（watchOS 10 以降）。</span></p>
+        <h3><span lang="zh">Android 能用吗？</span><span lang="en">Does it work on Android?</span><span lang="ja">Android でも使えますか？</span></h3>
+        <p><span lang="zh">能。Android 版 APK 在 GitHub Releases 下载；浏览器里也有网页版。</span><span lang="en">Yes. The Android APK is on GitHub Releases, and there is a browser client too.</span><span lang="ja">はい。Android 版の APK は GitHub Releases から入手できます。ブラウザ版もあります。</span></p>
+        <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。不想自己部署，可以开通 iTool 会员用官方网关：月度 ¥9.9 起，国际信用卡 US$3.19/月。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). To skip the server, an iTool membership adds the official gateway from ¥9.9 a month, or US$3.19 a month by international card.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、すべての機能を無料で使えます。サーバーを用意したくない場合は、iTool メンバーシップで公式ゲートウェイを使えます。月額 ¥9.9 から、海外のカードなら月額 US$3.19 です。</span></p>
+      </section>
+    </div>
+
+    <section class="close">
+      <div class="wrap">
+        <div class="close-card">
+          <h2><span lang="zh"><span class="nb">下次离开电脑，</span><span class="nb">把 Claude 带上</span></span><span lang="en">Next time you leave your desk, take Claude along</span><span lang="ja"><span class="nb">席を離れても、</span><span class="nb">Claude はそのまま</span></span></h2>
+          <p><span lang="zh">也在用 Codex？<a href="codex/">看看 Codex 怎么用</a>。</span><span lang="en">Using Codex too? <a href="codex/">See it on the phone</a>.</span><span lang="ja">Codex も使っていますか？<a href="codex/">Codex での使い方</a></span></p>
+          <div class="btns">
+            <a class="btn btn-p" href="https://apps.apple.com/app/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span><span lang="ja">iPhone 版を入手</span></a>
+            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
+            <a class="btn btn-s" href="#setup"><span lang="zh">电脑端设置</span><span lang="en">Set up your computer</span><span lang="ja">パソコンの準備</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═════════════════════════ CODEX ═════════════════════════ -->
+  <main class="page" data-page="codex">
+    <section class="hero">
+      <div class="wrap">
+        <div class="hero-top">
+          <div>
+            <h1><span lang="zh"><span class="nb">在手机上</span><span class="nb">用 Codex。</span></span><span lang="en">Codex, <span class="nb">from your phone.</span></span><span lang="ja"><span class="nb">Codex を、</span><span class="nb">iPhone から。</span></span></h1>
+            <p class="lead">
+              <span lang="zh">Codex 留在电脑上跑，终端和手机同时在线。进度、改动和请求实时到手机，在 iPhone、Android 或 Apple Watch 上批准、插话，哪一端都能接着干。</span>
+              <span lang="en">Codex keeps running on your computer, with the terminal and the phone live together. Follow its progress, approve requests and steer the running turn from iPhone, Android or Apple Watch.</span>
+              <span lang="ja">Codex はパソコンで動かしたまま、ターミナルとスマホの両方から同時に操作できます。進み具合の確認、リクエストの承認、実行中のターンへの指示は、iPhone・Android・Apple Watch から。</span>
+            </p>
+            <div class="btns">
+              <a class="btn btn-p" href="https://apps.apple.com/app/id6761547516">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
+                <span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span><span lang="ja">iPhone 版を入手</span>
+              </a>
+              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+                Android APK
+              </a>
+              <a class="btn btn-s" href="#setup"><span lang="zh">电脑端设置</span><span lang="en">Set up your computer</span><span lang="ja">パソコンの準備</span></a>
+            </div>
+          </div>
+
+          <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="手机上收到的审批请求 / A request on your phone / スマホに届いた承認リクエスト">
+            <div class="ask-head"><span class="av full" style="width:22px;height:22px"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span><b>Codex</b><span>api-server</span><time><span lang="zh">刚刚</span><span lang="en">now</span><span lang="ja">たった今</span></time></div>
+            <div class="ask-card">
+              <div class="ask-title"><i aria-hidden="true"></i><span><span lang="zh">运行测试，确认接口改动没有回归</span><span lang="en">Run the tests to check the API change broke nothing</span><span lang="ja">テストを実行して、API の変更の影響を確認</span></span></div>
+              <p class="ask-meta"><span lang="zh">需要你的批准</span><span lang="en">Needs your approval</span><span lang="ja">承認が必要です</span></p>
+              <p class="ask-cmd">pnpm test</p>
+              <div class="ask-actions">
+                <button type="button" class="deny"><span lang="zh">拒绝</span><span lang="en">Deny</span><span lang="ja">拒否</span></button>
+                <button type="button" class="allow"><span lang="zh">允许</span><span lang="en">Allow</span><span lang="ja">許可</span></button>
+              </div>
+              <div class="ask-result" aria-live="polite">
+                <span class="spin" aria-hidden="true"></span>
+                <span data-show="running"><span lang="zh">正在电脑上运行 pnpm test…</span><span lang="en">Running pnpm test on your computer…</span><span lang="ja">パソコンで pnpm test を実行中…</span></span>
+                <span data-show="done"><svg class="tick" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> <span lang="zh">36 项测试通过，Codex 接着干</span><span lang="en">36 tests passed. Codex carries on.</span><span lang="ja">36 件のテストに合格。Codex は作業を続けます</span></span>
+                <span data-show="denied"><span lang="zh">已拒绝，Codex 会换个办法</span><span lang="en">Denied. Codex will try another way.</span><span lang="ja">拒否しました。Codex は別の方法を試します</span></span>
+                <button type="button" class="again"><span lang="zh">再来一次</span><span lang="en">Again</span><span lang="ja">もう一度</span></button>
+              </div>
+            </div>
+            <p class="ask-foot"><span lang="zh">这就是手机上收到的请求。点一下试试。</span><span lang="en">This is the request your phone gets. Try it.</span><span lang="ja">スマホに届くリクエストはこんな形です。タップして試せます。</span></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+
+        <article class="feature intro-row">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">终端和手机，</span><span class="nb">同时在线</span></span><span lang="en">Terminal and phone, <span class="nb">live together</span></span><span lang="ja"><span class="nb">ターミナルとスマホを</span><span class="nb">同時に</span></span></h2>
+            <p><span lang="zh">用 <code>linkshell codex</code> 打开的终端和手机共用同一个会话：任何一端都能发消息、打断、审批。普通 <code>codex</code> 和 Codex 桌面 App 里开的会话，手机上也能跟进。</span><span lang="en">The terminal opened with <code>linkshell codex</code> and your phone share one session: either side can send, interrupt and approve. Sessions from a plain <code>codex</code> or the Codex desktop app can be followed too.</span><span lang="ja"><code>linkshell codex</code> で開いたターミナルとスマホは同じセッションを共有し、どちらからでもメッセージの送信、中断、承認ができます。通常の <code>codex</code> や Codex デスクトップアプリで開いたセッションも、スマホから追えます。</span></p>
+            <pre><code><span class="pr">$ </span>linkshell codex
+<span class="cm"># <span lang="zh">参数原样传给 codex</span><span lang="en">arguments pass through to codex</span><span lang="ja">引数はそのまま codex に渡ります</span></span></code></pre>
+          </div>
+        </article>
+
+        <article class="feature field split flip">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">手机上也能用</span> <span class="nb">Computer Use</span></span><span lang="en">Computer Use, <span class="nb">from your phone</span></span><span lang="ja"><span class="nb">Computer Use も</span><span class="nb">スマホから</span></span></h2>
+            <p><span lang="zh">在手机上让 Codex 操作电脑里的浏览器和桌面应用，画面在会话浮窗里实时预览。边看边聊，随时补充要求。浮窗可以拖动、放大或收起。（目前支持 macOS 上的 Codex）</span><span lang="en">Ask Codex to use the browser or desktop apps on your computer, right from your phone, and watch it live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. (Codex on macOS for now.)</span><span lang="ja">スマホから Codex に、パソコンのブラウザやデスクトップアプリを操作させられます。操作の様子は会話の上の小さなウィンドウでライブ表示され、見ながら指示を足せます。ウィンドウは動かす、拡大する、たたむことができます（現在は macOS の Codex に対応）。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <figure class="phone">
+            <img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗 / Computer Use live preview in a Codex conversation / スマホの Computer Use：Codex の会話の上に出るライブ画面のウィンドウ" />
+          </figure>
+          </div>
+        </article>
+
+        <article class="feature band center">
+          <div class="text">
+            <h2><span lang="zh"><span class="nb">不用打开 App，</span><span class="nb">锁屏和手表上就能批准</span></span><span lang="en">Approve from the Lock Screen <span class="nb">or your wrist</span></span><span lang="ja"><span class="nb">ロック画面と</span><span class="nb">Apple Watch で承認</span></span></h2>
+            <p><span lang="zh">实时活动在锁屏和灵动岛上显示进度；Codex 要权限时，卡片上直接给出「拒绝」和「允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</span><span lang="en">A Live Activity keeps Codex&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</span><span lang="ja">ライブアクティビティがロック画面と Dynamic Island に進み具合を表示します。Codex が許可を求めると、カードに「拒否」「許可」ボタンが出ます。Apple Watch でもセッションを確認し、リクエストに応答し、短い返信を送れます。</span></p>
+          </div>
+          <div class="stage feature-stage">
+          <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的请求，带拒绝和允许按钮 / A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny and Allow buttons / iPhone のロック画面に表示された LinkShell のライブアクティビティ：確認待ちのリクエストと「拒否」「許可」ボタン" /></figure>
+          </div>
+          <p class="note-small"><span lang="zh">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</span><span lang="en">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</span><span lang="ja">ライブアクティビティは iOS 16.2 以降、カード上のボタンは iOS 17 以降、Apple Watch アプリは watchOS 10 以降で使えます。</span></p>
+        </article>
+
+        <article class="feature intro-row">
+          <div class="text">
+            <h2><span lang="zh">Codex 的功能，手机上都在</span><span lang="en">Codex&#39;s own tools, on the phone</span><span lang="ja">Codex の機能をスマホでも</span></h2>
+            <dl class="more">
+              <div><dt><span lang="zh">它正忙，照样能插话</span><span lang="en">Cut in while it is busy</span><span lang="ja">作業中でも指示を送れる</span></dt><dd><span lang="zh">忙的时候发的消息先排队，可以调整顺序、取回重写，或者立即发送，直接插进当前这一轮；正在跑的一轮，手机上也能停。</span><span lang="en">Messages sent mid-turn wait in a queue: reorder them, take one back, or send it now, straight into the running turn. Stop a turn from the phone.</span><span lang="ja">作業中に送ったメッセージはキューに入り、順番の入れ替えや取り消し、実行中のターンへの即時送信ができます。ターンはスマホから止められます。</span></dd></div>
+              <div><dt><span lang="zh">用 /side 旁支提问</span><span lang="en">Side questions with /side</span><span lang="ja">/side で横から質問</span></dt><dd><span lang="zh">一个只读的临时分叉，问答不进入会话。</span><span lang="en">A read-only temporary fork; nothing of it enters the session.</span><span lang="ja">読み取り専用の一時的なフォークで、やり取りはセッションに残りません。</span></dd></div>
+              <div><dt><span lang="zh">持久目标 /goal</span><span lang="en">Persistent goals</span><span lang="ja">/goal で目標を保つ</span></dt><dd><span lang="zh">设置、暂停、恢复、清除，还能设 Token 预算。</span><span lang="en">Set, pause, resume or clear a <code>/goal</code>, with a token budget.</span><span lang="ja">設定、一時停止、再開、クリアができ、トークンの予算も決められます。</span></dd></div>
+              <div><dt><span lang="zh">斜杠命令和 skills</span><span lang="en">Slash commands and skills</span><span lang="ja">スラッシュコマンドとスキル</span></dt><dd><span lang="zh"><code>/compact</code>、<code>/review</code>、<code>/init</code> 和你的 skills 都能在手机上用。</span><span lang="en"><code>/compact</code>, <code>/review</code>, <code>/init</code> and your skills, from the phone.</span><span lang="ja"><code>/compact</code>、<code>/review</code>、<code>/init</code> やあなたのスキルをスマホから使えます。</span></dd></div>
+              <div><dt><span lang="zh">后台命令</span><span lang="en">Background commands</span><span lang="ja">バックグラウンドのコマンド</span></dt><dd><span lang="zh">查看状态和输出，单独停掉其中一个任务。</span><span lang="en">See their status and output, and stop one task.</span><span lang="ja">状態と出力を確認し、タスクを個別に止められます。</span></dd></div>
+              <div><dt><span lang="zh">回答提问，切换计划模式</span><span lang="en">Questions and plan mode</span><span lang="ja">質問への回答とプランモード</span></dt><dd><span lang="zh">回答 Codex 的提问，包括桌面版的异步提问；计划模式在手机上直接切换。</span><span lang="en">Answer Codex&#39;s questions, the desktop app&#39;s asynchronous ones included; plan mode is a setting on the phone.</span><span lang="ja">デスクトップアプリの非同期の質問も含め、Codex の質問に答えられます。プランモードはスマホの設定で切り替えます。</span></dd></div>
+              <div><dt><span lang="zh">登录方式照旧</span><span lang="en">Your sign-in, as it is</span><span lang="ja">ログイン方法はそのまま</span></dt><dd><span lang="zh">ChatGPT 登录、API Key 或自定义提供商（包括 CC Switch 管理的）都能用。</span><span lang="en">ChatGPT sign-in, an API key or a custom provider, including one managed by CC Switch.</span><span lang="ja">ChatGPT でのログイン、API キー、カスタムプロバイダ（CC Switch で管理しているものを含む）に対応します。</span></dd></div>
+            </dl>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">代码和 Codex 都留在你的电脑上</span><span lang="en">Your code and Codex stay on your computer</span><span lang="ja">コードも Codex もパソコンの中に</span></h2>
+          <dl class="more points">
+            <div><dt><span lang="zh">端到端加密</span><span lang="en">End-to-end encrypted</span><span lang="ja">エンドツーエンド暗号化</span></dt><dd><span lang="zh">X25519 交换密钥，每一帧用 XChaCha20-Poly1305 加密。网关只转发密文。</span><span lang="en">Keys are agreed with X25519 and every frame is sealed with XChaCha20-Poly1305. The gateway relays ciphertext only.</span><span lang="ja">X25519 で鍵を交換し、すべてのフレームを XChaCha20-Poly1305 で暗号化します。ゲートウェイが中継するのは暗号文だけです。</span></dd></div>
+            <div><dt><span lang="zh">用你自己的 Codex 登录</span><span lang="en">Your own Codex sign-in</span><span lang="ja">Codex のログインはそのまま</span></dt><dd><span lang="zh">Codex 以你的用户身份、用它自己的登录运行，LinkShell 不经手账号和密钥。</span><span lang="en">Codex runs as your user with its own sign-in. LinkShell never handles your accounts or API keys.</span><span lang="ja">Codex はあなたのユーザーとして、自身のログインで動きます。LinkShell がアカウントや API キーに触れることはありません。</span></dd></div>
+            <div><dt><span lang="zh">不用同一个 Wi-Fi</span><span lang="en">No shared Wi-Fi needed</span><span lang="ja">同じ Wi-Fi でなくても</span></dt><dd><span lang="zh">手机经网关连进电脑，不用开放端口；网关用官方的或自建的都行。</span><span lang="en">The phone reaches the computer through a gateway with no open ports: the official one or your own.</span><span lang="ja">スマホはゲートウェイ経由でつながるので、ポートを開ける必要はありません。公式のゲートウェイでも、自分で立てたものでも使えます。</span></dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="setup">
+      <div class="wrap">
+        <div class="text">
+          <h2><span lang="zh">三步开始</span><span lang="en">Three steps</span><span lang="ja">3 ステップで始める</span></h2>
+          <div class="step">
+            <h3><span lang="zh">在电脑上安装</span><span lang="en">Install on your computer</span><span lang="ja">パソコンにインストール</span></h3>
+            <p><span lang="zh">Mac 和 Windows 可以下载桌面 App，自带 CLI；macOS 和 Linux 也可以装 CLI，需要 Node.js 22.13 或更新版本。</span><span lang="en">On Mac or Windows, the desktop app brings its own CLI. On macOS or Linux you can install the CLI instead, with Node.js 22.13 or newer.</span><span lang="ja">Mac と Windows では、CLI 入りのデスクトップアプリを使えます。macOS と Linux では CLI だけでも使えます（Node.js 22.13 以降）。</span></p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest"><span lang="zh">下载桌面 App</span><span lang="en">Download the desktop app</span><span lang="ja">デスクトップアプリをダウンロード</span></a></p>
+            <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
+<span class="cm"># <span lang="zh">或</span><span lang="en">or</span><span lang="ja">または</span></span>
+<span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
+<span class="pr">$ </span>linkshell setup</code></pre>
+          </div>
+          <div class="step">
+            <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span><span lang="ja">スマホをつなぐ</span></h3>
+            <p><span lang="zh">iTool 会员：电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">iTool members: sign in on the computer and in the app with the same account; the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">iTool メンバー：パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
+            <pre><code><span class="cm"># iTool</span>
+<span class="pr">$ </span>linkshell login
+<span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span><span lang="ja">自前のゲートウェイ</span></span>
+<span class="pr">$ </span>docker run -d -p 8787:8787 -v linkshell-gateway:/data nickname4th/linkshell-gateway
+<span class="pr">$ </span>linkshell host --gateway wss://gw.you
+<span class="pr">$ </span>linkshell pair</code></pre>
+          </div>
+          <div class="step">
+            <h3><span lang="zh">开始工作</span><span lang="en">Get going</span><span lang="ja">使い始める</span></h3>
+            <pre><code><span class="pr">$ </span>linkshell codex</code></pre>
+            <p><span lang="zh">更多细节在<a href="docs/">文档</a>里。</span><span lang="en">The <a href="docs/">docs</a> have the details.</span><span lang="ja">詳しくは<a href="docs/">ドキュメント（英語）</a>をご覧ください。</span></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+      <h2><span lang="zh">价格</span><span lang="en">Pricing</span><span lang="ja">料金</span></h2>
+      <div class="plans">
+      <section class="plan">
+        <h2>Free</h2>
+        <div class="price">¥0</div>
+        <p class="per"><span lang="zh">全部功能，用自建网关</span><span lang="en">Every feature, with your own gateway</span><span lang="ja">全機能を、自前のゲートウェイで</span></p>
+        <ul>
+          <li><span lang="zh">全部 Agent、接力、审批、终端、预览</span><span lang="en">All agents, handoff, approvals, terminal, previews</span><span lang="ja">すべてのエージェント、引き継ぎ、承認、ターミナル、プレビュー</span></li>
+          <li><span lang="zh">自建网关：一条命令或 Docker</span><span lang="en">Self-hosted gateway: one command or Docker</span><span lang="ja">ゲートウェイはコマンド 1 つか Docker で</span></li>
+        </ul>
+        <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span><span lang="ja">セルフホストの手順（英語）</span></a>
+      </section>
+      <section class="plan pro">
+        <h2><span lang="zh">iTool 会员</span><span lang="en">iTool membership</span><span lang="ja">iTool メンバーシップ</span></h2>
+        <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
+        <p class="per"><span lang="zh">国际信用卡 US$3.19/月</span><span lang="en">US$3.19 a month by international card</span><span lang="ja">海外のカードなら月額 US$3.19</span></p>
+        <ul>
+          <li><span lang="zh">官方网关，不用部署服务器</span><span lang="en">The official gateway, no server to run</span><span lang="ja">公式ゲートウェイ。サーバーは不要</span></li>
+          <li><span lang="zh">登录同一账号即可连接，免扫码</span><span lang="en">Sign in with one account, no QR codes</span><span lang="ja">同じアカウントでログインするだけ。QR コードは不要</span></li>
+          <li><span lang="zh">年度 ¥99，含全部 iTool 产品</span><span lang="en">Or ¥99 a year with every iTool product</span><span lang="ja">年額 ¥99 なら iTool の全製品つき</span></li>
+        </ul>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 iTool 会员 ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">iTool メンバーシップに登録 ↗</a>
+      </section>
+      </div>
+      </div>
+    </section>
+
+    <div class="wrap">
+      <section class="faq text">
+        <h2><span lang="zh">常见问题</span><span lang="en">Questions</span><span lang="ja">よくある質問</span></h2>
+        <h3><span lang="zh">手机要和电脑连同一个 Wi-Fi 吗？</span><span lang="en">Does my phone need the same Wi-Fi as the computer?</span><span lang="ja">スマホとパソコンは同じ Wi-Fi につなぐ必要がありますか？</span></h3>
+        <p><span lang="zh">不用。手机经网关连到电脑，在外面用蜂窝网络也行，也不用开放端口。</span><span lang="en">No. The phone reaches the computer through a gateway, over cellular too, with no open ports.</span><span lang="ja">いいえ。スマホはゲートウェイ経由でつながるので、外出先のモバイル回線でも使えます。ポートを開ける必要もありません。</span></p>
+        <h3><span lang="zh">Codex 的账号和 API Key 会经过 LinkShell 吗？</span><span lang="en">Does LinkShell see my Codex sign-in or API key?</span><span lang="ja">Codex のアカウントや API キーは LinkShell を経由しますか？</span></h3>
+        <p><span lang="zh">不会。Codex 用电脑上已经登录的那一份运行，LinkShell 不经手账号和密钥。</span><span lang="en">No. Codex runs with the sign-in already on your computer; LinkShell never handles accounts or keys.</span><span lang="ja">いいえ。Codex はパソコンでログイン済みのものをそのまま使います。LinkShell がアカウントやキーを扱うことはありません。</span></p>
+        <h3><span lang="zh">能在手机上让 Codex 操作电脑吗？</span><span lang="en">Can Codex use my computer while I watch from the phone?</span><span lang="ja">スマホから Codex にパソコンを操作させられますか？</span></h3>
+        <p><span lang="zh">能。用 Computer Use 让 Codex 操作电脑上的浏览器和桌面应用，画面在会话浮窗里实时预览。目前支持 macOS 上的 Codex。</span><span lang="en">Yes. With Computer Use, Codex works the browser and desktop apps on your computer while a floating window shows it live. Codex on macOS for now.</span><span lang="ja">はい。Computer Use を使うと、Codex がパソコンのブラウザやデスクトップアプリを操作し、その様子が会話の上のウィンドウにライブで表示されます。現在は macOS の Codex に対応しています。</span></p>
+        <h3><span lang="zh">不打开 App 能批准请求吗？</span><span lang="en">Can I approve a request without opening the app?</span><span lang="ja">アプリを開かずにリクエストを承認できますか？</span></h3>
+        <p><span lang="zh">能。iPhone 锁屏的实时活动带「拒绝」和「允许」按钮（iOS 17 及以上），Apple Watch 上也能回复请求（watchOS 10 及以上）。</span><span lang="en">Yes. The Live Activity on the iPhone Lock Screen carries Deny and Allow (iOS 17 or later), and Apple Watch can answer requests too (watchOS 10 or later).</span><span lang="ja">はい。iPhone のロック画面のライブアクティビティに「拒否」「許可」ボタンが出ます（iOS 17 以降）。Apple Watch からもリクエストに応答できます（watchOS 10 以降）。</span></p>
+        <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。不想自己部署，可以开通 iTool 会员用官方网关：月度 ¥9.9 起，国际信用卡 US$3.19/月。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). To skip the server, an iTool membership adds the official gateway from ¥9.9 a month, or US$3.19 a month by international card.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、すべての機能を無料で使えます。サーバーを用意したくない場合は、iTool メンバーシップで公式ゲートウェイを使えます。月額 ¥9.9 から、海外のカードなら月額 US$3.19 です。</span></p>
+      </section>
+    </div>
+
+    <section class="close">
+      <div class="wrap">
+        <div class="close-card">
+          <h2><span lang="zh"><span class="nb">下次离开电脑，</span><span class="nb">让 Codex 接着干</span></span><span lang="en">Next time you leave your desk, Codex keeps going</span><span lang="ja"><span class="nb">席を離れても、</span><span class="nb">Codex は止まらない</span></span></h2>
+          <p><span lang="zh">也在用 Claude Code？<a href="claude-code/">看看 Claude Code 怎么用</a>。</span><span lang="en">Using Claude Code too? <a href="claude-code/">See it on the phone</a>.</span><span lang="ja">Claude Code も使っていますか？<a href="claude-code/">Claude Code での使い方</a></span></p>
+          <div class="btns">
+            <a class="btn btn-p" href="https://apps.apple.com/app/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span><span lang="ja">iPhone 版を入手</span></a>
+            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
+            <a class="btn btn-s" href="#setup"><span lang="zh">电脑端设置</span><span lang="en">Set up your computer</span><span lang="ja">パソコンの準備</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
   <footer>
     <div class="wrap">
       <div class="who">
         <a class="brand" href="./"><img src="assets/adaptive-icon.png" alt="" width="22" height="22" loading="lazy" />LinkShell</a>
-        <span><span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span></span>
+        <span><span lang="zh">出于对 Vibe Coding 的热爱。© 2026，MIT 开源。</span><span lang="en">Made for the love of vibe coding. © 2026, MIT licensed.</span><span lang="ja">Vibe Coding が好きで作りました。© 2026、MIT ライセンス。</span></span>
       </div>
       <nav>
         <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
-        <a href="docs/"><span lang="zh">文档</span><span lang="en">Docs</span></a>
-        <a href="pricing/"><span lang="zh">定价</span><span lang="en">Pricing</span></a>
+        <a href="docs/"><span lang="zh">文档</span><span lang="en">Docs</span><span lang="ja">Docs</span></a>
+        <a href="pricing/"><span lang="zh">定价</span><span lang="en">Pricing</span><span lang="ja">料金</span></a>
+        <a href="claude-code/">Claude Code</a>
+        <a href="codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
     </div>
@@ -1050,11 +1513,11 @@
   <script src="assets/duo/viewer.js?v=20261008-transparent-stage" defer></script>
   <script>
     // ── Language: each page is in one; the switch remembers the choice and keeps the place ──
-    const currentLang = document.documentElement.dataset.lang === 'en' ? 'en' : 'zh';
-    document.getElementById('lang-toggle').addEventListener('click', (event) => {
-      try { localStorage.setItem('linkshell-lang', currentLang === 'zh' ? 'en' : 'zh'); } catch { }
+    const currentLang = document.documentElement.dataset.lang || 'zh';
+    document.querySelectorAll('.lang-switch').forEach((link) => link.addEventListener('click', (event) => {
+      try { localStorage.setItem('linkshell-lang', link.lang.slice(0, 2)); } catch { }
       if (location.hash) event.currentTarget.hash = location.hash;
-    });
+    }));
 
     // ── Theme ──
     document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -1159,13 +1622,15 @@
       document.querySelectorAll('.doc h2[id]').forEach((h) => spy.observe(h));
     }
 
-    // ── Pages: /, /docs/, /pricing/ (and #docs, #pricing) ──
+    // ── Pages: /, /docs/, /pricing/, /claude-code/, /codex/ (and #docs, #pricing) ──
     const pages = document.querySelectorAll('main.page');
     const navLinks = document.querySelectorAll('[data-page-link]');
     let shown = null;
     function showPage(page) {
       if (![...pages].some((p) => p.dataset.page === page)) {
-        const path = (document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
+        // Japanese has the landing pages only; the rest is read in English.
+        const ja = document.documentElement.dataset.lang === 'ja' && page !== 'claude-code' && page !== 'codex';
+        const path = (ja ? 'en/' : document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
         location.replace(new URL(path, document.baseURI).href + (location.hash.startsWith('#d-') ? location.hash : ''));
         return false;
       }
@@ -1177,7 +1642,7 @@
     }
     function route() {
       const path = location.pathname.replace(/\/+$/, '');
-      const pathPage = path.endsWith('/docs') ? 'docs' : path.endsWith('/pricing') ? 'pricing' : 'home';
+      const pathPage = (path.match(/\/(docs|pricing|claude-code|codex)$/) || [])[1] || 'home';
       const hash = location.hash.replace('#', '');
       // (A docs anchor on the site's root is a link from before /docs/ had its own address.)
       const page = hash === 'docs' || hash === 'pricing' ? hash : hash.startsWith('d-') ? 'docs' : pathPage;

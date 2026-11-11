@@ -5,6 +5,8 @@
 - Website: https://linkshell.itool.tech/ (English: https://linkshell.itool.tech/en/)
 - Docs: https://linkshell.itool.tech/en/docs/ (Chinese: https://linkshell.itool.tech/docs/)
 - Pricing: https://linkshell.itool.tech/en/pricing/
+- Claude Code from your phone: https://linkshell.itool.tech/en/claude-code/ (Chinese: https://linkshell.itool.tech/claude-code/, Japanese: https://linkshell.itool.tech/ja/claude-code/)
+- Codex from your phone: https://linkshell.itool.tech/en/codex/ (Chinese: https://linkshell.itool.tech/codex/, Japanese: https://linkshell.itool.tech/ja/codex/)
 - Source: https://github.com/LiuTianjie/LinkShell
 - iPhone app: https://apps.apple.com/cn/app/linkshell/id6761547516
 - Android APK and desktop apps: https://github.com/LiuTianjie/LinkShell/releases/latest

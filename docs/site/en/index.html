@@ -201,27 +201,28 @@
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
   <script>
     // Before first paint: the theme (?theme=, then the saved choice; dark otherwise) and that
-    // scripts run. Each language has its own address (data-alt is the other one's, against
-    // <base>): the visitor's choice (?lang=, then the saved one) leads there, and with no
-    // choice yet a Chinese page (the root is x-default) follows the browser's language, but
-    // never for a crawler, which must see both versions where they are.
+    // scripts run. Each language has its own address (against <base>: data-alt is the other of
+    // Chinese and English, data-alt-<lang> any further one a view has): the visitor's choice
+    // (?lang=, then the saved one) leads there, and with no choice yet a Chinese page (the root
+    // is x-default) follows the browser's language, but never for a crawler, which must see
+    // every version where it is. A view without Japanese is read in English.
     (function () {
       var root = document.documentElement, query = new URLSearchParams(location.search);
-      var theme = query.get('theme'), lang = query.get('lang'), saved = null;
+      var theme = query.get('theme'), lang = query.get('lang'), saved = null, known = /^(zh|en|ja)$/;
       try {
         if (theme !== 'light' && theme !== 'dark') theme = localStorage.getItem('linkshell-theme');
         saved = localStorage.getItem('linkshell-lang');
-        if (lang === 'en' || lang === 'zh') localStorage.setItem('linkshell-lang', lang);
+        if (known.test(lang)) localStorage.setItem('linkshell-lang', lang);
       } catch (e) { }
       root.dataset.theme = theme === 'light' ? 'light' : 'dark';
       root.classList.add('js');
-      if (lang !== 'en' && lang !== 'zh') lang = saved;
-      if (lang !== 'en' && lang !== 'zh' && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
-        lang = /^zh/i.test(navigator.language) ? 'zh' : 'en';
+      if (!known.test(lang)) lang = saved;
+      if (!known.test(lang) && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
+        lang = /^zh/i.test(navigator.language) ? 'zh' : /^ja/i.test(navigator.language) ? 'ja' : 'en';
       }
-      if ((lang === 'en' || lang === 'zh') && lang !== root.dataset.lang && root.dataset.alt) {
-        location.replace(new URL(root.dataset.alt, document.baseURI).href + location.hash);
-      }
+      if (lang === 'ja' && root.dataset.lang !== 'ja' && !root.dataset.altJa) lang = 'en';
+      var alt = known.test(lang) && lang !== root.dataset.lang && (root.getAttribute('data-alt-' + lang) || root.dataset.alt);
+      if (alt) location.replace(new URL(alt, document.baseURI).href + location.hash);
     })();
   </script>
   <link rel="stylesheet" href="assets/family.css" />
@@ -306,8 +307,8 @@
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     button { font: inherit; color: inherit; }
 
-    /* one language at a time */
-    html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
+    /* one language at a time (the language switches carry the language they lead to) */
+    html[data-lang="zh"] [lang="en"]:not(.lang-switch), html[data-lang="en"] [lang="zh"]:not(.lang-switch) { display: none !important; }
 
     /* one page at a time (all three when scripts don't run) */
     .js .page:not(.visible) { display: none; }
@@ -335,6 +336,7 @@
     .theme .moon, :root[data-theme="light"] .theme .sun { display: none; }
     :root[data-theme="light"] .theme .moon { display: block; }
     @media (max-width: 460px) { .nav nav a.wide { display: none; } .nav nav a { padding-inline: 9px; } }
+    @media (max-width: 760px) { .nav nav a.intent { display: none; } }
     @media (max-width: 480px) { .btns .btn { flex: 1 1 auto; justify-content: center; } }
 
     /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
@@ -676,6 +678,8 @@
     <div class="wrap">
       <a class="brand" href="en/" aria-label="LinkShell"><img src="assets/adaptive-icon.png" alt="" width="28" height="28" />LinkShell</a>
       <nav>
+        <a class="intent" href="en/claude-code/" data-page-link="claude-code">Claude Code</a>
+        <a class="intent" href="en/codex/" data-page-link="codex">Codex</a>
         <a href="en/docs/" data-page-link="docs">Docs</a>
         <a href="en/pricing/" data-page-link="pricing">Pricing</a>
         <a class="wide" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
@@ -1008,6 +1012,8 @@
         <a href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
         <a href="en/docs/">Docs</a>
         <a href="en/pricing/">Pricing</a>
+        <a href="en/claude-code/">Claude Code</a>
+        <a href="en/codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
     </div>
@@ -1017,11 +1023,11 @@
   <script src="assets/duo/viewer.js?v=20261008-transparent-stage" defer></script>
   <script>
     // ── Language: each page is in one; the switch remembers the choice and keeps the place ──
-    const currentLang = document.documentElement.dataset.lang === 'en' ? 'en' : 'zh';
-    document.getElementById('lang-toggle').addEventListener('click', (event) => {
-      try { localStorage.setItem('linkshell-lang', currentLang === 'zh' ? 'en' : 'zh'); } catch { }
+    const currentLang = document.documentElement.dataset.lang || 'zh';
+    document.querySelectorAll('.lang-switch').forEach((link) => link.addEventListener('click', (event) => {
+      try { localStorage.setItem('linkshell-lang', link.lang.slice(0, 2)); } catch { }
       if (location.hash) event.currentTarget.hash = location.hash;
-    });
+    }));
 
     // ── Theme ──
     document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -1126,13 +1132,15 @@
       document.querySelectorAll('.doc h2[id]').forEach((h) => spy.observe(h));
     }
 
-    // ── Pages: /, /docs/, /pricing/ (and #docs, #pricing) ──
+    // ── Pages: /, /docs/, /pricing/, /claude-code/, /codex/ (and #docs, #pricing) ──
     const pages = document.querySelectorAll('main.page');
     const navLinks = document.querySelectorAll('[data-page-link]');
     let shown = null;
     function showPage(page) {
       if (![...pages].some((p) => p.dataset.page === page)) {
-        const path = (document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
+        // Japanese has the landing pages only; the rest is read in English.
+        const ja = document.documentElement.dataset.lang === 'ja' && page !== 'claude-code' && page !== 'codex';
+        const path = (ja ? 'en/' : document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
         location.replace(new URL(path, document.baseURI).href + (location.hash.startsWith('#d-') ? location.hash : ''));
         return false;
       }
@@ -1144,7 +1152,7 @@
     }
     function route() {
       const path = location.pathname.replace(/\/+$/, '');
-      const pathPage = path.endsWith('/docs') ? 'docs' : path.endsWith('/pricing') ? 'pricing' : 'home';
+      const pathPage = (path.match(/\/(docs|pricing|claude-code|codex)$/) || [])[1] || 'home';
       const hash = location.hash.replace('#', '');
       // (A docs anchor on the site's root is a link from before /docs/ had its own address.)
       const page = hash === 'docs' || hash === 'pricing' ? hash : hash.startsWith('d-') ? 'docs' : pathPage;
