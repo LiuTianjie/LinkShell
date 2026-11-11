@@ -28,11 +28,19 @@ export interface ProMembershipOptions {
 }
 
 export const LINKSHELL_PRODUCT = "linkshell";
-/** The only place a membership is bought. Phones must not link to it (App Store rules). */
-export const ITOOL_MEMBERSHIP_URL = "https://itool.tech/pro?from=linkshell";
+/**
+ * The only place a membership is bought. Phones must not link to it (App Store rules).
+ * www and a locale up front: the bare domain costs two redirects (308 to www, 307 to a locale).
+ * Chinese, like the rest of the computer UI. The entitlement API below stays on the bare domain:
+ * it is exempt from those redirects, and a cross-host redirect would drop the bearer token.
+ */
+export const ITOOL_MEMBERSHIP_URL = "https://www.itool.tech/zh/pro?from=linkshell";
 export const ITOOL_ENTITLEMENT_URL = `https://itool.tech/api/membership/entitlement?product=${LINKSHELL_PRODUCT}`;
 
-/** iTool products a membership can unlock: yearly unlocks all of them, monthly the iTool site and LinkShell. */
+/**
+ * iTool products a membership can unlock: yearly unlocks all of them, monthly the iTool site and LinkShell.
+ * Mirrors itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS: change them when it changes.
+ */
 export const MEMBERSHIP_PRODUCT_TOTAL = 7;
 export const MONTHLY_PRODUCT_COUNT = 2;
 /**
@@ -40,7 +48,7 @@ export const MONTHLY_PRODUCT_COUNT = 2;
  * person is signed in. Like the buy page, phones must not link to it (App Store rules).
  * apps/mac mirrors this and the counts in `DesktopModel.swift` (`ITool`).
  */
-export const ITOOL_YEARLY_UPGRADE_URL = "https://www.itool.tech/pro?from=linkshell&checkout=yearly";
+export const ITOOL_YEARLY_UPGRADE_URL = `${ITOOL_MEMBERSHIP_URL}&checkout=yearly`;
 
 /** The upgrade row monthly members see on the computer: what they have, and the way to the rest. */
 export const MONTHLY_UPGRADE_COPY = {

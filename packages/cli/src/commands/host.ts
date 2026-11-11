@@ -244,7 +244,7 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   if (!chosen && plan !== "pro") {
     // A running host now gets the gateway's own answer, instead of an old login's.
     await refreshGateway(0);
-    out("The official gateway needs an iTool membership (monthly or yearly): https://itool.tech/pro?from=linkshell");
+    out("The official gateway needs an iTool membership (monthly or yearly): https://www.itool.tech/en/pro?from=linkshell");
     out("Or use your own gateway: linkshell host --gateway <url>, then linkshell pair\n");
     return;
   }

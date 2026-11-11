@@ -4,7 +4,8 @@ import type { GatewayOptions } from "./relay.js";
 // has LinkShell. The gateway asks iTool's `itool_entitlement_for(uid, 'linkshell')` with the
 // service-role key, on its own behalf, not with the user's token.
 
-export const MEMBERSHIP_URL = "https://itool.tech/pro?from=linkshell";
+// www and a locale up front: the bare domain costs two redirects. Chinese, like the message it ends.
+export const MEMBERSHIP_URL = "https://www.itool.tech/zh/pro?from=linkshell";
 
 export interface SubscriptionCheck {
   /** "unknown": the lookup itself failed, which says nothing about the account. */

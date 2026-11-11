@@ -30,9 +30,11 @@ enum DesktopMembershipTier: Equatable {
 /// (ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MEMBERSHIP_PRODUCT_TOTAL, MONTHLY_PRODUCT_COUNT,
 /// MONTHLY_UPGRADE_COPY), which Swift can't import: change them there and here together.
 enum ITool {
-  static let membershipURL = "https://itool.tech/pro?from=linkshell"
+  /// www and a locale up front: the bare domain costs two redirects.
+  static let membershipURL = "https://www.itool.tech/zh/pro?from=linkshell"
   /// itool.tech opens the yearly checkout once signed in when `checkout=yearly` is present.
-  static let yearlyUpgradeURL = "https://www.itool.tech/pro?from=linkshell&checkout=yearly"
+  static let yearlyUpgradeURL = "https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly"
+  /// Mirror itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS (all of them yearly, two monthly).
   static let productTotal = 7
   static let monthlyProductCount = 2
   static let monthlyUnlocked = "已解锁 \(monthlyProductCount)/\(productTotal) 款产品"
