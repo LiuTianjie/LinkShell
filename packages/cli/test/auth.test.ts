@@ -129,7 +129,7 @@ describe("the account on this computer", () => {
   });
 });
 
-const PROXY = "https://itool.tech/api/linkshell/token";
+const PROXY = "https://www.itool.tech/api/linkshell/token";
 
 describe("refreshing through the itool.tech proxy", () => {
   beforeEach(() => { delete process.env.LINKSHELL_TOKEN_PROXY; });
@@ -153,24 +153,35 @@ describe("refreshing through the itool.tech proxy", () => {
     expect(auth.loadAuth()).toBeNull();
   });
 
-  it("falls back to Supabase directly when the proxy is unreachable", async () => {
+  it("keeps the session without repeating a possibly consumed token when the proxy is unreachable", async () => {
     auth.saveAuth(tokens(Date.now() - 1));
     const fetch = vi.fn(async (url: string) => {
       if (url === PROXY) throw new Error("itool.tech unreachable");
       return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
     });
     vi.stubGlobal("fetch", fetch);
-    expect(await auth.getValidToken()).toBe("access-direct");
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(auth.loadAuth()).toMatchObject({ refreshToken: "refresh-direct" });
+    expect(await auth.getValidToken()).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(auth.loadAuth()).not.toBeNull();
   });
 
-  it("falls back to Supabase directly when the proxy is temporarily unavailable", async () => {
+  it("keeps the session when the proxy is temporarily unavailable", async () => {
     auth.saveAuth(tokens(Date.now() - 1));
     const fetch = vi.fn(async (url: string) => {
       if (url === PROXY) return Response.json({ ok: false, code: "temporarily_unavailable" }, { status: 503 });
       return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
     });
+    vi.stubGlobal("fetch", fetch);
+    expect(await auth.getValidToken()).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(auth.loadAuth()).not.toBeNull();
+  });
+
+  it("falls back to Supabase directly when the proxy is not deployed", async () => {
+    auth.saveAuth(tokens(Date.now() - 1));
+    const fetch = vi.fn(async (url: string) => url === PROXY
+      ? new Response("Not Found", { status: 404 })
+      : Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } }));
     vi.stubGlobal("fetch", fetch);
     expect(await auth.getValidToken()).toBe("access-direct");
     expect(fetch).toHaveBeenCalledTimes(2);

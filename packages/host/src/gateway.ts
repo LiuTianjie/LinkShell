@@ -53,6 +53,7 @@ const UNKNOWN_CHANNEL_WINDOW_MS = 10_000;
 interface Tunnel {
   channel: SecureChannel;
   deviceId: string;
+  via: "paired" | "account";
   ch: string;
   message?: (text: string) => void;
   close?: () => void;
@@ -116,6 +117,7 @@ export class GatewayLink {
   /** After a failed request, the gateway is not asked again before this. */
   private turnRetryAt = 0;
   private stopped = false;
+  private accountLeaving = false;
   private lifecycle = 0;
   /** Channels told `close` because they are unknown here, per device, in the current window. */
   private readonly unknownReplies = new Map<string, { since: number; channels: Set<string> }>();
@@ -187,8 +189,19 @@ export class GatewayLink {
 
   /** Signs in to the gateway again: the account on this computer changed. */
   reauthenticate(): void {
+    this.accountLeaving = false;
     for (const tunnel of this.tunnels.values()) this.closeTunnel(tunnel, "gateway reconnecting", true);
     this.relay.reauthenticate();
+  }
+
+  /** Explicit logout revokes the gateway's durable account binding before disconnecting. */
+  async leaveAccount(): Promise<void> {
+    this.accountLeaving = true;
+    for (const tunnel of this.tunnels.values()) {
+      if (tunnel.via === "account") this.closeTunnel(tunnel, "account signed out", true);
+    }
+    if (!(await this.relay.waitOnline(3000))) throw RpcError.app("offline", "无法连接网关以解除账号绑定");
+    await this.relay.request("account.leave", {}, 5000);
   }
 
   /** Keep active tunnels intact when a recent gateway supports metadata updates. */
@@ -366,7 +379,7 @@ export class GatewayLink {
         for (const stale of held.slice(0, Math.max(0, held.length - MAX_TUNNELS_PER_DEVICE + 1))) {
           this.closeTunnel(stale, "superseded by a newer channel", true);
         }
-        const tunnel: Tunnel = { channel: answer.channel, deviceId: from.id, ch: frame.ch, closed: false };
+        const tunnel: Tunnel = { channel: answer.channel, deviceId: from.id, via, ch: frame.ch, closed: false };
         this.tunnels.set(key, tunnel);
         this.relay.send(from.id, answer.welcome);
         this.options.serve({
@@ -416,7 +429,7 @@ export class GatewayLink {
   private authorize(from: PublicIdentity, via: "paired" | "account"): PublicIdentity | undefined {
     const paired = this.devices.find((device) => device.id === from.id);
     if (paired) return paired.signKey === from.signKey && paired.boxKey === from.boxKey ? paired : undefined;
-    if (via === "account" && this.relay.account) return from;
+    if (via === "account" && this.relay.account && !this.accountLeaving) return from;
     return undefined;
   }
 

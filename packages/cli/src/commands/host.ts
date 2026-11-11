@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GatewayStatus } from "@linkshell/wire";
+import { RELAY_PATH, type GatewayStatus } from "@linkshell/wire";
 import { getCachedToken, isLoggedIn, loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
@@ -28,8 +28,19 @@ export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
 
 /** Whether two gateway addresses name the same one, however they were typed (scheme, trailing slash). */
 export function sameGateway(a: string | undefined, b: string): boolean {
-  const key = (url: string) => url.trim().replace(/^http/i, "ws").replace(/\/+$/, "").toLowerCase();
-  return a !== undefined && key(a) === key(b);
+  const key = (address: string) => {
+    try {
+      const url = new URL(address.trim().replace(/^http/i, "ws"));
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") return undefined;
+      let path = url.pathname.replace(/\/+$/, "");
+      if (path.endsWith(RELAY_PATH)) path = path.slice(0, -RELAY_PATH.length);
+      return `${url.origin}${path}`;
+    } catch {
+      return undefined;
+    }
+  };
+  const value = a === undefined ? undefined : key(a);
+  return value !== undefined && value === key(b);
 }
 
 /**
@@ -40,7 +51,11 @@ export function resolveGateway(home: string): string | undefined {
   const chosen = process.env.LINKSHELL_GATEWAY || readHostConfig(home).gateway;
   if (chosen === "off") return undefined;
   // A config.json written by 1.x holds a gateway URL ending in /ws.
-  if (chosen) return chosen.replace(/\/ws\/?$/, "");
+  if (chosen) {
+    const url = chosen.replace(/\/ws\/?$/, "");
+    // An explicit official URL must not keep a logged-out computer on its old account.
+    return sameGateway(url, OFFICIAL_GATEWAY) && !isLoggedIn() ? undefined : url;
+  }
   return isLoggedIn() ? OFFICIAL_GATEWAY : undefined;
 }
 

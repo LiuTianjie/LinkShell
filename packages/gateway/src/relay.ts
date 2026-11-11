@@ -29,6 +29,8 @@ export interface GatewayOptions {
   onRouted?: (frame: string) => void;
   pairingTtlMs?: number;
   heartbeatMs?: number;
+  /** Opt in to connected-computer/TURN revalidation; omitted preserves admission-only behavior. */
+  admissionCheckMs?: number;
   /**
    * Final say on a connecting peer, after its key (and token, if any) checked
    * out: return a message to refuse it. The official gateway uses this to
@@ -71,6 +73,9 @@ interface Peer {
   email?: string;
   /** Not being read: a peer it sends to can't keep up. */
   held?: boolean;
+  admissionCheckedAt: number;
+  admissionCheck?: Promise<string | undefined>;
+  admissionRefusal?: string;
 }
 
 interface Offer {
@@ -179,6 +184,9 @@ export class Gateway {
     for (const [code, offer] of this.offers) if (offer.expiresAt < now) this.offers.delete(code);
     for (const [deviceId, times] of this.claimTimes) if (times.every((t) => now - t >= 60_000)) this.claimTimes.delete(deviceId);
     for (const peer of this.peers.values()) {
+      if (this.options.admit && this.options.admissionCheckMs !== undefined && peer.record.role === "machine" && now - peer.admissionCheckedAt >= this.options.admissionCheckMs) {
+        void this.checkAdmission(peer).catch((error) => this.log(`admission recheck failed: ${String(error)}`));
+      }
       // A held peer isn't read, so its pong can't arrive; it is checked again once released.
       if (peer.held) continue;
       if (!this.alive.has(peer.socket)) {
@@ -249,6 +257,7 @@ export class Gateway {
       // Replaced by a newer connection with this identity: what still arrives on this one is from a
       // connection that is over, and must not reach channels opened on the new one.
       if (this.peers.get(peer.record.id)?.socket !== socket) return;
+      if (peer.admissionRefusal) return;
       switch (frame.t) {
         case "ping":
           send({ t: "pong" });
@@ -289,6 +298,7 @@ export class Gateway {
     if (existing && existing.role !== role) throw new RelayError("bad_identity", "这把密钥已经以另一种身份登记过");
     let userId: string | undefined;
     let email: string | undefined;
+    let inheritedAccount = false;
     if (frame.token) {
       if (!this.options.verifyToken) throw new RelayError("accounts_disabled", "这个网关不支持账号登录");
       const account = await this.options.verifyToken(frame.token);
@@ -299,14 +309,21 @@ export class Gateway {
         // Once a peer's Ed25519 key is bound to an account, keep that binding if its local OAuth
         // token later expires or fails to refresh while the computer is unattended.
         userId = existing.userId;
+        inheritedAccount = true;
       } else {
         throw new RelayError("token_invalid", "账号登录已失效，请重新登录");
       }
     } else if (existing?.userId && this.options.verifyToken) {
       userId = existing.userId;
+      inheritedAccount = true;
     }
     const refusal = await this.options.admit?.({ role: role as PeerRole, userId });
     if (refusal) throw new RelayError("not_admitted", refusal);
+    // An explicit logout may have revoked the saved binding during either lookup.
+    // Only a freshly verified token may establish it again, never this old snapshot.
+    if (inheritedAccount && this.store.peer(identity.id)?.userId !== userId) {
+      throw new RelayError("token_invalid", "账号绑定已解除，请重新登录");
+    }
     if (socket.readyState !== WebSocket.OPEN) throw new RelayError("closed", "认证过程中连接断开了");
     const record: PeerRecord = {
       id: identity.id,
@@ -330,7 +347,7 @@ export class Gateway {
       }
     }
     const previous = this.peers.get(record.id);
-    const peer: Peer = { record, socket, email };
+    const peer: Peer = { record, socket, email, admissionCheckedAt: Date.now() };
     this.peers.set(record.id, peer);
     // One live connection per identity: the newest wins.
     previous?.socket.close(4000, "replaced by a newer connection");
@@ -341,6 +358,24 @@ export class Gateway {
     if (previous && role === "device") this.announce(record, false);
     this.log(`${role} ${record.id.slice(0, 8)} "${record.name}" online${userId ? " (account)" : ""}`);
     return peer;
+  }
+
+  private checkAdmission(peer: Peer): Promise<string | undefined> {
+    if (!this.options.admit || this.options.admissionCheckMs === undefined || peer.record.role !== "machine") return Promise.resolve(undefined);
+    if (peer.admissionRefusal) return Promise.resolve(peer.admissionRefusal);
+    const userId = peer.record.userId;
+    peer.admissionCheck ??= this.options.admit({ role: peer.record.role, userId }).then((refusal) => {
+      // A logout or replacement connection can finish while the lookup is pending.
+      if (this.peers.get(peer.record.id) !== peer || peer.record.userId !== userId) return undefined;
+      peer.admissionCheckedAt = Date.now();
+      if (refusal) {
+        peer.admissionRefusal = refusal;
+        peer.socket.send(JSON.stringify({ t: "error", code: "not_admitted", message: refusal } satisfies ServerFrame));
+        peer.socket.close(4003, "not_admitted");
+      }
+      return refusal;
+    }).finally(() => { peer.admissionCheck = undefined; });
+    return peer.admissionCheck;
   }
 
   // ── routing ───────────────────────────────────────────────────────
@@ -460,6 +495,11 @@ export class Gateway {
       case "turn.credentials": {
         // The computer asks and gives them to the viewer it sends its picture to: a device has no use for its own.
         need("machine");
+        const userId = peer.record.userId;
+        const refusal = await this.checkAdmission(peer);
+        if (refusal) throw new RelayError("not_admitted", refusal);
+        if (peer.record.userId !== userId) throw new RelayError("not_admitted", "账号已退出，请重新登录");
+        if (this.peers.get(peer.record.id) !== peer || peer.socket.readyState !== WebSocket.OPEN) throw new RelayError("closed", "连接已经断开");
         const now = Date.now();
         const recent = (this.turnTimes.get(peer.record.id) ?? []).filter((t) => now - t < 60_000);
         if (recent.length >= 30) throw new RelayError("rate_limited", "请求凭据太频繁了，请稍等一分钟");
@@ -504,16 +544,21 @@ export class Gateway {
         return {};
       }
       case "account.leave": {
-        // A phone signing out. Its binding outlives a missing or failed token (installed apps rely
-        // on that), so it is ended by asking.
-        need("device");
+        // A peer's binding outlives a missing/expired token. Explicit logout ends it
+        // for computers as well as phones; a later tokenless reconnect cannot revive it.
         if (!peer.record.userId) return {};
-        const machines = this.store.reachable(peer.record.id).filter(({ via }) => via === "account");
+        const reachable = this.store.reachable(peer.record.id).filter(({ via }) => via === "account");
         this.store.disown(peer.record.id);
         peer.record.userId = undefined;
         peer.email = undefined;
         // Their channels from it close now, not when it next reconnects.
-        for (const { peer: machine } of machines) this.event(machine.id, "presence", { id: peer.record.id, online: false });
+        for (const { peer: other } of reachable) {
+          this.event(other.id, "presence", { id: peer.record.id, online: false });
+          if (role === "machine") {
+            this.event(other.id, "machines.changed", {});
+            this.event(peer.record.id, "presence", { id: other.id, online: false });
+          }
+        }
         return {};
       }
       case "devices.list":

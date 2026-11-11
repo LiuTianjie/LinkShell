@@ -86,8 +86,8 @@ META = {
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
     ("en", "pricing"): {
-        "title": "LinkShell Pricing: Free, or the iTool Membership from ¥9.9 a Month",
-        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: ¥9.9 a month with the iTool site, or ¥99 a year with every iTool product.",
+        "title": "LinkShell Pricing: Free, or the iTool Membership from $3.19 a Month",
+        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19 USD monthly or $26.49 USD yearly. Pay by international card or Alipay.",
         "keywords": "LinkShell pricing, iTool membership, official gateway, free, self-hosted gateway",
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
@@ -306,6 +306,8 @@ def structured_data(lang: str, view: str, page: str) -> dict:
         # www and a locale up front: the bare domain costs two redirects. itool.tech has no Japanese.
         # checkout= opens that plan's payment once the visitor is signed in.
         buy = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?from=linkshell&checkout="
+        # USD list prices verified against iTool's live /api/pay/creem/config on 2026-11-11.
+        currency, monthly_price, yearly_price = ("USD", "3.19", "26.49") if lang == "en" and view == "pricing" else ("CNY", "9.9", "99")
         graph.append({
             "@type": "SoftwareApplication",
             "@id": software_id,
@@ -314,7 +316,7 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "iOS, Android, macOS, Windows, Linux",
             "url": site("home"),
-            "downloadUrl": GITHUB + "/releases/latest",
+            "downloadUrl": site("docs") + "#d-install",
             "installUrl": APP_STORE_ANY if view in LANDING else APP_STORE,
             "softwareHelp": {"@type": "CreativeWork", "url": site("docs")},
             "image": BASE + LANGS[lang]["og_image"],
@@ -323,14 +325,14 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "isAccessibleForFree": True,
             "publisher": org,
             "offers": [
-                {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "CNY", "url": pricing},
+                {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": currency, "url": pricing},
                 {
-                    "@type": "Offer", "name": "iTool membership (monthly)", "price": "9.9", "priceCurrency": "CNY", "url": buy + "monthly",
-                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": "9.9", "priceCurrency": "CNY", "billingDuration": "P1M"},
+                    "@type": "Offer", "name": "iTool membership (monthly)", "price": monthly_price, "priceCurrency": currency, "url": buy + "monthly",
+                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": monthly_price, "priceCurrency": currency, "billingDuration": "P1M"},
                 },
                 {
-                    "@type": "Offer", "name": "iTool membership (yearly)", "price": "99", "priceCurrency": "CNY", "url": buy + "yearly",
-                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": "99", "priceCurrency": "CNY", "billingDuration": "P1Y"},
+                    "@type": "Offer", "name": "iTool membership (yearly)", "price": yearly_price, "priceCurrency": currency, "url": buy + "yearly",
+                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": yearly_price, "priceCurrency": currency, "billingDuration": "P1Y"},
                 },
             ],
         })

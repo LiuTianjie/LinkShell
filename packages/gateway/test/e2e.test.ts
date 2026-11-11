@@ -386,6 +386,39 @@ describe("gateway v2 end to end", () => {
     await until(() => phone.relay.lastError?.code === "token_invalid");
   });
 
+  it("revokes a computer's account on explicit logout without reviving it on a tokenless reconnect", async () => {
+    const { url, gateway, host, local } = await world({ machineToken: "token-alice" });
+    const identity = host.gateway!.identity;
+    const phone = device(url, "Alice's phone", "token-alice");
+    await phone.relay.waitOnline(5000);
+    const [machine] = (await phone.relay.request("machines.list", {})).machines;
+    const link = connect(phone.relay, phone.identity, machine!);
+    await link.call("machine.info", {});
+
+    await local.call("gateway.account.leave", {});
+    expect(gateway.store.peer(identity.id)?.userId).toBeUndefined();
+    expect((await phone.relay.request("machines.list", {})).machines).toEqual([]);
+    await until(() => link.status !== "online");
+    host.gateway!.stop();
+
+    let token: string | undefined;
+    const returning = new RelayClient({
+      url: url + RELAY_PATH, identity, role: "machine", name: "Test Mac", token: () => token,
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
+    });
+    cleanups.push(() => returning.stop());
+    returning.start();
+    expect(await returning.waitOnline(5000)).toBe(true);
+    expect(returning.account).toBeUndefined();
+    expect((await phone.relay.request("machines.list", {})).machines).toEqual([]);
+
+    // A new, valid login still restores normal same-account discovery without pairing.
+    token = "token-alice";
+    returning.reauthenticate();
+    expect(await returning.waitOnline(5000)).toBe(true);
+    expect((await phone.relay.request("machines.list", {})).machines).toMatchObject([{ id: identity.id, via: "account" }]);
+  });
+
   it("admits computers only through the admission check (a subscription on the official gateway)", async () => {
     const subscribed = new Set(["alice"]);
     const admit: GatewayOptions["admit"] = async ({ role, userId }) =>
@@ -408,6 +441,41 @@ describe("gateway v2 end to end", () => {
     cleanups.push(() => machine.stop());
     await until(() => machine.lastError?.code === "not_admitted");
     expect(machine.lastError?.message).toBe("需要 Pro 订阅");
+  });
+
+  it("does not resurrect an account revoked while a tokenless handshake is awaiting admission", async () => {
+    let hold = false;
+    let resume!: () => void;
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => { started = resolve; });
+    const { url, gateway, host, local } = await world({
+      machineToken: "token-alice",
+      admit: async ({ role }) => {
+        if (role === "machine" && hold) {
+          hold = false;
+          started();
+          await new Promise<void>((resolve) => { resume = resolve; });
+        }
+        return undefined;
+      },
+    });
+    const identity = host.gateway!.identity;
+    hold = true;
+    const returning = new RelayClient({
+      url: url + RELAY_PATH, identity, role: "machine", name: "Test Mac",
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
+    });
+    cleanups.push(() => returning.stop());
+    returning.start();
+    await waiting;
+    try {
+      await local.call("gateway.account.leave", {});
+      expect(gateway.store.peer(identity.id)?.userId).toBeUndefined();
+    } finally {
+      resume();
+    }
+    await until(() => returning.lastError?.code === "token_invalid");
+    expect(gateway.store.peer(identity.id)?.userId).toBeUndefined();
   });
 
   it("holds a fast sender back instead of buffering for a slow receiver", async () => {

@@ -14,7 +14,7 @@ const { LoginError } = await import("../src/commands/login-error.js");
 const auth = await import("../src/auth.js");
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
-const PROXY = "https://itool.tech/api/linkshell/auth";
+const PROXY = "https://www.itool.tech/api/linkshell/auth";
 const SUPABASE = "https://mkbeusztkzffnzjdwmqk.supabase.co";
 const realFetch = globalThis.fetch;
 const existing = { accessToken: "existing", refreshToken: "existing-refresh", userId: "existing-user", expiresAt: Date.now() + 3_600_000 };
@@ -191,14 +191,24 @@ describe("GitHub and Google through the loopback", () => {
     await vi.waitFor(() => expect(realFetch(callback)).rejects.toThrow());
   });
 
-  it("falls back to Supabase's own PKCE grant when the proxy has no verdict", async () => {
-    const calls = remote((url) => url === PROXY ? Promise.reject(new TypeError("fetch failed")) : Response.json(session("direct")));
+  it("falls back to Supabase's own PKCE grant only when the proxy is not deployed", async () => {
+    const calls = remote((url) => url === PROXY ? new Response("Not Found", { status: 404 }) : Response.json(session("direct")));
     const login = start({ provider: "google" });
     const callback = await login.callback;
     await realFetch(`${callback}?code=c1`, { redirect: "manual" });
     expect((await login.result).accessToken).toBe("direct");
     const direct = calls.find(({ url }) => url === `${SUPABASE}/auth/v1/token?grant_type=pkce`)!;
     expect(direct.body).toMatchObject({ auth_code: "c1" });
+  });
+
+  it("does not repeat a one-use PKCE exchange after an ambiguous proxy failure", async () => {
+    const calls = remote(() => Promise.reject(new TypeError("fetch failed")));
+    const login = start({ provider: "google" });
+    const failure = login.result.catch((error: unknown) => error);
+    const callback = await login.callback;
+    await realFetch(`${callback}?code=c1`, { redirect: "manual" });
+    expect(await failure).toMatchObject({ code: "unavailable" });
+    expect(calls.map(({ url }) => url)).toEqual([PROXY]);
   });
 
   it("reports the provider's refusal and keeps the existing login", async () => {

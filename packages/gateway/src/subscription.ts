@@ -48,14 +48,71 @@ export function supabaseSubscriptions(supabase: { url: string; anonKey: string; 
  * iTool membership. Devices only reach computers they're paired with or share an
  * account with, so they need nothing more.
  */
-export function requirePro(check: CheckSubscription, warn: (message: string) => void): NonNullable<GatewayOptions["admit"]> {
+export function requirePro(
+  check: CheckSubscription,
+  warn: (message: string) => void,
+  options: { enforceGrace?: boolean; cacheMs?: number; graceMs?: number; now?: () => number } = {},
+): NonNullable<GatewayOptions["admit"]> {
+  const now = options.now ?? Date.now;
+  const cacheMs = options.cacheMs ?? 60_000;
+  const graceMs = options.graceMs ?? 60 * 60_000;
+  const startedAt = now();
+  let pruneAt = startedAt + graceMs;
+  const accounts = new Map<string, {
+    checkedAt: number;
+    result?: SubscriptionCheck;
+    lastKnown?: "active" | "inactive";
+    graceFrom?: number;
+    pending?: Promise<SubscriptionCheck>;
+  }>();
   return async ({ role, userId }) => {
     if (role !== "machine") return undefined;
     if (!userId) return "官方网关需要登录 iTool 会员账号：在电脑上运行 linkshell login";
-    const subscription = await check(userId);
-    // A lookup failure isn't a lapsed subscription; don't lock people out over it.
-    if (subscription.status === "inactive") return `官方网关需要 iTool 会员：${MEMBERSHIP_URL}`;
-    if (subscription.status === "unknown") warn(`subscription check unavailable (${subscription.reason}); admitting ${userId}`);
-    return undefined;
+    // Roll out revalidation explicitly; a code upgrade alone must preserve the
+    // existing admission behavior during a Supabase/network incident.
+    if (!options.enforceGrace) {
+      const subscription = await check(userId);
+      if (subscription.status === "inactive") return `官方网关需要 iTool 会员：${MEMBERSHIP_URL}`;
+      if (subscription.status === "unknown") warn(`subscription check unavailable (${subscription.reason}); admitting ${userId}`);
+      return undefined;
+    }
+    if (now() >= pruneAt) {
+      for (const [id, entry] of accounts) {
+        if (!entry.pending && now() - entry.checkedAt >= graceMs && (entry.graceFrom === undefined || now() - entry.graceFrom >= graceMs)) accounts.delete(id);
+      }
+      pruneAt = now() + Math.max(1, Math.min(graceMs, 60_000));
+    }
+    let account = accounts.get(userId);
+    if (!account) {
+      account = { checkedAt: -Infinity };
+      accounts.set(userId, account);
+    }
+    if (!account.result || now() - account.checkedAt >= cacheMs) {
+      const entry = account;
+      // A computer's connection, periodic check and TURN request can arrive together.
+      entry.pending ??= check(userId).catch((): SubscriptionCheck => ({ status: "unknown", reason: "entitlement_lookup_failed" }))
+        .then((result) => {
+          entry.checkedAt = now();
+          entry.result = result;
+          if (result.status !== "unknown") {
+            entry.lastKnown = result.status;
+            entry.graceFrom = result.status === "active" ? entry.checkedAt : undefined;
+          } else {
+            // A fresh gateway also tolerates a brief outage. Repeated failures must not
+            // restart this window, or reconnecting would grant membership forever.
+            // Bootstrap grace belongs to this gateway start, not each new cache entry.
+            // This also makes pruning idle accounts safe: an unknown result cannot
+            // regain grace after a known-expired account's entry has been evicted.
+            entry.graceFrom ??= startedAt;
+            warn(`subscription check unavailable (${result.reason}); ${entry.lastKnown !== "inactive" && now() - entry.graceFrom < graceMs ? "admitting" : "refusing"} ${userId}`);
+          }
+          return result;
+        }).finally(() => { entry.pending = undefined; });
+      await entry.pending;
+    }
+    if (account.result?.status === "active") return undefined;
+    if (account.result?.status === "inactive" || account.lastKnown === "inactive") return `官方网关需要 iTool 会员：${MEMBERSHIP_URL}`;
+    if (account.graceFrom !== undefined && now() - account.graceFrom < graceMs) return undefined;
+    return "暂时无法验证 iTool 会员，请稍后重试";
   };
 }

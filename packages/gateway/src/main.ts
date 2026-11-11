@@ -8,6 +8,8 @@ import { turnOptionsFromEnv } from "./turn.js";
 //   RELAY_DATA_PATH               SQLite file with pairings and keys (./data/relay.db); keep it on a volume
 //   SUPABASE_URL + SUPABASE_ANON_KEY   turn accounts on
 //   AUTH_REQUIRED=true            computers need an active Pro account (with SUPABASE_SERVICE_ROLE_KEY)
+//   MEMBERSHIP_REVALIDATION_ENABLED=true  opt in to ongoing membership checks (off by default)
+//   MEMBERSHIP_FAILURE_GRACE_SECONDS     outage grace when enabled (3600; minimum 300)
 //   TURN_SECRET + TURN_URLS       lend computers a TURN server for video with no direct path: coturn's static-auth-secret,
 //                                 and its stun:/turn:/turns: URLs (comma separated). TURN_TTL_SECONDS (28800), TURN_MAX_KBPS (3000)
 //   TRUSTED_PROXIES               comma-separated proxy addresses (or IPv4 ranges, 10.0.0.0/8) whose X-Forwarded-For is believed
@@ -31,6 +33,9 @@ const supabase = {
 };
 const version = packageVersion();
 const turn = turnOptionsFromEnv(process.env);
+const revalidateMembership = process.env.MEMBERSHIP_REVALIDATION_ENABLED === "true";
+const configuredGrace = Number(process.env.MEMBERSHIP_FAILURE_GRACE_SECONDS ?? 3600);
+const membershipGraceMs = (Number.isFinite(configuredGrace) && configuredGrace >= 300 ? configuredGrace : 3600) * 1000;
 
 const gateway = await startGateway({
   port,
@@ -44,8 +49,9 @@ const gateway = await startGateway({
   verifyToken: supabase.url && supabase.anonKey ? supabaseVerifier(supabase.url, supabase.anonKey) : undefined,
   admit:
     process.env.AUTH_REQUIRED === "true"
-      ? requirePro(supabaseSubscriptions(supabase), (message) => log("warn", `[relay] ${message}`))
+      ? requirePro(supabaseSubscriptions(supabase), (message) => log("warn", `[relay] ${message}`), { enforceGrace: revalidateMembership, graceMs: membershipGraceMs })
       : undefined,
+  admissionCheckMs: revalidateMembership ? 5 * 60_000 : undefined,
   turn,
   trustedProxies: (process.env.TRUSTED_PROXIES ?? "").split(","),
   wsConnectLimit: {
@@ -59,6 +65,7 @@ log("info", `listening on http://0.0.0.0:${gateway.port}`);
 // Said at every start: coming up on an empty file is how every phone gets unpaired.
 log("info", `pairings and keys in ${databasePath}`);
 log("info", `log level: ${logLevel}`);
+log("info", revalidateMembership ? `membership revalidation enabled; outage grace ${membershipGraceMs / 1000}s` : "membership revalidation disabled; admission-only policy");
 log("info", turn ? `TURN for video: ${turn.urls.join(", ")}` : "no TURN server: video uses a direct path or the gateway's byte relay");
 
 function shutdown(): void {

@@ -94,6 +94,33 @@ describe("turn.credentials", () => {
     for (let i = 0; i < 30; i++) await peer.request("turn.credentials", {});
     await expect(peer.request("turn.credentials", {})).rejects.toMatchObject({ code: "rate_limited" });
   });
+
+  it("refuses new credentials when an already-connected computer loses membership", async () => {
+    let active = true;
+    const peer = await gateway({ turn: OPTIONS, admissionCheckMs: 300_000, admit: async () => active ? undefined : "会员已到期" });
+    expect((await peer.request("turn.credentials", {})).servers.length).toBeGreaterThan(0);
+    active = false;
+    await expect(peer.request("turn.credentials", {})).rejects.toThrow();
+    await vi.waitFor(() => expect(peer.lastError?.code).toBe("not_admitted"));
+  });
+
+  it("rechecks membership even when an existing connection requests no new TURN credentials", async () => {
+    let active = true;
+    const peer = await gateway({ heartbeatMs: 30, admissionCheckMs: 60, admit: async () => active ? undefined : "会员已到期" });
+    active = false;
+    await vi.waitFor(() => expect(peer.lastError?.code).toBe("not_admitted"));
+  });
+
+  it("preserves connected users and TURN issuance when ongoing revalidation has not been enabled", async () => {
+    let active = true;
+    const admit = vi.fn(async () => active ? undefined : "会员已到期");
+    const peer = await gateway({ turn: OPTIONS, heartbeatMs: 30, admit });
+    active = false;
+    expect((await peer.request("turn.credentials", {})).servers.length).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(peer.status).toBe("online");
+    expect(admit).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("a host's TURN credentials", () => {

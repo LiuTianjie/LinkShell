@@ -38,7 +38,7 @@ export const OAUTH_PROVIDERS: readonly OAuthProvider[] = ["github", "google"];
 
 // itool.tech forwards the exchange for places where supabase.co is blocked but itool.tech is
 // not, as it does for refreshes. LINKSHELL_TOKEN_PROXY=off skips it (the same kill switch).
-export const AUTH_PROXY_URL = "https://itool.tech/api/linkshell/auth";
+export const AUTH_PROXY_URL = "https://www.itool.tech/api/linkshell/auth";
 // Must match the Supabase redirect allowlist entry `http://127.0.0.1:*/linkshell/callback`.
 // An IP literal rather than `localhost` (RFC 8252 §7.3): nothing can resolve it elsewhere.
 export const OAUTH_CALLBACK_PATH = "/linkshell/callback";
@@ -117,8 +117,8 @@ function parseGrant(body: unknown): SessionGrant | undefined {
 
 /**
  * A session, a refusal to show (never retried directly: a wrong password stays wrong), or
- * undefined when the proxy gave no verdict (unreachable, absent, failing) and Supabase should be
- * asked directly.
+ * undefined when an older proxy is absent, or when a password grant can safely
+ * fall back. A PKCE code is never exchanged again after an ambiguous failure.
  */
 async function exchangeViaProxy(grant: Grant, signal?: AbortSignal): Promise<SessionGrant | LoginError | undefined> {
   let response: Response;
@@ -130,13 +130,17 @@ async function exchangeViaProxy(grant: Grant, signal?: AbortSignal): Promise<Ses
       signal: bounded(signal, AbortSignal.timeout(EXCHANGE_TIMEOUT_MS)),
     });
   } catch {
-    return signal?.aborted ? new LoginError("cancelled") : undefined;
+    return signal?.aborted ? new LoginError("cancelled") : grant.grant_type === "pkce" ? new LoginError("unavailable") : undefined;
   }
   const body = await response.json().catch(() => undefined);
-  if (response.ok) return parseGrant(body);
+  if (response.ok) {
+    const parsed = parseGrant(body);
+    return parsed ?? (grant.grant_type === "pkce" ? new LoginError("unavailable") : undefined);
+  }
   // Older itool.tech deployments have no such route yet.
   if (response.status === 404) return undefined;
   const code = tokenErrorCode(response.status, body, grant.grant_type);
+  if (grant.grant_type === "pkce") return new LoginError(code === "unknown" ? "unavailable" : code);
   return isDefinitiveAccountError(code) ? new LoginError(code) : undefined;
 }
 

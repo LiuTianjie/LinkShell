@@ -11,6 +11,9 @@ import { deleteSecret, readSecret, writeSecret } from "./secure";
 
 const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = accountConfig;
 const KEY = "linkshell.account.v2";
+const AUTH_PROXY_URL = "https://www.itool.tech/api/linkshell/auth";
+const TOKEN_PROXY_URL = "https://www.itool.tech/api/linkshell/token";
+const AUTH_TIMEOUT_MS = 8_000;
 
 export const SIGN_UP_URL = "https://itool.tech/zh/register";
 
@@ -49,21 +52,48 @@ class AuthRefused extends Error {
 }
 
 async function auth(path: string, body: unknown): Promise<AccountSession> {
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify(body),
-  });
-  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const grant = path.includes("grant_type=pkce") ? "pkce" : path.includes("grant_type=refresh_token") ? "refresh_token" : "password";
+  const controller = new AbortController();
+  // One deadline covers the exchange, including any old-server fallback, so an
+  // expired session cannot hold the gateway's 10-second auth challenge forever.
+  const timeout = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
+  let response: Response | undefined;
+  let json: Record<string, unknown>;
+  try {
+    try {
+      response = await fetch(grant === "refresh_token" ? TOKEN_PROXY_URL : AUTH_PROXY_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(grant === "refresh_token" ? body : { ...body as object, grant_type: grant }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      // A timeout may have happened after Supabase consumed a one-use code or
+      // refresh token. Only a password can safely be retried at another URL.
+      if (grant !== "password" || controller.signal.aborted) throw error;
+    }
+    if (!response || response.status === 404 || (grant === "password" && response.status >= 500)) {
+      response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    }
+    json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     const message = String(json.error_description ?? json.msg ?? json.message ?? "登录失败");
-    const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(json.error_code ?? json.error));
+    const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(json.error_code ?? json.error ?? json.code));
     // The desktop describes the same refusals with the same table (client-core account-errors).
-    const grant = path.includes("grant_type=pkce") ? "pkce" : path.includes("grant_type=refresh_token") ? "refresh_token" : "password";
     const code = tokenErrorCode(response.status, json, grant);
     throw new AuthRefused(code === "unknown" ? message : accountErrorMessage(code), final);
   }
-  const user = json.user as { id: string; email?: string };
+  const user = json.user as { id?: unknown; email?: string } | undefined;
+  if (typeof json.access_token !== "string" || !json.access_token || typeof json.refresh_token !== "string" ||
+      !json.refresh_token || typeof user?.id !== "string") throw new AuthRefused(accountErrorMessage("unavailable"), false);
   return {
     accessToken: String(json.access_token),
     refreshToken: String(json.refresh_token),
@@ -145,7 +175,7 @@ export const useAccount = create<AccountState>((set, get) => ({
       .then((next) => {
         // A refresh that outlived sign-out or another login must not restore its old account.
         const current = get().session;
-        if (current?.userId !== session.userId || current.refreshToken !== session.refreshToken) return undefined;
+        if (next.userId !== session.userId || current?.userId !== session.userId || current.refreshToken !== session.refreshToken) return undefined;
         writeSecret(KEY, next);
         set({ session: next });
         return next;
@@ -158,6 +188,9 @@ export const useAccount = create<AccountState>((set, get) => ({
       .finally(() => {
         refreshing = undefined;
       });
+    // Renew early without making an otherwise valid gateway handshake wait on
+    // the network. Expired / near-expiry tokens still wait for the new grant.
+    if (session.expiresAt - Date.now() > 30_000) return session.accessToken;
     return (await refreshing)?.accessToken;
   },
 }));

@@ -74,6 +74,8 @@ const gateway = await startGateway({ port: 8787, databasePath: "./relay.db" });
 | `SUPABASE_URL`、`SUPABASE_ANON_KEY` | - | 两个都设置后启用账号：校验账号令牌，同一账号下的手机和电脑不用配对就能互相访问 |
 | `AUTH_REQUIRED` | `false` | 设为 `true`：电脑必须登录账号并且订阅有效才能接入（手机不受影响） |
 | `SUPABASE_SERVICE_ROLE_KEY` | - | `AUTH_REQUIRED=true` 时用它查询订阅 |
+| `MEMBERSHIP_REVALIDATION_ENABLED` | `false` | 显式启用已连接电脑的周期权益复检、TURN 发证复检及有限故障宽限。默认保持原有仅连接时检查策略 |
+| `MEMBERSHIP_FAILURE_GRACE_SECONDS` | `3600` | 启用复检时的故障宽限，单位秒，最小 `300`；不改变会员套餐和到期时间 |
 | `TURN_SECRET`、`TURN_URLS` | - | 两个都设置后，给电脑签发 TURN 临时凭证，屏幕视频在直连不通时经这台 coturn 中继。`TURN_SECRET` 与 coturn 的 `static-auth-secret` 相同；`TURN_URLS` 是逗号分隔的 `stun:`/`turn:`/`turns:` 地址。部署见 `deploy/turn/` 和 docs/deploy.md |
 | `TURN_TTL_SECONDS` | `28800` | TURN 凭证有效期（秒） |
 | `TURN_MAX_KBPS` | `3000` | 经中继的画面码率上限，电脑端按它限制编码 |
@@ -99,7 +101,13 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 - 账号令牌通过 `${SUPABASE_URL}/auth/v1/user` 校验。
 - 会员查的是 iTool 的 `itool_entitlement_for(uid, 'linkshell')`（service-role key）：`active` 为 true 才算有效。月度、年度会员都包含 LinkShell，在 https://www.itool.tech/zh/pro?from=linkshell 开通。
-- 只在电脑连接时检查一次；查询本身失败（网络、配置问题）时放行，不会因为一次查询失败把用户挡在外面。
+- 默认仍只在电脑连接时检查一次，查询失败时保持现有放行行为。仅更新代码不会主动复检或踢掉已有连接。
+- 经单独启用 `MEMBERSHIP_REVALIDATION_ENABLED=true` 后，电脑连接时、每 5 分钟以及签发 TURN 凭证前检查权益；同账号查询合并，并缓存 1 分钟。已明确到期时断开官方网关连接。
+- 启用复检后，查询失败时保留有限宽限：最近一次确认有效后的默认 60 分钟内可继续使用；网关启动后的前 60 分钟也允许首次查询故障。连续失败、重连或清理闲置缓存不会重置宽限；同一网关进程中已确认到期的账号不会因后续网络故障放行。网关重启会重新开始启动宽限，恢复查询后按真实权益处理。可用 `MEMBERSHIP_FAILURE_GRACE_SECONDS` 调整此窗口。
+- `linkshell logout` 会请求解除电脑在网关上的账号绑定，并清除本地凭据。即使显式配置了官方网关地址，退出后的 Host 刷新或重启也不会自动恢复旧账号连接。离线时会显示远端解绑尚未确认；已有明确配对记录不随账号解绑删除。
+- 旧 Host 不支持退出 RPC 时，CLI 用本机原有设备密钥短连网关解除绑定，既有 Host 连接被替换，会话进程不停止。旧网关也不支持机器解绑时，CLI 明确显示远端未确认，并不重新唤醒已被替换的旧 Host 连接；需升级网关或从账号设备列表移除离线电脑完成解绑。
+
+启用复检前先保持开关关闭，验证现有客户端/Host 的正常登录与配对、权益接口的成功率和新旧版本退出兼容；之后再单独启用并观察。此前已签发的 TURN 凭据仍遵循原有效期，不因代码更新立即失效。
 
 ## 接口
 

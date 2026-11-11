@@ -44,3 +44,33 @@ it("stays signed in when the refresh fails for another reason", async () => {
   expect(useAccount.getState().session).toEqual(expired);
   expect(secrets.remove).not.toHaveBeenCalled();
 });
+
+it("uses the domestic refresh proxy without retrying a token after an ambiguous failure", async () => {
+  const fetch = vi.fn(async (url: string) => {
+    expect(url).toBe("https://www.itool.tech/api/linkshell/token");
+    return Response.json({ code: "temporarily_unavailable" }, { status: 503 });
+  });
+  vi.stubGlobal("fetch", fetch);
+  await expect(useAccount.getState().token()).resolves.toBeUndefined();
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(useAccount.getState().session).toEqual(expired);
+});
+
+it("can refresh against an older deployment that has no token proxy", async () => {
+  const fetch = vi.fn(async (url: string) => url.includes("itool.tech")
+    ? new Response("Not Found", { status: 404 })
+    : Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } }));
+  vi.stubGlobal("fetch", fetch);
+  await expect(useAccount.getState().token()).resolves.toBe("fresh");
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(useAccount.getState().session?.refreshToken).toBe("rotated");
+});
+
+it("renews a still-valid token in the background instead of delaying the gateway handshake", async () => {
+  useAccount.setState({ session: { ...expired, expiresAt: Date.now() + 90_000 } });
+  let respond!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { respond = resolve; })));
+  await expect(useAccount.getState().token()).resolves.toBe("old-access");
+  respond(Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } }));
+  await vi.waitFor(() => expect(useAccount.getState().session?.accessToken).toBe("fresh"));
+});

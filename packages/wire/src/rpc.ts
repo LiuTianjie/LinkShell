@@ -480,6 +480,8 @@ const coreMethods = {
    * host connects, moves or disconnects without a restart.
    */
   "gateway.refresh": { params: empty, result: gatewayStatusSchema },
+  /** Explicitly end this computer's gateway account binding (local only). */
+  "gateway.account.leave": { params: empty, result: empty },
   /**
    * Opens a pairing window (local only). `link` is what the QR encodes; the
    * code can be typed instead. `pairing.done` follows when a device pairs.

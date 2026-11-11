@@ -119,7 +119,7 @@ async function refused(res: Response): Promise<boolean> {
 
 // itool.tech proxies the Supabase token exchange so clients in regions that can't reach
 // supabase.co directly can still refresh. Set LINKSHELL_TOKEN_PROXY=off to skip it (kill switch).
-const TOKEN_PROXY_URL = "https://itool.tech/api/linkshell/token";
+const TOKEN_PROXY_URL = "https://www.itool.tech/api/linkshell/token";
 
 interface TokenResponse {
   access_token: string;
@@ -139,8 +139,9 @@ function exchangeSignal(signal?: AbortSignal): AbortSignal {
 
 /**
  * Tries the itool.tech proxy. Returns an outcome to act on, or null meaning the proxy itself
- * couldn't give a verdict (unreachable, 5xx, unexpected shape) so the caller should fall back to
- * Supabase directly. Only a definite `invalid_grant` from the proxy signs the account out.
+ * is absent (404) so an older deployment can fall back to Supabase directly.
+ * After any other outcome the one-use token may already have rotated: retain
+ * it and retry later, rather than consume it twice through a second endpoint.
  */
 async function exchangeViaProxy(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome | null> {
   try {
@@ -150,12 +151,18 @@ async function exchangeViaProxy(refreshToken: string, signal?: AbortSignal): Pro
       body: JSON.stringify({ refresh_token: refreshToken }),
       signal: exchangeSignal(signal),
     });
-    if (res.ok) return { kind: "ok", body: (await res.json()) as TokenResponse };
+    if (res.ok) {
+      const body = (await res.json()) as Partial<TokenResponse>;
+      if (typeof body.access_token !== "string" || !body.access_token || typeof body.refresh_token !== "string" ||
+          !body.refresh_token || typeof body.user?.id !== "string") return { kind: "retryable" };
+      return { kind: "ok", body: body as TokenResponse };
+    }
+    if (res.status === 404) return null;
     const body = (await res.json().catch(() => ({}))) as { code?: string };
     if (body.code === "invalid_grant") return { kind: "dead" };
-    return null; // temporarily_unavailable, invalid_request, anything else → fall back to direct
+    return { kind: "retryable" };
   } catch {
-    return null; // couldn't reach itool.tech → fall back to direct
+    return { kind: "retryable" };
   }
 }
 

@@ -123,7 +123,7 @@ export interface RelayMethods {
   "machines.forget": { params: { machineId: string }; result: Record<string, never> };
   "devices.list": { params: Record<string, never>; result: { devices: DeviceEntry[] } };
   "devices.revoke": { params: { deviceId: string }; result: Record<string, never> };
-  /** Device: take this device off its account (signing out); paired computers stay. */
+  /** Take this peer off its account (signing out); explicit pairings stay. */
   "account.leave": { params: Record<string, never>; result: Record<string, never> };
 }
 export type RelayMethod = keyof RelayMethods;

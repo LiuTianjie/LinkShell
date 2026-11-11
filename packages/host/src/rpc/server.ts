@@ -303,6 +303,11 @@ export class HostRpcServer {
         if (!context.local) throw RpcError.app("forbidden", "网关只能在电脑上设置");
         return this.refreshGateway?.() ?? this.gateway?.status() ?? { status: "off" as const, devices: [] };
       },
+      "gateway.account.leave": async (_params: P<"gateway.account.leave">, context) => {
+        if (!context.local) throw RpcError.app("forbidden", "账号只能在电脑上退出");
+        await this.gateway?.leaveAccount();
+        return {};
+      },
       "pairing.start": (_params: P<"pairing.start">, context) => {
         if (!context.local) throw RpcError.app("forbidden", "配对只能在电脑上发起：在电脑上运行 linkshell pair");
         if (!this.gateway) throw RpcError.app("not_supported", "还没有设置网关：运行 linkshell login 使用官方网关，或运行 linkshell host --gateway <地址> 使用自己的网关");

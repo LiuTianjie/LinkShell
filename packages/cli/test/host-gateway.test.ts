@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,10 @@ describe("host gateway choice", () => {
     delete process.env.LINKSHELL_GATEWAY;
     vi.mocked(auth.isLoggedIn).mockReturnValue(false);
   });
-  afterEach(() => delete process.env.LINKSHELL_GATEWAY);
+  afterEach(() => {
+    delete process.env.LINKSHELL_GATEWAY;
+    rmSync(home, { recursive: true, force: true });
+  });
 
   it("uses no gateway when logged out and nothing is chosen", () => {
     expect(resolveGateway(home)).toBeUndefined();
@@ -40,8 +43,24 @@ describe("host gateway choice", () => {
     expect(sameGateway(OFFICIAL_GATEWAY, OFFICIAL_GATEWAY)).toBe(true);
     expect(sameGateway("https://gateway.itool.tech/", OFFICIAL_GATEWAY)).toBe(true);
     expect(sameGateway("WSS://Gateway.itool.tech", OFFICIAL_GATEWAY)).toBe(true);
+    expect(sameGateway("wss://gateway.itool.tech:443/v2/connect", OFFICIAL_GATEWAY)).toBe(true);
+    expect(sameGateway("wss://gateway.itool.tech:8443", OFFICIAL_GATEWAY)).toBe(false);
     expect(sameGateway("wss://my-gateway.example", OFFICIAL_GATEWAY)).toBe(false);
     expect(sameGateway("wss://gateway.itool.tech.evil.example", OFFICIAL_GATEWAY)).toBe(false);
     expect(sameGateway(undefined, OFFICIAL_GATEWAY)).toBe(false);
+  });
+
+  it("keeps an explicit official gateway off after logout, including on a fresh host start", () => {
+    writeHostConfig(home, { gateway: OFFICIAL_GATEWAY });
+    vi.mocked(auth.isLoggedIn).mockReturnValue(true);
+    expect(resolveGateway(home)).toBe(OFFICIAL_GATEWAY);
+    vi.mocked(auth.isLoggedIn).mockReturnValue(false);
+    expect(resolveGateway(home)).toBeUndefined();
+    process.env.LINKSHELL_GATEWAY = "https://gateway.itool.tech/";
+    expect(resolveGateway(home)).toBeUndefined();
+    process.env.LINKSHELL_GATEWAY = "wss://gateway.itool.tech:443/v2/connect";
+    expect(resolveGateway(home)).toBeUndefined();
+    process.env.LINKSHELL_GATEWAY = "wss://my-gateway.example";
+    expect(resolveGateway(home)).toBe("wss://my-gateway.example");
   });
 });
