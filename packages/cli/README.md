@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-The official gateway needs an iTool membership on the account: [get it on itool.tech](https://itool.tech/en/pro?from=linkshell) with Alipay (monthly ¥9.9 covers the iTool site and LinkShell, yearly ¥99 covers every iTool product). `linkshell login` says which tier the account has; the desktop app refreshes it after you pay.
+The official gateway needs an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/en/pro?from=linkshell) with Alipay (monthly ¥9.9 covers the iTool site and LinkShell, yearly ¥99 covers every iTool product). `linkshell login` says which tier the account has; the desktop app refreshes it after you pay.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 

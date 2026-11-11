@@ -9,7 +9,7 @@ LinkShell 的官方网关属于 iTool 会员。一份会员、两个档位，只
 
 LinkShell 的产品键是 `linkshell`，所需档位 `monthly`，所以月度、年度会员都有 LinkShell。激活码已停用：没有兑换入口，也不再销售激活码（已售出的激活码持有人已在数据库中转为年度会员）。
 
-购买页：`https://itool.tech/pro?from=linkshell`（按访客语言跳转；`/zh/pro`、`/en/pro` 指定语言）。登录和付款都在那里完成。
+购买页：`https://www.itool.tech/zh/pro?from=linkshell`（英文 `/en/pro`）。直接写 www 和语言：裸域名要多跳两次（308 到 www，再 307 到语言）。加 `&checkout=yearly` 时，登录后直接打开年度付款，月度会员的「升级年度」用的就是它。登录和付款都在那里完成。
 
 ## 读取会员
 

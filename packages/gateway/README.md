@@ -98,7 +98,7 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
 - 账号令牌通过 `${SUPABASE_URL}/auth/v1/user` 校验。
-- 会员查的是 iTool 的 `itool_entitlement_for(uid, 'linkshell')`（service-role key）：`active` 为 true 才算有效。月度、年度会员都包含 LinkShell，在 https://itool.tech/pro?from=linkshell 开通。
+- 会员查的是 iTool 的 `itool_entitlement_for(uid, 'linkshell')`（service-role key）：`active` 为 true 才算有效。月度、年度会员都包含 LinkShell，在 https://www.itool.tech/zh/pro?from=linkshell 开通。
 - 只在电脑连接时检查一次；查询本身失败（网络、配置问题）时放行，不会因为一次查询失败把用户挡在外面。
 
 ## 接口

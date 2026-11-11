@@ -30,7 +30,7 @@
 
 “取消登录”会结束本轮登录等待。“退出登录”退出本机的 LinkShell 账号并刷新网关连接，本机会话和配对记录保留。自建网关在「网关」的「更改…」里填地址即可，手机扫码或输入配对码连接，不需要账号；部署见[部署说明](deploy.md)。
 
-已登录的普通账户在总览或设置中看到「开通 iTool 会员」按钮，它在系统浏览器打开 https://itool.tech/pro?from=linkshell，用同一账号以支付宝付款；回到 App 时会自动刷新会员状态，也可以点刷新按钮。详见[会员](v2/pro-redemption.md)。已有会员显示档位（iTool 月度 / 年度会员）和 LinkShell 有效期；会员读取失败时可手动刷新。会员状态由内置 CLI 用账户令牌读取 itool.tech 的会员接口（读不到时改用 Supabase RPC），桌面不再有激活码输入。
+已登录的普通账户在总览或设置中看到「开通 iTool 会员」按钮，它在系统浏览器打开 https://www.itool.tech/zh/pro?from=linkshell，用同一账号以支付宝付款；回到 App 时会自动刷新会员状态，也可以点刷新按钮。详见[会员](v2/pro-redemption.md)。已有会员显示档位（iTool 月度 / 年度会员）和 LinkShell 有效期；会员读取失败时可手动刷新。会员状态由内置 CLI 用账户令牌读取 itool.tech 的会员接口（读不到时改用 Supabase RPC），桌面不再有激活码输入。
 
 ## App 与 CLI 的关系
 

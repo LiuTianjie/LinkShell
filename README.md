@@ -106,7 +106,7 @@ Get the app: [iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [
   linkshell pair    # in the app: Computers → Add computer
   ```
 
-Every feature is free; an iTool membership adds the hosted gateway. Get it with Alipay at [itool.tech/pro](https://itool.tech/en/pro?from=linkshell), signed in with the same account: the monthly tier (¥9.9) covers the iTool site and LinkShell, the yearly tier (¥99) covers every iTool product. Then refresh the membership in the desktop app or web workspace; there are no activation codes. See [membership](docs/v2/pro-redemption.md).
+Every feature is free; an iTool membership adds the hosted gateway. Get it with Alipay at [itool.tech/pro](https://www.itool.tech/en/pro?from=linkshell), signed in with the same account: the monthly tier (¥9.9) covers the iTool site and LinkShell, the yearly tier (¥99) covers every iTool product. Then refresh the membership in the desktop app or web workspace; there are no activation codes. See [membership](docs/v2/pro-redemption.md).
 
 The gateway also serves a browser client at its root URL, with the same pairing or account sign-in. See [the web client](apps/web/README.md).
 

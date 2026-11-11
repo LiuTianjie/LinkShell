@@ -303,6 +303,9 @@ def structured_data(lang: str, view: str, page: str) -> dict:
     if view in ("home", "pricing") or view in LANDING:
         site = lambda target: url(written_in(lang, target), target)
         pricing = site("pricing")
+        # www and a locale up front: the bare domain costs two redirects. itool.tech has no Japanese.
+        # checkout= opens that plan's payment once the visitor is signed in.
+        buy = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?from=linkshell&checkout="
         graph.append({
             "@type": "SoftwareApplication",
             "@id": software_id,
@@ -322,11 +325,11 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "offers": [
                 {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "CNY", "url": pricing},
                 {
-                    "@type": "Offer", "name": "iTool membership (monthly)", "price": "9.9", "priceCurrency": "CNY", "url": "https://itool.tech/pro?from=linkshell",
+                    "@type": "Offer", "name": "iTool membership (monthly)", "price": "9.9", "priceCurrency": "CNY", "url": buy + "monthly",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": "9.9", "priceCurrency": "CNY", "billingDuration": "P1M"},
                 },
                 {
-                    "@type": "Offer", "name": "iTool membership (yearly)", "price": "99", "priceCurrency": "CNY", "url": "https://itool.tech/pro?from=linkshell",
+                    "@type": "Offer", "name": "iTool membership (yearly)", "price": "99", "priceCurrency": "CNY", "url": buy + "yearly",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": "99", "priceCurrency": "CNY", "billingDuration": "P1Y"},
                 },
             ],
