@@ -13,7 +13,6 @@ import { Icon } from "@/components/icon";
 import { AttentionIsland } from "@/components/attention-island";
 import { isHostLowBattery } from "@/components/computer-metrics";
 import { ConnectionBanner } from "@/components/connection-banner";
-import { LsaSheet } from "@/components/lsa-sheet";
 import { NeedCard } from "@/components/need-card";
 import { SectionHeader } from "@/components/section-header";
 import { SessionAvatar, SessionRow, positionOf, type RowPosition } from "@/components/session-row";
@@ -658,7 +657,6 @@ function HomeList({
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<HomeFilterMode>("all");
-  const [lsaOpen, setLsaOpen] = useState(false);
   const words = useMemo(() => searchWords(query), [query]);
   const searching = words.length > 0;
 
@@ -798,28 +796,6 @@ function HomeList({
                 <View style={{ flex: 1 }}>
                   <Summary small={inlineControls} batteryPercent={power?.onBattery ? power.percent : null} lowBattery={lowBattery} />
                 </View>
-                {hasComputer && online ? (
-                  <Pressable
-                    onPress={() => {
-                      haptics.selection();
-                      setLsaOpen(true);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t("nav.steward")}
-                    style={({ pressed }) => ({
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 5,
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: 999,
-                      backgroundColor: pressed ? colors.fillStrong : colors.fill,
-                    })}
-                  >
-                    <Icon sf="checklist" md="checklist" size={13} color={colors.accent} />
-                    <Text style={[type.caption, { color: colors.label, fontWeight: "600" }]}>{t("nav.steward")}</Text>
-                  </Pressable>
-                ) : null}
                 {Platform.OS !== "ios" && !inlineControls ? (
                   <Pressable
                     accessibilityRole="button"
@@ -976,7 +952,6 @@ function HomeList({
           )
         }
       />
-      <LsaSheet visible={lsaOpen} onClose={() => setLsaOpen(false)} />
     </>
   );
 }

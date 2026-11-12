@@ -4,7 +4,6 @@ import type { SessionSummary } from "@linkshell/wire";
 import { LOCALE_LABELS, groupProjects, type I18nKey } from "@linkshell/client-core";
 import {
   Archive,
-  Bot,
   Layers3,
   GitBranch,
   Globe,
@@ -50,7 +49,6 @@ type Appearance = "system" | "light" | "dark";
 const places: { id: string; titleKey: I18nKey; icon: typeof MessageSquare }[] = [
   { id: "home", titleKey: "nav.sessions", icon: MessageSquare },
   { id: "projects", titleKey: "nav.projects", icon: Layers3 },
-  { id: "steward", titleKey: "nav.steward", icon: Bot },
   { id: "screen", titleKey: "nav.screen", icon: Monitor },
   { id: "terminals", titleKey: "nav.terminals", icon: Terminal },
   { id: "files", titleKey: "nav.files", icon: File },

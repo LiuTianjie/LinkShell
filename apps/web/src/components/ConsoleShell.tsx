@@ -49,7 +49,6 @@ function useNavGroups(): {
       items: [
         { id: "home", title: t("nav.sessions"), icon: "grid" },
         { id: "projects", title: t("nav.projects"), icon: "grid" },
-        { id: "steward", title: t("nav.steward"), icon: "steward" },
         { id: "computers", title: t("nav.computers"), icon: "computer" },
         { id: "archive", title: t("nav.archived"), icon: "clock" },
       ],

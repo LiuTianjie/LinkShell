@@ -5,7 +5,6 @@ import type { ProjectGroup } from "@linkshell/client-core";
 import { LOCALE_LABELS, isLocalePreference, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
 import {
   BookOpen,
-  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -100,7 +99,6 @@ type NavigationItem = { id: string; titleKey: I18nKey; icon: LucideIcon };
 // list or ⌘K.
 const navigationItems: NavigationItem[] = [
   { id: "home", titleKey: "nav.sessions", icon: MessageSquare },
-  { id: "steward", titleKey: "nav.steward", icon: Bot },
   { id: "screen", titleKey: "nav.screen", icon: Monitor },
   { id: "terminals", titleKey: "nav.terminals", icon: Terminal },
   { id: "files", titleKey: "nav.files", icon: File },

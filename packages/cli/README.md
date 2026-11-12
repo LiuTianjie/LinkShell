@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-After your 7-day free trial, the official gateway uses an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/pro?from=linkshell) with an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr — monthly covers the iTool site and LinkShell; yearly covers every iTool product plus LinkShell Agent multi-machine steward capabilities). Invite a friend and both of you receive 14 days (monthly) or 30 days (yearly). `linkshell login` shows your trial or membership status; the desktop app refreshes it after you subscribe.
+After your 7-day free trial, the official gateway uses an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/pro?from=linkshell) with an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr — monthly covers the iTool site and LinkShell; yearly covers every iTool product). Invite a friend and both of you receive 14 days (monthly) or 30 days (yearly). `linkshell login` shows your trial or membership status; the desktop app refreshes it after you subscribe.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 

@@ -1,7 +1,7 @@
 import type { AgentInfo, GatewayStatus, UsageReport } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -11,12 +11,12 @@ import { Text } from "@/components/fixed-text";
 import { AgentTile } from "@/components/agent-tile";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
-import { LsaSheet } from "@/components/lsa-sheet";
 import { LinkDot } from "@/components/status";
 import { PressedWash } from "@/components/pressable-feedback";
 import { formatApiComputeValue } from "@/components/usage-dashboard";
 import { useAccount } from "@/lib/account";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
+import { listComputers, useComputers } from "@/lib/computers";
 import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
 import { relativeTime } from "@/lib/format";
@@ -145,15 +145,21 @@ function AgentRow({ agent, first }: { agent: AgentInfo; first: boolean }) {
   );
 }
 
-function PreviewSection() {
+function WorkspaceToolsSection({ roiDetail }: { roiDetail: string }) {
   const { t, pick } = useLocale();
   const { ports } = usePorts();
   const web = ports ?? [];
-  const shown = web.slice(0, 3);
+  const shown = web.slice(0, 2);
+  const portsSubtitle = shown.length
+    ? web.length > shown.length
+      ? pick({ zh: `全部 ${web.length} 个端口，或输入端口号`, en: `All ${web.length} ports, or enter port`, ja: `全 ${web.length} 件、またはポート番号入力` })
+      : pick({ zh: "查看全部或输入其他端口", en: "Open or enter another port", ja: "別のポートを開く" })
+    : t("ports.openPreview");
+
   return (
-    <View style={{ gap: 8 }}>
-      <Text style={[type.subhead, { fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 }]}>
-        {t("nav.ports")}
+    <View style={{ gap: 7 }}>
+      <Text style={[type.footnote, { fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 12 }]}>
+        {pick({ zh: "屏幕与工具", en: "Screen & Tools", ja: "画面とツール" })}
       </Text>
       <View>
         <ListRow
@@ -161,9 +167,9 @@ function PreviewSection() {
           title={t("nav.screen")}
           time=""
           detail={pick({
-            zh: "实时查看，经端到端加密通道传输",
-            en: "Live low-latency desktop view over encrypted channel",
-            ja: "E2EE チャネル経由のリアルタイム画面表示",
+            zh: "实时查看与操控桌面",
+            en: "Live low-latency desktop view & control",
+            ja: "リアルタイム画面表示・操作",
           })}
           position="first"
           onPress={() => router.push("/screen")}
@@ -172,37 +178,24 @@ function PreviewSection() {
         {shown.map((entry) => (
           <PortRow key={entry.port} entry={entry} position="middle" />
         ))}
-        <Pressable
+        <ListRow
+          leading={<Icon sf="globe" md="language" size={20} color={colors.accent} />}
+          title={t("nav.ports")}
+          time=""
+          detail={portsSubtitle}
+          position="middle"
           onPress={() => router.push("/ports")}
-          accessibilityRole="button"
           accessibilityLabel={t("nav.ports")}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            minHeight: 46,
-            paddingHorizontal: 14,
-            backgroundColor: colors.card,
-            borderBottomLeftRadius: radius.card,
-            borderBottomRightRadius: radius.card,
-            borderCurve: "continuous",
-          }}
-        >
-          {({ pressed }) => (
-            <>
-              <PressedWash pressed={pressed} style={{ borderBottomLeftRadius: radius.card, borderBottomRightRadius: radius.card, borderCurve: "continuous" }} />
-              <Icon sf="plus.circle" md="add_circle" size={18} color={colors.accent} />
-              <Text style={[type.subhead, { flex: 1, color: colors.accent }]}>
-                {shown.length
-                  ? web.length > shown.length
-                    ? pick({ zh: `全部 ${web.length} 个，或输入端口`, en: `All ${web.length} ports, or enter port`, ja: `全 ${web.length} 件、またはポート番号入力` })
-                    : pick({ zh: "输入其他端口", en: "Enter another port", ja: "別のポートを開く" })
-                  : t("ports.openPreview")}
-              </Text>
-              <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} weight="semibold" />
-            </>
-          )}
-        </Pressable>
+        />
+        <ListRow
+          leading={<Icon sf="chart.bar" md="bar_chart" size={20} color={colors.accent} />}
+          title={t("nav.usage")}
+          time=""
+          detail={roiDetail}
+          position="last"
+          onPress={() => router.push("/usage")}
+          accessibilityLabel={t("nav.usage")}
+        />
       </View>
     </View>
   );
@@ -210,12 +203,12 @@ function PreviewSection() {
 
 type PairedDevice = GatewayStatus["devices"][number];
 
-function DeviceRow({ device, own, first, onRemove }: { device: PairedDevice; own: boolean; first: boolean; onRemove: () => void }) {
+function DeviceRow({ device, own, onRemove }: { device: PairedDevice; own: boolean; onRemove: () => void }) {
   const { t, pick } = useLocale();
   return (
     <View>
-      {first ? null : <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 44 }} />}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 }}>
+      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 44 }} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
         <View
           style={{ width: 32, height: 32, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
         >
@@ -248,19 +241,101 @@ function DeviceRow({ device, own, first, onRemove }: { device: PairedDevice; own
           hitSlop={10}
           style={({ pressed }) => ({ paddingHorizontal: 6, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
         >
-          <Text style={[type.subhead, { color: colors.danger }]}>{t("session.delete")}</Text>
+          <Text style={[type.subhead, { color: colors.danger }]}>{pick({ zh: "移除", en: "Remove", ja: "削除" })}</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-function DevicesSection() {
+function ComputerPanel({
+  title,
+  children,
+  expanded = true,
+  onToggle,
+  onAdd,
+  detail,
+}: {
+  title: string;
+  children: ReactNode;
+  expanded?: boolean;
+  onToggle?: () => void;
+  onAdd?: () => void;
+  detail?: string;
+}) {
+  const control = (icon: ReactNode) => (
+    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>
+      {icon}
+    </View>
+  );
+
+  if (onToggle && !expanded) {
+    return (
+      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", minHeight: 48, paddingHorizontal: 16, gap: 10 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: false }}
+            onPress={onToggle}
+            style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, opacity: pressed ? 0.65 : 1 })}
+          >
+            <Text accessibilityRole="header" style={[type.callout, { flex: 1, fontWeight: "500", color: colors.label }]}>
+              {title}
+            </Text>
+            {detail ? (
+              <Text style={[type.subhead, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>{detail}</Text>
+            ) : null}
+            <Icon sf="chevron.down" md="expand_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
+          </Pressable>
+          {onAdd ? (
+            <Pressable accessibilityRole="button" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+              {control(<Icon sf="plus" md="add" size={14} color={colors.accent} weight="semibold" />)}
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ gap: 7 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 }}>
+        <Pressable
+          accessibilityRole={onToggle ? "button" : "header"}
+          accessibilityState={onToggle ? { expanded } : undefined}
+          disabled={!onToggle}
+          onPress={onToggle}
+          hitSlop={6}
+          style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, opacity: onToggle && pressed ? 0.65 : 1 })}
+        >
+          <Text style={[type.footnote, { flex: 1, fontWeight: "600", color: colors.secondaryLabel }]}>{title}</Text>
+          {detail ? <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{detail}</Text> : null}
+          {onToggle ? <Icon sf="chevron.up" md="expand_less" size={11} color={colors.tertiaryLabel} weight="semibold" /> : null}
+        </Pressable>
+        {onAdd ? (
+          <Pressable accessibilityRole="button" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+            {control(<Icon sf="plus" md="add" size={14} color={colors.accent} weight="semibold" />)}
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 4 }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function DevicesSection({ defaultExpanded }: { defaultExpanded: boolean }) {
   const { link } = useConnection();
   const { t, pick } = useLocale();
   const online = useClient((state) => state.status === "online");
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
 
   useEffect(() => {
     if (!online) return;
@@ -280,7 +355,6 @@ function DevicesSection() {
   const off = gateway.status === "off";
   const up = gateway.status === "online";
   const own = deviceIdentity().id;
-  const account = gateway.account ? (gateway.account.email ?? t("common.signedIn")) : null;
   const state = up
     ? t("connection.online")
     : gateway.status === "connecting"
@@ -302,7 +376,7 @@ function DevicesSection() {
       [
         { text: t("common.cancel"), style: "cancel" },
         {
-          text: t("session.delete"),
+          text: pick({ zh: "移除", en: "Remove", ja: "削除" }),
           style: "destructive",
           onPress: () => {
             setRemoving(device.id);
@@ -324,94 +398,48 @@ function DevicesSection() {
     );
   };
 
-  const heading = { ...type.subhead, fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 } as const;
-  const card = { backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 2 } as const;
   return (
-    <>
-      <View style={{ gap: 8 }}>
-        <Text style={heading}>{t("connection.gatewayRelay")}</Text>
-        <View style={card}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 }}>
-            <View
-              style={{ width: 32, height: 32, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-            >
-              <Icon sf="antenna.radiowaves.left.and.right" md="cell_tower" size={16} color={off ? colors.tertiaryLabel : colors.label} />
-            </View>
-            <View style={{ flex: 1, gap: 1 }}>
-              <Text numberOfLines={1} style={[type.callout, { fontWeight: "500", color: colors.label }]}>
-                {off ? t("connection.lanDirect") : hostOf(gateway.url ?? "")}
-              </Text>
-              {off ? (
-                <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-                  {pick({ zh: "只能在同一网络里直连这台电脑", en: "Reachable on local Wi-Fi only", ja: "同一ネットワーク内からのみ接続可能" })}
-                </Text>
-              ) : (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                  <LinkDot health={up ? "online" : gateway.status === "connecting" ? "connecting" : gateway.error ? "error" : "offline"} />
-                  <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                    {state}
-                    {account ? ` · ${account}` : ""}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
+    <ComputerPanel
+      title={pick({ zh: "连接与配对设备", en: "Relay & Paired Devices", ja: "中継とペアリング端末" })}
+      expanded={expanded}
+      onToggle={() => {
+        haptics.selection();
+        setExpanded((value) => !value);
+      }}
+      detail={gateway.devices.length > 0 ? String(gateway.devices.length) : state}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
+        <View
+          style={{ width: 32, height: 32, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
+        >
+          <Icon sf="antenna.radiowaves.left.and.right" md="cell_tower" size={16} color={off ? colors.tertiaryLabel : colors.label} />
         </View>
-      </View>
-      <View style={{ gap: 8 }}>
-        <Text style={heading}>{pick({ zh: "已配对的设备", en: "Paired Devices", ja: "ペアリング済み端末" })}</Text>
-        <View style={card}>
-          {gateway.devices.length === 0 ? (
-            <Text style={[type.subhead, { color: colors.secondaryLabel, paddingVertical: 14 }]}>
-              {pick({ zh: "还没有配对的设备", en: "No paired devices yet", ja: "ペアリング済みの端末はありません" })}
+        <View style={{ flex: 1, gap: 1 }}>
+          <Text numberOfLines={1} style={[type.callout, { fontWeight: "500", color: colors.label }]}>
+            {off ? t("connection.lanDirect") : hostOf(gateway.url ?? "")}
+          </Text>
+          {off ? (
+            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+              {pick({ zh: "仅限同一局域网直连", en: "Local Wi-Fi only", ja: "同一ネットワーク内のみ" })}
             </Text>
           ) : (
-            gateway.devices.map((device, index) => (
-              <View key={device.id} style={{ opacity: removing === device.id ? 0.4 : 1 }}>
-                <DeviceRow device={device} own={device.id === own} first={index === 0} onRemove={() => remove(device)} />
-              </View>
-            ))
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <LinkDot health={up ? "online" : gateway.status === "connecting" ? "connecting" : gateway.error ? "error" : "offline"} />
+              <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+                {state}
+              </Text>
+            </View>
           )}
         </View>
       </View>
-    </>
-  );
-}
-
-function ComputerPanel({ title, children, expanded = true, onToggle, onAdd, detail }: {
-  title: string;
-  children: ReactNode;
-  expanded?: boolean;
-  onToggle?: () => void;
-  onAdd?: () => void;
-  detail?: string;
-}) {
-  const heading = (
-    <>
-      <Text accessibilityRole="header" style={[type.subhead, { flex: 1, fontWeight: "600", color: colors.secondaryLabel }]}>{title}</Text>
-      {detail ? <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{detail}</Text> : null}
-    </>
-  );
-  const control = (icon: ReactNode) => <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>{icon}</View>;
-  return (
-    <View style={{ gap: 8 }}>
-      {onToggle ? (
-        <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={onToggle} hitSlop={6} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingHorizontal: 6, opacity: pressed ? 0.6 : 1 })}>
-          {heading}
-          {control(<Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={13} color={colors.secondaryLabel} weight="semibold" />)}
-        </Pressable>
-      ) : (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingHorizontal: 6 }}>
-          {heading}
-          {onAdd ? (
-            <Pressable accessibilityRole="button" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
-              {control(<Icon sf="plus" md="add" size={15} color={colors.secondaryLabel} weight="semibold" />)}
-            </Pressable>
-          ) : null}
-        </View>
-      )}
-      {expanded ? <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 4 }}>{children}</View> : null}
-    </View>
+      {gateway.devices.length > 0
+        ? gateway.devices.map((device) => (
+            <View key={device.id} style={{ opacity: removing === device.id ? 0.4 : 1 }}>
+              <DeviceRow device={device} own={device.id === own} onRemove={() => remove(device)} />
+            </View>
+          ))
+        : null}
+    </ComputerPanel>
   );
 }
 
@@ -432,6 +460,12 @@ export function ComputerScreen() {
   const detail = useClient((state) => state.statusDetail);
   const { refresh } = useActions();
   const { url, computer, link } = useConnection();
+  const savedComputers = useComputers((state) => state.saved);
+  const liveComputers = useComputers((state) => state.live);
+  const computersCount = useMemo(
+    () => listComputers({ saved: savedComputers, live: liveComputers }).length,
+    [savedComputers, liveComputers],
+  );
   const account = useAccount((state) => state.session);
   const accountAction: PageAction = {
     key: "account",
@@ -439,17 +473,17 @@ export function ComputerScreen() {
     label: t("nav.account"),
     onPress: () => router.push("/account"),
   };
+  const [computersExpanded, setComputersExpanded] = useState(false);
   const [agentsExpanded, setAgentsExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lsaOpen, setLsaOpen] = useState(false);
   const [usageSummary, setUsageSummary] = useState<UsageReport | null>(null);
   const hasComputer = useHasComputer();
   const online = status === "online";
   const platform = platformName(machine?.platform ?? "");
   const names = useComputerNames((state) => state.names);
   const title = computerDisplayName(computer, names);
-  const hostname = machine?.hostname.replace(/\.local$/, "");
   const agents = [...(machine?.agents ?? [])].sort((a, b) => Number(b.installed) - Number(a.installed));
+  const installedAgentsCount = agents.filter((agent) => agent.installed).length;
 
   useEffect(() => {
     setUsageSummary(null);
@@ -470,6 +504,21 @@ export function ComputerScreen() {
     ? `${formatApiComputeValue(usageSummary.estimatedCostUsd ?? usageSummary.totals.estimatedCostUsd)} · ${t("usage.remoteApprovals")} ${usageSummary.remoteStats?.remoteApprovals ?? 0}`
     : t("usage.subscriptionReferenceNote");
 
+  const statusSummary = online
+    ? [t("connection.online"), machine ? platform.label : undefined, machine?.hostVersion ? `v${machine.hostVersion}` : undefined]
+        .filter(Boolean)
+        .join(" · ")
+    : status === "connecting"
+      ? t("connection.connecting")
+      : `${t("connection.offline")}${detail ? ` · ${detail}` : ""}`;
+
+  const transportSummary =
+    computer.kind === "relay"
+      ? `${computer.lanUrl ? `${t("connection.lanDirect")} + ` : ""}${t("connection.gatewayRelay")}${
+          hostOf(computer.gateway) !== "gateway.itool.tech" ? ` · ${hostOf(computer.gateway)}` : ""
+        }`
+      : `${t("connection.lanDirect")} · ${url.replace(/^wss?:\/\//, "")}`;
+
   return (
     <>
       <Stack.Screen options={{ title: "", headerShown: !inlineControls, headerTransparent: true, headerLargeTitleEnabled: false }} />
@@ -480,7 +529,7 @@ export function ComputerScreen() {
           paddingHorizontal: 16,
           paddingTop: inlineControls ? Math.max(insets.top, systemInsets.top) + 8 : 16,
           paddingBottom: 40 + tabInset + (inlineControls && Platform.OS === "ios" ? Math.max(insets.bottom, systemInsets.bottom) : 0),
-          gap: 20,
+          gap: 18,
         }}
         refreshControl={
           <RefreshControl
@@ -497,21 +546,20 @@ export function ComputerScreen() {
         {hasComputer ? (
           <View
             onLayout={(event) => setDashboardWidth(event.nativeEvent.layout.width)}
-            style={{ width: "100%", flexDirection: wide ? "row" : "column", alignItems: "flex-start", gap: 20 }}
+            style={{ width: "100%", flexDirection: wide ? "row" : "column", alignItems: "flex-start", gap: 18 }}
           >
-            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
+            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 18 }}>
               <View
                 style={{
                   backgroundColor: colors.card,
                   borderRadius: radius.card,
                   borderCurve: "continuous",
-                  padding: 16,
-                  gap: 14,
+                  overflow: "hidden",
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-                  <ComputerArt name={machine?.hostname ?? (computer.kind === "relay" ? computer.machine.name : computer.name)} size={42} />
-                  <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 }}>
+                  <ComputerArt name={machine?.hostname ?? (computer.kind === "relay" ? computer.machine.name : computer.name)} size={40} />
+                  <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={t("nav.computers")}
@@ -519,79 +567,75 @@ export function ComputerScreen() {
                         haptics.selection();
                         router.push("/computers");
                       }}
-                      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                      hitSlop={6}
+                      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 6, opacity: pressed ? 0.6 : 1 })}
                     >
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
-                        <Text numberOfLines={1} style={[type.headline, { color: colors.label, flex: 1, minWidth: 0 }]}>
-                          {title}
-                        </Text>
-                        <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
-                      </View>
+                      <Text numberOfLines={1} style={[type.headline, { color: colors.label, flexShrink: 1 }]}>
+                        {title}
+                      </Text>
+                      <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
                     </Pressable>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <LinkDot health={online ? "online" : status === "connecting" ? "connecting" : detail ? "error" : "offline"} />
-                      <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel, flexShrink: 1 }]}>
-                        {online
-                          ? t("connection.online")
-                          : status === "connecting"
-                            ? t("connection.connecting")
-                            : `${t("connection.offline")}${detail ? ` · ${detail}` : ""}`}
+                      <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, flex: 1 }]}>
+                        {statusSummary}
                       </Text>
                     </View>
-                    {machine ? (
-                      <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
-                        {hostname && hostname !== title ? hostname : platform.label} · LinkShell {machine.hostVersion}
-                      </Text>
-                    ) : null}
                   </View>
                   {inlineControls ? <PageActionButton action={accountAction} /> : null}
                 </View>
-                <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                  <Icon
-                    sf={computer.kind === "relay" && !computer.lanUrl ? "lock.fill" : "wifi"}
-                    md={computer.kind === "relay" && !computer.lanUrl ? "lock" : "wifi"}
-                    size={12}
-                    color={colors.tertiaryLabel}
-                  />
-                  <Text numberOfLines={2} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                    {computer.kind === "relay"
-                      ? `${computer.lanUrl ? `${t("connection.lanDirect")} + ` : ""}${t("connection.gatewayRelay")} · ${hostOf(computer.gateway)}`
-                      : `${t("connection.lanDirect")} · ${url.replace(/^wss?:\/\//, "")}`}
-                  </Text>
-                </View>
+
+                <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 16 }} />
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("nav.account")}
+                  onPress={() => {
+                    haptics.selection();
+                    router.push("/account");
+                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingHorizontal: 16, paddingVertical: 9 }}
+                >
+                  {({ pressed }) => (
+                    <>
+                      <PressedWash pressed={pressed} />
+                      <Icon
+                        sf={account ? "person.crop.circle.fill" : "person.crop.circle"}
+                        md="account_circle"
+                        size={18}
+                        color={colors.accent}
+                      />
+                      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "500", flexShrink: 1 }]}>
+                          {account?.email ?? t("nav.account")}
+                        </Text>
+                        <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
+                          {transportSummary}
+                        </Text>
+                      </View>
+                      <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} weight="semibold" />
+                    </>
+                  )}
+                </Pressable>
               </View>
 
+              {online ? <WorkspaceToolsSection roiDetail={roiDetail} /> : null}
               <ComputerMetrics key={computer.key} />
-
-              {online ? (
-                <View>
-                  <ListRow
-                    leading={<Icon sf="checklist" md="checklist" size={20} color={colors.accent} />}
-                    title={t("lsa.title")}
-                    time=""
-                    detail={t("lsa.subtitle")}
-                    position="first"
-                    onPress={() => setLsaOpen(true)}
-                    accessibilityLabel={t("lsa.title")}
-                  />
-                  <ListRow
-                    leading={<Icon sf="chart.bar" md="bar_chart" size={20} color={colors.accent} />}
-                    title={t("nav.usage")}
-                    time=""
-                    detail={roiDetail}
-                    position="last"
-                    onPress={() => router.push("/usage")}
-                    accessibilityLabel={t("nav.usage")}
-                  />
-                </View>
-              ) : null}
-              {online ? <PreviewSection /> : null}
             </View>
 
-            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 20 }}>
+            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 12 }}>
               <ComputerPanel
                 title={t("nav.computers")}
+                expanded={wide || computersExpanded}
+                onToggle={
+                  wide
+                    ? undefined
+                    : () => {
+                        haptics.selection();
+                        setComputersExpanded((value) => !value);
+                      }
+                }
+                detail={computersCount > 0 ? String(computersCount) : undefined}
                 onAdd={() => {
                   haptics.selection();
                   router.push("/pair");
@@ -599,6 +643,7 @@ export function ComputerScreen() {
               >
                 <ComputerList background={colors.card} />
               </ComputerPanel>
+
               <ComputerPanel
                 title="Agent"
                 expanded={agentsExpanded}
@@ -607,8 +652,8 @@ export function ComputerScreen() {
                   setAgentsExpanded((value) => !value);
                 }}
                 detail={
-                  agents.some((agent) => agent.installed)
-                    ? `${agents.filter((agent) => agent.installed).length}`
+                  installedAgentsCount > 0
+                    ? String(installedAgentsCount)
                     : !agentsExpanded
                       ? online
                         ? "0"
@@ -616,7 +661,7 @@ export function ComputerScreen() {
                       : undefined
                 }
               >
-                {!agents.some((agent) => agent.installed) ? (
+                {installedAgentsCount === 0 ? (
                   <Text style={[type.subhead, { color: colors.secondaryLabel, paddingTop: 6, paddingBottom: 16 }]}>
                     {online
                       ? pick({ zh: "这台电脑上还没有检测到 Agent", en: "No coding agents detected on this computer", ja: "この PC で Agent が検出されていません" })
@@ -643,7 +688,7 @@ export function ComputerScreen() {
                 ) : null}
               </ComputerPanel>
 
-              {online ? <DevicesSection /> : null}
+              {online ? <DevicesSection defaultExpanded={wide} /> : null}
             </View>
           </View>
         ) : (
@@ -657,7 +702,6 @@ export function ComputerScreen() {
           </View>
         )}
       </ScrollView>
-      <LsaSheet visible={lsaOpen} onClose={() => setLsaOpen(false)} />
       {Platform.OS !== "ios" || inlineControls ? <StatusBarFade /> : null}
     </>
   );

@@ -83,11 +83,10 @@ import {
   ChevronDown,
   FileText,
   Folder,
-  Globe,
   Sparkles,
 } from "lucide-react";
 import { reconnectLabel, reconnectOf, shownQueue, userMessageView } from "@linkshell/client-core";
-import type { ContentBlock, PortInfo, ProjectFileEntry, SessionSummary, ToolDetail } from "@linkshell/wire";
+import type { ContentBlock, ProjectFileEntry, SessionSummary, ToolDetail } from "@linkshell/wire";
 import type { TimelineItem } from "@linkshell/client-core";
 import {
   commandQuery,
@@ -120,17 +119,15 @@ import { LiveActivity } from "./LiveActivity";
 import { FileView, Files, fileBase64 } from "./Files";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, shrinkImage } from "./attachments";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
-import { PortPreview } from "./Ports";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { finishComposerSend, useComposerDraft } from "./composer-draft";
-import { ComputerPreview, StatusDot } from "./Video";
+import { ComputerPreview } from "./Video";
 import { McpAppView, appTabId, type AppTab } from "./McpApp";
 import { isDesktop } from "./desktop";
 import { sessionNeedsAttention, waitingLabel } from "./session-list";
 import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useT } from "./i18n";
 
 /** Extracts an active `@file` mention token ending at `caret` (ignoring emails and bare `/commands`). */
@@ -170,14 +167,6 @@ function timelineItemText(item: TimelineItem): string {
     default:
       return "";
   }
-}
-
-function portMatchesSessionCwd(entry: PortInfo, sessionCwd: string): boolean {
-  if (!entry.http || !entry.cwd || !sessionCwd) return false;
-  const root = sessionCwd.replace(/\/+$/, "");
-  const target = entry.cwd.replace(/\/+$/, "");
-  if (!root || !target) return false;
-  return target === root || target.startsWith(`${root}/`) || root.startsWith(`${target}/`);
 }
 
 type Panel =
@@ -578,31 +567,6 @@ export function Session({
     }
     return outlineFilter === "all" ? list : list.filter((entry) => entry.category === outlineFilter);
   }, [view?.items, outlineFilter]);
-
-  // Auto-detect HTTP ports matching `session.cwd`
-  const portsLoad = useLoad(
-    () => (online ? link.call("ports.list", {}) : Promise.resolve({ ports: [] as PortInfo[] })),
-    [link, online],
-    online ? 8000 : 0,
-  );
-  const matchingPorts = useMemo(
-    () => (portsLoad.value?.ports ?? []).filter((entry) => portMatchesSessionCwd(entry, session.cwd)),
-    [portsLoad.value?.ports, session.cwd],
-  );
-  const [dismissedPorts, setDismissedPorts] = useState<ReadonlySet<number>>(new Set());
-  const [previewPort, setPreviewPort] = useState<number>();
-  const [previewPortRevision, setPreviewPortRevision] = useState(0);
-  const [previewMode, setPreviewMode] = useState<"port" | "screen">("port");
-  const activePreviewPort = previewPort ?? matchingPorts[0]?.port;
-  const readyPort = useMemo(
-    () =>
-      matchingPorts.find(
-        (entry) =>
-          !dismissedPorts.has(entry.port) &&
-          !(panel === "preview" && previewMode === "port" && activePreviewPort === entry.port),
-      ),
-    [matchingPorts, dismissedPorts, panel, previewMode, activePreviewPort],
-  );
 
   const queue = shownQueue(session.queue, queueing);
   const handleFile = (path: string, line?: number) => {
@@ -1554,52 +1518,6 @@ export function Session({
                   ))}
                 </div>
               )}
-              {readyPort && (
-                <div
-                  className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
-                  role="status"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <StatusDot on />
-                    <span className="truncate font-medium">
-                      {t("ports.readyPill", { port: readyPort.port })}
-                    </span>
-                    {readyPort.title && (
-                      <span className="truncate text-muted-foreground">· {readyPort.title}</span>
-                    )}
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="secondary"
-                      onClick={() => {
-                        setPreviewPort(readyPort.port);
-                        setPreviewMode("port");
-                        void setPanel("preview");
-                      }}
-                    >
-                      <Globe data-icon="inline-start" />
-                      {t("ports.openPreview")}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={t("common.close")}
-                      onClick={() =>
-                        setDismissedPorts((prev) => {
-                          const next = new Set(prev);
-                          next.add(readyPort.port);
-                          return next;
-                        })
-                      }
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                </div>
-              )}
               <Popover
                 open={query !== undefined || mention !== undefined}
                 onOpenChange={(open) => {
@@ -2140,55 +2058,9 @@ export function Session({
                     onSelect={setTerminal}
                   />
                 )}
-                {panel === "preview" &&
-                  (activePreviewPort ? (
-                    <div className="flex h-full min-h-0 flex-col gap-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <Tabs
-                          value={previewMode}
-                          onValueChange={(value) => setPreviewMode(value as "port" | "screen")}
-                        >
-                          <TabsList variant="line">
-                            <TabsTrigger value="port">
-                              localhost:{activePreviewPort}
-                            </TabsTrigger>
-                            <TabsTrigger value="screen">
-                              {t("nav.screen")}
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                        {matchingPorts.length > 1 && previewMode === "port" && (
-                          <div className="flex items-center gap-1">
-                            {matchingPorts.map((entry) => (
-                              <Button
-                                key={entry.port}
-                                type="button"
-                                size="xs"
-                                variant={entry.port === activePreviewPort ? "secondary" : "ghost"}
-                                onClick={() => setPreviewPort(entry.port)}
-                              >
-                                :{entry.port}
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-h-0 flex-1">
-                        {previewMode === "port" ? (
-                          <PortPreview
-                            key={`${activePreviewPort}:${previewPortRevision}`}
-                            port={activePreviewPort}
-                            sessionId={session.id}
-                            retry={() => setPreviewPortRevision((v) => v + 1)}
-                          />
-                        ) : (
-                          <ComputerPreview sessionId={session.id} />
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <ComputerPreview sessionId={session.id} />
-                  ))}
+                {panel === "preview" && (
+                  <ComputerPreview sessionId={session.id} />
+                )}
                 {(panel === "mcp" || panel === "apps") && (
                   <>
                     <p className="muted">

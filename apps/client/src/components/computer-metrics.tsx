@@ -89,24 +89,29 @@ function ResourceRow({
   return (
     <View
       style={{
-        minHeight: 44,
-        paddingVertical: 11,
+        minHeight: 42,
+        paddingVertical: 9,
         flexDirection: "row",
-        alignItems: "flex-start",
-        gap: 16,
+        alignItems: "center",
+        gap: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: colors.separator,
       }}
     >
       <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{label}</Text>
-      <View style={{ flex: 1, minWidth: 0, gap: 3, alignItems: "flex-end" }}>
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "baseline", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
+        {detail ? (
+          <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
+            {detail}
+          </Text>
+        ) : null}
         <Text
+          numberOfLines={1}
           style={[
             type.subhead,
             {
-              maxWidth: "100%",
               color: warn ? colors.danger : colors.label,
-              fontWeight: warn ? "600" : "400",
+              fontWeight: warn ? "600" : "500",
               textAlign: "right",
               fontVariant: ["tabular-nums"],
             },
@@ -114,11 +119,6 @@ function ResourceRow({
         >
           {value}
         </Text>
-        {detail ? (
-          <Text style={[type.caption, { maxWidth: "100%", color: colors.secondaryLabel, textAlign: "right", fontVariant: ["tabular-nums"] }]}>
-            {detail}
-          </Text>
-        ) : null}
       </View>
     </View>
   );
@@ -129,6 +129,7 @@ export function ComputerMetrics() {
   const { locale, t, pick } = useLocale();
   const { metrics, history, online, locked, unavailable, error, retry } = useMachineMetrics();
   const [expanded, setExpanded] = useState(false);
+  const [keepAwakeExpanded, setKeepAwakeExpanded] = useState(false);
   const [keepAwakeOverride, setKeepAwakeOverride] = useState<MachineKeepAwake | null>(null);
   const [switchingKeepAwake, setSwitchingKeepAwake] = useState(false);
 
@@ -163,6 +164,7 @@ export function ComputerMetrics() {
     try {
       const updated = await link.call("machine.keepAwake", { mode }, 10_000);
       setKeepAwakeOverride(updated);
+      setKeepAwakeExpanded(false);
       haptics.selection();
     } catch (reason) {
       haptics.error();
@@ -202,6 +204,10 @@ export function ComputerMetrics() {
     { mode: "off", label: t("power.keepAwakeOff"), desc: t("power.keepAwakeOffDesc") },
   ];
 
+  const currentKeepAwakeLabel = keepAwake
+    ? (keepAwakeOptions.find((opt) => opt.mode === keepAwake.mode)?.label ?? t("power.keepAwakeSmart"))
+    : "";
+
   return (
     <View style={{ gap: 12 }}>
       {lowBattery && power?.percent !== null && power?.percent !== undefined ? (
@@ -224,8 +230,8 @@ export function ComputerMetrics() {
         </View>
       ) : null}
 
-      <View style={{ gap: 8 }}>
-        <Text accessibilityRole="header" style={[type.subhead, { fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 6 }]}>
+      <View style={{ gap: 7 }}>
+        <Text accessibilityRole="header" style={[type.footnote, { fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 12 }]}>
           {pick({ zh: "资源与电源", en: "System & Power", ja: "システムと電源" })}
         </Text>
         <View style={{ paddingHorizontal: 16, backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
@@ -234,12 +240,11 @@ export function ComputerMetrics() {
               <ResourceRow label="CPU" value={percent(metrics.cpu.usage)} />
               <ResourceRow
                 label={pick({ zh: "内存", en: "Memory", ja: "メモリ" })}
-                value={percent(metricPercent(metrics.memory.usedBytes, metrics.memory.totalBytes))}
                 detail={`${gib(metrics.memory.usedBytes)} / ${gib(metrics.memory.totalBytes)}`}
+                value={percent(metricPercent(metrics.memory.usedBytes, metrics.memory.totalBytes))}
               />
               <ResourceRow
                 label={pick({ zh: "磁盘", en: "Disk", ja: "ディスク" })}
-                value={disk ? `${gib(disk.usedBytes)} / ${gib(disk.totalBytes)}` : "—"}
                 detail={
                   disk
                     ? pick({
@@ -249,6 +254,7 @@ export function ComputerMetrics() {
                       })
                     : undefined
                 }
+                value={disk ? `${gib(disk.usedBytes)} / ${gib(disk.totalBytes)}` : "—"}
               />
               {powerValue ? (
                 <ResourceRow
@@ -257,20 +263,83 @@ export function ComputerMetrics() {
                   warn={lowBattery}
                 />
               ) : null}
+              {online && keepAwake ? (
+                <View style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator }}>
+                  <PressableFeedback
+                    onPress={() => {
+                      haptics.selection();
+                      setKeepAwakeExpanded((value) => !value);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: keepAwakeExpanded }}
+                    accessibilityLabel={t("power.keepAwake")}
+                    style={{ marginHorizontal: -16, paddingHorizontal: 16, minHeight: 42, flexDirection: "row", alignItems: "center", gap: 10 }}
+                  >
+                    <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{t("power.keepAwake")}</Text>
+                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                      {keepAwake.active ? <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.ok }} /> : null}
+                      <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "500" }]}>
+                        {currentKeepAwakeLabel}
+                      </Text>
+                      <Icon
+                        sf={keepAwakeExpanded ? "chevron.up" : "chevron.down"}
+                        md={keepAwakeExpanded ? "expand_less" : "expand_more"}
+                        size={12}
+                        color={colors.tertiaryLabel}
+                        weight="semibold"
+                      />
+                    </View>
+                  </PressableFeedback>
+                  {keepAwakeExpanded ? (
+                    <View style={{ paddingBottom: 8 }}>
+                      {keepAwakeOptions.map((opt) => {
+                        const selected = keepAwake.mode === opt.mode;
+                        return (
+                          <Pressable
+                            key={opt.mode}
+                            disabled={switchingKeepAwake}
+                            onPress={() => void setKeepAwakeMode(opt.mode)}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected }}
+                            style={({ pressed }) => ({
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 10,
+                              paddingVertical: 8,
+                              paddingLeft: 8,
+                              borderTopWidth: StyleSheet.hairlineWidth,
+                              borderTopColor: colors.separator,
+                              opacity: pressed ? 0.65 : 1,
+                            })}
+                          >
+                            <View style={{ flex: 1, gap: 2 }}>
+                              <Text style={[type.subhead, { color: selected ? colors.accent : colors.label, fontWeight: selected ? "600" : "400" }]}>
+                                {opt.label}
+                              </Text>
+                              <Text style={[type.caption, { color: colors.secondaryLabel }]}>{opt.desc}</Text>
+                            </View>
+                            {selected ? <Icon sf="checkmark" md="check" size={14} color={colors.accent} weight="bold" /> : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               <PressableFeedback
                 onPress={() => setExpanded((value) => !value)}
                 accessibilityRole="button"
                 accessibilityState={{ expanded }}
                 accessibilityLabel={pick({ zh: "使用趋势与详情", en: "Trends & Details", ja: "推移と詳細" })}
-                style={{ marginHorizontal: -16, paddingHorizontal: 16, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ marginHorizontal: -16, paddingHorizontal: 16, minHeight: 42, flexDirection: "row", alignItems: "center", gap: 8 }}
               >
                 <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
                   {pick({ zh: "使用趋势与详情", en: "Trends & Details", ja: "推移と詳細" })}
                 </Text>
-                <Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={14} color={colors.tertiaryLabel} />
+                <Icon sf={expanded ? "chevron.up" : "chevron.down"} md={expanded ? "expand_less" : "expand_more"} size={12} color={colors.tertiaryLabel} weight="semibold" />
               </PressableFeedback>
               {expanded ? (
-                <View style={{ gap: 12, paddingBottom: 16 }}>
+                <View style={{ gap: 12, paddingBottom: 14 }}>
                   <View style={{ gap: 4 }}>
                     <View style={{ flexDirection: "row", gap: 12 }}>
                       <Text style={[type.caption, { color: colors.accent }]}>CPU</Text>
@@ -300,7 +369,7 @@ export function ComputerMetrics() {
               ) : null}
             </>
           ) : (
-            <View style={{ gap: 8, paddingVertical: 16 }}>
+            <View style={{ gap: 8, paddingVertical: 14 }}>
               <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{status}</Text>
               {error && !unavailable ? (
                 <>
@@ -314,55 +383,6 @@ export function ComputerMetrics() {
           )}
         </View>
       </View>
-
-      {online && keepAwake ? (
-        <View style={{ gap: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 }}>
-            <Text accessibilityRole="header" style={[type.subhead, { fontWeight: "600", color: colors.secondaryLabel }]}>
-              {t("power.keepAwake")}
-            </Text>
-            <Text style={[type.caption, { color: keepAwake.active ? colors.ok : colors.tertiaryLabel, fontWeight: "600" }]}>
-              {keepAwake.active ? t("power.keepAwakeActive") : t("power.keepAwakeIdle")}
-            </Text>
-          </View>
-          <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 14, paddingVertical: 8, gap: 4 }}>
-            {keepAwakeOptions.map((opt, idx) => {
-              const selected = keepAwake.mode === opt.mode;
-              return (
-                <Pressable
-                  key={opt.mode}
-                  disabled={switchingKeepAwake}
-                  onPress={() => void setKeepAwakeMode(opt.mode)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                    paddingVertical: 10,
-                    borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
-                    borderTopColor: colors.separator,
-                    opacity: pressed ? 0.65 : 1,
-                  })}
-                >
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[type.subhead, { color: colors.label, fontWeight: selected ? "600" : "400" }]}>
-                      {opt.label}
-                    </Text>
-                    <Text style={[type.caption, { color: colors.secondaryLabel }]}>{opt.desc}</Text>
-                  </View>
-                  <Icon
-                    sf={selected ? "checkmark.circle.fill" : "circle"}
-                    md={selected ? "radio_button_checked" : "radio_button_unchecked"}
-                    size={18}
-                    color={selected ? colors.accent : colors.tertiaryLabel}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import type { AsyncQuestion, PortInfo } from "@linkshell/wire";
+import type { AsyncQuestion } from "@linkshell/wire";
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { answeredQuestions, cardsAtTurnEnd, openWrapUp, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
@@ -6,7 +6,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
@@ -16,7 +16,6 @@ import { speakNativeText, stopNativeSpeaking } from "../../modules/link-layout";
 import { AgentTile } from "@/components/agent-tile";
 import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
-import { LsaSheet } from "@/components/lsa-sheet";
 import { SessionNotices } from "@/components/session-notices";
 import { SessionOutlineSheet } from "@/components/session-outline-sheet";
 import { AgentInteractions } from "./acp-screen";
@@ -30,14 +29,12 @@ import { Timeline } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
 import {
   isCommuterTtsEnabled,
-  matchSessionPorts,
   setCommuterTtsEnabled,
   summarizeTurnForSpeech,
 } from "@/lib/coding-ux";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { useLocale } from "@/lib/locale";
-import { usePorts } from "@/lib/ports";
 import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
@@ -46,7 +43,7 @@ import { BranchTag } from "@/components/branch-tag";
 import { branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { mono, radius, type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth, type HeaderAction } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
 import { sessionTimelineItems } from "@/lib/workflows";
@@ -112,53 +109,6 @@ function countChanges(items: TimelineItem[]): number {
     for (const change of fileChanges(item.content)) paths.add(change.path);
   }
   return paths.size;
-}
-
-function PortReadyCapsules({
-  ports,
-  onOpenPort,
-}: {
-  ports: PortInfo[];
-  onOpenPort: (entry: PortInfo) => void;
-}) {
-  const { t } = useLocale();
-  if (ports.length === 0) return null;
-  return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 14, paddingBottom: 6 }}>
-      {ports.slice(0, 2).map((entry) => (
-        <Pressable
-          key={entry.port}
-          onPress={() => {
-            haptics.selection();
-            onOpenPort(entry);
-          }}
-          accessibilityRole="button"
-          style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            paddingLeft: 10,
-            paddingRight: 10,
-            paddingVertical: 6,
-            borderRadius: 999,
-            backgroundColor: pressed ? colors.fillStrong : colors.card,
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: colors.separator,
-          })}
-        >
-          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.ok }} />
-          <Text style={[type.caption, { color: colors.label, fontFamily: mono, fontWeight: "600" }]}>
-            {t("ports.readyPill", { port: entry.port })}
-          </Text>
-          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: colors.accentSoft }}>
-            <Text style={[type.caption2, { color: colors.accent, fontWeight: "600" }]}>
-              {t("ports.openPreview")}
-            </Text>
-          </View>
-        </Pressable>
-      ))}
-    </View>
-  );
 }
 
 export function SessionScreen() {
@@ -263,14 +213,7 @@ export function SessionContent({
   }, [initialQuickVoice]);
 
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [lsaOpen, setLsaOpen] = useState(false);
   const [ttsEnabled, setTtsState] = useState(() => isCommuterTtsEnabled());
-
-  const { ports } = usePorts(online && focused);
-  const matchedPorts = useMemo(
-    () => matchSessionPorts(ports ?? [], summary?.cwd, summary?.worktree?.source),
-    [ports, summary?.cwd, summary?.worktree?.source],
-  );
 
   useSessionSubscription(id);
   useEffect(() => {
@@ -492,14 +435,6 @@ export function SessionContent({
     else if (workspace) workspace.show("changes");
     else router.push({ pathname: "/session/[id]/changes", params: { id } });
   };
-  const openMatchedPort = (entry: PortInfo) => {
-    if (workspace?.split) {
-      workspace.show("preview", entry.port);
-    } else {
-      router.push({ pathname: "/preview", params: { port: String(entry.port), title: entry.title, sessionId: id } });
-    }
-  };
-
   const starterPrompts = [
     { label: t("composer.quickSummarize"), prompt: t("composer.quickSummarizePrompt") },
     { label: t("composer.quickRunTests"), prompt: t("composer.quickRunTestsPrompt") },
@@ -650,13 +585,6 @@ export function SessionContent({
                             },
                           ]
                         : []),
-                      {
-                        section: "ask",
-                        title: t("lsa.title"),
-                        subtitle: t("lsa.dispatchAction"),
-                        icon: { sf: "checklist", md: "checklist" } as const,
-                        onPress: () => setLsaOpen(true),
-                      },
                       ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal
                         ? [
                             {
@@ -891,7 +819,6 @@ export function SessionContent({
                 accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
                 leadingContent={
                   <>
-                    <PortReadyCapsules ports={matchedPorts} onOpenPort={openMatchedPort} />
                     <SessionNotices sessionId={id} />
                     <AgentInteractions agent={summary.agent} />
                     {summary.asyncQuestions?.length ? (
@@ -942,7 +869,6 @@ export function SessionContent({
               void listRef.current?.scrollToIndex({ index: timelineIndex, animated: true });
             }}
           />
-          <LsaSheet visible={lsaOpen} defaultCwd={summary.cwd} onClose={() => setLsaOpen(false)} />
         </View>
       </ContentHeight>
     </View>

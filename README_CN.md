@@ -106,7 +106,7 @@ Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境�
   linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
   ```
 
-全部功能免费；7 天免费试用结束后，iTool 会员继续提供官方托管网关。用同一账号在 [itool.tech/pro](https://www.itool.tech/zh/pro?from=linkshell) 通过国际信用卡 Creem（$3.19/月、$26.49/年）或支付宝（¥9.9/月、¥99/年）开通：月度会员包含 iTool 网站和 LinkShell，年度会员包含全部 iTool 产品与 **LinkShell Agent（LSA）** 跨电脑个人研发总管能力。邀请好友首次开通会员，双方各得 **14 天**（月度）或 **30 天**（年度）。开通后在桌面版或网页工作区刷新会员状态即可，不需要激活码。详见 [会员](docs/v2/pro-redemption.md)。
+全部功能免费；7 天免费试用结束后，iTool 会员继续提供官方托管网关。用同一账号在 [itool.tech/pro](https://www.itool.tech/zh/pro?from=linkshell) 通过国际信用卡 Creem（$3.19/月、$26.49/年）或支付宝（¥9.9/月、¥99/年）开通：月度会员包含 iTool 网站和 LinkShell，年度会员包含全部 iTool 产品。邀请好友首次开通会员，双方各得 **14 天**（月度）或 **30 天**（年度）。开通后在桌面版或网页工作区刷新会员状态即可，不需要激活码。详见 [会员](docs/v2/pro-redemption.md)。
 
 网关根地址还提供浏览器客户端，同样支持配对或账号登录。详见[网页客户端](apps/web/README.md)。
 

@@ -81,7 +81,6 @@ import { Screens, ScreenDetail } from "./live/Screens";
 import { screenView, screenComputerKey } from "./live/screen-route";
 import { ScreenSessionSlot } from "./live/screen-session-slot";
 import { Ports } from "./live/Ports";
-import { Steward } from "./live/Steward";
 import { ConsoleShell } from "./components/ConsoleShell";
 import { readLocal, saveLocal } from "./live/storage";
 import type { Computer } from "./live/engine";
@@ -388,7 +387,6 @@ function Workspace({
           )}
           {view === "worktrees" && <Worktrees />}
           {view === "ports" && <Ports />}
-          {view === "steward" && <Steward navigate={navigate} />}
           {![
             "home",
             "archive",
@@ -398,7 +396,6 @@ function Workspace({
             "terminals",
             "worktrees",
             "ports",
-            "steward",
             "screen",
           ].includes(view) && (
             <SessionLookup key={view} id={view} navigate={navigate} />

@@ -31,7 +31,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  Bot,
 } from "lucide-react";
 
 const icons = {
@@ -66,7 +65,6 @@ const icons = {
   logout: LogOut,
   menu: Menu,
   moon: Moon,
-  steward: Bot,
 } as const;
 export type IconName = keyof typeof icons;
 export function Icon({

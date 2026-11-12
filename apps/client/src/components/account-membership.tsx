@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, View } from "react-native";
+import { ActivityIndicator, AppState, Pressable, View } from "react-native";
 import {
   dateLocaleTag,
   membershipTierLabel,
@@ -13,6 +13,7 @@ import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { useAccount } from "@/lib/account";
 import { loadAccountMembership } from "@/lib/account-membership";
+import { haptics } from "@/lib/haptics";
 import { useLocale } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
@@ -76,7 +77,7 @@ export function formatMobileMembershipState(
  * Shows the account's iTool entitlement status. The phone never sells anything: zero links,
  * zero URLs, zero prices, and zero buttons leading to a purchase (App Store 3.1.1).
  */
-export function AccountMembership({ userId }: { userId: string }) {
+export function AccountMembership({ userId, embedded = false }: { userId: string; embedded?: boolean }) {
   const { locale, t } = useLocale();
   const [membership, setMembership] = useState<ProMembership>();
   const [loading, setLoading] = useState(true);
@@ -88,7 +89,10 @@ export function AccountMembership({ userId }: { userId: string }) {
   useEffect(() => {
     const pending = request;
     alive.current = true;
-    return () => { alive.current = false; pending.current++; };
+    return () => {
+      alive.current = false;
+      pending.current++;
+    };
   }, []);
 
   const refresh = useCallback(async () => {
@@ -109,16 +113,88 @@ export function AccountMembership({ userId }: { userId: string }) {
     }
   }, [current, t, userId]);
 
-  useFocusEffect(useCallback(() => {
-    void refresh();
-    // Account status managed on a computer syncs automatically when returning to the app.
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
-    });
-    return () => subscription.remove();
-  }, [refresh]));
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+      // Account status managed on a computer syncs automatically when returning to the app.
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") void refresh();
+      });
+      return () => subscription.remove();
+    }, [refresh]),
+  );
 
   const presentation = formatMobileMembershipState(membership, loading, locale);
+
+  if (embedded) {
+    return (
+      <View style={{ paddingHorizontal: 16, paddingVertical: 11, gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: radius.control,
+              borderCurve: "continuous",
+              backgroundColor: colors.fill,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon
+              sf={presentation.isTrial ? "clock.badge.checkmark" : "sparkles"}
+              md={presentation.isTrial ? "schedule" : "auto_awesome"}
+              size={15}
+              color={colors.secondaryLabel}
+              weight="medium"
+            />
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text numberOfLines={1} style={[type.callout, { color: colors.label, fontWeight: "500" }]}>
+              {presentation.headline}
+            </Text>
+            <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel }]}>
+              {presentation.subtitle}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => {
+              if (loading) return;
+              haptics.selection();
+              void refresh();
+            }}
+            disabled={loading}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={loading ? t("mobile.membership.refreshing") : t("mobile.membership.refresh")}
+            style={({ pressed }) => ({
+              width: 30,
+              height: 30,
+              borderRadius: 15,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? colors.fill : undefined,
+              opacity: pressed ? 0.65 : 1,
+            })}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color={colors.secondaryLabel} />
+            ) : (
+              <Icon sf="arrow.clockwise" md="refresh" size={14} color={colors.secondaryLabel} weight="medium" />
+            )}
+          </Pressable>
+        </View>
+        {presentation.freeHint ? (
+          <Text style={[type.footnote, { color: colors.tertiaryLabel, paddingLeft: 42 }]}>{presentation.freeHint}</Text>
+        ) : null}
+        {error ? (
+          <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.danger, paddingLeft: 42 }]}>
+            {error}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={{ gap: 4 }}>
