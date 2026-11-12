@@ -1,16 +1,109 @@
 import { cpus, freemem, homedir, totalmem, type CpuInfo } from "node:os";
 import { execFile } from "node:child_process";
-import type { BigIntStatsFs } from "node:fs";
+import { readdirSync, type BigIntStatsFs } from "node:fs";
 import { readFile, statfs } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { setTimeout, clearTimeout } from "node:timers";
 import { promisify } from "node:util";
-import { MACHINE_METRICS_HISTORY_LIMIT, MACHINE_METRICS_INTERVAL_MS, type MachineMetrics, type MachineMetricsSnapshot } from "@linkshell/wire";
+import {
+  MACHINE_METRICS_HISTORY_LIMIT,
+  MACHINE_METRICS_INTERVAL_MS,
+  type MachineKeepAwake,
+  type MachineMetrics,
+  type MachineMetricsSnapshot,
+  type MachinePower,
+} from "@linkshell/wire";
 
 type CpuSample = { at: number; cores: CpuInfo[] };
 type DiskMetrics = NonNullable<MachineMetrics["disk"]>;
 const DISK_INTERVAL_MS = 30_000;
+const BATTERY_INTERVAL_MS = 30_000;
 const run = promisify(execFile);
+
+export function parseMacBattery(output: string): MachinePower | undefined {
+  const sourceMatch = /Now drawing from '([^']+)'/i.exec(output);
+  const batteryLine = output.split(/\r?\n/).find((line) => /-InternalBattery-\d+/i.test(line));
+  if (!sourceMatch || !batteryLine || /\bnot present\b|\bpresent:\s*false\b/i.test(batteryLine)) return undefined;
+  const onBattery = /battery/i.test(sourceMatch[1]!);
+  const pctMatch = /(\d{1,3})%/.exec(batteryLine);
+  const rawPercent = pctMatch ? Number(pctMatch[1]) : NaN;
+  const percent = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, rawPercent)) : null;
+  const charging = /\b(?:charging|finishing charge)\b/i.test(batteryLine) && !/\bnot charging\b/i.test(batteryLine);
+  return { onBattery, percent, charging };
+}
+
+export interface LinuxPowerSupplyInput {
+  name: string;
+  type?: string;
+  status?: string;
+  capacity?: string;
+  online?: string;
+}
+
+export function parseLinuxPowerSupplies(supplies: readonly LinuxPowerSupplyInput[]): MachinePower | undefined {
+  const battery = supplies.find((entry) => entry.type?.trim().toLowerCase() === "battery" || /^bat\d+/i.test(entry.name));
+  if (!battery) return undefined;
+  const mains = supplies.find((entry) => entry.type?.trim().toLowerCase() === "mains" || /^(?:ac|adp|acad)\d*$/i.test(entry.name));
+  const status = battery.status?.trim().toLowerCase();
+  const mainsOnline = mains?.online?.trim();
+  const onBattery = mainsOnline === "0" ? true : mainsOnline === "1" ? false : status === "discharging";
+  const rawCapacity = battery.capacity !== undefined && battery.capacity.trim() !== "" ? Number(battery.capacity.trim()) : NaN;
+  const percent = Number.isFinite(rawCapacity) && rawCapacity >= 0 && rawCapacity <= 100 ? Math.round(rawCapacity) : null;
+  const charging = status ? status === "charging" : undefined;
+  return { onBattery, percent, ...(charging !== undefined ? { charging } : {}) };
+}
+
+let sharedPowerValue: MachinePower | undefined;
+let sharedPowerCheckedAt = -Infinity;
+let sharedPowerPending: Promise<MachinePower | undefined> | undefined;
+
+async function readPowerStatus(): Promise<MachinePower | undefined> {
+  const age = Date.now() - sharedPowerCheckedAt;
+  if (sharedPowerPending) return sharedPowerPending;
+  if (age >= 0 && age < BATTERY_INTERVAL_MS) return sharedPowerValue;
+  sharedPowerCheckedAt = Date.now();
+  sharedPowerPending = (async (): Promise<MachinePower | undefined> => {
+    try {
+      if (process.platform === "darwin") {
+        const { stdout } = await run("/usr/bin/pmset", ["-g", "batt"], { timeout: 1000, maxBuffer: 16 * 1024 });
+        sharedPowerValue = parseMacBattery(stdout);
+        return sharedPowerValue;
+      }
+      if (process.platform === "linux") {
+        const root = "/sys/class/power_supply";
+        let names: string[];
+        try {
+          names = readdirSync(root);
+        } catch {
+          sharedPowerValue = undefined;
+          return undefined;
+        }
+        const supplies = await Promise.all(
+          names.slice(0, 16).map(async (name): Promise<LinuxPowerSupplyInput> => {
+            const readAttr = (attr: string) => readFile(`${root}/${name}/${attr}`, "utf8").catch(() => undefined);
+            const [type, status, capacity, online] = await Promise.all([
+              readAttr("type"),
+              readAttr("status"),
+              readAttr("capacity"),
+              readAttr("online"),
+            ]);
+            return { name, type, status, capacity, online };
+          }),
+        );
+        sharedPowerValue = parseLinuxPowerSupplies(supplies);
+        return sharedPowerValue;
+      }
+    } catch {
+      sharedPowerValue = undefined;
+      return undefined;
+    }
+    sharedPowerValue = undefined;
+    return undefined;
+  })().finally(() => {
+    sharedPowerPending = undefined;
+  });
+  return sharedPowerPending;
+}
 
 export function macMemoryUsedBytes(output: string): number | null {
   const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
@@ -84,6 +177,11 @@ export class MachineMetricsSampler {
   private disk?: DiskMetrics;
   private diskCheckedAt = -Infinity;
   private diskPending?: Promise<DiskMetrics | undefined>;
+  private power?: MachinePower;
+  private powerCheckedAt = -Infinity;
+  private powerPending?: Promise<MachinePower | undefined>;
+
+  constructor(private readonly options: { keepAwake?: () => MachineKeepAwake | undefined } = {}) {}
 
   start(): void {
     if (this.timer) return;
@@ -96,6 +194,19 @@ export class MachineMetricsSampler {
   stop(): void {
     clearInterval(this.timer);
     this.timer = undefined;
+  }
+
+  /** Keeps cached snapshots aligned immediately when `machine.keepAwake` mutates mode or demand. */
+  refreshKeepAwake(): void {
+    if (!this.cached) return;
+    const keepAwake = this.options.keepAwake?.();
+    const { keepAwake: _previous, ...rest } = this.cached;
+    const next: MachineMetrics = { ...rest, ...(keepAwake ? { keepAwake } : {}) };
+    this.cached = next;
+    const last = this.history.length - 1;
+    if (last >= 0 && this.history[last]?.sampledAt === next.sampledAt) {
+      this.history[last] = next;
+    }
   }
 
   async snapshot(): Promise<MachineMetricsSnapshot> {
@@ -140,6 +251,30 @@ export class MachineMetricsSampler {
     } finally { clearTimeout(timer); }
   }
 
+  private async samplePower(): Promise<MachinePower | undefined> {
+    const age = Date.now() - this.powerCheckedAt;
+    if (this.powerPending || (age >= 0 && age < BATTERY_INTERVAL_MS)) return this.power;
+    this.powerCheckedAt = Date.now();
+    this.powerPending = readPowerStatus()
+      .then((power) => {
+        this.power = power;
+        return power;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.powerPending = undefined;
+      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.powerPending,
+        new Promise<MachinePower | undefined>((resolve) => { timer = setTimeout(() => resolve(this.power), 1000); timer.unref(); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async collect(): Promise<MachineMetrics> {
     let before = this.previous;
     // Startup or waking from sleep needs a fresh window, not an average across the gap.
@@ -149,7 +284,8 @@ export class MachineMetricsSampler {
     }
     const after = { at: performance.now(), cores: cpus() };
     const sampledAt = Date.now();
-    const [memory, disk] = await Promise.all([memoryUsage(), this.sampleDisk()]);
+    const [memory, disk, power] = await Promise.all([memoryUsage(), this.sampleDisk(), this.samplePower()]);
+    const keepAwake = this.options.keepAwake?.();
     this.previous = after;
     this.cached = {
       sampledAt,
@@ -157,6 +293,8 @@ export class MachineMetricsSampler {
       cpu: { usage: cpuUsage(before.cores, after.cores), cores: after.cores.length, model: after.cores[0]?.model ?? "" },
       memory,
       ...(disk ? { disk } : {}),
+      ...(power ? { power } : {}),
+      ...(keepAwake ? { keepAwake } : {}),
     };
     this.history = [...this.history.filter((entry) => entry.sampledAt < sampledAt && entry.sampledAt > sampledAt - MACHINE_METRICS_INTERVAL_MS * MACHINE_METRICS_HISTORY_LIMIT), this.cached].slice(-MACHINE_METRICS_HISTORY_LIMIT);
     return this.cached;

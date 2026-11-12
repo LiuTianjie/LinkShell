@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requirePro, subscriptionFromEntitlement, supabaseSubscriptions, type SubscriptionCheck } from "../src/subscription.js";
+import {
+  admissionDenialMessage,
+  LOGIN_REQUIRED_CODE,
+  MEMBERSHIP_REQUIRED_CODE,
+  MEMBERSHIP_URL,
+  membershipUrl,
+  requirePro,
+  subscriptionFromEntitlement,
+  supabaseSubscriptions,
+  type SubscriptionCheck,
+} from "../src/subscription.js";
 
 const supabase = { url: "https://project.supabase.co/", anonKey: "anon", serviceRoleKey: "service" };
 
@@ -102,5 +112,28 @@ describe("membership revalidation during outages", () => {
     expect(await admit(machine)).toBeUndefined();
     now = 10_000;
     expect(await admit(machine)).toBeUndefined();
+  });
+
+  it("provides locale-neutral URLs, bilingual 7-day free trial hints, and localized helpers", async () => {
+    expect(MEMBERSHIP_URL).toBe("https://www.itool.tech/pro?from=linkshell");
+    expect(membershipUrl()).toBe("https://www.itool.tech/pro?from=linkshell");
+    expect(membershipUrl("zh")).toBe("https://www.itool.tech/zh/pro?from=linkshell");
+    expect(membershipUrl("en")).toBe("https://www.itool.tech/en/pro?from=linkshell");
+    expect(membershipUrl("ja")).toBe("https://www.itool.tech/en/pro?from=linkshell");
+    expect(LOGIN_REQUIRED_CODE).toBe("login_required");
+    expect(MEMBERSHIP_REQUIRED_CODE).toBe("membership_required");
+
+    const admit = requirePro(async () => ({ status: "inactive" }), () => {});
+    const anonMessage = await admit({ role: "machine" });
+    expect(anonMessage).toContain("linkshell login");
+    expect(anonMessage).toContain("7 天免费试用");
+    expect(anonMessage).toContain("7-day free trial");
+
+    const lapsedMessage = await admit({ role: "machine", userId: "lapsed-user" });
+    expect(lapsedMessage).toContain(MEMBERSHIP_URL);
+    expect(lapsedMessage).toContain("需要 iTool 会员");
+    expect(lapsedMessage).toContain("7-day free trial");
+
+    expect(admissionDenialMessage("membership_required", "ja")).toContain("7 日間無料トライアル");
   });
 });

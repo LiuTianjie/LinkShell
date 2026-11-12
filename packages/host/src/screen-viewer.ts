@@ -39,6 +39,8 @@ const ICONS = {
   down: icon('<path d="m6 9.5 6 6 6-6"/>'),
   quick: icon('<path d="M13 2.8 5.2 13.6H11l-1 7.6 7.8-10.8H12Z"/>'),
   compose: icon('<path d="M4 5h16v10.5H9.5L5.5 19v-3.5H4Z"/><path d="M8 9h8M8 12h5"/>'),
+  clipboard: icon('<rect x="8" y="3" width="8" height="3.6" rx="1.2"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 12h6M9 16h4"/>'),
+  privacy: icon('<path d="M12 3 5 6v5.5c0 4.6 3 8.5 7 9.5 4-1 7-4.9 7-9.5V6l-7-3Z"/><path d="M9.5 12 11 13.5 14.8 9.8"/>'),
   info: icon('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v6M12 7.2v.6"/>'),
   close: icon('<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>'),
 };
@@ -89,9 +91,10 @@ const STYLE = String.raw`
   .choice.on { background: rgba(255,255,255,0.16); }
   .choice b { display: block; font-weight: 600; font-size: calc(15px * var(--text-scale, 1)); }
   .choice span { display: block; font-size: calc(12px * var(--text-scale, 1)); color: rgba(255,255,255,0.62); }
-  #widths, #pacing { padding: 0 6px 6px; }
-  #widths .group, #pacing .group { padding-top: 4px; }
-  #pacing .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #widths, #pacing, #clipboard, #privacy, #langs { padding: 0 6px 6px; }
+  #widths .group, #pacing .group, #clipboard .group, #privacy .group, #langs .group { padding-top: 4px; }
+  #pacing .tiles, .tiles.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tiles.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #status { padding: 2px 10px 10px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5;
     color: rgba(255,255,255,0.5); white-space: pre-line; font-variant-numeric: tabular-nums; }
   #toast { position: absolute; left: 50%; max-width: min(86vw, 420px); width: max-content; transform: translateX(-50%); padding: 10px 16px; border-radius: 18px;
@@ -591,10 +594,120 @@ const coarse = matchMedia("(pointer: coarse)").matches;
 const android = /Android/i.test(navigator.userAgent);
 
 const MODES = ["view", "trackpad", "touch"];
+const LOCALES = ["zh", "en", "ja"];
+const LANGS = {
+  zh: {
+    title: "屏幕",
+    viewTitle: "只看", viewDesc: "不操作电脑", viewAria: "只看，不操作电脑",
+    trackpadTitle: "触控板", trackpadDesc: "滑动指针 · 轻点点击", trackpadAria: "触控板，滑动指针，轻点点击",
+    touchTitle: "点按", touchDesc: "点按画面直接操作", touchAria: "点按，点按画面直接操作",
+    hintView: "只看：双指缩放，单指移动画面",
+    hintTrackpad: "触控板：滑动指针 · 轻点点击 · 双指轻点右键 · 双指滑动滚动 · 轻点两下并按住拖拽",
+    hintTouch: "点按：点哪里就点哪里 · 长按右键 · 双指滑动滚动 · 轻点两下并按住拖拽",
+    connTitle: "连接信息", closeInfo: "关闭连接信息",
+    widthsTitle: "清晰度（直连视频）",
+    w1280: "流畅", w1920: "标准", w2560: "高清", wNative: "原生", wNativeSub: "最高 4K",
+    pacingTitle: "画面节奏",
+    pImmediate: "延迟优先", pImmediateSub: "最跟手",
+    pSmooth: "流畅优先", pSmoothSub: "适合观看",
+    pacingSmoothHint: "流畅优先：画面更均匀，Wi-Fi 下延迟约多 50 毫秒",
+    pacingImmediateHint: "延迟优先：最跟手，网络抖动时会短暂停顿",
+    clipHead: "加密剪贴板",
+    pasteComputer: "粘贴到电脑", pasteComputerSub: "发送剪贴板",
+    copyComputer: "读取电脑剪贴板", copyComputerSub: "复制到本机",
+    clipSynced: "剪贴板已同步", clipEmpty: "剪贴板为空", clipFailed: "剪贴板同步失败", clipBlocked: "浏览器没有允许读取剪贴板",
+    privacyHead: "隐私保护",
+    curtain: "防窥黑屏", curtainSub: "遮挡远端屏幕",
+    curtainOn: "远端防窥黑屏已开启", curtainOff: "远端防窥黑屏已关闭",
+    lockDisconnect: "断开时自动锁屏", lockDisconnectSub: "离开自动锁定",
+    lockOn: "已开启断开时自动锁屏", lockOff: "已关闭断开时自动锁屏",
+    langHead: "界面语言",
+    barMode: "控制方式", barKeyboard: "键盘", barQuick: "快捷操作", barClip: "剪贴板与隐私", barFit: "还原缩放", barInfo: "连接信息", barFull: "全屏", orbExpand: "展开屏幕控制",
+    composePrompt: "发送文字…", wordsHint: "在这里写好，再发到电脑上", pasteClip: "粘贴剪贴板", sendReturn: "发送并回车", sendWords: "发送",
+    connecting: "正在连接…", directVideo: "直连 · 视频", relayCompat: "中继 · 兼容", directCompat: "直连 · 兼容", fpsUnit: " 帧/秒", rttPrefix: "往返 ", msUnit: " 毫秒",
+    adjusting: "正在调整屏幕…", preparingControl: "正在准备控制电脑…", controlUnavailable: "这台电脑暂时不能被控制",
+    disconnected: "屏幕连接已断开，请确认电脑在线后重新连接。", reconnectSuffix: "，重新连接即可继续。",
+    slowerHint: "网络较慢：已降低画质，优先保证跟得上",
+    sentWords: "已发送 ", sentWordsSuffix: " 个字", sentAndReturn: "，并回车", sentReturnOnly: "已回车",
+  },
+  en: {
+    title: "Screen",
+    viewTitle: "View Only", viewDesc: "Watch without input", viewAria: "View only, watch without input",
+    trackpadTitle: "Trackpad", trackpadDesc: "Slide pointer · Tap to click", trackpadAria: "Trackpad, slide pointer and tap to click",
+    touchTitle: "Direct Touch", touchDesc: "Tap directly on screen", touchAria: "Direct touch, tap directly on screen",
+    hintView: "View only: pinch to zoom, drag with one finger to pan",
+    hintTrackpad: "Trackpad: slide to move · tap to click · two-finger tap right-click · two-finger scroll",
+    hintTouch: "Touch: tap anywhere to click · hold for right-click · two-finger scroll · double-tap drag",
+    connTitle: "Connection & Privacy", closeInfo: "Close panel",
+    widthsTitle: "Resolution (Direct Video)",
+    w1280: "Smooth", w1920: "Standard", w2560: "HD", wNative: "Native", wNativeSub: "Up to 4K",
+    pacingTitle: "Frame Pacing",
+    pImmediate: "Low Latency", pImmediateSub: "Responsive",
+    pSmooth: "Smooth", pSmoothSub: "Even cadence",
+    pacingSmoothHint: "Smooth pacing: steadier frames (+50 ms buffer on Wi-Fi)",
+    pacingImmediateHint: "Low latency: most responsive, brief pauses under jitter",
+    clipHead: "Encrypted Clipboard",
+    pasteComputer: "Paste to Computer", pasteComputerSub: "Send clipboard",
+    copyComputer: "Copy from Computer", copyComputerSub: "Read host text",
+    clipSynced: "Clipboard synced", clipEmpty: "Clipboard is empty", clipFailed: "Clipboard sync failed", clipBlocked: "Clipboard read permission was denied",
+    privacyHead: "Privacy Controls",
+    curtain: "Privacy Curtain", curtainSub: "Blank host screen",
+    curtainOn: "Privacy curtain enabled on host", curtainOff: "Privacy curtain disabled",
+    lockDisconnect: "Lock on Disconnect", lockDisconnectSub: "Auto-lock host",
+    lockOn: "Auto-lock on disconnect enabled", lockOff: "Auto-lock on disconnect disabled",
+    langHead: "Language",
+    barMode: "Control mode", barKeyboard: "Keyboard", barQuick: "Shortcuts", barClip: "Clipboard & privacy", barFit: "Reset zoom", barInfo: "Connection info", barFull: "Fullscreen", orbExpand: "Expand screen controls",
+    composePrompt: "Type text…", wordsHint: "Compose here, then send to computer", pasteClip: "Paste Clipboard", sendReturn: "Send + Return", sendWords: "Send",
+    connecting: "Connecting…", directVideo: "Direct · Video", relayCompat: "Relay · Stream", directCompat: "Direct · Stream", fpsUnit: " fps", rttPrefix: "RTT ", msUnit: " ms",
+    adjusting: "Adjusting display…", preparingControl: "Preparing remote input…", controlUnavailable: "Remote input is unavailable on this computer",
+    disconnected: "Screen disconnected. Check that the computer is online and reconnect.", reconnectSuffix: " — reconnect to continue.",
+    slowerHint: "Slow network: lowered video quality to stay live",
+    sentWords: "Sent ", sentWordsSuffix: " chars", sentAndReturn: " + Return", sentReturnOnly: "Sent Return",
+  },
+  ja: {
+    title: "リモート画面",
+    viewTitle: "表示のみ", viewDesc: "PCを操作しない", viewAria: "表示のみ、PCを操作しない",
+    trackpadTitle: "トラックパッド", trackpadDesc: "スライドで移動 · タップでクリック", trackpadAria: "トラックパッド、スライドで移動、タップでクリック",
+    touchTitle: "ダイレクトタッチ", touchDesc: "タップした位置を操作", touchAria: "ダイレクトタッチ、画面を直接タップして操作",
+    hintView: "表示のみ：ピンチで拡大縮小、1本指で画面移動",
+    hintTrackpad: "トラックパッド：スライドで移動 · タップでクリック · 2本指タップで右クリック · 2本指スクロール",
+    hintTouch: "タッチ：タップ位置をクリック · 長押しで右クリック · 2本指スクロール · ダブルタップ移動でドラッグ",
+    connTitle: "接続とプライバシー", closeInfo: "閉じる",
+    widthsTitle: "画質（直接ビデオ）",
+    w1280: "軽量", w1920: "標準", w2560: "高画質", wNative: "ネイティブ", wNativeSub: "最大 4K",
+    pacingTitle: "フレーム制御",
+    pImmediate: "低遅延優先", pImmediateSub: "操作向き",
+    pSmooth: "なめらか優先", pSmoothSub: "視聴向き",
+    pacingSmoothHint: "なめらか優先：表示が均一になります（Wi-Fi で約 +50 ms）",
+    pacingImmediateHint: "低遅延優先：最も追従性が高く、揺らぎ時は一瞬待機します",
+    clipHead: "暗号化クリップボード",
+    pasteComputer: "PC へ貼り付け", pasteComputerSub: "テキスト送信",
+    copyComputer: "PC のクリップボード取得", copyComputerSub: "手元へコピー",
+    clipSynced: "クリップボードを同期しました", clipEmpty: "クリップボードは空です", clipFailed: "クリップボード同期に失敗しました", clipBlocked: "クリップボードの読み取りが許可されていません",
+    privacyHead: "プライバシー保護",
+    curtain: "プライバシーブラインド", curtainSub: "PC画面を暗転",
+    curtainOn: "PC 側の画面ブラインドを有効化しました", curtainOff: "PC 側の画面ブラインドを解除しました",
+    lockDisconnect: "切断時に自動ロック", lockDisconnectSub: "終了時にロック",
+    lockOn: "切断時の自動ロックを有効化しました", lockOff: "切断時の自動ロックを解除しました",
+    langHead: "表示言語",
+    barMode: "操作モード", barKeyboard: "キーボード", barQuick: "ショートカット", barClip: "クリップボードと保護", barFit: "ズーム解除", barInfo: "接続情報", barFull: "全画面", orbExpand: "コントロールを展開",
+    composePrompt: "テキスト送信…", wordsHint: "ここに入力して PC へまとめて送信", pasteClip: "貼り付け", sendReturn: "送信して改行", sendWords: "送信",
+    connecting: "接続中…", directVideo: "直接接続 · ビデオ", relayCompat: "リレー · 互換", directCompat: "直接接続 · 互換", fpsUnit: " fps", rttPrefix: "往復 ", msUnit: " ms",
+    adjusting: "画面を調整中…", preparingControl: "リモート操作を準備中…", controlUnavailable: "この PC は現在リモート操作できません",
+    disconnected: "画面接続が切断されました。PC がオンラインか確認して再接続してください。", reconnectSuffix: "。再接続すると再開できます。",
+    slowerHint: "回線が混雑しているため、遅延を防ぐよう画質を調整しました",
+    sentWords: "", sentWordsSuffix: " 文字を送信", sentAndReturn: "（Enter 送信）", sentReturnOnly: "Enter を送信しました",
+  },
+};
+let storedLang = null;
+try { storedLang = localStorage.getItem("linkshell.screen.lang"); } catch {}
+const initialBodyLang = document.body.dataset.lang;
+let lang = LOCALES.includes(query.get("lang")) ? query.get("lang") : LOCALES.includes(window.__linkshellChrome?.locale) ? window.__linkshellChrome.locale : LOCALES.includes(storedLang) ? storedLang : LOCALES.includes(initialBodyLang) ? initialBodyLang : "zh";
+const L = () => LANGS[lang] || LANGS.zh;
 const HINTS = {
-  view: "只看：双指缩放，单指移动画面",
-  trackpad: "触控板：滑动指针 · 轻点点击 · 双指轻点右键 · 双指滑动滚动 · 轻点两下并按住拖拽",
-  touch: "点按：点哪里就点哪里 · 长按右键 · 双指滑动滚动 · 轻点两下并按住拖拽",
+  get view() { return L().hintView; },
+  get trackpad() { return L().hintTrackpad; },
+  get touch() { return L().hintTouch; },
 };
 let stored = null;
 try { stored = localStorage.getItem("linkshell.screen.mode"); } catch {}
@@ -864,7 +977,7 @@ ws.onclose = () => {
   // Ended for being unused: another path would only start the picture again by itself.
   if (!taken && !idle && requestRelay()) return;
   tellApp({ type: "screenClosed", ...(taken ? { reason: "taken" } : idle ? { reason: "idle" } : {}) });
-  if (loading.phase !== "error") say(idle ? SCREEN_IDLE + "，重新连接即可继续。" : "屏幕连接已断开，请确认电脑在线后重新连接。");
+  if (loading.phase !== "error") say(idle ? SCREEN_IDLE + L().reconnectSuffix : L().disconnected);
   blocked = false;
 };
 
@@ -875,11 +988,13 @@ function heard(message) {
   }
   if (message.error) {
     if (message.error === SCREEN_TAKEN) taken = true;
-    if (message.error === SCREEN_IDLE) { idle = true; return say(SCREEN_IDLE + "，重新连接即可继续。"); }
+    if (message.error === SCREEN_IDLE) { idle = true; return say(SCREEN_IDLE + L().reconnectSuffix); }
     return say(message.error);
   }
   if (message.rtc) return signal(message.rtc);
   if (message.pong) return meter && meter.pong(message.pong);
+  if (message.clipboard) return receiveComputerClipboard(message.clipboard);
+  if (message.privacy) return receivePrivacyState(message.privacy);
   if (message.restart) {
     jpegGeneration += 1;
     jpegPending = null;
@@ -891,7 +1006,7 @@ function heard(message) {
     shownUpTo(arrived);
     if (message.lighter && performance.now() - lighterAt > 30000) {
       lighterAt = performance.now();
-      hint("网络较慢：已降低画质，优先保证跟得上", 3000);
+      hint(L().slowerHint, 3000);
     }
   }
   if (message.control) {
@@ -2514,13 +2629,15 @@ function hint(text, ms) {
 /** Says why a controlling mode is not controlling, or how it works once it is. */
 function explain(was) {
   if (!session.active()) return;
-  if (!session.canInput()) return hint("正在调整屏幕…", 0);
-  if (!control.known) return hint("正在准备控制电脑…", 0);
-  if (!control.available) return hint(control.reason || "这台电脑暂时不能被控制");
+  if (!session.canInput()) return hint(L().adjusting, 0);
+  if (!control.known) return hint(L().preparingControl, 0);
+  if (!control.available) return hint(control.reason || L().controlUnavailable);
   if (!control.trusted) {
     // The system's own dialog, on the computer, once.
     if (!control.prompted) { control.prompted = true; send({ t: "prompt" }); }
     const who = control.app ? "「" + control.app + "」" : "LinkShell";
+    if (lang === "en") return hint("Remote control is not yet allowed on the computer. Open System Settings › Privacy & Security › Accessibility and enable " + (control.app || "LinkShell") + ", or run linkshell screen on the Mac.", 0);
+    if (lang === "ja") return hint("PC でリモート操作がまだ許可されていません。「システム設定 › プライバシーとセキュリティ › アクセシビリティ」で " + (control.app || "LinkShell") + " をオンにするか、PC で linkshell screen を実行してください。", 0);
     return hint("电脑还没有允许被控制。电脑上已经打开「系统设置 › 隐私与安全性 › 辅助功能」，把" + who + "的开关打开，这里会自动继续；人不在电脑旁，回去后运行 linkshell screen 即可。", 0);
   }
   if (!was) hint(HINTS[mode]);
@@ -2660,17 +2777,18 @@ async function status() {
     $("pacing").classList.toggle("gone", !pacingShown);
     layout();
   }
-  const way = !content.w ? "正在连接…" : live ? "直连 · 视频" : (relayed ? "中继" : "直连") + " · 兼容\n" + content.w + "×" + content.h;
+  const copy = L();
+  const way = !content.w ? copy.connecting : live ? copy.directVideo : (relayed ? copy.relayCompat : copy.directCompat) + "\n" + content.w + "×" + content.h;
   if (windowsHost && !live && content.w) {
     const stats = jpegVitals();
-    put(way + "\n" + stats.fps + " 帧/秒 · " + stats.bitrateMbps + " Mbps");
+    put(way + "\n" + stats.fps + copy.fpsUnit + " · " + stats.bitrateMbps + " Mbps");
     return;
   }
   if (nativePicture) {
     nativePost({ kind: "stats" });
     const detail = [content.w ? content.w + "×" + content.h : null,
-      nativeStats?.decodedFps == null ? null : Math.round(nativeStats.decodedFps) + " 帧/秒",
-      nativeStats?.rttMs == null ? null : "往返 " + Math.round(nativeStats.rttMs) + " 毫秒"].filter(Boolean).join(" · ");
+      nativeStats?.decodedFps == null ? null : Math.round(nativeStats.decodedFps) + copy.fpsUnit,
+      nativeStats?.rttMs == null ? null : copy.rttPrefix + Math.round(nativeStats.rttMs) + copy.msUnit].filter(Boolean).join(" · ");
     put(way + (detail ? "\n" + detail : ""));
     return;
   }
@@ -2680,18 +2798,12 @@ async function status() {
   if (!now || rtc === null || rtc.pc !== pc) return;
   statusWas = now.raw;
   const format = [now.codec, now.bitrateMbps === null ? null : now.bitrateMbps + " Mbps"].filter(Boolean).join(" · ");
-  put(way + "\n" + [now.width + "×" + now.height, now.fps === null ? "" : Math.round(now.fps) + " 帧/秒", now.rttMs === null ? "" : "往返 " + Math.round(now.rttMs) + " 毫秒"].filter(Boolean).join(" · ") + (format ? "\n" + format : ""));
+  put(way + "\n" + [now.width + "×" + now.height, now.fps === null ? "" : Math.round(now.fps) + copy.fpsUnit, now.rttMs === null ? "" : copy.rttPrefix + Math.round(now.rttMs) + copy.msUnit].filter(Boolean).join(" · ") + (format ? "\n" + format : ""));
 }
 
 const ICON = JSON.parse($("icons").textContent);
 const choices = menu.querySelectorAll(".choice");
-pressable($("mode"), () => {
-  closeSheet();
-  const wasOpen = popoverOpen(menu);
-  closeMenu();
-  if (!wasOpen) presentPopover(menu, true);
-});
-pressable($("info"), () => {
+function toggleConnectionPanel() {
   closeSheet();
   const wasOpen = popoverOpen(connection);
   closeMenu();
@@ -2702,7 +2814,15 @@ pressable($("info"), () => {
     statusTimer = setInterval(status, 1500);
   }
   layout();
+}
+pressable($("mode"), () => {
+  closeSheet();
+  const wasOpen = popoverOpen(menu);
+  closeMenu();
+  if (!wasOpen) presentPopover(menu, true);
 });
+pressable($("clipbar"), toggleConnectionPanel);
+pressable($("info"), toggleConnectionPanel);
 tappable($("closeinfo"), closeMenu);
 // On a phone the button is there only while the key bar is not, which is while the page knows of no keyboard:
 // there it only ever raises one, whatever state the field was left in. With a mouse it gives the keys and takes them.
@@ -2727,13 +2847,14 @@ for (const tile of $("pacing").querySelectorAll(".tile")) {
     const chosen = tile.dataset.pacing;
     if (chosen === pacing || !canChoosePacing()) return;
     try { localStorage.setItem("linkshell.screen.pacing", chosen); } catch {}
-    hint(chosen === "smooth" ? "流畅优先：画面更均匀，Wi-Fi 下延迟约多 50 毫秒" : "延迟优先：最跟手，网络抖动时会短暂停顿", 2500);
+    hint(chosen === "smooth" ? L().pacingSmoothHint : L().pacingImmediateHint, 2500);
     if (app) return tellApp({ type: "pacing", pacing: chosen });
     const next = new URLSearchParams(location.search);
     next.set("pacing", chosen);
     next.set("width", width);
     next.set("display", String(session.desired().display));
     next.set("mode", mode);
+    next.set("lang", lang);
     location.replace(location.pathname + "?" + next);
   });
 }
@@ -2999,13 +3120,182 @@ function sendWords(andReturn) {
   words.value = "";
   grow();
   tellApp({ type: "haptic", kind: "light" });
-  hint(text ? "已发送 " + [...text].length + " 个字" + (andReturn ? "，并回车" : "") : "已回车", 1500);
+  const copy = L();
+  hint(text ? copy.sentWords + [...text].length + copy.sentWordsSuffix + (andReturn ? copy.sentAndReturn : "") : copy.sentReturnOnly, 1500);
+}
+
+let clipboardGoal = "composer";
+const bridgeCall = (payload) => {
+  if (typeof window.__linkshellBridge === "function") {
+    window.__linkshellBridge(payload);
+    return true;
+  }
+  return false;
+};
+
+function pushClipboardToComputer(text) {
+  if (typeof text !== "string" || !text) return hint(L().clipEmpty, 2200);
+  const trimmed = text.slice(0, 100000);
+  const bridged = bridgeCall({ type: "clipboard-write", text: trimmed });
+  if (app) tellApp({ type: "clipboardWrite", text: trimmed });
+  if (!bridged && !app) send({ t: "clipboard.write", text: trimmed });
+  tellApp({ type: "haptic", kind: "light" });
+  hint(L().clipSynced, 1800);
+}
+
+function requestPasteToComputer() {
+  if (bridgeCall({ type: "clipboard-paste-to-computer" })) return;
+  if (app) {
+    clipboardGoal = "computer";
+    tellApp({ type: "clipboard", target: "computer" });
+    tellApp({ type: "clipboardPasteToComputer" });
+    return;
+  }
+  if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+    navigator.clipboard.readText().then(pushClipboardToComputer, () => hint(L().clipBlocked, 2500));
+    return;
+  }
+  hint(L().clipBlocked, 2500);
+}
+
+function requestCopyFromComputer() {
+  const bridged = bridgeCall({ type: "clipboard-read" });
+  if (app) tellApp({ type: "clipboardRead" });
+  if (!bridged && !app) send({ t: "clipboard.read" });
+}
+
+function receiveComputerClipboard(payload) {
+  const text = typeof payload === "string" ? payload : payload && typeof payload.text === "string" ? payload.text : "";
+  if (!text) return hint(L().clipEmpty, 2200);
+  if (app) {
+    tellApp({ type: "setDeviceClipboard", text });
+    tellApp({ type: "haptic", kind: "light" });
+    return hint(L().clipSynced, 1800);
+  }
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    navigator.clipboard.writeText(text).then(() => hint(L().clipSynced, 1800), () => hint(L().clipSynced, 1800));
+    return;
+  }
+  hint(L().clipSynced, 1800);
+}
+window.linkshellRemoteClipboard = receiveComputerClipboard;
+window.linkshellClipboardResult = (result) => {
+  if (result && result.ok === false) return hint(result.message || L().clipFailed, 2500);
+  hint(L().clipSynced, 1800);
+};
+
+const privacyState = { curtain: false, lockOnDisconnect: false, supported: !windowsHost };
+function drawPrivacy() {
+  $("privacy").classList.toggle("gone", privacyState.supported === false);
+  for (const [id, on] of [["privacycurtain", privacyState.curtain], ["lockdisconnect", privacyState.lockOnDisconnect]]) {
+    const el = $(id);
+    el.classList.toggle("on", !!on);
+    el.setAttribute("aria-pressed", String(!!on));
+  }
+  $("clipbar").classList.toggle("on", !!(privacyState.curtain || privacyState.lockOnDisconnect));
+}
+function receivePrivacyState(next) {
+  if (!next || typeof next !== "object") return;
+  if (typeof next.curtain === "boolean") privacyState.curtain = next.curtain;
+  if (typeof next.lockOnDisconnect === "boolean") privacyState.lockOnDisconnect = next.lockOnDisconnect;
+  if (typeof next.supported === "boolean") privacyState.supported = next.supported;
+  drawPrivacy();
+  layout();
+}
+window.linkshellPrivacy = receivePrivacyState;
+
+function togglePrivacy(field) {
+  const value = !privacyState[field];
+  privacyState[field] = value;
+  drawPrivacy();
+  const patch = field === "curtain" ? { curtain: value } : { lockOnDisconnect: value };
+  const bridged = bridgeCall(Object.assign({ type: "screen-privacy" }, patch));
+  if (app) tellApp(Object.assign({ type: "screenPrivacy" }, patch));
+  if (!bridged && !app) send(Object.assign({ t: "screen.privacy" }, patch));
+  tellApp({ type: "haptic", kind: "light" });
+  hint(field === "curtain" ? (value ? L().curtainOn : L().curtainOff) : (value ? L().lockOn : L().lockOff), 2200);
+}
+
+function applyLang(force) {
+  const copy = L();
+  for (const tile of $("langs").querySelectorAll(".tile")) {
+    const on = tile.dataset.lang === lang;
+    tile.classList.toggle("on", on);
+    tile.setAttribute("aria-pressed", String(on));
+  }
+  if (!force && lang === "zh") return;
+  document.title = copy.title;
+  const modeCopy = {
+    view: [copy.viewTitle, copy.viewDesc, copy.viewAria],
+    trackpad: [copy.trackpadTitle, copy.trackpadDesc, copy.trackpadAria],
+    touch: [copy.touchTitle, copy.touchDesc, copy.touchAria],
+  };
+  for (const choice of choices) {
+    const entry = modeCopy[choice.dataset.mode];
+    if (!entry) continue;
+    const b = choice.querySelector("b"), span = choice.querySelector("span");
+    if (b) b.textContent = entry[0];
+    if (span) span.textContent = entry[1];
+    choice.setAttribute("aria-label", entry[2]);
+  }
+  $("connheadtext").textContent = copy.connTitle;
+  $("closeinfo").setAttribute("aria-label", copy.closeInfo);
+  $("widthshead").textContent = copy.widthsTitle;
+  const widthCopy = { "1280": [copy.w1280, "1280"], "1920": [copy.w1920, "1920"], "2560": [copy.w2560, "2560"], native: [copy.wNative, copy.wNativeSub] };
+  for (const tile of $("widths").querySelectorAll(".tile")) {
+    const entry = widthCopy[tile.dataset.width];
+    if (!entry) continue;
+    const b = tile.querySelector("b"), span = tile.querySelector("span");
+    if (b) b.textContent = entry[0];
+    if (span) span.textContent = entry[1];
+  }
+  $("pacinghead").textContent = copy.pacingTitle;
+  const pacingCopy = { immediate: [copy.pImmediate, copy.pImmediateSub], smooth: [copy.pSmooth, copy.pSmoothSub] };
+  for (const tile of $("pacing").querySelectorAll(".tile")) {
+    const entry = pacingCopy[tile.dataset.pacing];
+    if (!entry) continue;
+    const b = tile.querySelector("b"), span = tile.querySelector("span");
+    if (b) b.textContent = entry[0];
+    if (span) span.textContent = entry[1];
+  }
+  $("cliphead").textContent = copy.clipHead;
+  for (const [id, title, sub] of [["pastecomputer", copy.pasteComputer, copy.pasteComputerSub], ["copycomputer", copy.copyComputer, copy.copyComputerSub], ["privacycurtain", copy.curtain, copy.curtainSub], ["lockdisconnect", copy.lockDisconnect, copy.lockDisconnectSub]]) {
+    const el = $(id), b = el.querySelector("b"), span = el.querySelector("span");
+    if (b) b.textContent = title;
+    if (span) span.textContent = sub;
+    el.setAttribute("aria-label", title);
+  }
+  $("privacyhead").textContent = copy.privacyHead;
+  $("langhead").textContent = copy.langHead;
+  for (const [id, label] of [["mode", copy.barMode], ["keyboard", copy.barKeyboard], ["quick", copy.barQuick], ["clipbar", copy.barClip], ["fit", copy.barFit], ["info", copy.barInfo], ["full", copy.barFull], ["orb", copy.orbExpand]]) {
+    $(id).setAttribute("aria-label", label);
+  }
+  $("compose").textContent = copy.composePrompt;
+  $("wordshint").textContent = copy.wordsHint;
+  $("pasteclip").textContent = copy.pasteClip;
+  $("sendreturn").textContent = copy.sendReturn;
+  $("sendwords").textContent = copy.sendWords;
+}
+
+function setLang(next) {
+  if (!LOCALES.includes(next) || next === lang) return;
+  lang = next;
+  try { localStorage.setItem("linkshell.screen.lang", lang); } catch {}
+  tellApp({ type: "locale", locale: lang });
+  bridgeCall({ type: "screen-locale", locale: lang });
+  applyLang(true);
+  if (popoverOpen(connection)) status();
+  layout();
 }
 
 /** The phone's clipboard, put where the caret is: to be looked over, and sent by the user. */
 function pasted(text) {
+  if (clipboardGoal === "computer") {
+    clipboardGoal = "composer";
+    return pushClipboardToComputer(text);
+  }
   if (!composerOpen) return;
-  if (typeof text !== "string" || !text) return hint("手机剪贴板里没有文字", 2500);
+  if (typeof text !== "string" || !text) return hint(L().clipEmpty, 2500);
   if (writing) return hint("先在键盘上选好字，再粘贴", 2500);
   words.setRangeText(text.slice(0, 20000), words.selectionStart, words.selectionEnd, "end");
   grow();
@@ -3016,18 +3306,29 @@ window.linkshellClipboard = pasted;
 words.addEventListener("input", grow);
 tappable($("composeclose"), closeComposer);
 tappable($("pasteclip"), () => {
+  clipboardGoal = "composer";
   if (app) return tellApp({ type: "clipboard" });
-  navigator.clipboard.readText().then(pasted, () => hint("浏览器没有允许读取剪贴板", 2500));
+  navigator.clipboard.readText().then(pasted, () => hint(L().clipBlocked, 2500));
 });
 tappable($("sendwords"), () => sendWords(false));
 tappable($("sendreturn"), () => sendWords(true));
 $("composeclose").innerHTML = ICON.down;
+$("clipbar").innerHTML = ICON.clipboard;
+pressable($("pastecomputer"), requestPasteToComputer);
+pressable($("copycomputer"), requestCopyFromComputer);
+pressable($("privacycurtain"), () => togglePrivacy("curtain"));
+pressable($("lockdisconnect"), () => togglePrivacy("lockOnDisconnect"));
+for (const tile of $("langs").querySelectorAll(".tile")) {
+  pressable(tile, () => setLang(tile.dataset.lang));
+}
 
 /** The app tells the page what it did with the phone's screen, whether the keyboard is on it, and what shortcuts it keeps for the user. */
 window.linkshellChrome = (next) => {
   if (typeof next.fullscreen === "boolean" && next.fullscreen !== chrome.fullscreen) beginPresentation(next.fullscreen);
   const was = chrome.keyboard;
   Object.assign(chrome, next);
+  if (next.locale && LOCALES.includes(next.locale) && next.locale !== lang) setLang(next.locale);
+  if (next.privacy && typeof next.privacy === "object") receivePrivacyState(next.privacy);
   if (chrome.keyboard === true) wentDown = false;
   else if (was === true && chrome.keyboard === false) {
     wentDown = true;
@@ -3197,6 +3498,8 @@ if (!nativePicture && query.get("measure")) meter = (() => {
   };
 })();
 
+drawPrivacy();
+applyLang(false);
 resetTyping();
 refresh();
 wake();
@@ -3240,13 +3543,13 @@ tellApp({ type: "ready", mode });
 
 const SCRIPT = `(() => {const SCREEN_TAKEN = ${JSON.stringify(SCREEN_TAKEN)};const SCREEN_IDLE = ${JSON.stringify(SCREEN_IDLE)};${VIEWER_LOGIC}${SCREEN_LOADING_SCRIPT}${BODY}})();`;
 
-export function viewerPage(platform: NodeJS.Platform = "darwin"): string {
+export function viewerPage(platform: NodeJS.Platform = "darwin", locale: "zh" | "en" | "ja" = "zh"): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>屏幕</title>
 <style>${STYLE}${SCREEN_LOADING_STYLE}</style></head>
-<body data-platform="${platform === "win32" ? "win32" : "darwin"}">
+<body data-platform="${platform === "win32" ? "win32" : "darwin"}"${locale !== "zh" ? ` data-lang="${locale}"` : ""}>
 <div id="stage"><div id="picture"><canvas id="screen"></canvas><canvas id="gpu" class="gone"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
 ${SCREEN_LOADING_HTML}
 <div id="toast" class="glass"></div>
@@ -3256,10 +3559,10 @@ ${SCREEN_LOADING_HTML}
   <div class="choice" role="button" aria-label="点按，点按画面直接操作" data-mode="touch"><i></i><div><b>点按</b><span>点按画面直接操作</span></div></div>
 </div>
 <div id="connection" class="glass gone">
-  <div id="connectionhead"><span>连接信息</span><div class="tool" id="closeinfo" role="button" aria-label="关闭连接信息">${ICONS.close}</div></div>
+  <div id="connectionhead"><span id="connheadtext">连接信息</span><div class="tool" id="closeinfo" role="button" aria-label="关闭连接信息">${ICONS.close}</div></div>
   <div id="status"></div>
   <div id="widths" class="gone">
-    <div class="group"><span>清晰度（直连视频）</span></div>
+    <div class="group"><span id="widthshead">清晰度（直连视频）</span></div>
     <div class="tiles">
       <div class="tile" role="button" aria-label="流畅，1280 宽" data-width="1280"><b>流畅</b><span>1280</span></div>
       <div class="tile" role="button" aria-label="标准，1920 宽" data-width="1920"><b>标准</b><span>1920</span></div>
@@ -3268,10 +3571,32 @@ ${SCREEN_LOADING_HTML}
     </div>
   </div>
   <div id="pacing" class="gone">
-    <div class="group"><span>画面节奏</span></div>
+    <div class="group"><span id="pacinghead">画面节奏</span></div>
     <div class="tiles">
       <div class="tile" role="button" aria-label="延迟优先，最跟手，网络抖动时会短暂停顿" data-pacing="immediate"><b>延迟优先</b><span>最跟手</span></div>
       <div class="tile" role="button" aria-label="流畅优先，画面更均匀，Wi-Fi 下延迟约多 50 毫秒，适合只观看" data-pacing="smooth"><b>流畅优先</b><span>适合观看</span></div>
+    </div>
+  </div>
+  <div id="clipboard">
+    <div class="group"><span id="cliphead">加密剪贴板</span></div>
+    <div class="tiles two">
+      <div class="tile" id="pastecomputer" role="button" aria-label="粘贴到电脑"><b>粘贴到电脑</b><span>发送剪贴板</span></div>
+      <div class="tile" id="copycomputer" role="button" aria-label="读取电脑剪贴板"><b>读取电脑剪贴板</b><span>复制到本机</span></div>
+    </div>
+  </div>
+  <div id="privacy">
+    <div class="group"><span id="privacyhead">隐私保护</span></div>
+    <div class="tiles two">
+      <div class="tile" id="privacycurtain" role="button" aria-label="防窥黑屏" aria-pressed="false"><b>防窥黑屏</b><span>遮挡远端屏幕</span></div>
+      <div class="tile" id="lockdisconnect" role="button" aria-label="断开时自动锁屏" aria-pressed="false"><b>断开时自动锁屏</b><span>离开自动锁定</span></div>
+    </div>
+  </div>
+  <div id="langs">
+    <div class="group"><span id="langhead">界面语言</span></div>
+    <div class="tiles three">
+      <div class="tile" role="button" aria-label="简体中文" data-lang="zh"><b>中文</b><span>简体</span></div>
+      <div class="tile" role="button" aria-label="English" data-lang="en"><b>English</b><span>EN</span></div>
+      <div class="tile" role="button" aria-label="日本語" data-lang="ja"><b>日本語</b><span>JA</span></div>
     </div>
   </div>
 </div>
@@ -3280,6 +3605,7 @@ ${SCREEN_LOADING_HTML}
   <div class="tool" id="mode" role="button" aria-label="控制方式"></div>
   <div class="tool" id="keyboard" role="button" aria-label="键盘">${ICONS.keyboard}</div>
   <div class="tool" id="quick" role="button" aria-label="快捷操作">${ICONS.quick}</div>
+  <div class="tool" id="clipbar" role="button" aria-label="剪贴板与隐私"></div>
   <div class="tool" id="fit" role="button" aria-label="还原缩放">${ICONS.fit}</div>
   <div class="tool" id="info" role="button" aria-label="连接信息">${ICONS.info}</div>
   <div class="tool" id="full" role="button" aria-label="全屏"></div>

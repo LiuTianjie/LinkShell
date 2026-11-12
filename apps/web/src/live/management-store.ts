@@ -1,5 +1,5 @@
 import { createStore } from "zustand/vanilla";
-import { ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL } from "@linkshell/client-core";
+import { getLocale, itoolMembershipUrl, itoolYearlyUpgradeUrl, type Locale } from "@linkshell/client-core";
 import { desktopInvoke, isElectronDesktop, openDesktopExternal, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
 import {
   newerVersion,
@@ -289,15 +289,15 @@ export function refreshAccount() {
 // Membership is bought in the browser on itool.tech; coming back to the window is when it may have changed.
 let visitedShop = false;
 
-export function openMembershipPage() {
+export function openMembershipPage(locale?: Locale) {
   visitedShop = true;
-  openDesktopExternal(ITOOL_MEMBERSHIP_URL);
+  openDesktopExternal(itoolMembershipUrl(locale ?? getLocale()));
 }
 
 /** Monthly members: itool.tech opens the yearly checkout straight away. */
-export function openYearlyUpgradePage() {
+export function openYearlyUpgradePage(locale?: Locale) {
   visitedShop = true;
-  openDesktopExternal(ITOOL_YEARLY_UPGRADE_URL);
+  openDesktopExternal(itoolYearlyUpgradeUrl(locale ?? getLocale()));
 }
 
 function returnedFromShop() {

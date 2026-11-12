@@ -77,9 +77,17 @@ import {
   Archive,
   ArchiveRestore,
   Trash2,
+  Search,
+  ListTree,
+  ChevronUp,
+  ChevronDown,
+  FileText,
+  Folder,
+  Globe,
+  Sparkles,
 } from "lucide-react";
-import { reconnectLabel, reconnectOf, shownQueue } from "@linkshell/client-core";
-import type { ContentBlock, SessionSummary, ToolDetail } from "@linkshell/wire";
+import { reconnectLabel, reconnectOf, shownQueue, userMessageView } from "@linkshell/client-core";
+import type { ContentBlock, PortInfo, ProjectFileEntry, SessionSummary, ToolDetail } from "@linkshell/wire";
 import type { TimelineItem } from "@linkshell/client-core";
 import {
   commandQuery,
@@ -112,15 +120,65 @@ import { LiveActivity } from "./LiveActivity";
 import { FileView, Files, fileBase64 } from "./Files";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, shrinkImage } from "./attachments";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
+import { PortPreview } from "./Ports";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
 import { finishComposerSend, useComposerDraft } from "./composer-draft";
-import { ComputerPreview } from "./Video";
+import { ComputerPreview, StatusDot } from "./Video";
 import { McpAppView, appTabId, type AppTab } from "./McpApp";
 import { isDesktop } from "./desktop";
 import { sessionNeedsAttention, waitingLabel } from "./session-list";
 import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useT } from "./i18n";
+
+/** Extracts an active `@file` mention token ending at `caret` (ignoring emails and bare `/commands`). */
+export function atFileMention(
+  text: string,
+  caret: number,
+): { start: number; end: number; query: string } | undefined {
+  if (text.startsWith("/") && !text.includes(" ")) return undefined;
+  const safeCaret = Math.max(0, Math.min(caret, text.length));
+  const head = text.slice(0, safeCaret);
+  const match = /(?:^|\s)@([^\s@]*)$/.exec(head);
+  if (!match) return undefined;
+  const query = match[1] ?? "";
+  const start = safeCaret - query.length - 1;
+  return { start, end: safeCaret, query };
+}
+
+function timelineItemText(item: TimelineItem): string {
+  switch (item.kind) {
+    case "user":
+      return userMessageView(item.blocks).text;
+    case "agent":
+    case "thought":
+      return item.text;
+    case "error":
+      return item.message;
+    case "notice":
+      return [item.title, item.detail].filter(Boolean).join(" ");
+    case "plan":
+      return [item.title, item.markdown, ...item.entries.map((entry) => entry.content)]
+        .filter(Boolean)
+        .join(" ");
+    case "permission-result":
+      return [item.title, item.optionName].filter(Boolean).join(" ");
+    case "tool":
+      return [item.title, item.output].filter(Boolean).join(" ");
+    default:
+      return "";
+  }
+}
+
+function portMatchesSessionCwd(entry: PortInfo, sessionCwd: string): boolean {
+  if (!entry.http || !entry.cwd || !sessionCwd) return false;
+  const root = sessionCwd.replace(/\/+$/, "");
+  const target = entry.cwd.replace(/\/+$/, "");
+  if (!root || !target) return false;
+  return target === root || target.startsWith(`${root}/`) || root.startsWith(`${target}/`);
+}
 
 type Panel =
   | "commands"
@@ -185,6 +243,7 @@ export function Session({
   session: SessionSummary;
   navigate: (id: string) => void;
 }) {
+  const t = useT();
   const dialogs = useDialogs();
   const connection = useConnection();
   const { store, link } = connection;
@@ -403,6 +462,148 @@ export function Session({
     dismissedSuggestions === draft ? undefined : commandQuery(draft);
   const suggestions =
     query === undefined ? [] : matchCommands(commands, query).slice(0, 10);
+
+  // `@file` fuzzy project file autocomplete
+  const [caret, setCaret] = useState(0);
+  const [dismissedMention, setDismissedMention] = useState<string>();
+  const rawMention = useMemo(() => atFileMention(draft, caret), [draft, caret]);
+  const mentionKey = rawMention ? `${rawMention.start}:${rawMention.query}` : undefined;
+  const mention = query === undefined && mentionKey && dismissedMention !== mentionKey ? rawMention : undefined;
+  const [mentionFiles, setMentionFiles] = useState<ProjectFileEntry[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionChoice, setMentionChoice] = useState(0);
+  const hasMention = Boolean(mention);
+  const mentionQuery = mention?.query;
+  useEffect(() => {
+    setMentionChoice(0);
+  }, [mentionQuery]);
+  useEffect(() => {
+    if (!hasMention || !online || !session.cwd) {
+      setMentionFiles([]);
+      setMentionLoading(false);
+      return;
+    }
+    let alive = true;
+    setMentionLoading(true);
+    const timer = setTimeout(() => {
+      link
+        .call("fs.projectFiles", { cwd: session.cwd, query: mentionQuery ?? "", limit: 30 })
+        .then(
+          (res) => {
+            if (alive) setMentionFiles(res.files);
+          },
+          () => {
+            if (alive) setMentionFiles([]);
+          },
+        )
+        .finally(() => {
+          if (alive) setMentionLoading(false);
+        });
+    }, 90);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [link, online, session.cwd, hasMention, mentionQuery]);
+
+  const insertFileMention = (entry: ProjectFileEntry) => {
+    if (!mention) return;
+    const inserted = `@${entry.relativePath} `;
+    const nextDraft = draft.slice(0, mention.start) + inserted + draft.slice(mention.end);
+    const nextCaret = mention.start + inserted.length;
+    setDraft(nextDraft);
+    setCaret(nextCaret);
+    setDismissedMention(undefined);
+    requestAnimationFrame(() => {
+      const el = composer.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  // In-session search (`⌘F`) & Turn Outline jump
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [outlineFilter, setOutlineFilter] = useState<"all" | "prompts" | "approvals" | "errors">("all");
+  const [focusTarget, setFocusTarget] = useState<{ itemId: string; nonce: number }>();
+  const jumpToItem = useCallback(
+    (itemId: string) => setFocusTarget((prev) => ({ itemId, nonce: (prev?.nonce ?? 0) + 1 })),
+    [],
+  );
+
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q || !view?.items.length) return [];
+    return view.items.filter((item) => timelineItemText(item).toLowerCase().includes(q));
+  }, [searchQuery, view?.items]);
+
+  const firstMatchId = searchMatches[0]?.id;
+  useEffect(() => {
+    setSearchIndex(0);
+    if (firstMatchId) jumpToItem(firstMatchId);
+  }, [searchQuery, firstMatchId, jumpToItem]);
+
+  useEffect(() => {
+    const onFindShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || keysBelongToContent()) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        });
+      }
+    };
+    window.addEventListener("keydown", onFindShortcut);
+    return () => window.removeEventListener("keydown", onFindShortcut);
+  }, []);
+
+  const outlineEntries = useMemo(() => {
+    const list: { id: string; category: "prompts" | "approvals" | "errors"; label: string }[] = [];
+    for (const item of view?.items ?? []) {
+      if (item.kind === "user" && !item.agentMessages?.length) {
+        const text = userMessageView(item.blocks).text.trim();
+        if (text) list.push({ id: item.id, category: "prompts", label: text.replace(/\s+/g, " ").slice(0, 80) });
+      } else if (item.kind === "permission-result") {
+        list.push({ id: item.id, category: "approvals", label: `${item.title} · ${item.optionName}` });
+      } else if (item.kind === "error") {
+        list.push({ id: item.id, category: "errors", label: item.message.replace(/\s+/g, " ").slice(0, 80) });
+      } else if (item.kind === "tool" && item.status === "failed") {
+        list.push({ id: item.id, category: "errors", label: item.title.replace(/\s+/g, " ").slice(0, 80) });
+      }
+    }
+    return outlineFilter === "all" ? list : list.filter((entry) => entry.category === outlineFilter);
+  }, [view?.items, outlineFilter]);
+
+  // Auto-detect HTTP ports matching `session.cwd`
+  const portsLoad = useLoad(
+    () => (online ? link.call("ports.list", {}) : Promise.resolve({ ports: [] as PortInfo[] })),
+    [link, online],
+    online ? 8000 : 0,
+  );
+  const matchingPorts = useMemo(
+    () => (portsLoad.value?.ports ?? []).filter((entry) => portMatchesSessionCwd(entry, session.cwd)),
+    [portsLoad.value?.ports, session.cwd],
+  );
+  const [dismissedPorts, setDismissedPorts] = useState<ReadonlySet<number>>(new Set());
+  const [previewPort, setPreviewPort] = useState<number>();
+  const [previewPortRevision, setPreviewPortRevision] = useState(0);
+  const [previewMode, setPreviewMode] = useState<"port" | "screen">("port");
+  const activePreviewPort = previewPort ?? matchingPorts[0]?.port;
+  const readyPort = useMemo(
+    () =>
+      matchingPorts.find(
+        (entry) =>
+          !dismissedPorts.has(entry.port) &&
+          !(panel === "preview" && previewMode === "port" && activePreviewPort === entry.port),
+      ),
+    [matchingPorts, dismissedPorts, panel, previewMode, activePreviewPort],
+  );
+
   const queue = shownQueue(session.queue, queueing);
   const handleFile = (path: string, line?: number) => {
     void changeFile(path, line);
@@ -842,6 +1043,82 @@ export function Session({
                 </Tooltip>
               </>
             )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("common.search")}
+                      aria-pressed={searchOpen}
+                      data-active={searchOpen || undefined}
+                      onClick={() => {
+                        setSearchOpen((prev) => {
+                          const next = !prev;
+                          if (next) {
+                            requestAnimationFrame(() => searchInputRef.current?.focus());
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <Search />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("common.search")} · ⌘F</TooltipContent>
+                </Tooltip>
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label={t("session.outline")}>
+                          <ListTree />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("session.outline")}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-72">
+                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border">
+                      {(
+                        [
+                          ["all", "session.outlineAll"],
+                          ["prompts", "session.outlinePrompts"],
+                          ["approvals", "session.outlineApprovals"],
+                          ["errors", "session.outlineErrors"],
+                        ] as const
+                      ).map(([filterKey, labelKey]) => (
+                        <Button
+                          key={filterKey}
+                          type="button"
+                          size="xs"
+                          variant={outlineFilter === filterKey ? "secondary" : "ghost"}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            setOutlineFilter(filterKey);
+                          }}
+                        >
+                          {t(labelKey)}
+                        </Button>
+                      ))}
+                    </div>
+                    {outlineEntries.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                        {t("session.noMatches")}
+                      </div>
+                    ) : (
+                      <DropdownMenuGroup className="max-h-72 overflow-y-auto">
+                        {outlineEntries.map((entry) => (
+                          <DropdownMenuItem
+                            key={entry.id}
+                            onSelect={() => jumpToItem(entry.id)}
+                          >
+                            <span className="truncate text-xs">{entry.label}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1010,6 +1287,84 @@ export function Session({
                   </EmptyHeader>
                 </Empty>
               )}
+            {searchOpen && (
+              <div
+                className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5"
+                role="search"
+                aria-label={t("common.search")}
+              >
+                <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <Input
+                  ref={searchInputRef}
+                  className="h-7 flex-1 text-xs"
+                  value={searchQuery}
+                  placeholder={t("session.searchPlaceholder")}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSearchOpen(false);
+                      composer.current?.focus();
+                    } else if (event.key === "Enter" && searchMatches.length > 0) {
+                      event.preventDefault();
+                      const delta = event.shiftKey ? searchMatches.length - 1 : 1;
+                      const nextIdx = (searchIndex + delta) % searchMatches.length;
+                      setSearchIndex(nextIdx);
+                      const target = searchMatches[nextIdx];
+                      if (target) jumpToItem(target.id);
+                    }
+                  }}
+                />
+                {searchQuery.trim() !== "" && (
+                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                    {searchMatches.length > 0
+                      ? `${searchIndex + 1} / ${searchMatches.length}`
+                      : t("session.noMatches")}
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={searchMatches.length === 0}
+                  aria-label="Previous match"
+                  onClick={() => {
+                    if (!searchMatches.length) return;
+                    const nextIdx = (searchIndex + searchMatches.length - 1) % searchMatches.length;
+                    setSearchIndex(nextIdx);
+                    const target = searchMatches[nextIdx];
+                    if (target) jumpToItem(target.id);
+                  }}
+                >
+                  <ChevronUp />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={searchMatches.length === 0}
+                  aria-label="Next match"
+                  onClick={() => {
+                    if (!searchMatches.length) return;
+                    const nextIdx = (searchIndex + 1) % searchMatches.length;
+                    setSearchIndex(nextIdx);
+                    const target = searchMatches[nextIdx];
+                    if (target) jumpToItem(target.id);
+                  }}
+                >
+                  <ChevronDown />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("common.close")}
+                  onClick={() => setSearchOpen(false)}
+                >
+                  <X />
+                </Button>
+              </div>
+            )}
             {view && hasContent && (
               <Conversation
                 view={view}
@@ -1021,6 +1376,7 @@ export function Session({
                 loadEarlier={() => actions.loadEarlier(session.id)}
                 onFile={handleFile}
                 onFork={setForkAt}
+                focusTarget={focusTarget}
                 onTerminal={(id) => {
                   setTerminal(id);
                   setTerminals(true);
@@ -1198,10 +1554,59 @@ export function Session({
                   ))}
                 </div>
               )}
+              {readyPort && (
+                <div
+                  className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
+                  role="status"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <StatusDot on />
+                    <span className="truncate font-medium">
+                      {t("ports.readyPill", { port: readyPort.port })}
+                    </span>
+                    {readyPort.title && (
+                      <span className="truncate text-muted-foreground">· {readyPort.title}</span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="secondary"
+                      onClick={() => {
+                        setPreviewPort(readyPort.port);
+                        setPreviewMode("port");
+                        void setPanel("preview");
+                      }}
+                    >
+                      <Globe data-icon="inline-start" />
+                      {t("ports.openPreview")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={t("common.close")}
+                      onClick={() =>
+                        setDismissedPorts((prev) => {
+                          const next = new Set(prev);
+                          next.add(readyPort.port);
+                          return next;
+                        })
+                      }
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                </div>
+              )}
               <Popover
-                open={query !== undefined}
+                open={query !== undefined || mention !== undefined}
                 onOpenChange={(open) => {
-                  if (!open) setDismissedSuggestions(draft);
+                  if (!open) {
+                    if (query !== undefined) setDismissedSuggestions(draft);
+                    if (mentionKey) setDismissedMention(mentionKey);
+                  }
                 }}
               >
                 <PopoverContent
@@ -1209,7 +1614,7 @@ export function Session({
                   align="start"
                   sideOffset={8}
                   collisionPadding={12}
-                  aria-label="命令建议"
+                  aria-label={mention ? t("composer.mentionFiles") : "命令建议"}
                   className="w-(--radix-popover-trigger-width) max-h-(--radix-popover-content-available-height) overflow-hidden p-0"
                   onOpenAutoFocus={(event) => event.preventDefault()}
                   onCloseAutoFocus={(event) => event.preventDefault()}
@@ -1218,41 +1623,81 @@ export function Session({
                       event.preventDefault();
                   }}
                 >
-                  <CommandUI
-                    className="h-auto"
-                    shouldFilter={false}
-                    value={suggestions[choice]?.name ?? ""}
-                    onValueChange={(value) => {
-                      const index = suggestions.findIndex(
-                        (command) => command.name === value,
-                      );
-                      if (index >= 0) setChoice(index);
-                    }}
-                  >
-                    <CommandList
-                      aria-label="命令建议"
-                      className="max-h-[min(18rem,35dvh,var(--radix-popover-content-available-height))]"
+                  {mention ? (
+                    <CommandUI
+                      className="h-auto"
+                      shouldFilter={false}
+                      value={mentionFiles[mentionChoice]?.relativePath ?? ""}
+                      onValueChange={(value) => {
+                        const index = mentionFiles.findIndex(
+                          (entry) => entry.relativePath === value,
+                        );
+                        if (index >= 0) setMentionChoice(index);
+                      }}
                     >
-                      <CommandEmpty>
-                        没有匹配项，可打开命令面板查看全部。
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {suggestions.map((command) => (
-                          <CommandItem
-                            key={command.name}
-                            value={command.name}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onSelect={() => choose(command)}
-                          >
-                            <strong>/{command.name}</strong>
-                            <span className="text-muted-foreground">
-                              {command.description}
-                            </span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </CommandUI>
+                      <CommandList
+                        aria-label={t("composer.mentionFiles")}
+                        className="max-h-[min(18rem,35dvh,var(--radix-popover-content-available-height))]"
+                      >
+                        <CommandEmpty>
+                          {mentionLoading ? t("composer.mentionSearching") : t("composer.mentionEmpty")}
+                        </CommandEmpty>
+                        <CommandGroup heading={t("composer.mentionFiles")}>
+                          {mentionFiles.map((entry) => (
+                            <CommandItem
+                              key={entry.relativePath}
+                              value={entry.relativePath}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onSelect={() => insertFileMention(entry)}
+                            >
+                              {entry.isDir ? (
+                                <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              ) : (
+                                <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                              )}
+                              <span className="truncate font-mono text-xs">{entry.relativePath}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </CommandUI>
+                  ) : (
+                    <CommandUI
+                      className="h-auto"
+                      shouldFilter={false}
+                      value={suggestions[choice]?.name ?? ""}
+                      onValueChange={(value) => {
+                        const index = suggestions.findIndex(
+                          (command) => command.name === value,
+                        );
+                        if (index >= 0) setChoice(index);
+                      }}
+                    >
+                      <CommandList
+                        aria-label="命令建议"
+                        className="max-h-[min(18rem,35dvh,var(--radix-popover-content-available-height))]"
+                      >
+                        <CommandEmpty>
+                          没有匹配项，可打开命令面板查看全部。
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {suggestions.map((command) => (
+                            <CommandItem
+                              key={command.name}
+                              value={command.name}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onSelect={() => choose(command)}
+                            >
+                              <strong>/{command.name}</strong>
+                              <span className="text-muted-foreground">
+                                {command.description}
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </CommandUI>
+                  )}
                 </PopoverContent>
                 <PopoverAnchor asChild>
                   <InputGroup
@@ -1332,13 +1777,25 @@ export function Session({
                       aria-label="消息"
                       aria-describedby="composer-hint"
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        setDraft(event.target.value);
+                        setCaret(event.target.selectionStart ?? event.target.value.length);
+                      }}
+                      onSelect={(event) => {
+                        setCaret(event.currentTarget.selectionStart ?? 0);
+                      }}
+                      onClick={(event) => {
+                        setCaret(event.currentTarget.selectionStart ?? 0);
+                      }}
+                      onKeyUp={(event) => {
+                        setCaret(event.currentTarget.selectionStart ?? 0);
+                      }}
                       placeholder={
                         !online
                           ? "连接已断开，可以继续编辑草稿…"
                           : showComposerCaption && isDesktop
                             ? "正在同步会话，完成后可发送…"
-                            : "发送消息，输入 / 选择命令或技能…"
+                            : t("composer.placeholder")
                       }
                       rows={2}
                       onPaste={(event) => {
@@ -1354,6 +1811,37 @@ export function Session({
                           event.nativeEvent.keyCode === 229
                         )
                           return;
+                        if (event.key === "Escape" && mention !== undefined) {
+                          event.preventDefault();
+                          if (mentionKey) setDismissedMention(mentionKey);
+                          return;
+                        }
+                        if (
+                          mention !== undefined &&
+                          mentionFiles.length > 0 &&
+                          ["ArrowDown", "ArrowUp"].includes(event.key)
+                        ) {
+                          event.preventDefault();
+                          setMentionChoice(
+                            (value) =>
+                              (value +
+                                (event.key === "ArrowDown"
+                                  ? 1
+                                  : mentionFiles.length - 1)) %
+                              mentionFiles.length,
+                          );
+                          return;
+                        }
+                        if (
+                          mention !== undefined &&
+                          mentionFiles.length > 0 &&
+                          (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))
+                        ) {
+                          event.preventDefault();
+                          const picked = mentionFiles[mentionChoice] ?? mentionFiles[0];
+                          if (picked) insertFileMention(picked);
+                          return;
+                        }
                         if (event.key === "Escape" && query !== undefined) {
                           event.preventDefault();
                           setDismissedSuggestions(draft);
@@ -1425,6 +1913,45 @@ export function Session({
                             </TooltipTrigger>
                             <TooltipContent side="top">命令与技能 · /</TooltipContent>
                           </Tooltip>
+                          <DropdownMenu>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={t("composer.quickPrompts")}
+                                  >
+                                    <Sparkles />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">{t("composer.quickPrompts")}</TooltipContent>
+                            </Tooltip>
+                            <DropdownMenuContent align="start" side="top" className="w-56">
+                              <DropdownMenuLabel>{t("composer.quickPrompts")}</DropdownMenuLabel>
+                              {(
+                                [
+                                  ["composer.quickRunTests", "composer.quickRunTestsPrompt"],
+                                  ["composer.quickSummarize", "composer.quickSummarizePrompt"],
+                                  ["composer.quickContinue", "composer.quickContinuePrompt"],
+                                  ["composer.quickCommitPr", "composer.quickCommitPrPrompt"],
+                                ] as const
+                              ).map(([labelKey, promptKey]) => (
+                                <DropdownMenuItem
+                                  key={labelKey}
+                                  onSelect={() => {
+                                    const promptText = t(promptKey);
+                                    setDraft(promptText);
+                                    setCaret(promptText.length);
+                                    requestAnimationFrame(() => composer.current?.focus());
+                                  }}
+                                >
+                                  {t(labelKey)}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                         <div className="composer-options">
                           <ComposerConfig
@@ -1569,7 +2096,7 @@ export function Session({
                 {panel === "settings" && (
                   <Settings session={session} view={view} />
                 )}
-                {panel === "changes" && <Changes view={view} />}
+                {panel === "changes" && <Changes view={view} session={session} />}
                 {panel === "files" &&
                   (file ? (
                     <>
@@ -1613,9 +2140,55 @@ export function Session({
                     onSelect={setTerminal}
                   />
                 )}
-                {panel === "preview" && (
-                  <ComputerPreview sessionId={session.id} />
-                )}
+                {panel === "preview" &&
+                  (activePreviewPort ? (
+                    <div className="flex h-full min-h-0 flex-col gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Tabs
+                          value={previewMode}
+                          onValueChange={(value) => setPreviewMode(value as "port" | "screen")}
+                        >
+                          <TabsList variant="line">
+                            <TabsTrigger value="port">
+                              localhost:{activePreviewPort}
+                            </TabsTrigger>
+                            <TabsTrigger value="screen">
+                              {t("nav.screen")}
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                        {matchingPorts.length > 1 && previewMode === "port" && (
+                          <div className="flex items-center gap-1">
+                            {matchingPorts.map((entry) => (
+                              <Button
+                                key={entry.port}
+                                type="button"
+                                size="xs"
+                                variant={entry.port === activePreviewPort ? "secondary" : "ghost"}
+                                onClick={() => setPreviewPort(entry.port)}
+                              >
+                                :{entry.port}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-h-0 flex-1">
+                        {previewMode === "port" ? (
+                          <PortPreview
+                            key={`${activePreviewPort}:${previewPortRevision}`}
+                            port={activePreviewPort}
+                            sessionId={session.id}
+                            retry={() => setPreviewPortRevision((v) => v + 1)}
+                          />
+                        ) : (
+                          <ComputerPreview sessionId={session.id} />
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <ComputerPreview sessionId={session.id} />
+                  ))}
                 {(panel === "mcp" || panel === "apps") && (
                   <>
                     <p className="muted">

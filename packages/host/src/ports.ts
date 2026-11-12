@@ -155,7 +155,8 @@ export async function listPorts(options: { exclude?: number[] } = {}): Promise<P
   const candidates = all
     .map((listener) => ({ ...listener, cwd: listener.pid ? cwd.get(listener.pid) : undefined }))
     .filter((listener) => process.platform === "win32" ? /^(node|python[\d.]*|dotnet|java|ruby|php|go|cargo|deno|bun|uvicorn)$/i.test(listener.process) : listener.cwd && listener.cwd !== "/")
-    .slice(0, 40);
+    .sort((a, b) => (b.pid ?? 0) - (a.pid ?? 0))
+    .slice(0, 80);
   const probed = await Promise.all(candidates.map(async (listener) => ({ ...listener, ...(await probeHttp(listener.port)) })));
   return probed
     .filter((entry) => entry.http)

@@ -2,7 +2,7 @@ import { AgentTile } from "@/components/agent-tile";
 import { UsageDashboard } from "@/components/usage-dashboard";
 import type { UsageQuery, UsageReport } from "@linkshell/wire";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -11,17 +11,11 @@ import { Segmented } from "@/components/segmented";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { useConnection } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
+import { useLocale } from "@/lib/locale";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 
-const RANGES = [
-  { value: 1, label: "今天" },
-  { value: 7, label: "7 天" },
-  { value: 30, label: "30 天" },
-] as const;
-
-/** One agent to filter by: its tile and short name, the chosen one on a card. */
 function AgentChip({ agent, label, selected, onPress }: { agent?: string; label: string; selected: boolean; onPress: () => void }) {
   return (
     <Pressable
@@ -55,6 +49,7 @@ function AgentChip({ agent, label, selected, onPress }: { agent?: string; label:
 
 export function UsageScreen() {
   const { link } = useConnection();
+  const { t, pick } = useLocale();
   const insets = usePageInsets();
   const [days, setDays] = useState<UsageQuery["days"]>(7);
   const [agent, setAgent] = useState<UsageQuery["agent"]>("all");
@@ -64,10 +59,19 @@ export function UsageScreen() {
   const [loading, setLoading] = useState(false);
   const [pulled, setPulled] = useState(false);
   const generation = useRef(0);
+
+  const ranges = useMemo(
+    () =>
+      [
+        { value: 1, label: t("usage.days1") },
+        { value: 7, label: t("usage.days7") },
+        { value: 30, label: t("usage.days30") },
+      ] as const,
+    [t],
+  );
+
   const refresh = useCallback(async () => {
     const request = ++generation.current;
-    // The last report stays up, dimmed, while the next one is read: a filter
-    // change doesn't blank the page for the seconds the logs take to scan.
     setLoading(true);
     setError(null);
     try {
@@ -77,7 +81,9 @@ export function UsageScreen() {
         setAgents(next.agents ?? []);
       }
     } catch (reason) {
-      if (generation.current === request) setError(`无法读取用量，请确认电脑在线并已更新 LinkShell。${reason instanceof Error ? reason.message : String(reason)}`);
+      if (generation.current === request) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
       if (generation.current === request) {
         setLoading(false);
@@ -85,6 +91,7 @@ export function UsageScreen() {
       }
     }
   }, [link, days, agent]);
+
   useFocusEffect(
     useCallback(() => {
       void refresh();
@@ -95,12 +102,22 @@ export function UsageScreen() {
   );
 
   const current = report && report.days === days && report.agent === agent ? report : null;
-  const empty = current?.totals.records === 0;
+  const empty = current?.totals.records === 0 && (current?.remoteStats?.remoteTurns ?? 0) === 0 && (current?.remoteStats?.remoteApprovals ?? 0) === 0;
   const chosen = agents.find((entry) => entry.id === agent);
 
   return (
     <>
-      <HeaderActions actions={[{ kind: "button", key: "refresh", icon: { sf: "arrow.clockwise", md: "refresh" }, label: "重新统计", onPress: () => void refresh() }]} />
+      <HeaderActions
+        actions={[
+          {
+            kind: "button",
+            key: "refresh",
+            icon: { sf: "arrow.clockwise", md: "refresh" },
+            label: t("common.refresh"),
+            onPress: () => void refresh(),
+          },
+        ]}
+      />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={
@@ -115,7 +132,7 @@ export function UsageScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 28, gap: 18 }}
       >
         <View style={{ gap: 12 }}>
-          <Segmented label="时间范围" options={RANGES} value={days} onChange={setDays} />
+          <Segmented label={t("usage.title")} options={ranges} value={days} onChange={setDays} />
           {agents.length > 1 ? (
             <ScrollView
               horizontal
@@ -125,7 +142,7 @@ export function UsageScreen() {
               style={{ marginHorizontal: -16 }}
               contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
             >
-              <AgentChip label="全部" selected={agent === "all"} onPress={() => setAgent("all")} />
+              <AgentChip label={t("session.outlineAll")} selected={agent === "all"} onPress={() => setAgent("all")} />
               {agents.map((entry) => (
                 <AgentChip key={entry.id} agent={entry.id} label={agentLook(entry.id, entry.label).short} selected={agent === entry.id} onPress={() => setAgent(entry.id)} />
               ))}
@@ -136,12 +153,20 @@ export function UsageScreen() {
         {error ? <Text selectable style={[type.footnote, { color: colors.danger, paddingHorizontal: 4 }]}>{error}</Text> : null}
 
         {!report && loading ? (
-          <LoadingState label="正在统计这台电脑上的用量…" />
+          <LoadingState label={t("common.loading")} />
         ) : empty ? (
           <EmptyState
             icon={{ sf: "chart.bar", md: "bar_chart" }}
-            title={days === 1 ? "今天还没有用量记录" : `近 ${days} 天没有用量记录`}
-            message={chosen && chosen.status === "no_data" ? chosen.note : "这里只统计 Agent 日志里记下的 Token。"}
+            title={pick({ zh: "暂无用量记录", en: "No usage records in this range", ja: "この期間の利用記録はありません" })}
+            message={
+              chosen && chosen.status === "no_data"
+                ? chosen.note
+                : pick({
+                    zh: "这里统计本机 Agent 日志记录的 Token 与远程协作次数。",
+                    en: "Tracks agent token logs and remote turns/approvals on this computer.",
+                    ja: "Agent のトークンログおよびリモート実行・承認回数を集計します。",
+                  })
+            }
           />
         ) : report ? (
           <View style={{ gap: 18, opacity: current ? 1 : 0.45 }}>
@@ -153,7 +178,7 @@ export function UsageScreen() {
                 </Text>
               ))}
               <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-                {new Date(report.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 统计 · 只算日志里记下的 Token，不代表剩余额度或账单
+                {new Date(report.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {t("usage.subscriptionReferenceNote")}
               </Text>
             </View>
           </View>

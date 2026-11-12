@@ -1,26 +1,63 @@
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-controller";
-import { WebView, type WebViewNavigation } from "react-native-webview";
+import { WebView, type WebViewMessageEvent, type WebViewNavigation } from "react-native-webview";
 import { Button } from "@/components/button";
 import { Glass } from "@/components/glass";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon, type IconProps } from "@/components/icon";
-import { useConnection } from "@/lib/client";
+import { useActions, useClient, useConnection } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
 import { openLink } from "@/lib/links";
+import { useLocale } from "@/lib/locale";
 import { forwardPort, type Forward } from "@/lib/preview";
 import { revealPreviewFocus } from "@/lib/preview-focus";
 import { colors } from "@/theme/colors";
-import { type } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 const DESKTOP_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+
+const RUNTIME_ERROR_BRIDGE_JS = `(function(){
+  if (window.__linkshellErrorBridgeInstalled) return;
+  window.__linkshellErrorBridgeInstalled = true;
+  var sent = 0;
+  function report(msg) {
+    if (!msg || sent >= 15) return;
+    sent++;
+    try {
+      window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "linkshell_preview_error",
+        message: String(msg).slice(0, 600)
+      }));
+    } catch (_) {}
+  }
+  window.addEventListener("error", function(ev) {
+    var loc = ev && ev.filename ? " (" + ev.filename + ":" + (ev.lineno || 0) + ")" : "";
+    report((ev && (ev.message || (ev.error && ev.error.stack))) ? (ev.message + loc) : "Uncaught error");
+  });
+  window.addEventListener("unhandledrejection", function(ev) {
+    var r = ev && ev.reason;
+    report("Unhandled rejection: " + (r && (r.stack || r.message) ? (r.stack || r.message) : String(r)));
+  });
+  var origError = console.error;
+  console.error = function() {
+    try {
+      var parts = [];
+      for (var i = 0; i < arguments.length; i++) {
+        var a = arguments[i];
+        parts.push(a && (a.stack || a.message) ? (a.stack || a.message) : typeof a === "object" ? JSON.stringify(a) : String(a));
+      }
+      report(parts.join(" "));
+    } catch (_) {}
+    if (origError) return origError.apply(console, arguments);
+  };
+})(); true;`;
 
 function ToolbarButton({ icon, label, disabled, onPress }: { icon: Pick<IconProps, "sf" | "md">; label: string; disabled?: boolean; onPress: () => void }) {
   return (
@@ -46,12 +83,25 @@ function ToolbarButton({ icon, label, disabled, onPress }: { icon: Pick<IconProp
  * through the encrypted channel as if it ran on the phone.
  */
 export function PreviewScreen() {
-  const params = useLocalSearchParams<{ port: string; title?: string }>();
-  return <PreviewContent key={params.port} port={Number(params.port)} initialTitle={params.title} />;
+  const params = useLocalSearchParams<{ port: string; title?: string; sessionId?: string }>();
+  return <PreviewContent key={params.port} port={Number(params.port)} initialTitle={params.title} sessionId={params.sessionId} />;
 }
 
-export function PreviewContent({ port, initialTitle, embedded = false }: { port: number; initialTitle?: string; embedded?: boolean }) {
+export function PreviewContent({
+  port,
+  initialTitle,
+  sessionId,
+  embedded = false,
+}: {
+  port: number;
+  initialTitle?: string;
+  sessionId?: string;
+  embedded?: boolean;
+}) {
   const { streams } = useConnection();
+  const actions = useActions();
+  const sessions = useClient((state) => state.sessions);
+  const { t, pick } = useLocale();
   const insets = usePageInsets();
   const web = useRef<WebView>(null);
   const keyboardOpen = useKeyboardState((state) => state.isVisible);
@@ -59,7 +109,6 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
   const revealEditor = useCallback(() => {
     if (Platform.OS !== "ios" || !keyboardOpen) return;
     clearTimeout(focusRevealTimer.current);
-    // Wait for the last keyboard/rotation frame, then let the page finish its own layout.
     focusRevealTimer.current = setTimeout(() => web.current?.injectJavaScript(revealPreviewFocus), 80);
   }, [keyboardOpen]);
   useEffect(() => () => clearTimeout(focusRevealTimer.current), [keyboardOpen]);
@@ -69,10 +118,18 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
   const [progress, setProgress] = useState(0);
   const [nav, setNav] = useState<Pick<WebViewNavigation, "title" | "url" | "canGoBack" | "canGoForward"> | null>(null);
   const [desktop, setDesktop] = useState(false);
-  // The page alone: no header, toolbar or status bar.
   const [fullscreen, setFullscreen] = useState(false);
-  // Remounts the WebView (a retry, or a new user agent).
   const [generation, setGeneration] = useState(0);
+  const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
+  const [sendingErrors, setSendingErrors] = useState(false);
+
+  const targetSessionId = useMemo(() => {
+    if (sessionId && sessions[sessionId]) return sessionId;
+    const candidates = Object.values(sessions)
+      .filter((s) => !s.archived)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    return candidates[0]?.id;
+  }, [sessionId, sessions]);
 
   useEffect(() => {
     let active: Forward | undefined;
@@ -92,7 +149,6 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
     };
   }, [streams, port, connectionAttempt]);
 
-  // Shown as the computer's address, not the phone's loopback.
   const shown = (url: string | undefined) => {
     if (!url || !forward) return `localhost:${port}`;
     const path = url.replace(/^https?:\/\/(127\.0\.0\.1|localhost):\d+/, "");
@@ -117,8 +173,47 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
   const retry = () => {
     setFailure(null);
     setProgress(0);
+    setRuntimeErrors([]);
     if (forward) setGeneration((value) => value + 1);
     else setConnectionAttempt((value) => value + 1);
+  };
+
+  const onWebViewMessage = useCallback((event: WebViewMessageEvent) => {
+    try {
+      const parsed = JSON.parse(event.nativeEvent.data) as { type?: string; message?: string };
+      if (parsed?.type === "linkshell_preview_error" && typeof parsed.message === "string") {
+        const clean = parsed.message.trim();
+        if (!clean) return;
+        setRuntimeErrors((prev) => (prev.includes(clean) || prev.length >= 15 ? prev : [...prev, clean]));
+      }
+    } catch {
+      // Ignore unrelated postMessage traffic from previewed web apps.
+    }
+  }, []);
+
+  const sendErrorsToAgent = async () => {
+    if (!targetSessionId || runtimeErrors.length === 0 || sendingErrors) return;
+    setSendingErrors(true);
+    try {
+      const prompt = `${t("ports.sendErrorsPromptPrefix")} (localhost:${port})\n\n\`\`\`\n${runtimeErrors.join("\n\n")}\n\`\`\``;
+      const res = await actions.send(targetSessionId, [{ type: "text", text: prompt }]);
+      if (res === "failed") {
+        throw new Error(pick({ zh: "发送失败，请重试", en: "Failed to send errors to session", ja: "エラーの送信に失敗しました" }));
+      }
+      haptics.success();
+      setRuntimeErrors([]);
+      if (!embedded) {
+        router.push({ pathname: "/session/[id]", params: { id: targetSessionId } });
+      }
+    } catch (reason) {
+      haptics.error();
+      Alert.alert(
+        pick({ zh: "发送失败", en: "Send failed", ja: "送信失敗" }),
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    } finally {
+      setSendingErrors(false);
+    }
   };
 
   return (
@@ -155,18 +250,27 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
             kind: "menu",
             key: "more",
             icon: { sf: "ellipsis", md: "more_vert" },
-            label: "更多",
+            label: pick({ zh: "更多", en: "More", ja: "その他" }),
             items: [
-              { title: "刷新", icon: { sf: "arrow.clockwise", md: "refresh" }, onPress: () => web.current?.reload() },
               {
-                title: desktop ? "手机版网页" : "电脑版网页",
+                title: t("common.refresh"),
+                icon: { sf: "arrow.clockwise", md: "refresh" },
+                onPress: () => {
+                  setRuntimeErrors([]);
+                  web.current?.reload();
+                },
+              },
+              {
+                title: desktop
+                  ? pick({ zh: "手机版网页", en: "Mobile Site", ja: "モバイル表示" })
+                  : pick({ zh: "电脑版网页", en: "Desktop Site", ja: "PC表示" }),
                 icon: desktop ? { sf: "iphone", md: "smartphone" } : { sf: "desktopcomputer", md: "desktop_windows" },
                 onPress: () => {
                   setDesktop((value) => !value);
                   setGeneration((value) => value + 1);
                 },
               },
-              { title: "其他端口", icon: { sf: "network", md: "lan" }, onPress: () => router.push("/ports") },
+              { title: t("nav.ports"), icon: { sf: "network", md: "lan" }, onPress: () => router.push("/ports") },
             ],
           },
         ]}
@@ -175,7 +279,6 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
       </>}
 
       {!embedded && Platform.OS === "ios" && !fullscreen && !keyboardOpen ? <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 8 }]}>{shown(nav?.url)}</Text> : null}
-      {/* Padding remeasures on rotation with the keyboard open; the native header stays outside this frame. */}
       <KeyboardAvoidingView behavior="padding" automaticOffset={Platform.OS === "ios"} enabled={Platform.OS === "ios"} style={{ flex: 1 }}>
         {forward && !failure ? (
           <WebView
@@ -183,13 +286,14 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
             ref={web}
             source={{ uri: forward.url }}
             userAgent={desktop ? DESKTOP_AGENT : undefined}
+            injectedJavaScriptBeforeContentLoaded={RUNTIME_ERROR_BRIDGE_JS}
+            onMessage={onWebViewMessage}
             onLayout={revealEditor}
             onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
             onNavigationStateChange={(state) => setNav(state)}
-            onError={({ nativeEvent }) => setFailure(nativeEvent.description || "页面加载失败")}
+            onError={({ nativeEvent }) => setFailure(nativeEvent.description || pick({ zh: "页面加载失败", en: "Failed to load page", ja: "ページの読み込みに失敗しました" }))}
             onShouldStartLoadWithRequest={(request) => {
               if (local(request.url) || /^(about|data|blob|javascript):/.test(request.url)) return true;
-              // A link off the dev server: open it in the in-app browser.
               if (/^https?:/.test(request.url) && request.isTopFrame !== false) {
                 void openLink(request.url);
                 return false;
@@ -209,9 +313,17 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
         ) : failure ? (
           <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 12 }}>
             <Icon sf="network.slash" md="cloud_off" size={36} color={colors.tertiaryLabel} />
-            <Text style={[type.headline, { color: colors.label }]}>打不开 localhost:{port}</Text>
-            <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>电脑上这个端口可能没有在运行服务，启动后再试。</Text>
-            <Button title="重试" variant="tonal" size="small" onPress={retry} />
+            <Text style={[type.headline, { color: colors.label }]}>
+              {pick({ zh: `打不开 localhost:${port}`, en: `Cannot reach localhost:${port}`, ja: `localhost:${port} に接続できません` })}
+            </Text>
+            <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
+              {pick({
+                zh: "电脑上这个端口可能没有在运行服务，启动后再试。",
+                en: "No HTTP service appears to be listening on this port on your computer.",
+                ja: "PC 上でこのポートが起動していない可能性があります。起動後に再試行してください。",
+              })}
+            </Text>
+            <Button title={t("common.retry")} variant="tonal" size="small" onPress={retry} />
           </ScrollView>
         ) : (
           <ActivityIndicator style={{ marginTop: 48 }} color={colors.secondaryLabel} />
@@ -219,6 +331,48 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
         {progress > 0 && progress < 1 && !failure ? (
           <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2 }}>
             <View style={{ width: `${progress * 100}%`, height: 2, backgroundColor: colors.accent }} />
+          </View>
+        ) : null}
+
+        {/* Runtime JS error bridge banner */}
+        {runtimeErrors.length > 0 && targetSessionId && !fullscreen ? (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginBottom: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 9,
+              borderRadius: radius.card,
+              borderCurve: "continuous",
+              backgroundColor: colors.dangerSoft,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}>
+              <Icon sf="exclamationmark.triangle.fill" md="error" size={15} color={colors.danger} />
+              <Text numberOfLines={1} style={[type.footnote, { color: colors.danger, fontWeight: "600", flexShrink: 1 }]}>
+                {t("ports.errorsCount", { count: runtimeErrors.length })}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => void sendErrorsToAgent()}
+              disabled={sendingErrors}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 999,
+                backgroundColor: colors.danger,
+                opacity: pressed || sendingErrors ? 0.75 : 1,
+              })}
+            >
+              <Text style={[type.caption, { color: "#ffffff", fontWeight: "600" }]}>
+                {t("ports.sendErrorsToAgent", { count: runtimeErrors.length })}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
       </KeyboardAvoidingView>
@@ -230,7 +384,7 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
             setFullscreen(false);
           }}
           accessibilityRole="button"
-          accessibilityLabel="退出全屏"
+          accessibilityLabel={pick({ zh: "退出全屏", en: "Exit Fullscreen", ja: "全画面を終了" })}
           hitSlop={10}
           style={{ position: "absolute", right: Math.max(insets.right, 0) + 14, bottom: Math.max(insets.bottom, 12) + 6, opacity: 0.9 }}
         >
@@ -240,15 +394,21 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
         </Pressable>
       ) : Platform.OS === "ios" && !embedded ? (
         <Stack.Toolbar placement="bottom">
-          <Stack.Toolbar.Button icon="chevron.left" accessibilityLabel="后退" disabled={!nav?.canGoBack} onPress={() => web.current?.goBack()}>后退</Stack.Toolbar.Button>
-          <Stack.Toolbar.Button icon="chevron.right" accessibilityLabel="前进" disabled={!nav?.canGoForward} onPress={() => web.current?.goForward()}>前进</Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon="chevron.left" accessibilityLabel={pick({ zh: "后退", en: "Back", ja: "戻る" })} disabled={!nav?.canGoBack} onPress={() => web.current?.goBack()}>
+            {pick({ zh: "后退", en: "Back", ja: "戻る" })}
+          </Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon="chevron.right" accessibilityLabel={pick({ zh: "前进", en: "Forward", ja: "進む" })} disabled={!nav?.canGoForward} onPress={() => web.current?.goForward()}>
+            {pick({ zh: "前进", en: "Forward", ja: "進む" })}
+          </Stack.Toolbar.Button>
           <Stack.Toolbar.Button
             icon={progress > 0 && progress < 1 ? "xmark" : "arrow.clockwise"}
-            accessibilityLabel={progress > 0 && progress < 1 ? "停止" : "刷新"}
+            accessibilityLabel={progress > 0 && progress < 1 ? t("session.stop") : t("common.refresh")}
             onPress={() => (progress > 0 && progress < 1 ? web.current?.stopLoading() : failure ? retry() : web.current?.reload())}
-          >{progress > 0 && progress < 1 ? "停止" : "刷新"}</Stack.Toolbar.Button>
+          >{progress > 0 && progress < 1 ? t("session.stop") : t("common.refresh")}</Stack.Toolbar.Button>
           <Stack.Toolbar.Spacer />
-          <Stack.Toolbar.Button icon="arrow.up.left.and.arrow.down.right" accessibilityLabel="全屏" onPress={() => setFullscreen(true)}>全屏</Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon="arrow.up.left.and.arrow.down.right" accessibilityLabel={t("screen.fullscreen")} onPress={() => setFullscreen(true)}>
+            {t("screen.fullscreen")}
+          </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : (
       <View
@@ -263,14 +423,14 @@ export function PreviewContent({ port, initialTitle, embedded = false }: { port:
           borderTopColor: colors.separator,
         }}
       >
-        <ToolbarButton icon={{ sf: "chevron.left", md: "arrow_back_ios_new" }} label="后退" disabled={!nav?.canGoBack} onPress={() => web.current?.goBack()} />
-        <ToolbarButton icon={{ sf: "chevron.right", md: "arrow_forward_ios" }} label="前进" disabled={!nav?.canGoForward} onPress={() => web.current?.goForward()} />
+        <ToolbarButton icon={{ sf: "chevron.left", md: "arrow_back_ios_new" }} label={pick({ zh: "后退", en: "Back", ja: "戻る" })} disabled={!nav?.canGoBack} onPress={() => web.current?.goBack()} />
+        <ToolbarButton icon={{ sf: "chevron.right", md: "arrow_forward_ios" }} label={pick({ zh: "前进", en: "Forward", ja: "進む" })} disabled={!nav?.canGoForward} onPress={() => web.current?.goForward()} />
         <ToolbarButton
           icon={progress > 0 && progress < 1 ? { sf: "xmark", md: "close" } : { sf: "arrow.clockwise", md: "refresh" }}
-          label={progress > 0 && progress < 1 ? "停止" : "刷新"}
+          label={progress > 0 && progress < 1 ? t("session.stop") : t("common.refresh")}
           onPress={() => (progress > 0 && progress < 1 ? web.current?.stopLoading() : failure ? retry() : web.current?.reload())}
         />
-        {embedded ? null : <ToolbarButton icon={{ sf: "arrow.up.left.and.arrow.down.right", md: "fullscreen" }} label="全屏" onPress={() => setFullscreen(true)} />}
+        {embedded ? null : <ToolbarButton icon={{ sf: "arrow.up.left.and.arrow.down.right", md: "fullscreen" }} label={t("screen.fullscreen")} onPress={() => setFullscreen(true)} />}
       </View>
       )}
     </View>

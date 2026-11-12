@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
 import type { ProjectGroup } from "@linkshell/client-core";
+import { LOCALE_LABELS, isLocalePreference, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
 import {
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -57,6 +59,7 @@ import { ProjectOverview, projectScope, setProjectScope, type ProjectSource } fr
 import type { CrossComputerProject } from "../live/cross-computer-projects";
 import { Badge } from "./ui/badge";
 import { useApplyDesktopAppearance, useDesktopAppearance, type Appearance } from "../live/desktop-appearance";
+import { setWebLocalePreference, useLocale, useLocalePreference, useT } from "../live/i18n";
 import type { ConsoleShellProps } from "./ConsoleShell";
 import { CommandCenter } from "./CommandCenter";
 import { ColumnResizer } from "./ColumnResizer";
@@ -89,26 +92,31 @@ import "../styles/desktop-resources.css";
 import "../styles/desktop-preview.css";
 import "../styles/management.css";
 
-type NavigationItem = { id: string; title: string; icon: LucideIcon };
+type NavigationItem = { id: string; titleKey: I18nKey; icon: LucideIcon };
 
 // The sidebar is mostly the working set (what waits on you, projects and their sessions), as in
 // Codex. Above it, every place on this computer in one flat list: a fold would only add a click.
 // Projects open from the tree's own heading; 电脑 and 已归档 from the computer menu, the session
 // list or ⌘K.
 const navigationItems: NavigationItem[] = [
-  { id: "home", title: "会话", icon: MessageSquare },
-  { id: "screen", title: "我的电脑", icon: Monitor },
-  { id: "terminals", title: "终端", icon: Terminal },
-  { id: "files", title: "文件", icon: File },
-  { id: "ports", title: "端口预览", icon: Globe },
-  { id: "worktrees", title: "Worktree", icon: GitBranch },
+  { id: "home", titleKey: "nav.sessions", icon: MessageSquare },
+  { id: "steward", titleKey: "nav.steward", icon: Bot },
+  { id: "screen", titleKey: "nav.screen", icon: Monitor },
+  { id: "terminals", titleKey: "nav.terminals", icon: Terminal },
+  { id: "files", titleKey: "nav.files", icon: File },
+  { id: "ports", titleKey: "nav.ports", icon: Globe },
+  { id: "worktrees", titleKey: "nav.worktrees", icon: GitBranch },
 ];
 const PROJECTS_SHOWN = 8;
 const SESSIONS_SHOWN = 5;
 const ACTIVE_SESSIONS_SHOWN = 6;
 
-function connectionLabel(status: string): string {
-  return status === "online" ? "已连接" : status === "locked" ? "需要密码" : status === "connecting" ? "连接中" : status === "reconnecting" ? "正在恢复" : "未连接";
+function connectionLabel(status: string, locale: Locale = "zh"): string {
+  if (status === "online") return translate(locale, "connection.online");
+  if (status === "locked") return translate(locale, "connection.locked");
+  if (status === "connecting") return translate(locale, "connection.connecting");
+  if (status === "reconnecting") return translate(locale, "connection.reconnecting");
+  return translate(locale, "connection.offline");
 }
 
 function sessionTone(session: SessionSummary): "waiting" | "running" | "error" | undefined {
@@ -203,6 +211,7 @@ function ComputerPicker({
 
 /** The current computer's connection: its state, the route, the Host's version and whether it is behind. */
 function ConnectionSummary({ connection }: { connection: Connection }) {
+  const locale = useLocale();
   const status = useStore(connection.store, (state) => state.status);
   const detail = useStore(connection.store, (state) => state.statusDetail);
   const machine = useStore(connection.store, (state) => state.machine);
@@ -213,7 +222,7 @@ function ConnectionSummary({ connection }: { connection: Connection }) {
   const behind = machine && (machine.protocol ?? 0) < HOST_PROTOCOL;
   return (
     <div className="desktop-connection-summary">
-      <span><span className="desktop-presence" data-online={status === "online" || undefined} />{status === "online" ? route : detail ?? connectionLabel(status)}</span>
+      <span><span className="desktop-presence" data-online={status === "online" || undefined} />{status === "online" ? route : detail ?? connectionLabel(status, locale)}</span>
       {machine?.hostVersion && <span className="desktop-status-meta">Host {machine.hostVersion}</span>}
       {behind && <span data-tone="waiting">电脑上的 LinkShell 较旧，部分功能不可用</span>}
     </div>
@@ -234,12 +243,13 @@ function PickerCopy({ name, detail, online }: { name: string; detail: string; on
 }
 
 function PickerFacts({ computer, connection, name }: { computer: Computer; connection: Connection; name: string }) {
+  const locale = useLocale();
   const status = useStore(connection.store, (state) => state.status);
   return (
     <PickerCopy
       name={name}
       online={status === "online"}
-      detail={`${computer.key === DESKTOP_LOCAL ? THIS_COMPUTER : "远程电脑"} · ${connectionLabel(status)}`}
+      detail={`${computer.key === DESKTOP_LOCAL ? THIS_COMPUTER : "远程电脑"} · ${connectionLabel(status, locale)}`}
     />
   );
 }
@@ -620,6 +630,8 @@ function DesktopNavigation({
   openPalette: () => void;
 }) {
   const state = useStore(engine.state);
+  const t = useT();
+  const localePreference = useLocalePreference();
   const scope = useStore(projectScope, (state) => state.value);
   const multipleComputers = state.computers.length > 1;
   const showAllProjects = scope === "all";
@@ -642,7 +654,7 @@ function DesktopNavigation({
       onClick={() => go(item.id)}
     >
       <item.icon size={16} aria-hidden />
-      <span>{item.title}</span>
+      <span>{t(item.titleKey)}</span>
       {item.id === "home" && state.connection && <SessionCountBadge connection={state.connection} />}
     </button>
   );
@@ -676,7 +688,7 @@ function DesktopNavigation({
         <div className="desktop-sidebar-actions">
           <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
             <SquarePen size={16} aria-hidden />
-            <span>新建会话</span>
+            <span>{t("session.new")}</span>
             <kbd>{shortcutText(desktopShortcuts.newSession)}</kbd>
           </button>
           {!isElectronDesktop && (
@@ -730,6 +742,19 @@ function DesktopNavigation({
               <DropdownMenuRadioItem value="dark">深色</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("locale.label")}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={localePreference}
+              onValueChange={(value) => {
+                if (isLocalePreference(value)) setWebLocalePreference(value);
+              }}
+            >
+              <DropdownMenuRadioItem value="system">{t("locale.system")}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="zh">{LOCALE_LABELS.zh}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="en">{LOCALE_LABELS.en}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="ja">{LOCALE_LABELS.ja}</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={openPalette}><Keyboard />命令与快捷键</DropdownMenuItem>
             <DropdownMenuItem asChild><a href="https://liutianjie.github.io/LinkShell/docs/" target="_blank" rel="noreferrer"><BookOpen />使用指南</a></DropdownMenuItem>
           </DropdownMenuContent>
@@ -773,6 +798,7 @@ function DesktopStatusBar({ openPalette, navigate }: { openPalette: () => void; 
 }
 
 function ConnectionFacts({ connection, name, navigate }: { connection: Connection; name: string; navigate: (view: string) => void }) {
+  const locale = useLocale();
   const status = useStore(connection.store, (state) => state.status);
   const detail = useStore(connection.store, (state) => state.statusDetail);
   const machine = useStore(connection.store, (state) => state.machine);
@@ -789,7 +815,7 @@ function ConnectionFacts({ connection, name, navigate }: { connection: Connectio
       <span className="desktop-status-item" title={detail}>
         <span className="desktop-presence" data-online={status === "online" || undefined} />
         <strong>{name}</strong>
-        <span>{status === "online" ? route : detail ?? connectionLabel(status)}</span>
+        <span>{status === "online" ? route : detail ?? connectionLabel(status, locale)}</span>
       </span>
       {machine?.hostVersion && <span className="desktop-status-item desktop-status-meta">Host {machine.hostVersion}</span>}
       {machine && (machine.protocol ?? 0) < HOST_PROTOCOL && (

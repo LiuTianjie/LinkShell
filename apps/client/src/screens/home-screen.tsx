@@ -1,5 +1,6 @@
-import { needsAttention } from "@/lib/describe";
+import { needsAttention, sessionTitle } from "@/lib/describe";
 import { LegendList } from "@legendapp/list/react-native";
+import type { Locale } from "@linkshell/client-core";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
@@ -10,10 +11,12 @@ import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { Icon } from "@/components/icon";
 import { AttentionIsland } from "@/components/attention-island";
+import { isHostLowBattery } from "@/components/computer-metrics";
 import { ConnectionBanner } from "@/components/connection-banner";
+import { LsaSheet } from "@/components/lsa-sheet";
 import { NeedCard } from "@/components/need-card";
 import { SectionHeader } from "@/components/section-header";
-import { SessionRow, positionOf, type RowPosition } from "@/components/session-row";
+import { SessionAvatar, SessionRow, positionOf, type RowPosition } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
 import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
@@ -23,6 +26,8 @@ import { useActions, useClient, useConnection, useConnectionStatus, useHasComput
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { Welcome } from "@/components/welcome";
 import { haptics } from "@/lib/haptics";
+import { useLocale } from "@/lib/locale";
+import { useMachineMetrics } from "@/lib/machine-metrics";
 import {
   buildLiveActivityPayload,
   isSessionSnoozed,
@@ -43,9 +48,7 @@ import { useLayoutGeometry } from "@/lib/use-layout-geometry";
 import { workspaceLayout } from "@/lib/workspace-layout";
 import { homeNavigationLayout, homeUsesInlineControls } from "@/lib/home-layout";
 import { SessionFoldLayoutContext } from "@/lib/session-fold-layout";
-import { sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
-import { SessionAvatar } from "@/components/session-row";
 import { Glass } from "@/components/glass";
 import { LayoutProbe } from "../../modules/link-layout";
 import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
@@ -81,20 +84,57 @@ const newest = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updated
 
 const DAY = 86_400_000;
 
-/** "今天 / 昨天 / 近 7 天 / 更早": recent sessions read as a diary, not a wall. */
-function dayBucket(ts: number, now: number): string {
+function dayBucket(ts: number, now: number, locale: Locale): string {
   const today = new Date(now);
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  if (ts >= start) return "今天";
-  if (ts >= start - DAY) return "昨天";
-  if (ts >= start - 6 * DAY) return "近 7 天";
-  return "更早";
+  if (ts >= start) return locale === "zh" ? "今天" : locale === "ja" ? "今日" : "Today";
+  if (ts >= start - DAY) return locale === "zh" ? "昨天" : locale === "ja" ? "昨日" : "Yesterday";
+  if (ts >= start - 6 * DAY) return locale === "zh" ? "近 7 天" : locale === "ja" ? "直近 7 日間" : "Last 7 Days";
+  return locale === "zh" ? "更早" : locale === "ja" ? "それ以前" : "Earlier";
+}
+
+function sectionWords(locale: Locale) {
+  if (locale === "ja") {
+    return {
+      need: "確認待ち",
+      fail: "エラー",
+      run: "実行中",
+      pin: "ピン留め",
+      term: "ターミナル",
+      snooze: "あとで",
+      found: "検索結果",
+      archived: "アーカイブ済み",
+    };
+  }
+  if (locale === "en") {
+    return {
+      need: "Needs Attention",
+      fail: "Errors",
+      run: "Running",
+      pin: "Pinned",
+      term: "Terminals",
+      snooze: "Snoozed",
+      found: "Found",
+      archived: "Archived",
+    };
+  }
+  return {
+    need: "等你处理",
+    fail: "出错",
+    run: "进行中",
+    pin: "已置顶",
+    term: "终端",
+    snooze: "稍后处理",
+    found: "找到",
+    archived: "已归档",
+  };
 }
 
 function buildItems(
   sessions: SessionSummary[],
   terminals: TerminalInfo[],
   now: number,
+  locale: Locale,
   options: {
     pinnedIds?: string[];
     snoozedMap?: Record<string, number>;
@@ -108,6 +148,7 @@ function buildItems(
   pinnedCount: number;
   snoozedCount: number;
 } {
+  const copy = sectionWords(locale);
   const pinnedSet = new Set(options.pinnedIds ?? []);
   const snoozedMap = options.snoozedMap ?? {};
   const filter = options.filter ?? "all";
@@ -141,64 +182,63 @@ function buildItems(
 
   if (filter === "attention") {
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "等你处理" });
+      items.push({ type: "header", key: "h-need", title: copy.need });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
-      items.push({ type: "header", key: "h-fail", title: "出错", count: failed.length, warn: true });
+      items.push({ type: "header", key: "h-fail", title: copy.fail, count: failed.length, warn: true });
       failed.forEach((session, index) => items.push({ type: "row", key: `err-${session.id}`, session, position: positionOf(index, failed.length) }));
     }
   } else if (filter === "running") {
     if (running.length) {
-      items.push({ type: "header", key: "h-run", title: "进行中", count: running.length });
+      items.push({ type: "header", key: "h-run", title: copy.run, count: running.length });
       running.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, running.length), "r")));
     }
   } else if (filter === "pinned") {
     const allPinned = liveAll.filter((s) => pinnedSet.has(s.id)).sort(newest);
     if (allPinned.length) {
-      items.push({ type: "header", key: "h-pin", title: "已置顶", count: allPinned.length });
+      items.push({ type: "header", key: "h-pin", title: copy.pin, count: allPinned.length });
       allPinned.forEach((session, index) => items.push({ type: "row", key: `pin-${session.id}`, session, position: positionOf(index, allPinned.length) }));
     }
   } else if (filter === "terminals") {
     const sortedTerminals = [...terminals].sort((a, b) => b.activeAt - a.activeAt);
     if (sortedTerminals.length) {
-      items.push({ type: "header", key: "h-term", title: "终端", count: sortedTerminals.length });
+      items.push({ type: "header", key: "h-term", title: copy.term, count: sortedTerminals.length });
       sortedTerminals.forEach((terminal, index) =>
         items.push({ type: "terminal", key: `term-${terminal.id}`, terminal, position: positionOf(index, sortedTerminals.length) }),
       );
     }
   } else if (filter === "snoozed") {
     if (snoozedSessions.length) {
-      items.push({ type: "header", key: "h-snooze", title: "稍后处理", count: snoozedSessions.length });
+      items.push({ type: "header", key: "h-snooze", title: copy.snooze, count: snoozedSessions.length });
       snoozedSessions.forEach((session, index) =>
         items.push({ type: "row", key: `snz-${session.id}`, session, position: positionOf(index, snoozedSessions.length) }),
       );
     }
   } else {
-    // Default "all" view: Attention-first hierarchy (Waiting > Failed > Running > Pinned > Day buckets)
     if (waiting.length) {
-      items.push({ type: "header", key: "h-need", title: "等你处理" });
+      items.push({ type: "header", key: "h-need", title: copy.need });
       for (const session of waiting) items.push({ type: "need", key: `n-${session.id}`, session });
     }
     if (failed.length) {
-      items.push({ type: "header", key: "h-fail", title: "出错", count: failed.length, warn: true });
+      items.push({ type: "header", key: "h-fail", title: copy.fail, count: failed.length, warn: true });
       failed.forEach((session, index) =>
         items.push({ type: "row", key: `err-${session.id}`, session, position: positionOf(index, failed.length) }),
       );
     }
     if (running.length) {
-      items.push({ type: "header", key: "h-run", title: "进行中", count: running.length });
+      items.push({ type: "header", key: "h-run", title: copy.run, count: running.length });
       running.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, running.length), "r")));
     }
     if (pinned.length) {
-      items.push({ type: "header", key: "h-pin", title: "已置顶", count: pinned.length });
+      items.push({ type: "header", key: "h-pin", title: copy.pin, count: pinned.length });
       pinned.forEach((session, index) =>
         items.push({ type: "row", key: `pin-${session.id}`, session, position: positionOf(index, pinned.length) }),
       );
     }
     const buckets = new Map<string, Entry[]>();
     for (const entry of recent) {
-      const bucket = dayBucket(entry.at, now);
+      const bucket = dayBucket(entry.at, now, locale);
       buckets.set(bucket, [...(buckets.get(bucket) ?? []), entry]);
     }
     for (const [title, group] of buckets) {
@@ -217,11 +257,8 @@ function buildItems(
   };
 }
 
-/**
- * What a search finds, newest first, as one plain list: no "needs you" cards or days, since the question
- * was "where is it". Archived sessions are found too, under their own heading.
- */
-function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], words: string[]): Item[] {
+function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], words: string[], locale: Locale): Item[] {
+  const copy = sectionWords(locale);
   const matching = sessions.filter((session) => sessionMatches(session, words));
   const current: Entry[] = [
     ...matching.filter((session) => !session.archived).map((session): Entry => ({ kind: "session", session, at: session.updatedAt })),
@@ -230,22 +267,22 @@ function searchItems(sessions: SessionSummary[], terminals: TerminalInfo[], word
   const archived = matching.filter((session) => session.archived).sort(newest);
   const items: Item[] = [];
   if (current.length) {
-    items.push({ type: "header", key: "h-found", title: "找到", count: current.length });
+    items.push({ type: "header", key: "h-found", title: copy.found, count: current.length });
     current.forEach((entry, index) => items.push(rowOf(entry, positionOf(index, current.length), "f")));
   }
   if (archived.length) {
-    items.push({ type: "header", key: "h-found-archived", title: "已归档", count: archived.length });
+    items.push({ type: "header", key: "h-found-archived", title: copy.archived, count: archived.length });
     archived.forEach((session, index) => items.push({ type: "row", key: `fa-${session.id}`, session, position: positionOf(index, archived.length) }));
   }
   return items;
 }
 
-/** Keep computer identity separate from task counts in the filters. */
-function Summary({ small = false }: { small?: boolean }) {
+function Summary({ small = false, batteryPercent, lowBattery }: { small?: boolean; batteryPercent?: number | null; lowBattery?: boolean }) {
   const { computer } = useConnection();
   const names = useComputerNames((state) => state.names);
   const name = computerDisplayName(computer, names);
   const status = useConnectionStatus();
+  const { t } = useLocale();
   return (
     <Pressable
       onPress={() => {
@@ -253,7 +290,7 @@ function Summary({ small = false }: { small?: boolean }) {
         router.push("/computers");
       }}
       accessibilityRole="button"
-      accessibilityLabel={`当前电脑：${name}，点按切换电脑`}
+      accessibilityLabel={`${name} · ${t("nav.computers")}`}
       hitSlop={6}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -269,6 +306,11 @@ function Summary({ small = false }: { small?: boolean }) {
       <Text numberOfLines={1} style={[small ? type.footnote : type.subhead, { color: colors.secondaryLabel, flexShrink: 1 }]}>
         {name}
       </Text>
+      {typeof batteryPercent === "number" ? (
+        <Text style={[type.caption2, { color: lowBattery ? colors.danger : colors.tertiaryLabel, fontVariant: ["tabular-nums"], fontWeight: lowBattery ? "600" : "400" }]}>
+          {Math.round(batteryPercent)}%
+        </Text>
+      ) : null}
       <Icon sf="chevron.up.chevron.down" md="unfold_more" size={11} color={colors.tertiaryLabel} />
     </Pressable>
   );
@@ -276,7 +318,11 @@ function Summary({ small = false }: { small?: boolean }) {
 
 export function HomeScreen() {
   const { computer } = useConnection();
-  return <AdaptivePage><HomeWorkspace key={computer.key} /></AdaptivePage>;
+  return (
+    <AdaptivePage>
+      <HomeWorkspace key={computer.key} />
+    </AdaptivePage>
+  );
 }
 
 function HomeWorkspace() {
@@ -285,6 +331,7 @@ function HomeWorkspace() {
   const headerHeight = useHeaderHeight();
   const window = useWindowDimensions();
   const geometry = useLayoutGeometry();
+  const { t } = useLocale();
   const { width, height } = geometry.frame;
   const divisions = geometry.metrics?.divisions ?? [];
   const layout = workspaceLayout(width, window.fontScale, divisions, height);
@@ -296,23 +343,33 @@ function HomeWorkspace() {
   const [detailOpened, setDetailOpened] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [laptopListOpen, setLaptopListOpen] = useState(false);
-  useEffect(() => { if (!laptop) setLaptopListOpen(false); }, [laptop]);
+  useEffect(() => {
+    if (!laptop) setLaptopListOpen(false);
+  }, [laptop]);
   const [motionAction, setMotionAction] = useState(0);
   const [detailVisited, setDetailVisited] = useState(false);
   const [tool, setTool] = useState<Panel | null>(null);
-  const first = useMemo(() => Object.values(sessions).filter((session) => !session.archived).sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || b.updatedAt - a.updatedAt)[0], [sessions]);
+  const first = useMemo(
+    () =>
+      Object.values(sessions)
+        .filter((session) => !session.archived)
+        .sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || b.updatedAt - a.updatedAt)[0],
+    [sessions],
+  );
   const selected = selectedId && sessions[selectedId] && !sessions[selectedId].archived ? sessions[selectedId] : first;
-  const select = useCallback((id: string) => {
-    if (!split) {
-      router.push({ pathname: "/session/[id]", params: { id } });
-      return;
-    }
-    setMotionAction((value) => value + 1);
-    setSelectedId(id);
-    setDetailOpened(true);
-    setLaptopListOpen(false);
-  }, [split]);
-  // Closing the phone continues the conversation the user was just reading.
+  const select = useCallback(
+    (id: string) => {
+      if (!split) {
+        router.push({ pathname: "/session/[id]", params: { id } });
+        return;
+      }
+      setMotionAction((value) => value + 1);
+      setSelectedId(id);
+      setDetailOpened(true);
+      setLaptopListOpen(false);
+    },
+    [split],
+  );
   useEffect(() => {
     if (split && selected) {
       setSelectedId(selected.id);
@@ -322,93 +379,268 @@ function HomeWorkspace() {
   const showDetail = !!selected && (split || detailOpened);
   const inlineControls = homeUsesInlineControls(systemInsets, showDetail);
   const navigationLayout = homeNavigationLayout(insets, systemInsets, headerHeight, !inlineControls);
-  useEffect(() => { if (showDetail) setDetailVisited(true); }, [showDetail]);
+  useEffect(() => {
+    if (showDetail) setDetailVisited(true);
+  }, [showDetail]);
   const showTools = !!selected && tool !== null;
   const showSidebar = laptop ? (!selected || laptopListOpen) && !showTools : split ? !sidebarCollapsed && !showTools : !showDetail && !showTools;
   const sidebarWidth = folded ? layout.before : Math.min(350, Math.max(290, width * 0.36));
-  const gap = split ? folded ? layout.gap : 12 : 0;
+  const gap = split ? (folded ? layout.gap : 12) : 0;
   const navigationTop = Platform.OS === "ios" ? navigationLayout.contentTop : 0;
   const paneTop = split ? Math.max(8, navigationTop, insets.top) : navigationTop;
   const bottom = laptop ? Math.max(12, insets.bottom) : split ? 12 : 0;
-  const foldLayout = useMemo(() => laptop ? { bottomReserved: bottom } : null, [laptop, bottom]);
-  const motionGeometry = [geometry.revision, width, height, split, axis, folded, layout.before, layout.after, layout.gap, insets.top, insets.bottom, navigationTop, window.fontScale].join(":");
+  const foldLayout = useMemo(() => (laptop ? { bottomReserved: bottom } : null), [laptop, bottom]);
+  const motionGeometry = [
+    geometry.revision,
+    width,
+    height,
+    split,
+    axis,
+    folded,
+    layout.before,
+    layout.after,
+    layout.gap,
+    insets.top,
+    insets.bottom,
+    navigationTop,
+    window.fontScale,
+  ].join(":");
   const sidebarTop = Platform.OS === "ios" ? navigationTop : split ? insets.top : 0;
   const padEmpty = Platform.OS === "ios" && Platform.isPad && split && !folded && !showDetail;
   const activeSidebarWidth = padEmpty ? width : sidebarWidth;
-  const sidebar: PaneFrame = axis === "column"
-    ? { left: 0, top: sidebarTop, width, height: showSidebar ? Math.max(0, layout.before - sidebarTop) : 0 }
-    : { left: 0, top: sidebarTop, width: showSidebar ? split ? activeSidebarWidth : width : 0, height: Math.max(0, height - sidebarTop) };
+  const sidebar: PaneFrame =
+    axis === "column"
+      ? { left: 0, top: sidebarTop, width, height: showSidebar ? Math.max(0, layout.before - sidebarTop) : 0 }
+      : { left: 0, top: sidebarTop, width: showSidebar ? (split ? activeSidebarWidth : width) : 0, height: Math.max(0, height - sidebarTop) };
   const detailVisible = showDetail && (split || !showTools);
-  const detailLeft = folded && axis === "row" && !showSidebar && !showTools ? layout.before + layout.gap : showSidebar && split && axis === "row" ? sidebarWidth + gap : 0;
+  const detailLeft =
+    folded && axis === "row" && !showSidebar && !showTools
+      ? layout.before + layout.gap
+      : showSidebar && split && axis === "row"
+        ? sidebarWidth + gap
+        : 0;
   const toolWidth = Math.max(0, split ? layout.after - 12 : width);
   const detail: PaneFrame = laptop
     ? { left: 0, top: paneTop, width, height: Math.max(0, height - paneTop - bottom) }
-    : { left: detailLeft, top: paneTop, width: detailVisible ? Math.max(0, width - detailLeft - (showTools && split ? toolWidth + gap + 12 : split ? 12 : 0)) : 0, height: Math.max(0, height - paneTop - bottom) };
-  const tools: PaneFrame = split && axis === "column"
-    ? { left: 0, top: paneTop, width, height: showTools ? Math.max(0, layout.before - paneTop) : 0 }
-    : { left: showTools ? split ? width - toolWidth - 12 : 0 : width, top: split ? paneTop : Math.max(navigationTop, insets.top), width: showTools ? toolWidth : 0, height: Math.max(0, height - (split ? paneTop : Math.max(navigationTop, insets.top)) - bottom) };
+    : {
+        left: detailLeft,
+        top: paneTop,
+        width: detailVisible ? Math.max(0, width - detailLeft - (showTools && split ? toolWidth + gap + 12 : split ? 12 : 0)) : 0,
+        height: Math.max(0, height - paneTop - bottom),
+      };
+  const tools: PaneFrame =
+    split && axis === "column"
+      ? { left: 0, top: paneTop, width, height: showTools ? Math.max(0, layout.before - paneTop) : 0 }
+      : {
+          left: showTools ? (split ? width - toolWidth - 12 : 0) : width,
+          top: split ? paneTop : Math.max(navigationTop, insets.top),
+          width: showTools ? toolWidth : 0,
+          height: Math.max(0, height - (split ? paneTop : Math.max(navigationTop, insets.top)) - bottom),
+        };
   const toggleSidebar = () => {
     setMotionAction((value) => value + 1);
-    if (laptop) { setLaptopListOpen((value) => !value); setTool(null); }
-    else if (!split) { setDetailOpened(false); setTool(null); }
-    else if (showTools) { setTool(null); setSidebarCollapsed(false); }
-    else setSidebarCollapsed((value) => !value);
+    if (laptop) {
+      setLaptopListOpen((value) => !value);
+      setTool(null);
+    } else if (!split) {
+      setDetailOpened(false);
+      setTool(null);
+    } else if (showTools) {
+      setTool(null);
+      setSidebarCollapsed(false);
+    } else setSidebarCollapsed((value) => !value);
   };
-  const openTool = (panel: Panel) => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool(panel); };
-  const toggleTool = (panel: Panel) => { setMotionAction((value) => value + 1); setLaptopListOpen(false); setTool((current) => current === panel ? null : panel); };
-  const closeTool = () => { setMotionAction((value) => value + 1); setTool(null); };
-  const sessionTools: HeaderAction[] = [{ ...NEW_SESSION, kind: "button" }, ...(["changes", "preview"] as const).map((panel): HeaderAction => ({
-    kind: "button", key: panel,
-    icon: panel === "changes" ? { sf: "plus.forwardslash.minus", md: "difference" } : { sf: "globe", md: "language" },
-    label: panel === "changes" ? "改动" : "预览",
-    onPress: () => toggleTool(panel),
-  }))];
+  const openTool = (panel: Panel) => {
+    setMotionAction((value) => value + 1);
+    setLaptopListOpen(false);
+    setTool(panel);
+  };
+  const toggleTool = (panel: Panel) => {
+    setMotionAction((value) => value + 1);
+    setLaptopListOpen(false);
+    setTool((current) => (current === panel ? null : panel));
+  };
+  const closeTool = () => {
+    setMotionAction((value) => value + 1);
+    setTool(null);
+  };
+  const sessionTools: HeaderAction[] = [
+    { ...NEW_SESSION, kind: "button" },
+    ...(["changes", "preview"] as const).map(
+      (panel): HeaderAction => ({
+        kind: "button",
+        key: panel,
+        icon: panel === "changes" ? { sf: "plus.forwardslash.minus", md: "difference" } : { sf: "globe", md: "language" },
+        label: panel === "changes" ? t("nav.changes") : t("nav.ports"),
+        onPress: () => toggleTool(panel),
+      }),
+    ),
+  ];
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {Platform.OS === "ios" ? <>
-        <Stack.Screen options={{ title: "", headerTitle: undefined, headerShown: !inlineControls, headerLargeTitleEnabled: false, headerTransparent: navigationLayout.headerTransparent, headerShadowVisible: false, headerStyle: { backgroundColor: colors.background as string } }} />
-        {showDetail ? <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon={split ? "sidebar.left" : "chevron.left"} accessibilityLabel={split ? showSidebar ? "收起会话列表" : "展开会话列表" : "返回会话列表"} onPress={toggleSidebar}>{split ? "会话列表" : "返回会话列表"}</Stack.Toolbar.Button></Stack.Toolbar> : null}
-        {!showDetail && !inlineControls ? <HeaderActions actions={[{ ...NEW_SESSION, kind: "button" }]} /> : null}
-      </> : null}
+      {Platform.OS === "ios" ? (
+        <>
+          <Stack.Screen
+            options={{
+              title: "",
+              headerTitle: undefined,
+              headerShown: !inlineControls,
+              headerLargeTitleEnabled: false,
+              headerTransparent: navigationLayout.headerTransparent,
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: colors.background as string },
+            }}
+          />
+          {showDetail ? (
+            <Stack.Toolbar placement="left">
+              <Stack.Toolbar.Button icon={split ? "sidebar.left" : "chevron.left"} accessibilityLabel={t("nav.sessions")} onPress={toggleSidebar}>
+                {t("nav.sessions")}
+              </Stack.Toolbar.Button>
+            </Stack.Toolbar>
+          ) : null}
+          {!showDetail && !inlineControls ? <HeaderActions actions={[{ ...NEW_SESSION, kind: "button" }]} /> : null}
+        </>
+      ) : null}
       <View onLayout={geometry.onLayout} style={{ flex: 1, overflow: "hidden" }}>
         <LayoutProbe onMetrics={geometry.onMetrics} revision={geometry.revision} />
-        <MountedMotionPane frame={sidebar} visible={showSidebar} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "row" ? activeSidebarWidth : width} style={{ zIndex: laptop ? 1 : 0 }}>
+        <MountedMotionPane
+          frame={sidebar}
+          visible={showSidebar}
+          action={motionAction}
+          geometry={motionGeometry}
+          fixedWidth={split && axis === "row" ? activeSidebarWidth : width}
+          style={{ zIndex: laptop ? 1 : 0 }}
+        >
           <HomeList onSelect={select} selectedId={showDetail ? selected?.id : undefined} compact={split} inlineControls={inlineControls} />
         </MountedMotionPane>
-          <MountedMotionPane frame={detail} visible={detailVisible} action={motionAction} geometry={motionGeometry} style={{ borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
-            <SessionFoldLayoutContext value={foldLayout}>
-            {selected && (showDetail || detailVisited) ? <>
-              {Platform.OS !== "ios" ? <View style={{ paddingTop: split ? Math.max(18, insets.top + 4) : insets.top + 12, paddingBottom: 14, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 0.5, borderBottomColor: colors.separator }}>
-                {!split ? <Pressable onPress={toggleSidebar} accessibilityRole="button" accessibilityLabel="返回会话列表" hitSlop={8} style={{ width: 32, height: 40, alignItems: "center", justifyContent: "center" }}><Icon sf="chevron.left" md="arrow_back" size={20} color={colors.accent} /></Pressable> : null}
-                {split ? <Pressable onPress={toggleSidebar} accessibilityRole="button" accessibilityLabel={!showSidebar ? "展开会话列表" : "收起会话列表"} accessibilityState={{ expanded: showSidebar }} hitSlop={6} style={{ width: 36, height: 40, alignItems: "center", justifyContent: "center" }}><Icon sf="sidebar.left" md="view_sidebar" size={20} color={colors.secondaryLabel} /></Pressable> : null}
-                <SessionAvatar session={selected} size={34} />
-                <View style={{ flex: 1, gap: 3 }}>
-                  <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>{sessionTitle(selected)}</Text>
-                  <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>{baseName(selected.cwd)}</Text>
-                </View>
-                {(["changes", "preview"] as const).map((panel) => (
-                  <Pressable key={panel} onPress={() => toggleTool(panel)} accessibilityRole="button" accessibilityState={{ selected: tool === panel }} accessibilityLabel={panel === "changes" ? "查看改动" : "网页预览"} hitSlop={4}>
-                    <Glass interactive style={{ minHeight: 40, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-                      <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{panel === "changes" ? "改动" : "预览"}</Text>
-                    </Glass>
-                  </Pressable>
-                ))}
-              </View> : null}
-              <SessionContent key={selected.id} sessionId={selected.id} embedded consumedBottomInset={bottom} navigation={Platform.OS === "ios" && showDetail} navigationTitle={split ? "" : undefined} toolbarActions={split ? sessionTools : []} onOpenPanel={openTool} panelsBeside={split} />
-            </> : null}
-            </SessionFoldLayoutContext>
-          </MountedMotionPane>
-          <MountedMotionPane frame={tools} visible={showTools} action={motionAction} geometry={motionGeometry} fixedWidth={split && axis === "column" ? width : toolWidth} style={{ zIndex: laptop ? 2 : 0, borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}>
-            {selected ? <SessionTools key={selected.id} sessionId={selected.id} panel={tool ?? "changes"} onPanel={openTool} onClose={closeTool} active={showTools} motionAction={motionAction} motionGeometry={motionGeometry} /> : null}
-          </MountedMotionPane>
+        <MountedMotionPane
+          frame={detail}
+          visible={detailVisible}
+          action={motionAction}
+          geometry={motionGeometry}
+          style={{ borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}
+        >
+          <SessionFoldLayoutContext value={foldLayout}>
+            {selected && (showDetail || detailVisited) ? (
+              <>
+                {Platform.OS !== "ios" ? (
+                  <View
+                    style={{
+                      paddingTop: split ? Math.max(18, insets.top + 4) : insets.top + 12,
+                      paddingBottom: 14,
+                      paddingHorizontal: 18,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      borderBottomWidth: 0.5,
+                      borderBottomColor: colors.separator,
+                    }}
+                  >
+                    {!split ? (
+                      <Pressable
+                        onPress={toggleSidebar}
+                        accessibilityRole="button"
+                        accessibilityLabel={t("nav.sessions")}
+                        hitSlop={8}
+                        style={{ width: 32, height: 40, alignItems: "center", justifyContent: "center" }}
+                      >
+                        <Icon sf="chevron.left" md="arrow_back" size={20} color={colors.accent} />
+                      </Pressable>
+                    ) : null}
+                    {split ? (
+                      <Pressable
+                        onPress={toggleSidebar}
+                        accessibilityRole="button"
+                        accessibilityLabel={t("nav.sessions")}
+                        accessibilityState={{ expanded: showSidebar }}
+                        hitSlop={6}
+                        style={{ width: 36, height: 40, alignItems: "center", justifyContent: "center" }}
+                      >
+                        <Icon sf="sidebar.left" md="view_sidebar" size={20} color={colors.secondaryLabel} />
+                      </Pressable>
+                    ) : null}
+                    <SessionAvatar session={selected} size={34} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
+                        {sessionTitle(selected)}
+                      </Text>
+                      <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
+                        {baseName(selected.cwd)}
+                      </Text>
+                    </View>
+                    {(["changes", "preview"] as const).map((panel) => (
+                      <Pressable
+                        key={panel}
+                        onPress={() => toggleTool(panel)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: tool === panel }}
+                        accessibilityLabel={panel === "changes" ? t("nav.changes") : t("nav.ports")}
+                        hitSlop={4}
+                      >
+                        <Glass interactive style={{ minHeight: 40, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+                          <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>
+                            {panel === "changes" ? t("nav.changes") : t("ports.openPreview")}
+                          </Text>
+                        </Glass>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                <SessionContent
+                  key={selected.id}
+                  sessionId={selected.id}
+                  embedded
+                  consumedBottomInset={bottom}
+                  navigation={Platform.OS === "ios" && showDetail}
+                  navigationTitle={split ? "" : undefined}
+                  toolbarActions={split ? sessionTools : []}
+                  onOpenPanel={openTool}
+                  panelsBeside={split}
+                />
+              </>
+            ) : null}
+          </SessionFoldLayoutContext>
+        </MountedMotionPane>
+        <MountedMotionPane
+          frame={tools}
+          visible={showTools}
+          action={motionAction}
+          geometry={motionGeometry}
+          fixedWidth={split && axis === "column" ? width : toolWidth}
+          style={{ zIndex: laptop ? 2 : 0, borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}
+        >
+          {selected ? (
+            <SessionTools
+              key={selected.id}
+              sessionId={selected.id}
+              panel={tool ?? "changes"}
+              onPanel={openTool}
+              onClose={closeTool}
+              active={showTools}
+              motionAction={motionAction}
+              motionGeometry={motionGeometry}
+            />
+          ) : null}
+        </MountedMotionPane>
       </View>
     </View>
   );
 }
 
-function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect: (id: string) => void; selectedId?: string; compact: boolean; inlineControls: boolean }) {
+function HomeList({
+  onSelect,
+  selectedId,
+  compact,
+  inlineControls,
+}: {
+  onSelect: (id: string) => void;
+  selectedId?: string;
+  compact: boolean;
+  inlineControls: boolean;
+}) {
   const insets = usePageInsets();
   const tabInset = useFloatingTabInset();
+  const { locale, t, pick } = useLocale();
   const sessionsById = useClient((state) => state.sessions);
   const { computer } = useConnection();
   const names = useComputerNames((state) => state.names);
@@ -419,17 +651,20 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
   const offline = unreachable(connectionStatus);
   const hasComputer = useHasComputer();
   const { refresh } = useActions();
+  const { metrics } = useMachineMetrics();
+  const power = metrics?.power;
+  const lowBattery = isHostLowBattery(power);
   const now = useNow();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<HomeFilterMode>("all");
+  const [lsaOpen, setLsaOpen] = useState(false);
   const words = useMemo(() => searchWords(query), [query]);
   const searching = words.length > 0;
 
   const pinnedIds = usePinnedSessionIds();
   const snoozedMap = useSnoozedSessions();
 
-  // Re-bucket when the day changes, not on every tick.
   const day = new Date(now).toDateString();
   const views = useClient((state) => state.views);
   const promptProgress = useClient((state) => state.promptProgress);
@@ -447,26 +682,32 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
 
   const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(
     () =>
-      buildItems(allSessions, terminals, Date.now(), {
+      buildItems(allSessions, terminals, Date.now(), locale, {
         pinnedIds,
         snoozedMap,
         filter,
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is not read: it is what says the buckets are stale.
-    [allSessions, terminals, day, pinnedIds, snoozedMap, filter],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` invalidates date buckets on midnight rollover.
+    [allSessions, terminals, day, locale, pinnedIds, snoozedMap, filter],
   );
   const empty = loaded && Object.keys(sessionsById).length === 0 && terminals.length === 0;
-  const results = useMemo(() => (searching ? searchItems(allSessions, terminals, words) : []), [searching, allSessions, terminals, words]);
+  const results = useMemo(
+    () => (searching ? searchItems(allSessions, terminals, words, locale) : []),
+    [searching, allSessions, terminals, words, locale],
+  );
 
   const filterChips = useMemo(() => {
-    const chips: { key: HomeFilterMode; label: string; count?: number }[] = [{ key: "all", label: "全部" }];
-    if (waiting + failed > 0) chips.push({ key: "attention", label: "待处理", count: waiting + failed });
-    if (running > 0) chips.push({ key: "running", label: "进行中", count: running });
-    if (pinnedCount > 0) chips.push({ key: "pinned", label: "已置顶", count: pinnedCount });
-    if (terminals.length > 0) chips.push({ key: "terminals", label: "终端", count: terminals.length });
-    if (snoozedCount > 0) chips.push({ key: "snoozed", label: "稍后", count: snoozedCount });
+    const copy = sectionWords(locale);
+    const chips: { key: HomeFilterMode; label: string; count?: number }[] = [
+      { key: "all", label: t("session.outlineAll") },
+    ];
+    if (waiting + failed > 0) chips.push({ key: "attention", label: copy.need, count: waiting + failed });
+    if (running > 0) chips.push({ key: "running", label: copy.run, count: running });
+    if (pinnedCount > 0) chips.push({ key: "pinned", label: copy.pin, count: pinnedCount });
+    if (terminals.length > 0) chips.push({ key: "terminals", label: copy.term, count: terminals.length });
+    if (snoozedCount > 0) chips.push({ key: "snoozed", label: copy.snooze, count: snoozedCount });
     return chips;
-  }, [waiting, failed, running, pinnedCount, terminals.length, snoozedCount]);
+  }, [locale, t, waiting, failed, running, pinnedCount, terminals.length, snoozedCount]);
 
   useEffect(() => {
     if (filter !== "all" && !filterChips.some((c) => c.key === filter)) {
@@ -494,7 +735,13 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         case "row":
           return (
             <View style={compact && item.position !== "last" && item.position !== "only" ? { paddingBottom: 8 } : undefined}>
-              <SessionRow session={item.session} position={compact ? "only" : item.position} now={now} onPress={() => onSelect(item.session.id)} selected={selectedId === item.session.id} />
+              <SessionRow
+                session={item.session}
+                position={compact ? "only" : item.position}
+                now={now}
+                onPress={() => onSelect(item.session.id)}
+                selected={selectedId === item.session.id}
+              />
             </View>
           );
         case "terminal":
@@ -530,7 +777,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         keyExtractor={(item) => item.key}
         getItemType={(item) => item.type}
         renderItem={renderItem}
-        extraData={`${selectedId ?? ""}:${now}:${filter}:${pinnedIds.join(",")}`}
+        extraData={`${selectedId ?? ""}:${now}:${filter}:${locale}:${pinnedIds.join(",")}`}
         estimatedItemSize={64}
         recycleItems
         contentInsetAdjustmentBehavior="never"
@@ -538,7 +785,6 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingHorizontal: compact ? 12 : 16,
-          // The system doesn't inset this list ("never" above), so on iOS its end clears the tab bar here.
           paddingBottom: 32 + (Platform.OS === "ios" ? insets.bottom + IOS_TAB_BAR_HEIGHT : tabInset),
           ...(padCenteredEmpty ? { maxWidth: 480, width: "100%", alignSelf: "center" } : {}),
         }}
@@ -549,10 +795,64 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
           <View>
             <View style={{ paddingTop: (inlineControls ? 8 : 16) + (Platform.OS === "ios" ? 0 : insets.top), paddingBottom: 8, gap: inlineControls ? 8 : 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ flex: 1 }}><Summary small={inlineControls} /></View>
-                {Platform.OS !== "ios" && !inlineControls ? <Pressable accessibilityRole="button" accessibilityLabel="新建会话" onPress={NEW_SESSION.onPress} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="square.and.pencil" md="edit_square" size={22} color={colors.accent} /></Pressable> : null}
+                <View style={{ flex: 1 }}>
+                  <Summary small={inlineControls} batteryPercent={power?.onBattery ? power.percent : null} lowBattery={lowBattery} />
+                </View>
+                {hasComputer && online ? (
+                  <Pressable
+                    onPress={() => {
+                      haptics.selection();
+                      setLsaOpen(true);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("nav.steward")}
+                    style={({ pressed }) => ({
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 5,
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 999,
+                      backgroundColor: pressed ? colors.fillStrong : colors.fill,
+                    })}
+                  >
+                    <Icon sf="checklist" md="checklist" size={13} color={colors.accent} />
+                    <Text style={[type.caption, { color: colors.label, fontWeight: "600" }]}>{t("nav.steward")}</Text>
+                  </Pressable>
+                ) : null}
+                {Platform.OS !== "ios" && !inlineControls ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t("session.new")}
+                    onPress={NEW_SESSION.onPress}
+                    style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Icon sf="square.and.pencil" md="edit_square" size={22} color={colors.accent} />
+                  </Pressable>
+                ) : null}
               </View>
-              {inlineControls || (loaded && !empty) ? <PageSearch value={query} onChangeText={setQuery} placeholder="搜索会话" action={inlineControls ? NEW_SESSION : undefined} /> : null}
+              {lowBattery && power?.percent !== null && power?.percent !== undefined ? (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: radius.control,
+                    borderCurve: "continuous",
+                    backgroundColor: colors.dangerSoft,
+                  }}
+                >
+                  <Icon sf="battery.25" md="battery_alert" size={15} color={colors.danger} />
+                  <Text style={[type.caption, { flex: 1, color: colors.danger, fontWeight: "600" }]}>
+                    {t("power.lowBatteryWarning", { percent: Math.round(power.percent) })}
+                  </Text>
+                </View>
+              ) : null}
+              {inlineControls || (loaded && !empty) ? (
+                <PageSearch value={query} onChangeText={setQuery} placeholder={`${t("common.search")}…`} action={inlineControls ? NEW_SESSION : undefined} />
+              ) : null}
               {!searching && filterChips.length > 1 ? (
                 <ScrollView
                   horizontal
@@ -571,14 +871,13 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
                         }}
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}
-                        accessibilityLabel={`筛选：${chip.label}`}
+                        accessibilityLabel={chip.label}
                         style={({ pressed }) => ({
                           flexDirection: "row",
                           alignItems: "center",
                           gap: 4,
                           height: 32,
                           paddingHorizontal: 12,
-                          // A capsule, like every button.
                           borderRadius: 16,
                           borderCurve: "continuous",
                           borderWidth: StyleSheet.hairlineWidth,
@@ -623,7 +922,6 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
           </View>
         }
         ListFooterComponent={
-          // (A search already looks through the archived ones.)
           loaded && !empty && !searching ? (
             <Pressable
               onPress={() => router.push("/archived")}
@@ -632,7 +930,7 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
               style={{ alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 18 }}
             >
               <Icon sf="archivebox" md="archive" size={13} color={colors.tertiaryLabel} />
-              <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>已归档的会话</Text>
+              <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{t("nav.archived")}</Text>
             </Pressable>
           ) : null
         }
@@ -641,31 +939,44 @@ function HomeList({ onSelect, selectedId, compact, inlineControls }: { onSelect:
             <Welcome />
           ) : !loaded ? (
             connectionStatus === "connecting" ? (
-              <LoadingState label="正在恢复连接…" />
+              <LoadingState label={t("connection.reconnecting")} />
             ) : error ? (
               <EmptyState
                 icon={{ sf: "exclamationmark.triangle", md: "warning" }}
-                title="读取会话失败"
+                title={pick({ zh: "读取会话失败", en: "Unable to load sessions", ja: "セッションの読み込みに失敗しました" })}
                 message={error}
-                action={{ title: "重试", onPress: () => void refresh() }}
+                action={{ title: t("common.retry"), onPress: () => void refresh() }}
               />
             ) : offline ? (
-              <WaitingForComputer what="电脑上的会话" />
+              <WaitingForComputer what={t("nav.sessions")} />
             ) : (
-              <LoadingState label="正在读取会话…" />
+              <LoadingState label={t("common.loading")} />
             )
           ) : searching ? (
-            <EmptyState icon={{ sf: "magnifyingglass", md: "search" }} title={`没有匹配“${query.trim()}”的会话`} message="可以搜标题、消息、项目、分支和 Agent。" />
+            <EmptyState
+              icon={{ sf: "magnifyingglass", md: "search" }}
+              title={t("session.noMatches")}
+              message={pick({
+                zh: "可以搜标题、消息、项目、分支和 Agent。",
+                en: "Search by session title, prompt, project, branch, or agent.",
+                ja: "タイトル、メッセージ、プロジェクト、ブランチ、Agent 名で検索できます。",
+              })}
+            />
           ) : (
             <EmptyState
               icon={{ sf: "bubble.left.and.text.bubble.right", md: "forum" }}
-              title="还没有会话"
-              message="在电脑终端里用 linkshell claude 或 linkshell codex 开始，或者直接在这里新建。"
-              action={{ title: "新建会话", onPress: () => router.push("/new") }}
+              title={pick({ zh: "还没有会话", en: "No sessions yet", ja: "セッションがまだありません" })}
+              message={pick({
+                zh: "在电脑终端里用 linkshell claude 或 linkshell codex 开始，或者直接在这里新建。",
+                en: "Start `linkshell claude` or `linkshell codex` on your computer, or create a session right here.",
+                ja: "PC ターミナルで linkshell claude / codex を起動するか、ここから新規作成できます。",
+              })}
+              action={{ title: t("session.new"), onPress: () => router.push("/new") }}
             />
           )
         }
       />
+      <LsaSheet visible={lsaOpen} onClose={() => setLsaOpen(false)} />
     </>
   );
 }

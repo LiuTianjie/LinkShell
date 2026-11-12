@@ -181,10 +181,14 @@ interface LiveSession {
   /** True while native history is imported: no live activity, one summary at the end. */
   importing?: boolean;
   importChanged?: boolean;
+  /** Streaming chunks can be coalesced once the last subscriber leaves after a completed turn. */
+  pendingCompaction?: boolean;
 }
 
 /** How long a session nobody has open stays attached to a driver that pays to follow it. */
 const IDLE_DETACH_MS = 10 * 60_000;
+/** Grace window after the last subscriber leaves before post-turn chunk compaction runs. */
+const DEFERRED_COMPACT_MS = 10_000;
 
 const PREVIEW_LENGTH = 160;
 const TITLE_LENGTH = 60;
@@ -218,8 +222,11 @@ export class SessionHub {
   private readonly interactionListeners = new Set<(agent: string, request: PendingPermissionSummary | { requestId: string; resolved: true }) => void>();
   private readonly agentListeners = new Set<(agent: AgentInfo) => void>();
   private readonly sideListeners = new Set<(sessionId: string, side: SideChat, closed?: boolean) => void>();
+  private readonly workListeners = new Set<() => void>();
   private readonly sides: SideChats;
   private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly compactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly activeGoals = new Set<string>();
   private readonly auth = new Map<string, { value: AgentAuth; checkedAt: number }>();
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
   private readonly desktops = new Map<string, DesktopController>();
@@ -318,6 +325,7 @@ export class SessionHub {
     this.sides = new SideChats((sessionId, side, closed) => {
       for (const listener of this.sideListeners) listener(sessionId, side, closed);
     }, log);
+    for (const id of store.activeGoalSessionIds()) this.activeGoals.add(id);
   }
 
   async start(options: { discoveryIntervalMs?: number } = {}): Promise<void> {
@@ -419,9 +427,94 @@ export class SessionHub {
     if (this.discoveryTimer) clearInterval(this.discoveryTimer);
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
+    for (const timer of this.compactionTimers.values()) clearTimeout(timer);
+    this.compactionTimers.clear();
     await this.sides.stop((sessionId) => this.sideTarget(sessionId));
     await Promise.allSettled([...this.drivers.values()].map((driver) => driver.stop()));
     await this.previews.stop();
+  }
+
+  onWorkChange(listener: () => void): () => void {
+    this.workListeners.add(listener);
+    return () => {
+      this.workListeners.delete(listener);
+    };
+  }
+
+  /** Whether any non-archived session is running/waiting or holds an active `/goal`. */
+  activeWorkDemand(): { sessionActive: boolean; goalActive: boolean } {
+    let sessionActive = false;
+    for (const [id, live] of this.live) {
+      const stored = this.store.getSession(id);
+      if (stored?.archived) continue;
+      if (
+        live.turnActive ||
+        live.permissions.size > 0 ||
+        [...(live.tasks?.values() ?? [])].some((task) => task.state === "running") ||
+        [...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state))
+      ) {
+        sessionActive = true;
+        break;
+      }
+    }
+    if (!sessionActive) {
+      sessionActive = this.store.hasBusySession();
+    }
+    let goalActive = false;
+    for (const id of this.activeGoals) {
+      const stored = this.store.getSession(id);
+      if (stored && !stored.archived) {
+        goalActive = true;
+        break;
+      }
+    }
+    return { sessionActive, goalActive };
+  }
+
+  /** Flushes deferred post-turn chunk compaction for sessions without active subscribers. */
+  compactIdleSessions(): number {
+    let deleted = 0;
+    for (const [sessionId, live] of this.live) {
+      if (live.pendingCompaction && live.subscribers.size === 0 && !live.turnActive) {
+        deleted += this.compactSessionChunks(sessionId);
+      }
+    }
+    return deleted;
+  }
+
+  private compactSessionChunks(sessionId: string): number {
+    clearTimeout(this.compactionTimers.get(sessionId));
+    this.compactionTimers.delete(sessionId);
+    const live = this.live.get(sessionId);
+    if (live) live.pendingCompaction = false;
+    try {
+      return this.store.compactTurnChunks(sessionId).removedRows;
+    } catch (error) {
+      this.log(`[hub] chunk compaction failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+  }
+
+  private scheduleDeferredCompaction(sessionId: string, delay = DEFERRED_COMPACT_MS): void {
+    clearTimeout(this.compactionTimers.get(sessionId));
+    const timer = setTimeout(() => {
+      this.compactionTimers.delete(sessionId);
+      const live = this.live.get(sessionId);
+      if (!live?.pendingCompaction || live.subscribers.size > 0 || live.turnActive) return;
+      this.compactSessionChunks(sessionId);
+    }, delay);
+    timer.unref?.();
+    this.compactionTimers.set(sessionId, timer);
+  }
+
+  private emitWorkChanged(): void {
+    for (const listener of this.workListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`[hub] work listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   // ── side conversations ────────────────────────────────────────────
@@ -975,6 +1068,8 @@ export class SessionHub {
     live.subscribers.add(subscriber);
     clearTimeout(this.idleTimers.get(sessionId));
     this.idleTimers.delete(sessionId);
+    clearTimeout(this.compactionTimers.get(sessionId));
+    this.compactionTimers.delete(sessionId);
     if (live.subscribers.size === 1) driver?.watched?.(summary.nativeId, true);
     return { session: this.getSession(sessionId), startSeq };
   }
@@ -1201,6 +1296,7 @@ export class SessionHub {
     if (!live?.subscribers.delete(subscriber) || live.subscribers.size > 0) return;
     const summary = this.store.getSession(sessionId);
     if (summary) this.drivers.get(summary.agent)?.watched?.(summary.nativeId, false);
+    if (live.pendingCompaction && !live.turnActive) this.scheduleDeferredCompaction(sessionId);
     this.detachWhenIdle(sessionId);
   }
 
@@ -1465,6 +1561,9 @@ export class SessionHub {
     if (!this.store.getSession(sessionId)) return;
     clearTimeout(this.idleTimers.get(sessionId));
     this.idleTimers.delete(sessionId);
+    clearTimeout(this.compactionTimers.get(sessionId));
+    this.compactionTimers.delete(sessionId);
+    this.activeGoals.delete(sessionId);
     this.live.delete(sessionId);
     this.previews.forget(sessionId);
     this.sides.forget(sessionId);
@@ -1482,6 +1581,7 @@ export class SessionHub {
         this.log(`[hub] removal listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    this.emitWorkChanged();
   }
 
   async cancel(sessionId: string): Promise<void> {
@@ -1800,7 +1900,14 @@ export class SessionHub {
         if (live.permissions.get(requestId)?.childSessionId) continue;
         this.commit(sessionId, { sessionUpdate: "ls_permission_resolved", requestId });
       }
-      if (!live.importing) void this.sendHeld(sessionId);
+      if (!live.importing) {
+        if (live.subscribers.size === 0) {
+          this.compactSessionChunks(sessionId);
+        } else {
+          live.pendingCompaction = true;
+        }
+        void this.sendHeld(sessionId);
+      }
     }
   }
 
@@ -1897,6 +2004,13 @@ export class SessionHub {
       case "ls_driver":
         patch.driver = update.driver;
         break;
+      case "ls_goal": {
+        const hadGoal = this.activeGoals.has(sessionId);
+        if (update.goal && update.goal.status === "active") this.activeGoals.add(sessionId);
+        else this.activeGoals.delete(sessionId);
+        if (hadGoal !== this.activeGoals.has(sessionId) && !live.importing) this.emitWorkChanged();
+        break;
+      }
       default:
         break;
     }
@@ -1934,5 +2048,6 @@ export class SessionHub {
         this.log(`[hub] summary listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    this.emitWorkChanged();
   }
 }

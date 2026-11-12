@@ -62,4 +62,56 @@ final class DesktopTests: XCTestCase {
     XCTAssertEqual(result.accountWarning, "会员已开通，网关连接待刷新。")
     guard case .pro(_, .monthly) = result.account?.membership() ?? .unknown else { return XCTFail("An active membership should be shown with its tier") }
   }
+
+  func testTrialBadgeRenewalThresholdAndLocaleAwareMembershipURLs() throws {
+    let now = Date(timeIntervalSince1970: 1_798_761_600)
+    let activeTrial = try JSONDecoder().decode(
+      DesktopSnapshot.Account.self,
+      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"monthly","isTrial":true,"daysRemaining":5,"planExpiresAt":"2027-01-06T00:00:00Z"}"#.utf8)
+    )
+    XCTAssertEqual(activeTrial.badgeLabel(at: now), "7 天免费试用 · 剩余 5 天")
+    XCTAssertFalse(activeTrial.isTrialExpiringSoon(at: now))
+
+    let expiringTrial = try JSONDecoder().decode(
+      DesktopSnapshot.Account.self,
+      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"monthly","isTrial":true,"daysRemaining":2,"planExpiresAt":"2027-01-03T00:00:00Z"}"#.utf8)
+    )
+    XCTAssertEqual(expiringTrial.badgeLabel(at: now), "7 天免费试用 · 剩余 2 天")
+    XCTAssertTrue(expiringTrial.isTrialExpiringSoon(at: now))
+
+    XCTAssertEqual(ITool.membershipURL(locale: "zh-Hans-CN"), "https://www.itool.tech/zh/pro?from=linkshell")
+    XCTAssertEqual(ITool.membershipURL(locale: "en-US"), "https://www.itool.tech/en/pro?from=linkshell")
+    XCTAssertEqual(ITool.yearlyUpgradeURL(locale: "ja-JP"), "https://www.itool.tech/en/pro?from=linkshell&checkout=yearly")
+  }
+
+  func testScreenPrivacyCurtainAndAutoLockLifecycle() {
+    var curtainCalls: [Bool] = []
+    var lockCount = 0
+    let privacy = ScreenPrivacy(
+      applyCurtain: { enabled in
+        curtainCalls.append(enabled)
+        return enabled ? [42, 99] : []
+      },
+      lockHost: { lockCount += 1 }
+    )
+
+    let enabled = privacy.apply(curtain: true, lockOnDisconnect: true)
+    XCTAssertEqual(enabled["curtain"] as? Bool, true)
+    XCTAssertEqual(enabled["lockOnDisconnect"] as? Bool, true)
+    XCTAssertEqual(privacy.curtainWindowIDs(), [42, 99])
+    XCTAssertEqual(curtainCalls, [true])
+
+    // While another viewer remains connected, neither curtain teardown nor lock fires.
+    XCTAssertFalse(privacy.viewerDisconnected(remainingViewers: 1))
+    XCTAssertEqual(lockCount, 0)
+    XCTAssertEqual(privacy.curtainWindowIDs(), [42, 99])
+
+    // Last viewer disconnecting lifts the curtain and locks the Mac once.
+    XCTAssertTrue(privacy.viewerDisconnected(remainingViewers: 0))
+    XCTAssertEqual(curtainCalls, [true, false])
+    XCTAssertEqual(lockCount, 1)
+    XCTAssertTrue(privacy.curtainWindowIDs().isEmpty)
+    XCTAssertEqual(privacy.currentState()["curtain"] as? Bool, false)
+    XCTAssertEqual(privacy.currentState()["lockOnDisconnect"] as? Bool, false)
+  }
 }

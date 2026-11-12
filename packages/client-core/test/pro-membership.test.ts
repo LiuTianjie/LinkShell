@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchProMembership,
+  fetchReferralSummary,
   ITOOL_ENTITLEMENT_URL,
   ITOOL_MEMBERSHIP_URL,
+  ITOOL_REFERRAL_URL,
   ITOOL_YEARLY_UPGRADE_URL,
+  itoolMembershipUrl,
+  itoolYearlyUpgradeUrl,
   MEMBERSHIP_PRODUCT_TOTAL,
   MONTHLY_PRODUCT_COUNT,
   monthlyUpgradeLabel,
   MembershipError,
   membershipFromEntitlement,
   membershipTierLabel,
+  referralFromResponse,
 } from "../src/pro-membership.js";
 
 const now = "2026-10-19T10:00:00.000Z";
@@ -21,8 +26,15 @@ const options = {
   userId: "user-id",
 };
 const entitlement = {
-  ok: true, product: "linkshell", required_tier: "monthly", active: true, valid_until: validUntil,
-  tier: "monthly", member_until: validUntil, yearly_until: null, server_time: now,
+  ok: true,
+  product: "linkshell",
+  required_tier: "monthly",
+  active: true,
+  valid_until: validUntil,
+  tier: "monthly",
+  member_until: validUntil,
+  yearly_until: null,
+  server_time: now,
 };
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -43,10 +55,65 @@ afterEach(() => {
 });
 
 describe("entitlement mapping", () => {
-  it("maps an active monthly or yearly membership to Pro with its tier and LinkShell's expiry", () => {
-    expect(membershipFromEntitlement(entitlement)).toEqual({ plan: "pro", tier: "monthly", expiresAt: validUntil });
-    const yearly = { ...entitlement, tier: "yearly", yearly_until: "2027-10-19T10:00:00.000Z", valid_until: "2027-10-19T10:00:00.000Z" };
-    expect(membershipFromEntitlement(yearly)).toEqual({ plan: "pro", tier: "yearly", expiresAt: "2027-10-19T10:00:00.000Z" });
+  it("maps an active monthly or yearly membership to Pro with its tier, expiry, and daysRemaining", () => {
+    expect(membershipFromEntitlement(entitlement)).toEqual({
+      plan: "pro",
+      tier: "monthly",
+      expiresAt: validUntil,
+      daysRemaining: 31,
+    });
+    const yearly = {
+      ...entitlement,
+      tier: "yearly",
+      yearly_until: "2027-10-19T10:00:00.000Z",
+      valid_until: "2027-10-19T10:00:00.000Z",
+    };
+    expect(membershipFromEntitlement(yearly)).toEqual({
+      plan: "pro",
+      tier: "yearly",
+      expiresAt: "2027-10-19T10:00:00.000Z",
+      daysRemaining: 365,
+    });
+  });
+
+  it("parses 7-day trial fields (is_trial, trial_ends_at) and computes remaining days accurately", () => {
+    const trialEnds = "2026-10-26T10:00:00.000Z";
+    const trial = {
+      ...entitlement,
+      tier: "yearly",
+      valid_until: trialEnds,
+      yearly_until: trialEnds,
+      is_trial: true,
+      trial_ends_at: trialEnds,
+    };
+    expect(membershipFromEntitlement(trial)).toEqual({
+      plan: "pro",
+      tier: "yearly",
+      expiresAt: trialEnds,
+      isTrial: true,
+      trialEndsAt: trialEnds,
+      daysRemaining: 7,
+    });
+
+    // 36 hours left -> rounds up to 2 days remaining
+    const twoDaysLeft = {
+      ...trial,
+      valid_until: "2026-10-20T22:00:00.000Z",
+      trial_ends_at: "2026-10-20T22:00:00.000Z",
+    };
+    expect(membershipFromEntitlement(twoDaysLeft).daysRemaining).toBe(2);
+
+    // Paid user after trial ended has isTrial: false
+    const paidAfterTrial = {
+      ...entitlement,
+      is_trial: false,
+      trial_ends_at: "2026-10-10T10:00:00.000Z",
+    };
+    expect(membershipFromEntitlement(paidAfterTrial)).toMatchObject({
+      plan: "pro",
+      isTrial: false,
+      trialEndsAt: "2026-10-10T10:00:00.000Z",
+    });
   });
 
   it.each([
@@ -65,18 +132,38 @@ describe("entitlement mapping", () => {
 
   it("reads login_required as a sign-in problem and anything unexpected as malformed", () => {
     expect(() => membershipFromEntitlement({ ok: false, code: "login_required" })).toThrow(expect.objectContaining({ kind: "login" }));
-    for (const body of [null, [], { ok: false, code: "unknown_product" }, { ...entitlement, active: "yes" }, { ...entitlement, product: "other" }, { ...entitlement, valid_until: "garbage" }]) {
+    for (const body of [
+      null,
+      [],
+      { ok: false, code: "unknown_product" },
+      { ...entitlement, active: "yes" },
+      { ...entitlement, product: "other" },
+      { ...entitlement, valid_until: "garbage" },
+    ]) {
       expect(() => membershipFromEntitlement(body)).toThrow(expect.objectContaining({ kind: "malformed" }));
     }
   });
 
-  it("names the tiers in Chinese", () => {
+  it("formats tier labels and locale-aware URLs across zh, en, and ja", () => {
     expect(membershipTierLabel("monthly")).toBe("iTool 月度会员");
     expect(membershipTierLabel("yearly")).toBe("iTool 年度会员");
+    expect(membershipTierLabel("monthly", { locale: "en" })).toBe("iTool Monthly");
+    expect(membershipTierLabel("yearly", { locale: "ja" })).toBe("iTool 年額プラン");
+    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "zh" })).toBe("7 天免费试用 · 剩余 5 天");
+    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "en" })).toBe("7-day free trial · 5d left");
+    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "ja" })).toBe("7日間無料トライアル · 残り 5 日");
+
     expect(ITOOL_MEMBERSHIP_URL).toBe("https://www.itool.tech/zh/pro?from=linkshell");
     expect(ITOOL_YEARLY_UPGRADE_URL).toBe("https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly");
+    expect(itoolMembershipUrl("zh")).toBe("https://www.itool.tech/zh/pro?from=linkshell");
+    expect(itoolMembershipUrl("en")).toBe("https://www.itool.tech/en/pro?from=linkshell");
+    expect(itoolMembershipUrl("ja")).toBe("https://www.itool.tech/en/pro?from=linkshell");
+    expect(itoolYearlyUpgradeUrl("en")).toBe("https://www.itool.tech/en/pro?from=linkshell&checkout=yearly");
+    expect(itoolYearlyUpgradeUrl("ja")).toBe("https://www.itool.tech/en/pro?from=linkshell&checkout=yearly");
+
     expect(monthlyUpgradeLabel()).toBe("已解锁 2/7 款产品 · 升级年度");
     expect(monthlyUpgradeLabel("en")).toBe("2 of 7 products unlocked · Go yearly");
+    expect(monthlyUpgradeLabel("ja")).toContain("2");
     expect([MONTHLY_PRODUCT_COUNT, MEMBERSHIP_PRODUCT_TOTAL]).toEqual([2, 7]);
   });
 });
@@ -84,7 +171,12 @@ describe("entitlement mapping", () => {
 describe("fetchProMembership", () => {
   it("asks itool.tech with only the user's bearer token", async () => {
     respond(entitlement);
-    await expect(fetchProMembership(options)).resolves.toEqual({ plan: "pro", tier: "monthly", expiresAt: validUntil });
+    await expect(fetchProMembership(options)).resolves.toEqual({
+      plan: "pro",
+      tier: "monthly",
+      expiresAt: validUntil,
+      daysRemaining: 31,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe(ITOOL_ENTITLEMENT_URL);
@@ -149,5 +241,43 @@ describe("fetchProMembership", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await result;
     expect(fetchMock.mock.calls[0]![1]?.signal?.aborted).toBe(true);
+  });
+});
+
+describe("fetchReferralSummary & referralFromResponse", () => {
+  const referralBody = {
+    ok: true,
+    code: "ab2c3d4e",
+    invited: 4,
+    rewarded: 2,
+    earned_days: 44,
+  };
+
+  it("parses referral summary from itool.tech API and builds localized shareUrl", async () => {
+    respond(referralBody);
+    const summary = await fetchReferralSummary({ ...options, locale: "en" });
+    expect(summary).toEqual({
+      code: "AB2C3D4E",
+      invited: 4,
+      rewarded: 2,
+      earnedDays: 44,
+      shareUrl: "https://www.itool.tech/en/pro?from=linkshell&ref=AB2C3D4E",
+    });
+    expect(fetchMock.mock.calls[0]![0]).toBe(ITOOL_REFERRAL_URL);
+  });
+
+  it("falls back to Supabase RPC itool_my_referral when itool.tech is unreachable", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    respond(referralBody);
+    const summary = await fetchReferralSummary(options);
+    expect(summary.code).toBe("AB2C3D4E");
+    expect(summary.earnedDays).toBe(44);
+    expect(summary.shareUrl).toBe("https://www.itool.tech/pro?from=linkshell&ref=AB2C3D4E");
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://project.supabase.co/rest/v1/rpc/itool_my_referral");
+  });
+
+  it("rejects invalid referral codes or login_required responses", () => {
+    expect(() => referralFromResponse({ ok: false, code: "login_required" })).toThrow(expect.objectContaining({ kind: "login" }));
+    expect(() => referralFromResponse({ ok: true, code: "INVALID1" })).toThrow(expect.objectContaining({ kind: "malformed" }));
   });
 });

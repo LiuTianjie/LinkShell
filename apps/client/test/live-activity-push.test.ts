@@ -10,7 +10,9 @@ const harness = vi.hoisted(() => ({
   serviceUrl: "https://push.itool.tech",
   saved: undefined as { records: SavedRegistration[] } | null | undefined,
   native: { activityId: "activity-1", computerKey: "computer-1", token: "ab".repeat(32) },
+  pushToStartToken: null as string | null,
   onToken: undefined as undefined | ((event: { activityId?: string; ended?: boolean }) => void),
+  onPushToStart: undefined as undefined | (() => void),
   onAppState: undefined as undefined | ((state: string) => void),
   onOnline: undefined as undefined | (() => void),
   getNative: vi.fn(), ready: vi.fn(), end: vi.fn(), call: vi.fn(), token: vi.fn(),
@@ -27,11 +29,16 @@ vi.mock("expo-crypto", () => ({ getRandomBytes: (count: number) => new Uint8Arra
 vi.mock("../modules/link-layout", () => ({
   get liveActivityPushURL() { return harness.serviceUrl; },
   getNativeLiveActivityRegistrations: harness.getNative,
+  getNativeLiveActivityPushToStartToken: async () => harness.pushToStartToken,
   setNativeLiveActivityPushReady: harness.ready,
   endNativeLiveActivity: harness.end,
   subscribeNativeLiveActivityTokens: (callback: typeof harness.onToken) => {
     harness.onToken = callback;
     return () => { harness.onToken = undefined; };
+  },
+  subscribeNativeLiveActivityPushToStartToken: (callback: () => void) => {
+    harness.onPushToStart = callback;
+    return () => { harness.onPushToStart = undefined; };
   },
 }));
 vi.mock("../src/lib/secure", () => ({
@@ -75,7 +82,8 @@ describe("ActivityKit registration handoff", () => {
     harness.owner = "owner-1"; harness.online = true; harness.computerKey = "computer-1";
     harness.serviceUrl = "https://push.itool.tech"; harness.saved = undefined;
     harness.native = { activityId: "activity-1", computerKey: "computer-1", token: "ab".repeat(32) };
-    harness.onToken = undefined; harness.onAppState = undefined;
+    harness.pushToStartToken = null;
+    harness.onToken = undefined; harness.onPushToStart = undefined; harness.onAppState = undefined;
     harness.getNative.mockImplementation(async () => [{ ...harness.native }]);
     harness.token.mockResolvedValue("account-access-token");
     harness.call.mockResolvedValue({ ok: true });
@@ -293,5 +301,39 @@ describe("ActivityKit registration handoff", () => {
     expect(harness.saved).toBeNull();
     expect(request.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(2);
     expect(harness.end).toHaveBeenCalledOnce();
+  });
+
+  it("registers iOS 17.2+ pushToStartToken with push service and hands it off to Host", async () => {
+    harness.getNative.mockImplementation(async () => []);
+    harness.pushToStartToken = "fe".repeat(32);
+    mount(); await settle();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringMatching(/^https:\/\/push\.itool\.tech\/v1\/push-to-start\/ios-/),
+      expect.objectContaining({
+        method: "PUT",
+        headers: { Authorization: "Bearer account-access-token", "content-type": "application/json" },
+      }),
+    );
+    expect(harness.call).toHaveBeenCalledWith(
+      "liveActivities.registerPushToStart",
+      expect.objectContaining({
+        pushToStartToken: "fe".repeat(32),
+        platform: "ios",
+        serviceUrl: "https://push.itool.tech",
+        grant: "07".repeat(32),
+        computerKey: "computer-1",
+      }),
+    );
+
+    harness.pushToStartToken = "dc".repeat(32);
+    harness.onPushToStart?.();
+    await settle();
+    expect(harness.call).toHaveBeenLastCalledWith(
+      "liveActivities.registerPushToStart",
+      expect.objectContaining({
+        pushToStartToken: "dc".repeat(32),
+        computerKey: "computer-1",
+      }),
+    );
   });
 });

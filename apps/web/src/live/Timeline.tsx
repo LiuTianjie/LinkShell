@@ -627,7 +627,21 @@ export function changeLines(change: Extract<ToolCallContent, { type: "diff" | "p
 
 /** A file's change as a unified diff: numbered lines, what went and what came tinted, the
     unchanged stretches between folded to a line. */
-export function DiffView({ lines, path }: { lines: DiffLine[]; path?: string }) {
+export function DiffView({
+  lines,
+  path,
+  comments,
+  activeLine,
+  onSelectLine,
+  renderLineEditor,
+}: {
+  lines: DiffLine[];
+  path?: string;
+  comments?: Readonly<Record<number, string>>;
+  activeLine?: number | null;
+  onSelectLine?: (lineIndex: number, line: DiffLine) => void;
+  renderLineEditor?: (lineIndex: number, line: DiffLine) => ReactNode;
+}) {
   const parts = useMemo(() => hunks(lines), [lines]);
   // Each side is highlighted as one text, so a line inside a string or comment that began
   // earlier is coloured as it is in the file; each line then takes its tokens from its side.
@@ -649,19 +663,63 @@ export function DiffView({ lines, path }: { lines: DiffLine[]; path?: string }) 
     const tokens = line.kind === "del" ? oldTokens : newTokens;
     return tokens?.[sides.at[index.get(line)!]!];
   };
+  const interactive = Boolean(onSelectLine || comments || activeLine !== undefined);
   return (
     <div className="diff-view" role="table" aria-label="差异">
-      {parts.map((part, index) => (
-        <Fragment key={index}>
+      {parts.map((part, partIndex) => (
+        <Fragment key={partIndex}>
           {part.skipped > 0 && <div className="diff-skip" role="row">{part.skipped} 行未改动</div>}
-          {part.lines.map((line, at) => (
-            <div key={at} className="diff-line" data-kind={line.kind} role="row">
-              <span className="diff-number" aria-hidden>{line.old ?? ""}</span>
-              <span className="diff-number" aria-hidden>{line.new ?? ""}</span>
-              <span className="diff-sign" aria-hidden>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}</span>
-              <code>{line.text ? <DiffCode text={line.text} tokens={tokensOf(line)} /> : " "}</code>
-            </div>
-          ))}
+          {part.lines.map((line, at) => {
+            if (!interactive) {
+              return (
+                <div key={at} className="diff-line" data-kind={line.kind} role="row">
+                  <span className="diff-number" aria-hidden>{line.old ?? ""}</span>
+                  <span className="diff-number" aria-hidden>{line.new ?? ""}</span>
+                  <span className="diff-sign" aria-hidden>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}</span>
+                  <code>{line.text ? <DiffCode text={line.text} tokens={tokensOf(line)} /> : " "}</code>
+                </div>
+              );
+            }
+            const fullIndex = index.get(line) ?? at;
+            const comment = comments?.[fullIndex];
+            const editing = activeLine === fullIndex && Boolean(renderLineEditor);
+            return (
+              <Fragment key={at}>
+                <div
+                  className="diff-line"
+                  data-kind={line.kind}
+                  data-interactive={onSelectLine ? "" : undefined}
+                  data-commented={comment ? "" : undefined}
+                  role="row"
+                  style={onSelectLine ? { cursor: "pointer" } : undefined}
+                  onClick={onSelectLine ? () => onSelectLine(fullIndex, line) : undefined}
+                >
+                  <span className="diff-number" aria-hidden>{line.old ?? ""}</span>
+                  <span className="diff-number" aria-hidden>{line.new ?? ""}</span>
+                  <span className="diff-sign" aria-hidden>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : ""}</span>
+                  <code>{line.text ? <DiffCode text={line.text} tokens={tokensOf(line)} /> : " "}</code>
+                </div>
+                {comment && !editing && (
+                  <div
+                    className="diff-line-comment border-y border-border bg-muted/40 px-3 py-1.5 text-xs text-foreground flex items-center justify-between gap-2"
+                    role="row"
+                    style={onSelectLine ? { cursor: "pointer" } : undefined}
+                    onClick={onSelectLine ? () => onSelectLine(fullIndex, line) : undefined}
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="whitespace-pre-wrap break-words">{comment}</span>
+                    </span>
+                  </div>
+                )}
+                {editing && (
+                  <div className="diff-line-editor border-y border-border bg-muted/30 p-2.5" role="row">
+                    {renderLineEditor?.(fullIndex, line)}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
         </Fragment>
       ))}
       {!parts.length && <div className="diff-skip">没有内容变化</div>}
@@ -783,6 +841,8 @@ interface EntryProps {
   answered: ReadonlyMap<string, string>;
   /** The conversation's last item while its turn runs: a retry on it is still being tried. */
   live?: boolean;
+  /** Optional DOM anchor id (`data-item-id`) used by Conversation search & outline jump. */
+  anchorId?: string;
 }
 
 /**
@@ -799,6 +859,7 @@ export const TimelineEntry = memo(function TimelineEntry({
   showAsyncQuestions,
   answered,
   live = false,
+  anchorId,
 }: EntryProps & { item: TimelineItem }) {
   const actions = useActions();
   const navigation = useContext(TimelineNavigation);
@@ -809,7 +870,7 @@ export const TimelineEntry = memo(function TimelineEntry({
   const entry = (() => {
     if (item.kind === "turn-end" || item.kind === "driver")
           return (
-            <p className="timeline-divider" key={item.id}>
+            <p className="timeline-divider" key={item.id} data-item-id={anchorId}>
               {item.kind === "driver"
                 ? `会话控制：${item.driver === "desktop" ? "电脑端" : item.driver === "remote" ? "远程端" : "空闲"}`
                 : item.stopReason === "cancelled"
@@ -829,7 +890,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "user" && item.agentMessages?.length)
           return (
-            <article key={item.id} className="agent-message">
+            <article key={item.id} className="agent-message" data-item-id={anchorId}>
               {item.agentMessages.map((message, index) => {
                 // Another session's message names it by the app's id: its title now, and a way there.
                 const sender = message.sessionId ? navigation?.findSession?.(message.sessionId) : undefined;
@@ -860,7 +921,7 @@ export const TimelineEntry = memo(function TimelineEntry({
         const said = item.kind === "user" ? userMessageView(item.blocks) : undefined;
         if (said?.event)
           return (
-            <p className="timeline-event" key={item.id}>
+            <p className="timeline-event" key={item.id} data-item-id={anchorId}>
               {userEventLabel(said.event)}
             </p>
           );
@@ -869,7 +930,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           // person's, so on their side, in the terminal's type.
           const output = said.shell ? [said.shell.stdout, said.shell.stderr].filter(Boolean).join("\n") : said.output;
           return (
-            <article className="user-shell" key={item.id}>
+            <article className="user-shell" key={item.id} data-item-id={anchorId}>
               {said.shell?.command && (
                 <code className="user-shell-command">
                   <span aria-hidden>!</span> {said.shell.command}
@@ -881,7 +942,7 @@ export const TimelineEntry = memo(function TimelineEntry({
         }
         if (item.kind === "user")
           return (
-            <article className="user-message" key={item.id}>
+            <article className="user-message" key={item.id} data-item-id={anchorId}>
               {said && said.context.length > 0 && <UserContextChips context={said.context} />}
               {/* The words in their own box, so the desktop can hang the time and actions under
                   the bubble instead of inside it. */}
@@ -955,7 +1016,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "agent")
           return (
-            <article className="assistant-message" key={item.id}>
+            <article className="assistant-message" key={item.id} data-item-id={anchorId}>
               {item.senderSessionId || item.recipientSessionId ? (
                 <small className="muted">
                   {item.senderSessionId ?? "Agent"} →{" "}
@@ -1005,22 +1066,22 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "thought")
           return (
-            <Fold className="thought-block" key={item.id} summary={<summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>}>
+            <Fold className="thought-block" key={item.id} data-item-id={anchorId} summary={<summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>}>
               <StreamingText text={item.text} streaming={item.streaming && online} />
             </Fold>
           );
-        if (item.kind === "error") return <ErrorCard key={item.id} item={item} />;
+        if (item.kind === "error") return <ErrorCard key={item.id} item={item} anchorId={anchorId} />;
         if (item.kind === "notice") {
           const reconnect = reconnectOf(item.title, item.detail);
           if (reconnect)
             return (
-              <p className="timeline-divider timeline-reconnect" key={item.id} role={live ? "status" : undefined}>
+              <p className="timeline-divider timeline-reconnect" key={item.id} data-item-id={anchorId} role={live ? "status" : undefined}>
                 {live && <LoaderCircle className="tool-state-spinner" aria-hidden />}
                 {reconnectLabel(reconnect, live)}
               </p>
             );
           return (
-            <Alert variant="info" key={item.id}>
+            <Alert variant="info" key={item.id} data-item-id={anchorId}>
               <AlertTitle>{item.title}</AlertTitle>
               {item.detail ? (
                 <AlertDescription>
@@ -1032,7 +1093,7 @@ export const TimelineEntry = memo(function TimelineEntry({
         }
         if (item.kind === "plan")
           return (
-            <section className="plan-card" key={item.id}>
+            <section className="plan-card" key={item.id} data-item-id={anchorId}>
               <strong>{item.title ?? "执行计划"}</strong>
               {item.markdown ? <RichText text={item.markdown} /> : null}
               {item.path ? (
@@ -1060,7 +1121,7 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "permission-result")
           return (
-            <details className="notice-card" key={item.id}>
+            <details className="notice-card" key={item.id} data-item-id={anchorId}>
               <summary>
                 {item.asked ? "已回答" : item.allowed ? "已允许" : "已拒绝"} ·{" "}
                 {item.title}
@@ -1081,6 +1142,7 @@ export const TimelineEntry = memo(function TimelineEntry({
             agent={agent}
             onFile={onFile}
             onTerminal={onTerminal}
+            anchorId={anchorId}
           />
         );
   })();
@@ -1097,10 +1159,10 @@ export const TimelineEntry = memo(function TimelineEntry({
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
 /** An error as the Claude app shows it: what kind of failure, what to do, the agent's words one click away. */
-function ErrorCard({ item }: { item: Extract<TimelineItem, { kind: "error" }> }) {
+function ErrorCard({ item, anchorId }: { item: Extract<TimelineItem, { kind: "error" }>; anchorId?: string }) {
   const shown = presentError(item);
   return (
-    <Alert variant="destructive" data-kind={shown.kind}>
+    <Alert variant="destructive" data-kind={shown.kind} data-item-id={anchorId}>
       <AlertTitle>{shown.title}</AlertTitle>
       {shown.kind ? (
         <AlertDescription>
@@ -1157,7 +1219,7 @@ const SUBAGENT_STATES: Record<string, string | null> = {
  * the open box (the last, nobody has written since), a reply button sends its words as the next
  * message, as the app's does; the app's own actions (commit, create a PR…) are done in the app.
  */
-function WrapUpCard({ item, sessionId }: { item: ToolItem; sessionId: string }) {
+function WrapUpCard({ item, sessionId, anchorId }: { item: ToolItem; sessionId: string; anchorId?: string }) {
   const box = wrapUpOf(item);
   const open = useContext(OpenWrapUp) === item.id;
   const actions = useActions();
@@ -1165,7 +1227,7 @@ function WrapUpCard({ item, sessionId }: { item: ToolItem; sessionId: string }) 
   const job = useJob();
   const [sent, setSent] = useState<number>();
   return (
-    <section className="wrap-up-card" aria-label="已收尾">
+    <section className="wrap-up-card" aria-label="已收尾" data-item-id={anchorId}>
       <small className="wrap-up-label">已收尾</small>
       {box.recap && <RichText text={box.recap} />}
       {box.ask && <p className="wrap-up-ask">{box.ask}</p>}
@@ -1207,7 +1269,7 @@ function WrapUpCard({ item, sessionId }: { item: ToolItem; sessionId: string }) 
 const SESSION_STATES = { starting: "正在启动", started: "已启动", proposed: "已提议，等你开始", failed: "启动失败" } as const;
 
 /** A session the Claude app started from this one: opens it when this computer has it. */
-function SessionCard({ item }: { item: ToolItem }) {
+function SessionCard({ item, anchorId }: { item: ToolItem; anchorId?: string }) {
   const navigation = useContext(TimelineNavigation);
   const started = startedSession(item);
   const target = started.appId ? navigation?.findSession?.(started.appId) : undefined;
@@ -1221,12 +1283,12 @@ function SessionCard({ item }: { item: ToolItem }) {
     </>
   );
   return target ? (
-    <button type="button" className="session-card" data-state={started.state} onClick={target.open} title={`打开「${target.title}」`}>
+    <button type="button" className="session-card" data-state={started.state} data-item-id={anchorId} onClick={target.open} title={`打开「${target.title}」`}>
       {body}
       <ChevronRight className="session-card-chevron" aria-hidden />
     </button>
   ) : (
-    <div className="session-card" data-state={started.state}>{body}</div>
+    <div className="session-card" data-state={started.state} data-item-id={anchorId}>{body}</div>
   );
 }
 
@@ -1259,12 +1321,14 @@ function ToolRecord({
   agent,
   onFile,
   onTerminal,
+  anchorId,
 }: {
   item: ToolItem;
   sessionId: string;
   agent: string;
   onFile: (path: string, line?: number) => void;
   onTerminal?: (id: string) => void;
+  anchorId?: string;
 }) {
   const { link } = useConnection();
   const navigation = useContext(TimelineNavigation);
@@ -1274,14 +1338,14 @@ function ToolRecord({
   const action = label.action;
   if (action === "compaction")
     return (
-      <p className="timeline-divider" role={item.status === "in_progress" ? "status" : undefined}>
+      <p className="timeline-divider" data-item-id={anchorId} role={item.status === "in_progress" ? "status" : undefined}>
         {item.status === "in_progress" && <LoaderCircle className="tool-state-spinner" aria-hidden />}
         {compactionLabel(item)}
       </p>
     );
-  if (action === "chapter") return <p className="timeline-divider timeline-chapter">{label.subject ?? "新章节"}</p>;
-  if (action === "wrap_up") return <WrapUpCard item={item} sessionId={sessionId} />;
-  if (action === "start_session") return <SessionCard item={item} />;
+  if (action === "chapter") return <p className="timeline-divider timeline-chapter" data-item-id={anchorId}>{label.subject ?? "新章节"}</p>;
+  if (action === "wrap_up") return <WrapUpCard item={item} sessionId={sessionId} anchorId={anchorId} />;
+  if (action === "start_session") return <SessionCard item={item} anchorId={anchorId} />;
 
   const parts = toolLabelParts(label);
   const command = action === "command" ? toolCommand(item) : undefined;
@@ -1356,12 +1420,12 @@ function ToolRecord({
   );
   if (!hasBody)
     return (
-      <div className={`tool-record tool-line ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined}>
+      <div className={`tool-record tool-line ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} data-item-id={anchorId}>
         <div className="tool-summary">{summary}</div>
       </div>
     );
   return (
-    <Fold className={`tool-record ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} summary={<summary>{summary}</summary>}>
+    <Fold className={`tool-record ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} data-item-id={anchorId} summary={<summary>{summary}</summary>}>
       {cancel ? (
         <Button
           variant="outline"

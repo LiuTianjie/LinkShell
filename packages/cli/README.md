@@ -17,7 +17,7 @@ linkshell setup
 
 Connect your phone one of two ways:
 
-- **iTool membership — the official gateway.** `linkshell login`, then sign in to the app with the same account. The computer shows up by itself.
+- **Official gateway (7-day free trial on sign-up, no card required).** `linkshell login`, then sign in to the app with the same account. New accounts get a 7-day free trial automatically, and the computer shows up by itself.
 - **Your own gateway.** Run one (below), then:
 
   ```bash
@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-The official gateway needs an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/en/pro?from=linkshell) with Alipay (monthly ¥9.9 covers the iTool site and LinkShell, yearly ¥99 covers every iTool product). `linkshell login` says which tier the account has; the desktop app refreshes it after you pay.
+After your 7-day free trial, the official gateway uses an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/pro?from=linkshell) with an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr — monthly covers the iTool site and LinkShell; yearly covers every iTool product plus LinkShell Agent multi-machine steward capabilities). Invite a friend and both of you receive 14 days (monthly) or 30 days (yearly). `linkshell login` shows your trial or membership status; the desktop app refreshes it after you subscribe.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 
@@ -64,7 +64,9 @@ a 120 fps request does not establish sustained 120 fps or stable 4K/60.
 | `linkshell status` | The host, its agents, sessions and gateway connection |
 | `linkshell host stop` | Stop the host (`linkshell stop` stops everything LinkShell runs here) |
 | `linkshell host --gateway <url>` | Choose the gateway (`off` to disconnect, `default` for the official one); applies to a running host |
-| `linkshell pair` | Pair a phone through your own gateway |
+| `linkshell host --lan [port]` | Connect over same-Wi-Fi LAN (starts a local gateway on `<port>`, default 8787; `off` to disable) |
+| `linkshell host --keep-awake <mode>` | Idle sleep prevention: `smart` (default, while active), `always`, or `off` |
+| `linkshell pair` | Pair a phone through your own or LAN gateway |
 | `linkshell devices` | Paired phones; `linkshell devices remove <name>` unpairs one |
 | `linkshell login` / `logout` | iTool account: join or leave the official gateway, without restarting the host |
 | `linkshell claude` / `linkshell codex` | The agent's own UI, shareable with the phone (arguments pass through) |

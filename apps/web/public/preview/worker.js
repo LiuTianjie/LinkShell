@@ -103,6 +103,58 @@ function navigationBootstrap(prefix) {
       original(state, title, url == null ? url : rewrite(url));
   }
 }
+function errorBootstrap(channel) {
+  const seen = new Set();
+  const report = (source, message, stack) => {
+    const text = String(message || "Runtime error").trim().slice(0, 1000);
+    if (!text) return;
+    const key = source + ":" + text;
+    if (seen.has(key) || seen.size >= 25) return;
+    seen.add(key);
+    parent.postMessage(
+      {
+        channel,
+        type: "preview-runtime-error",
+        source,
+        message: text,
+        stack: stack ? String(stack).slice(0, 2000) : undefined,
+      },
+      "*",
+    );
+  };
+  window.addEventListener("error", (event) => {
+    report(
+      "window.onerror",
+      event.message || (event.error && event.error.message) || "Uncaught error",
+      event.error && event.error.stack,
+    );
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    report(
+      "unhandledrejection",
+      (reason && reason.message) || String(reason),
+      reason && reason.stack,
+    );
+  });
+  const origError = console.error.bind(console);
+  console.error = (...args) => {
+    origError(...args);
+    const first = args[0];
+    const msg = args
+      .map((arg) => {
+        if (typeof arg === "string") return arg;
+        if (arg instanceof Error) return arg.message;
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      })
+      .join(" ");
+    report("console.error", msg, first instanceof Error ? first.stack : undefined);
+  };
+}
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
@@ -220,7 +272,7 @@ self.addEventListener("fetch", (event) => {
         }
         let output = stream;
         if (headers.get("content-type")?.includes("text/html")) {
-          const script = `<script>(${session.bootstrap})(${JSON.stringify(token)});(${navigationBootstrap.toString()})(${JSON.stringify(prefix)});</script>`;
+          const script = `<script>(${session.bootstrap})(${JSON.stringify(token)});(${navigationBootstrap.toString()})(${JSON.stringify(prefix)});(${errorBootstrap.toString()})(${JSON.stringify(token)});</script>`;
           const text = await new Response(stream).text();
           output = new TextEncoder().encode(
             /<head(?:\s[^>]*)?>/i.test(text)

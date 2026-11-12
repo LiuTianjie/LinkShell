@@ -33,7 +33,17 @@ describe("native usage statistics", () => {
     const rows = [a.parse(claude(10))!, a.parse(claude(20))!, b.parse(codex(100, 20, 40))!, fork.parse(codex(100, 20, 40))!];
     const now = Date.parse(timestamp) + 1000;
     const result = summarizeUsage(rows, { days: 7, agent: "all" }, now);
-    expect(result.totals).toEqual({ records: 2, sessions: 2, inputTokens: 160, outputTokens: 40, cacheReadTokens: 80, cacheWriteTokens: 20, totalTokens: 300 });
+    expect(result.totals).toEqual({
+      records: 2,
+      sessions: 2,
+      inputTokens: 160,
+      outputTokens: 40,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 20,
+      totalTokens: 300,
+      estimatedCostUsd: 0.000696,
+    });
+    expect(result.estimatedCostUsd).toBe(0.000696);
     expect(result.daily).toHaveLength(7);
     expect(result.daily.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(300);
     expect(summarizeUsage(rows, { days: 1, agent: "claude" }, now).totals.totalTokens).toBe(180);
@@ -114,5 +124,78 @@ describe("model names", () => {
     expect(modelName("claude-opus-5-5[1m]")).toBe("claude-opus-5.5[1m]");
     expect(modelName("gpt-5.5")).toBe("gpt-5.5");
     expect(modelName("claude-3-5-sonnet-20241022")).toBe("claude-3-5-sonnet-20241022");
+  });
+});
+
+describe("usage ROI and remote orchestration telemetry", () => {
+  it("estimates cost per model when native cost is absent and honors native USD cost when present", () => {
+    const now = Date.parse(timestamp) + 1000;
+    const events: Array<SessionEvent & { agent: string }> = [
+      {
+        agent: "gemini",
+        sessionId: "gemini:s1",
+        seq: 1,
+        ts: Date.parse(timestamp),
+        update: {
+          sessionUpdate: "usage_update",
+          accounting: { id: "t1", scope: "turn", model: "claude-sonnet-4.5" },
+          tokens: { totalTokens: 1_100_000, inputTokens: 1_000_000, outputTokens: 100_000 },
+        },
+      },
+      {
+        agent: "opencode",
+        sessionId: "opencode:s2",
+        seq: 1,
+        ts: Date.parse(timestamp),
+        update: {
+          sessionUpdate: "usage_update",
+          accounting: { id: "t2", scope: "turn", model: "custom-model" },
+          cost: { amount: 1.25, currency: "USD" },
+          tokens: { totalTokens: 5000, inputTokens: 4000, outputTokens: 1000 },
+        },
+      },
+    ];
+    const records = [...usageEventRecords(events)];
+    const report = summarizeUsage(records, { days: 7, agent: "all" }, now);
+    // Sonnet: 1M * $3 + 0.1M * $15 = $4.50; plus native $1.25 = $5.75
+    expect(report.estimatedCostUsd).toBe(5.75);
+    expect(report.totals.estimatedCostUsd).toBe(5.75);
+    expect(report.models.find((m) => m.agent === "opencode")?.estimatedCostUsd).toBe(1.25);
+  });
+
+  it("aggregates remoteTurns and remoteApprovals from HostStore in usage.summary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "linkshell-usage-roi-"));
+    temporary.push(root);
+    const store = new HostStore(join(root, "state.db"));
+    try {
+      const now = Date.now();
+      store.upsertSession({ id: "codex:s1", nativeId: "s1", agent: "codex", cwd: root, createdAt: now - 5000, updatedAt: now });
+      store.claimClientMessage("codex:s1", "msg-1");
+      store.claimClientMessage("codex:s1", "msg-2");
+      store.appendEvent("codex:s1", { sessionUpdate: "ls_permission_resolved", requestId: "req-1", optionId: "allow" }, now - 1000);
+
+      store.upsertSession({ id: "claude:s2", nativeId: "s2", agent: "claude", cwd: root, createdAt: now - 5000, updatedAt: now });
+      store.claimClientMessage("claude:s2", "msg-3");
+      store.appendEvent("claude:s2", { sessionUpdate: "ls_permission_resolved", requestId: "req-2", answers: [{ id: "q1", values: ["yes"] }] }, now - 500);
+      // Stale turn end auto-resolution (no optionId and no answers) is not counted as user remote approval.
+      store.appendEvent("claude:s2", { sessionUpdate: "ls_permission_resolved", requestId: "req-stale" }, now - 400);
+
+      const service = new UsageStatistics(
+        { codex: join(root, "codex"), claude: join(root, "claude") },
+        {
+          agents: () => [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }],
+          events: () => store.usageEvents(),
+          remoteStats: (since, until, agent) => store.remoteStats(since, until, agent),
+        },
+      );
+
+      const all = await service.summary({ days: 7, agent: "all" });
+      expect(all.remoteStats).toEqual({ remoteTurns: 3, remoteApprovals: 2 });
+
+      const codexOnly = await service.summary({ days: 7, agent: "codex" });
+      expect(codexOnly.remoteStats).toEqual({ remoteTurns: 2, remoteApprovals: 1 });
+    } finally {
+      store.close();
+    }
   });
 });

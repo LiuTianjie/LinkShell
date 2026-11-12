@@ -17,6 +17,7 @@ import {
 } from "../live/computer-names";
 import { readLocal, saveLocal } from "../live/storage";
 import { isDesktop } from "../live/desktop";
+import { LanguageDropdown, useT } from "../live/i18n";
 import { DesktopShell } from "./DesktopShell";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
@@ -37,30 +38,34 @@ import {
   useSidebar,
 } from "./ui/sidebar";
 
-const groups: {
+function useNavGroups(): {
   title: string;
   items: { id: string; title: string; icon: IconName }[];
-}[] = [
-  {
-    title: "工作空间",
-    items: [
-      { id: "home", title: "会话概览", icon: "grid" },
-      { id: "projects", title: "项目", icon: "grid" },
-      { id: "computers", title: "电脑", icon: "computer" },
-      { id: "archive", title: "已归档", icon: "clock" },
-    ],
-  },
-  {
-    title: "远程工具",
-    items: [
-      { id: "screen", title: "我的电脑", icon: "computer" },
-      { id: "terminals", title: "终端", icon: "terminal" },
-      { id: "files", title: "文件", icon: "file" },
-      { id: "ports", title: "端口预览", icon: "globe" },
-      { id: "worktrees", title: "工作树", icon: "branch" },
-    ],
-  },
-];
+}[] {
+  const t = useT();
+  return [
+    {
+      title: "工作空间",
+      items: [
+        { id: "home", title: t("nav.sessions"), icon: "grid" },
+        { id: "projects", title: t("nav.projects"), icon: "grid" },
+        { id: "steward", title: t("nav.steward"), icon: "steward" },
+        { id: "computers", title: t("nav.computers"), icon: "computer" },
+        { id: "archive", title: t("nav.archived"), icon: "clock" },
+      ],
+    },
+    {
+      title: "远程工具",
+      items: [
+        { id: "screen", title: t("nav.screen"), icon: "computer" },
+        { id: "terminals", title: t("nav.terminals"), icon: "terminal" },
+        { id: "files", title: t("nav.files"), icon: "file" },
+        { id: "ports", title: t("nav.ports"), icon: "globe" },
+        { id: "worktrees", title: t("nav.worktrees"), icon: "branch" },
+      ],
+    },
+  ];
+}
 
 function Navigation({
   view,
@@ -75,6 +80,7 @@ function Navigation({
 }) {
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
+  const groups = useNavGroups();
   const { setOpenMobile } = useSidebar();
   return (
     <Sidebar className="console-sidebar">
@@ -186,6 +192,8 @@ function WebConsoleShell({
 }: ConsoleShellProps) {
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
+  const t = useT();
+  const groups = useNavGroups();
   const [theme, setTheme] = useState(() =>
     readLocal(
       "theme",
@@ -201,7 +209,7 @@ function WebConsoleShell({
   );
   const title =
     groups.flatMap((group) => group.items).find((item) => item.id === view)
-      ?.title ?? "会话";
+      ?.title ?? t("nav.sessions");
   return (
     <div className="console-root">
       <a
@@ -247,10 +255,11 @@ function WebConsoleShell({
                     className="console-presence"
                     data-online={currentComputer?.machine.online ? "" : undefined}
                     role="img"
-                    aria-label={currentComputer?.machine.online ? "在线" : "离线"}
+                    aria-label={currentComputer?.machine.online ? t("connection.online") : t("connection.offline")}
                   />
                 )}
               </div>
+              <LanguageDropdown />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

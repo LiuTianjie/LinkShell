@@ -49,6 +49,7 @@ import {
   type Rect,
 } from "./screen-input";
 import { ScreenReceiver, type ReceiverState } from "./screen-receiver";
+import { ScreenToolsMenu } from "./Video";
 import "../styles/remote-screen.css";
 import { remoteShortcuts, shortcutSign, type RemoteShortcut } from "./screen-shortcuts";
 
@@ -497,6 +498,7 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
             )}
           </PopoverContent>
         </Popover>
+        <ScreenToolsMenu container={shown ? root.current : undefined} />
         <Button variant="ghost" size="icon" aria-label="重新连接" title="重新连接" onClick={retry}><RotateCw /></Button>
         <Button variant={shown ? "secondary" : "ghost"} size="sm" onClick={() => requestFullscreen(!fullscreen.owns)} title="全屏">
           {shown ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}

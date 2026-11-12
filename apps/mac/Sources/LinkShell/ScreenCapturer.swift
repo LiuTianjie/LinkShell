@@ -66,8 +66,10 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
           configuration.showsCursor = false
           configuration.scalesToFit = true
 
-          // Everything on the display, this app's own windows included (the clock strip is one).
-          let filter = SCContentFilter(display: target, excludingWindows: [])
+          // Everything on the display except local privacy-curtain overlays, this app's own clock strip included.
+          let curtainIDs = ScreenPrivacy.shared.curtainWindowIDs()
+          let excluded = curtainIDs.isEmpty ? [] : (content?.windows.filter { curtainIDs.contains($0.windowID) } ?? [])
+          let filter = SCContentFilter(display: target, excludingWindows: excluded)
           let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
           do {
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)

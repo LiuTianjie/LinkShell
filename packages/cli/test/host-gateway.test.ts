@@ -3,9 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/auth.js", () => ({ isLoggedIn: vi.fn(() => false), getValidToken: vi.fn(async () => null) }));
+vi.mock("../src/auth.js", () => ({ isLoggedIn: vi.fn(() => false), getValidToken: vi.fn(async () => null), loadAuth: vi.fn(() => null) }));
 const auth = await import("../src/auth.js");
-const { OFFICIAL_GATEWAY, resolveGateway, sameGateway, writeHostConfig } = await import("../src/commands/host.js");
+const {
+  OFFICIAL_GATEWAY,
+  describeGateway,
+  describePowerAndKeepAwake,
+  findLanIpv4,
+  parseKeepAwakeOption,
+  parseLanOption,
+  resolveGateway,
+  sameGateway,
+  writeHostConfig,
+} = await import("../src/commands/host.js");
 
 describe("host gateway choice", () => {
   let home: string;
@@ -62,5 +72,41 @@ describe("host gateway choice", () => {
     expect(resolveGateway(home)).toBeUndefined();
     process.env.LINKSHELL_GATEWAY = "wss://my-gateway.example";
     expect(resolveGateway(home)).toBe("wss://my-gateway.example");
+  });
+
+  it("parses --lan and --keep-awake options and formats power/keep-awake status", () => {
+    expect(parseKeepAwakeOption("smart")).toBe("smart");
+    expect(parseKeepAwakeOption("ALWAYS")).toBe("always");
+    expect(parseKeepAwakeOption("off")).toBe("off");
+    expect(() => parseKeepAwakeOption("invalid")).toThrow(/Invalid --keep-awake/);
+
+    expect(parseLanOption(true)).toBe(8787);
+    expect(parseLanOption("9000")).toBe(9000);
+    expect(parseLanOption("off")).toBe("off");
+    expect(() => parseLanOption("70000")).toThrow(/Invalid --lan/);
+
+    expect(
+      findLanIpv4({
+        utun0: [{ address: "100.64.0.2", netmask: "255.255.0.0", family: "IPv4", mac: "00:00:00:00:00:00", internal: false, cidr: "100.64.0.2/16" }],
+        en0: [{ address: "192.168.1.42", netmask: "255.255.255.0", family: "IPv4", mac: "00:00:00:00:00:01", internal: false, cidr: "192.168.1.42/24" }],
+      }),
+    ).toBe("192.168.1.42");
+
+    expect(
+      describePowerAndKeepAwake({
+        keepAwake: { mode: "smart", active: true, reason: "session_active" },
+        power: { onBattery: true, percent: 83, charging: true },
+      }),
+    ).toBe("keep-awake smart (active: session active) · battery 83% (charging)");
+
+    expect(
+      describePowerAndKeepAwake({
+        keepAwake: { mode: "smart", active: false },
+        power: { onBattery: false, percent: 100 },
+      }),
+    ).toBe("keep-awake smart (idle) · AC power 100%");
+
+    expect(describeGateway({ status: "off", devices: [] })).toContain("7-day free trial");
+    expect(describeGateway({ status: "off", devices: [] })).toContain("--lan");
   });
 });

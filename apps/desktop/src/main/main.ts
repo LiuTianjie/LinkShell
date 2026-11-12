@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
-import { KeepAwake } from "./keep-awake.js";
+import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
@@ -522,17 +522,20 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       clipboard.writeText(path);
       return { path };
     }
-    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", ...(MAC ? { keepAwake: settings.get("keepAwake") === true } : {}) };
+    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", keepAwake: normalizeKeepAwakeMode(settings.get("keepAwake")) };
     case "setSetting": {
       const key = String(params.key ?? "");
-      if (!["opaqueWindow", "autoCheck", "updateChannel", ...(MAC ? ["keepAwake"] : [])].includes(key)) throw new Error("未知设置");
+      if (!["opaqueWindow", "autoCheck", "updateChannel", "keepAwake"].includes(key)) throw new Error("未知设置");
       if (key === "updateChannel" && !["stable", "beta"].includes(String(params.value))) throw new Error("未知更新通道");
       if (key === "updateChannel" && WINDOWS && (windowsUpdate.checking || windowsUpdate.installing)) throw new Error("更新正在进行，请稍后再切换通道");
       if (key === "keepAwake") {
-        if (typeof params.value !== "boolean") throw new Error("无效的保持唤醒设置");
-        keepAwake.set(params.value);
+        if (typeof params.value !== "boolean" && !["smart", "always", "off"].includes(String(params.value))) throw new Error("无效的保持唤醒设置");
+        const normalized = normalizeKeepAwakeMode(params.value);
+        keepAwake.set(normalized);
+        settings.set(key, normalized);
+      } else {
+        settings.set(key, params.value);
       }
-      settings.set(key, params.value);
       if (key === "updateChannel" && WINDOWS) {
         // Invalidate the old channel before yielding to the settings write or another UI request.
         windowsInstaller = undefined;
@@ -917,7 +920,7 @@ function saveSettings(): Promise<void> {
 
 async function ready() {
   await loadSettings();
-  if (MAC) keepAwake.set(settings.get("keepAwake") === true);
+  keepAwake.set(normalizeKeepAwakeMode(settings.get("keepAwake")));
   // Sparkle relaunches with no arguments: keep the chosen state directory, never credentials.
   if (launch.home) { settings.set("home", launch.home); void saveSettings(); }
   else if (typeof settings.get("home") === "string" && runtime.standalone) process.env.LINKSHELL_HOME = settings.get("home") as string;

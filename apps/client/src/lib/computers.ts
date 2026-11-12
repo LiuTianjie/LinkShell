@@ -2,7 +2,7 @@ import Storage from "expo-sqlite/kv-store";
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import { create } from "zustand";
-import { RELAY_PATH, RelayClient, type MachineEntry, type RelaySocket, type RelayStatus } from "@linkshell/wire";
+import { RELAY_PATH, RelayClient, type MachineEntry, type PublicIdentity, type RelaySocket, type RelayStatus } from "@linkshell/wire";
 import { useAccount } from "./account";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
@@ -16,13 +16,50 @@ import { createSocket } from "./socket";
 export const DEFAULT_GATEWAY = process.env.EXPO_PUBLIC_LINKSHELL_GATEWAY ?? "wss://gateway.itool.tech";
 
 export type Computer =
-  | { key: string; kind: "relay"; gateway: string; machine: MachineEntry }
-  | { key: string; kind: "direct"; url: string; name: string };
+  | { key: string; kind: "relay"; gateway: string; machine: MachineEntry; lanUrl?: string; lanE2ee?: boolean }
+  | { key: string; kind: "direct"; url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string };
 
 interface Saved {
   relay: { gateway: string; machine: Omit<MachineEntry, "online"> }[];
-  direct: { url: string; name: string }[];
+  direct: { url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string }[];
+  /** Optional LAN WebSocket URLs bound by computer key or machine id for local Wi-Fi fast-path. */
+  lanUrls?: Record<string, { url: string; e2ee?: boolean } | string>;
   selected?: string;
+}
+
+export function normalizeLanUrl(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  let candidate = trimmed;
+  if (/^https?:\/\//i.test(candidate)) {
+    candidate = candidate.replace(/^http/i, "ws");
+  } else if (!/^wss?:\/\//i.test(candidate)) {
+    candidate = `ws://${candidate}`;
+  }
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return undefined;
+    if (!parsed.hostname) return undefined;
+    if (!parsed.port && parsed.protocol === "ws:") {
+      parsed.port = "7878";
+    }
+    const cleanPath = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.host}${cleanPath}${parsed.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveSavedLan(
+  lanUrls: Saved["lanUrls"],
+  key: string,
+  machineId: string,
+): { lanUrl?: string; lanE2ee?: boolean } {
+  if (!lanUrls) return {};
+  const entry = lanUrls[key] ?? lanUrls[machineId];
+  if (!entry) return {};
+  if (typeof entry === "string") return { lanUrl: entry };
+  return { lanUrl: entry.url, lanE2ee: entry.e2ee };
 }
 
 const KEY = "computers.v2";
@@ -129,7 +166,15 @@ interface ComputersState {
   discovery: Record<string, DiscoveryStatus>;
   select(key: string): void;
   addPaired(gateway: string, machine: MachineEntry): string;
-  addDirect(url: string, name: string): string;
+  addDirect(url: string, name: string, options?: { machine?: PublicIdentity; fallbackGateway?: string }): string;
+  setLanUrl(keyOrMachineId: string, lanUrl: string | undefined, options?: { e2ee?: boolean }): void;
+  discoverLanHost(host: {
+    url: string;
+    name?: string;
+    machineId?: string;
+    machine?: PublicIdentity;
+    e2ee?: boolean;
+  }): string;
   /**
    * Removes a computer from this phone's list. A paired one is unpaired; one that is here through
    * the account is taken off the account at the gateway (it comes back if it ever signs in again).
@@ -167,19 +212,75 @@ export const useComputers = create<ComputersState>((set, get) => ({
     void get().refresh(url);
     return relayKey(url, machine.id);
   },
-  addDirect(url, name) {
-    const saved: Saved = { ...get().saved, direct: [...get().saved.direct.filter((entry) => entry.url !== url), { url, name }] };
+  addDirect(rawUrl, name, options) {
+    const url = normalizeLanUrl(rawUrl) ?? rawUrl.trim();
+    const saved: Saved = {
+      ...get().saved,
+      direct: [
+        ...get().saved.direct.filter((entry) => entry.url !== url),
+        {
+          url,
+          name,
+          ...(options?.machine ? { machine: options.machine } : {}),
+          ...(options?.fallbackGateway ? { fallbackGateway: normalizeGateway(options.fallbackGateway) } : {}),
+        },
+      ],
+    };
     persist(saved);
     set({ saved });
     return `direct:${url}`;
+  },
+  setLanUrl(keyOrMachineId, rawLanUrl, options) {
+    const current = get().saved;
+    const nextMap = { ...(current.lanUrls ?? {}) };
+    if (!rawLanUrl || !rawLanUrl.trim()) {
+      delete nextMap[keyOrMachineId];
+    } else {
+      const normalized = normalizeLanUrl(rawLanUrl);
+      if (!normalized) return;
+      nextMap[keyOrMachineId] = options?.e2ee ? { url: normalized, e2ee: true } : normalized;
+    }
+    const saved: Saved = {
+      ...current,
+      lanUrls: Object.keys(nextMap).length > 0 ? nextMap : undefined,
+    };
+    persist(saved);
+    set({ saved });
+  },
+  discoverLanHost(host) {
+    const normalized = normalizeLanUrl(host.url);
+    if (!normalized) return "";
+    const state = get();
+    const all = listComputers(state);
+    const matchingRelay = all.find(
+      (item): item is Extract<Computer, { kind: "relay" }> =>
+        item.kind === "relay" &&
+        Boolean(
+          (host.machineId && item.machine.id === host.machineId) ||
+            (host.machine && item.machine.id === host.machine.id && item.machine.signKey === host.machine.signKey),
+        ),
+    );
+    if (matchingRelay) {
+      get().setLanUrl(matchingRelay.key, normalized, { e2ee: host.e2ee });
+      return matchingRelay.key;
+    }
+    return get().addDirect(normalized, host.name?.trim() || "LAN Computer", {
+      machine: host.machine,
+    });
   },
   async remove(key) {
     const current = get().saved;
     const relayEntry = current.relay.find((entry) => relayKey(entry.gateway, entry.machine.id) === key);
     if (relayEntry) await relayFor(relayEntry.gateway).request("machines.forget", { machineId: relayEntry.machine.id }).catch(() => {});
+    const nextLanUrls = current.lanUrls ? { ...current.lanUrls } : undefined;
+    if (nextLanUrls) {
+      delete nextLanUrls[key];
+      if (relayEntry) delete nextLanUrls[relayEntry.machine.id];
+    }
     const saved: Saved = {
       relay: current.relay.filter((entry) => relayKey(entry.gateway, entry.machine.id) !== key),
       direct: current.direct.filter((entry) => `direct:${entry.url}` !== key),
+      ...(nextLanUrls && Object.keys(nextLanUrls).length > 0 ? { lanUrls: nextLanUrls } : {}),
       selected: current.selected === key ? undefined : current.selected,
     };
     persist(saved);
@@ -300,17 +401,30 @@ export function listComputers(state: Pick<ComputersState, "saved" | "live">): Co
     // another signing key is shown offline.
     const same = live && live.signKey === entry.machine.signKey;
     const machine = live && same ? live : { ...entry.machine, ...(live ? { name: live.name } : {}), online: false };
-    out.push({ key, kind: "relay", gateway: entry.gateway, machine });
+    const lan = resolveSavedLan(state.saved.lanUrls, key, machine.id);
+    out.push({ key, kind: "relay", gateway: entry.gateway, machine, ...(lan.lanUrl ? { lanUrl: lan.lanUrl } : {}), ...(lan.lanE2ee ? { lanE2ee: true } : {}) });
     seen.add(key);
   }
   for (const [gateway, machines] of Object.entries(state.live)) {
     for (const machine of machines) {
       const key = relayKey(gateway, machine.id);
-      if (!seen.has(key)) out.push({ key, kind: "relay", gateway, machine });
+      if (!seen.has(key)) {
+        const lan = resolveSavedLan(state.saved.lanUrls, key, machine.id);
+        out.push({ key, kind: "relay", gateway, machine, ...(lan.lanUrl ? { lanUrl: lan.lanUrl } : {}), ...(lan.lanE2ee ? { lanE2ee: true } : {}) });
+      }
       seen.add(key);
     }
   }
-  for (const entry of state.saved.direct) out.push({ key: `direct:${entry.url}`, kind: "direct", url: entry.url, name: entry.name });
+  for (const entry of state.saved.direct) {
+    out.push({
+      key: `direct:${entry.url}`,
+      kind: "direct",
+      url: entry.url,
+      name: entry.name,
+      ...(entry.machine ? { machine: entry.machine } : {}),
+      ...(entry.fallbackGateway ? { fallbackGateway: entry.fallbackGateway } : {}),
+    });
+  }
   return out;
 }
 

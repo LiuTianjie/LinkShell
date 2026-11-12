@@ -81,4 +81,35 @@ describe("desktop membership", () => {
     expect(file).not.toContain("u1-access");
     expect(file).not.toContain("u1-refresh");
   });
+
+  it("preserves isTrial and trialEndsAt when reported by the entitlement endpoint", async () => {
+    const planExpiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      product: "linkshell",
+      required_tier: "monthly",
+      active: true,
+      valid_until: planExpiresAt,
+      tier: "yearly",
+      member_until: planExpiresAt,
+      yearly_until: planExpiresAt,
+      trial_ends_at: planExpiresAt,
+      is_trial: true,
+      server_time: new Date().toISOString(),
+    })));
+    expect(await refreshMembership()).toEqual({
+      plan: "pro",
+      planExpiresAt,
+      tier: "yearly",
+      isTrial: true,
+      trialEndsAt: planExpiresAt,
+    });
+    expect(cachedMembership("u1")).toEqual({
+      plan: "pro",
+      planExpiresAt,
+      tier: "yearly",
+      isTrial: true,
+      trialEndsAt: planExpiresAt,
+    });
+  });
 });

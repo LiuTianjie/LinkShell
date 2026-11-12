@@ -21,15 +21,17 @@ public class LinkLayoutModule: Module {
   private var simulatorWaveTimer: Timer?
   private var activeActivityId: String?
   private var pushTokenTasks: [String: Task<Void, Never>] = [:]
+  private var pushToStartTask: Task<Void, Never>?
   private var activityStateTasks: [String: Task<Void, Never>] = [:]
   private var activityActionObserver: NSObjectProtocol?
   private var watchCommandObserver: NSObjectProtocol?
   private var watchStatusObserver: NSObjectProtocol?
   private var pushRegistrationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+  private lazy var speechSynthesizer = AVSpeechSynthesizer()
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
-    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken", "onWatchCommand", "onWatchStatus")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken", "onLiveActivityPushToStartToken", "onWatchCommand", "onWatchStatus")
     OnCreate { [weak self] in
       WatchSessionBridge.shared.start()
       Task { @MainActor [weak self] in self?.observeExistingActivities() }
@@ -46,11 +48,16 @@ public class LinkLayoutModule: Module {
     OnDestroy { [weak self] in
       if let self {
         Task { @MainActor in
+          self.pushToStartTask?.cancel()
+          self.pushToStartTask = nil
           self.pushTokenTasks.values.forEach { $0.cancel() }
           self.activityStateTasks.values.forEach { $0.cancel() }
           self.pushTokenTasks.removeAll()
           self.activityStateTasks.removeAll()
           self.endPushRegistrationTask()
+          if self.speechSynthesizer.isSpeaking {
+            self.speechSynthesizer.stopSpeaking(at: .immediate)
+          }
         }
       }
       if let observer = self?.activityActionObserver { NotificationCenter.default.removeObserver(observer) }
@@ -104,6 +111,37 @@ public class LinkLayoutModule: Module {
       self?.stopNativeSpeech(cancel: true)
     }.runOnQueue(.main)
 
+    AsyncFunction("speakText") { [weak self] (text: String, localeId: String?) in
+      guard let self else { return }
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { return }
+      if self.speechSynthesizer.isSpeaking {
+        self.speechSynthesizer.stopSpeaking(at: .immediate)
+      }
+      if self.audioEngine?.isRunning != true {
+        try? AVAudioSession.sharedInstance().setCategory(
+          .playback,
+          mode: .spokenAudio,
+          options: [.duckOthers, .mixWithOthers]
+        )
+        try? AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+      }
+      let utterance = AVSpeechUtterance(string: trimmed)
+      let lang = localeId ?? Locale.preferredLanguages.first ?? "zh-CN"
+      utterance.voice = AVSpeechSynthesisVoice(language: lang)
+        ?? AVSpeechSynthesisVoice(language: "zh-CN")
+        ?? AVSpeechSynthesisVoice(language: "en-US")
+      utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+      self.speechSynthesizer.speak(utterance)
+    }.runOnQueue(.main)
+
+    AsyncFunction("stopSpeaking") { [weak self] in
+      guard let self else { return }
+      if self.speechSynthesizer.isSpeaking {
+        self.speechSynthesizer.stopSpeaking(at: .immediate)
+      }
+    }.runOnQueue(.main)
+
     AsyncFunction("setShortcutItems") { (items: [[String: String]]) in
       let shortcuts = items.compactMap { item -> UIApplicationShortcutItem? in
         guard let id = item["id"], let title = item["title"], let href = item["href"] else { return nil }
@@ -150,6 +188,9 @@ public class LinkLayoutModule: Module {
     }
     AsyncFunction("getLiveActivityPushRegistrations") { () async -> [[String: String]] in
       await self.liveActivityPushRegistrations()
+    }
+    AsyncFunction("getLiveActivityPushToStartToken") { () async -> String? in
+      await self.liveActivityPushToStartToken()
     }
     AsyncFunction("setLiveActivityPushReady") { (id: String) async in
       await MainActor.run {
@@ -356,6 +397,37 @@ public class LinkLayoutModule: Module {
     if #available(iOS 16.2, *), !Self.pushServiceURL.isEmpty {
       for activity in Activity<LinkShellAttentionAttributes>.activities { observePushToken(activity) }
     }
+    if #available(iOS 17.2, *), !Self.pushServiceURL.isEmpty {
+      observePushToStartToken()
+    }
+  }
+
+  @available(iOS 17.2, *)
+  @MainActor private func observePushToStartToken() {
+    guard !Self.pushServiceURL.isEmpty, pushToStartTask == nil else { return }
+    pushToStartTask = Task { [weak self] in
+      for await tokenData in Activity<LinkShellAttentionAttributes>.pushToStartTokenUpdates {
+        if Task.isCancelled { break }
+        let hex = tokenData.map { String(format: "%02x", $0) }.joined()
+        if !hex.isEmpty {
+          self?.sendEvent("onLiveActivityPushToStartToken", ["token": hex])
+        }
+      }
+    }
+  }
+
+  @MainActor private func liveActivityPushToStartToken() -> String? {
+    guard !Self.pushServiceURL.isEmpty else { return nil }
+    #if canImport(ActivityKit)
+    if #available(iOS 17.2, *), ActivityAuthorizationInfo().areActivitiesEnabled {
+      observePushToStartToken()
+      if let tokenData = Activity<LinkShellAttentionAttributes>.pushToStartToken {
+        let hex = tokenData.map { String(format: "%02x", $0) }.joined()
+        return hex.isEmpty ? nil : hex
+      }
+    }
+    #endif
+    return nil
   }
 
   @available(iOS 16.2, *)

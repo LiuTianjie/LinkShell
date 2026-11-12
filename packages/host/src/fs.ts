@@ -1,8 +1,12 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, open, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { RpcError, type DirectoryEntry } from "@linkshell/wire";
+
+const execFileAsync = promisify(execFile);
 
 // Browsing and searching the host's directories, to pick where a session runs.
 
@@ -269,4 +273,179 @@ export async function makeDirectory(input: { parent: string; name: string }) {
     throw error;
   }
   return { path };
+}
+
+export interface ProjectFileEntry {
+  path: string;
+  relativePath: string;
+  isDir?: boolean;
+}
+
+const MAX_PROJECT_WALK_ENTRIES = 10_000;
+const BOUNDARY_CHARS = new Set(["/", "-", "_", ".", " "]);
+
+/**
+ * Fuzzy score for `@file` autocomplete. Returns `null` when `query` is not a
+ * subsequence of `relativePath`. Higher scores rank first.
+ */
+export function scoreProjectPath(relativePath: string, query: string, isDir?: boolean): number | null {
+  const q = query.trim().replace(/^@+/, "").replace(/\\/g, "/").toLowerCase();
+  if (!q) return 0;
+  const rel = relativePath.toLowerCase();
+  const slashIndex = rel.lastIndexOf("/");
+  const base = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
+  const dirPenalty = isDir ? 8 : 0;
+
+  if (rel === q) return 2000 - dirPenalty;
+  if (base === q) return 1800 - rel.length * 0.2 - dirPenalty;
+  if (base.startsWith(q)) return 1500 - base.length - rel.length * 0.2 - dirPenalty;
+  if (rel.startsWith(q)) return 1400 - rel.length * 0.4 - dirPenalty;
+  if (rel.endsWith(`/${q}`)) return 1350 - rel.length * 0.2 - dirPenalty;
+
+  const baseIdx = base.indexOf(q);
+  if (baseIdx >= 0) return 1200 - baseIdx * 4 - base.length - rel.length * 0.2 - dirPenalty;
+
+  const relIdx = rel.indexOf(q);
+  if (relIdx >= 0) return 1000 - relIdx * 2 - rel.length * 0.3 - dirPenalty;
+
+  // Subsequence fuzzy match preferring basename and word/segment boundaries.
+  let qi = 0;
+  let score = 200 - rel.length * 0.5 - dirPenalty;
+  let lastMatch = -2;
+  for (let i = 0; i < rel.length && qi < q.length; i++) {
+    if (rel[i] !== q[qi]) continue;
+    if (i === lastMatch + 1) score += 14;
+    if (i === 0 || BOUNDARY_CHARS.has(rel[i - 1]!)) score += 18;
+    if (i > slashIndex) score += 20;
+    lastMatch = i;
+    qi++;
+  }
+  return qi === q.length ? score : null;
+}
+
+async function gitProjectCandidates(cwd: string): Promise<ProjectFileEntry[] | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "ls-files", "-co", "--exclude-standard", "-z"], {
+      encoding: "buffer",
+      timeout: 3000,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    });
+    const rawPaths = stdout.toString("utf8").split("\0").filter(Boolean);
+    const seenFiles = new Set<string>();
+    const seenDirs = new Set<string>();
+    const entries: ProjectFileEntry[] = [];
+    for (const raw of rawPaths) {
+      const rel = raw.replace(/\\/g, "/").replace(/^\/+/, "");
+      if (!rel || rel.split("/").includes("..") || seenFiles.has(rel)) continue;
+      seenFiles.add(rel);
+      entries.push({ path: join(cwd, ...rel.split("/")), relativePath: rel });
+      const parts = rel.split("/");
+      for (let depth = 1; depth < parts.length; depth++) {
+        const dirRel = parts.slice(0, depth).join("/");
+        if (!seenDirs.has(dirRel)) {
+          seenDirs.add(dirRel);
+          entries.push({ path: join(cwd, ...dirRel.split("/")), relativePath: dirRel, isDir: true });
+        }
+      }
+    }
+    return entries;
+  } catch {
+    return undefined;
+  }
+}
+
+async function walkProjectCandidates(cwd: string, budgetMs = 1500): Promise<{ entries: ProjectFileEntry[]; truncated: boolean }> {
+  const deadline = Date.now() + budgetMs;
+  const entries: ProjectFileEntry[] = [];
+  let queue: { full: string; rel: string; depth: number }[] = [{ full: cwd, rel: "", depth: 0 }];
+  let truncated = false;
+
+  while (queue.length > 0) {
+    if (Date.now() > deadline || entries.length >= MAX_PROJECT_WALK_ENTRIES) {
+      truncated = true;
+      break;
+    }
+    const next: typeof queue = [];
+    for (const current of queue) {
+      if (Date.now() > deadline || entries.length >= MAX_PROJECT_WALK_ENTRIES) {
+        truncated = true;
+        break;
+      }
+      let dirents;
+      try {
+        dirents = await readdir(current.full, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const d of dirents) {
+        if (d.name === ".git" || SKIP.has(d.name)) continue;
+        if (d.isDirectory() && d.name.startsWith(".")) continue;
+        const rel = current.rel ? `${current.rel}/${d.name}` : d.name;
+        const full = join(current.full, d.name);
+        if (d.isDirectory()) {
+          entries.push({ path: full, relativePath: rel, isDir: true });
+          if (current.depth < 8) next.push({ full, rel, depth: current.depth + 1 });
+        } else if (d.isFile()) {
+          entries.push({ path: full, relativePath: rel });
+        }
+        if (entries.length >= MAX_PROJECT_WALK_ENTRIES) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+    queue = next;
+  }
+
+  return { entries, truncated };
+}
+
+export async function listProjectFiles(input: {
+  cwd: string;
+  query?: string;
+  limit?: number;
+}): Promise<{ files: ProjectFileEntry[]; truncated: boolean }> {
+  const cwd = await existingDirectory(input.cwd);
+  const limit = Math.min(Math.max(1, input.limit ?? 100), 1000);
+  const gitEntries = await gitProjectCandidates(cwd);
+  let candidates: ProjectFileEntry[];
+  let sourceTruncated = false;
+  if (gitEntries !== undefined) {
+    candidates = gitEntries;
+  } else {
+    const walked = await walkProjectCandidates(cwd);
+    candidates = walked.entries;
+    sourceTruncated = walked.truncated;
+  }
+
+  const query = (input.query ?? "").trim().replace(/^@+/, "");
+  if (!query) {
+    candidates.sort(
+      (a, b) =>
+        Number(Boolean(a.isDir)) - Number(Boolean(b.isDir)) ||
+        a.relativePath.split("/").length - b.relativePath.split("/").length ||
+        a.relativePath.localeCompare(b.relativePath),
+    );
+    return {
+      files: candidates.slice(0, limit),
+      truncated: sourceTruncated || candidates.length > limit,
+    };
+  }
+
+  const scored: { entry: ProjectFileEntry; score: number }[] = [];
+  for (const entry of candidates) {
+    const score = scoreProjectPath(entry.relativePath, query, entry.isDir);
+    if (score !== null) scored.push({ entry, score });
+  }
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.entry.relativePath.length - b.entry.relativePath.length ||
+      a.entry.relativePath.localeCompare(b.entry.relativePath),
+  );
+  return {
+    files: scored.slice(0, limit).map((item) => item.entry),
+    truncated: sourceTruncated || scored.length > limit,
+  };
 }

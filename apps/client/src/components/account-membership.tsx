@@ -1,20 +1,83 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, View } from "react-native";
-import { membershipTierLabel, type ProMembership } from "@linkshell/client-core";
+import {
+  dateLocaleTag,
+  membershipTierLabel,
+  t as translateKey,
+  type Locale,
+  type ProMembership,
+} from "@linkshell/client-core";
 import { Text } from "@/components/fixed-text";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { useAccount } from "@/lib/account";
 import { loadAccountMembership } from "@/lib/account-membership";
+import { useLocale } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
 
+export interface MobileMembershipPresentation {
+  headline: string;
+  subtitle: string;
+  freeHint?: string;
+  isTrial: boolean;
+}
+
+export function computeTrialDaysRemaining(membership: ProMembership, nowMs = Date.now()): number | undefined {
+  if (typeof membership.daysRemaining === "number" && Number.isFinite(membership.daysRemaining)) {
+    return Math.max(1, Math.ceil(membership.daysRemaining));
+  }
+  const rawEnd = membership.trialEndsAt ?? membership.expiresAt;
+  if (!rawEnd) return undefined;
+  const until = Date.parse(rawEnd);
+  if (!Number.isFinite(until)) return undefined;
+  return Math.max(1, Math.ceil((until - nowMs) / 86_400_000));
+}
+
+export function formatMobileMembershipState(
+  membership: ProMembership | undefined,
+  loading: boolean,
+  locale: Locale,
+  nowMs = Date.now(),
+): MobileMembershipPresentation {
+  const pro = membership?.plan === "pro";
+  if (pro && membership) {
+    const isTrial = membership.isTrial === true;
+    const daysRemaining = isTrial ? computeTrialDaysRemaining(membership, nowMs) : undefined;
+    const headline = membershipTierLabel(membership.tier, {
+      isTrial,
+      daysRemaining,
+      locale,
+    });
+    const subtitle = membership.expiresAt
+      ? translateKey(locale, "mobile.membership.validUntil", {
+          date: new Date(membership.expiresAt).toLocaleDateString(dateLocaleTag(locale)),
+        })
+      : translateKey(locale, "mobile.membership.title");
+    return { headline, subtitle, isTrial };
+  }
+  if (membership?.plan === "free") {
+    return {
+      headline: translateKey(locale, "mobile.membership.title"),
+      subtitle: translateKey(locale, "mobile.membership.freeAccount"),
+      freeHint: translateKey(locale, "mobile.membership.freeHint"),
+      isTrial: false,
+    };
+  }
+  return {
+    headline: translateKey(locale, "mobile.membership.title"),
+    subtitle: translateKey(locale, loading ? "mobile.membership.loading" : "mobile.membership.unavailable"),
+    isTrial: false,
+  };
+}
+
 /**
- * Shows the account's iTool membership. The phone never sells it: no link, no price, no button
- * that leads to a purchase (App Store rules). People open it on a computer, then this refreshes.
+ * Shows the account's iTool entitlement status. The phone never sells anything: zero links,
+ * zero URLs, zero prices, and zero buttons leading to a purchase (App Store 3.1.1).
  */
 export function AccountMembership({ userId }: { userId: string }) {
+  const { locale, t } = useLocale();
   const [membership, setMembership] = useState<ProMembership>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -38,47 +101,51 @@ export function AccountMembership({ userId }: { userId: string }) {
       if (current() && attempt === request.current) setMembership(next);
     } catch (reason) {
       // A failed read keeps what was last known; it says nothing about the account.
-      if (current() && attempt === request.current) setError(reason instanceof Error ? reason.message : "会员状态读取失败，请重试");
+      if (current() && attempt === request.current) {
+        setError(reason instanceof Error ? reason.message : t("mobile.membership.readFailed"));
+      }
     } finally {
       if (current() && attempt === request.current) setLoading(false);
     }
-  }, [current, userId]);
+  }, [current, t, userId]);
 
   useFocusEffect(useCallback(() => {
     void refresh();
-    // A membership opened on a computer shows up when the app comes back to the front.
+    // Account status managed on a computer syncs automatically when returning to the app.
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void refresh();
     });
     return () => subscription.remove();
   }, [refresh]));
 
-  const pro = membership?.plan === "pro";
+  const presentation = formatMobileMembershipState(membership, loading, locale);
+
   return (
     <View style={{ gap: 4 }}>
       <View style={{ backgroundColor: colors.sheetCard, borderRadius: radius.card, borderCurve: "continuous", padding: 16, gap: 14 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {/* Membership is a plain fact, so its mark is grey like every other tile. */}
+          {/* Status is informational only, using neutral fill styling. */}
           <View style={{ width: 30, height: 30, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>
-            <Icon sf="sparkles" md="auto_awesome" size={16} color={colors.label} />
+            <Icon sf={presentation.isTrial ? "clock.badge.checkmark" : "sparkles"} md={presentation.isTrial ? "schedule" : "auto_awesome"} size={16} color={colors.label} />
           </View>
           <View style={{ flex: 1, gap: 3 }}>
-            <Text style={[type.headline, { color: colors.label }]}>{pro ? membershipTierLabel(membership.tier) : "iTool 会员"}</Text>
-            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-              {pro && membership.expiresAt
-                ? `LinkShell 有效期至 ${new Date(membership.expiresAt).toLocaleDateString("zh-CN")}`
-                : membership ? "普通账户" : loading ? "正在确认会员状态" : "会员状态暂不可用"}
-            </Text>
+            <Text style={[type.headline, { color: colors.label }]}>{presentation.headline}</Text>
+            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{presentation.subtitle}</Text>
           </View>
           {loading ? <ActivityIndicator size="small" color={colors.secondaryLabel} /> : null}
         </View>
-        {membership?.plan === "free" ? (
-          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-            官方网关需要 iTool 会员。在电脑浏览器打开 itool.tech/pro 开通会员，回到这里即可生效。
-          </Text>
+        {presentation.freeHint ? (
+          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{presentation.freeHint}</Text>
         ) : null}
         {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={[type.footnote, { color: colors.danger }]}>{error}</Text> : null}
-        {membership || error ? <Button title={loading ? "正在刷新…" : "刷新会员状态"} variant="plain" onPress={() => void refresh()} busy={loading} /> : null}
+        {membership || error ? (
+          <Button
+            title={loading ? t("mobile.membership.refreshing") : t("mobile.membership.refresh")}
+            variant="plain"
+            onPress={() => void refresh()}
+            busy={loading}
+          />
+        ) : null}
       </View>
     </View>
   );

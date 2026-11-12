@@ -126,4 +126,38 @@ describe("linkshell login", () => {
     await realFetch(`${base}/token?access_token=a2&refresh_token=r2`, { method: "POST" });
     expect(await login.result).toMatchObject({ plan: "free" });
   });
+
+  it("announces the 7-day free trial when signing in with a new trial account", async () => {
+    const trialEndsAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    vi.stubGlobal("fetch", (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("http://localhost:")) return realFetch(input, init);
+      if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u-trial", email: "trial@example.com" }));
+      if (url.includes("/api/membership/entitlement")) {
+        return Promise.resolve(Response.json({
+          ok: true,
+          product: "linkshell",
+          required_tier: "monthly",
+          active: true,
+          valid_until: trialEndsAt,
+          tier: "yearly",
+          trial_ends_at: trialEndsAt,
+          is_trial: true,
+          server_time: new Date().toISOString(),
+        }));
+      }
+      return Promise.reject(new Error(`unexpected request to ${url}`));
+    });
+    const login = startLogin();
+    const base = await login.callback;
+    await realFetch(`${base}/token?access_token=at&refresh_token=rt`, { method: "POST" });
+    expect(await login.result).toMatchObject({
+      success: true,
+      plan: "pro",
+      isTrial: true,
+      trialEndsAt,
+      email: "trial@example.com",
+    });
+    expect(login.said()).toContain("7-day free trial");
+  });
 });

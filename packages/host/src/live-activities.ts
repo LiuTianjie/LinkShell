@@ -2,8 +2,10 @@ import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "
 import { createHash } from "node:crypto";
 import {
   buildLiveActivitySnapshot, liveActivityActions, liveActivityContent, liveActivityDetailLink, liveActivityNoticeSchema,
-  liveActivitySessionTask, liveActivitySubscriptionSchema, liveActivityTerminalTask, needsAttention, RpcError, terminalState,
-  type LiveActivityNotice, type LiveActivitySubscription, type LiveActivityTask, type SessionSummary, type TerminalInfo,
+  liveActivityPushToStartSchema, liveActivitySessionTask, liveActivitySubscriptionSchema, liveActivityTerminalTask,
+  needsAttention, RpcError, terminalState, wakeupNoticeSchema,
+  type LiveActivityNotice, type LiveActivityPushToStart, type LiveActivitySubscription, type LiveActivityTask,
+  type SessionSummary, type TerminalInfo, type WakeupEventType, type WakeupNotice,
 } from "@linkshell/wire";
 import type { SessionHub, Subscriber } from "./hub.js";
 import type { TerminalManager } from "./terminals.js";
@@ -13,9 +15,24 @@ interface Registration extends LiveActivitySubscription {
   notices?: LiveActivityNotice[]; lastNoticeId?: string;
 }
 
+interface PendingPushToStart {
+  sessionId: string;
+  phase: LiveActivityTask["phase"];
+  wakeup?: WakeupNotice;
+  createdAt: number;
+}
+
+interface PushToStartRegistration extends LiveActivityPushToStart {
+  sequence: number;
+  retryAfter?: number;
+  failures?: number;
+  pendingStart?: PendingPushToStart;
+}
+
 /** Its subscriptions outlive a phone socket; only a device-scoped delivery grant leaves that socket. */
 export class LiveActivityRelay {
   private readonly registrations = new Map<string, Registration>();
+  private readonly pushToStart = new Map<string, PushToStartRegistration>();
   private readonly watched = new Map<string, Subscriber>();
   private readonly sessions = new Map<string, SessionSummary>();
   private readonly terminals = new Map<string, TerminalInfo>();
@@ -32,12 +49,30 @@ export class LiveActivityRelay {
     hub: Pick<SessionHub, "listSessions" | "subscribe" | "unsubscribe" | "onSummary" | "onRemoved">;
     terminals: Pick<TerminalManager, "list" | "onChange">;
     computerName: () => string;
+    machineId?: () => string;
+    onWakeup?: (notice: WakeupNotice) => void;
     serviceUrl?: string;
     request?: typeof fetch;
     log: (message: string) => void;
   }) {}
 
   private get serviceUrl() { return (this.options.serviceUrl ?? "https://push.itool.tech").replace(/\/$/, ""); }
+  private get pushToStartPath() { return `${this.options.path.replace(/\.json$/, "")}-push-to-start.json`; }
+  private pushToStartKey(item: Pick<LiveActivityPushToStart, "deviceId" | "platform" | "computerKey">) {
+    return `${item.deviceId}:${item.platform}:${item.computerKey}`;
+  }
+  private hasForegroundFor(computerKey: string, now = Date.now()) {
+    for (const row of this.registrations.values()) {
+      if (row.computerKey === computerKey && row.expiresAt > now) return true;
+    }
+    return false;
+  }
+  private hasPendingPushToStart() {
+    for (const row of this.pushToStart.values()) {
+      if (row.pendingStart) return true;
+    }
+    return false;
+  }
 
   start() {
     try {
@@ -56,6 +91,22 @@ export class LiveActivityRelay {
         }
       }
     } catch { this.options.log("[live-activity] could not restore registrations"); }
+    try {
+      if (existsSync(this.pushToStartPath)) {
+        const saved: unknown = JSON.parse(readFileSync(this.pushToStartPath, "utf8"));
+        if (Array.isArray(saved)) for (const item of saved.slice(0, 16)) {
+          const parsed = liveActivityPushToStartSchema.safeParse(item);
+          if (parsed.success && parsed.data.expiresAt > Date.now() && parsed.data.serviceUrl === this.serviceUrl) {
+            const key = this.pushToStartKey(parsed.data);
+            const seq = (item as { sequence?: unknown }).sequence;
+            this.pushToStart.set(key, {
+              ...parsed.data,
+              sequence: typeof seq === "number" && Number.isSafeInteger(seq) ? seq : 0,
+            });
+          }
+        }
+      }
+    } catch { this.options.log("[live-activity] could not restore push-to-start registrations"); }
     for (const session of this.options.hub.listSessions({ limit: 200 }).sessions) this.sessions.set(session.id, session);
     for (const terminal of this.options.terminals.list()) this.terminals.set(terminal.id, terminal);
     this.stopListeners.push(this.options.hub.onSummary((session) => this.sessionChanged(session)),
@@ -74,8 +125,32 @@ export class LiveActivityRelay {
     const previous = this.registrations.get(data.activityId);
     this.registrations.set(data.activityId, { ...previous, ...data, sequence: previous?.sequence ?? 0 });
     if (!previous) this.options.log(`[live-activity] registered ${data.activityId}`);
+    for (const row of this.pushToStart.values()) {
+      if (row.computerKey === data.computerKey) row.pendingStart = undefined;
+    }
     this.save();
     this.schedule(0);
+  }
+
+  registerPushToStart(registration: LiveActivityPushToStart): { ok: true } {
+    const data = liveActivityPushToStartSchema.parse(registration);
+    if (data.serviceUrl !== this.serviceUrl) throw RpcError.app("invalid_params", "实时活动服务地址与电脑配置不一致");
+    if (data.expiresAt <= Date.now() || data.expiresAt > Date.now() + 30 * 24 * 60 * 60 * 1000) {
+      throw RpcError.app("invalid_params", "实时活动授权已过期");
+    }
+    const key = this.pushToStartKey(data);
+    if (!this.pushToStart.has(key) && this.pushToStart.size >= 16) throw RpcError.app("busy", "实时活动数量已达上限");
+    const previous = this.pushToStart.get(key);
+    this.pushToStart.set(key, {
+      ...previous,
+      ...data,
+      sequence: previous?.sequence ?? 0,
+      failures: 0,
+      retryAfter: 0,
+    });
+    if (!previous) this.options.log(`[live-activity] registered push-to-start ${data.platform}:${data.deviceId}`);
+    this.savePushToStart();
+    return { ok: true };
   }
 
   async unsubscribe(activityId: string) {
@@ -97,21 +172,77 @@ export class LiveActivityRelay {
   private sessionChanged(session: SessionSummary) {
     const before = this.sessions.get(session.id);
     this.sessions.set(session.id, session);
-    if (!session.archived && this.registrations.size) {
+    const request = (value: SessionSummary) => [value.permission?.requestId, ...(value.asyncQuestions ?? []).map((question) => question.id)].filter(Boolean).join(":");
+    if (!session.archived) {
       const task = liveActivitySessionTask(session);
-      const request = (value: SessionSummary) => [value.permission?.requestId, ...(value.asyncQuestions ?? []).map((question) => question.id)].filter(Boolean).join(":");
+      const beforePhase = before ? liveActivitySessionTask(before).phase : undefined;
       const attention = needsAttention(session) || session.state === "error";
-      // Discovery can replay existing work after a restart. Alert on a transition
-      // we observed, not on a historical question being discovered for the first time.
-      if (attention && before && (liveActivitySessionTask(before).phase !== task.phase || request(before) !== request(session))) {
-        this.enqueue(task, request(session) || String(session.updatedAt));
-      } else if (session.state === "idle" && before && (before.state === "running" || needsAttention(before))) {
-        this.enqueue(task, String(session.updatedAt));
-      } else {
-        this.removeOutdatedNotices(task);
+      const attentionTransition = attention && (!before || beforePhase !== task.phase || request(before) !== request(session));
+      const completedTransition = session.state === "idle" && !!before && (before.state === "running" || needsAttention(before));
+      const runningTransition = (session.state === "running" || task.phase === "running" || task.phase === "starting") && beforePhase !== task.phase;
+
+      if (this.registrations.size) {
+        // Discovery can replay existing work after a restart. Alert on a transition
+        // we observed, not on a historical question being discovered for the first time.
+        if (attention && before && (beforePhase !== task.phase || request(before) !== request(session))) {
+          this.enqueue(task, request(session) || String(session.updatedAt));
+        } else if (completedTransition) {
+          this.enqueue(task, String(session.updatedAt));
+        } else {
+          this.removeOutdatedNotices(task);
+        }
       }
-    } else if (session.archived) {
+
+      let wakeupEventType: WakeupEventType | undefined;
+      if (attentionTransition) {
+        wakeupEventType = task.phase === "waiting_for_approval"
+          ? "approval"
+          : task.phase === "waiting_for_input"
+            ? "question"
+            : "error";
+      } else if (completedTransition) {
+        wakeupEventType = "completed";
+      }
+
+      const now = Date.now();
+      const wakeup: WakeupNotice | undefined = wakeupEventType
+        ? wakeupNoticeSchema.parse({
+            machineId: this.options.machineId?.() || "local",
+            sessionId: session.id,
+            eventType: wakeupEventType,
+            createdAt: now,
+          })
+        : undefined;
+      if (wakeup) {
+        try {
+          this.options.onWakeup?.(wakeup);
+        } catch {
+          this.options.log("[live-activity] wakeup listener failed");
+        }
+      }
+
+      if (this.pushToStart.size && (runningTransition || attentionTransition || completedTransition)) {
+        let queued = false;
+        for (const row of this.pushToStart.values()) {
+          if (row.expiresAt <= now || this.hasForegroundFor(row.computerKey, now)) continue;
+          // Push-to-start wakes idle devices when a session starts running or needs attention
+          // (and sends zero-plaintext completion wakeups on Android when no foreground card exists).
+          if (completedTransition && row.platform === "ios" && !attentionTransition) continue;
+          row.pendingStart = {
+            sessionId: session.id,
+            phase: completedTransition ? "completed" : task.phase,
+            wakeup,
+            createdAt: now,
+          };
+          queued = true;
+        }
+        if (queued) this.schedule(0);
+      }
+    } else {
       for (const row of this.registrations.values()) row.notices = row.notices?.filter((notice) => notice.task.kind !== "session" || notice.task.id !== session.id);
+      for (const row of this.pushToStart.values()) {
+        if (row.pendingStart?.sessionId === session.id) row.pendingStart = undefined;
+      }
     }
     this.schedule();
   }
@@ -123,6 +254,9 @@ export class LiveActivityRelay {
       this.watched.delete(sessionId);
     }
     for (const row of this.registrations.values()) row.notices = row.notices?.filter((notice) => notice.task.kind !== "session" || notice.task.id !== sessionId);
+    for (const row of this.pushToStart.values()) {
+      if (row.pendingStart?.sessionId === sessionId) row.pendingStart = undefined;
+    }
     if (this.registrations.size) this.save();
     this.schedule(0);
   }
@@ -159,8 +293,15 @@ export class LiveActivityRelay {
     chmodSync(temporary, 0o600);
     renameSync(temporary, this.options.path);
   }
+  private savePushToStart() {
+    const temporary = `${this.pushToStartPath}.tmp`;
+    const entries = [...this.pushToStart.values()].map(({ retryAfter: _retry, failures: _failures, pendingStart: _pending, ...entry }) => entry);
+    writeFileSync(temporary, JSON.stringify(entries), { mode: 0o600 });
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, this.pushToStartPath);
+  }
   private schedule(delay = 5000) {
-    if (this.stopped || !this.registrations.size) return;
+    if (this.stopped || (!this.registrations.size && !this.hasPendingPushToStart())) return;
     const at = Date.now() + delay;
     if (this.timer && this.scheduledAt <= at) return;
     clearTimeout(this.timer);
@@ -172,7 +313,8 @@ export class LiveActivityRelay {
     this.timer.unref();
   }
   private reconcileWatches(sessions: SessionSummary[]) {
-    const wanted = new Set(this.registrations.size ? sessions.filter((session) => !session.archived && (session.state === "running" || needsAttention(session))).map((session) => session.id) : []);
+    const hasWatchers = this.registrations.size > 0 || this.pushToStart.size > 0;
+    const wanted = new Set(hasWatchers ? sessions.filter((session) => !session.archived && (session.state === "running" || needsAttention(session))).map((session) => session.id) : []);
     for (const [id, subscriber] of this.watched) if (!wanted.has(id)) {
       this.options.hub.unsubscribe(id, subscriber);
       this.watched.delete(id);
@@ -192,9 +334,16 @@ export class LiveActivityRelay {
     if (this.flushing) { this.schedule(); return; }
     this.flushing = true;
     try {
-      for (const [id, row] of this.registrations) if (row.expiresAt <= Date.now()) {
+      const now = Date.now();
+      for (const [id, row] of this.registrations) if (row.expiresAt <= now) {
         this.registrations.delete(id);
         this.options.log(`[live-activity] authorization expired ${id}`);
+      }
+      let pushToStartChanged = false;
+      for (const [key, row] of this.pushToStart) if (row.expiresAt <= now) {
+        this.pushToStart.delete(key);
+        pushToStartChanged = true;
+        this.options.log(`[live-activity] push-to-start authorization expired ${key}`);
       }
       const sessions = this.options.hub.listSessions({ limit: 200 }).sessions;
       this.reconcileWatches(sessions);
@@ -251,13 +400,80 @@ export class LiveActivityRelay {
           this.schedule();
         }
       });
-      this.save();
-      await Promise.allSettled(sends);
+
+      const startSends = [...this.pushToStart.entries()]
+        .filter(([, row]) => Boolean(row.pendingStart) && (row.retryAfter ?? 0) <= Date.now())
+        .map(async ([key, row]) => {
+          const pending = row.pendingStart;
+          if (!pending) return;
+          if (this.hasForegroundFor(row.computerKey)) {
+            row.pendingStart = undefined;
+            return;
+          }
+          const wakeup: WakeupNotice = pending.wakeup ?? {
+            machineId: this.options.machineId?.() || "local",
+            sessionId: pending.sessionId,
+            eventType: pending.phase === "waiting_for_approval"
+              ? "approval"
+              : pending.phase === "waiting_for_input"
+                ? "question"
+                : pending.phase === "failed"
+                  ? "error"
+                  : "completed",
+            createdAt: pending.createdAt,
+          };
+          row.sequence = Math.max(Date.now(), row.sequence + 1);
+          pushToStartChanged = true;
+          try {
+            const response = await this.request()(`${this.serviceUrl}/v1/activities/start`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${row.grant}`, "content-type": "application/json" },
+              body: JSON.stringify({
+                sequence: row.sequence,
+                deviceId: row.deviceId,
+                platform: row.platform,
+                pushToStartToken: row.pushToStartToken,
+                computerKey: row.computerKey,
+                phase: pending.phase,
+                wakeup,
+              }),
+              signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15_000)]),
+              redirect: "error",
+            });
+            if (this.pushToStart.get(key) !== row || this.stopped) return;
+            if (response.status === 410) {
+              this.pushToStart.delete(key);
+              this.options.log(`[live-activity] retired push-to-start ${key}: registration expired`);
+            } else if (response.ok) {
+              row.failures = 0;
+              row.retryAfter = 0;
+              if (row.pendingStart === pending) row.pendingStart = undefined;
+            } else {
+              this.options.log(`[live-activity] push-to-start HTTP ${response.status} for ${key}; retaining registration`);
+              throw new Error("push-to-start delivery unavailable");
+            }
+          } catch {
+            if (this.pushToStart.get(key) !== row || this.stopped) return;
+            row.failures = Math.min((row.failures ?? 0) + 1, 5);
+            row.retryAfter = Date.now() + Math.min(60_000, 5000 * 2 ** (row.failures - 1));
+            this.schedule();
+          }
+        });
+
+      if (this.registrations.size || existsSync(this.options.path)) this.save();
+      if (pushToStartChanged) this.savePushToStart();
+      await Promise.allSettled([...sends, ...startSends]);
       if (!this.stopped) {
-        this.save();
-        if (!this.registrations.size) this.reconcileWatches([]);
+        if (this.registrations.size || existsSync(this.options.path)) this.save();
+        if (pushToStartChanged) this.savePushToStart();
+        if (!this.registrations.size && !this.pushToStart.size) this.reconcileWatches([]);
         if ([...this.registrations.values()].some((row) => row.notices?.length)) this.schedule(1000);
-        else if ([...this.registrations.values()].some((row) => row.retryAfter)) this.schedule();
+        else if (
+          [...this.registrations.values()].some((row) => row.retryAfter) ||
+          [...this.pushToStart.values()].some((row) => row.retryAfter && row.pendingStart)
+        ) {
+          this.schedule();
+        }
       }
     } finally { this.flushing = false; }
   }

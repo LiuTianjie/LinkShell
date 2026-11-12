@@ -1,4 +1,4 @@
-import type { AsyncQuestion } from "@linkshell/wire";
+import type { AsyncQuestion, PortInfo } from "@linkshell/wire";
 import { setComputerPreviewMode } from "@/lib/use-computer-preview";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { answeredQuestions, cardsAtTurnEnd, openWrapUp, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
@@ -6,16 +6,19 @@ import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { confirmDelete, renameSession, toggleArchived } from "@/lib/session-actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useKeyboardState, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { speakNativeText, stopNativeSpeaking } from "../../modules/link-layout";
 import { AgentTile } from "@/components/agent-tile";
 import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
+import { LsaSheet } from "@/components/lsa-sheet";
 import { SessionNotices } from "@/components/session-notices";
+import { SessionOutlineSheet } from "@/components/session-outline-sheet";
 import { AgentInteractions } from "./acp-screen";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
@@ -25,8 +28,16 @@ import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
+import {
+  isCommuterTtsEnabled,
+  matchSessionPorts,
+  setCommuterTtsEnabled,
+  summarizeTurnForSpeech,
+} from "@/lib/coding-ux";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
+import { useLocale } from "@/lib/locale";
+import { usePorts } from "@/lib/ports";
 import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
 import { fileChanges, sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
@@ -35,7 +46,7 @@ import { BranchTag } from "@/components/branch-tag";
 import { branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
 import { colors } from "@/theme/colors";
-import { radius, type } from "@/theme/type";
+import { mono, radius, type } from "@/theme/type";
 import { HeaderActions, useHeaderTitleWidth, type HeaderAction } from "@/components/header-actions";
 import { LiveWorkflowsBar } from "@/components/workflow";
 import { sessionTimelineItems } from "@/lib/workflows";
@@ -49,10 +60,8 @@ import { useSessionCommands } from "@/lib/use-session-commands";
 import { GoalCard } from "@/components/goal-card";
 import { turnActivity } from "@/lib/turn-activity";
 
-// One array for "nothing yet": a new one on every render would make everything computed from the items run again.
 const NO_ITEMS: TimelineItem[] = [];
 
-/** iOS 26-style title capsule: agent icon, title and where it runs, on glass. */
 function HeaderTitle({
   agent,
   title,
@@ -65,38 +74,33 @@ function HeaderTitle({
   agent: string;
   title: string;
   subtitle: string;
-  /** The git branch the session works on, shown after the subtitle. */
   branch?: string;
-  /** The branch is the session's own (it works in a worktree): marked as in the lists. */
   ownBranch?: boolean;
   live: boolean;
   actions: number;
 }) {
-  // Long titles end in an ellipsis inside the capsule, clear of the buttons.
   const maxWidth = useHeaderTitleWidth(actions);
   const content = (
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <AgentTile agent={agent} size={28} />
-        <View style={{ flexShrink: 1 }}>
-          <Text numberOfLines={1} style={{ fontSize: 15, lineHeight: 19, fontWeight: "600", color: colors.label }}>
-            {title}
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <AgentTile agent={agent} size={28} />
+      <View style={{ flexShrink: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, lineHeight: 19, fontWeight: "600", color: colors.label }}>
+          {title}
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          {live ? <StatusDot /> : null}
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
+            {subtitle}
           </Text>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            {live ? <StatusDot /> : null}
-            {/* Tight: the branch (what the agent is working on) stays whole, the project name gives way. */}
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
-              {subtitle}
-            </Text>
-            {branch ? (
-              <View style={{ flexShrink: 0 }}>
-                <BranchTag branch={branch} max={18} own={ownBranch} />
-              </View>
-            ) : null}
-          </View>
+          {branch ? (
+            <View style={{ flexShrink: 0 }}>
+              <BranchTag branch={branch} max={18} own={ownBranch} />
+            </View>
+          ) : null}
         </View>
       </View>
+    </View>
   );
-  // iOS: a glass capsule floating over the content. Android: plain title in a solid app bar.
   if (Platform.OS !== "ios") return <View style={{ maxWidth }}>{content}</View>;
   return <Glass style={{ borderRadius: 22, paddingLeft: 6, paddingRight: 14, paddingVertical: 5, maxWidth }}>{content}</Glass>;
 }
@@ -110,12 +114,79 @@ function countChanges(items: TimelineItem[]): number {
   return paths.size;
 }
 
-export function SessionScreen() {
-  const { id, panel } = useLocalSearchParams<{ id: string; panel?: string }>();
-  return <AdaptivePage surface="plain"><SessionWorkspace key={id} sessionId={id} initialPanel={panel === "preview" || panel === "changes" || panel === "side" ? panel : undefined}><SessionContent sessionId={id} /></SessionWorkspace></AdaptivePage>;
+function PortReadyCapsules({
+  ports,
+  onOpenPort,
+}: {
+  ports: PortInfo[];
+  onOpenPort: (entry: PortInfo) => void;
+}) {
+  const { t } = useLocale();
+  if (ports.length === 0) return null;
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 14, paddingBottom: 6 }}>
+      {ports.slice(0, 2).map((entry) => (
+        <Pressable
+          key={entry.port}
+          onPress={() => {
+            haptics.selection();
+            onOpenPort(entry);
+          }}
+          accessibilityRole="button"
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingLeft: 10,
+            paddingRight: 10,
+            paddingVertical: 6,
+            borderRadius: 999,
+            backgroundColor: pressed ? colors.fillStrong : colors.card,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.separator,
+          })}
+        >
+          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.ok }} />
+          <Text style={[type.caption, { color: colors.label, fontFamily: mono, fontWeight: "600" }]}>
+            {t("ports.readyPill", { port: entry.port })}
+          </Text>
+          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: colors.accentSoft }}>
+            <Text style={[type.caption2, { color: colors.accent, fontWeight: "600" }]}>
+              {t("ports.openPreview")}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
 }
 
-export function SessionContent({ sessionId: id, embedded = false, navigation = !embedded, toolbarActions = [], onOpenPanel, panelsBeside = false, navigationTitle, consumedBottomInset = 0 }: {
+export function SessionScreen() {
+  const { id, panel, quickVoice } = useLocalSearchParams<{ id: string; panel?: string; quickVoice?: string }>();
+  return (
+    <AdaptivePage surface="plain">
+      <SessionWorkspace
+        key={id}
+        sessionId={id}
+        initialPanel={panel === "preview" || panel === "changes" || panel === "side" ? panel : undefined}
+      >
+        <SessionContent sessionId={id} initialQuickVoice={quickVoice === "1"} />
+      </SessionWorkspace>
+    </AdaptivePage>
+  );
+}
+
+export function SessionContent({
+  sessionId: id,
+  embedded = false,
+  navigation = !embedded,
+  toolbarActions = [],
+  onOpenPanel,
+  panelsBeside = false,
+  navigationTitle,
+  consumedBottomInset = 0,
+  initialQuickVoice = false,
+}: {
   sessionId: string;
   embedded?: boolean;
   navigation?: boolean;
@@ -123,11 +194,12 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   consumedBottomInset?: number;
   toolbarActions?: HeaderAction[];
   onOpenPanel?: (panel: Panel) => void;
-  /** Whether a panel opened through `onOpenPanel` sits beside the conversation. */
   panelsBeside?: boolean;
+  initialQuickVoice?: boolean;
 }) {
   const workspace = useSessionWorkspace();
   const folded = useSessionFoldLayout();
+  const { locale, speechLocale, t, pick } = useLocale();
   const summary = useClient((state) => state.sessions[id]);
   const view = useClient((state) => state.views[id]);
   const loaded = useClient((state) => state.sessionsLoaded);
@@ -150,7 +222,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const agentInfo = useClient((state) => state.machine?.agents.find((agent) => agent.id === summary?.agent));
   const sideCount = useClient((state) => state.sides[id]?.length ?? 0);
   const actions = useActions();
-  // Beside the conversation when there is room for both; a sheet over it otherwise.
   const sideBeside = onOpenPanel ? panelsBeside : workspace?.split === true;
   const openSide = (sideId?: string) => {
     if (sideBeside && onOpenPanel) onOpenPanel("side");
@@ -159,7 +230,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   };
   const permissions = view?.permissions;
   const waitingCalls = useMemo(() => new Set((permissions ?? []).flatMap((request) => (request.toolCallId ? [request.toolCallId] : []))), [permissions]);
-  // A passage picked in a reply: a new side conversation about it.
   const askAboutQuote = agentInfo?.capabilities.side && online ? (quote: string) => { quoteForSide(id, quote); openSide(); } : undefined;
   const commandControls = useSessionCommands(id, openSide);
   const hasDraft = useHasComposerDraft(id);
@@ -169,42 +239,47 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const focused = useIsFocused();
   const ipadKeyboard = useIPadKeyboard(focused);
   const keyboardHeight = useKeyboardState((state) => state.height);
-  // Some panes already stop above native tabs. Padding and keyboard travel use the same physical edge.
   const reservedBottom = folded?.bottomReserved ?? consumedBottomInset;
-  // The foldable layout probe may report zero while native bars move between edges.
-  // Keep the system home-indicator inset, subtracting only space the parent actually reserved.
   const bottomInset = ipadKeyboard.enabled && ipadKeyboard.overlap > 0 ? 0 : Math.max(0, Math.max(insets.bottom, systemInsets.bottom) - reservedBottom);
-  // iPad resizes the viewport once; the list and composer must not lift again.
   const keyboardOffset = ipadKeyboard.enabled ? keyboardHeight : reservedBottom + bottomInset;
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const { height: keyboardTranslation, progress: keyboardProgress } = useReanimatedKeyboardAnimation();
   const stickyEnabled = !ipadKeyboard.enabled;
   const composerKeyboardStyle = useAnimatedStyle(() => {
     const height = keyboardTranslation.get();
-    // iOS can report progress=1 with a hidden keyboard after rotation; no keyboard means no safe-area compensation.
     const progress = height < 0 ? keyboardProgress.get() : 0;
     return { transform: [{ translateY: stickyEnabled ? height + progress * keyboardOffset : 0 }] };
   }, [keyboardTranslation, keyboardProgress, keyboardOffset, stickyEnabled]);
   const composerInset = useSharedValue(0);
   const headerHeight = useHeaderHeight();
-  // Only bounded panes consume the bar; a full-height iOS list underlaps it.
   const headerConsumed = embedded || workspace?.headerConsumed === true;
   const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerConsumed ? 0 : headerHeight }));
   const listRef = useRef<LegendListRef>(null);
   const [atEnd, setAtEnd] = useState(true);
 
+  const [quickVoicePending, setQuickVoicePending] = useState(initialQuickVoice);
+  useEffect(() => {
+    if (initialQuickVoice) setQuickVoicePending(true);
+  }, [initialQuickVoice]);
+
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [lsaOpen, setLsaOpen] = useState(false);
+  const [ttsEnabled, setTtsState] = useState(() => isCommuterTtsEnabled());
+
+  const { ports } = usePorts(online && focused);
+  const matchedPorts = useMemo(
+    () => matchSessionPorts(ports ?? [], summary?.cwd, summary?.worktree?.source),
+    [ports, summary?.cwd, summary?.worktree?.source],
+  );
+
   useSessionSubscription(id);
-  // The sub-agents' own records (running, failed, when they ended): asked for once the
-  // session is open, and again whenever one starts or finishes.
   useEffect(() => {
     if (ready && focused) void actions.loadSubagents(id).catch(() => {});
   }, [actions, id, ready, focused, subagentsTotal, subagentsRunning]);
 
   const items = view?.items ?? NO_ITEMS;
-  // The plan sits at the end of its turn, as on the desktop and in the agents' own apps.
   const turnBreaks = view?.turnBreaks;
   const timelineItems = useMemo(() => sessionTimelineItems(cardsAtTurnEnd(items, turnBreaks), workflows, subagents), [items, turnBreaks, workflows, subagents]);
-  // The agent's async questions (Codex Desktop) are answered by a message quoting them, from here or the computer.
   const questions = useMemo(() => {
     const answered = new Map(items.flatMap((item) => (item.kind === "user" && !item.failed && !item.pending ? item.blocks.flatMap((block) => (block.type === "text" ? answeredQuestions(block.text) : [])) : [])));
     return {
@@ -217,42 +292,71 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
   const wrapUp = useMemo(() => ({
     open: openBox,
     reply: async (message: string) => {
-      if ((await actions.send(id, [{ type: "text", text: message }])) === "failed") throw new Error("消息发送失败，请重试");
+      if ((await actions.send(id, [{ type: "text", text: message }])) === "failed") {
+        throw new Error(pick({ zh: "消息发送失败，请重试", en: "Failed to send message, please retry", ja: "送信に失敗しました。再試行してください" }));
+      }
     },
-  }), [openBox, actions, id]);
-  // The session opens at its latest turns; what came before loads a page at a time.
+  }), [openBox, actions, id, pick]);
+
   const hasEarlier = (view?.startSeq ?? 0) > 0;
   const earlier = useMemo(
     () => (hasEarlier ? { loading: loadingEarlier, load: () => actions.loadEarlier(id) } : undefined),
     [hasEarlier, loadingEarlier, actions, id],
   );
-  // Reopened sessions show what we already have straight away.
   const [cachedAtOpen] = useState(() => items.length > 0);
   const wasReady = useRef(ready);
   if (ready) wasReady.current = true;
 
   const changeCount = useMemo(() => countChanges(items), [items]);
-  // The host's summary is authoritative: an agent's own history can end mid-turn.
   const turnActive = summary ? summary.state === "running" || summary.state === "waiting" : false;
   const driver = view?.driver ?? summary?.driver;
   const look = agentLook(summary?.agent ?? "", agentInfo?.label);
 
+  // Commuter Audio Summary: speak a concise summary when an active turn completes.
+  const prevTurnActive = useRef<boolean | null>(null);
+  useEffect(() => {
+    const wasActive = prevTurnActive.current;
+    prevTurnActive.current = turnActive;
+    if (
+      wasActive === true &&
+      !turnActive &&
+      ttsEnabled &&
+      summary &&
+      (summary.state === "idle" || summary.state === "error")
+    ) {
+      const currentTitle = sessionTitle(view?.title ? { title: view.title } : summary);
+      const summarySpeech = summarizeTurnForSpeech(timelineItems, locale, currentTitle);
+      void speakNativeText(summarySpeech, speechLocale);
+    }
+  }, [turnActive, ttsEnabled, summary, view?.title, timelineItems, locale, speechLocale]);
+
+  const toggleCommuterTts = useCallback(() => {
+    const next = !ttsEnabled;
+    setTtsState(next);
+    setCommuterTtsEnabled(next);
+    if (!next) void stopNativeSpeaking();
+    haptics.selection();
+  }, [ttsEnabled]);
+
   const onFailedMessage = useCallback(
     (item: Extract<TimelineItem, { kind: "user" }>) => {
       const clientMessageId = item.id.replace(/^local-/, "");
-      Alert.alert("消息没发出去", "要重新发送吗？", [
-        { text: "取消", style: "cancel" },
-        { text: "删除", style: "destructive", onPress: () => actions.discard(clientMessageId) },
-        { text: "重新发送", onPress: () => void actions.retry(clientMessageId) },
-      ]);
+      Alert.alert(
+        pick({ zh: "消息没发出去", en: "Message not sent", ja: "メッセージを送信できませんでした" }),
+        pick({ zh: "要重新发送吗？", en: "Would you like to retry?", ja: "再送信しますか？" }),
+        [
+          { text: t("common.cancel"), style: "cancel" },
+          { text: t("session.delete"), style: "destructive", onPress: () => actions.discard(clientMessageId) },
+          { text: t("common.retry"), onPress: () => void actions.retry(clientMessageId) },
+        ],
+      );
     },
-    [actions],
+    [actions, pick, t],
   );
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement, contentInset } = event.nativeEvent;
     const distance = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height);
-    // Content shorter than the screen has nowhere to jump to.
     const next = distance < 120 || contentSize.height <= layoutMeasurement.height + 1;
     setAtEnd((current) => (current === next ? current : next));
   }, []);
@@ -262,10 +366,6 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
     void listRef.current?.scrollToEnd({ animated: true });
   };
 
-  // A fork: the conversation so far (through one reply, or all of it) in a new
-  // session, here or in a new worktree of the project's repository.
-  // The branch the agent is working on: asked when the screen opens, when a
-  // turn ends (the agent may have switched or made one) and when the app comes back.
   const [gitRefresh, setGitRefresh] = useState(0);
   const turnRunning = summary ? summary.state === "running" || summary.state === "waiting" : false;
   useEffect(() => {
@@ -290,16 +390,45 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       })
       .catch((reason: unknown) => {
         haptics.error();
-        Alert.alert("分叉失败", reason instanceof Error ? reason.message : String(reason));
+        Alert.alert(
+          pick({ zh: "分叉失败", en: "Fork failed", ja: "フォークに失敗しました" }),
+          reason instanceof Error ? reason.message : String(reason),
+        );
       })
       .finally(() => setForking(false));
   };
   const askFork = (itemId?: string) => {
-    Alert.alert(itemId ? "从这里分叉" : "分叉会话", itemId ? "新会话带着到这条回复为止的对话，这个会话不受影响。" : "新会话带着到现在为止的对话，这个会话不受影响。", [
-      { text: "取消", style: "cancel" },
-      { text: "在当前目录继续", onPress: () => fork(itemId, false) },
-      ...(git ? [{ text: "在新的 worktree 里继续", onPress: () => fork(itemId, true) }] : []),
-    ]);
+    Alert.alert(
+      itemId
+        ? pick({ zh: "从这里分叉", en: "Fork from here", ja: "ここからフォーク" })
+        : pick({ zh: "分叉会话", en: "Fork Session", ja: "セッションをフォーク" }),
+      itemId
+        ? pick({
+            zh: "新会话带着到这条回复为止的对话，这个会话不受影响。",
+            en: "Starts a new session with history up to this turn; the current session stays untouched.",
+            ja: "この返信までの履歴を引き継ぐ新しいセッションを作成します。",
+          })
+        : pick({
+            zh: "新会话带着到现在为止的对话，这个会话不受影响。",
+            en: "Starts a new session with the conversation so far; the current session stays untouched.",
+            ja: "ここまでの履歴を引き継ぐ新しいセッションを作成します。",
+          }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: pick({ zh: "在当前目录继续", en: "Continue in current directory", ja: "現在のディレクトリで続行" }),
+          onPress: () => fork(itemId, false),
+        },
+        ...(git
+          ? [
+              {
+                text: pick({ zh: "在新的 worktree 里继续", en: "Continue in new Git worktree", ja: "新しい Worktree で続行" }),
+                onPress: () => fork(itemId, true),
+              },
+            ]
+          : []),
+      ],
+    );
   };
 
   const guard = async (work: () => Promise<unknown>, failure: string) => {
@@ -316,37 +445,34 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
       <View style={{ flex: 1, backgroundColor: colors.plain }}>
         {navigation ? <Stack.Screen options={{ title: "" }} /> : null}
         <ScrollableState>
-        {loaded ? (
-          <EmptyState
-            icon={{ sf: "questionmark.bubble", md: "help" }}
-            title="找不到这个会话"
-            message="它可能已经在电脑上被删除了。"
-            action={{ title: "返回", onPress: () => router.back() }}
-          />
-        ) : (
-          <LoadingState label="正在连接电脑…" />
-        )}
+          {loaded ? (
+            <EmptyState
+              icon={{ sf: "questionmark.bubble", md: "help" }}
+              title={pick({ zh: "找不到这个会话", en: "Session not found", ja: "セッションが見つかりません" })}
+              message={pick({
+                zh: "它可能已经在电脑上被删除了。",
+                en: "It may have been removed on your computer.",
+                ja: "PC 上で削除された可能性があります。",
+              })}
+              action={{ title: pick({ zh: "返回", en: "Back", ja: "戻る" }), onPress: () => router.back() }}
+            />
+          ) : (
+            <LoadingState label={t("connection.connecting")} />
+          )}
         </ScrollableState>
       </View>
     );
   }
 
   const tier = agentInfo?.tier;
-  // In a git repository: the project and the branch, which there's no room to share with more.
-  // (A session in a worktree belongs to the project the worktree was made from.)
   const branch = branchOf(git) ?? summary.worktree?.branch;
   const subtitle = branch
     ? baseName(summary.worktree?.source ?? summary.cwd)
     : [baseName(summary.cwd), look.short, tier ? tierCopy[tier].label : null].filter(Boolean).join(" · ");
   const canFork = tier !== "terminal" && online;
 
-  // A session with a title or preview has history, even before its first import.
   const hasHistory = summary.lastSeq > 0 || !!summary.preview || !!summary.title;
   const loading = !ready && !wasReady.current && !cachedAtOpen && online && hasHistory;
-  // An empty session: the intro sits centred above the composer, outside the
-  // list (which aligns its content to the bottom, as a chat should).
-  // Notices ("the terminal quit") don't start a conversation; messages and tools do.
-  // Nor is it the start while earlier history is still to load.
   const started =
     hasEarlier ||
     items.some(
@@ -366,6 +492,27 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
     else if (workspace) workspace.show("changes");
     else router.push({ pathname: "/session/[id]/changes", params: { id } });
   };
+  const openMatchedPort = (entry: PortInfo) => {
+    if (workspace?.split) {
+      workspace.show("preview", entry.port);
+    } else {
+      router.push({ pathname: "/preview", params: { port: String(entry.port), title: entry.title, sessionId: id } });
+    }
+  };
+
+  const starterPrompts = [
+    { label: t("composer.quickSummarize"), prompt: t("composer.quickSummarizePrompt") },
+    { label: t("composer.quickRunTests"), prompt: t("composer.quickRunTestsPrompt") },
+    {
+      label: pick({ zh: "梳理当前项目结构", en: "Map project architecture", ja: "プロジェクト構成を整理" }),
+      prompt: pick({
+        zh: "请简要梳理当前项目的目录结构、核心模块和构建测试方式。",
+        en: "Summarize this project's directory structure, core modules, and build/test commands.",
+        ja: "このプロジェクトのディレクトリ構成、主要モジュール、ビルド・テスト方法を整理してください。",
+      }),
+    },
+  ];
+
   const intro =
     loading || started || hasDraft || view?.goal ? null : (
       <View style={{ alignItems: "center", gap: 12, paddingHorizontal: 28 }}>
@@ -373,20 +520,26 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
         <View style={{ alignItems: "center", gap: 4 }}>
           <Text style={[type.headline, { color: colors.label }]}>{look.name}</Text>
           <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
-            {tier ? tierCopy[tier].detail : `在 ${baseName(summary.cwd)} 里开始对话`}
+            {tier
+              ? tierCopy[tier].detail
+              : pick({
+                  zh: `在 ${baseName(summary.cwd)} 里开始对话`,
+                  en: `Start a session in ${baseName(summary.cwd)}`,
+                  ja: `${baseName(summary.cwd)} で会話を開始`,
+                })}
           </Text>
         </View>
         {online && tier !== "terminal" ? (
           <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 }}>
-            {["查看最近 git 改动", "运行测试并排查问题", "梳理当前项目结构"].map((starter) => (
+            {starterPrompts.map((starter) => (
               <Pressable
-                key={starter}
+                key={starter.label}
                 onPress={() => {
                   haptics.selection();
-                  void commandControls.send([{ type: "text", text: starter }]);
+                  void commandControls.send([{ type: "text", text: starter.prompt }]);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel={`发送：${starter}`}
+                accessibilityLabel={starter.label}
                 style={({ pressed }) => ({
                   paddingHorizontal: 13,
                   paddingVertical: 7,
@@ -395,7 +548,7 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
                   backgroundColor: pressed ? colors.fillStrong : colors.fill,
                 })}
               >
-                <Text style={[type.footnote, { color: colors.label, fontWeight: "500" }]}>{starter}</Text>
+                <Text style={[type.footnote, { color: colors.label, fontWeight: "500" }]}>{starter.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -405,245 +558,393 @@ export function SessionContent({ sessionId: id, embedded = false, navigation = !
 
   return (
     <View ref={ipadKeyboard.ref} onLayout={ipadKeyboard.measure} style={{ flex: 1, paddingBottom: ipadKeyboard.overlap }}>
-    <ContentHeight value={contentHeight}>
-    <View onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
-      {!navigation ? null : <>
-      <Stack.Screen
-        options={{
-          scrollEdgeEffects: { top: "soft" },
-          ...(Platform.OS === "ios"
-            ? {}
-            : { headerTransparent: false, headerStyle: { backgroundColor: colors.plain as string }, headerShadowVisible: false }),
-          title: navigationTitle ?? sessionTitle(view?.title ? { title: view.title } : summary),
-          headerTitle: Platform.OS === "ios" ? undefined : () => (
-            <HeaderTitle
-              agent={summary.agent}
-              title={sessionTitle(view?.title ? { title: view.title } : summary)}
-              subtitle={subtitle}
-              branch={branch}
-              ownBranch={!!summary.worktree}
-              live={turnActive}
-              actions={(hasSubagents ? 1 : 0) + (changeCount > 0 ? 1 : 0) + 1}
-            />
-          ),
-        }}
-      />
-      <HeaderActions
-        actions={[
-          ...toolbarActions,
-          ...(changeCount > 0 && !toolbarActions.some((action) => action.key === "changes")
-            ? [
-                {
-                  kind: "button" as const,
-                  key: "changes",
-                  icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
-                  label: `查看改动（${changeCount} 个文件）`,
-                  onPress: openChanges,
-                },
-              ]
-            : []),
-          // Every sub-agent the session started, a tap away: the ones still working (counted on the button) and the finished ones.
-          ...(hasSubagents
-            ? [
-                {
-                  kind: "button" as const,
-                  key: "subagents",
-                  icon: { sf: "square.stack.3d.up", md: "layers" } as const,
-                  label: taskCount ? `后台任务，${tasksRunning} 个运行中` : hasWorkflows ? "Agent 与工作流" : subagentsRunning ? `子 Agent，${subagentsRunning} 个运行中` : "子 Agent",
-                  live: subagentsRunning > 0 || tasksRunning > 0,
-                  onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
-                },
-              ]
-            : []),
-          {
-            kind: "menu",
-            key: "more",
-            icon: { sf: "ellipsis", md: "more_vert" },
-            label: "更多",
-            items: [
-              // Ask, steer, look, keep: the menu reads in groups, the way iOS draws them. Commands
-              // (the composer's +) and stopping (its stop button) are where the hand already is.
-              ...(agentInfo?.capabilities.side && online
-                ? [{ section: "ask", title: sideCount ? `旁支对话（${sideCount}）` : "旁支对话", subtitle: "问一句，不打断这一轮", icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const, onPress: () => openSide() }]
-                : []),
-              ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal ? [{ section: "ask", title: "持续目标", icon: { sf: "target", md: "flag" } as const, onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }) }] : []),
-              { section: "steer", title: "会话设置", icon: { sf: "slider.horizontal.3", md: "tune" }, onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }) },
-              ...(canFork
-                ? [{ section: "steer", title: "分叉会话", icon: { sf: "arrow.triangle.branch", md: "fork_right" } as const, onPress: () => askFork() }]
-                : []),
-              ...(tier === "handoff" && driver === "remote"
-                ? [{ section: "steer", title: "交还电脑", icon: { sf: "laptopcomputer", md: "laptop_mac" } as const, onPress: () => void guard(() => actions.release(id), "交还失败") }]
-                : []),
-              // The changes have their own button in the bar.
-              { section: "look", title: "显示电脑画面", icon: { sf: "desktopcomputer", md: "desktop_windows" }, onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown") },
-              {
-                section: "look",
-                title: "预览网页",
-                icon: { sf: "globe", md: "language" },
-                onPress: () => onOpenPanel ? onOpenPanel("preview") : workspace ? workspace.show("preview") : router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
-              },
-              {
-                section: "look",
-                title: "项目文件",
-                icon: { sf: "folder", md: "folder_open" },
-                onPress: () => router.push({ pathname: "/files", params: { path: summary.cwd } }),
-              },
-              { section: "keep", title: "重命名", icon: { sf: "pencil", md: "edit" }, onPress: () => renameSession(summary) },
-              {
-                section: "keep",
-                title: summary.archived ? "取消归档" : "归档",
-                icon: summary.archived ? { sf: "tray.and.arrow.up", md: "unarchive" } : { sf: "archivebox", md: "archive" },
-                onPress: () => {
-                  void toggleArchived(summary, actions).then((done) => {
-                    if (done && !summary.archived) router.back();
-                  });
-                },
-              },
-              {
-                section: "keep",
-                title: "复制",
-                icon: { sf: "doc.on.doc", md: "content_copy" },
-                children: [
+      <ContentHeight value={contentHeight}>
+        <View onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
+          {!navigation ? null : (
+            <>
+              <Stack.Screen
+                options={{
+                  scrollEdgeEffects: { top: "soft" },
+                  ...(Platform.OS === "ios"
+                    ? {}
+                    : { headerTransparent: false, headerStyle: { backgroundColor: colors.plain as string }, headerShadowVisible: false }),
+                  title: navigationTitle ?? sessionTitle(view?.title ? { title: view.title } : summary),
+                  headerTitle:
+                    Platform.OS === "ios"
+                      ? undefined
+                      : () => (
+                          <HeaderTitle
+                            agent={summary.agent}
+                            title={sessionTitle(view?.title ? { title: view.title } : summary)}
+                            subtitle={subtitle}
+                            branch={branch}
+                            ownBranch={!!summary.worktree}
+                            live={turnActive}
+                            actions={(started ? 1 : 0) + (hasSubagents ? 1 : 0) + (changeCount > 0 ? 1 : 0) + 1}
+                          />
+                        ),
+                }}
+              />
+              <HeaderActions
+                actions={[
+                  ...toolbarActions,
+                  ...(started && !toolbarActions.some((action) => action.key === "outline")
+                    ? [
+                        {
+                          kind: "button" as const,
+                          key: "outline",
+                          icon: { sf: "magnifyingglass", md: "search" } as const,
+                          label: t("session.outline"),
+                          onPress: () => {
+                            haptics.selection();
+                            setOutlineOpen(true);
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(changeCount > 0 && !toolbarActions.some((action) => action.key === "changes")
+                    ? [
+                        {
+                          kind: "button" as const,
+                          key: "changes",
+                          icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
+                          label: `${t("nav.changes")} (${changeCount})`,
+                          onPress: openChanges,
+                        },
+                      ]
+                    : []),
+                  ...(hasSubagents
+                    ? [
+                        {
+                          kind: "button" as const,
+                          key: "subagents",
+                          icon: { sf: "square.stack.3d.up", md: "layers" } as const,
+                          label: taskCount
+                            ? pick({ zh: `后台任务（${tasksRunning}）`, en: `Tasks (${tasksRunning})`, ja: `タスク (${tasksRunning})` })
+                            : hasWorkflows
+                              ? pick({ zh: "Agent 与工作流", en: "Agents & Workflows", ja: "Agent とワークフロー" })
+                              : subagentsRunning
+                                ? `Subagents (${subagentsRunning})`
+                                : "Subagents",
+                          live: subagentsRunning > 0 || tasksRunning > 0,
+                          onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
+                        },
+                      ]
+                    : []),
                   {
-                    title: "会话 ID",
-                    icon: { sf: "number", md: "tag" },
-                    onPress: () => {
-                      void Clipboard.setStringAsync(summary.nativeId);
-                      haptics.success();
-                    },
+                    kind: "menu",
+                    key: "more",
+                    icon: { sf: "ellipsis", md: "more_vert" },
+                    label: pick({ zh: "更多", en: "More", ja: "その他" }),
+                    items: [
+                      ...(agentInfo?.capabilities.side && online
+                        ? [
+                            {
+                              section: "ask",
+                              title: sideCount
+                                ? pick({ zh: `旁支对话（${sideCount}）`, en: `Side Chat (${sideCount})`, ja: `サイド会話 (${sideCount})` })
+                                : pick({ zh: "旁支对话", en: "Side Chat", ja: "サイド会話" }),
+                              subtitle: pick({ zh: "问一句，不打断这一轮", en: "Ask without interrupting", ja: "現在のターンを止めずに質問" }),
+                              icon: { sf: "bubble.left.and.text.bubble.right", md: "forum" } as const,
+                              onPress: () => openSide(),
+                            },
+                          ]
+                        : []),
+                      {
+                        section: "ask",
+                        title: t("lsa.title"),
+                        subtitle: t("lsa.dispatchAction"),
+                        icon: { sf: "checklist", md: "checklist" } as const,
+                        onPress: () => setLsaOpen(true),
+                      },
+                      ...(commandControls.commands.some((command) => command.name === "goal") || view?.goal
+                        ? [
+                            {
+                              section: "ask",
+                              title: pick({ zh: "持续目标", en: "Session Goal", ja: "継続ゴール" }),
+                              icon: { sf: "target", md: "flag" } as const,
+                              onPress: () => router.push({ pathname: "/session/[id]/goal", params: { id } }),
+                            },
+                          ]
+                        : []),
+                      {
+                        section: "steer",
+                        title: t("session.ttsReadAloud"),
+                        subtitle: ttsEnabled ? t("session.ttsEnabled") : t("session.ttsDisabled"),
+                        icon: ttsEnabled
+                          ? ({ sf: "speaker.wave.2.fill", md: "volume_up" } as const)
+                          : ({ sf: "speaker.slash", md: "volume_off" } as const),
+                        onPress: toggleCommuterTts,
+                      },
+                      {
+                        section: "steer",
+                        title: t("nav.settings"),
+                        icon: { sf: "slider.horizontal.3", md: "tune" },
+                        onPress: () => router.push({ pathname: "/session/[id]/settings", params: { id } }),
+                      },
+                      ...(canFork
+                        ? [
+                            {
+                              section: "steer",
+                              title: pick({ zh: "分叉会话", en: "Fork Session", ja: "セッションをフォーク" }),
+                              icon: { sf: "arrow.triangle.branch", md: "fork_right" } as const,
+                              onPress: () => askFork(),
+                            },
+                          ]
+                        : []),
+                      ...(tier === "handoff" && driver === "remote"
+                        ? [
+                            {
+                              section: "steer",
+                              title: pick({ zh: "交还电脑", en: "Hand back to computer", ja: "PC へ操作を戻す" }),
+                              icon: { sf: "laptopcomputer", md: "laptop_mac" } as const,
+                              onPress: () =>
+                                void guard(
+                                  () => actions.release(id),
+                                  pick({ zh: "交还失败", en: "Release failed", ja: "切り替えに失敗しました" }),
+                                ),
+                            },
+                          ]
+                        : []),
+                      {
+                        section: "look",
+                        title: t("session.outline"),
+                        icon: { sf: "magnifyingglass", md: "search" },
+                        onPress: () => setOutlineOpen(true),
+                      },
+                      {
+                        section: "look",
+                        title: t("nav.changes"),
+                        icon: { sf: "plus.forwardslash.minus", md: "difference" },
+                        onPress: openChanges,
+                      },
+                      {
+                        section: "look",
+                        title: t("nav.screen"),
+                        icon: { sf: "desktopcomputer", md: "desktop_windows" },
+                        onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown"),
+                      },
+                      {
+                        section: "look",
+                        title: t("nav.ports"),
+                        icon: { sf: "globe", md: "language" },
+                        onPress: () =>
+                          onOpenPanel
+                            ? onOpenPanel("preview")
+                            : workspace
+                              ? workspace.show("preview")
+                              : router.push({ pathname: "/ports", params: { cwd: summary.cwd } }),
+                      },
+                      {
+                        section: "look",
+                        title: t("nav.files"),
+                        icon: { sf: "folder", md: "folder_open" },
+                        onPress: () => router.push({ pathname: "/files", params: { path: summary.cwd } }),
+                      },
+                      {
+                        section: "keep",
+                        title: t("session.rename"),
+                        icon: { sf: "pencil", md: "edit" },
+                        onPress: () => renameSession(summary),
+                      },
+                      {
+                        section: "keep",
+                        title: summary.archived ? t("session.restore") : t("session.archive"),
+                        icon: summary.archived
+                          ? { sf: "tray.and.arrow.up", md: "unarchive" }
+                          : { sf: "archivebox", md: "archive" },
+                        onPress: () => {
+                          void toggleArchived(summary, actions).then((done) => {
+                            if (done && !summary.archived) router.back();
+                          });
+                        },
+                      },
+                      {
+                        section: "keep",
+                        title: t("common.copy"),
+                        icon: { sf: "doc.on.doc", md: "content_copy" },
+                        children: [
+                          {
+                            title: "Session ID",
+                            icon: { sf: "number", md: "tag" },
+                            onPress: () => {
+                              void Clipboard.setStringAsync(summary.nativeId);
+                              haptics.success();
+                            },
+                          },
+                          {
+                            title: pick({ zh: "项目路径", en: "Project Path", ja: "プロジェクトパス" }),
+                            icon: { sf: "folder", md: "folder" },
+                            onPress: () => {
+                              void Clipboard.setStringAsync(summary.cwd);
+                              haptics.success();
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        section: "keep",
+                        title: t("session.delete"),
+                        icon: { sf: "trash", md: "delete" },
+                        destructive: true,
+                        onPress: () => confirmDelete(summary, actions, () => router.back()),
+                      },
+                    ],
                   },
-                  {
-                    title: "项目路径",
-                    icon: { sf: "folder", md: "folder" },
-                    onPress: () => {
-                      void Clipboard.setStringAsync(summary.cwd);
-                      haptics.success();
-                    },
-                  },
-                ],
-              },
-              {
-                section: "keep",
-                title: "删除",
-                icon: { sf: "trash", md: "delete" },
-                destructive: true,
-                onPress: () => confirmDelete(summary, actions, () => router.back()),
-              },
-            ],
-          },
-        ]}
-      />
+                ]}
+              />
+            </>
+          )}
 
-      </>}
-      {/* Mount the list once history is in, so it lays out and opens at the latest message. */}
-      {loading ? null : (
-      <LinkBase value={summary.cwd}>
-      <TimelineSession.Provider value={id}>
-      <TimelineFork.Provider value={canFork ? askFork : undefined}>
-      <TimelineQuestions.Provider value={questions}>
-      <TimelineSide.Provider value={askAboutQuote}>
-      <TimelineWaiting.Provider value={waitingCalls}>
-      <TimelineWrapUp.Provider value={wrapUp}>
-      <Timeline
-        computerPreview
-        previewHeaderConsumed={headerConsumed}
-        ref={listRef}
-        items={timelineItems}
-        planId={view?.planId}
-        turnActive={turnActive}
-        activity={turnActivity({ session: summary, progress: promptProgress, online, connecting, ready, hasPermission: !!view?.permissions.length, queued: shownQueue(summary.queue, queueing).length, view })}
-        composerInset={composerInset}
-        keyboardOffset={keyboardOffset}
-        onFailedMessage={onFailedMessage}
-        onScroll={onScroll}
-        earlier={earlier}
-      />
-      </TimelineWrapUp.Provider>
-      </TimelineWaiting.Provider>
-      </TimelineSide.Provider>
-      </TimelineQuestions.Provider>
-      </TimelineFork.Provider>
-      </TimelineSession.Provider>
-      </LinkBase>
-      )}
+          {loading ? null : (
+            <LinkBase value={summary.cwd}>
+              <TimelineSession.Provider value={id}>
+                <TimelineFork.Provider value={canFork ? askFork : undefined}>
+                  <TimelineQuestions.Provider value={questions}>
+                    <TimelineSide.Provider value={askAboutQuote}>
+                      <TimelineWaiting.Provider value={waitingCalls}>
+                        <TimelineWrapUp.Provider value={wrapUp}>
+                          <Timeline
+                            computerPreview
+                            previewHeaderConsumed={headerConsumed}
+                            ref={listRef}
+                            items={timelineItems}
+                            planId={view?.planId}
+                            turnActive={turnActive}
+                            activity={turnActivity({
+                              session: summary,
+                              progress: promptProgress,
+                              online,
+                              connecting,
+                              ready,
+                              hasPermission: !!view?.permissions.length,
+                              queued: shownQueue(summary.queue, queueing).length,
+                              view,
+                            })}
+                            composerInset={composerInset}
+                            keyboardOffset={keyboardOffset}
+                            onFailedMessage={onFailedMessage}
+                            onScroll={onScroll}
+                            earlier={earlier}
+                          />
+                        </TimelineWrapUp.Provider>
+                      </TimelineWaiting.Provider>
+                    </TimelineSide.Provider>
+                  </TimelineQuestions.Provider>
+                </TimelineFork.Provider>
+              </TimelineSession.Provider>
+            </LinkBase>
+          )}
 
-      {intro ? (
-        <Animated.View pointerEvents="box-none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
-          {intro}
-        </Animated.View>
-      ) : null}
-      {loading ? <TimelineSkeleton label="正在载入对话…" top={headerConsumed ? 16 : headerHeight + 16} /> : null}
-      {/* A fork takes a few seconds (a worktree to make, an agent to start): nothing else can be tapped meanwhile. */}
-      {forking ? (
-        <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }} accessibilityViewIsModal>
-          <Glass style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 22 }}>
-            <ActivityIndicator color={colors.secondaryLabel} />
-            <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>正在分叉…</Text>
-          </Glass>
-        </View>
-      ) : null}
-
-
-      <Animated.View
-        pointerEvents="box-none"
-        style={[{ position: "absolute", left: 0, right: 0, bottom: 0 }, composerKeyboardStyle]}
-      >
-        {!atEnd && items.length > 0 ? (
-          <View
-            pointerEvents="box-none"
-            style={{ alignItems: "center", paddingBottom: 2 }}
-          >
-            <Pressable onPress={scrollToEnd} accessibilityRole="button" accessibilityLabel="回到最新" hitSlop={8}>
-              <Glass interactive style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-                <Icon sf="arrow.down" md="arrow_downward" size={16} color={colors.label} weight="semibold" />
+          {intro ? (
+            <Animated.View pointerEvents="box-none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
+              {intro}
+            </Animated.View>
+          ) : null}
+          {loading ? <TimelineSkeleton label={t("common.loading")} top={headerConsumed ? 16 : headerHeight + 16} /> : null}
+          {forking ? (
+            <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }} accessibilityViewIsModal>
+              <Glass style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 22 }}>
+                <ActivityIndicator color={colors.secondaryLabel} />
+                <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>
+                  {pick({ zh: "正在分叉…", en: "Forking session…", ja: "フォーク中…" })}
+                </Text>
               </Glass>
-            </Pressable>
-          </View>
-        ) : null}
-        <View onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}>
-        <Composer
-          sessionId={id}
-          agent={summary.agent}
-          agentInfo={agentInfo}
-          online={online}
-          connecting={connecting}
-          turnActive={turnActive || summary.state === "unknown"}
-          driver={driver}
-          permission={view?.permissions[0]}
-          permissionCount={view?.permissions.length ?? 0}
-          config={view?.config ?? []}
-          commands={commandControls.commands}
-          usage={view?.usage}
-          bottomInset={bottomInset}
-          keyboardOffset={keyboardOffset}
-          autoFocusOnPoseEntry={folded !== null}
-          accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
-          leadingContent={
-              <>
-                <SessionNotices sessionId={id} />
-                <AgentInteractions agent={summary.agent} />
-                {summary.asyncQuestions?.length ? <AsyncQuestionCard sessionId={id} questions={summary.asyncQuestions} agentName={look.name} disabled={!online} /> : null}
-                {view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}
-                {tasksRunning > 0 || subagentsRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? <LiveWorkflowsBar sessionId={id} subagentsRunning={subagentsRunning} /> : null}
-              </>
-          }
-          onSend={commandControls.send}
-          onStop={() => guard(() => actions.cancel(id), "停止失败")}
-          queue={shownQueue(summary.queue, queueing)}
-          onUnqueue={(clientMessageId) => void guard(() => actions.unqueue(id, clientMessageId).then(() => {}), "取消失败")}
-          onTakeQueued={(clientMessageId) => actions.takeQueued(id, clientMessageId)}
-          onSendQueuedNow={(clientMessageId) => guard(() => actions.sendQueuedNow(id, clientMessageId), "发送失败")}
-          onReorderQueue={(clientMessageIds) => void guard(() => actions.reorderQueue(id, clientMessageIds), "调整顺序失败")}
-          onCommands={() => router.push({ pathname: "/session/[id]/commands", params: { id } })}
-          onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
-          onAnswer={(requestId, answers) => actions.answer(id, requestId, answers)}
-          onTakeover={() => actions.takeover(id)}
-          onSettings={() => router.push({ pathname: "/session/[id]/settings", params: { id } })}
-        />
+            </View>
+          ) : null}
+
+          <Animated.View pointerEvents="box-none" style={[{ position: "absolute", left: 0, right: 0, bottom: 0 }, composerKeyboardStyle]}>
+            {!atEnd && items.length > 0 ? (
+              <View pointerEvents="box-none" style={{ alignItems: "center", paddingBottom: 2 }}>
+                <Pressable
+                  onPress={scrollToEnd}
+                  accessibilityRole="button"
+                  accessibilityLabel={pick({ zh: "回到最新", en: "Jump to latest", ja: "最新へ移動" })}
+                  hitSlop={8}
+                >
+                  <Glass interactive style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+                    <Icon sf="arrow.down" md="arrow_downward" size={16} color={colors.label} weight="semibold" />
+                  </Glass>
+                </Pressable>
+              </View>
+            ) : null}
+            <View onLayout={(event) => composerInset.set(event.nativeEvent.layout.height)}>
+              <Composer
+                sessionId={id}
+                cwd={summary.cwd}
+                agent={summary.agent}
+                agentInfo={agentInfo}
+                online={online}
+                connecting={connecting}
+                turnActive={turnActive || summary.state === "unknown"}
+                driver={driver}
+                permission={view?.permissions[0]}
+                permissionCount={view?.permissions.length ?? 0}
+                config={view?.config ?? []}
+                commands={commandControls.commands}
+                usage={view?.usage}
+                bottomInset={bottomInset}
+                keyboardOffset={keyboardOffset}
+                autoFocusOnPoseEntry={folded !== null}
+                autoStartVoice={quickVoicePending}
+                onAutoStartVoiceConsumed={() => setQuickVoicePending(false)}
+                accessoryHeight={(!atEnd && items.length > 0 ? 42 : 0) + (embedded ? 0 : insets.top)}
+                leadingContent={
+                  <>
+                    <PortReadyCapsules ports={matchedPorts} onOpenPort={openMatchedPort} />
+                    <SessionNotices sessionId={id} />
+                    <AgentInteractions agent={summary.agent} />
+                    {summary.asyncQuestions?.length ? (
+                      <AsyncQuestionCard sessionId={id} questions={summary.asyncQuestions} agentName={look.name} disabled={!online} />
+                    ) : null}
+                    {view?.goal ? <GoalCard sessionId={id} goal={view.goal} /> : null}
+                    {tasksRunning > 0 || subagentsRunning > 0 || Object.values(workflows ?? {}).some((record) => workflowIsLive(record.workflow)) ? (
+                      <LiveWorkflowsBar sessionId={id} subagentsRunning={subagentsRunning} />
+                    ) : null}
+                  </>
+                }
+                onSend={commandControls.send}
+                onStop={() => guard(() => actions.cancel(id), pick({ zh: "停止失败", en: "Stop failed", ja: "停止に失敗しました" }))}
+                queue={shownQueue(summary.queue, queueing)}
+                onUnqueue={(clientMessageId) =>
+                  void guard(
+                    () => actions.unqueue(id, clientMessageId).then(() => {}),
+                    pick({ zh: "取消失败", en: "Unqueue failed", ja: "取り消しに失敗しました" }),
+                  )
+                }
+                onTakeQueued={(clientMessageId) => actions.takeQueued(id, clientMessageId)}
+                onSendQueuedNow={(clientMessageId) =>
+                  guard(
+                    () => actions.sendQueuedNow(id, clientMessageId),
+                    pick({ zh: "发送失败", en: "Send failed", ja: "送信失敗" }),
+                  )
+                }
+                onReorderQueue={(clientMessageIds) =>
+                  void guard(
+                    () => actions.reorderQueue(id, clientMessageIds),
+                    pick({ zh: "调整顺序失败", en: "Reorder failed", ja: "並び替えに失敗しました" }),
+                  )
+                }
+                onCommands={() => router.push({ pathname: "/session/[id]/commands", params: { id } })}
+                onRespond={(requestId, optionId) => actions.respond(id, requestId, optionId)}
+                onAnswer={(requestId, answers) => actions.answer(id, requestId, answers)}
+                onTakeover={() => actions.takeover(id)}
+                onSettings={() => router.push({ pathname: "/session/[id]/settings", params: { id } })}
+              />
+            </View>
+          </Animated.View>
+
+          <SessionOutlineSheet
+            visible={outlineOpen}
+            items={timelineItems}
+            onClose={() => setOutlineOpen(false)}
+            onSelectIndex={(timelineIndex) => {
+              void listRef.current?.scrollToIndex({ index: timelineIndex, animated: true });
+            }}
+          />
+          <LsaSheet visible={lsaOpen} defaultCwd={summary.cwd} onClose={() => setLsaOpen(false)} />
         </View>
-      </Animated.View>
-    </View>
-    </ContentHeight>
+      </ContentHeight>
     </View>
   );
 }

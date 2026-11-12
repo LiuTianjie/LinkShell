@@ -19,6 +19,9 @@ export interface DesktopAccount {
   planExpiresAt?: string;
   /** The iTool membership tier behind "pro" (CLI 0.10.94+); older CLIs leave it out. */
   tier?: string | null;
+  isTrial?: boolean;
+  trialEndsAt?: string;
+  daysRemaining?: number;
 }
 export interface DesktopSnapshot {
   schema?: number;
@@ -43,14 +46,19 @@ export interface DesktopAbout {
   bundle?: string;
   home: string;
 }
-export interface DesktopSettings { opaqueWindow: boolean; autoCheck: boolean; updateChannel: "stable" | "beta"; keepAwake?: boolean }
+export interface DesktopSettings {
+  opaqueWindow: boolean;
+  autoCheck: boolean;
+  updateChannel: "stable" | "beta";
+  keepAwake?: boolean | "smart" | "always" | "off";
+}
 export interface PairingOffer { code: string; link: string; gateway: string; expiresAt: number; qr?: boolean[][] }
 
 export type Membership =
   | { kind: "signed-out" }
   | { kind: "unknown" }
   | { kind: "free" }
-  | { kind: "pro"; expiresAt: Date; tier: "monthly" | "yearly" };
+  | { kind: "pro"; expiresAt: Date; tier: "monthly" | "yearly"; isTrial?: boolean; daysRemaining?: number };
 
 export function isManageView(view: string): boolean {
   return view === "manage" || view.startsWith("manage:");
@@ -74,10 +82,19 @@ export function manageView(page: ManagePage = "overview"): string {
 export function membershipOf(account: DesktopAccount | undefined, now = Date.now()): Membership {
   if (account?.state !== "signed-in") return { kind: "signed-out" };
   if (account.plan === "free") return { kind: "free" };
-  if (account.plan !== "pro" || !account.planExpiresAt) return { kind: "unknown" };
-  const expiresAt = new Date(account.planExpiresAt);
+  const rawExpiry = account.planExpiresAt ?? account.trialEndsAt;
+  if (account.plan !== "pro" || !rawExpiry) return { kind: "unknown" };
+  const expiresAt = new Date(rawExpiry);
   if (Number.isNaN(expiresAt.getTime())) return { kind: "unknown" };
-  return expiresAt.getTime() > now ? { kind: "pro", expiresAt, tier: account.tier === "yearly" ? "yearly" : "monthly" } : { kind: "free" };
+  if (expiresAt.getTime() <= now) return { kind: "free" };
+  const computedDays = Math.max(1, Math.ceil((expiresAt.getTime() - now) / 86_400_000));
+  return {
+    kind: "pro",
+    expiresAt,
+    tier: account.tier === "yearly" ? "yearly" : "monthly",
+    isTrial: Boolean(account.isTrial),
+    daysRemaining: typeof account.daysRemaining === "number" ? account.daysRemaining : computedDays,
+  };
 }
 
 /** The CLI checks the same bounds; checking here keeps the password off the wire when it can't pass. */

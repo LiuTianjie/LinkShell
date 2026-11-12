@@ -423,7 +423,7 @@ struct DesktopView: View {
         switch model.membership {
         case .pro(let expiresAt, let tier):
           // A membership is a neutral badge: colour is kept for what can be done and for state.
-          Text(tier.label).fontWeight(.medium).foregroundStyle(DesktopStyle.primary).padding(.horizontal, 8).frame(height: 20)
+          Text(model.membershipBadgeLabel ?? tier.label).fontWeight(.medium).foregroundStyle(DesktopStyle.primary).padding(.horizontal, 8).frame(height: 20)
             .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
           Text("\(expiresAt.formatted(date: .abbreviated, time: .omitted)) 到期").foregroundStyle(DesktopStyle.secondary)
         case .free:
@@ -438,6 +438,18 @@ struct DesktopView: View {
             .disabled(model.busy || model.preview).help("刷新会员状态").accessibilityLabel("刷新会员状态")
         }
       }.font(.system(size: 12))
+      if model.trialExpiringSoon, let days = model.trialDaysRemaining {
+        HStack(spacing: 8) {
+          Text("免费试用还剩 \(days) 天，续费后远程会话与后台值守不会中断。")
+            .font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting)
+          Spacer(minLength: 8)
+          Button("立即续费") { model.openMembershipPage() }
+            .buttonStyle(DesktopButtonStyle(.secondary, compact: true))
+            .disabled(model.busy || model.preview)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
+      }
       if case .pro(_, .monthly) = model.membership {
         // Monthly covers two of the iTool products: one quiet line, the way to the rest at its end.
         HStack(spacing: 4) {

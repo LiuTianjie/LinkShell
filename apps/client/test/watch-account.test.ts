@@ -202,6 +202,6 @@ final class FakeHTTP: URLProtocol {
 it("Watch membership screen offers no purchase", () => {
   const views = readFileSync(resolve(import.meta.dirname, "../plugins/watch/WatchConnectionViews.swift"), "utf8");
   const membership = views.slice(views.indexOf("struct WatchMembershipView"), views.indexOf("struct WatchLoginView"));
-  expect(membership).not.toMatch(/Link\(|openURL|TextField|激活码|https?:\/\//);
-  expect(membership).toContain("在电脑浏览器打开 itool.tech/pro 开通会员");
+  expect(membership).not.toMatch(/Link\(|openURL|TextField|itool\.tech\/pro|checkout=|¥|\$[0-9]|激活码|https?:\/\//);
+  expect(membership).toContain("可在电脑端 LinkShell 管理账户状态");
 });

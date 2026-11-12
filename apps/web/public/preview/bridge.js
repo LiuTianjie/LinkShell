@@ -22,7 +22,7 @@ window.addEventListener("message", async (event) => {
     bootstrap = message.bootstrap;
     try {
       const registration = await navigator.serviceWorker.register(
-        "/preview/worker.js?v=3",
+        "/preview/worker.js?v=4",
         { scope: "/preview/" },
       );
       const next =
@@ -66,7 +66,7 @@ window.addEventListener("message", async (event) => {
     event.source === page.contentWindow &&
     event.origin === location.origin &&
     parentOrigin &&
-    /^ws-/.test(message.type)
+    (/^ws-/.test(message.type) || message.type === "preview-runtime-error")
   ) {
     parent.postMessage(message, parentOrigin);
   }

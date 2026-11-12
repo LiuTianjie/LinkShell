@@ -30,10 +30,19 @@ enum DesktopMembershipTier: Equatable {
 /// (ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MEMBERSHIP_PRODUCT_TOTAL, MONTHLY_PRODUCT_COUNT,
 /// MONTHLY_UPGRADE_COPY), which Swift can't import: change them there and here together.
 enum ITool {
+  private static func pathLocale(_ locale: String) -> String {
+    locale.lowercased().hasPrefix("zh") ? "zh" : "en"
+  }
   /// www and a locale up front: the bare domain costs two redirects.
   static let membershipURL = "https://www.itool.tech/zh/pro?from=linkshell"
   /// itool.tech opens the yearly checkout once signed in when `checkout=yearly` is present.
   static let yearlyUpgradeURL = "https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly"
+  static func membershipURL(locale: String) -> String {
+    "https://www.itool.tech/\(pathLocale(locale))/pro?from=linkshell"
+  }
+  static func yearlyUpgradeURL(locale: String) -> String {
+    "https://www.itool.tech/\(pathLocale(locale))/pro?from=linkshell&checkout=yearly"
+  }
   /// Mirror itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS (all of them yearly, two monthly).
   static let productTotal = 7
   static let monthlyProductCount = 2
@@ -63,17 +72,47 @@ struct DesktopSnapshot: Decodable {
     let planExpiresAt: String?
     /// The iTool membership tier behind "pro"; older CLIs leave it out (read as monthly).
     let tier: String?
+    let isTrial: Bool?
+    let trialEndsAt: String?
+    let daysRemaining: Int?
+
+    private static func parseISO8601(_ value: String) -> Date? {
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      if let fractional = formatter.date(from: value) { return fractional }
+      formatter.formatOptions = [.withInternetDateTime]
+      return formatter.date(from: value)
+    }
 
     func membership(at now: Date = Date()) -> DesktopMembership {
       guard state == "signed-in" else { return .signedOut }
       if plan == "free" { return .free }
-      guard plan == "pro", let planExpiresAt else { return .unknown }
-      let formatter = ISO8601DateFormatter()
-      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-      let fractional = formatter.date(from: planExpiresAt)
-      formatter.formatOptions = [.withInternetDateTime]
-      guard let expiresAt = fractional ?? formatter.date(from: planExpiresAt) else { return .unknown }
+      guard plan == "pro", let rawExpiry = planExpiresAt ?? trialEndsAt,
+            let expiresAt = Self.parseISO8601(rawExpiry) else { return .unknown }
       return expiresAt > now ? .pro(expiresAt, tier == "yearly" ? .yearly : .monthly) : .free
+    }
+
+    func resolvedTrialDays(at now: Date = Date()) -> Int? {
+      guard isTrial == true else { return nil }
+      if let daysRemaining { return max(0, daysRemaining) }
+      guard let rawExpiry = trialEndsAt ?? planExpiresAt,
+            let expiresAt = Self.parseISO8601(rawExpiry),
+            expiresAt > now else { return nil }
+      return max(0, Int(ceil(expiresAt.timeIntervalSince(now) / 86_400)))
+    }
+
+    func badgeLabel(at now: Date = Date()) -> String? {
+      guard case .pro(_, let tierValue) = membership(at: now) else { return nil }
+      if isTrial == true {
+        if let days = resolvedTrialDays(at: now) { return "7 天免费试用 · 剩余 \(days) 天" }
+        return "7 天免费试用"
+      }
+      return tierValue.label
+    }
+
+    func isTrialExpiringSoon(at now: Date = Date()) -> Bool {
+      guard case .pro = membership(at: now), let days = resolvedTrialDays(at: now) else { return false }
+      return days <= 2
     }
   }
   let account: Account?
@@ -242,6 +281,9 @@ enum DesktopCommand {
   var signedIn: Bool { snapshot?.account?.state == "signed-in" }
   var accountLabel: String { snapshot?.account?.email ?? snapshot?.account?.userId ?? "未登录" }
   var membership: DesktopMembership { snapshot?.account?.membership() ?? .signedOut }
+  var membershipBadgeLabel: String? { snapshot?.account?.badgeLabel() }
+  var trialDaysRemaining: Int? { snapshot?.account?.resolvedTrialDays() }
+  var trialExpiringSoon: Bool { snapshot?.account?.isTrialExpiringSoon() ?? false }
   /// Set when the buy page was opened, so coming back to the app asks again.
   private var visitedMembershipPage = false
   var home: String { snapshot?.home ?? DesktopRuntime.home }
@@ -485,7 +527,9 @@ enum DesktopCommand {
   /// Membership is bought in the browser on itool.tech with the same account; LinkShell only reads it.
   /// `upgrade` is for monthly members: the page opens on the yearly checkout.
   func openMembershipPage(upgrade: Bool = false) {
-    guard !preview, let url = URL(string: upgrade ? ITool.yearlyUpgradeURL : ITool.membershipURL) else { return }
+    let preferredLocale = Locale.preferredLanguages.first ?? "zh"
+    let target = upgrade ? ITool.yearlyUpgradeURL(locale: preferredLocale) : ITool.membershipURL(locale: preferredLocale)
+    guard !preview, let url = URL(string: target) else { return }
     visitedMembershipPage = true
     NSWorkspace.shared.open(url)
   }

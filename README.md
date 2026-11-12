@@ -98,7 +98,7 @@ The agents you use must be installed and signed in on the computer as usual (`cl
 
 Get the app: [iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest). Then either:
 
-- **Pro: the official gateway.** Sign in on the computer (`linkshell login`, or in the Mac app) and in the phone app with the same account. The computer appears by itself.
+- **Official gateway (7-day free trial on sign-up, no card required).** Sign in on the computer (`linkshell login`, or in the desktop app) and in the phone app with the same account. New accounts automatically get a **7-day free trial**, and the computer appears by itself.
 - **Free: your own gateway.** Run a gateway ([below](#run-your-own-gateway)), point the host at it and pair each phone once by QR code or six-digit code:
 
   ```bash
@@ -106,7 +106,7 @@ Get the app: [iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [
   linkshell pair    # in the app: Computers → Add computer
   ```
 
-Every feature is free; an iTool membership adds the hosted gateway. Get it with Alipay at [itool.tech/pro](https://www.itool.tech/en/pro?from=linkshell), signed in with the same account: the monthly tier (¥9.9) covers the iTool site and LinkShell, the yearly tier (¥99) covers every iTool product. Then refresh the membership in the desktop app or web workspace; there are no activation codes. See [membership](docs/v2/pro-redemption.md).
+Every feature is free; an iTool membership adds the hosted gateway after your 7-day free trial. Get it at [itool.tech/pro](https://www.itool.tech/en/pro?from=linkshell), signed in with the same account, using an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr): the monthly tier covers the iTool site and LinkShell, while the yearly tier covers every iTool product plus **LinkShell Agent (LSA)** multi-machine steward capabilities. Invite a friend and when they make their first purchase, both of you earn **14 days** (monthly) or **30 days** (yearly). Refresh the membership in the desktop app or web workspace; there are no activation codes. See [membership](docs/v2/pro-redemption.md).
 
 The gateway also serves a browser client at its root URL, with the same pairing or account sign-in. See [the web client](apps/web/README.md).
 
@@ -168,9 +168,10 @@ Architecture details: [design](docs/v2/architecture.md) and [remote desktop](doc
 | --- | --- |
 | Set up a computer: host, screen permissions, phone | `linkshell setup` |
 | Start the host in the background / see it / stop it | `linkshell host --daemon` / `linkshell host status` / `linkshell host stop` |
-| Pair a phone (own gateway) | `linkshell pair` |
+| Connect on same-Wi-Fi LAN / set sleep policy | `linkshell host --lan [port]` / `linkshell host --keep-awake <smart\|always\|off>` |
+| Pair a phone (own or LAN gateway) | `linkshell pair` |
 | List or remove paired phones | `linkshell devices` / `linkshell devices remove <name>` |
-| Use the official gateway (Pro) | `linkshell login` / `linkshell logout` |
+| Use the official gateway (7-day free trial / iTool) | `linkshell login` / `linkshell logout` |
 | Claude Code / Codex, shareable with the phone | `linkshell claude` / `linkshell codex` (arguments pass through) |
 | Set up or check the screen | `linkshell screen` / `linkshell screen --check` |
 | Open the Mac status app | `linkshell app` |

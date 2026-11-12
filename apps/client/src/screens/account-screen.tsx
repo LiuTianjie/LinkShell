@@ -1,7 +1,7 @@
 import { router, Stack } from "expo-router";
 import { Image } from "expo-image";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, StyleSheet, useColorScheme, View } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -10,18 +10,20 @@ import Svg, { Path } from "react-native-svg";
 import { Icon, type IconProps } from "@/components/icon";
 import { AccountMembership } from "@/components/account-membership";
 import { SIGN_UP_URL, useAccount, type OAuthProvider } from "@/lib/account";
+import { checkForAndroidAppUpdate, currentAppVersion, openAndroidUpdateUrl } from "@/lib/app-update";
 import { useContentWidth } from "@/lib/content-width";
 import { useConnection } from "@/lib/client";
 import { listComputers, useComputers, type Computer } from "@/lib/computers";
 import { ComputerSwipe, computerRemovable } from "@/components/computer-swipe";
 import { LinkDot } from "@/components/status";
 import { haptics } from "@/lib/haptics";
+import { MOBILE_LOCALE_OPTIONS, useLocale, type Locale } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
 
 // Account and computers, on one page: who you are signed in as (which
-// brings that account's computers in without pairing), and every computer
-// this phone can reach.
+// brings that account's computers in without pairing), language preferences,
+// and every computer this phone can reach.
 
 function hostOf(url: string): string {
   try {
@@ -29,6 +31,10 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+function localizedSignUpUrl(locale: Locale): string {
+  return locale === "zh" ? SIGN_UP_URL : SIGN_UP_URL.replace("/zh/register", "/en/register");
 }
 
 function Section({ title, footer, children }: { title?: string; footer?: string; children: React.ReactNode }) {
@@ -55,6 +61,7 @@ function Row({
   accessory,
   onPress,
   onRemove,
+  removeLabel = "移除",
 }: {
   icon?: Pick<IconProps, "sf" | "md">;
   iconTint?: IconProps["color"];
@@ -66,12 +73,13 @@ function Row({
   onPress?: () => void;
   /** Offered to VoiceOver as an action; sighted people swipe the row. */
   onRemove?: () => void;
+  removeLabel?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityActions={onRemove ? [{ name: "remove", label: "移除" }] : undefined}
+      accessibilityActions={onRemove ? [{ name: "remove", label: removeLabel }] : undefined}
       onAccessibilityAction={onRemove ? (event) => { if (event.nativeEvent.actionName === "remove") onRemove(); } : undefined}
       disabled={!onPress}
       style={({ pressed }) => ({
@@ -127,11 +135,10 @@ function ProviderMark({ provider, color }: { provider: OAuthProvider; color: str
 
 function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuthProvider; busy: boolean; disabled: boolean; onPress: () => void }) {
   const dark = useColorScheme() === "dark";
-  // Keep the two providers equally weighted; their marks identify the service.
   const github = provider === "github";
   const background = colors.sheetCard;
   const foreground = dark ? "#f3f3f6" : "#18181b";
-  const title = github ? "使用 GitHub 登录" : "使用 Google 登录";
+  const title = github ? "GitHub" : "Google";
   return (
     <Pressable
       onPress={onPress}
@@ -143,7 +150,6 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
         minHeight: 48,
         paddingHorizontal: 14,
         paddingVertical: 11,
-        // A capsule, like every button.
         borderRadius: 24,
         borderCurve: "continuous",
         backgroundColor: background,
@@ -157,12 +163,113 @@ function ProviderButton({ provider, busy, disabled, onPress }: { provider: OAuth
       })}
     >
       {busy ? <ActivityIndicator color={foreground} /> : <ProviderMark provider={provider} color={foreground} />}
-      <Text style={[type.callout, { color: foreground, fontWeight: "600", flexShrink: 1, textAlign: "center" }]}>{github ? "GitHub" : "Google"}</Text>
+      <Text style={[type.callout, { color: foreground, fontWeight: "600", flexShrink: 1, textAlign: "center" }]}>{title}</Text>
     </Pressable>
   );
 }
 
+function LanguageSection() {
+  const { locale, preference, setPreference, t } = useLocale();
+  return (
+    <Section title={t("locale.label")}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, padding: 12 }}>
+        {MOBILE_LOCALE_OPTIONS.map((option) => {
+          const selected = preference === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => {
+                haptics.selection();
+                setPreference(option.value);
+              }}
+              style={({ pressed }) => ({
+                minHeight: 36,
+                paddingHorizontal: 13,
+                paddingVertical: 7,
+                borderRadius: 999,
+                borderCurve: "continuous",
+                backgroundColor: selected ? colors.accentSoft : colors.fill,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed ? 0.65 : 1,
+              })}
+            >
+              <Text style={[type.footnote, { color: selected ? colors.accent : colors.label, fontWeight: selected ? "600" : "500" }]}>
+                {option.label(locale)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </Section>
+  );
+}
+
+function AndroidUpdateSection() {
+  const { t, pick } = useLocale();
+  const [busy, setBusy] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+
+  // Strict platform guard: never render or run on iOS.
+  if (Platform.OS !== "android") return null;
+
+  const checkNow = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await checkForAndroidAppUpdate();
+      if (!res.upToDate && res.latestVersion && res.downloadUrl) {
+        setStatusText(t("android.updateAvailable", { version: `v${res.latestVersion}` }));
+        setDownloadUrl(res.downloadUrl);
+        Alert.alert(
+          t("android.updateAvailable", { version: `v${res.latestVersion}` }),
+          res.notes || pick({ zh: "发现新的 Android 安装包，是否前往下载？", en: "A new Android release is available. Open download page?", ja: "新しい Android 版が利用可能です。ダウンロードページを開きますか？" }),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            { text: pick({ zh: "下载更新", en: "Download", ja: "ダウンロード" }), onPress: () => void openAndroidUpdateUrl(res.downloadUrl!) },
+          ],
+        );
+      } else {
+        setStatusText(`${t("android.upToDate")} (v${res.currentVersion})`);
+        setDownloadUrl(null);
+      }
+    } catch {
+      setStatusText(pick({ zh: "检查更新失败，请稍后重试", en: "Failed to check for updates", ja: "更新の確認に失敗しました" }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title="Android">
+      <Row
+        icon={{ sf: "arrow.down.circle", md: "system_update" }}
+        iconTint={colors.accent}
+        title={t("android.checkForUpdate")}
+        detail={statusText ?? `v${currentAppVersion()}`}
+        accessory={
+          busy ? (
+            <ActivityIndicator size="small" color={colors.secondaryLabel} />
+          ) : downloadUrl ? (
+            <Icon sf="arrow.up.right" md="open_in_new" size={14} color={colors.accent} />
+          ) : (
+            <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />
+          )
+        }
+        onPress={() => {
+          if (downloadUrl) void openAndroidUpdateUrl(downloadUrl);
+          else void checkNow();
+        }}
+      />
+    </Section>
+  );
+}
+
 function SignInForm({ width }: { width: number }) {
+  const { locale, pick } = useLocale();
   const { fontScale } = useWindowDimensions();
   const providersInline = width >= 320 * fontScale;
   const signIn = useAccount((state) => state.signIn);
@@ -217,7 +324,13 @@ function SignInForm({ width }: { width: number }) {
         <Image source={require("../../assets/mark.png")} style={{ width: 72, height: 72 }} contentFit="contain" />
         <View style={{ alignItems: "center", gap: 8 }}>
           <Text style={[type.title1, { color: colors.label }]}>LinkShell</Text>
-          <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>电脑上的 Agent，随时跟进</Text>
+          <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
+            {pick({
+              zh: "电脑上的 Agent，随时跟进",
+              en: "Follow, steer & approve your computer's agents anywhere",
+              ja: "PC 上のエージェントをどこからでも操作・承認",
+            })}
+          </Text>
         </View>
       </View>
       <View style={{ gap: 12 }}>
@@ -226,8 +339,8 @@ function SignInForm({ width }: { width: number }) {
             ref={emailRef}
             value={email}
             onChangeText={setEmail}
-            accessibilityLabel="邮箱"
-            placeholder="iTool 账号邮箱"
+            accessibilityLabel={pick({ zh: "邮箱", en: "Email", ja: "メールアドレス" })}
+            placeholder={pick({ zh: "iTool 账号邮箱", en: "iTool account email", ja: "iTool アカウントメール" })}
             placeholderTextColor={colors.placeholder as string}
             autoCapitalize="none"
             autoCorrect={false}
@@ -243,8 +356,8 @@ function SignInForm({ width }: { width: number }) {
             ref={passwordRef}
             value={password}
             onChangeText={setPassword}
-            accessibilityLabel="密码"
-            placeholder="密码"
+            accessibilityLabel={pick({ zh: "密码", en: "Password", ja: "パスワード" })}
+            placeholder={pick({ zh: "密码", en: "Password", ja: "パスワード" })}
             placeholderTextColor={colors.placeholder as string}
             secureTextEntry
             textContentType="password"
@@ -259,7 +372,7 @@ function SignInForm({ width }: { width: number }) {
           onPress={() => emailOpen ? void submit() : setEmailOpen(true)}
           disabled={loginDisabled}
           accessibilityRole="button"
-          accessibilityLabel={emailOpen ? "使用邮箱登录" : "登录 LinkShell"}
+          accessibilityLabel={emailOpen ? pick({ zh: "使用邮箱登录", en: "Sign in with email", ja: "メールでサインイン" }) : pick({ zh: "登录 LinkShell", en: "Sign in to LinkShell", ja: "LinkShell にサインイン" })}
           accessibilityState={{ disabled: loginDisabled, busy }}
           style={({ pressed }) => ({
             minHeight: 52,
@@ -273,11 +386,21 @@ function SignInForm({ width }: { width: number }) {
             opacity: pressed ? 0.6 : 1,
           })}
         >
-          {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={[type.headline, { color: loginDisabled ? colors.secondaryLabel : colors.onAccent }]}>{emailOpen ? "登录" : "登录 LinkShell"}</Text>}
+          {busy ? (
+            <ActivityIndicator color={colors.onAccent} />
+          ) : (
+            <Text style={[type.headline, { color: loginDisabled ? colors.secondaryLabel : colors.onAccent }]}>
+              {emailOpen
+                ? pick({ zh: "登录", en: "Sign in", ja: "サインイン" })
+                : pick({ zh: "登录 LinkShell", en: "Sign in to LinkShell", ja: "LinkShell にサインイン" })}
+            </Text>
+          )}
         </Pressable>
       </View>
       <View style={{ gap: 12 }}>
-        <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>或使用以下方式登录</Text>
+        <Text style={[type.caption, { color: colors.tertiaryLabel, textAlign: "center" }]}>
+          {pick({ zh: "或使用以下方式登录", en: "Or continue with", ja: "または以下で続行" })}
+        </Text>
         <View style={{ flexDirection: providersInline ? "row" : "column", gap: 10 }}>
           <View style={providersInline ? { flex: 1 } : undefined}>
             <ProviderButton provider="github" busy={provider === "github"} disabled={working} onPress={() => void continueWith("github")} />
@@ -287,14 +410,26 @@ function SignInForm({ width }: { width: number }) {
           </View>
         </View>
       </View>
-      {emailOpen ? <Pressable onPress={() => void Linking.openURL(SIGN_UP_URL)} accessibilityRole="link" accessibilityLabel="在 iTool 注册账号" style={{ alignSelf: "center", minHeight: 44, paddingHorizontal: 12, justifyContent: "center" }}>
-        <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>还没有账号？<Text style={{ color: colors.accent }}>注册 iTool 账号</Text></Text>
-      </Pressable> : null}
+      {emailOpen ? (
+        <Pressable
+          onPress={() => void Linking.openURL(localizedSignUpUrl(locale))}
+          accessibilityRole="link"
+          style={{ alignSelf: "center", minHeight: 44, paddingHorizontal: 12, justifyContent: "center" }}
+        >
+          <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>
+            {pick({ zh: "还没有账号？", en: "New here? ", ja: "アカウントをお持ちでないですか？ " })}
+            <Text style={{ color: colors.accent }}>
+              {pick({ zh: "注册 iTool 账号", en: "Create iTool account", ja: "iTool アカウント作成" })}
+            </Text>
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 function SignedIn() {
+  const { t, pick } = useLocale();
   const session = useAccount((state) => state.session)!;
   const initial = (session.email ?? "?").slice(0, 1).toUpperCase();
   return (
@@ -305,20 +440,34 @@ function SignedIn() {
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>
-            {session.email ?? "已登录"}
+            {session.email ?? t("common.signedIn")}
           </Text>
-          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>iTool 账号 · 同一账号的电脑自动出现</Text>
+          <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+            {pick({
+              zh: "iTool 账号 · 同一账号的电脑自动出现",
+              en: "iTool account · Computers on this account appear automatically",
+              ja: "iTool アカウント · 同じアカウントの PC が自動表示されます",
+            })}
+          </Text>
         </View>
       </View>
       <Separator inset={0} />
       <Row
-        title="退出登录"
+        title={t("common.signOut")}
         tint={colors.danger}
         onPress={() =>
-          Alert.alert("退出登录？", "同一账号下的电脑会从列表里消失，配对过的电脑不受影响。", [
-            { text: "取消", style: "cancel" },
-            { text: "退出登录", style: "destructive", onPress: () => void useAccount.getState().signOut() },
-          ])
+          Alert.alert(
+            pick({ zh: "退出登录？", en: "Sign out?", ja: "サインアウトしますか？" }),
+            pick({
+              zh: "同一账号下的电脑会从列表里消失，配对过的电脑不受影响。",
+              en: "Account-discovered computers will be hidden; paired computers stay on this device.",
+              ja: "アカウント経由の PC は非表示になりますが、ペアリング済みの PC は残ります。",
+            }),
+            [
+              { text: t("common.cancel"), style: "cancel" },
+              { text: t("common.signOut"), style: "destructive", onPress: () => void useAccount.getState().signOut() },
+            ],
+          )
         }
       />
     </Section>
@@ -326,13 +475,22 @@ function SignedIn() {
 }
 
 function ComputerRow({ computer, current }: { computer: Computer; current: boolean }) {
+  const { t, pick } = useLocale();
   const relayStatus = useComputers((state) => (computer.kind === "relay" ? state.relayStatus[computer.gateway] : undefined));
   const name = computer.kind === "relay" ? computer.machine.name : computer.name;
   const online = computer.kind === "relay" ? computer.machine.online && relayStatus === "online" : undefined;
+  const viaLabel =
+    computer.kind === "relay"
+      ? computer.machine.via === "account"
+        ? pick({ zh: "同一账号", en: "Same account", ja: "同一アカウント" })
+        : pick({ zh: "已配对", en: "Paired", ja: "ペアリング済み" })
+      : "";
+  const stateLabel = online ? t("connection.online") : relayStatus === "connecting" ? t("connection.connecting") : t("connection.offline");
+  const lanSuffix = computer.kind === "relay" && computer.lanUrl ? ` · LAN ${computer.lanUrl.replace(/^wss?:\/\//, "")}` : "";
   const detail =
     computer.kind === "relay"
-      ? `${computer.machine.via === "account" ? "同一账号" : "已配对"} · ${online ? "在线" : relayStatus === "connecting" ? "连接中" : "离线"} · ${hostOf(computer.gateway)}`
-      : `局域网 · ${computer.url.replace(/^wss?:\/\//, "")}`;
+      ? `${viaLabel} · ${stateLabel} · ${hostOf(computer.gateway)}${lanSuffix}`
+      : `${t("connection.lanDirect")} · ${computer.url.replace(/^wss?:\/\//, "")}`;
   return (
     <ComputerSwipe computer={computer} name={name} enabled={computerRemovable(computer, online)} background={colors.sheetCard}>
       {(remove) => (
@@ -341,6 +499,7 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
           iconTint={current ? colors.accent : colors.secondaryLabel}
           title={name}
           detail={detail}
+          removeLabel={pick({ zh: "移除", en: "Remove", ja: "削除" })}
           accessory={
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
               {online !== undefined ? <LinkDot health={online ? "online" : relayStatus === "connecting" ? "connecting" : "offline"} /> : null}
@@ -360,6 +519,7 @@ function ComputerRow({ computer, current }: { computer: Computer; current: boole
 }
 
 export function AccountScreen() {
+  const { t, pick } = useLocale();
   const insets = usePageInsets();
   const parentWidth = useContentWidth();
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
@@ -371,7 +531,6 @@ export function AccountScreen() {
   const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
   const { computer: current } = useConnection();
   const showManagement = Boolean(account);
-  // Signed-out users enter through one login home, including when computers are already paired.
   const columns = showManagement && width >= Math.max(760, 720 * fontScale);
   const columnWidth = columns ? Math.min(440, (width - 64) / 2) : Math.min(account ? 440 : 420, width - 32);
 
@@ -385,74 +544,113 @@ export function AccountScreen() {
       style={{ flex: 1, backgroundColor: colors.sheet }}
       contentContainerStyle={{ flexGrow: 1, justifyContent: showManagement ? "flex-start" : "center", paddingHorizontal: 16, paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24 }}
     >
-      <Stack.Screen options={{ title: account ? "账号与电脑" : "", headerLargeTitleEnabled: false, headerTransparent: !account, headerShadowVisible: false }} />
+      <Stack.Screen options={{ title: account ? t("nav.account") : "", headerLargeTitleEnabled: false, headerTransparent: !account, headerShadowVisible: false }} />
       <View style={{ flexDirection: columns ? "row" : "column", alignItems: columns ? "flex-start" : "center", justifyContent: "center", gap: columns ? 32 : 28 }}>
         <View style={{ width: columnWidth, minWidth: 0, gap: 12 }}>
           {account ? <SignedIn /> : <SignInForm width={columnWidth} />}
           {account ? <AccountMembership key={account.userId} userId={account.userId} /> : null}
+          <LanguageSection />
+          <AndroidUpdateSection />
           {!showManagement ? (
-            <Pressable onPress={() => router.push("/pair")} accessibilityRole="button" style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
-              <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>手动连接电脑</Text>
-            </Pressable>
+            <View style={{ flexDirection: "row", justifyContent: "center", gap: 16 }}>
+              <Pressable onPress={() => router.push("/pair")} accessibilityRole="button" style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+                <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>
+                  {t("welcome.scanQrToAdd")}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => router.push("/connect")} accessibilityRole="button" style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+                <Text style={[type.footnote, { color: colors.secondaryLabel, textAlign: "center" }]}>
+                  {t("connection.lanDirect")}
+                </Text>
+              </Pressable>
+            </View>
           ) : null}
           {!account && computers.length > 0 ? (
             <View style={{ paddingTop: 12 }}>
-              <Section title="已添加电脑">
+              <Section title={t("nav.computers")}>
                 {computers.map((computer, index) => <View key={computer.key}>{index > 0 ? <Separator inset={58} /> : null}<ComputerRow computer={computer} current={computer.key === current.key} /></View>)}
               </Section>
             </View>
           ) : null}
         </View>
-        {showManagement ? <View style={{ width: columnWidth, minWidth: 0, gap: 16 }}>
-          <View style={{ gap: 6, paddingBottom: 4 }}>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-              <Text style={[type.title3, { color: colors.label }]}>我的电脑</Text>
-              <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{computers.length}</Text>
+        {showManagement ? (
+          <View style={{ width: columnWidth, minWidth: 0, gap: 16 }}>
+            <View style={{ gap: 6, paddingBottom: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                <Text style={[type.title3, { color: colors.label }]}>{t("nav.computer")}</Text>
+                <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{computers.length}</Text>
+              </View>
+              <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+                {pick({
+                  zh: "选择电脑后开始连接，也可以手动添加或配置局域网直连。",
+                  en: "Select a computer to connect, or pair / configure LAN direct fast-path below.",
+                  ja: "接続する PC を選択するか、下からペアリング・LAN 直結を設定できます。",
+                })}
+              </Text>
             </View>
-            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>选择电脑后开始连接，也可以手动添加。</Text>
+            <Section
+              footer={
+                computers.length
+                  ? pick({ zh: "向左滑动可移除电脑。", en: "Swipe left on a computer to remove it.", ja: "左にスワイプして PC を削除できます。" })
+                  : undefined
+              }
+            >
+              {computers.length === 0 ? (
+                <View style={{ paddingHorizontal: 20, paddingVertical: 24, gap: 6 }}>
+                  <Text style={[type.headline, { color: colors.label }]}>
+                    {pick({ zh: "暂无电脑", en: "No computers yet", ja: "PC がまだありません" })}
+                  </Text>
+                  <Text style={[type.subhead, { color: colors.secondaryLabel }]}>
+                    {pick({
+                      zh: "在电脑上登录同一账号，或通过下方入口配对。",
+                      en: "Sign in to the same account on your computer, or pair one below.",
+                      ja: "PC で同じアカウントにサインインするか、下からペアリングしてください。",
+                    })}
+                  </Text>
+                </View>
+              ) : null}
+              {computers.map((computer, index) => (
+                <View key={computer.key}>
+                  {index > 0 ? <Separator inset={58} /> : null}
+                  <ComputerRow computer={computer} current={computer.key === current.key} />
+                </View>
+              ))}
+            </Section>
+            <Section title={pick({ zh: "添加与直连", en: "Add & Direct Connect", ja: "追加と直接接続" })}>
+              <Row
+                icon={{ sf: "qrcode.viewfinder", md: "qr_code_scanner" }}
+                iconTint={colors.accent}
+                title={t("welcome.scanQrToAdd")}
+                detail={pick({ zh: "扫描二维码或输入 6 位配对码", en: "Scan QR code or enter 6-digit pairing code", ja: "QR コード読取または6桁コード入力" })}
+                accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
+                onPress={() => router.push("/pair")}
+              />
+              <Separator inset={58} />
+              <Row
+                icon={{ sf: "wifi", md: "wifi" }}
+                iconTint={colors.accent}
+                title={t("connection.lanDirect")}
+                detail={pick({
+                  zh: "同一 Wi-Fi 下毫秒级直连，离开时自动切回加密网关",
+                  en: "Connect directly on local Wi-Fi with automatic gateway fallback",
+                  ja: "同一 Wi-Fi で高速直結し、外出時は自動でゲートウェイへ切替",
+                })}
+                accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
+                onPress={() => router.push("/connect")}
+              />
+            </Section>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 7, paddingHorizontal: 4 }}>
+              <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} />
+              <Text style={[type.caption, { flex: 1, color: colors.tertiaryLabel }]}>
+                {pick({
+                  zh: "通过账号、配对或局域网隧道连接时，内容均端到端加密。",
+                  en: "All sessions over account, pairing, or LAN tunnels are end-to-end encrypted.",
+                  ja: "アカウント・ペアリング・LAN トンネル経由の通信はすべてエンドツーエンドで暗号化されます。",
+                })}
+              </Text>
+            </View>
           </View>
-          <Section footer={computers.length ? "向左滑动可移除电脑。" : undefined}>
-            {computers.length === 0 ? (
-              <View style={{ paddingHorizontal: 20, paddingVertical: 24, gap: 6 }}>
-                <Text style={[type.headline, { color: colors.label }]}>暂无电脑</Text>
-                <Text style={[type.subhead, { color: colors.secondaryLabel }]}>在电脑上登录同一账号，或通过下方入口配对。</Text>
-              </View>
-            ) : null}
-            {computers.map((computer, index) => (
-              <View key={computer.key}>
-                {index > 0 ? <Separator inset={58} /> : null}
-                <ComputerRow computer={computer} current={computer.key === current.key} />
-              </View>
-            ))}
-          </Section>
-          <Section title="手动添加">
-            <Row
-              icon={{ sf: "qrcode.viewfinder", md: "qr_code_scanner" }}
-              iconTint={colors.accent}
-              title="配对电脑"
-              detail="扫描二维码或输入配对码"
-              accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
-              onPress={() => router.push("/pair")}
-            />
-            {__DEV__ ? (
-              <>
-            <Separator inset={58} />
-            <Row
-              icon={{ sf: "wifi", md: "wifi" }}
-              iconTint={colors.accent}
-              title="局域网连接"
-              detail="通过本地地址连接"
-              accessory={<Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} />}
-              onPress={() => router.push("/connect")}
-            />
-              </>
-            ) : null}
-          </Section>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 7, paddingHorizontal: 4 }}>
-            <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} />
-            <Text style={[type.caption, { flex: 1, color: colors.tertiaryLabel }]}>通过账号或配对连接时，内容均端到端加密。</Text>
-          </View>
-        </View> : null}
+        ) : null}
       </View>
     </KeyboardAwareScrollView>
   );

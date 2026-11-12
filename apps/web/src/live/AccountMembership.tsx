@@ -1,13 +1,29 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { LoaderCircle, RefreshCw } from "lucide-react";
-import { ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MONTHLY_UPGRADE_COPY, membershipTierLabel, type ProMembership } from "@linkshell/client-core";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Copy, Gift, LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  MONTHLY_UPGRADE_COPY,
+  dateLocaleTag,
+  itoolMembershipUrl,
+  itoolYearlyUpgradeUrl,
+  membershipTierLabel,
+  t as translate,
+  type Locale,
+  type ProMembership,
+  type ReferralSummary,
+} from "@linkshell/client-core";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { accountMembership } from "./account";
+import { accountMembership, accountReferral } from "./account";
 import { useLoad } from "./common";
 import { isDesktop, openDesktopExternal } from "./desktop";
+import { useLocale } from "./i18n";
 
-function expiry(at: string): string {
-  return new Date(at).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+function expiry(at: string, locale: Locale): string {
+  return new Date(at).toLocaleDateString(dateLocaleTag(locale), {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
 /**
@@ -18,9 +34,10 @@ export function AccountSummary({
   email,
   userId,
   disabled,
-  signOutLabel = "退出",
+  signOutLabel,
   onSignOut,
   membership,
+  locale,
 }: {
   email?: string;
   userId?: string;
@@ -29,10 +46,14 @@ export function AccountSummary({
   onSignOut(): void;
   /** Replaces the live lookup; for previews of each state. */
   membership?: ReactNode;
+  locale?: Locale;
 }) {
+  const detectedLocale = useLocale();
+  const activeLocale = locale ?? detectedLocale;
   const initial = (email ?? "?").trim().charAt(0).toUpperCase() || "?";
+  const resolvedSignOut = signOutLabel ?? translate(activeLocale, "common.signOut");
   return (
-    <div className="flex min-w-0 items-center gap-3" aria-label="iTool 账号">
+    <div className="flex min-w-0 items-center gap-3" aria-label={translate(activeLocale, "nav.account")}>
       <span
         className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
         aria-hidden
@@ -40,17 +61,19 @@ export function AccountSummary({
         {initial}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[13px] font-medium" title={email}>{email ?? "已登录"}</span>
-        {membership ?? (userId ? <MembershipLine key={userId} userId={userId} disabled={disabled} /> : null)}
+        <span className="truncate text-[13px] font-medium" title={email}>
+          {email ?? translate(activeLocale, "common.signedIn")}
+        </span>
+        {membership ?? (userId ? <MembershipLine key={userId} userId={userId} disabled={disabled} locale={activeLocale} /> : null)}
       </div>
       <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onSignOut}>
-        {signOutLabel}
+        {resolvedSignOut}
       </Button>
     </div>
   );
 }
 
-function MembershipLine({ userId, disabled }: { userId: string; disabled: boolean }) {
+function MembershipLine({ userId, disabled, locale }: { userId: string; disabled: boolean; locale?: Locale }) {
   const status = useLoad(() => accountMembership(userId), [userId]);
   const membership = status.value;
   // After a trip to itool.tech to pay, coming back to this window is when the answer may change.
@@ -77,7 +100,10 @@ function MembershipLine({ userId, disabled }: { userId: string; disabled: boolea
       loading={status.loading}
       disabled={disabled}
       onRefresh={status.reload}
-      onShop={() => { visitedShop.current = true; }}
+      onShop={() => {
+        visitedShop.current = true;
+      }}
+      locale={locale}
     />
   );
 }
@@ -88,21 +114,35 @@ export function MembershipStatus({
   disabled,
   onRefresh,
   onShop,
+  locale,
 }: {
   membership?: ProMembership;
   loading: boolean;
   disabled: boolean;
   onRefresh(): void;
   onShop?(): void;
+  locale?: Locale;
 }) {
-  if (loading && !membership) return <span className="text-xs text-muted-foreground" role="status">正在查询会员…</span>;
+  const detectedLocale = useLocale();
+  const activeLocale = locale ?? detectedLocale;
+  const t = (key: Parameters<typeof translate>[1], vars?: Parameters<typeof translate>[2]) =>
+    translate(activeLocale, key, vars);
 
+  if (loading && !membership) {
+    return (
+      <span className="text-xs text-muted-foreground" role="status">
+        {t("desktop.membership.checking")}
+      </span>
+    );
+  }
+
+  const refreshLabel = t("desktop.membership.refresh");
   const refresh = (
     <button
       type="button"
       className="inline-grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-      aria-label="刷新会员状态"
-      title="刷新会员状态"
+      aria-label={refreshLabel}
+      title={refreshLabel}
       disabled={disabled || loading}
       onClick={onRefresh}
     >
@@ -113,25 +153,63 @@ export function MembershipStatus({
   if (!membership) {
     return (
       <span className="flex items-center gap-1 text-xs text-destructive" role="alert">
-        会员状态获取失败 {refresh}
+        {t("desktop.membership.failed")} {refresh}
       </span>
     );
   }
 
   if (membership.plan === "pro") {
+    const isTrial = Boolean(membership.isTrial);
+    const rawTrialEnd = membership.trialEndsAt ?? membership.expiresAt;
+    const daysRemaining =
+      typeof membership.daysRemaining === "number"
+        ? membership.daysRemaining
+        : isTrial && rawTrialEnd && !Number.isNaN(Date.parse(rawTrialEnd))
+          ? Math.max(0, Math.ceil((Date.parse(rawTrialEnd) - Date.now()) / 86_400_000))
+          : undefined;
+    const trialExpiringSoon = isTrial && daysRemaining !== undefined && daysRemaining <= 2;
+    const upgradeCopy = MONTHLY_UPGRADE_COPY[activeLocale] ?? MONTHLY_UPGRADE_COPY.en;
     return (
       <>
-        <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-          <span className="truncate">
-            {membershipTierLabel(membership.tier)}
-            {membership.expiresAt ? ` · ${expiry(membership.expiresAt)}到期` : ""}
-          </span>
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {isTrial ? (
+            <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-medium">
+              {membershipTierLabel(membership.tier, {
+                isTrial: true,
+                daysRemaining,
+                locale: activeLocale,
+              })}
+            </Badge>
+          ) : (
+            <span className="truncate">
+              {membershipTierLabel(membership.tier, { locale: activeLocale })}
+              {membership.expiresAt ? ` · ${t("desktop.membership.expiresOn", { date: expiry(membership.expiresAt, activeLocale) })}` : ""}
+            </span>
+          )}
+          {isTrial && membership.expiresAt && (
+            <span className="truncate">
+              {t("desktop.membership.expiresOn", { date: expiry(membership.expiresAt, activeLocale) })}
+            </span>
+          )}
           {refresh}
         </span>
-        {membership.tier === "monthly" && (
+        {trialExpiringSoon && (
+          <div
+            className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-xs text-foreground"
+            role="status"
+          >
+            <span>{t("desktop.membership.trialExpiringBanner", { days: daysRemaining ?? 0 })}</span>
+            <ShopLink url={itoolMembershipUrl(activeLocale)} onShop={onShop}>
+              {t("desktop.membership.activateOfficialPlan")}
+            </ShopLink>
+          </div>
+        )}
+        {!isTrial && membership.tier === "monthly" && (
           <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-            <span className="truncate">{MONTHLY_UPGRADE_COPY.zh.unlocked} ·</span>
-            <ShopLink url={ITOOL_YEARLY_UPGRADE_URL} onShop={onShop}>{MONTHLY_UPGRADE_COPY.zh.action}</ShopLink>
+            <span className="truncate">{upgradeCopy.unlocked} ·</span>
+            <ShopLink url={itoolYearlyUpgradeUrl(activeLocale)} onShop={onShop}>
+              {upgradeCopy.action}
+            </ShopLink>
           </span>
         )}
       </>
@@ -140,10 +218,86 @@ export function MembershipStatus({
 
   return (
     <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-      <span>未开通会员 ·</span>
-      <ShopLink url={ITOOL_MEMBERSHIP_URL} onShop={onShop}>开通</ShopLink>
+      <span>{t("desktop.membership.notSubscribed")} ·</span>
+      <ShopLink url={itoolMembershipUrl(activeLocale)} onShop={onShop}>
+        {activeLocale === "zh" ? "开通" : t("desktop.membership.subscribeAction")}
+      </ShopLink>
       {refresh}
     </span>
+  );
+}
+
+/**
+ * Invite Friends growth card: displays the signed-in user's referral code, invited/rewarded
+ * summary, and 1-click copy share URL.
+ */
+export function ReferralCard({
+  userId,
+  referral: initialReferral,
+  disabled,
+  locale,
+}: {
+  userId?: string;
+  referral?: ReferralSummary;
+  disabled?: boolean;
+  locale?: Locale;
+}) {
+  const detectedLocale = useLocale();
+  const activeLocale = locale ?? detectedLocale;
+  const t = (key: Parameters<typeof translate>[1], vars?: Parameters<typeof translate>[2]) =>
+    translate(activeLocale, key, vars);
+  const loaded = useLoad(
+    () => (initialReferral ? Promise.resolve(initialReferral) : userId ? accountReferral(userId, activeLocale) : Promise.resolve(undefined)),
+    [userId, activeLocale, initialReferral],
+  );
+  const summary = initialReferral ?? loaded.value;
+  const [copied, setCopied] = useState(false);
+
+  if (!summary && loaded.loading) return null;
+  if (!summary) return null;
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(summary.shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API unavailable in non-secure context; ignore silently.
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
+          <Gift className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{t("desktop.membership.referralTitle")}</span>
+        </div>
+        <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
+          {summary.code}
+        </Badge>
+      </div>
+      <p className="text-muted-foreground leading-relaxed">{t("desktop.membership.referralDesc")}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <span className="text-muted-foreground">
+          {t("desktop.membership.referralStats", {
+            invited: summary.invited,
+            rewarded: summary.rewarded,
+            days: summary.earnedDays,
+          })}
+        </span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={disabled}
+          onClick={() => void copyLink()}
+        >
+          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          {copied ? t("desktop.membership.copiedInviteLink") : t("desktop.membership.copyInviteLink")}
+        </Button>
+      </div>
+    </div>
   );
 }
 

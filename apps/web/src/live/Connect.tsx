@@ -20,7 +20,7 @@ import { signInWithAccountOAuth } from "./account-oauth";
 import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
 import { Scan } from "./Scan";
-import { AccountSummary } from "./AccountMembership";
+import { AccountSummary, ReferralCard } from "./AccountMembership";
 import { desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
 import { SignIn } from "./SignIn";
 import { useDesktopSignIn } from "./desktop-sign-in";
@@ -65,6 +65,7 @@ export function Connect({ close }: { close: () => void }) {
           disabled={job.busy}
           onSignOut={() => void job.run(desktopLogout)}
         />
+        <ReferralCard userId={state.accountUserId} disabled={job.busy} />
         <Button disabled={blocked} onClick={() => void job.run(async () => {
           await engine.connectAccount();
           close();
@@ -93,6 +94,7 @@ export function Connect({ close }: { close: () => void }) {
           })
         }
       />
+      {state.accountUserId && <ReferralCard userId={state.accountUserId} disabled={job.busy} />}
       <p className="field-hint">
         在电脑上运行 <code>linkshell login</code> 登录同一账号，电脑就会出现在这里。
       </p>

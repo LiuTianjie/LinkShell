@@ -6,10 +6,10 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@": fileURLToPath(new URL("./src", import.meta.url).href),
       // The packages' sources, as Metro takes them: no build needed first.
-      "@linkshell/wire": fileURLToPath(new URL("../../packages/wire/src/index.ts", import.meta.url)),
-      "@linkshell/client-core": fileURLToPath(new URL("../../packages/client-core/src/index.ts", import.meta.url)),
+      "@linkshell/wire": fileURLToPath(new URL("../../packages/wire/src/index.ts", import.meta.url).href),
+      "@linkshell/client-core": fileURLToPath(new URL("../../packages/client-core/src/index.ts", import.meta.url).href),
     },
   },
   test: { include: ["test/**/*.test.ts"] },

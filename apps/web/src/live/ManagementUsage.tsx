@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentMarks } from "../../../client/src/theme/agent-marks";
 import { desktopInvoke, THIS_COMPUTER_SPACED } from "./desktop";
 import { compactNumber, wholeNumber } from "./management-model";
+import { useT } from "./i18n";
 
 type Days = 1 | 7 | 30;
 type Metric = "tokens" | "records";
@@ -57,6 +58,7 @@ function Tip({ tip, children }: { tip: ReactNode; children: ReactNode }) {
 
 /** The usage page: a port of LinkShell.app's DesktopUsageView, over the Host's `usage.summary`. */
 export function ManagementUsage() {
+  const t = useT();
   const [days, setDays] = useState<Days>(7);
   const [agent, setAgent] = useState("all");
   const [metric, setMetric] = useState<Metric>("tokens");
@@ -86,6 +88,9 @@ export function ManagementUsage() {
   const peakDay = daily.reduce<Day | undefined>((best, day) => (valueOf(day) > (best ? valueOf(best) : 0) ? day : best), undefined);
   const unit = metric === "tokens" ? "Token" : "条记录";
   const empty = report?.totals.records === 0;
+  const estimatedCostUsd = report?.estimatedCostUsd ?? report?.totals.estimatedCostUsd ?? 0;
+  const remoteTurns = report?.remoteStats?.remoteTurns ?? 0;
+  const remoteApprovals = report?.remoteStats?.remoteApprovals ?? 0;
   const label = (id: string) => agents.find((entry) => entry.id === id)?.label ?? id;
   const current = agents.find((entry) => entry.id === agent);
   const missing = agents.filter((entry) => entry.status === "no_data");
@@ -97,19 +102,19 @@ export function ManagementUsage() {
   return (
     <div className="management-usage">
       <PageHeader
-        title="用量统计"
+        title={t("usage.title")}
         detail={`${THIS_COMPUTER_SPACED}的 Token 与模型分布`}
         actions={<>
-          {loading && <LoaderCircle className="animate-spin management-muted" size={16} aria-label="正在读取" />}
+          {loading && <LoaderCircle className="animate-spin management-muted" size={16} aria-label={t("common.loading")} />}
           <Button variant="ghost" size="sm" disabled={loading} onClick={() => setRevision((value) => value + 1)}>
-            <RefreshCw />同步
+            <RefreshCw />{t("common.refresh")}
           </Button>
         </>}
       />
       <div className="management-usage-filters">
         <Tabs value={agent} onValueChange={setAgent}>
           <TabsList variant="line" aria-label="Agent">
-            <TabsTrigger value="all">全部</TabsTrigger>
+            <TabsTrigger value="all">{t("session.outlineAll")}</TabsTrigger>
             {/* Agents with nothing recorded (not installed, or never used) are named in 总用量's tooltip instead. */}
             {agents.filter((entry) => entry.status !== "no_data" || entry.id === agent).map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id} title={entry.label}>
@@ -120,9 +125,9 @@ export function ManagementUsage() {
         </Tabs>
         <Tabs value={String(days)} onValueChange={(value) => setDays(Number(value) as Days)}>
           <TabsList variant="line" aria-label="时间范围">
-            <TabsTrigger value="1">今天</TabsTrigger>
-            <TabsTrigger value="7">7 天</TabsTrigger>
-            <TabsTrigger value="30">30 天</TabsTrigger>
+            <TabsTrigger value="1">{t("usage.days1")}</TabsTrigger>
+            <TabsTrigger value="7">{t("usage.days7")}</TabsTrigger>
+            <TabsTrigger value="30">{t("usage.days30")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -131,7 +136,7 @@ export function ManagementUsage() {
       {!report && !error && (
         <div className="management-usage-skeleton" role="status" aria-label="正在读取用量">
           <div className="management-facts">
-            {[0, 1, 2, 3].map((key) => (
+            {[0, 1, 2, 3, 4].map((key) => (
               <div className="management-fact" key={key}>
                 <Skeleton className="h-3 w-16" />
                 <Skeleton className="h-6 w-24" />
@@ -166,7 +171,7 @@ export function ManagementUsage() {
           {empty && <p className="management-footnote">所选范围暂无可用数据；未上报用量不等于零消耗。</p>}
           <div className="management-facts">
             <Fact
-              label="总用量"
+              label={t("usage.totalTokens")}
               value={compactNumber(report.totals.totalTokens)}
               unit="Token"
               empty={empty}
@@ -177,8 +182,14 @@ export function ManagementUsage() {
                 <span>本地日志统计，不代表账单或剩余额度</span>
               </>}
             />
+            <Fact
+              label={t("usage.estimatedApiValue")}
+              value={`$${estimatedCostUsd.toFixed(2)}`}
+              empty={empty}
+              tip={t("usage.subscriptionReferenceNote")}
+            />
+            <Fact label={t("usage.sessions")} value={wholeNumber(report.totals.sessions)} empty={empty} tip="所选 Agent 和时间范围内的会话" />
             <Fact label="用量记录" value={wholeNumber(report.totals.records)} empty={empty} tip="本地日志中的去重用量记录，并非网络请求数" />
-            <Fact label="会话" value={wholeNumber(report.totals.sessions)} empty={empty} tip="所选 Agent 和时间范围内的会话" />
             <Fact
               label="缓存读取占比"
               value={`${(report.totals.cacheReadTokens / Math.max(1, report.totals.totalTokens) * 100).toFixed(1)}%`}
@@ -186,6 +197,21 @@ export function ManagementUsage() {
               tip="缓存读取 Token / 总 Token，不等同于请求缓存命中率"
             />
           </div>
+          {!empty && (
+            <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5 text-sm">
+              <p className="font-medium text-foreground">
+                {t("usage.roiSummary", {
+                  days,
+                  turns: wholeNumber(remoteTurns),
+                  approvals: wholeNumber(remoteApprovals),
+                  cost: estimatedCostUsd.toFixed(2),
+                })}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t("usage.subscriptionReferenceNote")}
+              </p>
+            </div>
+          )}
 
           <section className="management-section" aria-label="使用趋势">
             <div className="management-section-head">
@@ -236,7 +262,8 @@ export function ManagementUsage() {
                       <th scope="col"><Tip tip="不含缓存读取与写入"><span tabIndex={0}>输入</span></Tip></th>
                       <th scope="col">输出</th>
                       <th scope="col">缓存读取</th>
-                      <th scope="col">总 Token</th>
+                      <th scope="col">{t("usage.totalTokens")}</th>
+                      <th scope="col">{t("usage.estimatedApiValue")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -250,6 +277,7 @@ export function ManagementUsage() {
                         {/* Agents that don't report cache reads count them as 0: a dash says "not known". */}
                         <td title={entry.cacheReadTokens ? wholeNumber(entry.cacheReadTokens) : "未上报"}>{entry.cacheReadTokens ? compactNumber(entry.cacheReadTokens) : "—"}</td>
                         <td title={wholeNumber(entry.totalTokens)}>{compactNumber(entry.totalTokens)}</td>
+                        <td>{entry.estimatedCostUsd !== undefined ? `$${entry.estimatedCostUsd.toFixed(2)}` : "—"}</td>
                       </tr>
                     ))}
                   </tbody>

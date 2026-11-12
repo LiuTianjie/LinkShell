@@ -18,6 +18,7 @@ export interface UseVoiceInputOptions {
   onChangeText: (next: string) => void;
   onSendAfterStop?: (finalText: string) => void;
   onError?: (message: string) => void;
+  localeId?: string;
 }
 
 export interface VoiceInputController {
@@ -52,7 +53,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): VoiceInputControll
         if (!permission.granted) return { ok: false, reason: "请在系统设置中允许 LinkShell 使用麦克风" };
         if (!isCurrent() || !mounted.current || AppState.currentState !== "active") return { ok: false };
       }
-      return startNativeSpeech();
+      return startNativeSpeech(callbacks.current.localeId);
     },
     stop: stopNativeSpeech,
     cancel: cancelNativeSpeech,

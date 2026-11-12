@@ -44,6 +44,16 @@ export type { LiveActivityPayload, LiveActivityAction, WatchSnapshot, WatchComma
 
 export interface NativeLiveActivityRegistration { activityId: string; computerKey: string; token: string }
 
+export interface AndroidStatusNotificationPayload {
+  active: boolean;
+  title?: string;
+  subtitle?: string;
+  computerName?: string;
+  deepLink?: string;
+  urgent?: boolean;
+  ongoing?: boolean;
+}
+
 export interface NativeWatchStatus {
   supported: boolean;
   activated?: boolean;
@@ -58,6 +68,10 @@ interface NativeLayoutModuleType {
   startSpeech?: (localeId?: string | null) => Promise<{ ok: boolean; reason?: string }>;
   stopSpeech?: () => Promise<{ text: string } | void>;
   cancelSpeech?: () => Promise<void>;
+  speakText?: (text: string, localeId?: string | null) => Promise<void>;
+  stopSpeaking?: () => Promise<void>;
+  syncStatusNotification?: (payload: AndroidStatusNotificationPayload) => Promise<boolean>;
+  cancelStatusNotification?: () => Promise<void>;
   setShortcutItems?: (items: ShortcutItemInput[]) => Promise<void>;
   isLiveActivityAvailable?: () => Promise<boolean>;
   syncLiveActivity?: (payload: LiveActivityPayload) => Promise<boolean>;
@@ -67,6 +81,7 @@ interface NativeLayoutModuleType {
   liveActivityPushURL?: string;
   getLiveActivityPushRegistration?: () => Promise<NativeLiveActivityRegistration | null>;
   getLiveActivityPushRegistrations?: () => Promise<NativeLiveActivityRegistration[]>;
+  getLiveActivityPushToStartToken?: () => Promise<string | null>;
   setLiveActivityPushReady?: (id: string) => Promise<void>;
   getWatchStatus?: () => Promise<NativeWatchStatus>;
   syncWatchSnapshot?: (payload: WatchSnapshot) => Promise<boolean>;
@@ -104,6 +119,29 @@ export function cancelNativeSpeech(): Promise<void> {
 
 export function hasNativeSpeechSupport(): boolean {
   return typeof nativeLayout?.startSpeech === "function";
+}
+
+export function hasNativeTtsSupport(): boolean {
+  return typeof nativeLayout?.speakText === "function";
+}
+
+export function speakNativeText(text: string, localeId?: string): Promise<void> {
+  if (!text.trim()) return Promise.resolve();
+  return nativeLayout?.speakText?.(text, localeId ?? null) ?? Promise.resolve();
+}
+
+export function stopNativeSpeaking(): Promise<void> {
+  return nativeLayout?.stopSpeaking?.() ?? Promise.resolve();
+}
+
+export function syncNativeAndroidStatusNotification(payload: AndroidStatusNotificationPayload): Promise<boolean> {
+  if (Platform.OS !== "android") return Promise.resolve(false);
+  return nativeLayout?.syncStatusNotification?.(payload) ?? Promise.resolve(false);
+}
+
+export function cancelNativeAndroidStatusNotification(): Promise<void> {
+  if (Platform.OS !== "android") return Promise.resolve();
+  return nativeLayout?.cancelStatusNotification?.() ?? Promise.resolve();
 }
 
 export function subscribeNativeSpeech(handlers: {
@@ -163,6 +201,20 @@ export function subscribeNativeLiveActivityTokens(listener: (event: { activityId
   if (!nativeLayout?.getLiveActivityPushRegistration || !nativeLayout.addListener) return () => {};
   const sub = nativeLayout.addListener("onLiveActivityPushToken", listener);
   return () => sub.remove();
+}
+
+export function getNativeLiveActivityPushToStartToken(): Promise<string | null> {
+  return nativeLayout?.getLiveActivityPushToStartToken?.() ?? Promise.resolve(null);
+}
+
+export function subscribeNativeLiveActivityPushToStartToken(listener: (event: { token?: string }) => void): () => void {
+  if (!nativeLayout?.getLiveActivityPushToStartToken || !nativeLayout.addListener) return () => {};
+  try {
+    const sub = nativeLayout.addListener("onLiveActivityPushToStartToken", listener);
+    return () => sub.remove();
+  } catch {
+    return () => {};
+  }
 }
 
 export function endNativeLiveActivity(): Promise<void> {

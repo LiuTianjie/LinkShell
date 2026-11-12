@@ -21,9 +21,11 @@ async function git(cwd: string, args: string[], timeout = 60_000): Promise<strin
 export async function gitInfo(path: string): Promise<GitInfo | undefined> {
   try {
     const root = normalize(await git(path, ["rev-parse", "--show-toplevel"]));
-    const branch = await git(path, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "");
-    const head = await git(path, ["rev-parse", "--short", "HEAD"]).catch(() => "");
-    const status = await git(path, ["status", "--porcelain"]);
+    const [branch, head, status] = await Promise.all([
+      git(path, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => ""),
+      git(path, ["rev-parse", "--short", "HEAD"]).catch(() => ""),
+      git(path, ["status", "--porcelain"]),
+    ]);
     return { root, branch: branch || undefined, head: head || undefined, dirty: status.length > 0 };
   } catch {
     return undefined;

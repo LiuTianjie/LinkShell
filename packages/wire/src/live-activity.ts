@@ -49,6 +49,41 @@ export const liveActivitySubscriptionSchema = z.object({
 });
 export type LiveActivitySubscription = z.infer<typeof liveActivitySubscriptionSchema>;
 
+export const liveActivityPlatformSchema = z.enum(["ios", "android"]);
+export type LiveActivityPlatform = z.infer<typeof liveActivityPlatformSchema>;
+
+/**
+ * Registers an iOS 17.2+ ActivityKit `pushToStartToken` (or Android background wakeup endpoint)
+ * so the host can start a Live Activity or wakeup alert even when the app was never opened first.
+ */
+export const liveActivityPushToStartSchema = z.object({
+  deviceId: z.string().min(1).max(256),
+  pushToStartToken: z.string().min(1).max(1024),
+  platform: liveActivityPlatformSchema,
+  serviceUrl: z.url().max(256),
+  grant: z.string().regex(/^[a-f0-9]{64}$/),
+  expiresAt: z.number().int().positive(),
+  computerKey: z.string().min(1).max(512),
+});
+export type LiveActivityPushToStart = z.infer<typeof liveActivityPushToStartSchema>;
+
+export const wakeupEventTypeSchema = z.enum(["approval", "question", "error", "completed"]);
+export type WakeupEventType = z.infer<typeof wakeupEventTypeSchema>;
+
+/**
+ * Zero-plaintext wakeup notice payload: carries only routing identifiers and transition kind,
+ * never source code, file paths, or prompt text, preserving end-to-end privacy.
+ */
+export const wakeupNoticeSchema = z.object({
+  machineId: z.string().min(1).max(256),
+  sessionId: z.string().min(1).max(256),
+  eventType: wakeupEventTypeSchema,
+  createdAt: z.number().int().positive(),
+});
+export type WakeupNotice = z.infer<typeof wakeupNoticeSchema>;
+export const liveActivityWakeupNoticeSchema = wakeupNoticeSchema;
+export type LiveActivityWakeupNotice = WakeupNotice;
+
 // ActivityKit accepts at most 4 KB. Preserve request identifiers exactly; drop
 // whole buttons when necessary, so a truncated choice can never be submitted.
 export function liveActivityContent(payload: LiveActivityPayload): LiveActivityContentState {

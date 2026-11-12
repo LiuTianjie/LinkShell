@@ -19,7 +19,7 @@ import {
   Smartphone,
   type LucideIcon,
 } from "lucide-react";
-import { MONTHLY_UPGRADE_COPY, membershipTierLabel } from "@linkshell/client-core";
+import { MONTHLY_UPGRADE_COPY, dateLocaleTag, membershipTierLabel } from "@linkshell/client-core";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -96,6 +96,8 @@ import {
   splitPath,
   type ManagePage,
 } from "./management-model";
+import { ReferralCard } from "./AccountMembership";
+import { LanguageTabs, useLocale, useT } from "./i18n";
 import { ManagementPairing } from "./ManagementPairing";
 import { ManagementUsage } from "./ManagementUsage";
 import { SignIn } from "./SignIn";
@@ -410,6 +412,11 @@ function Account({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
         </SettingRow>
         {signedIn && <Membership state={state} />}
       </div>
+      {signedIn && account?.userId && (
+        <div className="pt-2">
+          <ReferralCard userId={account.userId} disabled={state.busy} />
+        </div>
+      )}
       {state.accountMessage && <Note>{state.accountMessage}</Note>}
       <SignInDialog open={signingIn && !signedIn} close={() => setSigningIn(false)} />
     </Group>
@@ -533,40 +540,68 @@ function SignInDialog({ open, close }: { open: boolean; close: () => void }) {
 }
 
 function Membership({ state }: { state: ManagementState }) {
+  const locale = useLocale();
+  const t = useT();
   const membership = membershipOf(state.snapshot?.account);
+  const upgradeCopy = MONTHLY_UPGRADE_COPY[locale] ?? MONTHLY_UPGRADE_COPY.en;
+  const trialExpiring = membership.kind === "pro" && membership.isTrial && (membership.daysRemaining ?? 99) <= 2;
   return (
     <>
       <SettingRow
         title="会员"
         detail={membership.kind === "pro"
-          ? `${membership.expiresAt.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}到期`
-          : membership.kind === "free" ? "官方网关需要 iTool 会员" : state.checkingMembership ? "正在查询会员状态…" : "会员状态暂不可用"}
+          ? t("desktop.membership.expiresOn", {
+              date: membership.expiresAt.toLocaleDateString(dateLocaleTag(locale), {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }),
+            })
+          : membership.kind === "free" ? "官方网关需要 iTool 会员" : state.checkingMembership ? t("desktop.membership.checking") : "会员状态暂不可用"}
       >
         {/* Membership is not a state: a neutral badge. */}
-        {membership.kind === "pro" ? <Badge variant="secondary">{membershipTierLabel(membership.tier)}</Badge> : membership.kind === "free" ? <span className="management-value">普通账户</span> : null}
+        {membership.kind === "pro" ? (
+          <Badge variant="secondary">
+            {membershipTierLabel(membership.tier, {
+              isTrial: membership.isTrial,
+              daysRemaining: membership.daysRemaining,
+              locale,
+            })}
+          </Badge>
+        ) : membership.kind === "free" ? (
+          <span className="management-value">{t("desktop.membership.notSubscribed")}</span>
+        ) : null}
         {state.checkingMembership
           ? <LoaderCircle className="animate-spin management-muted" size={16} aria-hidden />
           : (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="刷新会员状态" disabled={state.busy} onClick={refreshAccount}><RefreshCw /></Button>
+                <Button variant="ghost" size="icon" aria-label={t("desktop.membership.refresh")} disabled={state.busy} onClick={refreshAccount}><RefreshCw /></Button>
               </TooltipTrigger>
-              <TooltipContent>刷新会员状态</TooltipContent>
+              <TooltipContent>{t("desktop.membership.refresh")}</TooltipContent>
             </Tooltip>
           )}
       </SettingRow>
-      {membership.kind === "pro" && membership.tier === "monthly" && (
+      {trialExpiring && (
+        <SettingRow
+          title={t("desktop.membership.trialExpiringBanner", { days: membership.daysRemaining ?? 0 })}
+          onClick={() => openMembershipPage(locale)}
+        >
+          <span className="text-link">{t("desktop.membership.activateOfficialPlan")}</span>
+        </SettingRow>
+      )}
+      {membership.kind === "pro" && !membership.isTrial && membership.tier === "monthly" && (
         // Monthly covers two of the iTool products: one quiet row, the way to the rest at its end.
-        <SettingRow title={MONTHLY_UPGRADE_COPY.zh.unlocked} onClick={openYearlyUpgradePage}>
-          <span className="text-link">{MONTHLY_UPGRADE_COPY.zh.action}</span>
+        <SettingRow title={upgradeCopy.unlocked} onClick={() => openYearlyUpgradePage(locale)}>
+          <span className="text-link">{upgradeCopy.action}</span>
         </SettingRow>
       )}
       {membership.kind === "free" && (
         <SettingRow
-          title="开通 iTool 会员"
+          title={t("desktop.membership.subscribeAction")}
           detail="月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品"
         >
-          <Button size="sm" variant="secondary" onClick={openMembershipPage}>开通 iTool 会员</Button>
+          <Button size="sm" variant="secondary" onClick={() => openMembershipPage(locale)}>{t("desktop.membership.subscribeAction")}</Button>
         </SettingRow>
       )}
     </>
@@ -767,14 +802,24 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
 
 function SettingsPage({ facts }: { facts: Facts }) {
   const { state, standalone } = facts;
+  const t = useT();
   const [appearance, setAppearance] = useDesktopAppearance();
   const permissions = state.permissions;
   // `reveal` takes an absolute path that exists; the fallback `~/.linkshell` is neither.
   const revealable = /^(?:\/|[A-Za-z]:[\\/])/.test(facts.home);
+  const keepAwakeMode: "smart" | "always" | "off" =
+    state.settings.keepAwake === "always" || state.settings.keepAwake === true
+      ? "always"
+      : state.settings.keepAwake === "off" || state.settings.keepAwake === false
+        ? "off"
+        : "smart";
   return (
     <>
       <Group title={standalone ? "外观与启动" : "外观"}>
         <div className="management-rows">
+          <SettingRow title={t("locale.label")}>
+            <LanguageTabs />
+          </SettingRow>
           <SettingRow title="外观">
             <Tabs value={appearance} onValueChange={(value) => setAppearance(value as Appearance)}>
               <TabsList variant="line" aria-label="外观">
@@ -805,14 +850,35 @@ function SettingsPage({ facts }: { facts: Facts }) {
         {state.loginItemMessage && <Note tone="warning">{state.loginItemMessage}</Note>}
         <Note>窗口关闭后，LinkShell 留在{isWindowsDesktop ? "任务栏的通知区域" : "菜单栏"}。退出界面不会停止 Host 或代理任务。</Note>
       </Group>
-      {typeof state.settings.keepAwake === "boolean" && (
-        <Group title="保持在线">
+      {state.settings.keepAwake !== undefined && (
+        <Group title={t("power.keepAwake")}>
           <div className="management-rows">
-            <SettingRow title="运行时保持唤醒" detail="LinkShell 留在菜单栏时防止 Mac 因闲置而睡眠，显示器仍可自动熄屏">
-              <Switch checked={state.settings.keepAwake} onCheckedChange={(value) => void setDesktopSetting("keepAwake", value)} aria-label="运行时保持唤醒" />
+            <SettingRow
+              title={t("power.keepAwake")}
+              detail={
+                keepAwakeMode === "smart"
+                  ? t("power.keepAwakeSmartDesc")
+                  : keepAwakeMode === "always"
+                    ? t("power.keepAwakeAlwaysDesc")
+                    : t("power.keepAwakeOffDesc")
+              }
+            >
+              <Tabs
+                value={keepAwakeMode}
+                onValueChange={(value) => {
+                  const next = value === "always" || value === "off" ? value : "smart";
+                  void setDesktopSetting("keepAwake", next);
+                }}
+              >
+                <TabsList variant="line" aria-label={t("power.keepAwake")}>
+                  <TabsTrigger value="smart">{t("power.keepAwakeSmart")}</TabsTrigger>
+                  <TabsTrigger value="always">{t("power.keepAwakeAlways")}</TabsTrigger>
+                  <TabsTrigger value="off">{t("power.keepAwakeOff")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </SettingRow>
           </div>
-          <Note>关闭此开关或退出 LinkShell 后恢复系统休眠设置。不能阻止手动睡眠、低电量或合盖触发的睡眠；合盖使用需满足 Mac 的外接显示器与供电条件。</Note>
+          <Note>关闭后或退出 LinkShell 后恢复系统休眠设置。智能模式仅在活跃会话、终端或屏幕连接时防休眠；不能阻止手动睡眠、低电量或合盖触发的睡眠。</Note>
         </Group>
       )}
       <Group title={`让手机查看和控制${THIS_COMPUTER}`}>

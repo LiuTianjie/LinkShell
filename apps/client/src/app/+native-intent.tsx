@@ -6,6 +6,9 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
     const internal = url.protocol === "linkshell:" || url.protocol === "linkshell-dev:";
     const route = `${url.host ? `/${url.host}` : ""}${url.pathname}`;
     if (internal && route === "/auth-callback") return null;
+    if (internal && (route === "/quick-voice" || route === "/approve-latest")) {
+      return `/?shortcut=${route.slice(1)}`;
+    }
     // Expo's custom-scheme parser decodes query values before parsing the route.
     // Our computer keys contain '#', so that would turn the machine and session
     // into a fragment. A relative path bypasses that lossy scheme conversion.

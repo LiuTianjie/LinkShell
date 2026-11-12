@@ -7,6 +7,7 @@ import { buildInstaller } from './installer.mjs';
 import { ensureMedia } from './media-runtime.mjs';
 import { assembleElectron } from './electron.mjs';
 import { isRuntimeDependency, isRuntimePath, pruneRuntime } from './prune-runtime.mjs';
+import { signWindowsBinaries } from './sign.mjs';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Package on Windows x64.');
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,6 +108,7 @@ cpSync(join(app, 'build/LinkShell.Screen.exe'), join(bundle, 'LinkShell.Screen.e
 // A reused staging directory may still hold the earlier WebView2 window's loader.
 for (const file of ['Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.Wpf.dll', 'WebView2Loader.dll', 'WEBVIEW2-LICENSE.txt', 'WEBVIEW2-NOTICE.txt']) rmSync(join(bundle, file), { force: true });
 await assembleElectron(bundle, version);
+signWindowsBinaries([join(bundle, 'LinkShell.exe'), join(bundle, 'LinkShell.Screen.exe')]);
 // Delete only the owned staged assets so an upgrade never carries stale web bundles.
 const workspaceAssets = join(bundle, 'workspace');
 rmSync(workspaceAssets, { recursive: true, force: true });

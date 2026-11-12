@@ -209,6 +209,7 @@ function viewer({ framed = false, native = false, relayFallback = false, platfor
     ? nativeMessages.filter((message) => message.kind === "input").map((message) => message.message)
     : [...messages(), ...pcs.flatMap((pc) => pc.channels.flatMap((channel) => channel.messages))].filter((message) => ["move", "down", "up", "key", "text", "scroll"].includes(message.t));
   return {
+    window: sandbox,
     sockets, pcs, elements, document, reports, reloads, nativeMessages, messages, configure, input, settle, receive,
     session: (state: Message) => sandbox.linkshellSession(state),
     capabilities: () => receive({ session: { t: "capabilities", version: 1, configure: true, pause: true, retainMs: 120000 } }),
@@ -657,5 +658,47 @@ describe("the running viewer screen session", () => {
     expect(ui.reports.filter((message) => message.type === "screenFallback")).toHaveLength(1);
     expect(ui.reports.filter((message) => message.type === "screenClosed")).toEqual([]);
     expect(ui.pcs[0]!.closeCount).toBe(1);
+  });
+
+  it("localizes controls across zh, en, and ja and persists runtime language changes", async () => {
+    const en = viewer({ search: "&lang=en" }); await en.ready();
+    expect(en.elements.get("connheadtext")!.textContent).toBe("Connection & Privacy");
+    expect(en.elements.get("pastecomputer")!.querySelector("b")!.textContent).toBe("Paste to Computer");
+    expect(en.elements.get("privacycurtain")!.querySelector("b")!.textContent).toBe("Privacy Curtain");
+
+    const jaTile = en.elements.get("langs")!.querySelectorAll(".tile").find((tile) => tile.dataset.lang === "ja")!;
+    jaTile.emit("pointerdown"); jaTile.emit("pointerup");
+    expect(en.elements.get("connheadtext")!.textContent).toBe("接続とプライバシー");
+    expect(en.elements.get("copycomputer")!.querySelector("b")!.textContent).toBe("PC のクリップボード取得");
+    expect(en.reports.some((message) => message.type === "locale" && message.locale === "ja")).toBe(true);
+  });
+
+  it("bridges encrypted clipboard read/write and privacy curtain + lock-on-disconnect toggles", async () => {
+    const ui = viewer(); await ui.ready();
+    const tapTile = (id: string) => {
+      const tile = ui.elements.get(id)!;
+      tile.emit("pointerdown"); tile.emit("pointerup");
+    };
+    tapTile("copycomputer");
+    expect(ui.reports.some((message) => message.type === "clipboardRead")).toBe(true);
+
+    tapTile("pastecomputer");
+    expect(ui.reports.some((message) => message.type === "clipboardPasteToComputer")).toBe(true);
+    ui.window.linkshellClipboard("secret-token-123");
+    expect(ui.reports.some((message) => message.type === "clipboardWrite" && message.text === "secret-token-123")).toBe(true);
+
+    ui.window.linkshellRemoteClipboard({ text: "from-mac" });
+    expect(ui.reports.some((message) => message.type === "setDeviceClipboard" && message.text === "from-mac")).toBe(true);
+
+    tapTile("privacycurtain");
+    expect(ui.reports.some((message) => message.type === "screenPrivacy" && message.curtain === true)).toBe(true);
+    expect(ui.elements.get("privacycurtain")!.classList.contains("on")).toBe(true);
+
+    tapTile("lockdisconnect");
+    expect(ui.reports.some((message) => message.type === "screenPrivacy" && message.lockOnDisconnect === true)).toBe(true);
+    expect(ui.elements.get("lockdisconnect")!.classList.contains("on")).toBe(true);
+
+    const win = viewer({ platform: "win32" });
+    expect(win.elements.get("privacy")!.classList.contains("gone")).toBe(true);
   });
 });

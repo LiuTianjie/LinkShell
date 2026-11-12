@@ -3,11 +3,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { signWindowsBinaries } from './sign.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(app, '../..');
 
-export function buildInstaller(archive, output, { main = 'LinkShell.Windows.Installer', sources = [] } = {}) {
+export function buildInstaller(archive, output, { main = 'LinkShell.Windows.Installer', sources = [], sign = true } = {}) {
   if (process.platform !== 'win32' || !existsSync(archive)) throw new Error('Build the installer on Windows with an existing portable ZIP.');
   const version = JSON.parse(readFileSync(join(app, 'package.json'))).version;
   const versionFile = join(app, 'build/installer-version.txt');
@@ -26,6 +27,7 @@ export function buildInstaller(archive, output, { main = 'LinkShell.Windows.Inst
   const result = spawnSync(join(framework, 'csc.exe'), args, { windowsHide: true, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Installer compiler failed (${result.status}).`);
+  if (sign) signWindowsBinaries([output]);
   writeFileSync(`${output}.sha256`, `${createHash('sha256').update(readFileSync(output)).digest('hex')}  ${basename(output)}\n`);
   return output;
 }

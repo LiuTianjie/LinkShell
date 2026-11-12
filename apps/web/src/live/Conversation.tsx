@@ -67,6 +67,7 @@ export function Conversation({
   onFork,
   onTerminal,
   footer,
+  focusTarget,
 }: {
   view: SessionView;
   sessionId: string;
@@ -79,6 +80,7 @@ export function Conversation({
   onFork: (id: string) => void;
   onTerminal: (id: string) => void;
   footer: React.ReactNode;
+  focusTarget?: { itemId: string; nonce: number };
 }) {
   // Opening a session lands on its newest message at once; later growth follows smoothly.
   const { scrollRef, contentRef, scrollToBottom, isAtBottom, state } = useStickToBottom({
@@ -260,6 +262,32 @@ export function Conversation({
     if (settled && topVisible && view.startSeq > 0 && failedAt !== view.startSeq) void load();
   }, [settled, topVisible, view.startSeq, failedAt, load, finished]);
 
+  useEffect(() => {
+    if (!focusTarget) return;
+    const folded = rows.find(
+      (row) => row.type === "steps" && row.steps.some((step) => step.id === focusTarget.itemId),
+    );
+    if (folded && folded.type === "steps" && !openSteps.has(folded.key)) {
+      setOpenSteps((previous) => {
+        const next = new Set(previous);
+        next.add(folded.key);
+        return next;
+      });
+    }
+    const frame = requestAnimationFrame(() => {
+      const container = list.current;
+      if (!container) return;
+      const nodes = container.querySelectorAll<HTMLElement>("[data-item-id]");
+      for (const node of nodes) {
+        if (node.getAttribute("data-item-id") === focusTarget.itemId) {
+          node.scrollIntoView({ behavior: "smooth", block: "center" });
+          break;
+        }
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusTarget, rows, openSteps]);
+
   return (
     <div className="conversation-column">
       <div ref={scrollRef} className="conversation" data-testid="conversation-scroller">
@@ -299,6 +327,7 @@ export function Conversation({
               ) : (
                 <TimelineEntry
                   key={row.item.id}
+                  anchorId={row.item.id}
                   item={row.item}
                   sessionId={sessionId}
                   agent={agent}

@@ -243,12 +243,16 @@ describe("startGateway", () => {
 
     const anonymous = peer(ws, "machine");
     await until(() => anonymous.errors.some((error) => error.code === "not_admitted"));
-    expect(anonymous.errors.find((error) => error.code === "not_admitted")?.message).toContain("linkshell login");
+    const anonMessage = anonymous.errors.find((error) => error.code === "not_admitted")?.message;
+    expect(anonMessage).toContain("linkshell login");
+    expect(anonMessage).toContain("7-day free trial");
     anonymous.relay.stop();
 
     const lapsed = peer(ws, "machine", "token-lapsed");
     await until(() => lapsed.errors.some((error) => error.code === "not_admitted"));
-    expect(lapsed.errors.find((error) => error.code === "not_admitted")?.message).toContain("https://www.itool.tech/zh/pro?from=linkshell");
+    const lapsedMessage = lapsed.errors.find((error) => error.code === "not_admitted")?.message;
+    expect(lapsedMessage).toContain("https://www.itool.tech/pro?from=linkshell");
+    expect(lapsedMessage).toContain("7-day free trial");
     lapsed.relay.stop();
 
     expect(await peer(ws, "machine", "token-active").relay.waitOnline(5000)).toBe(true);

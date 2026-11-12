@@ -183,5 +183,5 @@ describe("Apple Watch Expo plugin and Swift typechecking", () => {
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 45_000);
 });

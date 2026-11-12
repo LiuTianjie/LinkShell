@@ -18,6 +18,10 @@ export interface LoginResult {
   plan: "pro" | "free";
   /** The iTool membership tier when `plan` is "pro". */
   tier?: "monthly" | "yearly";
+  /** True when the active entitlement comes from the 7-day sign-up trial. */
+  isTrial?: boolean;
+  /** ISO timestamp when the sign-up trial ends, when reported by the backend. */
+  trialEndsAt?: string;
   email: string;
   userId: string;
   accessToken: string;
@@ -98,7 +102,16 @@ export async function completeLogin(grant: SessionGrant, options: { signal?: Abo
   };
   saveAuth(tokens);
   try { cacheMembership(user.id, membership); } catch { /* A cache write cannot invalidate a completed login. */ }
-  return { success: true, plan: membership.plan === "pro" ? "pro" : "free", ...(membership.plan === "pro" && membership.tier ? { tier: membership.tier } : {}), email, userId: user.id, accessToken: grant.accessToken };
+  return {
+    success: true,
+    plan: membership.plan === "pro" ? "pro" : "free",
+    ...(membership.plan === "pro" && membership.tier ? { tier: membership.tier } : {}),
+    ...(membership.plan === "pro" && typeof membership.isTrial === "boolean" ? { isTrial: membership.isTrial } : {}),
+    ...(membership.trialEndsAt ? { trialEndsAt: membership.trialEndsAt } : {}),
+    email,
+    userId: user.id,
+    accessToken: grant.accessToken,
+  };
 }
 
 function parseGrant(body: unknown): SessionGrant | undefined {

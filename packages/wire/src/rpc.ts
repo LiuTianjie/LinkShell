@@ -3,12 +3,14 @@ import { usageQuerySchema, usageReportSchema } from "./usage.js";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import { acpAgentSettingsSchema, acpFeaturesSchema, acpRemoteAgentSchema, acpProviderSchema } from "./acp.js";
 import { editorRequestSchema, editorResultSchema } from "./editor.js";
-import { liveActivityIdSchema, liveActivitySubscriptionSchema } from "./live-activity.js";
+import { liveActivityIdSchema, liveActivityPushToStartSchema, liveActivitySubscriptionSchema, wakeupNoticeSchema } from "./live-activity.js";
 import {
   backgroundTaskSchema,
   agentInfoSchema,
   gatewayStatusSchema,
+  keepAwakeModeSchema,
   machineInfoSchema,
+  machineKeepAwakeSchema,
   machineMetricsSnapshotSchema,
   portInfoSchema,
   projectSummarySchema,
@@ -24,6 +26,7 @@ import {
 import { contentBlockSchema, sessionConfigOptionSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
 import { sideChatSchema } from "./side.js";
 import { mcpMethods } from "./rpc-mcp.js";
+import { lsaMethods } from "./lsa.js";
 
 // ── JSON-RPC 2.0 framing ─────────────────────────────────────────────
 
@@ -77,10 +80,50 @@ export const RPC_APP_ERROR = -32000;
  * 1: side conversations (`sessions.side`), `machine.info.protocol` itself.
  * 2: session terminals (`terminals.create` `sessionId`, `TerminalInfo.sessionId`).
  * 3: whole-computer CPU and physical memory sampling (`machine.metrics`).
+ * 4: smart keep-awake & battery telemetry (`machine.keepAwake`), real git working-tree
+ *    diff/revert (`git.diff`, `git.revertFile`), fast `@file` search (`fs.projectFiles`),
+ *    clipboard & screen privacy (`clipboard.*`, `screen.privacy`), push-to-start wakeup
+ *    (`liveActivities.registerPushToStart`), and LSA Phase 1 steward RPCs (`lsa.*`).
  */
-export const HOST_PROTOCOL = 3;
+export const HOST_PROTOCOL = 4;
 
 const empty = z.looseObject({});
+
+export const gitDiffFileStatusSchema = z.enum(["modified", "added", "deleted", "renamed", "untracked"]);
+export type GitDiffFileStatus = z.infer<typeof gitDiffFileStatusSchema>;
+
+export const gitDiffFileSchema = z.object({
+  path: z.string(),
+  oldPath: z.string().optional(),
+  status: gitDiffFileStatusSchema,
+  oldText: z.string(),
+  newText: z.string(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  binary: z.boolean().optional(),
+});
+export type GitDiffFile = z.infer<typeof gitDiffFileSchema>;
+
+export const gitDiffResultSchema = z.object({
+  files: z.array(gitDiffFileSchema),
+  truncated: z.boolean(),
+  branch: z.string().optional(),
+});
+export type GitDiffResult = z.infer<typeof gitDiffResultSchema>;
+
+export const projectFileEntrySchema = z.object({
+  path: z.string(),
+  relativePath: z.string(),
+  isDir: z.boolean().optional(),
+});
+export type ProjectFileEntry = z.infer<typeof projectFileEntrySchema>;
+
+export const screenPrivacyStateSchema = z.object({
+  curtain: z.boolean(),
+  lockOnDisconnect: z.boolean(),
+  supported: z.boolean(),
+});
+export type ScreenPrivacyState = z.infer<typeof screenPrivacyStateSchema>;
 
 export const directoryEntrySchema = z.object({
   name: z.string(),
@@ -133,11 +176,19 @@ const coreMethods = {
     params: z.object({ activityId: liveActivityIdSchema }),
     result: z.object({}),
   },
+  "liveActivities.registerPushToStart": {
+    params: liveActivityPushToStartSchema,
+    result: z.looseObject({ ok: z.boolean().optional() }),
+  },
   "machine.info": {
     params: empty,
     result: machineInfoSchema,
   },
   "machine.metrics": { params: empty, result: machineMetricsSnapshotSchema },
+  "machine.keepAwake": {
+    params: z.object({ mode: keepAwakeModeSchema.optional() }),
+    result: machineKeepAwakeSchema,
+  },
   "machine.rename": {
     /** Empty restores the configured default; names never change peer identities. */
     params: z.object({ name: z.string().trim().max(40) }),
@@ -508,9 +559,24 @@ const coreMethods = {
     params: z.object({ password: z.string().min(4).max(128).optional() }),
     result: z.object({ password: z.boolean() }),
   },
-  // ── Git: sessions in worktrees ──
+  // ── Git: sessions in worktrees & working-tree diffs ──
   /** What git says about `path`; no `git` when it isn't in a repository. */
   "git.info": { params: z.object({ path: z.string().min(1) }), result: z.object({ git: gitInfoSchema.optional() }) },
+  /** Real git working-tree diff (or against `base`), bounded by `maxBytes` and including untracked text files by default. */
+  "git.diff": {
+    params: z.object({
+      cwd: z.string().min(1),
+      base: z.string().optional(),
+      includeUntracked: z.boolean().optional(),
+      maxBytes: z.number().int().positive().max(10_000_000).optional(),
+    }),
+    result: gitDiffResultSchema,
+  },
+  /** Restores a tracked file or removes an untracked file strictly inside the repository root. */
+  "git.revertFile": {
+    params: z.object({ cwd: z.string().min(1), path: z.string().min(1) }),
+    result: z.object({ ok: z.boolean() }),
+  },
   /** The worktrees LinkShell made, newest first. */
   "worktrees.list": { params: empty, result: z.object({ worktrees: z.array(worktreeEntrySchema) }) },
   /** Removes a worktree and its branch. Refused (`busy`) while a session uses it, or (`dirty`) when work in it would be lost, unless `force`. */
@@ -599,6 +665,27 @@ const coreMethods = {
   "fs.search": {
     params: z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(200).default(60) }),
     result: z.object({ entries: z.array(directoryEntrySchema), truncated: z.boolean() }),
+  },
+  /** Fast project file listing under `cwd` (`git ls-files` with directory walk fallback) for `@file` autocomplete. */
+  "fs.projectFiles": {
+    params: z.object({
+      cwd: z.string().min(1),
+      query: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(2000).optional(),
+    }),
+    result: z.object({
+      files: z.array(projectFileEntrySchema),
+      truncated: z.boolean(),
+    }),
+  },
+  // ── Clipboard: encrypted host clipboard access ──
+  "clipboard.read": {
+    params: empty,
+    result: z.object({ text: z.string() }),
+  },
+  "clipboard.write": {
+    params: z.object({ text: z.string().max(2_000_000) }),
+    result: z.object({ ok: z.boolean() }),
   },
   // ── Terminals: plain shells on the host, any command, like SSH ──
   "terminals.list": {
@@ -733,6 +820,14 @@ const coreMethods = {
       problem: z.string().optional(),
     }),
   },
+  /** Privacy curtain (dim/blank physical screen while viewing remotely) and auto-lock on disconnect. */
+  "screen.privacy": {
+    params: z.object({
+      curtain: z.boolean().optional(),
+      lockOnDisconnect: z.boolean().optional(),
+    }),
+    result: screenPrivacyStateSchema,
+  },
   /** Bytes to the host's end of a stream (base64). */
   "proxy.write": {
     params: z.object({ streamId: z.string().min(1), data: z.string().max(2_000_000) }),
@@ -744,7 +839,12 @@ const coreMethods = {
   },
 } as const;
 
-export const methods: typeof coreMethods & typeof acpMethods & typeof mcpMethods = { ...coreMethods, ...acpMethods, ...mcpMethods };
+export const methods: typeof coreMethods & typeof acpMethods & typeof mcpMethods & typeof lsaMethods = {
+  ...coreMethods,
+  ...acpMethods,
+  ...mcpMethods,
+  ...lsaMethods,
+};
 
 export type MethodName = keyof typeof methods;
 export type MethodParams<M extends MethodName> = z.input<(typeof methods)[M]["params"]>;
@@ -789,6 +889,8 @@ export const notifications = {
   "proxy.data": z.object({ streamId: z.string(), data: z.string() }),
   /** The host's end of a stream closed (the server hung up, or refused). */
   "proxy.closed": z.object({ streamId: z.string(), error: z.string().optional() }),
+  /** Zero-plaintext transition wakeup metadata. */
+  "liveActivities.wakeup": wakeupNoticeSchema,
 } as const;
 
 export type NotificationName = keyof typeof notifications;

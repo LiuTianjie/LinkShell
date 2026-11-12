@@ -11,6 +11,7 @@ import {
   methods,
   type GatewayStatus,
   type MachineInfo,
+  type MachineKeepAwake,
   type MethodName,
   type MethodResult,
   type NotificationName,
@@ -18,7 +19,11 @@ import {
 } from "@linkshell/wire";
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
-import { downloadFile, listDirectory, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
+import { downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
+import { gitDiff, gitRevertFile } from "../git-diff.js";
+import { readClipboard, writeClipboard } from "../clipboard.js";
+import type { KeepAwakeManager } from "../keep-awake.js";
+import { createLsaService, type LsaService } from "../lsa/index.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
 import { DirectPeer } from "../direct.js";
@@ -63,6 +68,9 @@ export interface HostRpcServerOptions {
   log: (message: string) => void;
   liveActivities?: LiveActivityRelay;
   usage?: UsageStatistics;
+  keepAwake?: KeepAwakeManager;
+  lsa?: LsaService;
+  onLockScreen?: () => void | Promise<void>;
   shutdown?: () => void;
   /** The optional access password remote connections unlock with. */
   access?: AccessControl;
@@ -115,17 +123,34 @@ export class HostRpcServer {
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
   private readonly computerPreview: ComputerPreviewServer;
-  private readonly metrics = new MachineMetricsSampler();
+  private readonly metrics: MachineMetricsSampler;
+  private readonly lsa: LsaService;
+  private readonly ownsLsa: boolean;
+  private readonly demandListeners = new Set<() => void>();
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
+    this.metrics = new MachineMetricsSampler({
+      keepAwake: () => this.options.keepAwake?.status(),
+    });
     // LINKSHELL_ICE_SERVERS=off or LINKSHELL_TURN=off: nothing outside this network is asked to help the picture.
     this.screen = new ScreenShare(
       options.log,
       () => options.machineInfo().direct?.iceServers ?? [],
       () => (options.machineInfo().direct && process.env.LINKSHELL_TURN !== "off" ? this.gateway?.turn() : undefined),
+      options.onLockScreen,
     );
+    this.screen.onViewersChanged(() => this.notifyDemandChanged());
     const hub = options.hub;
+    this.ownsLsa = !options.lsa;
+    this.lsa =
+      options.lsa ??
+      createLsaService({
+        dbPath: ":memory:",
+        hub,
+        machineId: () => options.machineInfo().machineId,
+        log: options.log,
+      });
     this.computerPreview = new ComputerPreviewServer(hub.previews);
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
@@ -146,6 +171,10 @@ export class HostRpcServer {
       "liveActivities.unsubscribe": async (params: P<"liveActivities.unsubscribe">) => {
         await options.liveActivities?.unsubscribe(params.activityId);
         return {};
+      },
+      "liveActivities.registerPushToStart": (params: P<"liveActivities.registerPushToStart">) => {
+        if (!options.liveActivities) throw RpcError.app("not_supported", "电脑端尚不支持实时活动推送，请更新 CLI");
+        return options.liveActivities.registerPushToStart(params);
       },
       "agents.editor": (params: P<"agents.editor">) => hub.editor(params),
       "agents.acp": (params: P<"agents.acp">) => hub.acpInfo(params.agent, params.sessionId),
@@ -170,12 +199,20 @@ export class HostRpcServer {
         return info;
       },
       "machine.metrics": () => this.metrics.snapshot(),
+      "machine.keepAwake": (params: P<"machine.keepAwake">): MachineKeepAwake => {
+        if (!options.keepAwake) return { mode: params.mode ?? "off", active: false };
+        const state = params.mode ? options.keepAwake.setMode(params.mode) : options.keepAwake.status();
+        this.metrics.refreshKeepAwake();
+        return state;
+      },
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
       "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd, params.model),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
       "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),
       "git.info": async (params: P<"git.info">) => ({ git: await hub.gitInfo(params.path) }),
+      "git.diff": (params: P<"git.diff">) => gitDiff(params),
+      "git.revertFile": (params: P<"git.revertFile">) => gitRevertFile(params),
       "worktrees.list": async () => ({ worktrees: await hub.listWorktrees() }),
       "worktrees.remove": async (params: P<"worktrees.remove">) => {
         await hub.removeWorktree(params.path, params.force);
@@ -346,10 +383,13 @@ export class HostRpcServer {
       },
       "fs.list": (params: P<"fs.list">) => listDirectory(params),
       "fs.search": (params: P<"fs.search">) => searchDirectories(params),
+      "fs.projectFiles": (params: P<"fs.projectFiles">) => listProjectFiles(params),
       "fs.read": (params: P<"fs.read">) => readFile(params),
       "fs.download": (params: P<"fs.download">) => downloadFile(params),
       "fs.upload": (params: P<"fs.upload">) => uploadFile(params),
       "fs.mkdir": (params: P<"fs.mkdir">) => makeDirectory(params),
+      "clipboard.read": () => readClipboard(),
+      "clipboard.write": (params: P<"clipboard.write">) => writeClipboard(params.text),
       "terminals.list": () => ({ terminals: terminals.list() }),
       "terminals.create": (params: P<"terminals.create">) => {
         // A session's terminal starts where the session works (its worktree, if it has one).
@@ -384,6 +424,7 @@ export class HostRpcServer {
       "ports.list": async () => ({ ports: await listPorts() }),
       "screen.start": () => this.screen.start(),
       "screen.access": (params: P<"screen.access">) => this.screen.access(params.ask === true),
+      "screen.privacy": (params: P<"screen.privacy">) => this.screen.privacy(params),
       "proxy.open": async (params: P<"proxy.open">, context) => context.proxy.open(params.port, params.direct),
       "direct.offer": async (params: P<"direct.offer">, context) => ({ sdp: await context.direct.answer(params.sdp) }),
       "proxy.write": (params: P<"proxy.write">, context) => {
@@ -404,7 +445,40 @@ export class HostRpcServer {
         return launch;
       },
       ...mcpHandlers(hub),
+      ...this.lsa.rpcHandlers(),
     };
+  }
+
+  hasRemoteClients(): boolean {
+    for (const context of this.connections.values()) {
+      if (!context.local && context.unlocked) return true;
+    }
+    return false;
+  }
+
+  hasActiveScreen(): boolean {
+    return this.screen.hasActiveViewers();
+  }
+
+  refreshKeepAwakeMetrics(): void {
+    this.metrics.refreshKeepAwake();
+  }
+
+  onDemandChanged(listener: () => void): () => void {
+    this.demandListeners.add(listener);
+    return () => {
+      this.demandListeners.delete(listener);
+    };
+  }
+
+  private notifyDemandChanged(): void {
+    for (const listener of this.demandListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.options.log(`[rpc] demand listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   async start(): Promise<void> {
@@ -422,6 +496,7 @@ export class HostRpcServer {
     this.metrics.stop();
     this.screen.stop();
     this.computerPreview.stop();
+    if (this.ownsLsa) this.lsa.close();
     // A connection tidies up after itself when its socket closes, and that reaches into the hub. The close
     // comes a moment after terminate(): waited for here, so that it isn't still to come when the hub and
     // its database are gone.
@@ -513,6 +588,7 @@ export class HostRpcServer {
     if (context.unlocked) return;
     context.unlocked = true;
     this.startPushes(context);
+    if (!context.local) this.notifyDemandChanged();
   }
 
   setGateway(gateway: GatewayLink | undefined): void {
@@ -571,10 +647,15 @@ export class HostRpcServer {
         ),
       );
     });
-    if (context.unlocked) this.startPushes(context);
+    if (context.unlocked) {
+      this.startPushes(context);
+      if (!context.local) this.notifyDemandChanged();
+    }
     transport.onMessage((text) => context.peer.receive(text));
     transport.onClose(() => {
+      const wasRemoteUnlocked = !context.local && context.unlocked;
       this.connections.delete(context.peer);
+      if (wasRemoteUnlocked) this.notifyDemandChanged();
       this.listeners.delete(context);
       for (const stop of stops) stop();
       for (const [terminalId, listener] of context.terminals) this.options.terminals.detach(terminalId, listener);

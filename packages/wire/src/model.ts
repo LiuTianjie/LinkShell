@@ -302,6 +302,10 @@ export const gitInfoSchema = z.object({
   head: z.string().optional(),
   /** Uncommitted changes in the working directory (a new worktree starts from the last commit, without them). */
   dirty: z.boolean(),
+  /** Normalized git origin remote (`host/owner/repo`), when configured. */
+  remote: z.string().optional(),
+  /** First commit hash of the repository, for cross-machine repo identity. */
+  rootCommit: z.string().optional(),
 });
 export type GitInfo = z.infer<typeof gitInfoSchema>;
 
@@ -356,6 +360,23 @@ export const machineInfoSchema = z.object({
 });
 export type MachineInfo = z.infer<typeof machineInfoSchema>;
 
+export const keepAwakeModeSchema = z.enum(["smart", "always", "off"]);
+export type KeepAwakeMode = z.infer<typeof keepAwakeModeSchema>;
+
+export const machinePowerSchema = z.object({
+  onBattery: z.boolean(),
+  percent: z.number().min(0).max(100).nullable(),
+  charging: z.boolean().optional(),
+});
+export type MachinePower = z.infer<typeof machinePowerSchema>;
+
+export const machineKeepAwakeSchema = z.object({
+  mode: keepAwakeModeSchema,
+  active: z.boolean(),
+  reason: z.string().optional(),
+});
+export type MachineKeepAwake = z.infer<typeof machineKeepAwakeSchema>;
+
 /** Whole-computer resource use; CPU is a delta across all logical cores, not load average. */
 export const machineMetricsSchema = z.object({
   sampledAt: z.number().nonnegative(),
@@ -382,6 +403,10 @@ export const machineMetricsSchema = z.object({
     /** Space available to this user; excludes filesystem reservations. */
     availableBytes: z.number().nonnegative(),
   }).optional(),
+  /** Battery and AC power state on laptops; absent on desktops or older hosts. */
+  power: machinePowerSchema.optional(),
+  /** Host idle-sleep assertion state; absent on older hosts. */
+  keepAwake: machineKeepAwakeSchema.optional(),
 });
 export type MachineMetrics = z.infer<typeof machineMetricsSchema>;
 

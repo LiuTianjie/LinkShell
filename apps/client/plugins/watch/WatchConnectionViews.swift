@@ -47,24 +47,28 @@ struct WatchMembershipView: View {
   var body: some View {
     List {
       if account.session != nil {
-        Section("会员状态") {
+        Section("账户权益") {
           switch account.membership {
           case .unknown:
-            Text(account.membershipLoading ? "正在查询…" : "会员状态未确认").font(.caption)
+            Text(account.membershipLoading ? "正在查询…" : "账户状态未确认").font(.caption)
           case .free:
-            Label("普通账户", systemImage: "person.crop.circle")
+            Label("基础账户", systemImage: "person.crop.circle")
+          case .trial(let expiry, let days):
+            Label("7 天免费试用 · 剩余 \(days) 天", systemImage: "clock.badge.checkmark")
+            Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")
+              .font(.caption).foregroundStyle(.secondary)
           case .pro(let expiry, let yearly):
             Label(yearly ? "iTool 年度会员" : "iTool 月度会员", systemImage: "checkmark.seal.fill")
             Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")
               .font(.caption).foregroundStyle(.secondary)
           }
-          Button(account.membershipLoading ? "正在刷新…" : "刷新会员状态") {
+          Button(account.membershipLoading ? "正在刷新…" : "刷新账户状态") {
             Task { await account.refreshMembership() }
           }.disabled(account.membershipLoading)
         }
         if account.membership == .free {
-          // Text only: the watch sells nothing (App Store rules).
-          Text("在电脑浏览器打开 itool.tech/pro 开通会员")
+          // Text only: the watch sells nothing and never links to any purchase page (App Store 3.1.1).
+          Text("可在电脑端 LinkShell 管理账户状态")
             .font(.caption2).foregroundStyle(.secondary)
         }
         if let error = account.membershipError {

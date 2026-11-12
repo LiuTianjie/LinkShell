@@ -18,6 +18,7 @@ import {
 } from "@linkshell/client-core";
 import { probeRelays, relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
 import { deviceIdentity } from "./identity";
+import { HybridLanGatewaySocket, LanE2eeSocket } from "./lan-socket";
 import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
 import { directConnector } from "./direct";
@@ -74,18 +75,54 @@ export function accessToken(computer: Computer) {
   };
 }
 
+function connectionSignature(computer: Computer): string {
+  if (computer.kind === "relay") {
+    return `${computer.key}|${computer.lanUrl ?? ""}|${computer.lanE2ee ? "1" : "0"}`;
+  }
+  return `${computer.key}|${computer.fallbackGateway ?? ""}|${computer.machine?.id ?? ""}`;
+}
+
 function createConnection(computer: Computer): Connection {
   const link =
     computer.kind === "direct"
-      ? new HostLink({ url: computer.url, createSocket, lazyImages: true, accessToken: accessToken(computer) })
-      : // Through a gateway: an end-to-end encrypted channel that behaves like a WebSocket.
+      ? new HostLink({
+          url: computer.url,
+          createSocket: (targetUrl) => {
+            if (computer.machine && computer.fallbackGateway) {
+              const machine = computer.machine;
+              const fallbackGateway = computer.fallbackGateway;
+              return new HybridLanGatewaySocket({
+                openLan: () => new LanE2eeSocket(targetUrl, createSocket, deviceIdentity(), machine),
+                openGateway: () => new TunnelSocket(relayFor(fallbackGateway), deviceIdentity(), machine),
+              });
+            }
+            if (computer.machine) {
+              return new LanE2eeSocket(targetUrl, createSocket, deviceIdentity(), computer.machine);
+            }
+            return createSocket(targetUrl);
+          },
+          lazyImages: true,
+          accessToken: accessToken(computer),
+        })
+      : // Through a gateway, or LAN fast-path first with automatic Gateway E2EE tunnel fallback when away.
         new HostLink({
           url: `${computer.gateway}#${computer.machine.id}`,
-          createSocket: () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine),
+          createSocket: () => {
+            const openGateway = () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine);
+            if (!computer.lanUrl) return openGateway();
+            const lanUrl = computer.lanUrl;
+            return new HybridLanGatewaySocket({
+              openLan: () =>
+                computer.lanE2ee
+                  ? new LanE2eeSocket(lanUrl, createSocket, deviceIdentity(), computer.machine)
+                  : createSocket(lanUrl),
+              openGateway,
+            });
+          },
           lazyImages: true,
           accessToken: accessToken(computer),
         });
-  const url = computer.kind === "direct" ? computer.url : computer.gateway;
+  const url = computer.kind === "direct" ? computer.url : computer.lanUrl ?? computer.gateway;
   // Pictures in history come as references and load when shown (`useImage`).
   const store = createClientStore(link, { newId: randomUUID, lazyImages: true, sessionPreferences });
   // Paths render as ~/… with this computer's home, set before anything renders them.
@@ -114,11 +151,12 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     startRelays();
   }, []);
 
-  // A different computer selected: a new connection. (Live status updates of
-  // the same computer don't reconnect.)
+  // A different computer selected (or LAN endpoint bound): open a fresh connection.
   useEffect(() => {
-    if (selected.key !== connection.key) setConnection(createConnection(selected));
-  }, [selected, connection.key]);
+    if (connectionSignature(selected) !== connectionSignature(connection.computer)) {
+      setConnection(createConnection(selected));
+    }
+  }, [selected, connection.computer]);
 
   useEffect(() => {
     const { store, link } = connection;

@@ -15,9 +15,12 @@ import {
   CommandEmpty,
 } from "@/components/ui/command";
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field";
-import { useContext, useEffect, useMemo, useState } from "react";
-import { subagentKey, type SessionView } from "@linkshell/client-core";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge as PillBadge } from "@/components/ui/badge";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { subagentKey, type Locale, type SessionView } from "@linkshell/client-core";
 import type {
+  GitDiffFileStatus,
   GoalChange,
   SessionSummary,
   ToolCallContent,
@@ -45,10 +48,11 @@ import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from ".
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
 import { optionDescription, sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
+import { useLocale, useT } from "./i18n";
 
 const KNOWN_CATEGORIES = new Set(["mode", "model", "effort"]);
 import { isDesktop } from "./desktop";
-import { ChevronRight, GitBranch, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, GitBranch, GitPullRequest, MessageSquarePlus, Play, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 
 export function Commands({
   commands,
@@ -225,14 +229,98 @@ export function Settings({
 }
 type FileChange = Extract<ToolCallContent, { type: "diff" | "patch" }>;
 
+export interface DiffReviewAnnotation {
+  path: string;
+  lineNumber: number;
+  sign: "+" | "−" | " ";
+  code: string;
+  comment: string;
+}
+
+export function formatDiffReviewPrompt(
+  annotations: readonly DiffReviewAnnotation[],
+  locale: Locale = "zh",
+): string {
+  const header =
+    locale === "en"
+      ? "Please address the following inline diff review comments:"
+      : locale === "ja"
+        ? "以下の行単位コードレビュー指摘に基づいて修正してください："
+        : "请根据以下逐行代码审阅意见修改代码：";
+  const body = annotations
+    .map((item) => {
+      const snippet = item.code.trim().slice(0, 160);
+      if (locale === "en") {
+        return `- \`${item.path}\` line ${item.lineNumber} (${item.sign} \`${snippet}\`):\n  ${item.comment.trim()}`;
+      }
+      if (locale === "ja") {
+        return `- \`${item.path}\` ${item.lineNumber}行目 (${item.sign} \`${snippet}\`)：\n  ${item.comment.trim()}`;
+      }
+      return `- \`${item.path}\` 第 ${item.lineNumber} 行 (${item.sign} \`${snippet}\`)：\n  ${item.comment.trim()}`;
+    })
+    .join("\n\n");
+  return `${header}\n\n${body}`;
+}
+
+interface ShownChangeFile {
+  path: string;
+  oldPath?: string;
+  status?: GitDiffFileStatus;
+  binary?: boolean;
+  lines: DiffLine[];
+  stat: { added: number; removed: number };
+}
+
+function gitStatusLabelKey(status: GitDiffFileStatus) {
+  switch (status) {
+    case "added":
+      return "changes.statusAdded" as const;
+    case "deleted":
+      return "changes.statusDeleted" as const;
+    case "renamed":
+      return "changes.statusRenamed" as const;
+    case "untracked":
+      return "changes.statusUntracked" as const;
+    default:
+      return "changes.statusModified" as const;
+  }
+}
+
 /**
- * What the session changed, one row a file, as Codex's turn changes: a file edited several times
- * shows from what it was before the first edit to what it is after the last (when the agent
- * reported whole texts), or each patch in turn.
+ * What the session changed, or the live Git working-tree diff (`git.diff`), with inline
+ * click-on-line review annotations, per-file revert (`git.revertFile`), and 1-click wrap-up actions.
  */
-export function Changes({ view }: { view?: SessionView }) {
-  const cwd = useContext(TimelineNavigation)?.cwd;
-  const files = useMemo(() => {
+export function Changes({
+  view,
+  session,
+}: {
+  view?: SessionView;
+  session?: SessionSummary;
+}) {
+  const t = useT();
+  const locale = useLocale();
+  const dialogs = useDialogs();
+  const { link } = useConnection();
+  const actions = useActions();
+  const online = useSessionOnline();
+  const job = useJob();
+  const navCwd = useContext(TimelineNavigation)?.cwd;
+  const cwd = session?.cwd ?? navCwd;
+  const [mode, setMode] = useState<"session" | "git">("session");
+  const [notice, setNotice] = useState<string>();
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [comments, setComments] = useState<Record<string, Record<number, string>>>({});
+  const [editing, setEditing] = useState<{ key: string; lineIndex: number; draft: string } | null>(null);
+
+  const gitDiff = useLoad(
+    () =>
+      mode === "git" && online && cwd
+        ? link.call("git.diff", { cwd, includeUntracked: true })
+        : Promise.resolve(undefined),
+    [link, mode, online, cwd],
+  );
+
+  const sessionFiles = useMemo<ShownChangeFile[]>(() => {
     const byPath = new Map<string, { path: string; lines: DiffLine[]; first?: string; last?: string; patches: DiffLine[][] }>();
     for (const item of view?.items ?? []) {
       if (item.kind !== "tool" || item.status === "failed") continue;
@@ -253,45 +341,332 @@ export function Changes({ view }: { view?: SessionView }) {
       return { path: entry.path, lines, stat: diffStat(lines) };
     });
   }, [view?.items]);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const total = files.reduce((sum, file) => ({ added: sum.added + file.stat.added, removed: sum.removed + file.stat.removed }), { added: 0, removed: 0 });
-  const shown = (path: string) =>
-    cwd && path.startsWith(`${cwd.replace(/\/$/, "")}/`) ? path.slice(cwd.replace(/\/$/, "").length + 1) : path;
-  if (!files.length)
-    return <p className="changes-empty">这个会话还没有报告文件变更。加载更早的历史可以看到之前的改动。</p>;
+
+  const gitFiles = useMemo<ShownChangeFile[]>(
+    () =>
+      (gitDiff.value?.files ?? []).map((entry) => ({
+        path: entry.path,
+        oldPath: entry.oldPath,
+        status: entry.status,
+        binary: entry.binary,
+        lines: entry.binary ? [] : diffLines(entry.oldText, entry.newText),
+        stat: { added: entry.additions, removed: entry.deletions },
+      })),
+    [gitDiff.value?.files],
+  );
+
+  const files = mode === "git" ? gitFiles : sessionFiles;
+  const total = files.reduce(
+    (sum, file) => ({ added: sum.added + file.stat.added, removed: sum.removed + file.stat.removed }),
+    { added: 0, removed: 0 },
+  );
+  const shown = useCallback(
+    (path: string) =>
+      cwd && path.startsWith(`${cwd.replace(/\/$/, "")}/`)
+        ? path.slice(cwd.replace(/\/$/, "").length + 1)
+        : path,
+    [cwd],
+  );
+
+  const annotations = useMemo<DiffReviewAnnotation[]>(() => {
+    const list: DiffReviewAnnotation[] = [];
+    for (const file of files) {
+      const fileComments = comments[`${mode}:${file.path}`];
+      if (!fileComments) continue;
+      const indices = Object.keys(fileComments)
+        .map(Number)
+        .filter((idx) => Number.isFinite(idx) && Boolean(fileComments[idx]?.trim()))
+        .sort((a, b) => a - b);
+      for (const lineIndex of indices) {
+        const line = file.lines[lineIndex];
+        const comment = fileComments[lineIndex]?.trim();
+        if (!comment) continue;
+        list.push({
+          path: shown(file.path),
+          lineNumber: line?.new ?? line?.old ?? lineIndex + 1,
+          sign: line?.kind === "add" ? "+" : line?.kind === "del" ? "−" : " ",
+          code: line?.text ?? "",
+          comment,
+        });
+      }
+    }
+    return list;
+  }, [comments, files, mode, shown]);
+
+  const saveLineComment = (fileKey: string, lineIndex: number, text: string) => {
+    const trimmed = text.trim();
+    setComments((prev) => {
+      const nextFile = { ...(prev[fileKey] ?? {}) };
+      if (trimmed) nextFile[lineIndex] = trimmed;
+      else delete nextFile[lineIndex];
+      const next = { ...prev };
+      if (Object.keys(nextFile).length > 0) next[fileKey] = nextFile;
+      else delete next[fileKey];
+      return next;
+    });
+    setEditing(null);
+  };
+
+  const sendToSession = (promptText: string, clearModeComments = false) => {
+    if (!session) return;
+    setNotice(undefined);
+    void job.run(async () => {
+      const result = await actions.send(session.id, [{ type: "text", text: promptText }]);
+      if (result === "failed") throw new Error("Failed to send message");
+      if (clearModeComments) {
+        setComments((prev) => {
+          const next = { ...prev };
+          for (const key of Object.keys(next)) {
+            if (key.startsWith(`${mode}:`)) delete next[key];
+          }
+          return next;
+        });
+        setEditing(null);
+      }
+    });
+  };
+
+  const revertFile = async (filePath: string) => {
+    if (!cwd) return;
+    const displayPath = shown(filePath);
+    if (
+      !(await dialogs.confirm(
+        `${t("changes.revertConfirmTitle")}\n\n${t("changes.revertConfirmBody", { path: displayPath })}`,
+      ))
+    )
+      return;
+    setNotice(undefined);
+    await job.run(async () => {
+      await link.call("git.revertFile", { cwd, path: filePath });
+      setComments((prev) => {
+        const next = { ...prev };
+        delete next[`git:${filePath}`];
+        return next;
+      });
+      setNotice(t("changes.reverted", { path: displayPath }));
+      gitDiff.reload();
+    });
+  };
+
   return (
-    <section className="changes">
-      <header className="changes-head">
-        <strong>{files.length} 个文件已更改</strong>
-        <DiffStat added={total.added} removed={total.removed} />
-      </header>
-      <div className="changes-files">
-        {files.map((file) => {
-          const expanded = open[file.path] ?? files.length === 1;
-          const slash = shown(file.path).lastIndexOf("/");
-          return (
-            <div className="changes-file" key={file.path} data-open={expanded || undefined}>
-              <button
-                type="button"
-                className="changes-file-row"
-                aria-expanded={expanded}
-                title={file.path}
-                onClick={() => setOpen((state) => ({ ...state, [file.path]: !expanded }))}
-              >
-                <ChevronRight className="changes-chevron" aria-hidden />
-                <span className="changes-file-name">
-                  {/* The folder gives way first, cut from its start, so the end nearest the name stays. */}
-                  {slash >= 0 && <small><bdi>{shown(file.path).slice(0, slash + 1)}</bdi></small>}
-                  <span>{shown(file.path).slice(slash + 1)}</span>
-                </span>
-                <DiffStat added={file.stat.added} removed={file.stat.removed} />
-              </button>
-              {expanded && <DiffView lines={file.lines} path={file.path} />}
-            </div>
-          );
-        })}
+    <section className="changes flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Tabs value={mode} onValueChange={(next) => { setMode(next as "session" | "git"); setEditing(null); setNotice(undefined); }}>
+          <TabsList aria-label={t("changes.title")}>
+            <TabsTrigger value="session">{t("changes.sessionEdits")}</TabsTrigger>
+            <TabsTrigger value="git" disabled={!cwd}>{t("changes.gitWorkingTree")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {mode === "git" && (
+          <div className="flex items-center gap-1.5">
+            {gitDiff.value?.branch && (
+              <PillBadge variant="outline" className="gap-1">
+                <GitBranch className="size-3" aria-hidden />
+                {gitDiff.value.branch}
+              </PillBadge>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("common.refresh")}
+              title={t("common.refresh")}
+              disabled={!online || gitDiff.loading}
+              onClick={gitDiff.reload}
+            >
+              <RefreshCw className={gitDiff.loading ? "animate-spin" : undefined} />
+            </Button>
+          </div>
+        )}
       </div>
-      <p className="changes-note">来自已加载的会话记录</p>
+
+      {session && files.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={!online || job.busy}
+            onClick={() => sendToSession(t("changes.askCommitPrPrompt"))}
+          >
+            <GitPullRequest data-icon="inline-start" />
+            {t("changes.askCommitPr")}
+          </Button>
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={!online || job.busy}
+            onClick={() => sendToSession(t("changes.askRunTestsPrompt"))}
+          >
+            <Play data-icon="inline-start" />
+            {t("changes.askRunTests")}
+          </Button>
+        </div>
+      )}
+
+      {annotations.length > 0 && session && (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+          <span className="font-medium">{t("changes.reviewCount", { count: annotations.length })}</span>
+          <Button
+            size="xs"
+            disabled={!online || job.busy}
+            onClick={() => sendToSession(formatDiffReviewPrompt(annotations, locale), true)}
+          >
+            <MessageSquarePlus data-icon="inline-start" />
+            {t("changes.submitReview", { count: annotations.length })}
+          </Button>
+        </div>
+      )}
+
+      <ErrorNotice error={job.error} />
+      {mode === "git" && <LoadState {...gitDiff} />}
+      {notice && <p className="text-xs text-muted-foreground" role="status">{notice}</p>}
+      {mode === "git" && gitDiff.value?.truncated && (
+        <p className="text-xs text-muted-foreground">{t("changes.truncated")}</p>
+      )}
+
+      {!files.length && !(mode === "git" && gitDiff.loading) ? (
+        <p className="changes-empty">{t("changes.empty")}</p>
+      ) : files.length > 0 ? (
+        <>
+          <header className="changes-head">
+            <strong>
+              {locale === "en"
+                ? `${files.length} file${files.length === 1 ? "" : "s"}`
+                : locale === "ja"
+                  ? `${files.length} 件のファイル`
+                  : `${files.length} 个文件已更改`}
+            </strong>
+            <DiffStat added={total.added} removed={total.removed} />
+          </header>
+          <div className="changes-files">
+            {files.map((file) => {
+              const fileKey = `${mode}:${file.path}`;
+              const expanded = open[fileKey] ?? files.length === 1;
+              const displayPath = shown(file.path);
+              const slash = displayPath.lastIndexOf("/");
+              const fileComments = comments[fileKey];
+              const fileCommentCount = fileComments ? Object.keys(fileComments).length : 0;
+              return (
+                <div className="changes-file" key={fileKey} data-open={expanded || undefined}>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="changes-file-row flex-1 min-w-0"
+                      aria-expanded={expanded}
+                      title={file.path}
+                      onClick={() => setOpen((state) => ({ ...state, [fileKey]: !expanded }))}
+                    >
+                      <ChevronRight className="changes-chevron" aria-hidden />
+                      <span className="changes-file-name">
+                        {slash >= 0 && <small><bdi>{displayPath.slice(0, slash + 1)}</bdi></small>}
+                        <span>{displayPath.slice(slash + 1)}</span>
+                      </span>
+                      {file.status && (
+                        <PillBadge variant="outline" className="text-[11px] px-1.5 py-0">
+                          {t(gitStatusLabelKey(file.status))}
+                        </PillBadge>
+                      )}
+                      {fileCommentCount > 0 && (
+                        <PillBadge variant="secondary" className="text-[11px] px-1.5 py-0">
+                          {fileCommentCount}
+                        </PillBadge>
+                      )}
+                      <DiffStat added={file.stat.added} removed={file.stat.removed} />
+                    </button>
+                    {mode === "git" && cwd && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="shrink-0"
+                        disabled={!online || job.busy}
+                        title={t("changes.revertFile")}
+                        aria-label={`${t("changes.revertFile")} ${displayPath}`}
+                        onClick={() => void revertFile(file.path)}
+                      >
+                        <RotateCcw data-icon="inline-start" />
+                        {t("changes.revertFile")}
+                      </Button>
+                    )}
+                  </div>
+                  {expanded && (
+                    file.binary ? (
+                      <div className="diff-skip">{t("changes.binaryFile")}</div>
+                    ) : (
+                      <DiffView
+                        lines={file.lines}
+                        path={file.path}
+                        comments={fileComments}
+                        activeLine={editing?.key === fileKey ? editing.lineIndex : null}
+                        onSelectLine={(lineIndex) =>
+                          setEditing((current) =>
+                            current?.key === fileKey && current.lineIndex === lineIndex
+                              ? null
+                              : { key: fileKey, lineIndex, draft: fileComments?.[lineIndex] ?? "" },
+                          )
+                        }
+                        renderLineEditor={(lineIndex) => (
+                          <div
+                            className="flex flex-col gap-2"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Textarea
+                              rows={2}
+                              autoFocus
+                              value={editing?.key === fileKey && editing.lineIndex === lineIndex ? editing.draft : ""}
+                              placeholder={t("changes.commentPlaceholder")}
+                              onChange={(event) =>
+                                setEditing((current) =>
+                                  current ? { ...current, draft: event.target.value } : null,
+                                )
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  setEditing(null);
+                                } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                                  event.preventDefault();
+                                  saveLineComment(fileKey, lineIndex, editing?.draft ?? "");
+                                }
+                              }}
+                            />
+                            <div className="flex items-center justify-end gap-1.5">
+                              {fileComments?.[lineIndex] && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="xs"
+                                  onClick={() => saveLineComment(fileKey, lineIndex, "")}
+                                >
+                                  <Trash2 data-icon="inline-start" />
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                onClick={() => setEditing(null)}
+                              >
+                                {t("changes.cancelComment")}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="xs"
+                                onClick={() => saveLineComment(fileKey, lineIndex, editing?.draft ?? "")}
+                              >
+                                {t("changes.saveComment")}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      />
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {mode === "session" && <p className="changes-note">{t("changes.sessionEdits")}</p>}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -861,6 +1236,7 @@ function Workflow({
   );
 }
 export function Worktrees() {
+  const t = useT();
   const dialogs = useDialogs();
   const actions = useActions();
   const { store } = useConnection();
@@ -871,7 +1247,7 @@ export function Worktrees() {
   return (
     <section className="worktrees-page">
       <PageHeader
-        title="工作树"
+        title={t("nav.worktrees")}
         actions={<>
       <Button
         variant="ghost"
@@ -880,7 +1256,7 @@ export function Worktrees() {
         onClick={loaded.reload}
       >
         <RefreshCw data-icon="inline-start" />
-        刷新
+        {t("common.refresh")}
       </Button>
         </>}
       />

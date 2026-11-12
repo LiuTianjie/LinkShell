@@ -243,7 +243,7 @@ export function buildIOSShortcutItems(
     })
     .slice(0, 3);
 
-  return [
+  const items: ShortcutItemInput[] = [
     {
       id: "linkshell.new-session",
       title: "新建会话",
@@ -266,6 +266,27 @@ export function buildIOSShortcutItems(
       };
     }),
   ];
+
+  const hasWaitingApproval = sessions.some((s) => !s.archived && needsAttention(s));
+  if (items.length < 4 && hasWaitingApproval) {
+    items.push({
+      id: "linkshell.approve-latest",
+      title: "一键批准最新请求",
+      subtitle: "Siri / 操作按钮快捷审批",
+      icon: "checkmark.shield.fill",
+      href: "/approve-latest",
+    });
+  }
+  if (items.length < 4) {
+    items.push({
+      id: "linkshell.quick-voice",
+      title: "语音指令",
+      subtitle: "直接对最近会话说话",
+      icon: "waveform",
+      href: "/quick-voice",
+    });
+  }
+  return items.slice(0, 4);
 }
 
 /**

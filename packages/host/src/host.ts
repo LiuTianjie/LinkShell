@@ -1,5 +1,6 @@
 import { UsageStatistics } from "./usage.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -20,9 +21,13 @@ import { LiveActivityRelay } from "./live-activities.js";
 import { isNamedPipe, windowsPipe } from "./local-transport.js";
 import { MachineName } from "./machine-name.js";
 import { openChildRegistry, reapOrphans } from "./children.js";
+import { KeepAwakeManager, type SpawnAssertion } from "./keep-awake.js";
+import { MdnsAdvertiser, hostFingerprint } from "./mdns.js";
+import { createLsaService, type LsaService } from "./lsa/index.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
+const MAINTENANCE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export interface HostPaths {
   home: string;
@@ -98,12 +103,17 @@ export interface HostOptions {
   };
   /** How often to re-list sessions started outside LinkShell; 0 disables. */
   discoveryIntervalMs?: number;
+  /** Whether to advertise `_linkshell._tcp` over LAN mDNS when `tcpPort` is active. */
+  mdns?: boolean;
+  spawnMdnsProcess?: (command: string, args: string[]) => ChildProcess;
+  spawnKeepAwakeAssertion?: SpawnAssertion;
 }
 
 export interface RunningHost {
   paths: HostPaths;
   hub: SessionHub;
   server: HostRpcServer;
+  lsa: LsaService;
   /** The current gateway connection; it can change on `gateway.refresh`. */
   readonly gateway?: GatewayLink;
   machineInfo(): MachineInfo;
@@ -178,6 +188,21 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     },
   });
   await hub.start({ discoveryIntervalMs: options.discoveryIntervalMs });
+  try {
+    store.runMaintenance();
+  } catch (error) {
+    log(`[store] startup maintenance failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const maintenanceTimer = setInterval(() => {
+    try {
+      if (hub.activeWorkDemand().sessionActive) return;
+      hub.compactIdleSessions();
+      store.runMaintenance();
+    } catch (error) {
+      log(`[store] periodic maintenance failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, MAINTENANCE_INTERVAL_MS);
+  maintenanceTimer.unref?.();
 
   const iceServers = options.iceServers ?? iceServersFromEnv(process.env.LINKSHELL_ICE_SERVERS);
   const machineInfo = (): MachineInfo => ({
@@ -192,9 +217,53 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     // LINKSHELL_ICE_SERVERS: STUN servers for the direct channel, comma separated ("off": never direct).
     ...(iceServers ? { direct: { iceServers } } : {}),
   });
+
+  let serverRef: HostRpcServer | undefined;
+  let lsaRef: LsaService | undefined;
+  const defaultTestAssertion: SpawnAssertion | undefined = process.env.VITEST
+    ? () => {
+        let alive = true;
+        return {
+          get alive() {
+            return alive;
+          },
+          release() {
+            alive = false;
+          },
+        };
+      }
+    : undefined;
+  const keepAwake = new KeepAwakeManager({
+    home: paths.home,
+    signals: () => {
+      const work = hub.activeWorkDemand();
+      return {
+        sessionActive: work.sessionActive,
+        goalActive: work.goalActive || (lsaRef ? !lsaRef.isStewardIdle() : false),
+        remoteConnected: serverRef?.hasRemoteClients() ?? false,
+        screenActive: serverRef?.hasActiveScreen() ?? false,
+      };
+    },
+    spawnAssertion: options.spawnKeepAwakeAssertion ?? defaultTestAssertion,
+    log,
+  });
+
+  const lsa = createLsaService({
+    home: paths.home,
+    hub,
+    machineId: () => machineId,
+    followupPollIntervalMs: 15_000,
+    log,
+  });
+  lsaRef = lsa;
+
   const liveActivities = new LiveActivityRelay({
-    path: join(paths.home, "live-activities.json"), hub, terminals,
+    path: join(paths.home, "live-activities.json"),
+    hub,
+    terminals,
     computerName: () => machineInfo().hostname,
+    machineId: () => machineId,
+    onWakeup: (notice) => serverRef?.broadcast("liveActivities.wakeup", notice),
     serviceUrl: process.env.LINKSHELL_PUSH_SERVICE_URL,
     log,
   });
@@ -213,14 +282,53 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     access,
     // The gateway shows a lock on this computer from its next sign-in.
     onAccessChanged: () => gateway?.reauthenticate(),
-    usage: new UsageStatistics({ codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") }, { agents: () => hub.agents(), events: () => store.usageEvents() }),
+    usage: new UsageStatistics(
+      { codex: env.CODEX_HOME || join(homedir(), ".codex"), claude: env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") },
+      {
+        agents: () => hub.agents(),
+        events: () => store.usageEvents(),
+        remoteStats: (sinceMs, untilMs, agent) => store.remoteStats(sinceMs, untilMs, agent),
+      },
+    ),
+    keepAwake,
+    lsa,
     socketPath: paths.hostSocket,
     shutdown: options.shutdown,
     tcpPort: options.tcpPort,
     log,
     liveActivities,
   });
+  serverRef = server;
+  const stopWorkListener = hub.onWorkChange(() => {
+    keepAwake.reconcile();
+    server.refreshKeepAwakeMetrics();
+  });
+  const stopDemandListener = server.onDemandChanged(() => {
+    keepAwake.reconcile();
+    server.refreshKeepAwakeMetrics();
+  });
   await server.start();
+  keepAwake.start();
+  server.refreshKeepAwakeMetrics();
+
+  let mdns: MdnsAdvertiser | undefined;
+  const tcpPort = server.tcpAddress();
+  const shouldAdvertiseMdns =
+    tcpPort !== undefined &&
+    options.mdns !== false &&
+    process.env.LINKSHELL_MDNS !== "off" &&
+    (options.mdns === true || Boolean(options.spawnMdnsProcess) || !process.env.VITEST);
+  if (shouldAdvertiseMdns && tcpPort !== undefined) {
+    mdns = new MdnsAdvertiser({
+      port: tcpPort,
+      machineId,
+      fingerprint: hostFingerprint(paths.home, machineId),
+      protocolVersion: HOST_PROTOCOL,
+      spawnProcess: options.spawnMdnsProcess,
+      log,
+    });
+    mdns.start();
+  }
 
   const chosen = options.gateway;
   /** Follows the gateway choice: connects, moves or disconnects; an unchanged one signs in again. */
@@ -263,16 +371,23 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     paths,
     hub,
     server,
+    lsa,
     get gateway() {
       return gateway;
     },
     machineInfo,
     stop() {
       stopping ??= (async () => {
+        clearInterval(maintenanceTimer);
+        stopWorkListener();
+        stopDemandListener();
+        await mdns?.stop();
+        keepAwake.stop();
         gateway?.stop();
         liveActivities.stop();
         await server.stop();
         terminals.stop();
+        lsa.close();
         await hub.stop();
         await children.close(log);
         store.close();

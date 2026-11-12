@@ -174,6 +174,14 @@
       "mainEntity": [
         {
           "@type": "Question",
+          "name": "Is there a free trial or referral reward?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Every new account automatically gets a 7-day free trial of the official gateway upon sign-up — no credit card required. Share your invite code or link from the desktop/web workspace or itool.tech/pro: when a friend makes their first purchase, you both get 14 days on monthly or 30 days on yearly."
+          }
+        },
+        {
+          "@type": "Question",
           "name": "What does Free leave out?",
           "acceptedAnswer": {
             "@type": "Answer",
@@ -201,7 +209,7 @@
           "name": "How can I pay?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Pay with an international card through Creem (USD) or Alipay (CNY) on itool.tech. Card subscriptions renew automatically and can be canceled anytime; Alipay purchases are one-time. The membership lands on your iTool account, and LinkShell reads it from the same account; nothing else to enter. The phone app doesn't sell it: open itool.tech/pro in a browser on your computer."
+            "text": "Pay with an international card through Creem ($3.19/mo, $26.49/yr USD) or Alipay (¥9.9/mo, ¥99/yr CNY) on itool.tech. Card subscriptions renew automatically and can be canceled anytime; Alipay purchases are one-time. The membership lands on your iTool account, and LinkShell reads it from the same account; nothing else to enter. The phone app doesn't sell it: open itool.tech/pro in a browser on your computer."
           }
         },
         {
@@ -209,7 +217,7 @@
           "name": "Monthly or yearly?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Both include LinkShell's official gateway. Monthly ($3.19 USD) also covers the iTool site; yearly ($26.49 USD) covers every iTool product. Alipay prices are ¥9.9 monthly and ¥99 yearly. Your checkout shows the final price and available payment methods."
+            "text": "Both include LinkShell's official gateway. Monthly ($3.19 USD / ¥9.9 CNY) also covers the iTool site; yearly ($26.49 USD / ¥99 CNY) covers every iTool product and includes LinkShell Agent (LSA) multi-machine steward capabilities. Your checkout shows the final price and available payment methods."
           }
         }
       ]
@@ -730,7 +738,7 @@
     <div class="wrap pricing">
       <div class="text">
         <h1>Every feature is free</h1>
-        <p class="lead">An iTool membership adds one thing: the official gateway, so you don't run a server.</p>
+        <p class="lead">An iTool membership adds one thing: the official gateway, so you don't run a server. New accounts get a 7-day free trial on sign-up (no credit card required); invite a friend and both get 14 / 30 days.</p>
       </div>
 
       <div class="plans">
@@ -751,26 +759,27 @@
         <h2>iTool membership</h2>
         <div id="price-monthly" class="price">$3.19<small>/mo</small></div>
         <div id="price-yearly" class="price" style="display:none">$26.49<small>/yr</small></div>
-        <p class="per"><span id="price-alt-monthly">Monthly: the iTool site + LinkShell</span><span id="price-alt-yearly" style="display:none">Yearly: every iTool product</span></p>
+        <p class="per"><span id="price-alt-monthly">Monthly: the iTool site + LinkShell (or ¥9.9/mo via Alipay)</span><span id="price-alt-yearly" style="display:none">Yearly: every iTool product + LSA multi-machine steward (or ¥99/yr via Alipay)</span></p>
         <div class="cycle">
           <button class="cycle-btn active" data-cycle="monthly" type="button" onclick="setPricingCycle('monthly')">Monthly</button>
           <button class="cycle-btn" data-cycle="yearly" type="button" onclick="setPricingCycle('yearly')">Yearly</button>
         </div>
         <ul>
-          <li>Everything in Free</li>
-          <li>The official gateway, no server to run</li>
-          <li>Sign in with one account, no QR codes</li>
+          <li><b>7-day free trial on sign-up (no credit card required)</b></li>
+          <li>The official gateway: sign in with one account, no server or QR codes</li>
+          <li><b>Invite a friend: both get 14 days (monthly) or 30 days (yearly)</b></li>
+          <li>Yearly includes every iTool product + LinkShell Agent (LSA) multi-machine steward</li>
           <li>Priority support</li>
         </ul>
 
         <div id="pricing-buy">
           <ol>
-            <li>On itool.tech, sign in with the same iTool account you use in LinkShell, choose monthly or yearly, then pay with an international card in USD or Alipay in CNY.</li>
+            <li>Sign in with a new account to start your 7-day free trial right away (no card required). To subscribe, sign in at itool.tech with the same iTool account, choose monthly or yearly, and pay with an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr).</li>
             <li>Back in LinkShell, refresh the membership (the account section of the Mac / Windows desktop app or the web workspace; on the phone, the Account page refreshes when opened). The computer then reconnects through the official gateway.</li>
           </ol>
           
-          <a href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">Get iTool membership ↗</a>
-          <p>One iTool membership covers several products: monthly includes the iTool site and LinkShell; yearly includes every iTool product. Renewing extends the time you have left.</p>
+          <a href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">Start 7-day free trial / Subscribe ↗</a>
+          <p>One iTool membership covers several products: monthly includes the iTool site and LinkShell; yearly includes every iTool product plus LinkShell Agent (LSA) multi-machine steward. Invite a friend and you both earn 14 days (monthly) or 30 days (yearly); renewals and rewards extend your remaining time.</p>
         </div>
       </section>
 
@@ -778,6 +787,8 @@
 
       <section class="faq text">
         <h2>Questions</h2>
+        <h3>Is there a free trial or referral reward?</h3>
+        <p>Yes. Every new account automatically gets a 7-day free trial of the official gateway upon sign-up — no credit card required. Share your invite code or link from the desktop/web workspace or itool.tech/pro: when a friend makes their first purchase, you both get 14 days on monthly or 30 days on yearly.</p>
         <h3>What does Free leave out?</h3>
         <p>No features. You just run a gateway yourself; an iTool membership gives you the hosted one instead.</p>
         <h3>Can the official gateway see my code?</h3>
@@ -785,9 +796,9 @@
         <h3>What happens when the membership ends?</h3>
         <p>You are back on Free: every feature stays, and you connect through your own gateway.</p>
         <h3>How can I pay?</h3>
-        <p>Pay with an international card through Creem (USD) or Alipay (CNY) on itool.tech. Card subscriptions renew automatically and can be canceled anytime; Alipay purchases are one-time. The membership lands on your iTool account, and LinkShell reads it from the same account; nothing else to enter. The phone app doesn't sell it: open itool.tech/pro in a browser on your computer.</p>
+        <p>Pay with an international card through Creem ($3.19/mo, $26.49/yr USD) or Alipay (¥9.9/mo, ¥99/yr CNY) on itool.tech. Card subscriptions renew automatically and can be canceled anytime; Alipay purchases are one-time. The membership lands on your iTool account, and LinkShell reads it from the same account; nothing else to enter. The phone app doesn't sell it: open itool.tech/pro in a browser on your computer.</p>
         <h3>Monthly or yearly?</h3>
-        <p>Both include LinkShell's official gateway. Monthly ($3.19 USD) also covers the iTool site; yearly ($26.49 USD) covers every iTool product. Alipay prices are ¥9.9 monthly and ¥99 yearly. Your checkout shows the final price and available payment methods.</p>
+        <p>Both include LinkShell's official gateway. Monthly ($3.19 USD / ¥9.9 CNY) also covers the iTool site; yearly ($26.49 USD / ¥99 CNY) covers every iTool product and includes LinkShell Agent (LSA) multi-machine steward capabilities. Your checkout shows the final price and available payment methods.</p>
       </section>
     </div>
   </main>

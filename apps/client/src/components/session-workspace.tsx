@@ -33,7 +33,7 @@ const PANEL_ICON: Record<Panel, Pick<IconProps, "sf" | "md">> = {
   side: { sf: "bubble.left.and.text.bubble.right", md: "forum" },
 };
 const PANEL_LABEL: Record<Panel, string> = { changes: "改动", preview: "预览", side: "旁支" };
-const Workspace = createContext<{ split: boolean; headerConsumed: boolean; show: (panel: Panel) => void } | null>(null);
+const Workspace = createContext<{ split: boolean; headerConsumed: boolean; show: (panel: Panel, port?: number) => void } | null>(null);
 export const useSessionWorkspace = () => use(Workspace);
 
 /** The conversation and browser stay mounted while the window folds or resizes. */
@@ -44,14 +44,16 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
   const regions = geometry.metrics?.divisions ?? [];
   const { split, folded, gap, axis, before, after } = workspaceLayout(width, window.fontScale, regions, height);
   const [panel, setPanel] = useState<Panel>(initialPanel ?? "changes");
+  const [requestedPort, setRequestedPort] = useState<number | null>(null);
   const [toolsOpen, setToolsOpen] = useState(!!initialPanel);
   const insets = usePageInsets();
   const systemInsets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const laptop = folded && axis === "column";
   const [motionAction, setMotionAction] = useState(0);
-  const showPanel = useCallback((next: Panel) => {
+  const showPanel = useCallback((next: Panel, nextPort?: number) => {
     setMotionAction((value) => value + 1);
+    if (next === "preview" && typeof nextPort === "number") setRequestedPort(nextPort);
     setPanel(next);
     setToolsOpen(true);
   }, []);
@@ -83,7 +85,7 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
             <ConsumedTopInset height={chat.top}><SessionFoldLayoutContext value={foldLayout}><ComputerPreviewVisible value={chatVisible}>{children}</ComputerPreviewVisible></SessionFoldLayoutContext></ConsumedTopInset>
           </MountedMotionPane>
           <MountedMotionPane fixedWidth={Math.max(0, split && axis === "row" ? after - 12 : width)} frame={tools} visible={toolsOpen} action={motionAction} geometry={motionGeometry} style={{ borderRadius: radius.panel, borderCurve: "continuous", backgroundColor: colors.background }}>
-            <SessionTools sessionId={sessionId} panel={panel} onPanel={showPanel} onClose={closeTools} active={toolsOpen} motionAction={motionAction} motionGeometry={motionGeometry} />
+            <SessionTools sessionId={sessionId} panel={panel} requestedPort={requestedPort} onPanel={showPanel} onClose={closeTools} active={toolsOpen} motionAction={motionAction} motionGeometry={motionGeometry} />
           </MountedMotionPane>
         </View>
       </View>
@@ -91,8 +93,11 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
   );
 }
 
-export function SessionTools({ sessionId, panel, onPanel, onClose, active = true, motionAction = 0, motionGeometry }: { sessionId: string; panel: Panel; onPanel: (panel: Panel) => void; onClose?: () => void; active?: boolean; motionAction?: number; motionGeometry?: string }) {
-  const [port, setPort] = useState<number | null>(null);
+export function SessionTools({ sessionId, panel, requestedPort, onPanel, onClose, active = true, motionAction = 0, motionGeometry }: { sessionId: string; panel: Panel; requestedPort?: number | null; onPanel: (panel: Panel) => void; onClose?: () => void; active?: boolean; motionAction?: number; motionGeometry?: string }) {
+  const [port, setPort] = useState<number | null>(requestedPort ?? null);
+  useEffect(() => {
+    if (typeof requestedPort === "number") setPort(requestedPort);
+  }, [requestedPort]);
   const [body, setBody] = useState({ width: 0, height: 0 });
   const [previewVisited, setPreviewVisited] = useState(panel === "preview");
   useEffect(() => { if (panel === "preview") setPreviewVisited(true); }, [panel]);
@@ -127,7 +132,7 @@ export function SessionTools({ sessionId, panel, onPanel, onClose, active = true
           <ChangesContent sessionId={sessionId} embedded />
         </MountedMotionPane>
         <MountedMotionPane frame={{ left: panel === "preview" ? 0 : 12, top: 0, ...body }} visible={panel === "preview"} action={motionAction} geometry={motionGeometry ?? `${body.width}:${body.height}`}>
-          {port !== null ? <PreviewContent key={port} port={port} embedded /> : null}
+          {port !== null ? <PreviewContent key={port} port={port} sessionId={sessionId} embedded /> : null}
           <View style={{ flex: 1, display: port === null ? "flex" : "none" }}>{previewVisited || panel === "preview" ? <PreviewPicker cwd={cwd} onOpen={setPort} active={panel === "preview" && port === null && active} /> : null}</View>
         </MountedMotionPane>
         {side ? (

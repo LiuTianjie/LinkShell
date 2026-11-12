@@ -4,8 +4,41 @@ import type { GatewayOptions } from "./relay.js";
 // has LinkShell. The gateway asks iTool's `itool_entitlement_for(uid, 'linkshell')` with the
 // service-role key, on its own behalf, not with the user's token.
 
-// www and a locale up front: the bare domain costs two redirects. Chinese, like the message it ends.
-export const MEMBERSHIP_URL = "https://www.itool.tech/zh/pro?from=linkshell";
+// Locale-neutral www URL: itool.tech routes /pro to /zh/pro or /en/pro from the browser's locale.
+export const MEMBERSHIP_URL = "https://www.itool.tech/pro?from=linkshell";
+
+export type GatewayLocale = "zh" | "en" | "ja";
+export type AdmissionDenialCode = "login_required" | "membership_required" | "temporarily_unavailable";
+
+export const LOGIN_REQUIRED_CODE: AdmissionDenialCode = "login_required";
+export const MEMBERSHIP_REQUIRED_CODE: AdmissionDenialCode = "membership_required";
+
+export function membershipUrl(locale?: GatewayLocale): string {
+  if (locale === "zh") return "https://www.itool.tech/zh/pro?from=linkshell";
+  if (locale === "en" || locale === "ja") return "https://www.itool.tech/en/pro?from=linkshell";
+  return MEMBERSHIP_URL;
+}
+
+export function admissionDenialMessage(code: AdmissionDenialCode, locale?: GatewayLocale): string {
+  const url = membershipUrl(locale);
+  switch (code) {
+    case "login_required":
+      if (locale === "zh") return "官方网关需要登录账号（新账号注册享 7 天免费试用）：在电脑上运行 linkshell login";
+      if (locale === "en") return "Official gateway requires sign-in (new accounts include a 7-day free trial): run linkshell login";
+      if (locale === "ja") return "公式ゲートウェイの利用にはログインが必要です（新規登録で 7 日間無料トライアル）：PC で linkshell login を実行してください";
+      return "官方网关需要登录账号（新账号注册享 7 天免费试用）：在电脑上运行 linkshell login · Official gateway requires sign-in (new accounts include a 7-day free trial): run linkshell login";
+    case "membership_required":
+      if (locale === "zh") return `官方网关需要 iTool 会员（新账号注册享 7 天免费试用）：${url}`;
+      if (locale === "en") return `Official gateway requires an iTool membership (new accounts include a 7-day free trial): ${url}`;
+      if (locale === "ja") return `公式ゲートウェイには iTool メンバーシップが必要です（新規アカウントは 7 日間無料トライアル付き）：${url}`;
+      return `官方网关需要 iTool 会员（新账号注册享 7 天免费试用）：${url} · Official gateway requires an iTool membership (7-day free trial on new accounts)`;
+    case "temporarily_unavailable":
+      if (locale === "zh") return "暂时无法验证 iTool 会员，请稍后重试";
+      if (locale === "en") return "Unable to verify iTool membership right now; please try again shortly";
+      if (locale === "ja") return "現在 iTool メンバーシップを確認できません。しばらくしてから再度お試しください";
+      return "暂时无法验证 iTool 会员，请稍后重试 · Unable to verify iTool membership right now; please try again shortly";
+  }
+}
 
 export interface SubscriptionCheck {
   /** "unknown": the lookup itself failed, which says nothing about the account. */
@@ -51,7 +84,7 @@ export function supabaseSubscriptions(supabase: { url: string; anonKey: string; 
 export function requirePro(
   check: CheckSubscription,
   warn: (message: string) => void,
-  options: { enforceGrace?: boolean; cacheMs?: number; graceMs?: number; now?: () => number } = {},
+  options: { enforceGrace?: boolean; cacheMs?: number; graceMs?: number; now?: () => number; locale?: GatewayLocale } = {},
 ): NonNullable<GatewayOptions["admit"]> {
   const now = options.now ?? Date.now;
   const cacheMs = options.cacheMs ?? 60_000;
@@ -67,12 +100,12 @@ export function requirePro(
   }>();
   return async ({ role, userId }) => {
     if (role !== "machine") return undefined;
-    if (!userId) return "官方网关需要登录 iTool 会员账号：在电脑上运行 linkshell login";
+    if (!userId) return admissionDenialMessage(LOGIN_REQUIRED_CODE, options.locale);
     // Roll out revalidation explicitly; a code upgrade alone must preserve the
     // existing admission behavior during a Supabase/network incident.
     if (!options.enforceGrace) {
       const subscription = await check(userId);
-      if (subscription.status === "inactive") return `官方网关需要 iTool 会员：${MEMBERSHIP_URL}`;
+      if (subscription.status === "inactive") return admissionDenialMessage(MEMBERSHIP_REQUIRED_CODE, options.locale);
       if (subscription.status === "unknown") warn(`subscription check unavailable (${subscription.reason}); admitting ${userId}`);
       return undefined;
     }
@@ -111,8 +144,10 @@ export function requirePro(
       await entry.pending;
     }
     if (account.result?.status === "active") return undefined;
-    if (account.result?.status === "inactive" || account.lastKnown === "inactive") return `官方网关需要 iTool 会员：${MEMBERSHIP_URL}`;
+    if (account.result?.status === "inactive" || account.lastKnown === "inactive") {
+      return admissionDenialMessage(MEMBERSHIP_REQUIRED_CODE, options.locale);
+    }
     if (account.graceFrom !== undefined && now() - account.graceFrom < graceMs) return undefined;
-    return "暂时无法验证 iTool 会员，请稍后重试";
+    return admissionDenialMessage("temporarily_unavailable", options.locale);
   };
 }

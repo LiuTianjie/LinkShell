@@ -10,7 +10,7 @@ import { RemoteScreen } from "./RemoteScreen";
 import { autoScreenWidth, screenPreferences } from "./screen-preferences";
 import { CAPABILITIES_WAIT_MS, PAUSE_ACK_MS, RETRIES_EARNED_MS, nativeSessionPolicy, screenRate, targetChanged, type ScreenTarget } from "./desktop-screen-session";
 import { openWebSocket } from "./transport";
-import type { ScreenProps } from "./Video";
+import { ScreenToolsMenu, type ScreenProps } from "./Video";
 
 /** One native session, as the effects that outlive a render reach it. */
 interface Live { apply(next: ScreenTarget): void }
@@ -376,7 +376,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       <strong className="screen-view-title"><Monitor size={17} /><span>{title}</span></strong>
       <div className="screen-actions">
         <Button variant="ghost" size="icon" aria-label="画质设置" aria-expanded={settings} onClick={() => setSettings(!settings)}><SlidersHorizontal /></Button>
-        {started && <><Button variant={controlling ? "secondary" : "outline"} disabled={!status.live || access.value?.control === false} aria-pressed={controlling} onClick={control}>{controlling ? "停止控制" : controlRequested ? "取消控制请求" : "控制电脑"}</Button><Button variant="ghost" size="icon" aria-label="重新连接" onClick={retry}><RotateCw /></Button></>}
+        {started && <><ScreenToolsMenu /><Button variant={controlling ? "secondary" : "outline"} disabled={!status.live || access.value?.control === false} aria-pressed={controlling} onClick={control}>{controlling ? "停止控制" : controlRequested ? "取消控制请求" : "控制电脑"}</Button><Button variant="ghost" size="icon" aria-label="重新连接" onClick={retry}><RotateCw /></Button></>}
         {!fullscreen && <Button variant="outline" onClick={() => setFocused(!focused)}>{focused ? <ArrowDownLeft data-icon="inline-start" /> : <Expand data-icon="inline-start" />}{focused ? "退出铺满" : "铺满窗口"}</Button>}
         {started && <Button variant="outline" onClick={() => fullscreenRequest(!fullscreen)}>{fullscreen ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}{fullscreen ? "退出全屏" : "全屏"}</Button>}
         {started && <Button variant="ghost" size="icon" aria-label="停止观看" onClick={() => { setStarted(false); setFocused(false); fullscreenRequest(false); setStatus({}); setError(undefined); }}><Square /></Button>}

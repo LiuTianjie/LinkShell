@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RpcError, type RelayIceServer, type TurnCredentials } from "@linkshell/wire";
+import { RpcError, type RelayIceServer, type ScreenPrivacyState, type TurnCredentials } from "@linkshell/wire";
 import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { SCREEN_IDLE, SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
@@ -290,6 +290,11 @@ export class ScreenShare {
   private video?: { id: string; taken(): void };
   private readonly controls = new Set<InputControl>();
   private readonly viewers = new Map<WebSocket, () => void>();
+  private readonly viewerListeners = new Set<() => void>();
+  private privacyState: { curtain: boolean; lockOnDisconnect: boolean } = {
+    curtain: false,
+    lockOnDisconnect: false,
+  };
 
   constructor(
     private readonly log: (message: string) => void,
@@ -297,8 +302,59 @@ export class ScreenShare {
     private readonly iceServers: () => string[] = () => [],
     /** The gateway's TURN server, for video that finds no direct path; undefined where there is none to use. */
     private readonly relayServers: () => Promise<TurnCredentials | undefined> | undefined = () => undefined,
+    private readonly onLockScreen?: () => void | Promise<void>,
   ) {
     void reapOrphanCaptures(log);
+  }
+
+  hasActiveViewers(): boolean {
+    return this.viewers.size > 0;
+  }
+
+  onViewersChanged(listener: () => void): () => void {
+    this.viewerListeners.add(listener);
+    return () => {
+      this.viewerListeners.delete(listener);
+    };
+  }
+
+  privacy(params: { curtain?: boolean; lockOnDisconnect?: boolean } = {}): ScreenPrivacyState {
+    if (params.curtain !== undefined) this.privacyState.curtain = params.curtain;
+    if (params.lockOnDisconnect !== undefined) this.privacyState.lockOnDisconnect = params.lockOnDisconnect;
+    const supported = process.platform === "darwin" || process.platform === "win32" || process.platform === "linux";
+    return {
+      curtain: this.privacyState.curtain,
+      lockOnDisconnect: this.privacyState.lockOnDisconnect,
+      supported,
+    };
+  }
+
+  private notifyViewersChanged(): void {
+    for (const listener of this.viewerListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`[screen] viewer listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private triggerDisconnectLockIfEnabled(): void {
+    if (!this.privacyState.lockOnDisconnect || this.viewers.size > 0) return;
+    if (this.onLockScreen) {
+      void Promise.resolve(this.onLockScreen()).catch((error: unknown) => {
+        this.log(`[screen] lockOnDisconnect hook failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      return;
+    }
+    if (process.env.VITEST) return;
+    if (process.platform === "darwin") {
+      void run("/usr/bin/pmset", ["displaysleepnow"], { timeout: 3000 }).catch(() => {});
+    } else if (process.platform === "win32") {
+      void run("rundll32.exe", ["user32.dll,LockWorkStation"], { timeout: 3000 }).catch(() => {});
+    } else if (process.platform === "linux") {
+      void run("loginctl", ["lock-session"], { timeout: 3000 }).catch(() => {});
+    }
   }
 
   /**
@@ -997,8 +1053,11 @@ export class ScreenShare {
       endVideo();
       stopControl();
       this.viewers.delete(ws);
+      this.notifyViewersChanged();
+      this.triggerDisconnectLockIfEnabled();
     };
     this.viewers.set(ws, dispose);
+    this.notifyViewersChanged();
     ws.on("close", dispose);
     ws.on("message", (data, binary) => {
       if (binary || !live()) return;
@@ -1093,8 +1152,10 @@ export class ScreenShare {
   }
 
   stop(): void {
+    const hadViewers = this.viewers.size > 0;
     for (const [viewer, release] of this.viewers) { release(); viewer.close(1000, "host stopped"); }
     this.viewers.clear();
+    if (hadViewers) this.notifyViewersChanged();
     // The host is going: there is no later to insist in.
     this.holder?.end();
     this.holder = undefined;

@@ -98,7 +98,7 @@ Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境�
 
 下载 App：[iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [Android](https://github.com/LiuTianjie/LinkShell/releases/latest)。然后任选一种：
 
-- **Pro：官方网关。** 在电脑上登录（`linkshell login` 或 Mac App），手机 App 登录同一个账号，电脑自动出现。
+- **官方网关（注册即享 7 天免费试用，无需绑卡）。** 在电脑上登录（`linkshell login` 或桌面 App），手机 App 登录同一个账号。新账号自动获得 **7 天免费试用**，电脑自动出现。
 - **免费：自建网关。** 先运行一个网关（见[下文](#自建网关)），让 host 连上它，每台手机扫码或输入 6 位码配对一次：
 
   ```bash
@@ -106,7 +106,7 @@ Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境�
   linkshell pair    # 在 App 的「电脑 → 添加电脑」里扫码
   ```
 
-全部功能免费；iTool 会员只多一个官方托管网关。用同一账号在 [itool.tech/pro](https://www.itool.tech/zh/pro?from=linkshell) 以支付宝开通：月度会员（¥9.9）包含 iTool 网站和 LinkShell，年度会员（¥99）包含全部 iTool 产品。开通后在桌面版或网页工作区刷新会员状态即可，不需要激活码。详见 [会员](docs/v2/pro-redemption.md)。
+全部功能免费；7 天免费试用结束后，iTool 会员继续提供官方托管网关。用同一账号在 [itool.tech/pro](https://www.itool.tech/zh/pro?from=linkshell) 通过国际信用卡 Creem（$3.19/月、$26.49/年）或支付宝（¥9.9/月、¥99/年）开通：月度会员包含 iTool 网站和 LinkShell，年度会员包含全部 iTool 产品与 **LinkShell Agent（LSA）** 跨电脑个人研发总管能力。邀请好友首次开通会员，双方各得 **14 天**（月度）或 **30 天**（年度）。开通后在桌面版或网页工作区刷新会员状态即可，不需要激活码。详见 [会员](docs/v2/pro-redemption.md)。
 
 网关根地址还提供浏览器客户端，同样支持配对或账号登录。详见[网页客户端](apps/web/README.md)。
 
@@ -168,9 +168,10 @@ docker run -d --name linkshell-gateway -p 8787:8787 \
 | --- | --- |
 | 设置电脑：host、屏幕权限、连接手机 | `linkshell setup` |
 | 后台启动 host / 查看状态 / 停止 | `linkshell host --daemon` / `linkshell host status` / `linkshell host stop` |
-| 配对手机（自建网关） | `linkshell pair` |
+| 同 Wi-Fi 局域网连接 / 设置防休眠策略 | `linkshell host --lan [端口]` / `linkshell host --keep-awake <smart\|always\|off>` |
+| 配对手机（自建或局域网网关） | `linkshell pair` |
 | 查看、移除已配对的手机 | `linkshell devices` / `linkshell devices remove <名称>` |
-| 使用官方网关（Pro） | `linkshell login` / `linkshell logout` |
+| 使用官方网关（7 天免费试用 / iTool） | `linkshell login` / `linkshell logout` |
 | 可交给手机的 Claude Code / Codex | `linkshell claude` / `linkshell codex`（参数原样传递） |
 | 设置或检查屏幕 | `linkshell screen` / `linkshell screen --check` |
 | 打开 Mac 状态应用 | `linkshell app` |

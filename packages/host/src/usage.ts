@@ -4,7 +4,14 @@ import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as yieldToHost } from "node:timers/promises";
-import type { UsageQuery, UsageReport, UsageTotals, SessionEvent } from "@linkshell/wire";
+import {
+  estimateModelCostUsd,
+  type SessionEvent,
+  type UsageQuery,
+  type UsageRemoteStats,
+  type UsageReport,
+  type UsageTotals,
+} from "@linkshell/wire";
 
 type NativeAgent = "codex" | "claude";
 type Json = Record<string, unknown>;
@@ -14,6 +21,7 @@ const text = (value: unknown, fallback: string) => typeof value === "string" && 
 export interface UsageRecord {
   key: string; session: string; agent: string; model: string; timestamp: number;
   inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens?: number;
+  costUsd?: number;
 }
 
 /** Native logs are cumulative (Codex) or repeated content blocks (Claude), never additive lines. */
@@ -58,7 +66,17 @@ export class UsageParser {
       cacheReadTokens: count(usage.cache_read_input_tokens), cacheWriteTokens: count(usage.cache_creation_input_tokens) };
   }
 }
-const emptyTotals = (): UsageTotals => ({ records: 0, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 });
+const roundCostUsd = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
+const emptyTotals = (): UsageTotals => ({
+  records: 0,
+  sessions: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  totalTokens: 0,
+  estimatedCostUsd: 0,
+});
 const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 function mergeRecord(records: Map<string, UsageRecord>, row: UsageRecord) {
   const previous = records.get(row.key);
@@ -68,14 +86,21 @@ export function summarizeUsage(records: Iterable<UsageRecord>, query: UsageQuery
   const start = new Date(now); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - query.days + 1);
   const unique = new Map<string, UsageRecord>();
   for (const row of records) mergeRecord(unique, row);
-  type Group = { totals: UsageTotals; sessions: Set<string> };
-  const group = (): Group => ({ totals: emptyTotals(), sessions: new Set() });
+  type Group = { totals: UsageTotals; sessions: Set<string>; rawCostUsd: number };
+  const group = (): Group => ({ totals: emptyTotals(), sessions: new Set(), rawCostUsd: 0 });
   const total = group(), daily = new Map<string, Group>(), models = new Map<string, Group & { model: string; agent: string }>();
   for (let day = new Date(start); day.getTime() <= now; day.setDate(day.getDate() + 1)) daily.set(dateKey(day), group());
   const add = (target: Group, row: UsageRecord) => {
     target.totals.records++; target.sessions.add(`${row.agent}:${row.session}`); target.totals.sessions = target.sessions.size;
     for (const key of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const) target.totals[key] += row[key];
     target.totals.totalTokens += row.totalTokens ?? (row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens);
+    const name = modelName(row.model);
+    const recordCost =
+      typeof row.costUsd === "number" && Number.isFinite(row.costUsd) && row.costUsd >= 0
+        ? row.costUsd
+        : estimateModelCostUsd(name, row);
+    target.rawCostUsd += recordCost;
+    target.totals.estimatedCostUsd = roundCostUsd(target.rawCostUsd);
   };
   for (const row of unique.values()) {
     if (row.timestamp < start.getTime() || row.timestamp > now || (query.agent !== "all" && row.agent !== query.agent)) continue;
@@ -86,9 +111,17 @@ export function summarizeUsage(records: Iterable<UsageRecord>, query: UsageQuery
     if (!model) { model = { ...group(), model: name, agent: row.agent }; models.set(key, model); }
     add(model, row);
   }
-  return { generatedAt: now, days: query.days, agent: query.agent, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    totals: total.totals, daily: [...daily].map(([date, value]) => ({ date, ...value.totals })),
-    models: [...models.values()].map(value => ({ agent: value.agent, model: value.model, ...value.totals })).sort((a, b) => b.totalTokens - a.totalTokens), warnings };
+  return {
+    generatedAt: now,
+    days: query.days,
+    agent: query.agent,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    totals: total.totals,
+    daily: [...daily].map(([date, value]) => ({ date, ...value.totals })),
+    models: [...models.values()].map(value => ({ agent: value.agent, model: value.model, ...value.totals })).sort((a, b) => b.totalTokens - a.totalTokens),
+    estimatedCostUsd: total.totals.estimatedCostUsd,
+    warnings,
+  };
 }
 
 /**
@@ -102,11 +135,13 @@ export function modelName(model: string): string {
 export interface UsageEventSource {
   agents(): { id: string; label: string }[];
   events(): Iterable<SessionEvent & { agent: string }>;
+  remoteStats?(sinceMs: number, untilMs: number, agent: string): UsageRemoteStats;
 }
 
 /** Context occupancy and older unscoped updates cannot be safely summed. */
 export function* usageEventRecords(events: Iterable<SessionEvent & { agent: string }>): Iterable<UsageRecord> {
   const previous = new Map<string, number[]>();
+  const previousCost = new Map<string, number>();
   const seen = new Set<string>();
   for (const event of events) {
     const update = event.update;
@@ -117,22 +152,42 @@ export function* usageEventRecords(events: Iterable<SessionEvent & { agent: stri
     seen.add(key);
     const values = [tokens.totalTokens, tokens.inputTokens, tokens.outputTokens, tokens.cachedReadTokens ?? 0, tokens.cachedWriteTokens ?? 0];
     if (values.some(value => !Number.isSafeInteger(value) || value < 0)) continue;
+    const nativeUsd =
+      update.cost && update.cost.currency.toUpperCase() === "USD" && Number.isFinite(update.cost.amount) && update.cost.amount >= 0
+        ? update.cost.amount
+        : undefined;
     let delta = values;
+    let costUsd = nativeUsd;
     if (accounting.scope === "session") {
       const baseline = previous.get(event.sessionId);
+      const baselineCost = previousCost.get(event.sessionId);
       previous.set(event.sessionId, values);
+      if (nativeUsd !== undefined) previousCost.set(event.sessionId, nativeUsd);
       // Attaching mid-session must not charge older usage to today's date.
       if (!baseline || values.some((value, i) => value < baseline[i]!)) continue;
       delta = values.map((value, i) => value - baseline[i]!);
+      costUsd =
+        nativeUsd !== undefined && baselineCost !== undefined && nativeUsd >= baselineCost
+          ? nativeUsd - baselineCost
+          : undefined;
     }
     const [total, input, output, cached, written] = delta as [number, number, number, number, number];
     if (!total) continue;
     // ACP implementations differ on whether cache tokens are included in input.
     const exclusive = total >= input + output + cached + written;
-    yield { key, session: event.sessionId, agent: event.agent, model: accounting.model ?? "未知模型",
-      timestamp: accounting.timestamp ?? event.ts, totalTokens: total,
-      inputTokens: exclusive ? input : Math.max(0, input - cached - written), outputTokens: output,
-      cacheReadTokens: cached, cacheWriteTokens: written };
+    yield {
+      key,
+      session: event.sessionId,
+      agent: event.agent,
+      model: accounting.model ?? "未知模型",
+      timestamp: accounting.timestamp ?? event.ts,
+      totalTokens: total,
+      inputTokens: exclusive ? input : Math.max(0, input - cached - written),
+      outputTokens: output,
+      cacheReadTokens: cached,
+      cacheWriteTokens: written,
+      ...(costUsd !== undefined ? { costUsd } : {}),
+    };
   }
 }
 
@@ -153,16 +208,29 @@ export class UsageStatistics {
     await this.pending;
     const records = [...this.records(), ...usageEventRecords(this.source?.events() ?? [])];
     const now = Date.now();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - query.days + 1);
     const report = summarizeUsage(records, query, now, this.warnings);
     const catalog = new Map((this.source?.agents() ?? [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }]).map(agent => [agent.id, agent]));
     for (const record of records) if (!catalog.has(record.agent)) catalog.set(record.agent, { id: record.agent, label: record.agent });
     report.agents = [...catalog.values()].map(agent => {
       const totals = summarizeUsage(records, { ...query, agent: agent.id }, now).totals;
       const native = agent.id === "codex" || agent.id === "claude";
-      return { ...agent, source: native ? "native" : "acp", status: totals.records ? "available" : "no_data",
-        records: totals.records, totalTokens: totals.totalTokens,
-        note: native ? "本机原生日志（含归档）" : agent.id === "copilot" ? "LinkShell 接收的累计用量差值；首条仅建立基线" : "LinkShell 已记录的 Agent 用量；未上报的会话不计入" };
+      return {
+        ...agent,
+        source: native ? "native" : "acp",
+        status: totals.records ? "available" : "no_data",
+        records: totals.records,
+        totalTokens: totals.totalTokens,
+        estimatedCostUsd: totals.estimatedCostUsd,
+        note: native ? "本机原生日志（含归档）" : agent.id === "copilot" ? "LinkShell 接收的累计用量差值；首条仅建立基线" : "LinkShell 已记录的 Agent 用量；未上报的会话不计入",
+      };
     });
+    report.remoteStats = this.source?.remoteStats?.(start.getTime(), now, query.agent) ?? {
+      remoteTurns: 0,
+      remoteApprovals: 0,
+    };
     return report;
   }
   private *records() { for (const file of this.cache.values()) yield* file.records; }

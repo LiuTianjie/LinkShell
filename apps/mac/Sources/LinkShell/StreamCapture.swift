@@ -30,8 +30,10 @@ final class StreamCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         guard let target = content?.displays.first(where: { $0.displayID == display.id }) else {
           return done(error?.localizedDescription ?? "display \(display.id) can't be captured")
         }
-        // Everything on the display, this app's own windows included (the clock strip is one).
-        let filter = SCContentFilter(display: target, excludingWindows: [])
+        // Everything on the display except local privacy-curtain overlays, this app's own clock strip included.
+        let curtainIDs = ScreenPrivacy.shared.curtainWindowIDs()
+        let excluded = curtainIDs.isEmpty ? [] : (content?.windows.filter { curtainIDs.contains($0.windowID) } ?? [])
+        let filter = SCContentFilter(display: target, excludingWindows: excluded)
         let stream = SCStream(filter: filter, configuration: StreamCapture.configuration(width: width, height: height, fps: fps), delegate: self)
         do {
           try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)

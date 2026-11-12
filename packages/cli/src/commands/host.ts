@@ -1,7 +1,14 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-import { RELAY_PATH, type GatewayStatus } from "@linkshell/wire";
+import {
+  RELAY_PATH,
+  type GatewayStatus,
+  type KeepAwakeMode,
+  type MachineKeepAwake,
+  type MachinePower,
+} from "@linkshell/wire";
 import { getCachedToken, isLoggedIn, loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
 
@@ -16,11 +23,103 @@ export function silenceSqliteWarning(): void {
   }) as typeof process.emitWarning;
 }
 
-interface HostConfig {
+export interface HostConfig {
   /** v2 gateway base URL (ws:// or wss://), or "off". Unset: the official gateway once logged in. */
   gateway?: string;
   /** Set once `linkshell setup` has run here (by itself on the first start, or by hand). */
   setup?: "done";
+  /** Idle sleep prevention mode ("smart" default, "always", or "off"). */
+  keepAwake?: KeepAwakeMode;
+  /** Same-Wi-Fi LAN gateway port configured via `linkshell host --lan`. */
+  lanPort?: number;
+  [key: string]: unknown;
+}
+
+export function parseKeepAwakeOption(raw: string): KeepAwakeMode {
+  const mode = raw.trim().toLowerCase();
+  if (mode === "smart" || mode === "always" || mode === "off") return mode;
+  throw new Error(`Invalid --keep-awake mode "${raw}". Expected smart, always, or off.`);
+}
+
+export function parseLanOption(raw: boolean | string): "off" | number {
+  if (raw === true) return 8787;
+  const trimmed = String(raw).trim().toLowerCase();
+  if (trimmed === "off" || trimmed === "false") return "off";
+  const port = Number(trimmed);
+  if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+  throw new Error(`Invalid --lan value "${raw}". Pass a port (e.g. 8787), omit for 8787, or pass "off".`);
+}
+
+export function findLanIpv4(interfaces = networkInterfaces()): string | undefined {
+  const isPrivateRfc1918 = (ip: string) =>
+    ip.startsWith("192.168.") ||
+    ip.startsWith("10.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+  const virtualName = /^(lo|utun|tun|tap|docker|br-|veth|vmnet|tailscale)/i;
+  let fallback: string | undefined;
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family !== "IPv4" || addr.internal) continue;
+      if (!virtualName.test(name) && isPrivateRfc1918(addr.address)) return addr.address;
+      fallback ??= addr.address;
+    }
+  }
+  return fallback;
+}
+
+export function configureLanGateway(
+  home: string,
+  option: "off" | number,
+): { gatewayUrl?: string; startedLocalGateway: boolean; port?: number } {
+  const current = readHostConfig(home);
+  if (option === "off") {
+    const next: HostConfig = { ...current };
+    if (next.lanPort !== undefined && next.gateway?.startsWith("ws://") && next.gateway.endsWith(`:${next.lanPort}`)) {
+      delete next.gateway;
+    }
+    delete next.lanPort;
+    writeHostConfig(home, next);
+    delete process.env.LINKSHELL_LAN_PORT;
+    return { startedLocalGateway: false };
+  }
+  const lanIp = findLanIpv4() ?? "127.0.0.1";
+  const gatewayUrl = `ws://${lanIp}:${option}`;
+  let startedLocalGateway = false;
+  if (!daemon.readPid("gateway")) {
+    daemon.spawnDaemon("gateway", ["gateway", "--_foreground-gw", "--port", String(option)]);
+    startedLocalGateway = true;
+  }
+  writeHostConfig(home, { ...current, gateway: gatewayUrl, lanPort: option });
+  process.env.LINKSHELL_LAN_PORT = String(option);
+  return { gatewayUrl, startedLocalGateway, port: option };
+}
+
+export function describePowerAndKeepAwake(
+  metrics: { power?: MachinePower; keepAwake?: MachineKeepAwake } | undefined,
+): string | undefined {
+  if (!metrics?.keepAwake && !metrics?.power) return undefined;
+  const parts: string[] = [];
+  if (metrics.keepAwake) {
+    const { mode, active, reason } = metrics.keepAwake;
+    if (mode === "off") {
+      parts.push("keep-awake off");
+    } else if (active) {
+      parts.push(`keep-awake ${mode} (active${reason && reason !== mode ? `: ${reason.replace(/_/g, " ")}` : ""})`);
+    } else {
+      parts.push(`keep-awake ${mode} (idle)`);
+    }
+  }
+  if (metrics.power) {
+    const { onBattery, percent, charging } = metrics.power;
+    const pct = typeof percent === "number" ? ` ${Math.round(percent)}%` : "";
+    if (onBattery) {
+      parts.push(`battery${pct}${charging ? " (charging)" : ""}`);
+    } else {
+      parts.push(`AC power${pct}`);
+    }
+  }
+  return parts.join(" · ");
 }
 
 /** LinkShell's own gateway: an iTool member's computers are reachable there. */
@@ -214,7 +313,9 @@ export async function refreshGateway(waitMs: number): Promise<GatewayStatus | un
 }
 
 export function describeGateway(gateway: GatewayStatus): string {
-  if (gateway.status === "off") return "off (linkshell login for the official one, or linkshell host --gateway <url>)";
+  if (gateway.status === "off") {
+    return "off (linkshell login for 7-day free trial / official gateway, linkshell host --lan, or linkshell host --gateway <url>)";
+  }
   const label = gateway.account ? (gateway.account.email ?? loadAuth()?.email ?? gateway.account.userId) : undefined;
   const account = label ? `, account ${label}` : "";
   const problem = gateway.error ? `  ⚠ ${gateway.error.message}` : "";
@@ -259,8 +360,8 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   if (!chosen && plan !== "pro") {
     // A running host now gets the gateway's own answer, instead of an old login's.
     await refreshGateway(0);
-    out("The official gateway needs an iTool membership (monthly or yearly): https://www.itool.tech/en/pro?from=linkshell");
-    out("Or use your own gateway: linkshell host --gateway <url>, then linkshell pair\n");
+    out("The official gateway requires an active 7-day free trial or iTool membership: https://www.itool.tech/pro?from=linkshell");
+    out("Invite a friend to earn +14 / +30 days, use same-Wi-Fi LAN (linkshell host --lan), or self-host (linkshell host --gateway <url> && linkshell pair).\n");
     return;
   }
   await ensureHostRunning();
@@ -309,6 +410,9 @@ export async function printHostStatus(): Promise<void> {
     for (const device of gateway.devices) {
       process.stdout.write(`    ${device.online ? "●" : "○"} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
     }
+    const metrics = await client.call("machine.metrics", {}, 5000).catch(() => undefined);
+    const powerLine = describePowerAndKeepAwake(metrics);
+    if (powerLine) process.stdout.write(`  Power:    ${powerLine}\n`);
     const { describeScreen } = await import("./screen.js");
     const screen = describeScreen(
       await client.call("screen.access", {}, 20_000).catch((error: Error) => (/method not found|unknown method/i.test(error.message) ? ("old" as const) : undefined)),

@@ -54,6 +54,7 @@ struct WatchMembershipUnavailable: LocalizedError {
 enum WatchMembership: Equatable {
   case unknown
   case free
+  case trial(expiresAt: Date, daysRemaining: Int)
   case pro(expiresAt: Date, yearly: Bool)
 }
 
@@ -165,6 +166,7 @@ final class WatchAccount: ObservableObject {
     struct Entitlement: Decodable {
       let ok: Bool; let code: String?; let product: String?; let active: Bool?
       let valid_until: String?; let tier: String?; let server_time: String?
+      let is_trial: Bool?; let days_remaining: Int?
     }
     guard let body = try? JSONDecoder().decode(Entitlement.self, from: data) else { throw WatchLinkError("会员状态返回异常，请稍后重试") }
     guard body.ok else {
@@ -174,7 +176,12 @@ final class WatchAccount: ObservableObject {
     guard active else { return .free }
     guard let raw = body.valid_until, let expiry = date(raw) else { throw WatchLinkError("会员状态返回异常，请稍后重试") }
     let now = body.server_time.flatMap(date) ?? Date()
-    return expiry > now ? .pro(expiresAt: expiry, yearly: body.tier == "yearly") : .free
+    guard expiry > now else { return .free }
+    if body.is_trial == true {
+      let fallbackDays = max(1, Int(ceil(expiry.timeIntervalSince(now) / 86_400)))
+      return .trial(expiresAt: expiry, daysRemaining: max(1, body.days_remaining ?? fallbackDays))
+    }
+    return .pro(expiresAt: expiry, yearly: body.tier == "yearly")
   }
   private func membershipRequest(_ original: URLRequest) async throws -> (Data, HTTPURLResponse) {
     var request = original

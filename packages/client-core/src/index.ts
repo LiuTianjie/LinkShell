@@ -16,6 +16,7 @@ export * from "./tunnel-socket.js";
 export * from "./pairing.js";
 export * from "./streams.js";
 export * from "./computer-preview.js";
+export * from "./i18n.js";
 export * from "./pro-membership.js";
 export * from "./account-errors.js";
 export * from "./session-preferences.js";

@@ -63,13 +63,15 @@ async function setUpPhone(out: (line?: string) => void, interactive: boolean): P
     return false;
   }
   if (!interactive) {
-    out("  Not connected to a phone yet: linkshell login (LinkShell account), or your own gateway and linkshell pair.");
+    out("  Not connected to a phone yet: linkshell login (7-day free trial on new accounts, no card needed), linkshell host --lan (same Wi-Fi), or your own gateway and linkshell pair.");
     return false;
   }
-  out("  Your phone reaches this computer through your LinkShell account (iTool membership), from anywhere.");
-  const answer = await ask("  Sign in now? It opens your browser. [Y/n] ");
+  out("  Your phone reaches this computer from anywhere through the official gateway:");
+  out("  • Sign in: new accounts get a 7-day free trial (no credit card needed), then iTool membership.");
+  out(dim("  • Free alternatives: same-Wi-Fi LAN (linkshell host --lan) or self-hosted gateway (linkshell host --gateway <url> && linkshell pair)."));
+  const answer = await ask("  Sign in now to start your 7-day free trial / connect your account? It opens your browser. [Y/n] ");
   if (answer === "n" || answer === "no") {
-    out(dim("    Later: linkshell login — or with your own gateway: linkshell host --gateway <url>, then linkshell pair"));
+    out(dim("    Later: linkshell login (7-day free trial, no card needed) — LAN: linkshell host --lan — Self-hosted: linkshell host --gateway <url>, then linkshell pair"));
     return false;
   }
   const { runLogin } = await import("./login.js");
@@ -101,7 +103,7 @@ export async function runSetup(version: string, from: "command" | "first-start" 
   // Run where nobody could answer, it has set nothing up: the first start at a terminal still offers it.
   if (interactive) await remember("done");
   if (screen && phone) out(`  ${green("All set.")} Open LinkShell on your phone.\n`);
-  else out(`  Done for now. ${[!screen && "The screen: linkshell screen", !phone && "The phone: linkshell login, or linkshell pair"].filter(Boolean).join(" · ")}\n`);
+  else out(`  Done for now. ${[!screen && "The screen: linkshell screen", !phone && "The phone: linkshell login (7-day free trial), linkshell host --lan, or linkshell pair"].filter(Boolean).join(" · ")}\n`);
 }
 
 /**

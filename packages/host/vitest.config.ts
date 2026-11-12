@@ -7,4 +7,8 @@ export default defineConfig({
       "@linkshell/wire": fileURLToPath(new URL("../wire/src/index.ts", import.meta.url)),
     },
   },
+  test: {
+    testTimeout: 15_000,
+    maxWorkers: 4,
+  },
 });

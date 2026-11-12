@@ -57,11 +57,25 @@ const hostCmd = program
   .option("--daemon", "Run in background (detached)")
   .option("--dev-port <port>", "Also serve the host API on 127.0.0.1:<port> (local development clients only)")
   .option("--gateway <url>", "Reach this computer through a gateway (saved; 'off' to disable, 'default' for the official one when logged in)")
+  .option("--lan [port]", "Reach this computer on same-Wi-Fi LAN (starts local gateway on <port>, default 8787; 'off' to disable)")
+  .option("--keep-awake <mode>", "Prevent idle system sleep: 'smart' (default, while active), 'always', or 'off'")
   .option("--_foreground-host", undefined) // internal
   .addOption(new Option("--_upgrade-host").hideHelp())
   .action(async (options) => {
-    const { runHostForeground, ensureHostRunning, readHostConfig, writeHostConfig, assertHostRuntime, silenceSqliteWarning, withRunningHost, refreshGateway, describeGateway } =
-      await import("./commands/host.js");
+    const {
+      runHostForeground,
+      ensureHostRunning,
+      readHostConfig,
+      writeHostConfig,
+      assertHostRuntime,
+      silenceSqliteWarning,
+      withRunningHost,
+      refreshGateway,
+      describeGateway,
+      parseKeepAwakeOption,
+      parseLanOption,
+      configureLanGateway,
+    } = await import("./commands/host.js");
     assertHostRuntime();
     silenceSqliteWarning();
     if (options._upgradeHost) {
@@ -70,13 +84,35 @@ const hostCmd = program
       return;
     }
     if (options.devPort) process.env.LINKSHELL_DEV_PORT = String(options.devPort);
-    if (options.gateway) {
+    const parsedKeepAwake = options.keepAwake !== undefined ? parseKeepAwakeOption(String(options.keepAwake)) : undefined;
+    const parsedLan = options.lan !== undefined ? parseLanOption(options.lan) : undefined;
+    let gatewayUpdated = Boolean(options.gateway);
+    if (options.gateway || parsedKeepAwake !== undefined || parsedLan !== undefined) {
       const { defaultHome } = await import("@linkshell/host");
       const home = defaultHome();
-      // "off" is remembered, so being logged in doesn't turn the official gateway back on.
-      writeHostConfig(home, { ...readHostConfig(home), gateway: options.gateway === "default" ? undefined : options.gateway });
+      if (parsedLan !== undefined) {
+        const lanResult = configureLanGateway(home, parsedLan);
+        gatewayUpdated = true;
+        if (lanResult.gatewayUrl) {
+          process.stderr.write(`  LAN gateway: ${lanResult.gatewayUrl}${lanResult.startedLocalGateway ? " (started local gateway)" : ""}\n`);
+          process.stderr.write("  Pair your phone on the same Wi-Fi with: linkshell pair\n");
+        } else {
+          process.stderr.write("  LAN mode disabled.\n");
+        }
+      }
+      if (options.gateway) {
+        const existing = readHostConfig(home);
+        // "off" is remembered, so being logged in doesn't turn the official gateway back on.
+        writeHostConfig(home, { ...existing, gateway: options.gateway === "default" ? undefined : options.gateway, lanPort: undefined });
+      }
+      if (parsedKeepAwake !== undefined) {
+        writeHostConfig(home, { ...readHostConfig(home), keepAwake: parsedKeepAwake });
+      }
     }
     const running = options._foregroundHost ? undefined : await withRunningHost((client) => client.call("machine.info", {}));
+    if (parsedKeepAwake !== undefined && running) {
+      await withRunningHost((client) => client.call("machine.keepAwake", { mode: parsedKeepAwake })).catch(() => undefined);
+    }
     if (options.daemon && !options._foregroundHost) {
       const socket = await ensureHostRunning();
       const daemon = await import("./utils/daemon.js");
@@ -86,7 +122,7 @@ const hostCmd = program
         process.stderr.write(`    linkshell host stop && linkshell host --daemon\n`);
       }
       // A gateway given to a host that was already running applies now.
-      if (options.gateway && running) {
+      if (gatewayUpdated && running) {
         const gateway = await refreshGateway(10_000);
         if (gateway) process.stderr.write(`  Gateway: ${describeGateway(gateway)}\n`);
       }
@@ -102,9 +138,13 @@ const hostCmd = program
       process.stderr.write("\n");
       return;
     }
-    if (running && options.gateway) {
-      const gateway = await refreshGateway(10_000);
-      if (gateway) process.stderr.write(`\n  Gateway: ${describeGateway(gateway)}\n\n`);
+    if (running && (gatewayUpdated || parsedKeepAwake !== undefined)) {
+      if (gatewayUpdated) {
+        const gateway = await refreshGateway(10_000);
+        if (gateway) process.stderr.write(`\n  Gateway: ${describeGateway(gateway)}\n\n`);
+      } else if (parsedKeepAwake !== undefined) {
+        process.stderr.write(`\n  Keep-awake mode set to: ${parsedKeepAwake}\n\n`);
+      }
       return;
     }
     await runHostForeground(pkg.version);
@@ -361,7 +401,7 @@ program
 
 program
   .command("login")
-  .description("Log in to LinkShell (Pro: the official gateway, no pairing needed)")
+  .description("Log in to LinkShell (official gateway: 7-day free trial on new accounts, no pairing needed)")
   .action(async () => {
     const result = await runLogin();
     if (!result) return;

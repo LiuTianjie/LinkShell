@@ -9,6 +9,10 @@ export interface DesktopMembership {
   planExpiresAt: string | null;
   /** The iTool membership tier behind "pro"; null otherwise. */
   tier?: MembershipTier | null;
+  /** True when the active entitlement comes from the 7-day sign-up trial. */
+  isTrial?: boolean;
+  /** When the 7-day sign-up trial ends (ISO 8601), when reported by the backend. */
+  trialEndsAt?: string | null;
 }
 
 const unknownMembership: DesktopMembership = { plan: "unknown", planExpiresAt: null, tier: null };
@@ -23,8 +27,15 @@ export function cachedMembership(userId: string): DesktopMembership {
     const expiry = typeof value.planExpiresAt === "string" && Number.isFinite(Date.parse(value.planExpiresAt)) ? value.planExpiresAt : null;
     if (value.plan === "pro" && !expiry) return { ...unknownMembership };
     const tier: MembershipTier | null = value.tier === "yearly" || value.tier === "monthly" ? value.tier : null;
-    if (value.plan !== "pro") return { plan: value.plan, planExpiresAt: expiry, tier: null };
-    return Date.parse(expiry!) > Date.now() ? { plan: "pro", planExpiresAt: expiry, tier: tier ?? "monthly" } : { plan: "free", planExpiresAt: expiry, tier: null };
+    const trialEndsAt = typeof value.trialEndsAt === "string" && Number.isFinite(Date.parse(value.trialEndsAt)) ? value.trialEndsAt : undefined;
+    const trialFields = {
+      ...(typeof value.isTrial === "boolean" ? { isTrial: value.isTrial } : {}),
+      ...(trialEndsAt !== undefined ? { trialEndsAt } : {}),
+    };
+    if (value.plan !== "pro") return { plan: value.plan, planExpiresAt: expiry, tier: null, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
+    return Date.parse(expiry!) > Date.now()
+      ? { plan: "pro", planExpiresAt: expiry, tier: tier ?? "monthly", ...trialFields }
+      : { plan: "free", planExpiresAt: expiry, tier: null, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
   } catch {
     return { ...unknownMembership };
   }
@@ -58,7 +69,13 @@ async function accountToken(expectedUserId?: string): Promise<{ userId: string; 
 export async function lookupMembership(accessToken: string, signal?: AbortSignal): Promise<DesktopMembership> {
   const prefer = process.env.LINKSHELL_TOKEN_PROXY === "off" ? "supabase" : "itool";
   const membership = await fetchProMembership({ accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, prefer, signal });
-  return { plan: membership.plan, planExpiresAt: membership.expiresAt ?? null, tier: membership.tier ?? null };
+  return {
+    plan: membership.plan,
+    planExpiresAt: membership.expiresAt ?? null,
+    tier: membership.tier ?? null,
+    ...(typeof membership.isTrial === "boolean" ? { isTrial: membership.isTrial } : {}),
+    ...(membership.trialEndsAt ? { trialEndsAt: membership.trialEndsAt } : {}),
+  };
 }
 
 export async function refreshMembership(): Promise<DesktopMembership> {

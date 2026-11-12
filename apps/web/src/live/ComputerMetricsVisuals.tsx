@@ -1,5 +1,7 @@
-import type { MachineMetrics } from "@linkshell/wire";
+import type { MachineKeepAwake, MachineMetrics } from "@linkshell/wire";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { historySamples, memoryPercent } from "./machine-metrics";
+import { useT } from "./i18n";
 
 export function metricPercent(value: number | null | undefined) { return value == null ? "—" : Math.round(value); }
 export function memorySize(metrics: MachineMetrics) {
@@ -16,11 +18,26 @@ const percent = (value: number | null | undefined) => value == null ? "—" : `$
 function diskPercent(disk: MachineMetrics["disk"]) {
   return disk && disk.totalBytes > 0 ? Math.min(100, Math.max(0, disk.usedBytes / disk.totalBytes * 100)) : null;
 }
+function powerSummary(power: NonNullable<MachineMetrics["power"]>, t: ReturnType<typeof useT>) {
+  const pct = power.percent != null ? Math.round(power.percent) : undefined;
+  if (power.charging && pct !== undefined) return t("power.charging", { percent: pct });
+  if (power.onBattery && pct !== undefined) return t("power.onBattery", { percent: pct });
+  if (!power.onBattery && pct !== undefined) return `${t("power.pluggedIn")} · ${pct}%`;
+  return power.onBattery ? t("power.battery", { percent: "—" }) : t("power.pluggedIn");
+}
 export function ComputerResourceReadings({ metrics }: { metrics?: MachineMetrics }) {
+  const t = useT();
+  const batteryPct = metrics?.power?.percent != null ? Math.round(metrics.power.percent) : null;
   return <dl className="computer-resource-readings">
     <div title={metrics ? `${metrics.cpu.model} · ${metrics.cpu.cores} 个逻辑核心` : undefined}><dt>CPU</dt><dd>{percent(metrics?.cpu.usage)}</dd></div>
     <div title={metrics ? `已用 ${memorySize(metrics)}` : undefined}><dt>内存</dt><dd>{percent(metrics && memoryPercent(metrics))}</dd></div>
     <div title={metrics?.disk ? `主目录磁盘已用 ${size(metrics.disk.usedBytes)} / ${size(metrics.disk.totalBytes)}；可用 ${size(metrics.disk.availableBytes)}` : "此电脑端未提供磁盘读数"}><dt>磁盘</dt><dd>{percent(diskPercent(metrics?.disk))}</dd></div>
+    {batteryPct !== null && metrics?.power && (
+      <div title={powerSummary(metrics.power, t)}>
+        <dt>{t("power.battery", { percent: "" }).replace(/\s*%$/, "").trim() || "电池"}</dt>
+        <dd>{batteryPct}%</dd>
+      </div>
+    )}
   </dl>;
 }
 function WaveHistory({ history }: { history: MachineMetrics[] }) {
@@ -50,13 +67,80 @@ function WaveHistory({ history }: { history: MachineMetrics[] }) {
   </svg>;
 }
 /** The list stays compact; full capacity information and history are shown only on request. */
-export function ComputerMetricsVisual({ metrics, history }: { metrics: MachineMetrics; history: MachineMetrics[] }) {
+export function ComputerMetricsVisual({
+  metrics,
+  history,
+  onKeepAwakeChange,
+  keepAwakeBusy,
+}: {
+  metrics: MachineMetrics;
+  history: MachineMetrics[];
+  onKeepAwakeChange?: (mode: MachineKeepAwake["mode"]) => void;
+  keepAwakeBusy?: boolean;
+}) {
+  const t = useT();
   const disk = metrics.disk;
+  const power = metrics.power;
+  const keepAwake = metrics.keepAwake;
+  const lowBattery =
+    power?.onBattery &&
+    !power.charging &&
+    power.percent != null &&
+    power.percent <= 20
+      ? Math.round(power.percent)
+      : undefined;
   return <>
+    {lowBattery !== undefined && (
+      <p className="mb-2 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-xs text-foreground" role="status">
+        {t("power.lowBatteryWarning", { percent: lowBattery })}
+      </p>
+    )}
     <dl className="computer-resource-details">
       <div><dt>CPU</dt><dd>{metrics.cpu.model || "处理器"} · {metrics.cpu.cores} 个逻辑核心</dd></div>
       <div><dt>物理内存</dt><dd>已用 {memorySize(metrics)}<small>{memoryDescription(metrics)}</small></dd></div>
       <div><dt>主目录磁盘</dt><dd>{disk ? <>已用 {size(disk.usedBytes)} / {size(disk.totalBytes)} · 可用 {size(disk.availableBytes)}<small>{disk.path} · 每 30 秒更新</small></> : "此电脑端未提供磁盘读数"}</dd></div>
+      {power && (
+        <div>
+          <dt>{t("power.battery", { percent: "" }).replace(/\s*%$/, "").trim() || "电源"}</dt>
+          <dd>{powerSummary(power, t)}</dd>
+        </div>
+      )}
+      {(keepAwake || onKeepAwakeChange) && (
+        <div>
+          <dt>{t("power.keepAwake")}</dt>
+          <dd className="flex flex-col gap-1.5">
+            {onKeepAwakeChange ? (
+              <Tabs
+                value={keepAwake?.mode ?? "smart"}
+                onValueChange={(value) => {
+                  const mode = value === "always" || value === "off" ? value : "smart";
+                  onKeepAwakeChange(mode);
+                }}
+              >
+                <TabsList variant="line" aria-label={t("power.keepAwake")}>
+                  <TabsTrigger value="smart" disabled={keepAwakeBusy}>{t("power.keepAwakeSmart")}</TabsTrigger>
+                  <TabsTrigger value="always" disabled={keepAwakeBusy}>{t("power.keepAwakeAlways")}</TabsTrigger>
+                  <TabsTrigger value="off" disabled={keepAwakeBusy}>{t("power.keepAwakeOff")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            ) : (
+              <span>
+                {keepAwake?.mode === "always"
+                  ? t("power.keepAwakeAlways")
+                  : keepAwake?.mode === "off"
+                    ? t("power.keepAwakeOff")
+                    : t("power.keepAwakeSmart")}
+              </span>
+            )}
+            {keepAwake && (
+              <small>
+                {keepAwake.active ? t("power.keepAwakeActive") : t("power.keepAwakeIdle")}
+                {keepAwake.reason ? ` · ${keepAwake.reason}` : ""}
+              </small>
+            )}
+          </dd>
+        </div>
+      )}
     </dl>
     <div className="computer-history">
       <div className="computer-history-heading"><span>最近 2 分钟</span><span><i data-tone="cpu" />CPU<i data-tone="memory" />内存</span></div>

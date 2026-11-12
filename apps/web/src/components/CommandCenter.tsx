@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
-import { groupProjects } from "@linkshell/client-core";
+import { LOCALE_LABELS, groupProjects, type I18nKey } from "@linkshell/client-core";
 import {
   Archive,
+  Bot,
   Layers3,
   GitBranch,
   Globe,
   Keyboard,
+  Languages,
   Laptop,
   MessageSquare,
   MessageSquarePlus,
@@ -30,6 +32,7 @@ import { isWindowsDesktop, openDesktopManagement } from "../live/desktop";
 import { desktopModeShortcuts, desktopShortcuts, sendDesktopCommand, shortcutText, type DesktopShortcut } from "../live/desktop-commands";
 import { sessionNeedsAttention, waitingLabel } from "../live/session-list";
 import { sessionTime } from "../live/session-time";
+import { setWebLocalePreference, useT } from "../live/i18n";
 import {
   Command,
   CommandDialog,
@@ -44,16 +47,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 type Appearance = "system" | "light" | "dark";
 
-const places = [
-  { id: "home", title: "会话", icon: MessageSquare },
-  { id: "projects", title: "项目", icon: Layers3 },
-  { id: "screen", title: "我的电脑", icon: Monitor },
-  { id: "terminals", title: "终端", icon: Terminal },
-  { id: "files", title: "文件", icon: File },
-  { id: "ports", title: "端口预览", icon: Globe },
-  { id: "worktrees", title: "工作树", icon: GitBranch },
-  { id: "computers", title: "电脑与 Agent", icon: Laptop },
-  { id: "archive", title: "已归档会话", icon: Archive },
+const places: { id: string; titleKey: I18nKey; icon: typeof MessageSquare }[] = [
+  { id: "home", titleKey: "nav.sessions", icon: MessageSquare },
+  { id: "projects", titleKey: "nav.projects", icon: Layers3 },
+  { id: "steward", titleKey: "nav.steward", icon: Bot },
+  { id: "screen", titleKey: "nav.screen", icon: Monitor },
+  { id: "terminals", titleKey: "nav.terminals", icon: Terminal },
+  { id: "files", titleKey: "nav.files", icon: File },
+  { id: "ports", titleKey: "nav.ports", icon: Globe },
+  { id: "worktrees", titleKey: "nav.worktrees", icon: GitBranch },
+  { id: "computers", titleKey: "nav.computers", icon: Laptop },
+  { id: "archive", titleKey: "nav.archived", icon: Archive },
 ];
 
 function stateWord(session: SessionSummary): string {
@@ -81,6 +85,7 @@ export function CommandCenter({
 }) {
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
+  const t = useT();
   const connection = state.connection;
   const [keys, setKeys] = useState(false);
   const run = (action: () => void) => {
@@ -123,11 +128,14 @@ export function CommandCenter({
               </CommandItem>
             </CommandGroup>
             <CommandGroup heading="前往">
-              {places.map((place) => (
-                <CommandItem key={place.id} value={`前往 ${place.title} ${place.id}`} onSelect={() => run(() => navigate(place.id))}>
-                  <place.icon />{place.title}
-                </CommandItem>
-              ))}
+              {places.map((place) => {
+                const title = t(place.titleKey);
+                return (
+                  <CommandItem key={place.id} value={`前往 ${title} ${place.id}`} onSelect={() => run(() => navigate(place.id))}>
+                    <place.icon />{title}
+                  </CommandItem>
+                );
+              })}
               <CommandItem value="本机管理 management settings 设置" onSelect={() => run(openDesktopManagement)}>
                 <Settings2 />本机管理<CommandShortcut>{shortcutText(desktopModeShortcuts.manage)}</CommandShortcut>
               </CommandItem>
@@ -152,6 +160,12 @@ export function CommandCenter({
               <CommandItem value="外观 跟随系统 appearance system" onSelect={() => run(() => setAppearance("system"))}><SunMoon />跟随系统外观</CommandItem>
               <CommandItem value="外观 浅色 light" onSelect={() => run(() => setAppearance("light"))}><Sun />浅色外观</CommandItem>
               <CommandItem value="外观 深色 dark" onSelect={() => run(() => setAppearance("dark"))}><Moon />深色外观</CommandItem>
+            </CommandGroup>
+            <CommandGroup heading={t("locale.label")}>
+              <CommandItem value={`language locale system ${t("locale.system")}`} onSelect={() => run(() => setWebLocalePreference("system"))}><Languages />{t("locale.system")}</CommandItem>
+              <CommandItem value={`language locale zh chinese ${LOCALE_LABELS.zh}`} onSelect={() => run(() => setWebLocalePreference("zh"))}><Languages />{LOCALE_LABELS.zh}</CommandItem>
+              <CommandItem value={`language locale en english ${LOCALE_LABELS.en}`} onSelect={() => run(() => setWebLocalePreference("en"))}><Languages />{LOCALE_LABELS.en}</CommandItem>
+              <CommandItem value={`language locale ja japanese ${LOCALE_LABELS.ja}`} onSelect={() => run(() => setWebLocalePreference("ja"))}><Languages />{LOCALE_LABELS.ja}</CommandItem>
             </CommandGroup>
           </CommandList>
         </Command>

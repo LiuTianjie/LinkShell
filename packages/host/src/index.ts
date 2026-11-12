@@ -13,3 +13,9 @@ export { ACP_AGENTS, defaultDrivers } from "./drivers/registry.js";
 
 export { shippedApp } from "./input.js";
 export { AccessControl, accessPath, writeAccessPassword } from "./access.js";
+export { KeepAwakeManager, readKeepAwakeMode, writeKeepAwakeMode } from "./keep-awake.js";
+export { gitDiff, gitRevertFile } from "./git-diff.js";
+export { listProjectFiles, scoreProjectPath } from "./fs.js";
+export { MdnsAdvertiser, buildMdnsCommand, hostFingerprint } from "./mdns.js";
+export { readClipboard, writeClipboard } from "./clipboard.js";
+export * from "./lsa/index.js";

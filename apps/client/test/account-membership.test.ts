@@ -50,10 +50,9 @@ describe("mobile membership account isolation", () => {
 });
 
 describe("the phone sells nothing", () => {
-  // App Store rules: no purchase link, no code entry, no price on the phone.
+  // App Store 3.1.1 rules: no purchase link, no itool.tech/pro, no checkout=, no code entry, no price on the phone.
   const screen = readFileSync(resolve(import.meta.dirname, "../src/components/account-membership.tsx"), "utf8");
-  it("has no link, code entry or price", () => {
-    expect(screen).not.toMatch(/Linking|openURL|TextInput|ITOOL_MEMBERSHIP_URL|https?:\/\/|¥|激活码|链动/);
-    expect(screen).toContain("在电脑浏览器打开 itool.tech/pro 开通会员");
+  it("has no link, purchase URL, code entry or price", () => {
+    expect(screen).not.toMatch(/Linking|openURL|TextInput|ITOOL_MEMBERSHIP_URL|itool\.tech\/pro|checkout=|https?:\/\/|¥|\$[0-9]|激活码|链动/);
   });
 });

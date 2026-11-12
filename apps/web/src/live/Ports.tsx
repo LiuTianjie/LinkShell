@@ -19,6 +19,7 @@ import {
   Minimize,
   Plus,
   RefreshCw,
+  Send,
   Server,
   ShieldCheck,
   X,
@@ -30,6 +31,7 @@ import {
   EmptyState,
   LoadState,
   useConnection,
+  useJob,
   useLoad,
   messageOf,
 } from "./common";
@@ -37,6 +39,7 @@ import { socketBootstrap } from "./Video";
 import { openWebSocket } from "./transport";
 import { isDesktop } from "./desktop";
 import { initialPortTabs, portTabsReducer } from "./port-tabs";
+import { useT } from "./i18n";
 
 function previewOrigin() {
   const configured = window.__LINKSHELL_CONFIG__?.previewOrigin;
@@ -63,16 +66,36 @@ function previewOrigin() {
     return undefined;
   return url.origin;
 }
-export function PortPreview({ port, retry }: { port: number; retry(): void }) {
-  const { streams } = useConnection();
+export interface PreviewRuntimeError {
+  source: string;
+  message: string;
+  stack?: string;
+}
+
+export function PortPreview({
+  port,
+  retry,
+  sessionId,
+}: {
+  port: number;
+  retry(): void;
+  sessionId?: string;
+}) {
+  const t = useT();
+  const { streams, store } = useConnection();
+  const sendJob = useJob();
   const ref = useRef<HTMLIFrameElement>(null);
   // An HTTP error page still loads and is shown under a notice; a failed connection has no page.
   const [error, setError] = useState<string>();
   const [failure, setFailure] = useState<string>();
   const [waiting, setWaiting] = useState(true);
   const [slow, setSlow] = useState(false);
+  const [runtimeErrors, setRuntimeErrors] = useState<PreviewRuntimeError[]>([]);
   const [channel] = useState(() => crypto.randomUUID());
   const origin = previewOrigin();
+  useEffect(() => {
+    setRuntimeErrors([]);
+  }, [port]);
   useEffect(() => {
     if (!origin) return;
     let alive = true;
@@ -118,7 +141,27 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
         url?: string;
         protocols?: string[];
         data?: string | ArrayBuffer;
+        source?: string;
+        message?: string;
+        stack?: string;
       };
+      if (message.type === "preview-runtime-error" && typeof message.message === "string") {
+        const nextError: PreviewRuntimeError = {
+          source: typeof message.source === "string" ? message.source.slice(0, 64) : "runtime",
+          message: message.message.slice(0, 1000),
+          stack: typeof message.stack === "string" ? message.stack.slice(0, 2000) : undefined,
+        };
+        setRuntimeErrors((current) => {
+          if (
+            current.length >= 25 ||
+            current.some((item) => item.source === nextError.source && item.message === nextError.message)
+          ) {
+            return current;
+          }
+          return [...current, nextError];
+        });
+        return;
+      }
       if (message.type === "preview-ready")
         reply({ type: "preview-init", bootstrap: socketBootstrap.toString() });
       if (message.type === "http-cancel") http.get(message.id)?.abort();
@@ -308,8 +351,67 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
         </AlertDescription>
       </Alert>
     );
+  const targetSessionId = (() => {
+    if (sessionId) return sessionId;
+    const state = store.getState();
+    const candidates = Object.values(state.sessions).filter((entry) => !entry.archived);
+    candidates.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    return candidates[0]?.id;
+  })();
+
+  const sendErrorsToAgent = () => {
+    if (!targetSessionId || !runtimeErrors.length) return;
+    const body = runtimeErrors
+      .map((item, idx) => `${idx + 1}. [${item.source}] ${item.message}${item.stack ? `\n${item.stack}` : ""}`)
+      .join("\n\n");
+    const prompt = `${t("ports.sendErrorsPromptPrefix")}\n\n\`\`\`text\n${body}\n\`\`\``;
+    void sendJob.run(async () => {
+      const result = await store.getState().send(targetSessionId, [{ type: "text", text: prompt }]);
+      if (result === "failed") throw new Error("Failed to send runtime errors");
+      setRuntimeErrors([]);
+    });
+  };
+
   return (
     <div className="resource-preview-body">
+      {runtimeErrors.length > 0 && (
+        <div
+          className="flex flex-col gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs"
+          role="region"
+          aria-label={t("ports.errorsCount", { count: runtimeErrors.length })}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 font-medium text-destructive">
+              <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+              <span>{t("ports.errorsCount", { count: runtimeErrors.length })}</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              {targetSessionId && (
+                <Button
+                  size="xs"
+                  disabled={sendJob.busy}
+                  onClick={sendErrorsToAgent}
+                >
+                  <Send data-icon="inline-start" />
+                  {t("ports.sendErrorsToAgent", { count: runtimeErrors.length })}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("common.close")}
+                onClick={() => setRuntimeErrors([])}
+              >
+                <X />
+              </Button>
+            </div>
+          </div>
+          <pre className="max-h-24 overflow-auto rounded bg-background/70 p-2 font-mono text-[11px] text-muted-foreground">
+            {runtimeErrors.map((item) => `[${item.source}] ${item.message}`).join("\n")}
+          </pre>
+          <ErrorNotice error={sendJob.error} />
+        </div>
+      )}
       {error && !failure && (
         <Alert variant="destructive">
           <CircleAlert />
@@ -373,6 +475,7 @@ export function PortPreview({ port, retry }: { port: number; retry(): void }) {
   );
 }
 export function Ports() {
+  const t = useT();
   const { link } = useConnection();
   const load = useLoad(() => link.call("ports.list", {}), [link], 10000);
   const [{ tabs, selected, focused }, dispatch] = useReducer(portTabsReducer, initialPortTabs);
@@ -444,7 +547,7 @@ export function Ports() {
   return (
     <section className="ports-page resource-ports" data-browsing={browsing || undefined}>
       <PageHeader
-        title="端口预览"
+        title={t("nav.ports")}
         actions={<>
       {/* On the desktop a port is typed in the toolbar, as an address; an open preview has its own new tab. */}
       {isDesktop && !browsing && (
@@ -452,7 +555,7 @@ export function Ports() {
           <InputGroup className="port-toolbar-field">
             <InputGroupInput
               ref={manualField}
-              aria-label="预览端口"
+              aria-label={t("nav.ports")}
               type="number"
               inputMode="numeric"
               min="1"
@@ -461,17 +564,17 @@ export function Ports() {
               value={manual}
               onChange={(event) => setManual(event.target.value)}
               required
-              placeholder="端口，如 3000"
+              placeholder="3000"
             />
           </InputGroup>
           <Button type="submit" variant="secondary" size="sm" disabled={!manual}>
-            打开
+            {t("ports.openPreview")}
           </Button>
         </form>
       )}
       <Button variant="ghost" size="sm" disabled={load.loading} onClick={load.reload}>
         <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
-        刷新
+        {t("common.refresh")}
       </Button>
         </>}
         detail={services.length || isDesktop ? <>

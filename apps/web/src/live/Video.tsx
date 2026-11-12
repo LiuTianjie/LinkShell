@@ -6,9 +6,18 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Choice, type ChoiceProps } from "../components/Choice";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ComputerPreviewSubscription } from "@linkshell/client-core";
+import { ComputerPreviewSubscription, getLocale, isLocale } from "@linkshell/client-core";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import {
   EmptyState,
@@ -23,7 +32,12 @@ import { httpRequest, openWebSocket } from "./transport";
 import { Button } from "../components/ui/button";
 import {
   ArrowDownLeft,
+  Clipboard,
+  ClipboardCopy,
+  ClipboardPaste,
   Expand,
+  EyeOff,
+  Lock,
   Maximize,
   Minimize,
   Monitor,
@@ -44,6 +58,123 @@ import {
   screenQuery,
   type ScreenPreferences,
 } from "./screen-preferences";
+import { setWebLocalePreference, useT } from "./i18n";
+
+export function ScreenToolsMenu({ container }: { container?: HTMLElement | null }) {
+  const { link } = useConnection();
+  const t = useT();
+  const job = useJob();
+  const [privacy, setPrivacy] = useState<{
+    curtain: boolean;
+    lockOnDisconnect: boolean;
+    supported: boolean;
+  }>({ curtain: false, lockOnDisconnect: false, supported: true });
+  const [statusNote, setStatusNote] = useState<string>();
+
+  const flashNote = (note: string) => {
+    setStatusNote(note);
+    window.setTimeout(() => {
+      setStatusNote((current) => (current === note ? undefined : current));
+    }, 2200);
+  };
+
+  const pasteToComputer = () =>
+    void job.run(async () => {
+      if (!navigator.clipboard?.readText) {
+        flashNote(t("screen.clipboardFailed"));
+        return;
+      }
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        flashNote(t("screen.clipboardEmpty"));
+        return;
+      }
+      await link.call("clipboard.write", { text: text.slice(0, 100_000) });
+      flashNote(t("screen.clipboardSynced"));
+    });
+
+  const copyFromComputer = () =>
+    void job.run(async () => {
+      const res = await link.call("clipboard.read", {});
+      if (!res.text) {
+        flashNote(t("screen.clipboardEmpty"));
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(res.text);
+      }
+      flashNote(t("screen.clipboardSynced"));
+    });
+
+  const togglePrivacy = (field: "curtain" | "lockOnDisconnect") =>
+    void job.run(async () => {
+      const nextValue = !privacy[field];
+      const patch =
+        field === "curtain"
+          ? { curtain: nextValue }
+          : { lockOnDisconnect: nextValue };
+      const res = await link.call("screen.privacy", patch);
+      setPrivacy(res);
+      if (field === "curtain") {
+        flashNote(
+          res.curtain ? t("screen.privacyCurtainOn") : t("screen.privacyCurtainOff"),
+        );
+      }
+    });
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant={privacy.curtain || privacy.lockOnDisconnect ? "secondary" : "ghost"}
+          size="icon"
+          aria-label={t("screen.pasteToComputer")}
+          title={statusNote ?? t("screen.pasteToComputer")}
+        >
+          <Clipboard />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52" container={container ?? undefined}>
+        <DropdownMenuItem disabled={job.busy} onSelect={pasteToComputer}>
+          <ClipboardPaste />
+          <span>{t("screen.pasteToComputer")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={job.busy} onSelect={copyFromComputer}>
+          <ClipboardCopy />
+          <span>{t("screen.copyFromComputer")}</span>
+        </DropdownMenuItem>
+        {privacy.supported !== false && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("screen.privacyCurtain")}</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={privacy.curtain}
+              disabled={job.busy}
+              onCheckedChange={() => togglePrivacy("curtain")}
+            >
+              <EyeOff />
+              <span>{t("screen.privacyCurtain")}</span>
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={privacy.lockOnDisconnect}
+              disabled={job.busy}
+              onCheckedChange={() => togglePrivacy("lockOnDisconnect")}
+            >
+              <Lock />
+              <span>{t("screen.lockOnDisconnect")}</span>
+            </DropdownMenuCheckboxItem>
+          </>
+        )}
+        {statusNote && (
+          <>
+            <DropdownMenuSeparator />
+            <div className="px-2 py-1 text-xs text-muted-foreground">{statusNote}</div>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function ComputerPreview({ sessionId }: { sessionId: string }) {
   const { link, streams } = useConnection();
@@ -95,6 +226,7 @@ export function socketBootstrap(
       "linkshell.screen.shortcuts",
       "linkshell.screen.mode",
       "linkshell.screen.width",
+      "linkshell.screen.lang",
     ];
     const values = new Map(
       keys.flatMap((key) =>
@@ -241,8 +373,18 @@ export function socketBootstrap(
     window as unknown as { __linkshellScreenState: (phase: string) => void }
   ).__linkshellScreenState = (phase) =>
     parent.postMessage({ channel, type: "screen-state", phase }, "*");
+  (
+    window as unknown as { __linkshellBridge: (payload: unknown) => void }
+  ).__linkshellBridge = (payload) =>
+    parent.postMessage({ channel, type: "viewer-bridge", payload }, "*");
   window.addEventListener("message", (event) => {
     if (event.source !== parent || event.data?.channel !== channel) return;
+    if (event.data.type === "viewer-call") {
+      const target = window as unknown as Record<string, ((arg: unknown) => void) | undefined>;
+      const fn = typeof event.data.fn === "string" ? target[event.data.fn] : undefined;
+      if (typeof fn === "function") fn(event.data.arg);
+      return;
+    }
     if (event.data.type === "screen-session") {
       const configure = (window as unknown as {
         linkshellSession?: (state: unknown) => void;
@@ -482,6 +624,7 @@ function BrowserScreen({
         phase?: unknown;
         key?: unknown;
         value?: unknown;
+        payload?: unknown;
         session?: { t?: unknown; version?: unknown; configure?: unknown; pause?: unknown; paused?: unknown; message?: unknown };
         stats?: {
           width?: unknown;
@@ -519,6 +662,58 @@ function BrowserScreen({
         if (typeof message.phase === "string" && ["connecting", "receiving", "recovering", "adjusting", "paused", "blocked", "error", "ready"].includes(message.phase)) setViewerState(message.phase);
         return;
       }
+      if (message.type === "viewer-bridge" && message.payload && typeof message.payload === "object") {
+        const payload = message.payload as Record<string, unknown>;
+        if (payload.type === "clipboard-paste-to-computer") {
+          void (async () => {
+            if (!navigator.clipboard?.readText) {
+              reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: false } });
+              return;
+            }
+            try {
+              const text = await navigator.clipboard.readText();
+              if (!text) {
+                reply({ type: "viewer-call", fn: "linkshellRemoteClipboard", arg: "" });
+                return;
+              }
+              await link.call("clipboard.write", { text: text.slice(0, 100_000) });
+              reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: true } });
+            } catch (err) {
+              reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: false, message: messageOf(err) } });
+            }
+          })();
+        } else if (payload.type === "clipboard-write" && typeof payload.text === "string") {
+          void link
+            .call("clipboard.write", { text: payload.text.slice(0, 100_000) })
+            .then(
+              () => reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: true } }),
+              (err) => reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: false, message: messageOf(err) } }),
+            );
+        } else if (payload.type === "clipboard-read") {
+          void link
+            .call("clipboard.read", {})
+            .then(async (res) => {
+              if (res.text && navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(res.text).catch(() => {});
+              }
+              reply({ type: "viewer-call", fn: "linkshellRemoteClipboard", arg: res.text });
+            })
+            .catch((err) => {
+              reply({ type: "viewer-call", fn: "linkshellClipboardResult", arg: { ok: false, message: messageOf(err) } });
+            });
+        } else if (payload.type === "screen-privacy") {
+          const patch: { curtain?: boolean; lockOnDisconnect?: boolean } = {};
+          if (typeof payload.curtain === "boolean") patch.curtain = payload.curtain;
+          if (typeof payload.lockOnDisconnect === "boolean") patch.lockOnDisconnect = payload.lockOnDisconnect;
+          void link
+            .call("screen.privacy", patch)
+            .then((res) => reply({ type: "viewer-call", fn: "linkshellPrivacy", arg: res }))
+            .catch(() => {});
+        } else if (payload.type === "screen-locale" && isLocale(payload.locale)) {
+          setWebLocalePreference(payload.locale);
+        }
+        return;
+      }
       if (message.type === "screen-storage") {
         if (
           typeof message.key === "string" &&
@@ -526,6 +721,7 @@ function BrowserScreen({
             "linkshell.screen.shortcuts",
             "linkshell.screen.mode",
             "linkshell.screen.width",
+            "linkshell.screen.lang",
           ].includes(message.key) &&
           typeof message.value === "string" &&
           message.value.length <= 32768
@@ -538,6 +734,8 @@ function BrowserScreen({
           } else if (message.key === "linkshell.screen.mode" && /^(view|trackpad|touch)$/.test(message.value)) {
             const mode = message.value;
             setView((current) => current.mode === mode ? current : { ...current, mode });
+          } else if (message.key === "linkshell.screen.lang" && isLocale(message.value)) {
+            setWebLocalePreference(message.value);
           }
         }
         return;
@@ -714,13 +912,16 @@ function BrowserScreen({
         source = source.replace(
           "<head>",
           `<head><script>(${socketBootstrap.toString()})(${JSON.stringify(channel)},${JSON.stringify(
-            Object.fromEntries(
-              [
-                "linkshell.screen.shortcuts",
-                "linkshell.screen.mode",
-                "linkshell.screen.width",
-              ].map((key) => [key, readStored(key)]),
-            ),
+            {
+              ...Object.fromEntries(
+                [
+                  "linkshell.screen.shortcuts",
+                  "linkshell.screen.mode",
+                  "linkshell.screen.width",
+                ].map((key) => [key, readStored(key)]),
+              ),
+              "linkshell.screen.lang": readStored("linkshell.screen.lang") ?? getLocale(),
+            },
           ).replaceAll("<", "\\u003c")})</script>`,
         );
         if (alive) setHtml(source);
@@ -1008,15 +1209,20 @@ function BrowserScreen({
           {!compact && (
             <div className="screen-actions">
               {started && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="重新连接"
-                  aria-label="重新连接"
-                  onClick={() => setRetry((value) => value + 1)}
-                >
-                  <RotateCw />
-                </Button>
+                <>
+                  <ScreenToolsMenu
+                    container={fullscreen || focused ? surface.current : undefined}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="重新连接"
+                    aria-label="重新连接"
+                    onClick={() => setRetry((value) => value + 1)}
+                  >
+                    <RotateCw />
+                  </Button>
+                </>
               )}
               {!fullscreen && (
                 <Button

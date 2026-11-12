@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// What the app does for the host over its socket (`--connect`): says what it may do, lends its
@@ -36,16 +37,25 @@ final class Service {
       session?.close()
       mediaLab?.run.close()
       for preview in previews.values { preview.close() }
+      ScreenPrivacy.shared.viewerDisconnected(remainingViewers: 0)
       InputSource.restoreNow()
       watch?.cancel()
       exit(0)
     })
   }
 
+  private var activeViewers: Int {
+    var ids = Set(controls.keys)
+    if let viewer = session?.viewer { ids.insert(viewer) }
+    ids.formUnion(streams.keys)
+    return ids.count
+  }
+
   private func status() -> [String: Any] {
     var status = Permissions.status()
     status["preview"] = true
     status["videoReconfigure"] = true
+    status["privacy"] = true
     // Input may name physical keys held and let go, and the middle button (`Control.physical`).
     status["keys"] = true
     if options.clock { status["clock"] = ClockStrip.timing }
@@ -57,6 +67,29 @@ final class Service {
     switch kind {
     case "status": return link.emit(status())
     case "displays": return link.emit(["t": "displays", "list": Display.list()])
+    case "privacy", "screen.privacy":
+      var response = ScreenPrivacy.shared.apply(
+        curtain: command["curtain"] as? Bool,
+        lockOnDisconnect: command["lockOnDisconnect"] as? Bool
+      )
+      response["t"] = "privacy"
+      if let id = command["v"] as? String { response["v"] = id }
+      if let requestId = command["requestId"] { response["requestId"] = requestId }
+      return link.emit(response)
+    case "clipboard.read":
+      let text = Launch.dryRun ? "" : (NSPasteboard.general.string(forType: .string) ?? "")
+      var response: [String: Any] = ["t": "clipboard", "text": text]
+      if let id = command["v"] as? String { response["v"] = id }
+      return link.emit(response)
+    case "clipboard.write":
+      let text = (command["text"] as? String) ?? ""
+      if !Launch.dryRun {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+      }
+      var response: [String: Any] = ["t": "clipboard.written", "ok": true]
+      if let id = command["v"] as? String { response["v"] = id }
+      return link.emit(response)
     default: break
     }
     guard let id = command["v"] as? String else { return }
@@ -89,6 +122,7 @@ final class Service {
       control.ready()
     case "close":
       controls.removeValue(forKey: id)?.releaseAll()
+      ScreenPrivacy.shared.viewerDisconnected(remainingViewers: activeViewers)
     case "rtc.open":
       // One viewer of the video track at a time: the latest wins.
       session?.close()
@@ -104,6 +138,7 @@ final class Service {
     case "rtc.close":
       watched(by: id)?.close()
       if session?.viewer == id { session = nil }
+      ScreenPrivacy.shared.viewerDisconnected(remainingViewers: activeViewers)
     case "rtc.loopback.send":
       guard let events = command["events"] as? [Any], let channel = command["channel"] as? String else { return }
       watched(by: id)?.sendFromLoopback(events, on: channel)
@@ -116,7 +151,11 @@ final class Service {
       streams.removeValue(forKey: id)?.close()
       guard let request = StreamRequest(viewer: id, command) else { return link.emit(["t": "stream.ended", "v": id, "error": "not a stream: no socket"]) }
       let stream = StreamSession(request: request, options: options, link: link) { [weak self] ended in
-        if self?.streams[id] === ended { self?.streams[id] = nil }
+        guard let self else { return }
+        if self.streams[id] === ended {
+          self.streams[id] = nil
+          ScreenPrivacy.shared.viewerDisconnected(remainingViewers: self.activeViewers)
+        }
       }
       streams[id] = stream
       stream.start()
@@ -126,6 +165,7 @@ final class Service {
       streams[id]?.key()
     case "stream.close":
       streams.removeValue(forKey: id)?.close()
+      ScreenPrivacy.shared.viewerDisconnected(remainingViewers: activeViewers)
     default:
       controls[id]?.handle(command)
     }

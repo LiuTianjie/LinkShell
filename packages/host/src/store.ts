@@ -883,4 +883,279 @@ export class HostStore {
       .prepare("DELETE FROM client_messages WHERE session_id = ? AND client_message_id = ?")
       .run(sessionId, clientMessageId);
   }
+
+  /**
+   * Coalesces contiguous runs of `agent_message_chunk` (same `messageId` and
+   * `parentToolCallId`) and `agent_thought_chunk` inside completed turns into a
+   * single consolidated chunk row, preserving the final chunk's `seq` so
+   * `lastSeq`, `fromSeq`, and `pageStart` / `sessions.history` stay monotonic.
+   */
+  compactTurnChunks(sessionId: string): { coalescedRuns: number; removedRows: number } {
+    const ended = this.db
+      .prepare(
+        `SELECT MAX(m.seq) AS seq FROM event_meta m
+         JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.kind = 'ls_turn' AND m.parent IS NULL AND json_extract(e.body, '$.state') = 'ended'`,
+      )
+      .get(sessionId) as { seq: number | null } | undefined;
+    const maxEndedSeq = ended?.seq ?? 0;
+    const savedCursor = Number(this.getDriverState(sessionId, "compacted-seq") ?? 0);
+    const afterSeq = Number.isSafeInteger(savedCursor) && savedCursor >= 0 ? savedCursor : 0;
+    if (!maxEndedSeq || maxEndedSeq <= afterSeq) {
+      return { coalescedRuns: 0, removedRows: 0 };
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT m.seq, m.kind, m.parent, e.body
+         FROM event_meta m
+         JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE m.session_id = ? AND m.seq > ? AND m.seq <= ?
+         ORDER BY m.seq ASC`,
+      )
+      .all(sessionId, afterSeq, maxEndedSeq) as { seq: number; kind: string; parent: string | null; body: string }[];
+
+    type ChunkUpdate = Extract<SessionUpdate, { sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" }>;
+    interface Run {
+      kind: "agent_message_chunk" | "agent_thought_chunk";
+      messageId: string;
+      parent: string | null;
+      annotationsKey: string;
+      seqs: number[];
+      texts: string[];
+      lastUpdate: ChunkUpdate;
+    }
+    interface Coalesced {
+      toDelete: number[];
+      keptSeq: number;
+      mergedBody: string;
+      mergedBytes: number;
+    }
+
+    const plans: Coalesced[] = [];
+    let current: Run | undefined;
+
+    const flush = () => {
+      if (current && current.seqs.length >= 2) {
+        const keptSeq = current.seqs[current.seqs.length - 1]!;
+        const toDelete = current.seqs.slice(0, -1);
+        const mergedText = current.texts.join("");
+        const mergedUpdate: ChunkUpdate = {
+          ...current.lastUpdate,
+          content: { ...current.lastUpdate.content, type: "text", text: mergedText },
+        };
+        const mergedBody = JSON.stringify(mergedUpdate);
+        plans.push({
+          toDelete,
+          keptSeq,
+          mergedBody,
+          mergedBytes: Buffer.byteLength(mergedBody),
+        });
+      }
+      current = undefined;
+    };
+
+    for (const row of rows) {
+      if (row.kind !== "agent_message_chunk" && row.kind !== "agent_thought_chunk") {
+        flush();
+        continue;
+      }
+      let parsed: ChunkUpdate;
+      try {
+        parsed = JSON.parse(row.body) as ChunkUpdate;
+      } catch {
+        flush();
+        continue;
+      }
+      if (
+        (parsed.sessionUpdate !== "agent_message_chunk" && parsed.sessionUpdate !== "agent_thought_chunk") ||
+        (parsed.messageId !== undefined && typeof parsed.messageId !== "string") ||
+        parsed.content?.type !== "text"
+      ) {
+        flush();
+        continue;
+      }
+      const messageId = parsed.messageId ?? "";
+      const parent = parsed.parentToolCallId ?? null;
+      const annotationsKey = JSON.stringify(parsed.content.annotations ?? null);
+      if (
+        current &&
+        current.kind === parsed.sessionUpdate &&
+        current.messageId === messageId &&
+        current.parent === parent &&
+        current.annotationsKey === annotationsKey
+      ) {
+        current.seqs.push(row.seq);
+        current.texts.push(parsed.content.text);
+        current.lastUpdate = parsed;
+      } else {
+        flush();
+        current = {
+          kind: parsed.sessionUpdate,
+          messageId,
+          parent,
+          annotationsKey,
+          seqs: [row.seq],
+          texts: [parsed.content.text],
+          lastUpdate: parsed,
+        };
+      }
+    }
+    flush();
+
+    let removedRows = 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (plans.length > 0) {
+        const delEvent = this.db.prepare("DELETE FROM events WHERE session_id = ? AND seq = ?");
+        const delMeta = this.db.prepare("DELETE FROM event_meta WHERE session_id = ? AND seq = ?");
+        const updEvent = this.db.prepare("UPDATE events SET body = ? WHERE session_id = ? AND seq = ?");
+        const updMeta = this.db.prepare("UPDATE event_meta SET bytes = ? WHERE session_id = ? AND seq = ?");
+        for (const plan of plans) {
+          for (const seq of plan.toDelete) {
+            delEvent.run(sessionId, seq);
+            delMeta.run(sessionId, seq);
+            removedRows++;
+          }
+          updEvent.run(plan.mergedBody, sessionId, plan.keptSeq);
+          updMeta.run(plan.mergedBytes, sessionId, plan.keptSeq);
+        }
+      }
+      this.setDriverState(sessionId, "compacted-seq", String(maxEndedSeq));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return { coalescedRuns: plans.length, removedRows };
+  }
+
+  /**
+   * Periodic database lifecycle pruning and passive WAL checkpoint:
+   * - Prunes `terminal_frames` for exited terminals older than 7 days while keeping `terminal_snapshots`.
+   * - Prunes `client_messages` and `removed_sessions` older than 30 days.
+   * - Runs `PRAGMA wal_checkpoint(PASSIVE)`.
+   */
+  runMaintenance(
+    now = Date.now(),
+    options: { terminalFramesMaxAgeMs?: number; ephemeralMaxAgeMs?: number } = {},
+  ): { prunedTerminalFrames: number; prunedClientMessages: number; prunedRemovedSessions: number } {
+    const terminalCutoff = now - (options.terminalFramesMaxAgeMs ?? 7 * 24 * 60 * 60 * 1000);
+    const ephemeralCutoff = now - (options.ephemeralMaxAgeMs ?? 30 * 24 * 60 * 60 * 1000);
+
+    let prunedTerminalFrames: number;
+    let prunedClientMessages: number;
+    let prunedRemovedSessions: number;
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      prunedTerminalFrames = Number(
+        this.db
+          .prepare(
+            `DELETE FROM terminal_frames
+             WHERE terminal_id IN (SELECT id FROM terminals WHERE ended = 1 AND active_at < ?)`,
+          )
+          .run(terminalCutoff).changes,
+      );
+      prunedClientMessages = Number(
+        this.db.prepare("DELETE FROM client_messages WHERE ts < ?").run(ephemeralCutoff).changes,
+      );
+      prunedRemovedSessions = Number(
+        this.db.prepare("DELETE FROM removed_sessions WHERE ts < ?").run(ephemeralCutoff).changes,
+      );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+    } catch {
+      // Passive checkpoint is best-effort and never blocks readers.
+    }
+
+    return { prunedTerminalFrames, prunedClientMessages, prunedRemovedSessions };
+  }
+
+  /** Fast check for any non-archived stored session in `running` or `waiting` state. */
+  hasBusySession(): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM sessions
+         WHERE archived = 0
+           AND state IN ('running', 'waiting')
+           AND NOT EXISTS (SELECT 1 FROM driver_state d WHERE d.session_id = sessions.id AND d.key = 'native-missing' AND d.value = '1')
+         LIMIT 1`,
+      )
+      .get();
+    return row !== undefined;
+  }
+
+  /** Non-archived session IDs whose latest `ls_goal` record has `status === "active"`. */
+  activeGoalSessionIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.id
+         FROM sessions s
+         JOIN event_meta m ON m.session_id = s.id AND m.seq = (
+           SELECT MAX(m2.seq) FROM event_meta m2 WHERE m2.session_id = s.id AND m2.kind = 'ls_goal'
+         )
+         JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+         WHERE s.archived = 0
+           AND NOT EXISTS (SELECT 1 FROM driver_state d WHERE d.session_id = s.id AND d.key = 'native-missing' AND d.value = '1')
+           AND json_extract(e.body, '$.goal.status') = 'active'`,
+      )
+      .all() as { id: string }[];
+    return rows.map((row) => String(row.id));
+  }
+
+  /** Counts LinkShell-submitted turns and answered permission/question approvals within `[sinceMs, untilMs]`. */
+  remoteStats(sinceMs: number, untilMs: number, agent = "all"): { remoteTurns: number; remoteApprovals: number } {
+    const filterAgent = agent !== "all";
+    const turnsRow = (filterAgent
+      ? this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM client_messages cm
+             JOIN sessions s ON s.id = cm.session_id
+             WHERE cm.ts >= ? AND cm.ts <= ? AND s.agent = ?`,
+          )
+          .get(sinceMs, untilMs, agent)
+      : this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM client_messages cm
+             JOIN sessions s ON s.id = cm.session_id
+             WHERE cm.ts >= ? AND cm.ts <= ?`,
+          )
+          .get(sinceMs, untilMs)) as { n: number };
+
+    const approvalsRow = (filterAgent
+      ? this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM event_meta m
+             JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+             JOIN sessions s ON s.id = m.session_id
+             WHERE m.kind = 'ls_permission_resolved'
+               AND e.ts >= ? AND e.ts <= ?
+               AND s.agent = ?
+               AND (json_extract(e.body, '$.optionId') IS NOT NULL OR json_extract(e.body, '$.answers') IS NOT NULL)`,
+          )
+          .get(sinceMs, untilMs, agent)
+      : this.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM event_meta m
+             JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+             JOIN sessions s ON s.id = m.session_id
+             WHERE m.kind = 'ls_permission_resolved'
+               AND e.ts >= ? AND e.ts <= ?
+               AND (json_extract(e.body, '$.optionId') IS NOT NULL OR json_extract(e.body, '$.answers') IS NOT NULL)`,
+          )
+          .get(sinceMs, untilMs)) as { n: number };
+
+    return {
+      remoteTurns: Number(turnsRow?.n ?? 0),
+      remoteApprovals: Number(approvalsRow?.n ?? 0),
+    };
+  }
 }
