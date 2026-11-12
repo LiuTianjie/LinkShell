@@ -13,6 +13,7 @@ interface Raw {
   screenMessage(message: string): void;
   screenVisible(visible: boolean): void;
   screenStop(): void;
+  setImmersiveFullScreen?(enabled: boolean): void;
   permissions(): string;
   loginItem(): string;
   setLoginItem(enabled: boolean): string;
@@ -29,6 +30,7 @@ export interface NativeModule {
   screenMessage(message: Record<string, unknown>): void;
   screenVisible(visible: boolean): void;
   screenStop(): void;
+  setImmersiveFullScreen(enabled: boolean): void;
   permissions(): { recording: boolean; control: boolean };
   loginItem(): { enabled: boolean; approval: boolean };
   /** Why it could not be changed, or undefined. */
@@ -50,6 +52,7 @@ function wrap(raw: Raw): NativeModule {
     screenMessage: (message) => raw.screenMessage(JSON.stringify(message)),
     screenVisible: (visible) => raw.screenVisible(visible),
     screenStop: () => raw.screenStop(),
+    setImmersiveFullScreen: (enabled) => raw.setImmersiveFullScreen?.(enabled),
     permissions: () => value(raw.permissions()) as { recording: boolean; control: boolean },
     loginItem: () => value(raw.loginItem()) as { enabled: boolean; approval: boolean },
     setLoginItem: (enabled) => raw.setLoginItem(enabled) || undefined,

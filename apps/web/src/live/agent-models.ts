@@ -23,7 +23,15 @@ export function useAgentModels(agent: string, cwd: string, ready: boolean, model
     if (!ready || !agent) return;
     let alive = true;
     void store.getState().agentModels(agent, cwd.trim() || undefined, model).then(
-      (result) => { if (alive) setListed({ key, store, ...result }); },
+      (result) => {
+        if (!alive) return;
+        setListed({
+          key,
+          store,
+          ...result,
+          models: Array.isArray(result?.models) ? result.models : [],
+        });
+      },
       (error: unknown) => { if (alive) setListed({ key, store, models: [], error: error instanceof Error ? error.message : String(error) }); },
     );
     return () => { alive = false; };
@@ -48,6 +56,6 @@ export function configToCreate(config: SessionConfigOption[] | undefined, picked
 
 /** A deliberate choice is pinned even when ACP cached it as another project's default. */
 export function modelToCreate(listed: MethodResult<"agents.models"> | undefined, picked: string | undefined): string | undefined {
-  if (!listed || !picked) return undefined;
+  if (!listed || !picked || !Array.isArray(listed.models)) return undefined;
   return listed.models.some((entry) => entry.value === picked) ? picked : undefined;
 }

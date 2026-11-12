@@ -126,6 +126,52 @@ final class DesktopScreenSurfaceTests: XCTestCase {
     XCTAssertEqual(pieces.joined(), text)
   }
 
+  func testFullScreenTopEdgeSnapReachesRemoteMenuBarAcrossNarrowLetterbox() throws {
+    // 16:9 remote Mac (1920x1080) inside a 14" MacBook Pro full-screen stage (1512x982 -> top letterbox ~65.8pt).
+    let picture = CGSize(width: 1920, height: 1080)
+    let bounds = CGRect(x: 0, y: 0, width: 1512, height: 982)
+    XCTAssertNil(DesktopScreenGeometry.stagePoint(CGPoint(x: 1380, y: 0), picture: picture, bounds: bounds))
+    let snapped = try XCTUnwrap(DesktopScreenGeometry.stagePoint(
+      CGPoint(x: 1380, y: 0), picture: picture, bounds: bounds, topEdgeSnap: true
+    ))
+    XCTAssertEqual(snapped.x, 1380 / 1512, accuracy: 0.000_01)
+    XCTAssertEqual(snapped.y, 0)
+
+    // Large vertical letterboxing (> 96pt, e.g. square/portrait container) does not snap distant blank space.
+    let tallBounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+    XCTAssertNil(DesktopScreenGeometry.stagePoint(CGPoint(x: 500, y: 10), picture: picture, bounds: tallBounds, topEdgeSnap: true))
+  }
+
+  func testFullScreenExitBarLeavesMacMenuAndStatusBarClear() {
+    let bounds = CGRect(x: 0, y: 0, width: 1512, height: 982)
+    let barFrame = CGRect(x: 696, y: 10, width: 120, height: 34)
+    // Left Apple/App menus and right NSStatusBar items at y = 0..24 never reveal the exit bar.
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 24, y: 0), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 220, y: 12), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 1360, y: 0), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 1480, y: 14), in: bounds, barFrame: barFrame, barShown: false))
+    // Deliberate touch in the narrow top-center pull zone reveals it, and hovering the visible bar retains it.
+    XCTAssertTrue(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 2), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 18), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertTrue(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 24), in: bounds, barFrame: barFrame, barShown: true))
+  }
+
+  func testControlMouseDeltaPreservesTopEdgeUpwardPressure() {
+    let bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+    // Sliding along or arriving at y = 0 carries negative dy so remote full-screen Mac menu bars reveal.
+    let topSlide = Control.mouseDelta(from: CGPoint(x: 1300, y: 0), to: CGPoint(x: 1360, y: 0), bounds: bounds, dragging: false)
+    XCTAssertEqual(topSlide.dx, 60)
+    XCTAssertEqual(topSlide.dy, -1)
+
+    let subPixelArrival = Control.mouseDelta(from: CGPoint(x: 40, y: 0.4), to: CGPoint(x: 40, y: 0), bounds: bounds, dragging: false)
+    XCTAssertEqual(subPixelArrival.dy, -1)
+
+    // Dragging at the top edge keeps geometric delta without inventing upward pressure.
+    let dragTop = Control.mouseDelta(from: CGPoint(x: 200, y: 0), to: CGPoint(x: 240, y: 0), bounds: bounds, dragging: true)
+    XCTAssertEqual(dragTop.dx, 40)
+    XCTAssertEqual(dragTop.dy, 0)
+  }
+
   private func commandDescription(_ command: [String: Any]) -> String {
     guard let kind = command["t"] as? String else { return "missing-kind" }
     return kind + ":" + ((command[kind == "text" ? "s" : "k"] as? String) ?? "missing-value")

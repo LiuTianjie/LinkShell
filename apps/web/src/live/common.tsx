@@ -194,6 +194,8 @@ export function LoadMore(props: { disabled?: boolean; onClick: () => void; child
 }
 export function Modal({
   title,
+  description,
+  icon,
   children,
   close,
   wide = false,
@@ -201,6 +203,8 @@ export function Modal({
   className,
 }: {
   title: string;
+  description?: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   close: () => void;
   wide?: boolean;
@@ -230,11 +234,14 @@ export function Modal({
           className,
         )}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">
-            {title}设置与操作
-          </DialogDescription>
+        <DialogHeader className={icon ? "modal-header-with-icon" : undefined}>
+          {icon}
+          <div className="modal-header-copy">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription className={description ? undefined : "sr-only"}>
+              {description ?? `${title}设置与操作`}
+            </DialogDescription>
+          </div>
         </DialogHeader>
         {children}
       </DialogContent>

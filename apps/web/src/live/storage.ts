@@ -15,7 +15,8 @@ export function readLocal<T>(key: string, fallback: T): T {
 }
 export function saveLocal(key: string, value: unknown) {
   if (isDesktop) return saveDesktopStorage(key, value);
-  localStorage.setItem(`linkshell.web.${key}`, JSON.stringify(value));
+  if (value === undefined) localStorage.removeItem(`linkshell.web.${key}`);
+  else localStorage.setItem(`linkshell.web.${key}`, JSON.stringify(value));
 }
 
 let identityPromise: Promise<Identity> | undefined;

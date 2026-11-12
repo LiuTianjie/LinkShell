@@ -414,7 +414,7 @@ function Account({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
       </div>
       {signedIn && account?.userId && (
         <div className="pt-2">
-          <ReferralCard userId={account.userId} disabled={state.busy} />
+          <ReferralCard userId={account.userId} disabled={state.busy} reserveSpace />
         </div>
       )}
       {state.accountMessage && <Note>{state.accountMessage}</Note>}
@@ -516,6 +516,7 @@ function SignInDialog({ open, close }: { open: boolean; close: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) dismiss(); }}>
       <DialogContent
+        className="signin-dialog"
         // A stray click beside the panel must not end a sign-in the browser is still on.
         onInteractOutside={(event) => { if (waiting) event.preventDefault(); }}
       >
@@ -751,9 +752,9 @@ function Log({ text }: { text: string }) {
 function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) => void }) {
   const { state, standalone, newVersion } = facts;
   const update = state.update;
-  const cli = state.snapshot?.cliVersion;
   const host = state.snapshot?.machine?.hostVersion;
   const desktop = state.about?.version;
+  const cli = state.snapshot?.cliVersion ?? (standalone ? desktop : undefined);
   // One number while the three parts agree; a row each once they don't.
   const same = !!cli && cli === host && cli === desktop;
   const checked = update.checkedAt ? ` · 上次检查 ${new Date(update.checkedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "";
@@ -765,7 +766,7 @@ function Updates({ facts, confirm }: { facts: Facts; confirm: (action: Confirm) 
           <SettingRow title="版本"><span className="management-value">{cli}</span></SettingRow>
         ) : (
           <>
-            <SettingRow title="CLI 版本"><span className="management-value">{cli ?? "未知"}</span></SettingRow>
+            <SettingRow title="CLI 版本"><span className="management-value">{cli ?? (host ? `${host}（与 Host 同步）` : "随服务连接读取")}</span></SettingRow>
             <SettingRow title="运行中的 Host"><span className="management-value">{host ?? "未连接"}</span></SettingRow>
             <SettingRow title="桌面版本"><span className="management-value">{desktop ?? "开发版"}</span></SettingRow>
           </>
@@ -973,5 +974,68 @@ export function ManagementNav({ page, navigate, back }: { page: ManagePage; navi
         );
       })}
     </nav>
+  );
+}
+
+/**
+ * Unified Settings & Local Service dialog (`⌘,` / `⌘2`), rendered over the workspace so opening
+ * settings or inspecting logs never unmounts active sessions, terminals or the inspector.
+ */
+export function ManagementDialog({
+  open,
+  page,
+  onOpenChange,
+  onPageChange,
+}: {
+  open: boolean;
+  page: ManagePage;
+  onOpenChange: (open: boolean) => void;
+  onPageChange: (page: ManagePage) => void;
+}) {
+  const facts = useFacts();
+  const machine = facts.state.snapshot?.machine?.hostname.replace(/\.local$/, "");
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="management-dialog sm:max-w-none p-0 gap-0 overflow-hidden" showCloseButton>
+        <DialogTitle className="sr-only">设置与本机服务 — {managePageTitles[page]}</DialogTitle>
+        <DialogDescription className="sr-only">
+          管理{THIS_COMPUTER}的后台服务、设备配对、访问密码、用量、日志、更新与桌面偏好
+        </DialogDescription>
+        <div className="management-dialog-shell">
+          <aside className="management-dialog-rail" aria-label="设置与本机服务导航">
+            <div className="management-machine">
+              <span className="desktop-presence" data-online={facts.healthy || undefined} aria-hidden />
+              <div>
+                <strong>{machine ?? THIS_COMPUTER}</strong>
+                <span>本机服务{facts.service}</span>
+              </div>
+            </div>
+            <nav className="management-dialog-nav" aria-label="设置分类">
+              {MANAGE_PAGES.map((id, index) => {
+                const Icon = pageIcons[id];
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    className="desktop-place management-nav-item"
+                    data-active={page === id || undefined}
+                    data-gap={index === 5 || undefined}
+                    aria-current={page === id ? "page" : undefined}
+                    onClick={() => onPageChange(id)}
+                  >
+                    <Icon size={16} aria-hidden />
+                    <span>{managePageTitles[id]}</span>
+                    {id === "updates" && facts.newVersion && <span className="management-dot" aria-label="有新版本" />}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+          <div className="management-dialog-body">
+            <Management page={page} navigate={onPageChange} />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

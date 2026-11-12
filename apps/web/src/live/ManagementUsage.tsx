@@ -135,6 +135,7 @@ export function ManagementUsage() {
       {/* Reading the logs can take seconds: the page's shape stands in until the numbers arrive. */}
       {!report && !error && (
         <div className="management-usage-skeleton" role="status" aria-label="正在读取用量">
+          <p className="management-footnote">正在扫描本地会话用量记录…</p>
           <div className="management-facts">
             {[0, 1, 2, 3, 4].map((key) => (
               <div className="management-fact" key={key}>
@@ -198,8 +199,8 @@ export function ManagementUsage() {
             />
           </div>
           {!empty && (
-            <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5 text-sm">
-              <p className="font-medium text-foreground">
+            <div className="management-roi">
+              <p className="management-roi-title">
                 {t("usage.roiSummary", {
                   days,
                   turns: wholeNumber(remoteTurns),
@@ -207,7 +208,7 @@ export function ManagementUsage() {
                   cost: estimatedCostUsd.toFixed(2),
                 })}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p className="management-roi-note">
                 {t("usage.subscriptionReferenceNote")}
               </p>
             </div>

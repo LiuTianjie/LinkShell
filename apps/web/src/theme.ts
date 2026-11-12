@@ -108,7 +108,7 @@ const desktopNeutrals: Palette = {
   // Hover and press: 5 % / 12 % of the ink, 8 % / 16 % of white in the dark.
   "fill": ["#1a1c1f0d", "#ffffff14"],
   "fillStrong": ["#1a1c1f1f", "#ffffff29"],
-  "userBubble": ["#1a1c1f0d", "#ffffff0d"],
+  "userBubble": ["#1a1c1f12", "#ffffff12"],
   "code": ["#f9f9f9", "#131313"],
   "codeText": ["#1a1c1f", "#dfdfdf"],
   // The terminal is the panel itself: no darker block inside it.

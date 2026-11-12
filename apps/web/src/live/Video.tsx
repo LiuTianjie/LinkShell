@@ -45,7 +45,6 @@ import {
   RotateCw,
   Square,
   SlidersHorizontal,
-  ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { isDesktop, isElectronDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
@@ -1037,45 +1036,46 @@ function BrowserScreen({
     const access = loaded.value;
     const needsPermission = access?.recording === false;
     const problem = job.error ?? loaded.error;
+    const ready = Boolean(access?.supported && !needsPermission && !problem);
+    const loading = !access && !problem;
+    const statusLabel = problem
+      ? "检查失败"
+      : !access
+        ? "检查屏幕…"
+        : !access.supported
+          ? "暂不支持共享"
+          : needsPermission
+            ? "需要录制权限"
+            : access.control
+              ? "可观看与控制"
+              : "仅观看桌面";
     return (
       <section
         className="screen-page screen-is-idle"
         aria-label={`${title}观看区域`}
       >
-        <div className="screen-idle-status" role="status">
-          <StatusDot on={Boolean(access?.supported && !needsPermission && !problem)} />
-          <div>
-            <strong>
-              {problem
-                ? "检查失败"
-                : !access
-                  ? "正在检查屏幕…"
-                  : !access.supported
-                    ? "暂不支持共享"
-                    : needsPermission
-                      ? "等待授权"
-                      : "在线"}
-            </strong>
-            <span title={problem}>
-              {problem ??
-                (!access
-                  ? "正在读取屏幕与权限状态"
-                  : !access.supported
-                    ? "此系统无法共享屏幕"
-                    : needsPermission
-                      ? "需要屏幕录制权限"
-                      : access.control
-                        ? "可观看与控制"
-                        : "仅观看桌面")}
-            </span>
-          </div>
+        <div
+          className="screen-idle-status"
+          data-pending={loading || undefined}
+          data-tone={problem ? "danger" : needsPermission ? "waiting" : undefined}
+          role="status"
+          title={problem ?? access?.problem}
+        >
+          <span
+            className="screen-dot"
+            data-on={ready || undefined}
+            data-tone={problem ? "danger" : needsPermission ? "waiting" : undefined}
+            aria-hidden="true"
+          />
+          <span className="screen-idle-label">{statusLabel}</span>
         </div>
         <div className="screen-idle-actions">
           <Popover>
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
+                className="computer-row-hover-action"
                 aria-label="画质与权限"
                 title="画质与权限"
               >
@@ -1155,11 +1155,12 @@ function BrowserScreen({
             </PopoverContent>
           </Popover>
           {loaded.error ? (
-            <Button variant="outline" onClick={loaded.reload}>
+            <Button size="sm" variant="outline" onClick={loaded.reload}>
               重新检查
             </Button>
           ) : (
             <Button
+              size="sm"
               variant={primaryAction ? "default" : "outline"}
               disabled={!access?.supported || job.busy}
               onClick={() => {
@@ -1177,7 +1178,6 @@ function BrowserScreen({
                   ? "正在请求…"
                   : "检查权限"
                 : "打开桌面"}
-              <ArrowUpRight data-icon="inline-end" />
             </Button>
           )}
         </div>

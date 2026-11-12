@@ -13,6 +13,7 @@ import {
 } from "@linkshell/client-core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { accountMembership, accountReferral } from "./account";
 import { useLoad } from "./common";
 import { isDesktop, openDesktopExternal } from "./desktop";
@@ -236,11 +237,13 @@ export function ReferralCard({
   referral: initialReferral,
   disabled,
   locale,
+  reserveSpace = false,
 }: {
   userId?: string;
   referral?: ReferralSummary;
   disabled?: boolean;
   locale?: Locale;
+  reserveSpace?: boolean;
 }) {
   const detectedLocale = useLocale();
   const activeLocale = locale ?? detectedLocale;
@@ -253,7 +256,25 @@ export function ReferralCard({
   const summary = initialReferral ?? loaded.value;
   const [copied, setCopied] = useState(false);
 
-  if (!summary && loaded.loading) return null;
+  if (!summary && loaded.loading) {
+    if (!reserveSpace || !userId) return null;
+    return (
+      <div
+        className="flex min-h-[104px] flex-col justify-between gap-2 rounded-lg border border-border bg-muted/20 p-3"
+        aria-busy="true"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-5 w-16" />
+        </div>
+        <Skeleton className="h-3.5 w-4/5" />
+        <div className="flex items-center justify-between gap-2 pt-0.5">
+          <Skeleton className="h-3.5 w-32" />
+          <Skeleton className="h-7 w-24" />
+        </div>
+      </div>
+    );
+  }
   if (!summary) return null;
 
   const copyLink = async () => {

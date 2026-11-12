@@ -13,12 +13,31 @@ public enum DesktopScreenGeometry {
     return CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height)
   }
 
+  public static let fullScreenTopSnapLimit: CGFloat = 96
+
   public static func normalizedPoint(_ point: CGPoint, picture: CGSize, bounds: CGRect, clamp: Bool = false) -> CGPoint? {
     let rect = fittedRect(picture: picture, in: bounds)
     guard rect.width > 0, rect.height > 0, point.x.isFinite, point.y.isFinite else { return nil }
     let x = (point.x - rect.minX) / rect.width, y = (point.y - rect.minY) / rect.height
     guard clamp || (0...1).contains(x) && (0...1).contains(y) else { return nil }
     return CGPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
+  }
+
+  /// Maps a stage point to remote display coordinates. In full screen (`topEdgeSnap`), when aspect
+  /// letterboxing leaves a narrow black band above the picture (`<= 96pt`), slamming the pointer to
+  /// the physical top bezel snaps `y` to `0` so Fitts's-law clicks reach the remote Mac's menu bar.
+  public static func stagePoint(_ point: CGPoint, picture: CGSize, bounds: CGRect, clamp: Bool = false, topEdgeSnap: Bool = false) -> CGPoint? {
+    if let exact = normalizedPoint(point, picture: picture, bounds: bounds, clamp: clamp) {
+      return exact
+    }
+    guard topEdgeSnap else { return nil }
+    let rect = fittedRect(picture: picture, in: bounds)
+    let topBand = rect.minY - bounds.minY
+    guard rect.width > 0, rect.height > 0, topBand > 0, topBand <= fullScreenTopSnapLimit,
+          point.x.isFinite, point.y.isFinite,
+          point.y >= bounds.minY, point.y <= rect.minY,
+          (rect.minX...rect.maxX).contains(point.x) else { return nil }
+    return CGPoint(x: min(1, max(0, (point.x - rect.minX) / rect.width)), y: 0)
   }
 }
 
@@ -73,6 +92,8 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   }
   /// The remote computer's helper accepts held keys and the middle button (`keys` capability).
   public var physicalKeys = false
+  /// Enables Fitts's-law top-bezel snapping when a full-screen picture has a narrow top letterbox.
+  public var fullScreen = false
   /// Keys and modifier keys this remote-desktop view has pressed on the remote computer, so each is released.
   private var pressedKeys: Set<UInt16> = []
   private var pressedModifiers: Set<UInt16> = []
@@ -256,15 +277,18 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private func updateCursorVisibility() { cursorView.isHidden = !active || stopped || pictureSize == .zero || (canControl && pointerInside) }
   private var canControl: Bool { controlEnabled && active && !stopped && window?.isKeyWindow == true }
   private func move(_ event: NSEvent, clamp: Bool = false, replaceable: Bool = true) -> Bool {
-    guard canControl, let point = DesktopScreenGeometry.normalizedPoint(convert(event.locationInWindow, from: nil), picture: pictureSize, bounds: bounds, clamp: clamp) else { return false }
+    guard canControl, let point = DesktopScreenGeometry.stagePoint(convert(event.locationInWindow, from: nil), picture: pictureSize, bounds: bounds, clamp: clamp, topEdgeSnap: fullScreen) else { return false }
     cursorPosition = point
     onInput?(["t": "move", "x": Double(point.x), "y": Double(point.y)], replaceable && heldButtons.isEmpty)
     return true
   }
   public override func mouseMoved(with event: NSEvent) {
-    pointerInside = DesktopScreenGeometry.normalizedPoint(convert(event.locationInWindow, from: nil), picture: pictureSize, bounds: bounds) != nil
+    let local = convert(event.locationInWindow, from: nil)
+    let inPicture = DesktopScreenGeometry.normalizedPoint(local, picture: pictureSize, bounds: bounds) != nil
+    let shouldClamp = bounds.contains(local) || pointerInside
+    pointerInside = inPicture
     updateCursorVisibility()
-    _ = move(event)
+    _ = move(event, clamp: shouldClamp)
   }
   public override func mouseDragged(with event: NSEvent) { if heldButtons.contains("left") { _ = move(event, clamp: true) } }
   public override func rightMouseDragged(with event: NSEvent) { if heldButtons.contains("right") { _ = move(event, clamp: true) } }

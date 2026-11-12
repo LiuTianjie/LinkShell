@@ -32,9 +32,7 @@ import WebKit
   private var screenRect = CGRect.zero
   private var fullScreen = ScreenFullScreen()
   private var fullScreenObservers: [NSObjectProtocol] = []
-  private var fullScreenBar: DesktopFullScreenBar?
-  private var fullScreenBarMonitor: Any?
-  private var fullScreenBarHide: DispatchWorkItem?
+  private var fullScreenOverlay: DesktopFullScreenOverlay?
   private var fullScreenWatch: DispatchWorkItem?
   /// What the page was last told.
   private var pageFullScreen = false
@@ -42,7 +40,7 @@ import WebKit
 
   lazy var view: NSView = {
     let container = DesktopWorkspaceContainer()
-    container.onLayout = { [weak self] in self?.layoutNativeScreen(); self?.layoutFullScreenBar() }
+    container.onLayout = { [weak self] in self?.layoutNativeScreen(); self?.fullScreenOverlay?.layout() }
     // From the start: a full screen the user makes with the green button is an animation too.
     observeFullScreen()
     webView.translatesAutoresizingMaskIntoConstraints = false
@@ -412,6 +410,7 @@ import WebKit
 
   private func reportScreenFullScreen(_ value: Bool) {
     pageFullScreen = value
+    screenSurface?.fullScreen = value
     showFullScreenBar(value)
     guard policy?.isTrusted(webView.url) == true else { return }
     webView.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('linkshell-desktop-fullscreen', {detail: {fullscreen}}));",
@@ -419,62 +418,17 @@ import WebKit
   }
 
   /// The page's toolbar is gone while only the picture shows, and keys may go to the other
-  /// computer; near the top edge this bar is always a way back out.
+  /// computer; at the narrow top-center edge this bar stays out of the remote Mac's status bar.
   private func showFullScreenBar(_ shown: Bool) {
     guard shown else {
-      if let monitor = fullScreenBarMonitor { NSEvent.removeMonitor(monitor) }
-      fullScreenBarMonitor = nil
-      fullScreenBarHide?.cancel(); fullScreenBarHide = nil
-      fullScreenBar?.removeFromSuperview(); fullScreenBar = nil
+      fullScreenOverlay?.detach()
+      fullScreenOverlay = nil
       return
     }
-    if fullScreenBar == nil {
-      let bar = DesktopFullScreenBar()
-      bar.onExit = { [weak self] in self?.setScreenFullScreen(false) }
-      fullScreenBar = bar
+    if fullScreenOverlay == nil {
+      fullScreenOverlay = DesktopFullScreenOverlay { [weak self] in self?.setScreenFullScreen(false) }
     }
-    guard let bar = fullScreenBar else { return }
-    // Above the picture, which is placed above the page whenever a screen starts.
-    view.addSubview(bar, positioned: .above, relativeTo: nil)
-    layoutFullScreenBar()
-    webView.window?.acceptsMouseMovedEvents = true
-    if fullScreenBarMonitor == nil {
-      fullScreenBarMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] event in
-        MainActor.assumeIsolated { self?.pointerMoved(event) }
-        return event
-      }
-    }
-    // Shown once on the way in, so it can be found.
-    revealFullScreenBar()
-  }
-
-  private func pointerMoved(_ event: NSEvent) {
-    guard let bar = fullScreenBar, event.window === view.window else { return }
-    let point = view.convert(event.locationInWindow, from: nil)
-    if point.y <= DesktopFullScreenBar.revealDepth || bar.frame.insetBy(dx: -12, dy: -12).contains(point) { revealFullScreenBar() }
-  }
-
-  private func revealFullScreenBar() {
-    guard let bar = fullScreenBar else { return }
-    bar.reveal(true)
-    fullScreenBarHide?.cancel()
-    let hide = DispatchWorkItem { [weak self] in
-      guard let self, let bar = self.fullScreenBar else { return }
-      // Not while the pointer rests on it.
-      if let window = self.view.window {
-        let point = self.view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        if bar.frame.insetBy(dx: -12, dy: -12).contains(point) { return self.revealFullScreenBar() }
-      }
-      bar.reveal(false)
-    }
-    fullScreenBarHide = hide
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: hide)
-  }
-
-  private func layoutFullScreenBar() {
-    guard let bar = fullScreenBar else { return }
-    let size = bar.fittingSize
-    bar.frame = CGRect(x: ((view.bounds.width - size.width) / 2).rounded(), y: 14, width: size.width, height: size.height)
+    fullScreenOverlay?.attach(to: view)
   }
 
   private func stopNativeScreen() {

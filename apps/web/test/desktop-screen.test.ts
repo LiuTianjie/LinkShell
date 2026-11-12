@@ -51,6 +51,10 @@ describe("remote screen full screen", () => {
     expect(windowFullscreenChanged({ owns: false, fullscreen: true }, false)).toEqual({ owns: false, fullscreen: false, focused: false });
   });
 
+  it("adopts the window's own full screen when the active screen is already started", () => {
+    expect(windowFullscreenChanged(idle, true, true)).toEqual({ owns: true, fullscreen: true, focused: true });
+  });
+
   it("leaves other screens alone", () => {
     expect(windowFullscreenChanged(idle, true)).toBeUndefined();
     expect(windowFullscreenChanged(idle, false)).toBeUndefined();

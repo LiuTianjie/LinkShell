@@ -78,6 +78,7 @@ export function useDesktopCommand(handle: (command: DesktopCommand) => void): vo
 export const desktopShortcuts = {
   palette: { key: "k", label: "搜索与命令" },
   newSession: { key: "n", label: "新建会话" },
+  settings: { key: ",", label: "设置与本机服务" },
   toggleSidebar: { key: "b", label: "显示或隐藏侧栏" },
   toggleInspector: { key: "b", alt: true, label: "显示或隐藏检查器" },
   terminal: { key: "j", label: "打开终端" },
@@ -108,7 +109,7 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: { key: string; a
   // ⌥ and ⇧ change event.key ("∫", "{"); the physical key still names the shortcut.
   const code = event.code;
   const physical = code.startsWith("Key") ? code.slice(3).toLowerCase()
-    : code === "BracketLeft" ? "[" : code === "BracketRight" ? "]" : event.key.toLowerCase();
+    : code === "BracketLeft" ? "[" : code === "BracketRight" ? "]" : code === "Comma" ? "," : event.key.toLowerCase();
   return physical === shortcut.key;
 }
 

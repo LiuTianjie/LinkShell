@@ -678,7 +678,7 @@ export function AcpManager() {
       <div className="acp-settings min-w-0">
       {!online && <OfflineNotice />}
       <Field className="acp-agent-field" orientation="horizontal">
-        <FieldLabel htmlFor={`${id}-agent`}>选择 Agent</FieldLabel>
+        <FieldLabel htmlFor={`${id}-agent`} className="shrink-0 whitespace-nowrap">选择 Agent</FieldLabel>
         <Choice
           id={`${id}-agent`}
           label="选择 Agent"

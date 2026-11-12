@@ -228,9 +228,11 @@ const panelTitles: Record<Exclude<Panel, null | "commands" | AppPanel>, string> 
 export function Session({
   session,
   navigate,
+  active = true,
 }: {
   session: SessionSummary;
   navigate: (id: string) => void;
+  active?: boolean;
 }) {
   const t = useT();
   const dialogs = useDialogs();
@@ -392,13 +394,14 @@ export function Session({
     if ((await actions.send(session.id, content)) === "failed") throw new Error("消息发送失败，请重试");
   };
   useDesktopCommand((command) => {
+    if (!active) return;
     if (command.command === "inspector") {
       if (command.panel) void setPanel(command.panel);
       else toggleInspector();
     }
   });
   useEffect(() => {
-    if (!isDesktop) return;
+    if (!isDesktop || !active) return;
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || keysBelongToContent()) return;
       if (matchesShortcut(event, desktopShortcuts.toggleInspector)) { event.preventDefault(); toggleInspector(); }
@@ -428,6 +431,16 @@ export function Session({
     !!notices?.length;
   const hasContent = !!view && (view.items.length > 0 || footerActive);
   const showComposerCaption = !canInteract && !hasContent;
+  const [syncDelayed, setSyncDelayed] = useState(false);
+  useEffect(() => {
+    if (!online || canInteract || !hasContent) {
+      setSyncDelayed(false);
+      return;
+    }
+    const timer = setTimeout(() => setSyncDelayed(true), 450);
+    return () => clearTimeout(timer);
+  }, [online, canInteract, hasContent]);
+  const showRecovery = !canInteract && hasContent && (!online || syncDelayed);
   const composerWrap = useRef<HTMLDivElement>(null);
   const captureComposerWrap = useCallback((wrap: HTMLDivElement | null) => {
     composerWrap.current = wrap;
@@ -536,6 +549,7 @@ export function Session({
   }, [searchQuery, firstMatchId, jumpToItem]);
 
   useEffect(() => {
+    if (!active) return;
     const onFindShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || keysBelongToContent()) return;
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
@@ -549,7 +563,7 @@ export function Session({
     };
     window.addEventListener("keydown", onFindShortcut);
     return () => window.removeEventListener("keydown", onFindShortcut);
-  }, []);
+  }, [active]);
 
   const outlineEntries = useMemo(() => {
     const list: { id: string; category: "prompts" | "approvals" | "errors"; label: string }[] = [];
@@ -592,9 +606,10 @@ export function Session({
     [link, session.id, setPanel],
   );
   useEffect(() => {
+    if (connection.sessions) return connection.sessions.acquire(session.id);
     store.getState().openSession(session.id);
     return () => store.getState().closeSession(session.id);
-  }, [store, session.id]);
+  }, [connection.sessions, store, session.id]);
   useEffect(() => {
     setChoice(0);
   }, [query]);
@@ -897,43 +912,46 @@ export function Session({
             )}
             {isDesktop ? (
               <>
-                {/* The two tools reached for mid-task; the rest are the inspector's tabs. */}
-                {([
-                  ["changes", "branch", "变更"],
-                  ["terminal", "terminal", `终端 · ${shortcutText(desktopShortcuts.terminal)}`],
-                ] as const).map(([id, icon, label]) => (
-                  <Tooltip key={id}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={label}
-                        aria-pressed={panel === id}
-                        data-active={panel === id || undefined}
-                        onClick={() => toggleInspector(id)}
-                      >
-                        <Icon name={icon} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{label}</TooltipContent>
-                  </Tooltip>
-                ))}
-                <span className="session-actions-divider" aria-hidden />
+                {/* Once the inspector is open beside the session, its own tab bar shows 变更/终端. */}
+                {(!panel || panel === "commands") && (
+                  <div className="session-quick-tools">
+                    {([
+                      ["changes", "branch", "变更"],
+                      ["terminal", "terminal", `终端 · ${shortcutText(desktopShortcuts.terminal)}`],
+                    ] as const).map(([id, icon, label]) => (
+                      <Tooltip key={id}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={label}
+                            onClick={() => toggleInspector(id)}
+                          >
+                            <Icon name={icon} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{label}</TooltipContent>
+                      </Tooltip>
+                    ))}
+                    <span className="session-actions-divider" aria-hidden />
+                  </div>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
                       aria-label="检查器"
-                      // Pressed for the inspector's other tabs only: 变更 and 终端 show their own.
-                      aria-pressed={!!panel && panel !== "commands" && panel !== "changes" && panel !== "terminal"}
-                      data-active={(!!panel && panel !== "commands" && panel !== "changes" && panel !== "terminal") || undefined}
+                      aria-pressed={!!panel && panel !== "commands"}
+                      data-active={(!!panel && panel !== "commands") || undefined}
                       onClick={() => toggleInspector()}
                     >
                       <PanelRight />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>检查器 · {shortcutText(desktopShortcuts.toggleInspector)}</TooltipContent>
+                  <TooltipContent>
+                    {panel && panel !== "commands" ? "收起检查器" : "检查器"} · {shortcutText(desktopShortcuts.toggleInspector)}
+                  </TooltipContent>
                 </Tooltip>
               </>
             ) : (
@@ -1208,7 +1226,7 @@ export function Session({
   );
   const column = (
           <div className="conversation-column">
-            {!canInteract && hasContent && (
+            {showRecovery && (
               <div className="conversation-recovery" role="status" data-offline={!online || undefined}>
                 <span>
                   {isDesktop
@@ -1253,16 +1271,18 @@ export function Session({
               )}
             {searchOpen && (
               <div
-                className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5"
+                className="session-find-bar"
                 role="search"
                 aria-label={t("common.search")}
               >
-                <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <Input
+                <Search className="session-find-icon" aria-hidden />
+                <input
                   ref={searchInputRef}
-                  className="h-7 flex-1 text-xs"
+                  type="search"
+                  className="session-find-input"
                   value={searchQuery}
                   placeholder={t("session.searchPlaceholder")}
+                  aria-label={t("session.searchPlaceholder")}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
@@ -1280,53 +1300,55 @@ export function Session({
                   }}
                 />
                 {searchQuery.trim() !== "" && (
-                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                  <span className="session-find-count">
                     {searchMatches.length > 0
                       ? `${searchIndex + 1} / ${searchMatches.length}`
                       : t("session.noMatches")}
                   </span>
                 )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={searchMatches.length === 0}
-                  aria-label="Previous match"
-                  onClick={() => {
-                    if (!searchMatches.length) return;
-                    const nextIdx = (searchIndex + searchMatches.length - 1) % searchMatches.length;
-                    setSearchIndex(nextIdx);
-                    const target = searchMatches[nextIdx];
-                    if (target) jumpToItem(target.id);
-                  }}
-                >
-                  <ChevronUp />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={searchMatches.length === 0}
-                  aria-label="Next match"
-                  onClick={() => {
-                    if (!searchMatches.length) return;
-                    const nextIdx = (searchIndex + 1) % searchMatches.length;
-                    setSearchIndex(nextIdx);
-                    const target = searchMatches[nextIdx];
-                    if (target) jumpToItem(target.id);
-                  }}
-                >
-                  <ChevronDown />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("common.close")}
-                  onClick={() => setSearchOpen(false)}
-                >
-                  <X />
-                </Button>
+                <div className="session-find-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={searchMatches.length === 0}
+                    aria-label="上一个匹配"
+                    onClick={() => {
+                      if (!searchMatches.length) return;
+                      const nextIdx = (searchIndex + searchMatches.length - 1) % searchMatches.length;
+                      setSearchIndex(nextIdx);
+                      const target = searchMatches[nextIdx];
+                      if (target) jumpToItem(target.id);
+                    }}
+                  >
+                    <ChevronUp />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={searchMatches.length === 0}
+                    aria-label="下一个匹配"
+                    onClick={() => {
+                      if (!searchMatches.length) return;
+                      const nextIdx = (searchIndex + 1) % searchMatches.length;
+                      setSearchIndex(nextIdx);
+                      const target = searchMatches[nextIdx];
+                      if (target) jumpToItem(target.id);
+                    }}
+                  >
+                    <ChevronDown />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("common.close")}
+                    onClick={() => setSearchOpen(false)}
+                  >
+                    <X />
+                  </Button>
+                </div>
               </div>
             )}
             {view && hasContent && (

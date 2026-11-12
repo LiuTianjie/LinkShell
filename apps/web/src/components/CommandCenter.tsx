@@ -134,8 +134,8 @@ export function CommandCenter({
                   </CommandItem>
                 );
               })}
-              <CommandItem value="本机管理 management settings 设置" onSelect={() => run(openDesktopManagement)}>
-                <Settings2 />本机管理<CommandShortcut>{shortcutText(desktopModeShortcuts.manage)}</CommandShortcut>
+              <CommandItem value="设置与本机服务 本机管理 management settings preferences 设置" onSelect={() => run(() => openDesktopManagement())}>
+                <Settings2 />设置与本机服务<CommandShortcut>{shortcutText(desktopShortcuts.settings)}</CommandShortcut>
               </CommandItem>
             </CommandGroup>
             <CommandGroup heading="电脑">

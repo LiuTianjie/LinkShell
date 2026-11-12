@@ -27,12 +27,13 @@ import {
 import { accountClient, accountToken } from "./account";
 import { browserIdentity, readLocal, saveLocal } from "./storage";
 import { sessionPreferences } from "./session-preferences";
+import { SessionSubscriptions } from "./session-subscriptions";
 import { browserDirect } from "./direct";
 import { ComputerConnections } from "./computer-connections";
 import { computerNames } from "./computer-names";
 import { computerAtKey, deduplicateLocalComputer } from "./computer-identity";
 import {
-  DESKTOP_ACCOUNT_EVENT, DESKTOP_ERROR_EVENT, DESKTOP_LOCAL, DESKTOP_VISIBILITY_EVENT,
+  DESKTOP_ACCOUNT_EVENT, DESKTOP_ERROR_EVENT, DESKTOP_HOST_EVENT, DESKTOP_LOCAL, DESKTOP_VISIBILITY_EVENT,
   desktopAccount, desktopHostSocket, desktopLocalComputer, desktopRequest, isDesktop, isWindowsDesktop,
   retryDesktopStorage, type DesktopAccount,
 } from "./desktop";
@@ -49,6 +50,7 @@ export interface Connection {
   link: HostLink;
   streams: HostStreams;
   store: ClientStore;
+  sessions?: SessionSubscriptions;
 }
 interface EngineState {
   source: Source;
@@ -104,6 +106,7 @@ export class BrowserEngine {
   private releaseLock?: () => void;
   private starting?: Promise<void>;
   private authUser?: string;
+  private pendingAccountFrom?: string | null;
   private accountRevision = 0;
   private authSubscribed = false;
   private generation = 0;
@@ -124,6 +127,7 @@ export class BrowserEngine {
     if (isDesktop) {
       window.addEventListener(DESKTOP_ERROR_EVENT, (event) => this.report((event as CustomEvent<string>).detail));
       window.addEventListener(DESKTOP_ACCOUNT_EVENT, (event) => this.applyAccount((event as CustomEvent<DesktopAccount>).detail));
+      window.addEventListener(DESKTOP_HOST_EVENT, () => this.onDesktopHostChanged());
       window.addEventListener(DESKTOP_VISIBILITY_EVENT, (event) => {
         if ((event as CustomEvent<{ visible: boolean }>).detail?.visible) this.reconnect();
       });
@@ -253,9 +257,11 @@ export class BrowserEngine {
     saveLocal("source", "official");
   }
   private applyAccount(account: Pick<DesktopAccount, "userId" | "email">) {
-    const changed = this.authUser !== account.userId;
+    const previousUser = this.authUser;
+    const changed = previousUser !== account.userId;
     this.authUser = account.userId;
     if (changed) {
+      if (this.pendingAccountFrom === undefined) this.pendingAccountFrom = previousUser ?? null;
       this.accountRevision++;
       // A running relay connection can outlive its merged local row until the user navigates.
       const known = [...this.state.getState().computers, ...this.connections.values().map((connection) => connection.computer)];
@@ -288,10 +294,35 @@ export class BrowserEngine {
     // open tunnel while they still look online.
     this.accountAuthTimer = setTimeout(() => {
       this.accountAuthTimer = undefined;
+      const fromUser = this.pendingAccountFrom;
+      this.pendingAccountFrom = undefined;
       if (!this.releaseLock || generation !== this.generation || account.userId !== this.authUser) return;
-      if (changed) this.relays.get(officialGateway)?.reauthenticate();
+      const relay = this.relays.get(officialGateway);
+      if (fromUser !== undefined && relay) {
+        const revision = this.accountRevision;
+        // Signed out: explicitly tell the gateway to clear this device's persisted account row.
+        const leaving = fromUser && !account.userId && relay.status === "online"
+          ? relay.request("account.leave", {}, 5_000).catch(() => undefined)
+          : Promise.resolve(undefined);
+        void leaving.then(() => {
+          if (!this.releaseLock || generation !== this.generation || revision !== this.accountRevision) return;
+          if (this.relays.get(officialGateway) === relay) relay.reauthenticate();
+          if (account.userId) this.relay(officialGateway);
+        });
+        return;
+      }
       if (account.userId) this.relay(officialGateway);
     }, 0);
+  }
+  private onDesktopHostChanged() {
+    if (!this.releaseLock) return;
+    if (this.desktopLocalRetry) clearTimeout(this.desktopLocalRetry);
+    this.desktopLocalRetry = undefined;
+    this.desktopLocalAttempt = 0;
+    void this.refreshDesktop();
+    for (const connection of this.connections.values()) {
+      connection.link.reconnectNow();
+    }
   }
   private setLocalComputer(computer?: Computer) {
     if (computer) {
@@ -299,15 +330,18 @@ export class BrowserEngine {
       this.desktopLocalRetry = undefined;
       this.desktopLocalAttempt = undefined;
     }
+    const localOnline = !computer && [...this.connections.values()].some(
+      (connection) => connection.computer.key === DESKTOP_LOCAL && connection.link.status === "online",
+    );
     this.state.setState((state) => {
       const previous = state.localComputer ?? state.computers.find((item) => item.key === DESKTOP_LOCAL);
       const local = computer
         ? { ...computer, relayId: computer.relayId ?? (computer.machine.id === previous?.machine.id ? previous.relayId : undefined) }
-        : previous ? { ...previous, machine: { ...previous.machine, online: false } } : undefined;
+        : previous ? { ...previous, machine: { ...previous.machine, online: localOnline ? true : false } } : undefined;
       return {
         localComputer: local,
         computers: this.mergeComputers(state.computers.filter((item) => item.key !== DESKTOP_LOCAL), local),
-        localError: computer ? undefined : "本机服务未运行，请在本机服务中启动。",
+        localError: computer || localOnline ? undefined : "本机服务未运行，请在本机服务中启动。",
       };
     });
     if (computer && !this.state.getState().connection && (!this.selected || this.computerForKey(this.selected)?.key === DESKTOP_LOCAL))
@@ -431,13 +465,24 @@ export class BrowserEngine {
             ? { error: undefined }
             : {}),
       }));
-      if (status === "online")
+      if (status === "online") {
+        for (const connection of this.connections.values()) {
+          if (connection.computer.gateway === gateway) connection.link.reconnectNow();
+        }
         void this.refresh(gateway).catch((error) => this.report(error));
+      }
     });
     relay.on("machines.changed", () => {
       void this.refresh(gateway).catch((error) => this.report(error));
     });
     relay.on("presence", ({ id, online }) => {
+      if (online) {
+        for (const connection of this.connections.values()) {
+          if (connection.computer.gateway === gateway && connection.computer.machine.id === id) {
+            connection.link.reconnectNow();
+          }
+        }
+      }
       const aliasKey = `${gateway}#${id}`;
       const alias = this.localAliases.get(aliasKey);
       if (alias) this.localAliases.set(aliasKey, { ...alias, machine: { ...alias.machine, online } });
@@ -497,6 +542,14 @@ export class BrowserEngine {
   }
   select(computer: Computer) {
     computer = this.computerForKey(computer.key) ?? computer;
+    const active = this.state.getState().connection;
+    if (active?.computer.key === computer.key) {
+      this.selected = computer.key;
+      saveLocal("selected", computer.key);
+      this.state.setState({ error: undefined });
+      active.link.reconnectNow();
+      return;
+    }
     const selected = this.retainComputer(computer);
     this.disconnect();
     this.releaseSelected = selected.release;
@@ -517,18 +570,29 @@ export class BrowserEngine {
     const identity = this.identity;
     const local = isDesktop && computer.key === DESKTOP_LOCAL && computer.gateway === DESKTOP_LOCAL;
     const relay = local ? undefined : this.relay(computer.gateway);
+    const tokenKey = `accessToken.${computer.key}`;
     const link = new HostLink({
       url: computer.key,
       createSocket: () => local ? desktopHostSocket() as unknown as SocketLike : new TunnelSocket(relay!, identity, computer.machine),
       lazyImages: true,
+      accessToken: local ? undefined : {
+        load: () => {
+          const saved = readLocal<string>(tokenKey, "");
+          return saved || undefined;
+        },
+        save: (token) => {
+          saveLocal(tokenKey, token ?? undefined);
+        },
+      },
     });
     const store = createClientStore(link, { lazyImages: true, sessionPreferences });
+    const sessions = new SessionSubscriptions(store);
     const streams = new HostStreams(link, {
       connector: local ? undefined : browserDirect,
       iceServers: () => store.getState().machine?.direct?.iceServers,
     });
     streams.stop();
-    const connection: Connection = { computer, link, store, streams };
+    const connection: Connection = { computer, link, store, streams, sessions };
     const unsubscribe = store.subscribe((state, previous) => {
       if (state.machine === previous.machine) return;
       if (state.machine?.naming) {
@@ -548,7 +612,7 @@ export class BrowserEngine {
     });
     store.getState().connect();
     return { connection, close: () => {
-      unsubscribe(); streams.stop(); store.getState().disconnect();
+      sessions.close(); unsubscribe(); streams.stop(); store.getState().disconnect();
     } };
   }
   async pair(address: string, codeOrLink: string) {
@@ -585,6 +649,7 @@ export class BrowserEngine {
     });
     this.paired = this.paired.filter((item) => item.key !== computer.key);
     saveLocal("paired", this.paired);
+    saveLocal(`accessToken.${computer.key}`, undefined);
     if (this.state.getState().connection?.computer.key === computer.key)
       this.disconnect();
     this.connections.remove(computer.key);
@@ -611,8 +676,15 @@ export class BrowserEngine {
       void retryDesktopStorage();
       void this.refreshDesktop();
     }
-    for (const relay of this.relays.values()) relay.reconnectNow();
-    for (const connection of this.connections.values()) connection.link.reconnectNow();
+    for (const relay of this.relays.values()) {
+      relay.probe?.();
+      relay.reconnectNow();
+    }
+    for (const connection of this.connections.values()) {
+      connection.link.probe?.();
+      connection.link.reconnectNow();
+      connection.streams.connect();
+    }
   }
   disconnect() {
     this.releaseSelected?.();
@@ -621,6 +693,7 @@ export class BrowserEngine {
   }
   stop() {
     this.generation++;
+    this.pendingAccountFrom = undefined;
     if (this.desktopLocalRetry) clearTimeout(this.desktopLocalRetry);
     this.desktopLocalRetry = undefined;
     this.desktopLocalAttempt = undefined;

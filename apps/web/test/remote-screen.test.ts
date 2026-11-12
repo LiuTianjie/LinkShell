@@ -13,7 +13,7 @@ import {
   wheelPixels,
 } from "../src/live/screen-input";
 import { ScreenGate } from "../src/live/screen-gate";
-import { askFullscreen, fullscreenShown, idleFullscreen, windowFullscreen } from "../src/live/screen-fullscreen";
+import { askFullscreen, fullscreenShown, idleFullscreen, shouldRevealFullscreenBar, windowFullscreen } from "../src/live/screen-fullscreen";
 import { remoteShortcuts, shortcutSign } from "../src/live/screen-shortcuts";
 
 const held = (keys: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }>) =>
@@ -82,6 +82,9 @@ describe("the picture's place and size", () => {
     expect(pictureFraction(rect, 500, 275)).toEqual({ x: 0.5, y: 0.5 });
     expect(pictureFraction(rect, 50, 275)).toBeUndefined();
     expect(pictureFraction(rect, 50, 600, true)).toEqual({ x: 0, y: 1 });
+    // Full-screen top-bezel click above a narrow letterbox snaps onto the remote Mac's menu bar (y = 0).
+    expect(pictureFraction(rect, 700, 0, false, true)).toEqual({ x: 0.75, y: 0 });
+    expect(pictureFraction({ x: 0, y: 140, width: 800, height: 450 }, 400, 0, false, true)).toBeUndefined();
   });
   it("asks for the narrowest width that covers the pixels shown", () => {
     // A 1200-point-wide stage on a 2× display shows 2400 pixels.
@@ -172,6 +175,12 @@ describe("full screen", () => {
     const { next, request } = askFullscreen(window, true);
     expect(request).toBeUndefined();
     expect(fullscreenShown(next)).toBe(true);
+  });
+  it("reveals the floating bar only at the top-center pull zone so Mac status bar menus stay clickable", () => {
+    expect(shouldRevealFullscreenBar(24, 0, 1512)).toBe(false);
+    expect(shouldRevealFullscreenBar(1380, 0, 1512)).toBe(false);
+    expect(shouldRevealFullscreenBar(756, 20, 1512)).toBe(false);
+    expect(shouldRevealFullscreenBar(756, 2, 1512)).toBe(true);
   });
 });
 

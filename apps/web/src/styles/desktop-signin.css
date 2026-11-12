@@ -1,18 +1,22 @@
-/* The iTool account sign-in panel (SignIn.tsx), visual-system.md 登录: one centred column,
-   providers as outlined secondary buttons, the email sign-in the only solid one, outlined fields.
-   Plain elements with their own classes, so the shared button and dialog rules don't reach in. */
+/* The iTool account sign-in panel (SignIn.tsx), visual-system.md 登录与连接电脑: one unified column,
+   providers side by side as secondary buttons, email sign-in the single solid primary button,
+   crisp 36 px fields with password visibility toggle. */
 
-html[data-desktop] .signin { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 360px; margin-inline: auto; color: var(--label); font-size: 13px; line-height: 18px; }
-/* In a dialog it stays a column of its own width, centred under the dialog's heading. */
-html[data-desktop] [data-slot="dialog-content"] .signin { max-width: 360px; }
-html[data-desktop] .signin-header { display: grid; gap: 4px; text-align: center; }
+html[data-desktop] .signin { display: flex; flex: 1; flex-direction: column; gap: 12px; width: 100%; max-width: 372px; margin-inline: auto; color: var(--label); font-size: 13px; line-height: 18px; }
+/* Inside a dialog it fills the dialog's single column so tabs never shift width. */
+html[data-desktop] [data-slot="dialog-content"] .signin { max-width: none; }
+html[data-desktop] .signin-header { display: grid; gap: 4px; }
 html[data-desktop] .signin-header h2 { font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
 html[data-desktop] .signin-header p { color: var(--secondaryLabel); font-size: 12px; }
 
-html[data-desktop] .signin-providers { display: grid; gap: 10px; }
-html[data-desktop] .signin-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; padding: 0 14px; border: 0; border-radius: var(--radius-card); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition), opacity var(--transition); }
-html[data-desktop] .signin-button svg { width: 16px; height: 16px; flex: none; }
-html[data-desktop] .signin-button[data-kind="provider"] { background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
+html[data-desktop] .signin-providers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 380px) {
+  html[data-desktop] .signin-providers { grid-template-columns: minmax(0, 1fr); }
+}
+html[data-desktop] .signin-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 36px; min-width: 0; padding: 0 10px; border: 0; border-radius: var(--radius-control); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: default; transition: background var(--transition), box-shadow var(--transition), color var(--transition), opacity var(--transition); }
+html[data-desktop] .signin-button > span { overflow: hidden; text-overflow: ellipsis; }
+html[data-desktop] .signin-button svg { width: 15px; height: 15px; flex: none; }
+html[data-desktop] .signin-button[data-kind="provider"] { background: var(--card); box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
 html[data-desktop] .signin-button[data-kind="provider"]:hover:not(:disabled) { background: var(--fill); }
 html[data-desktop] .signin-button[data-kind="primary"] { background: var(--accentFill); color: var(--primaryForeground); }
 html[data-desktop] .signin-button[data-kind="primary"]:hover:not(:disabled) { background: var(--accentHover); }
@@ -24,41 +28,54 @@ html[data-desktop] .signin-button:disabled { opacity: .4; cursor: default; }
 /* A password sign-in in flight keeps its button readable: the spinner says it's busy. */
 html[data-desktop] .signin-form[aria-busy="true"] .signin-button[data-kind="primary"]:disabled { opacity: 1; }
 
-html[data-desktop] .signin-divider { display: flex; align-items: center; gap: 10px; color: var(--tertiaryLabel); font-size: 12px; }
+html[data-desktop] .signin-divider { display: flex; align-items: center; gap: 10px; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; }
 html[data-desktop] .signin-divider::before,
 html[data-desktop] .signin-divider::after { content: ""; flex: 1; height: var(--hairline); background: var(--separator); }
 
-html[data-desktop] .signin-form { display: grid; gap: 12px; margin: 0; }
+html[data-desktop] .signin-form { display: flex; flex: 1; flex-direction: column; gap: 12px; margin: 0; }
 html[data-desktop] .signin-field { display: grid; gap: 6px; }
-html[data-desktop] .signin-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; line-height: 16px; }
-html[data-desktop] .signin-input { width: 100%; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); font: inherit; font-size: 13px; outline: none; transition: background var(--transition), box-shadow var(--transition); }
+html[data-desktop] .signin-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--label); font-size: 13px; font-weight: 500; line-height: 16px; }
+html[data-desktop] .signin-input { width: 100%; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: var(--card); box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); font: inherit; font-size: 13px; outline: none; transition: background var(--transition), box-shadow var(--transition); }
+html[data-desktop] .signin-input-password { padding-right: 38px; }
 html[data-desktop] .signin-input::placeholder { color: var(--placeholder); opacity: 1; }
 /* Scoped to the panel: desktop-components.css clears every input's focus shadow at the same weight. */
-html[data-desktop] .signin .signin-input:focus-visible { background: transparent; box-shadow: inset 0 0 0 1px var(--focus); outline: none; }
+html[data-desktop] .signin .signin-input:focus-visible { background: var(--card); box-shadow: inset 0 0 0 1px var(--focus); outline: none; }
+html[data-desktop] .signin .signin-input:is(:autofill, :-webkit-autofill) { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 45%, var(--separatorStrong)), inset 0 0 0 100vmax var(--card); -webkit-text-fill-color: var(--label); caret-color: var(--label); }
+html[data-desktop] .signin .signin-input:is(:autofill, :-webkit-autofill):focus-visible { box-shadow: inset 0 0 0 2px var(--focus), inset 0 0 0 100vmax var(--card); }
 html[data-desktop] .signin .signin-input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--danger); }
 html[data-desktop] .signin-input:disabled { opacity: .4; }
-html[data-desktop] .signin-error { color: var(--danger); font-size: 12px; line-height: 17px; -webkit-user-select: text; user-select: text; }
+html[data-desktop] .signin-password-wrap { position: relative; display: flex; align-items: center; }
+html[data-desktop] .signin-password-toggle { position: absolute; right: 4px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--tertiaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .signin-password-toggle:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .signin-password-toggle:disabled { opacity: .4; }
+html[data-desktop] .signin-password-toggle svg { width: 15px; height: 15px; }
+html[data-desktop] .signin-submit { margin-top: auto; }
+html[data-desktop] .signin-error { margin: -2px 0 0; color: var(--danger); font-size: 12px; line-height: 17px; -webkit-user-select: text; user-select: text; }
 
 html[data-desktop] .signin a,
 html[data-desktop] .signin-link { padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-decoration: none; cursor: default; }
 /* After the rule above, whose `font: inherit` would give a label's link the label's weight. */
-html[data-desktop] .signin-field-label a { font-weight: 400; }
+html[data-desktop] .signin-field-label a { font-size: 12px; font-weight: 400; }
 html[data-desktop] .signin a:hover,
 html[data-desktop] .signin-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
 html[data-desktop] .signin-link:disabled { opacity: .4; }
-html[data-desktop] .signin :is(.signin-button, .signin-link, a):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+html[data-desktop] .signin :is(.signin-button, .signin-link, .signin-password-toggle, a):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-html[data-desktop] .signin-footer { display: grid; gap: 6px; color: var(--secondaryLabel); font-size: 12px; line-height: 17px; text-align: center; }
+html[data-desktop] .signin-footer { display: grid; gap: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; text-align: center; }
+html[data-desktop] .signin-footer p > span:first-child { margin-right: 4px; }
 
-html[data-desktop] .signin-waiting { display: grid; justify-items: center; gap: 6px; padding: 8px 0 4px; text-align: center; }
-html[data-desktop] .signin-waiting h3 { margin-top: 6px; font-size: 14px; font-weight: 600; line-height: 20px; }
-html[data-desktop] .signin-waiting p { color: var(--secondaryLabel); }
+html[data-desktop] .signin[data-state="waiting"] { justify-content: space-between; min-height: 290px; }
+html[data-desktop] .signin-waiting { display: grid; flex: 1; align-content: center; justify-items: center; gap: 6px; padding: 16px; border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--card); text-align: center; }
+html[data-desktop] .signin-waiting-badge { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--fill); color: var(--accent); }
+html[data-desktop] .signin-waiting h3 { margin-top: 2px; font-size: 14px; font-weight: 600; line-height: 20px; }
+html[data-desktop] .signin-waiting p { color: var(--secondaryLabel); font-size: 12px; }
+html[data-desktop] .signin-waiting-foot { display: grid; gap: 6px; }
 html[data-desktop] .signin-hint { color: var(--tertiaryLabel); font-size: 12px; line-height: 17px; text-align: center; }
 html[data-desktop] .signin-link-text { color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 html[data-desktop] .signin-actions { display: flex; gap: 8px; }
 html[data-desktop] .signin-actions > .signin-button { flex: 1; width: auto; }
 
 html[data-desktop] .signin-spinner { width: 14px; height: 14px; flex: none; animation: signin-spin 1s linear infinite; }
-html[data-desktop] .signin-spinner[data-size="large"] { width: 20px; height: 20px; color: var(--tertiaryLabel); }
+html[data-desktop] .signin-spinner[data-size="large"] { width: 18px; height: 18px; color: currentColor; }
 @keyframes signin-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .signin-spinner { animation: none; } }

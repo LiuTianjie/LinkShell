@@ -32,3 +32,24 @@ it("keeps a live rename when an earlier metadata refresh finishes loading projec
   expect(store.getState().machine).toBe(renamed);
   expect(store.getState().sessionsLoaded).toBe(true);
 });
+
+it("commits machine.info immediately without waiting on slower project scans", async () => {
+  const link = new HostLink({ url: "ws://unused" });
+  const info: MachineInfo = { machineId: "host-b", hostname: "air3", platform: "darwin", hostVersion: "test", protocol: 4, agents: [] };
+  let releaseProjects!: (value: { projects: [] }) => void;
+  const projects = new Promise<{ projects: [] }>((resolve) => { releaseProjects = resolve; });
+  vi.spyOn(link, "call").mockImplementation((method) => {
+    if (method === "machine.info") return Promise.resolve(info);
+    if (method === "projects.list") return projects;
+    if (method === "agents.pending") return Promise.resolve({ interactions: [] });
+    return Promise.resolve({ sessions: [] });
+  });
+  const store = createClientStore(link);
+  const refresh = store.getState().refresh();
+  await Promise.resolve();
+  expect(store.getState().machine).toBe(info);
+  expect(store.getState().sessionsLoaded).toBe(false);
+  releaseProjects({ projects: [] });
+  await refresh;
+  expect(store.getState().sessionsLoaded).toBe(true);
+});

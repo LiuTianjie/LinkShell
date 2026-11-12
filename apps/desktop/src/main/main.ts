@@ -118,31 +118,91 @@ function send(name: string, detail: unknown) {
  * newest wish instead, and a toggle that never took is asked again after a second.
  */
 let wantedFullScreen: boolean | undefined;
+let wantedImmersiveFullScreen = false;
 let fullScreenMoving = false;
 /** The last leave was asked for by the page (its wish is already false), not the window's own button. */
 let fullScreenAsked = false;
 let fullScreenRetry: ReturnType<typeof setTimeout> | undefined;
+function isSimpleFullScreen(): boolean {
+  return MAC && !!window && !window.isDestroyed() && window.isSimpleFullScreen();
+}
+function isWindowFullScreen(): boolean {
+  return !!window && !window.isDestroyed() && (window.isFullScreen() || isSimpleFullScreen());
+}
+function syncImmersivePresentation() {
+  if (!MAC) return;
+  const active = isSimpleFullScreen() && visible && !!window && !window.isDestroyed() && window.isFocused() && !window.isFullScreen();
+  nativeModule?.setImmersiveFullScreen(active);
+}
 function reconcileFullScreen() {
   if (!window || window.isDestroyed() || wantedFullScreen === undefined || fullScreenMoving) return;
   const wanted = wantedFullScreen;
+  // On macOS, a full-screen Space forces an auto-hiding local menu bar + 44pt toolbar window over
+  // y = 0..81pt whenever the pointer reaches the top edge, blocking the remote Mac's status bar.
+  // Remote screens enter borderless `simpleFullScreen` with `.hideMenuBar` instead.
+  if (MAC && wanted && wantedImmersiveFullScreen && !window.isFullScreen()) {
+    clearTimeout(fullScreenRetry);
+    if (!window.isSimpleFullScreen()) {
+      rememberBounds();
+      window.setSimpleFullScreen(true);
+    }
+    syncImmersivePresentation();
+    updateWindowSurface();
+    send("linkshell-desktop-window", { fullscreen: true });
+    send("linkshell-desktop-fullscreen", { fullscreen: true });
+    return;
+  }
+  if (MAC && !wanted && window.isSimpleFullScreen()) {
+    clearTimeout(fullScreenRetry);
+    wantedImmersiveFullScreen = false;
+    nativeModule?.setImmersiveFullScreen(false);
+    window.setSimpleFullScreen(false);
+    wantedFullScreen = undefined;
+    updateWindowSurface();
+    send("linkshell-desktop-window", { fullscreen: false });
+    send("linkshell-desktop-fullscreen", { fullscreen: false });
+    return;
+  }
   if (window.isFullScreen() === wanted) {
     clearTimeout(fullScreenRetry);
+    syncImmersivePresentation();
     // The answer the page waits for, whether or not anything had to move.
     send("linkshell-desktop-fullscreen", { fullscreen: wanted });
-    if (!wanted) wantedFullScreen = undefined;
+    if (!wanted) { wantedFullScreen = undefined; wantedImmersiveFullScreen = false; }
     return;
   }
   fullScreenMoving = true;
-  if (!wanted) fullScreenAsked = true;
+  if (!wanted) { fullScreenAsked = true; wantedImmersiveFullScreen = false; }
+  syncImmersivePresentation();
   window.setFullScreen(wanted);
   clearTimeout(fullScreenRetry);
   fullScreenRetry = setTimeout(() => { fullScreenMoving = false; reconcileFullScreen(); }, 1500);
+}
+
+function toggleWindowFullScreen() {
+  if (!window || window.isDestroyed()) return;
+  if (isSimpleFullScreen()) {
+    wantedFullScreen = false;
+    wantedImmersiveFullScreen = false;
+    reconcileFullScreen();
+    return;
+  }
+  if (window.isFullScreen()) {
+    wantedFullScreen = false;
+    wantedImmersiveFullScreen = false;
+    reconcileFullScreen();
+    return;
+  }
+  wantedFullScreen = true;
+  wantedImmersiveFullScreen = nativeScreenShown;
+  reconcileFullScreen();
 }
 
 /** Hidden, minimized or closed: the page pauses its remote screen and previews. */
 function setVisible(value: boolean) {
   visible = value;
   nativeModule?.screenVisible(value);
+  syncImmersivePresentation();
   send("linkshell-desktop-visibility", { visible });
 }
 
@@ -175,15 +235,16 @@ function createWindow() {
       safeDialogs: true,
     },
   });
-  window.on("closed", () => { nativeModule?.screenStop(); nativeScreenShown = false; });
+  window.on("closed", () => { nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
     // Unhidden after ⌘H the window may not get "show": focus is the sure sign it is on screen again.
     if (!visible && window?.isVisible() && !window.isMinimized()) setVisible(true);
+    syncImmersivePresentation();
     updateWindowSurface();
   });
-  window.on("blur", updateWindowSurface);
+  window.on("blur", () => { syncImmersivePresentation(); updateWindowSurface(); });
   window.on("resize", updateWindowSurface);
   window.on("moved", updateWindowSurface);
   // Started at sign-in: the window waits in the tray until it is asked for.
@@ -201,7 +262,14 @@ function createWindow() {
     event.preventDefault();
     // A full-screen window would leave an empty Space behind when hidden.
     wantedFullScreen = undefined;
-    if (window!.isFullScreen()) { window!.once("leave-full-screen", () => window?.hide()); window!.setFullScreen(false); }
+    wantedImmersiveFullScreen = false;
+    nativeModule?.setImmersiveFullScreen(false);
+    if (isSimpleFullScreen()) {
+      window!.setSimpleFullScreen(false);
+      send("linkshell-desktop-window", { fullscreen: false });
+      send("linkshell-desktop-fullscreen", { fullscreen: false });
+      window!.hide();
+    } else if (window!.isFullScreen()) { window!.once("leave-full-screen", () => window?.hide()); window!.setFullScreen(false); }
     else window!.hide();
     if (process.platform === "darwin") app.dock?.hide();
   });
@@ -209,6 +277,7 @@ function createWindow() {
   window.on("blur", () => window?.webContents.setIgnoreMenuShortcuts(false));
   window.on("enter-full-screen", () => {
     fullScreenMoving = false;
+    syncImmersivePresentation();
     // Entered by the window's own button or the menu: that is the page's wish from now on.
     if (wantedFullScreen === undefined) wantedFullScreen = true;
     send("linkshell-desktop-window", { fullscreen: true });
@@ -216,6 +285,8 @@ function createWindow() {
   });
   window.on("leave-full-screen", () => {
     fullScreenMoving = false;
+    wantedImmersiveFullScreen = false;
+    syncImmersivePresentation();
     // Left by the window's own button or Esc: what asked for full screen leaves it too.
     if (wantedFullScreen === true && !fullScreenAsked) wantedFullScreen = false;
     fullScreenAsked = false;
@@ -233,11 +304,12 @@ function createWindow() {
     setTimeout(() => {
       pageReady = true;
       updateWindowSurface();
-      send("linkshell-desktop-window", { fullscreen: window?.isFullScreen() ?? false });
+      send("linkshell-desktop-window", { fullscreen: isWindowFullScreen() });
       if (pendingCommand) { send("linkshell-desktop-command", pendingCommand); pendingCommand = undefined; }
     }, 300);
   });
   web.on("render-process-gone", () => {
+    nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
     showProblem("工作台页面意外退出。请重新连接以恢复电脑与会话。");
@@ -246,7 +318,7 @@ function createWindow() {
 }
 
 function rememberBounds() {
-  if (!window || window.isFullScreen() || window.isMinimized()) return;
+  if (!window || isWindowFullScreen() || window.isMinimized()) return;
   settings.set("window", window.getBounds());
   void saveSettings();
 }
@@ -404,6 +476,7 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     case "screenFullScreen": {
       if (!window || typeof message.enabled !== "boolean") return;
       wantedFullScreen = message.enabled;
+      wantedImmersiveFullScreen = message.enabled && message.immersive === true;
       reconcileFullScreen();
       return;
     }
@@ -603,6 +676,7 @@ app.on("before-quit", (event) => {
   void flushOrConfirm("仍然退出").then((confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
+    nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
     server.stop();
@@ -868,6 +942,7 @@ function installMenu() {
       { label: "关于 LinkShell", role: "about" },
       { type: "separator" },
       { label: "工作台", accelerator: "CmdOrCtrl+1", click: () => { openWorkspace(); showWindow(); } },
+      { label: "设置与本机服务…", accelerator: "CmdOrCtrl+,", click: () => { openManagement(); showWindow(); } },
       { label: "本机管理", accelerator: "CmdOrCtrl+2", click: () => { openManagement(); showWindow(); } },
       { label: "检查更新…", click: () => { openManagement("更新"); showWindow(); checkUpdates(); } },
       { type: "separator" },
@@ -885,7 +960,7 @@ function installMenu() {
     { label: "显示", submenu: [
       { label: "实际大小", role: "resetZoom" }, { label: "放大", role: "zoomIn" }, { label: "缩小", role: "zoomOut" },
       { type: "separator" },
-      { label: "进入全屏", role: "togglefullscreen" },
+      { label: "切换全屏", accelerator: "Ctrl+Command+F", click: () => toggleWindowFullScreen() },
       ...(app.isPackaged ? [] : [{ type: "separator" as const }, { label: "开发者工具", role: "toggleDevTools" as const }]),
     ] },
     { label: "窗口", role: "windowMenu", submenu: [

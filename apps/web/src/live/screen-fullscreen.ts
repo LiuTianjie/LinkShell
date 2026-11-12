@@ -34,3 +34,15 @@ export function windowFullscreen(state: FullscreenState, fullscreen: boolean, ad
   const owns = (state.wanted && state.owns) || (adopt && !state.window);
   return { wanted: owns, owns, window: true };
 }
+
+export const FULLSCREEN_PULL_HALF_WIDTH = 48;
+export const FULLSCREEN_PULL_DEPTH = 6;
+
+/**
+ * Only a deliberate touch at the narrow top-center pull zone reveals the floating bar in full
+ * screen, leaving the remote Mac's left-side app menus and right-side status bar unobstructed.
+ */
+export function shouldRevealFullscreenBar(x: number, y: number, width: number, depth = FULLSCREEN_PULL_DEPTH): boolean {
+  if (!(width > 0 && Number.isFinite(x) && Number.isFinite(y))) return false;
+  return y >= 0 && y <= depth && Math.abs(x - width / 2) <= FULLSCREEN_PULL_HALF_WIDTH;
+}

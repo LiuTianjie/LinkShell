@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronUp,
   Command,
   Keyboard,
   LoaderCircle,
@@ -32,7 +33,7 @@ import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, setDesktopSc
 import { useDesktopVisibility } from "./desktop-visibility";
 import { readLocal, saveLocal } from "./storage";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
-import { askFullscreen, fullscreenShown, idleFullscreen, windowFullscreen, type FullscreenState } from "./screen-fullscreen";
+import { askFullscreen, fullscreenShown, idleFullscreen, shouldRevealFullscreenBar, windowFullscreen, type FullscreenState } from "./screen-fullscreen";
 import {
   chosenScreenWidth,
   fittedRect,
@@ -222,13 +223,31 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   useLayoutEffect(placeCursor, [placeCursor, rect]);
 
   // ── Full screen ──────────────────────────────────────────────────────────────────────────
+  const barRef = useRef<HTMLDivElement>(null);
+  const barHideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const barHovered = useRef(false);
+  const barHasOpenPopup = useCallback(
+    () => Boolean(barRef.current?.querySelector('[aria-expanded="true"], [data-state="open"]')),
+    [],
+  );
+  const scheduleBarHide = useCallback((delayMs: number) => {
+    clearTimeout(barHideTimer.current);
+    barHideTimer.current = setTimeout(() => {
+      if (barHovered.current || barHasOpenPopup()) {
+        scheduleBarHide(500);
+        return;
+      }
+      setBarVisible(false);
+    }, delayMs);
+  }, [barHasOpenPopup]);
+
   const requestFullscreen = useCallback((enabled: boolean) => {
     const { next, request } = askFullscreen(fullscreenRef.current, enabled);
     fullscreenRef.current = next;
     setFullscreenState(next);
     if (request === undefined) return;
     // Outside the desktop app the page's own full screen stands in for the window's.
-    if (!setDesktopScreenFullScreen(request)) {
+    if (!setDesktopScreenFullScreen(request, { immersive: true })) {
       if (request) void root.current?.requestFullscreen?.().catch(() => {});
       else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     }
@@ -255,13 +274,15 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     };
   }, [requestFullscreen]);
   useEffect(() => { if (!active) requestFullscreen(false); }, [active, requestFullscreen]);
-  // The bar comes back while the pointer is near the top edge, and on entering full screen.
+  // Shown briefly on entering full screen, then tucked away so the remote Mac's status bar stays clear.
   useEffect(() => {
+    clearTimeout(barHideTimer.current);
+    barHovered.current = false;
     if (!shown) { setBarVisible(true); return; }
     setBarVisible(true);
-    const timer = setTimeout(() => setBarVisible(false), 2200);
-    return () => clearTimeout(timer);
-  }, [shown]);
+    scheduleBarHide(1600);
+    return () => clearTimeout(barHideTimer.current);
+  }, [shown, scheduleBarHide]);
 
   // ── Input ────────────────────────────────────────────────────────────────────────────────
   const canInput = !!state?.canInput;
@@ -287,30 +308,43 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     return () => window.removeEventListener("blur", blur);
   }, []);
 
-  const at = (event: { clientX: number; clientY: number }, clamp = false) => {
+  const at = (event: { clientX: number; clientY: number }, clamp = false, topEdgeSnap = false) => {
     const box = stage.current?.getBoundingClientRect();
     if (!box) return undefined;
-    return pictureFraction(rectRef.current, event.clientX - box.left, event.clientY - box.top, clamp);
+    return pictureFraction(rectRef.current, event.clientX - box.left, event.clientY - box.top, clamp, topEdgeSnap);
   };
-  const lastBar = useRef(0);
   const onPointerMove = (event: React.PointerEvent) => {
     if (shown) {
       const box = root.current?.getBoundingClientRect();
-      const near = !!box && event.clientY - box.top < 56;
-      if (near !== barVisible && (near || performance.now() - lastBar.current > 600)) { lastBar.current = performance.now(); setBarVisible(near); }
+      if (box && shouldRevealFullscreenBar(event.clientX - box.left, event.clientY - box.top, box.width)) {
+        setBarVisible(true);
+        scheduleBarHide(1400);
+      } else if (barVisible && !barHovered.current && !barHasOpenPopup()) {
+        scheduleBarHide(220);
+      }
     }
     if (!canInput || event.pointerType !== "mouse") return;
+    const box = stage.current?.getBoundingClientRect();
+    const inStage = !!box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
     const captured = stage.current?.hasPointerCapture(event.pointerId);
-    const point = at(event, captured);
+    const point = at(event, Boolean(captured) || inStage, shown);
     if (!point) return;
     pointerAt.current = point;
     placeCursor();
     receiver.current?.pointer(point.x, point.y);
   };
   const onPointerDown = (event: React.PointerEvent) => {
+    if (shown && !barVisible && event.pointerType !== "mouse") {
+      const box = root.current?.getBoundingClientRect();
+      if (box && shouldRevealFullscreenBar(event.clientX - box.left, event.clientY - box.top, box.width, 18)) {
+        setBarVisible(true);
+        scheduleBarHide(2400);
+        return;
+      }
+    }
     if (event.pointerType !== "mouse" || !canInput) return;
     const button = mouseButton(event.button);
-    const point = at(event);
+    const point = at(event, false, shown);
     if (!button || !point) return;
     event.preventDefault();
     focusStage();
@@ -404,7 +438,20 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const shortcuts = remoteShortcuts(remote);
 
   const toolbar = (
-    <div className="remote-screen-bar" data-hidden={shown && !barVisible ? "" : undefined} onPointerEnter={() => shown && setBarVisible(true)}>
+    <div
+      ref={barRef}
+      className="remote-screen-bar"
+      data-hidden={shown && !barVisible ? "" : undefined}
+      onPointerEnter={() => {
+        barHovered.current = true;
+        clearTimeout(barHideTimer.current);
+        if (shown) setBarVisible(true);
+      }}
+      onPointerLeave={() => {
+        barHovered.current = false;
+        if (shown) scheduleBarHide(220);
+      }}
+    >
       <div className="remote-screen-title">
         {back && !shown
           ? <Button variant="ghost" size="icon" aria-label="返回电脑列表" title="返回电脑列表" onClick={back}><ArrowLeft /></Button>
@@ -504,6 +551,17 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
           {shown ? <Minimize data-icon="inline-start" /> : <Maximize data-icon="inline-start" />}
           {shown ? "退出全屏" : "全屏"}
         </Button>
+        {shown && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="收起工具栏"
+            title="收起工具栏"
+            onClick={() => { barHovered.current = false; clearTimeout(barHideTimer.current); setBarVisible(false); focusStage(); }}
+          >
+            <ChevronUp />
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -557,6 +615,7 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
       onWheelCapture={() => receiver.current?.used()}
       onKeyDownCapture={() => receiver.current?.used()}
     >
+      {shown && !barVisible && <div className="remote-screen-pull" aria-hidden="true" />}
       {toolbar}
       <div
         ref={stage}

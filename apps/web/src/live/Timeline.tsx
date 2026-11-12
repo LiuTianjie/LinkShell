@@ -313,6 +313,12 @@ const markdownURL = (url: string) => (url.startsWith("file://") ? url : defaultU
 const markdownComponents: Components = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
+  table: ({ children }) => (
+    <div className="table-wrapper" role="region" aria-label="数据表格" tabIndex={0}>
+      <table>{children}</table>
+    </div>
+  ),
+  th: ({ children, ...props }) => <th scope="col" {...props}>{children}</th>,
   img: ({ src, alt }) => (
     <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer">
       {alt || "查看图片"} <ArrowUpRight className="external-link-icon" aria-hidden />
@@ -1162,21 +1168,17 @@ type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 function ErrorCard({ item, anchorId }: { item: Extract<TimelineItem, { kind: "error" }>; anchorId?: string }) {
   const shown = presentError(item);
   return (
-    <Alert variant="destructive" data-kind={shown.kind} data-item-id={anchorId}>
+    <Alert variant="destructive" className="timeline-error-card" data-kind={shown.kind} data-item-id={anchorId}>
       <AlertTitle>{shown.title}</AlertTitle>
-      {shown.kind ? (
+      {(shown.hint || (shown.kind && shown.detail)) ? (
         <AlertDescription>
-          {shown.hint && <p>{shown.hint}</p>}
-          {shown.detail && (
+          {shown.hint && <p className="whitespace-pre-wrap break-words">{shown.hint}</p>}
+          {shown.kind && shown.detail && (
             <details className="error-detail">
               <summary>查看详情</summary>
               <pre tabIndex={0}>{shown.detail}</pre>
             </details>
           )}
-        </AlertDescription>
-      ) : shown.hint ? (
-        <AlertDescription>
-          <pre>{shown.hint}</pre>
         </AlertDescription>
       ) : null}
     </Alert>

@@ -65,12 +65,14 @@
 
   /* Full screen: the picture alone, the bar over it on demand. */
   .remote-screen-fullscreen { position: fixed; inset: 0; z-index: 60; background: #000; }
+  /* Subtle center pull cue in the top bezel/notch zone; pointer-events stay off so status icons below remain clickable. */
+  .remote-screen-pull { position: absolute; top: 3px; left: 50%; z-index: 3; width: 38px; height: 4px; border-radius: 999px; transform: translateX(-50%); background: rgb(255 255 255 / .34); box-shadow: 0 1px 3px rgb(0 0 0 / .55); pointer-events: none; transition: opacity 160ms var(--ease-out, ease-out); }
   /* Over the picture, which is often black too: a lighter glass and a drawn edge keep it apart. */
   .remote-screen-fullscreen > .remote-screen-bar { position: absolute; top: 8px; left: 50%; width: auto; max-width: calc(100% - 24px); height: 40px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-card); transform: translateX(-50%); color: #fff; background: rgb(44 44 48 / .84); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 12px 32px -8px rgb(0 0 0 / .7); transition: transform 220ms var(--ease-out, ease-out), opacity 180ms var(--ease-out, ease-out); }
   /* The icon sits as far in from the left edge as the last button's pill does from the right. */
   .remote-screen-fullscreen .remote-screen-title { padding-left: 2px; }
   .remote-screen-fullscreen .remote-screen-title > svg { margin-left: 6px; }
-  .remote-screen-fullscreen > .remote-screen-bar[data-hidden] { opacity: 0; transform: translate(-50%, -64px); pointer-events: none; }
+  .remote-screen-fullscreen > .remote-screen-bar[data-hidden]:not(:focus-within) { opacity: 0; transform: translate(-50%, -64px); pointer-events: none; }
   .remote-screen-fullscreen .remote-screen-title { flex: none; color: rgb(255 255 255 / .7); }
   .remote-screen-fullscreen .remote-screen-title strong { max-width: 240px; color: #fff; font-size: 13px; }
   .remote-screen-fullscreen .remote-screen-path { color: rgb(255 255 255 / .55); }

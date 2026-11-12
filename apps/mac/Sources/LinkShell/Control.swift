@@ -72,12 +72,24 @@ final class Control {
     )
   }
 
+  static func mouseDelta(from origin: CGPoint, to target: CGPoint, bounds: CGRect, dragging: Bool) -> (dx: Int64, dy: Int64) {
+    let dx = Int64((target.x - origin.x).rounded())
+    var dy = Int64((target.y - origin.y).rounded())
+    // On a remote Mac with an auto-hidden full-screen menu bar, WindowServer reveals the bar only
+    // when top-edge pointer motion carries upward (negative) deltaY.
+    if !dragging, bounds.height > 0, target.y <= bounds.minY + 0.5 {
+      dy = min(dy, -1)
+    }
+    return (dx, dy)
+  }
+
   private func move(to target: CGPoint) {
     let kind: CGEventType = held["left"] == true ? .leftMouseDragged : held["right"] == true ? .rightMouseDragged : held["middle"] == true ? .otherMouseDragged : .mouseMoved
     let pressed: CGMouseButton = held["left"] == true ? .left : held["right"] == true ? .right : held["middle"] == true ? .center : .left
     let event = CGEvent(mouseEventSource: Control.source, mouseType: kind, mouseCursorPosition: target, mouseButton: pressed)
-    event?.setIntegerValueField(.mouseEventDeltaX, value: Int64(target.x - position.x))
-    event?.setIntegerValueField(.mouseEventDeltaY, value: Int64(target.y - position.y))
+    let delta = Control.mouseDelta(from: position, to: target, bounds: bounds, dragging: kind != .mouseMoved)
+    event?.setIntegerValueField(.mouseEventDeltaX, value: delta.dx)
+    event?.setIntegerValueField(.mouseEventDeltaY, value: delta.dy)
     event?.flags = heldFlags
     position = target
     lastMove = Date()

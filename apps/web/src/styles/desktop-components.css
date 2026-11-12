@@ -49,21 +49,25 @@ html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], f
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-button] { align-self: flex-end; width: auto; min-width: 96px; }
 html[data-desktop] .new-session-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
-/* The connect dialog (Connect.tsx): a narrow centred dialog; the local computer as one quiet
-   line, the ways in as two underlined tabs. */
-html[data-desktop] [data-slot="dialog-content"].connect-dialog:not(.command-center) { width: min(440px, calc(100vw - 48px)); padding: 28px 28px 24px; }
-/* A form people read and type into: an opaque surface, so a coloured card behind it cannot tint it through the blur. */
-html[data-desktop] [data-slot="dialog-content"].connect-dialog { background: var(--plain); -webkit-backdrop-filter: none; backdrop-filter: none; }
-html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].connect-dialog { background: var(--cardRaised); }
-html[data-desktop] .connect-dialog [data-slot="dialog-header"] { place-items: center; padding-right: 0; text-align: center; }
-html[data-desktop] .connect-dialog [data-slot="dialog-title"] { font-size: 20px; line-height: 28px; }
-html[data-desktop] .connect-dialog .modal-subtitle { margin-top: -12px; color: var(--secondaryLabel); font-size: 13px; text-align: center; }
-html[data-desktop] .connect-dialog .connect-local { margin: -8px 0 4px; }
-html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] { justify-content: center; gap: 24px; width: min(360px, 100%); height: 32px; margin-inline: auto; border-bottom: var(--hairline) solid var(--separator); }
-html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"] { flex: none; height: 32px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; }
-html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"] { color: var(--label); box-shadow: inset 0 -2px 0 var(--accent); }
-html[data-desktop] .connect-dialog [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
-html[data-desktop] .connect-dialog [data-slot="tabs-content"] { padding-top: 24px; }
+/* The connect & sign-in dialogs (Connect.tsx, Management.tsx SignInDialog): a fixed-top 420 px
+   sheet with one unified column width and locked panel height so switching tabs or accounts never
+   jumps the dialog's top edge or tab bar. */
+html[data-desktop] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { top: clamp(40px, calc(50dvh - 246px), calc(100dvh - 512px)); translate: -50% 0; width: min(420px, calc(100vw - 48px)); gap: 14px; padding: 22px 24px 20px; background: var(--plain); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { background: var(--cardRaised); }
+html[data-desktop] .connect-dialog [data-slot="dialog-header"].modal-header-with-icon { display: flex; flex-direction: row; align-items: center; gap: 12px; padding-right: 32px; text-align: left; place-items: initial; }
+html[data-desktop] :is(.connect-dialog, .signin-dialog) [data-slot="dialog-title"] { font-size: 16px; line-height: 22px; }
+html[data-desktop] :is(.connect-dialog, .signin-dialog) [data-slot="dialog-description"] { font-size: 12px; line-height: 17px; }
+html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] { height: 32px; padding: 2px; border-radius: var(--radius-card); }
+html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] [data-slot="tabs-trigger"] { height: 28px; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
+html[data-desktop] .connect-dialog [data-slot="tabs-content"].connect-panel:not([hidden]),
+html[data-desktop] .connect-dialog > .connect-panel { display: flex; flex-direction: column; min-height: 316px; gap: 12px; padding-top: 14px !important; }
+html[data-desktop] .connect-dialog input[data-slot="input"] { height: 36px; border-radius: var(--radius-control); }
+html[data-desktop] .connect-dialog input[data-slot="input"][data-readonly] { background: var(--fill); border-color: var(--separator); color: var(--secondaryLabel); }
+html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill) { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 45%, var(--separatorStrong)), inset 0 0 0 100vmax var(--card); -webkit-text-fill-color: var(--label); caret-color: var(--label); }
+html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill):focus-visible { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 100vmax var(--card); }
+html[data-desktop] [data-slot="dialog-content"].connect-dialog .connect-submit[data-button] { align-self: stretch; justify-self: stretch; width: 100%; height: 36px; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
+html[data-desktop] .connect-dialog .qr-dropzone { cursor: default; }
+html[data-desktop] .connect-dialog .qr-dropzone [data-button] { height: 28px; padding-inline: 10px; font-size: 12px; }
 
 /* ── Notices (Alert) ─────────────────────────────────────────────────────── */
 /* A notice is a well: no coloured bar down its edge; the state shows in the icon and a tint. */
@@ -133,11 +137,11 @@ html[data-desktop] details > summary { cursor: default; }
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
 html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
 
-/* ── Connect ─────────────────────────────────────────────────────────────── */
+/* ── Dialog tabs ─────────────────────────────────────────────────────────── */
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs"] { gap: 0; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-list"]:not([data-variant="line"]) { width: 100%; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { flex: 1; }
-html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] { display: flex; flex-direction: column; gap: 14px; padding-top: 16px !important; }
+html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"]:not([hidden]):not(.connect-panel) { display: flex; flex-direction: column; gap: 14px; padding-top: 16px !important; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-slot="field-group"] { gap: 14px; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] .field-hint { margin-top: 2px; }
 

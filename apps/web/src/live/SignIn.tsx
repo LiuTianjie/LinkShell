@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { openDesktopExternal } from "./desktop";
 import "../styles/desktop-signin.css";
 
@@ -85,6 +85,7 @@ export function SignIn(props: SignInProps) {
   const id = useId();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [invalid, setInvalid] = useState<{ field: "email" | "password"; message: string }>();
   const emailInput = useRef<HTMLInputElement>(null);
   const passwordInput = useRef<HTMLInputElement>(null);
@@ -127,11 +128,11 @@ export function SignIn(props: SignInProps) {
         {(["github", "google"] as const).map((provider) => (
           <button key={provider} type="button" className="signin-button" data-kind="provider" disabled={blocked} onClick={() => onProvider(provider)}>
             {provider === "github" ? <GitHubMark /> : <GoogleMark />}
-            使用 {providerNames[provider]} 继续
+            <span>使用 {providerNames[provider]} 继续</span>
           </button>
         ))}
       </div>
-      <div className="signin-divider" role="separator" aria-label="或使用邮箱"><span>或</span></div>
+      <div className="signin-divider" role="separator" aria-label="或使用邮箱"><span>或使用邮箱</span></div>
       <form
         className="signin-form"
         noValidate
@@ -153,6 +154,8 @@ export function SignIn(props: SignInProps) {
             autoCorrect="off"
             spellCheck={false}
             inputMode="email"
+            enterKeyHint="next"
+            required
             placeholder="你的 iTool 账号邮箱"
             value={email}
             disabled={blocked}
@@ -167,30 +170,46 @@ export function SignIn(props: SignInProps) {
             <label htmlFor={`${id}-password`}>密码</label>
             <ExternalLink href={FORGOT_PASSWORD_URL}>忘记密码？</ExternalLink>
           </div>
-          <input
-            ref={passwordInput}
-            id={`${id}-password`}
-            className="signin-input"
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            value={password}
-            disabled={blocked}
-            aria-invalid={invalid?.field === "password"}
-            aria-describedby={shownError ? `${id}-error` : undefined}
-            onKeyDown={guardComposition}
-            onChange={(event) => { setPassword(event.target.value); edited(); }}
-          />
+          <div className="signin-password-wrap">
+            <input
+              ref={passwordInput}
+              id={`${id}-password`}
+              className="signin-input signin-input-password"
+              type={showPassword ? "text" : "password"}
+              name="password"
+              autoComplete="current-password"
+              enterKeyHint="done"
+              required
+              placeholder="输入登录密码"
+              value={password}
+              disabled={blocked}
+              aria-invalid={invalid?.field === "password"}
+              aria-describedby={shownError ? `${id}-error` : undefined}
+              onKeyDown={guardComposition}
+              onChange={(event) => { setPassword(event.target.value); edited(); }}
+            />
+            <button
+              type="button"
+              className="signin-password-toggle"
+              aria-label={showPassword ? "隐藏密码" : "显示密码"}
+              aria-pressed={showPassword}
+              disabled={blocked}
+              onClick={() => setShowPassword((value) => !value)}
+            >
+              {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+            </button>
+          </div>
         </div>
         {/* Under the fields it is about, before the button that would try again. */}
         {shownError && <p id={`${id}-error`} className="signin-error" role="alert">{shownError}</p>}
-        <button type="submit" className="signin-button" data-kind="primary" disabled={blocked}>
+        <button type="submit" className="signin-button signin-submit" data-kind="primary" disabled={blocked}>
           {pending === "password" && <LoaderCircle className="signin-spinner" aria-hidden />}
           {pending === "password" ? "正在登录…" : "登录"}
         </button>
       </form>
       <footer className="signin-footer">
         <p>
+          <span>还没有账号？</span>
           <ExternalLink href={SIGN_UP_URL}>注册账号</ExternalLink>
           <span aria-hidden> · </span>
           <button type="button" className="signin-link" disabled={blocked} onClick={onBrowser}>用浏览器登录</button>
@@ -221,29 +240,33 @@ function Waiting({ method, link, title, onCancel }: { method: Exclude<SignInMeth
     <div className="signin" data-state="waiting">
       {title && <header className="signin-header"><h2>{title}</h2></header>}
       <div className="signin-waiting" role="status" aria-live="polite">
-        <LoaderCircle className="signin-spinner" data-size="large" aria-hidden />
+        <span className="signin-waiting-badge" aria-hidden>
+          <LoaderCircle className="signin-spinner" data-size="large" />
+        </span>
         <h3>{provider ? `请在浏览器中完成 ${provider} 登录` : "请在浏览器中完成授权"}</h3>
-        <p>{provider ? "完成后会自动回到 LinkShell。" : "在 iTool 页面确认后，会自动回到 LinkShell。"}</p>
+        <p>{provider ? "授权完成后会自动回到 LinkShell。" : "在 iTool 页面确认后，会自动回到 LinkShell。"}</p>
         {stale && (
           <p className="signin-hint">
             还没有收到浏览器的结果。如果浏览器停在了错误页，请取消后重试，或改用邮箱和密码登录。等待 5 分钟后会自动取消。
           </p>
         )}
       </div>
-      {provider && (
-        <div className="signin-actions">
-          <button type="button" className="signin-button" data-kind="provider" disabled={!link} onClick={() => link && openDesktopExternal(link)}>
-            重新打开浏览器
-          </button>
-          <button type="button" className="signin-button" data-kind="provider" disabled={!link} onClick={copyLink}>
-            {copy === "copied" ? "已复制" : "复制链接"}
-          </button>
-        </div>
-      )}
-      {copy === "failed" && link && (
-        <p className="signin-hint">无法写入剪贴板，请手动复制：<span className="signin-link-text">{link}</span></p>
-      )}
-      <button type="button" className="signin-button" data-kind="quiet" onClick={onCancel}>取消</button>
+      <div className="signin-waiting-foot">
+        {provider && (
+          <div className="signin-actions">
+            <button type="button" className="signin-button" data-kind="provider" disabled={!link} onClick={() => link && openDesktopExternal(link)}>
+              重新打开浏览器
+            </button>
+            <button type="button" className="signin-button" data-kind="provider" disabled={!link} onClick={copyLink}>
+              {copy === "copied" ? "已复制" : "复制链接"}
+            </button>
+          </div>
+        )}
+        {copy === "failed" && link && (
+          <p className="signin-hint">无法写入剪贴板，请手动复制：<span className="signin-link-text">{link}</span></p>
+        )}
+        <button type="button" className="signin-button" data-kind="quiet" onClick={onCancel}>取消</button>
+      </div>
     </div>
   );
 }

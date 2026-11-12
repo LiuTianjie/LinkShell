@@ -115,12 +115,19 @@ export function snappedRect(rect: Rect, ratio: number): Rect {
   return { x: snap(rect.x), y: snap(rect.y), width: snap(rect.width), height: snap(rect.height) };
 }
 
-/** A point of the stage as a fraction of the picture; undefined outside it unless `clamp`. */
-export function pictureFraction(rect: Rect, x: number, y: number, clamp = false): { x: number; y: number } | undefined {
+export const FULLSCREEN_TOP_SNAP_LIMIT = 96;
+
+/** A point of the stage as a fraction of the picture; undefined outside it unless `clamp` or `topEdgeSnap`. */
+export function pictureFraction(rect: Rect, x: number, y: number, clamp = false, topEdgeSnap = false): { x: number; y: number } | undefined {
   if (!(rect.width > 0 && rect.height > 0)) return undefined;
   const u = (x - rect.x) / rect.width, v = (y - rect.y) / rect.height;
-  if (!clamp && (u < 0 || u > 1 || v < 0 || v > 1)) return undefined;
   const bound = (value: number) => Math.min(1, Math.max(0, value));
+  if (!clamp && (u < 0 || u > 1 || v < 0 || v > 1)) {
+    if (topEdgeSnap && rect.y > 0 && rect.y <= FULLSCREEN_TOP_SNAP_LIMIT && y >= 0 && y <= rect.y && u >= 0 && u <= 1) {
+      return { x: +bound(u).toFixed(5), y: 0 };
+    }
+    return undefined;
+  }
   return { x: +bound(u).toFixed(5), y: +bound(v).toFixed(5) };
 }
 

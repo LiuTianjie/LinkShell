@@ -43,6 +43,7 @@ export const DESKTOP_LOCAL = "desktop:local";
 export const DESKTOP_VISIBILITY_EVENT = "linkshell-desktop-visibility";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
 export const DESKTOP_ERROR_EVENT = "linkshell-desktop-error";
+export const DESKTOP_HOST_EVENT = "linkshell-desktop-host";
 
 export interface DesktopAccount {
   userId?: string;
@@ -67,6 +68,7 @@ let accountRequest: Promise<DesktopAccount> | undefined;
 let accountGeneration = 0;
 
 export function reportDesktopError(error: unknown) {
+  if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(DESKTOP_ERROR_EVENT, {
     detail: error instanceof Error ? error.message : String(error),
   }));
@@ -173,7 +175,8 @@ export function flushDesktopStorage(): Promise<{ saved: boolean; pending: number
 }
 
 function updateAccount(next: DesktopAccount) {
-  const changed = next.userId !== account.userId || next.email !== account.email || next.accessToken !== account.accessToken;
+  // Refreshed accessTokens for the same signed-in user must not re-fire account state changes.
+  const changed = next.userId !== account.userId || next.email !== account.email || Boolean(next.accessToken) !== Boolean(account.accessToken);
   account = next;
   if (changed) window.dispatchEvent(new CustomEvent(DESKTOP_ACCOUNT_EVENT, { detail: next }));
   return next;
@@ -239,7 +242,7 @@ export function postDesktopMessage(message: Record<string, unknown>): boolean {
   return true;
 }
 
-function nativeCommand(message: { action: "manage" } | { action: "workspace" } |{ action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean } | { action: "screenKeys"; captured: boolean }): boolean {
+function nativeCommand(message: { action: "manage" } | { action: "workspace" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean; immersive?: boolean } | { action: "screenKeys"; captured: boolean }): boolean {
   if (electron) return postDesktopMessage(message);
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
@@ -300,8 +303,8 @@ export function revealOnDesktop(path: string): Promise<unknown> {
 }
 
 /** Asks the window to go full screen (the terminal, the Mac app's native remote screen); the answer arrives as `DESKTOP_FULLSCREEN_EVENT`. */
-export function setDesktopScreenFullScreen(enabled: boolean): boolean {
-  return nativeCommand({ action: "screenFullScreen", enabled });
+export function setDesktopScreenFullScreen(enabled: boolean, options?: { immersive?: boolean }): boolean {
+  return nativeCommand({ action: "screenFullScreen", enabled, ...(options?.immersive ? { immersive: true } : {}) });
 }
 export const DESKTOP_FULLSCREEN_EVENT = "linkshell-desktop-fullscreen";
 
@@ -313,11 +316,16 @@ export function setDesktopScreenKeys(captured: boolean): void {
   if (isElectronDesktop) nativeCommand({ action: "screenKeys", captured });
 }
 
-export function openDesktopManagement(): void {
-  // In Electron, management is a page of this window: the shell navigates on the same command
-  // the menu bar sends (desktop-commands.ts), without a round trip through the main process.
+export function notifyDesktopHostChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(DESKTOP_HOST_EVENT));
+}
+
+export function openDesktopManagement(page?: string | unknown): void {
+  // In Electron, management opens inside this window without unmounting the workspace.
   if (isElectronDesktop) {
-    window.dispatchEvent(new CustomEvent("linkshell-desktop-command", { detail: { command: "manage" } }));
+    window.dispatchEvent(new CustomEvent("linkshell-desktop-command", {
+      detail: { command: "manage", ...(typeof page === "string" ? { page } : {}) },
+    }));
     return;
   }
   if (!nativeCommand({ action: "manage" })) reportDesktopError("请通过 LinkShell 菜单打开本机服务");

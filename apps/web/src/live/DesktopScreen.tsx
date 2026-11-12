@@ -26,6 +26,8 @@ export function MacScreen(props: ScreenProps) {
   return <DesktopScreen {...props} onFallback={isElectronDesktop ? setFallback : undefined} />;
 }
 
+const DESKTOP_WINDOW_EVENT = "linkshell-desktop-window";
+
 /** The DOM owns chrome and authenticated signalling; AppKit owns the video surface and input. */
 export function DesktopScreen({ title = "电脑屏幕", embedded = false, primaryAction = false, onOpen, autoStart = false, active = true, onFallback }: ScreenProps & { onFallback?: (reason: string) => void }) {
   const { link, streams } = useConnection();
@@ -37,6 +39,10 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   const [fullscreen, setFullscreen] = useState(false);
   // Only the screen that asked for the window's full screen follows it or ends it.
   const fullscreenState = useRef<ScreenFullscreen>({ owns: false, fullscreen: false });
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+  const adoptableRef = useRef(active && started);
+  adoptableRef.current = active && started;
   const fullscreenRequest = (enabled: boolean) => {
     if (!enabled) {
       const next = leaveScreenFullscreen(fullscreenState.current);
@@ -44,7 +50,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       fullscreenState.current = next;
       setFullscreen(false);
     } else fullscreenState.current = { ...fullscreenState.current, owns: true };
-    if (!setDesktopScreenFullScreen(enabled)) { fullscreenState.current = { ...fullscreenState.current, owns: false }; setFocused(enabled); }
+    if (!setDesktopScreenFullScreen(enabled, { immersive: true })) { fullscreenState.current = { ...fullscreenState.current, owns: false }; setFocused(enabled); }
   };
   const [settings, setSettings] = useState(false);
   const [display, setDisplay] = useState(0);
@@ -87,26 +93,36 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   }, [active, visible]);
   useEffect(() => {
     // The window's own full screen; while it lasts the page also fills the window.
-    const changed = (event: Event) => {
-      const next = windowFullscreenChanged(fullscreenState.current, (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true);
+    const apply = (fullscreen: boolean, adopt: boolean) => {
+      const next = windowFullscreenChanged(fullscreenState.current, fullscreen, adopt);
       if (!next) return;
       fullscreenState.current = { owns: next.owns, fullscreen: next.fullscreen };
       setFullscreen(next.fullscreen);
       setFocused(next.focused);
     };
+    const changed = (event: Event) => apply((event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true, false);
+    const windowChanged = (event: Event) => apply(
+      (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true,
+      adoptableRef.current && !document.querySelector(".terminal-fullscreen"),
+    );
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setFocused(false);
       fullscreenRequest(false);
     };
     window.addEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
+    window.addEventListener(DESKTOP_WINDOW_EVENT, windowChanged);
     window.addEventListener("keydown", escape);
     return () => {
       window.removeEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
+      window.removeEventListener(DESKTOP_WINDOW_EVENT, windowChanged);
       window.removeEventListener("keydown", escape);
       fullscreenRequest(false);
     };
   }, []);
+  useEffect(() => {
+    if (sessionID.current) postNativeScreen(sessionID.current, "fullscreen", { enabled: fullscreen });
+  }, [fullscreen]);
 
   // "Auto" follows the stage once it has settled after a resize or a full-screen change, and is
   // applied in-band: the picture stays as sharp as the stage, without reconnecting.
@@ -224,6 +240,10 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       else if (detail.type === "error") fail(detail.error || "原生屏幕连接失败");
       else if (detail.type === "status" && detail.status) {
         const next = detail.status;
+        if (next.exitFullScreen === true) {
+          fullscreenRequest(false);
+          return;
+        }
         if (typeof next.displayFps === "number" && next.displayFps > 0) setDisplayFps(next.displayFps);
         setStatus((previous) => ({ ...previous, ...next }));
         if (next.live) {
@@ -267,7 +287,7 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
     overlays.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
     window.addEventListener("resize", layout);
     window.addEventListener("scroll", layout, true);
-    if (!postNativeScreen(id, "start", { rect: rect(), smooth })) fail("原生屏幕组件不可用，请更新 LinkShell App");
+    if (!postNativeScreen(id, "start", { rect: rect(), smooth, fullscreen: fullscreenRef.current })) fail("原生屏幕组件不可用，请更新 LinkShell App");
     else {
       timer = setTimeout(() => fail("视频直连超时，请确认电脑在线、已授权屏幕录制且网络允许直连"), 30_000);
       void link.call("screen.start", {}).then(async (viewer) => {
@@ -357,17 +377,27 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
   const checkPermissions = () => void job.run(async () => { await link.call("screen.access", { ask: true }); access.reload(); });
   if (compact) {
     const ready = Boolean(access.value?.supported && access.value.recording !== false);
+    const needsPermission = access.value?.recording === false;
     const problem = job.error ?? access.error;
+    const loading = access.loading && !access.value && !problem;
+    const statusLabel = problem
+      ? "检查失败"
+      : loading
+        ? "检查屏幕…"
+        : !access.value?.supported
+          ? "暂不支持共享"
+          : needsPermission
+            ? "需要录制权限"
+            : access.value.control
+              ? "可观看与控制"
+              : "仅观看桌面";
     return <section className="screen-page screen-is-idle" aria-label={`${title}观看区域`}>
-      <div className="screen-idle-status" role="status">
-        <span className="screen-dot" data-on={ready || undefined} aria-hidden="true" />
-        <div>
-          <strong>{problem ? "检查失败" : access.loading && !access.value ? "正在检查屏幕…" : !access.value?.supported ? "屏幕共享" : access.value.recording === false ? "等待授权" : "在线"}</strong>
-          <span title={problem}>{problem ?? (!access.value ? "正在读取屏幕状态" : !access.value.supported ? "此系统无法共享屏幕" : access.value.recording === false ? "需要屏幕录制权限" : access.value.control ? "可观看与控制" : "仅观看桌面")}</span>
-        </div>
+      <div className="screen-idle-status" data-pending={loading || undefined} data-tone={problem ? "danger" : needsPermission ? "waiting" : undefined} role="status" title={problem ?? access.value?.problem}>
+        <span className="screen-dot" data-on={ready || undefined} data-tone={problem ? "danger" : needsPermission ? "waiting" : undefined} aria-hidden="true" />
+        <span className="screen-idle-label">{statusLabel}</span>
       </div>
       <div className="screen-idle-actions">
-        <Button variant={primaryAction ? "default" : "outline"} disabled={(!access.value?.supported && !problem) || job.busy} onClick={() => problem ? access.reload() : access.value?.recording === false ? checkPermissions() : onOpen ? onOpen() : setStarted(true)}>{problem ? "重新检查" : access.value?.recording === false ? "检查权限" : "打开桌面"}</Button>
+        <Button size="sm" variant={primaryAction ? "default" : "outline"} disabled={(!access.value?.supported && !problem) || job.busy} onClick={() => problem ? access.reload() : needsPermission ? checkPermissions() : onOpen ? onOpen() : setStarted(true)}>{problem ? "重新检查" : needsPermission ? (job.busy ? "正在请求…" : "检查权限") : "打开桌面"}</Button>
       </div>
     </section>;
   }

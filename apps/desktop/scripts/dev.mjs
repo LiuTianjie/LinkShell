@@ -4,10 +4,17 @@
 // installed Host keeps ~/.linkshell).
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const electron = createRequire(import.meta.url)("electron");
-const child = spawn(electron, [here, ...process.argv.slice(2)], { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
+const args = process.argv.slice(2).filter((arg) => arg !== "--");
+const hasUserData = args.some((arg) => arg.startsWith("--user-data-dir"));
+const defaultUserData = process.platform === "darwin"
+  ? join(homedir(), "Library/Application Support/LinkShell Dev")
+  : join(homedir(), ".linkshell-dev-window");
+const electronFlags = hasUserData ? [] : [`--user-data-dir=${defaultUserData}`];
+const child = spawn(electron, [...electronFlags, here, ...args], { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
 child.on("exit", (code) => process.exit(code ?? 0));

@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  links: [] as { options: { createSocket(): unknown }; socket?: unknown }[],
+  links: [] as { options: { createSocket(): unknown }; socket?: unknown; status?: string; reconnectNow: ReturnType<typeof vi.fn>; probe: ReturnType<typeof vi.fn> }[],
   streams: [] as { connector?: unknown }[],
-  relays: [] as { options: { name: string; platform: string }; account?: { userId: string }; reauthenticate: ReturnType<typeof vi.fn>; handlers: Map<string, (data: unknown) => void>; request: ReturnType<typeof vi.fn>; status: string }[],
+  relays: [] as { options: { name: string; platform: string }; account?: { userId: string }; reauthenticate: ReturnType<typeof vi.fn>; probe: ReturnType<typeof vi.fn>; reconnectNow: ReturnType<typeof vi.fn>; statusHandlers: ((status: string, error?: unknown) => void)[]; handlers: Map<string, (data: unknown) => void>; request: ReturnType<typeof vi.fn>; status: string }[],
   supabase: vi.fn(),
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: mocks.supabase }));
 vi.mock("../src/live/session-preferences", () => ({ sessionPreferences: { read: () => ({ agents: {} }), remember: vi.fn() } }));
 vi.mock("@linkshell/client-core", () => ({
   HostLink: class {
+    reconnectNow = vi.fn();
+    probe = vi.fn();
+    status?: string;
     constructor(readonly options: { createSocket(): unknown }) { mocks.links.push(this); }
-    reconnectNow() {}
   },
   HostStreams: class {
     constructor(_link: unknown, options: { connector?: unknown }) { mocks.streams.push(options); }
@@ -37,16 +39,18 @@ vi.mock("@linkshell/wire", () => ({
   createIdentity: vi.fn(),
   RelayClient: class {
     reauthenticate = vi.fn();
+    probe = vi.fn();
+    reconnectNow = vi.fn();
+    statusHandlers: ((status: string, error?: unknown) => void)[] = [];
     handlers = new Map<string, (data: unknown) => void>();
     request = vi.fn(async () => ({ machines: [] as unknown[] }));
     status = "online";
     account = { userId: "user-a" };
     constructor(readonly options: { name: string; platform: string }) { mocks.relays.push(this); }
-    onStatus() {}
+    onStatus(handler: (status: string, error?: unknown) => void) { this.statusHandlers.push(handler); }
     on(name: string, handler: (data: unknown) => void) { this.handlers.set(name, handler); }
     start() {}
     stop() {}
-    reconnectNow() {}
   },
 }));
 
@@ -290,5 +294,41 @@ describe("desktop client connections", () => {
     const asked = relay.request.mock.calls.length;
     await engine!.refreshComputers();
     expect(relay.request.mock.calls.length).toBe(asked + 1);
+  });
+
+  it("keeps the active connection on repeated select, wakes links on host/presence events and probes on reconnect", async () => {
+    const desktop = await start(false, local, "user-a");
+    const initialConnection = engine!.state.getState().connection!;
+    expect(mocks.links).toHaveLength(1);
+
+    // Selecting the already active computer is idempotent and does not tear down the link.
+    engine!.select(local);
+    expect(engine!.state.getState().connection).toBe(initialConnection);
+    expect(mocks.links).toHaveLength(1);
+    expect(mocks.links[0].reconnectNow).toHaveBeenCalledTimes(1);
+
+    // Starting/restarting the local Host via Management notifies the engine immediately.
+    desktop.notifyDesktopHostChanged();
+    expect(mocks.links[0].reconnectNow).toHaveBeenCalledTimes(2);
+
+    // Remote tunnel wakes immediately when the relay comes online or the remote peer announces presence.
+    const relay = engine!.relay(remote.gateway);
+    relay.request.mockResolvedValue({ machines: [remote.machine] });
+    await engine!.refresh(remote.gateway);
+    engine!.select(remote);
+    const remoteLink = mocks.links.at(-1)!;
+    remoteLink.reconnectNow.mockClear();
+
+    for (const handler of mocks.relays.at(-1)!.statusHandlers) handler("online");
+    expect(remoteLink.reconnectNow).toHaveBeenCalledTimes(1);
+
+    mocks.relays.at(-1)!.handlers.get("presence")!({ id: remote.machine.id, online: true });
+    expect(remoteLink.reconnectNow).toHaveBeenCalledTimes(2);
+
+    // Waking the window actively probes both the gateway and the HostLink.
+    engine!.reconnect();
+    expect(mocks.relays.at(-1)!.probe).toHaveBeenCalledTimes(1);
+    expect(remoteLink.probe).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });

@@ -29,17 +29,20 @@ final class NativeScreen: NSObject {
   private var pending: [[String: Any]] = []
   private var rect: CGRect
   private var visible = true
+  private var fullScreen = false
+  private var fullScreenOverlay: DesktopFullScreenOverlay?
   private var wantedControl = false
   private var startup: DispatchWorkItem?
 
-  init(host: NSView, helper: String, id: String, rect: CGRect, smooth: Bool = false, callback: Callback) throws {
+  init(host: NSView, helper: String, id: String, rect: CGRect, smooth: Bool = false, fullScreen: Bool = false, callback: Callback) throws {
     guard let port = DesktopFramePort(receiver: true) else {
       throw NSError(domain: "LinkShellScreen", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建原生画面通道"])
     }
     self.port = port
     pipe = DesktopMediaPipe(output: input.fileHandleForWriting)
-    self.host = host; self.id = id; self.rect = rect; self.callback = callback
+    self.host = host; self.id = id; self.rect = rect; self.fullScreen = fullScreen; self.callback = callback
     super.init()
+    surface.fullScreen = fullScreen
     clip.wantsLayer = true; clip.layer?.masksToBounds = true
     clip.addSubview(surface)
     host.addSubview(clip, positioned: .above, relativeTo: nil)
@@ -132,6 +135,12 @@ final class NativeScreen: NSObject {
     switch value["type"] as? String {
     case "stop": stop()
     case "layout": if let rect = DesktopScreenBridge.rect(value["rect"]) { self.rect = rect; layout() }
+    case "fullscreen":
+      if let enabled = DesktopScreenBridge.boolean(value["enabled"]) {
+        fullScreen = enabled
+        surface.fullScreen = enabled
+        MainActor.assumeIsolated { syncFullScreenOverlay() }
+      }
     case "control":
       if let enabled = DesktopScreenBridge.boolean(value["enabled"]) { wantedControl = enabled; if ready { pipe.send(["type": "control", "enabled": enabled]) } }
     case "signal":
@@ -152,11 +161,33 @@ final class NativeScreen: NSObject {
     clip.isHidden = !showing
     surface.setActive(showing)
     if ready { pipe.send(["type": "visible", "enabled": showing]) }
-    guard showing else { return }
+    guard showing else {
+      MainActor.assumeIsolated { syncFullScreenOverlay() }
+      return
+    }
     clip.frame = clipped
     surface.frame = CGRect(x: requested.minX - clipped.minX,
       y: host.isFlipped ? requested.minY - clipped.minY : clipped.maxY - requested.maxY,
       width: requested.width, height: requested.height)
+    MainActor.assumeIsolated {
+      syncFullScreenOverlay()
+      fullScreenOverlay?.layout()
+    }
+  }
+  @MainActor private func syncFullScreenOverlay() {
+    let showing = fullScreen && visible && !clip.isHidden && !closed
+    if showing {
+      if fullScreenOverlay == nil {
+        fullScreenOverlay = DesktopFullScreenOverlay { [weak self] in
+          guard let self, !self.closed else { return }
+          self.callback.call(["id": self.id, "type": "status", "status": ["exitFullScreen": true]])
+        }
+      }
+      fullScreenOverlay?.attach(to: clip)
+    } else {
+      fullScreenOverlay?.detach()
+      fullScreenOverlay = nil
+    }
   }
   private func fail(_ error: String) {
     guard !closed else { return }
@@ -168,6 +199,10 @@ final class NativeScreen: NSObject {
     startup?.cancel(); startup = nil
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
     observers.removeAll()
+    MainActor.assumeIsolated {
+      fullScreenOverlay?.detach()
+      fullScreenOverlay = nil
+    }
     surface.stop(); clip.removeFromSuperview()
     pending.removeAll(); ready = false
     pipe.send(["type": "stop"]); pipe.close()

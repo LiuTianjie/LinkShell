@@ -498,8 +498,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           });
         }).catch(() => {});
         try {
-          const [machine, list, projects] = await Promise.all([
-            link.call("machine.info", {}),
+          const machinePromise = link.call("machine.info", {}).then((machine) => {
+            // A live metadata update may arrive while the slower session or project list is loading.
+            // Commit machine info as soon as it arrives without overwriting a newer machine.changed push.
+            set((state) => (state.machine === machineAtStart ? { machine } : {}));
+            return machine;
+          });
+          const [, list, projects] = await Promise.all([
+            machinePromise,
             link.call("sessions.list", { limit: 200 }),
             link.call("projects.list", { limit: 100 }),
           ]);
@@ -511,9 +517,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
               for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
             }
             for (const session of list.sessions) sessions[session.id] = session;
-            // A live metadata update may arrive while the slower project list is loading.
-            // Do not replace it with the machine.info snapshot this refresh started with.
-            return { machine: state.machine === machineAtStart ? machine : state.machine, sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
+            return { sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
           });
         } catch (error) {
           set({ sessionsError: describeError(error) });

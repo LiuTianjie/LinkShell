@@ -118,10 +118,14 @@ async function loadAssets(directory: string): Promise<Map<string, Buffer>> {
   return assets;
 }
 
-async function localComputer(target: string, upstreams: Set<WebSocket>): Promise<LocalComputer | undefined> {
+async function localComputer(
+  target: string,
+  upstreams: Set<WebSocket>,
+  timeouts: { handshakeMs: number; finishMs: number } = { handshakeMs: 1_500, finishMs: 2_500 },
+): Promise<LocalComputer | undefined> {
   // Query the existing socket directly: discovering this computer never starts a host.
   return new Promise((resolve) => {
-    const client = localWebSocket(target, 1_500, { maxPayload: MAX_PROXY_BYTES });
+    const client = localWebSocket(target, timeouts.handshakeMs, { maxPayload: MAX_PROXY_BYTES });
     upstreams.add(client);
     let computer: LocalComputer | undefined;
     let gatewayRead = false;
@@ -131,7 +135,7 @@ async function localComputer(target: string, upstreams: Set<WebSocket>): Promise
       resolve(result && relayId ? { ...result, relayId } : result);
       client.terminate();
     };
-    const timeout = setTimeout(() => finish(), 3_000);
+    const timeout = setTimeout(() => finish(), timeouts.finishMs);
     client.on("error", () => finish());
     client.on("close", () => { upstreams.delete(client); clearTimeout(timeout); resolve(computer); });
     client.on("open", () => {
@@ -312,7 +316,7 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           json(response, 200, { ...state.snapshot(), localComputer: await localComputer(hostSocket, upstreams) }); return;
         }
         if (request.method === "GET" && path === "/desktop/local") {
-          json(response, 200, { computer: await localComputer(hostSocket, upstreams) }); return;
+          json(response, 200, { computer: await localComputer(hostSocket, upstreams, { handshakeMs: 2_000, finishMs: 5_000 }) }); return;
         }
         if (request.method === "GET" && path === "/desktop/account") {
           json(response, 200, await account(accountAbort.signal)); return;

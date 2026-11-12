@@ -14,6 +14,7 @@ import {
   Globe,
   Keyboard,
   Laptop,
+  Layers3,
   MessageSquare,
   Monitor,
   PanelLeft,
@@ -29,15 +30,13 @@ import {
   Lock,
   Settings2,
 } from "lucide-react";
-// Keep the app icon's white tile visible in both desktop themes.
-import appIcon from "../assets/app-icon.png";
 import { engine, type Computer, type Connection } from "../live/engine";
 import { baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
 import { DESKTOP_LOCAL, isElectronDesktop, isWindowsDesktop, reportDesktopWorkspace, setDesktopContentFocus, THIS_COMPUTER } from "../live/desktop";
 import { newVersion, management, startManagement } from "../live/management-store";
-import { isManageView, managePage, manageView, type ManagePage } from "../live/management-model";
-import { ManagementNav } from "../live/Management";
+import { isManageView, managePage, type ManagePage } from "../live/management-model";
+import { ManagementDialog } from "../live/Management";
 import {
   desktopModeShortcuts,
   desktopShortcuts,
@@ -50,7 +49,7 @@ import {
   opensNewSessions,
 } from "../live/desktop-commands";
 import { screenComputerKey } from "../live/screen-route";
-import { sessionGroup, sessionNeedsAttention, sessionPreview } from "../live/session-list";
+import { sessionGroup, sessionNeedsAttention } from "../live/session-list";
 import { desktopSessionTree, sessionFamilies } from "../live/desktop-session-tree";
 import { compactTime } from "../live/session-time";
 import { readLocal, saveLocal } from "../live/storage";
@@ -93,18 +92,18 @@ import "../styles/management.css";
 
 type NavigationItem = { id: string; titleKey: I18nKey; icon: LucideIcon };
 
-// The sidebar is mostly the working set (what waits on you, projects and their sessions), as in
-// Codex. Above it, every place on this computer in one flat list: a fold would only add a click.
-// Projects open from the tree's own heading; 电脑 and 已归档 from the computer menu, the session
-// list or ⌘K.
-const navigationItems: NavigationItem[] = [
+const primaryNavigationItems: NavigationItem[] = [
   { id: "home", titleKey: "nav.sessions", icon: MessageSquare },
+  { id: "projects", titleKey: "nav.projects", icon: Layers3 },
   { id: "screen", titleKey: "nav.screen", icon: Monitor },
+];
+const toolNavigationItems: NavigationItem[] = [
   { id: "terminals", titleKey: "nav.terminals", icon: Terminal },
   { id: "files", titleKey: "nav.files", icon: File },
   { id: "ports", titleKey: "nav.ports", icon: Globe },
   { id: "worktrees", titleKey: "nav.worktrees", icon: GitBranch },
 ];
+const navigationItems: NavigationItem[] = [...primaryNavigationItems, ...toolNavigationItems];
 const PROJECTS_SHOWN = 8;
 const SESSIONS_SHOWN = 5;
 const ACTIVE_SESSIONS_SHOWN = 6;
@@ -348,6 +347,12 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   };
   const [allProjects, setAllProjects] = useState(false);
   const [allActive, setAllActive] = useState(false);
+  const [activeOpen, setActiveOpen] = useState(() => readLocal("desktopActiveSessionsOpen", true));
+  const toggleActiveOpen = () => setActiveOpen((current) => {
+    const next = !current;
+    try { saveLocal("desktopActiveSessionsOpen", next); } catch { /* A preference, not state. */ }
+    return next;
+  });
   const tree = useMemo(() => desktopSessionTree(projects, Object.values(sessions)), [sessions, projects]);
   const active = projectKey ? [] : tree.active;
   const groups = projectKey ? tree.groups.filter((group) => group.key === projectKey) : tree.groups;
@@ -371,23 +376,38 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
     <>
       {active.length > 0 && (
         <section className="tree-section" aria-label="活跃会话">
-          <h2 className="tree-heading">活跃会话<span>{active.length}</span></h2>
-          {(allActive ? active : active.slice(0, ACTIVE_SESSIONS_SHOWN)).map((session) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              computerKey={engine.computerForKey(connection.computer.key)?.key ?? connection.computer.key}
-              active={view === session.id}
-              navigate={navigate}
-              detail={`${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : sessionPreview(session) || "运行中"}`}
-              menuOpen={menuFor === session.id}
-              openMenu={sessionMenu(session)}
-            />
-          ))}
-          {active.length > ACTIVE_SESSIONS_SHOWN && (
-            <button type="button" className="tree-more" onClick={() => setAllActive((value) => !value)}>
-              {allActive ? "收起" : `显示其余 ${active.length - ACTIVE_SESSIONS_SHOWN} 个活跃会话`}
+          <h2 className="tree-heading">
+            <button
+              type="button"
+              className="tree-heading-toggle"
+              aria-expanded={activeOpen}
+              onClick={toggleActiveOpen}
+            >
+              <ChevronRight size={12} className="tree-heading-chevron" data-open={activeOpen || undefined} aria-hidden />
+              <span>活跃会话</span>
             </button>
+            <span>{active.length}</span>
+          </h2>
+          {activeOpen && (
+            <>
+              {(allActive ? active : active.slice(0, ACTIVE_SESSIONS_SHOWN)).map((session) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  computerKey={engine.computerForKey(connection.computer.key)?.key ?? connection.computer.key}
+                  active={view === session.id}
+                  navigate={navigate}
+                  detail={`${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : "运行中"}`}
+                  menuOpen={menuFor === session.id}
+                  openMenu={sessionMenu(session)}
+                />
+              ))}
+              {active.length > ACTIVE_SESSIONS_SHOWN && (
+                <button type="button" className="tree-more" onClick={() => setAllActive((value) => !value)}>
+                  {allActive ? "收起" : `显示其余 ${active.length - ACTIVE_SESSIONS_SHOWN} 个活跃会话`}
+                </button>
+              )}
+            </>
           )}
         </section>
       )}
@@ -537,7 +557,7 @@ function CrossProjectTree({ sources, projects, view, openComputerView, navigate,
       {(showAllActive ? active : active.slice(0, ACTIVE_SESSIONS_SHOWN)).map(({ source, session }) => <SessionRow
         key={`${source.computer.key}:${session.id}`} session={session} computerKey={source.computer.key} active={!!source.selected && view === session.id}
         navigate={(id) => openComputerView(source.computer, id)} menuOpen={menuFor === `${source.computer.key}:${session.id}`} openMenu={sessionMenu(source, session)}
-        detail={`${computerName(source.computer, names)} · ${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : sessionPreview(session) || "运行中"}`} />)}
+        detail={`${computerName(source.computer, names)} · ${baseName(session.worktree?.source ?? session.cwd)} · ${sessionNeedsAttention(session) ? "等你处理" : "运行中"}`} />)}
       {active.length > ACTIVE_SESSIONS_SHOWN && <button type="button" className="tree-more" onClick={() => setShowAllActive((value) => !value)}>
         {showAllActive ? "收起" : `显示其余 ${active.length - ACTIVE_SESSIONS_SHOWN} 个活跃会话`}
       </button>}
@@ -622,12 +642,18 @@ function DesktopNavigation({
   appearance,
   setAppearance,
   openPalette,
+  openManagement,
+  managementOpen,
 }: Omit<ConsoleShellProps, "children"> & {
   appearance: Appearance;
   setAppearance: (appearance: Appearance) => void;
   openPalette: () => void;
+  openManagement: (page?: ManagePage) => void;
+  managementOpen: boolean;
 }) {
   const state = useStore(engine.state);
+  const update = useStore(management, newVersion);
+  const problem = useStore(management, (state) => !!state.problem);
   const t = useT();
   const localePreference = useLocalePreference();
   const scope = useStore(projectScope, (state) => state.value);
@@ -636,12 +662,20 @@ function DesktopNavigation({
   const scopeMenu = multipleComputers || showAllProjects ? <ProjectScopeMenu value={scope} /> : undefined;
   const { setOpenMobile } = useSidebar();
   const go = (id: string) => { navigate(id); setOpenMobile(false); };
-  // Management takes the sidebar for its own pages, as Codex's settings do.
-  const managing = isElectronDesktop && isManageView(view);
   const activeView = screenComputerKey(view)
     ? "screen"
     : view === "archive" ? "home"
     : navigationItems.some((item) => item.id === view) ? view : "";
+  const toolsActive = toolNavigationItems.some((item) => item.id === activeView);
+  const [toolsOpen, setToolsOpen] = useState(() => readLocal("desktopToolsOpen", false) || toolsActive);
+  useEffect(() => {
+    if (toolsActive) setToolsOpen(true);
+  }, [toolsActive]);
+  const toggleTools = () => setToolsOpen((current) => {
+    const next = !current;
+    try { saveLocal("desktopToolsOpen", next); } catch { /* A preference, not state. */ }
+    return next;
+  });
   const place = (item: NavigationItem) => (
     <button
       type="button"
@@ -661,8 +695,7 @@ function DesktopNavigation({
       {isElectronDesktop && (
         // The window's title row: the traffic lights sit at its left, it drags the window.
         <div className="desktop-titlebar desktop-sidebar-titlebar">
-          {/* Ours, in the title row beside the traffic lights: the app's mark and name. */}
-          <span className="desktop-brand" aria-hidden><img src={appIcon} alt="" draggable={false} /><span>LinkShell</span></span>
+          <span className="desktop-titlebar-spacer" aria-hidden />
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className="desktop-titlebar-button" aria-label="隐藏侧栏" onClick={() => sendDesktopCommand({ command: "toggle-sidebar" })}>
@@ -681,7 +714,7 @@ function DesktopNavigation({
           </Tooltip>
         </div>
       )}
-      <SidebarHeader className="desktop-sidebar-header" hidden={managing}>
+      <SidebarHeader className="desktop-sidebar-header">
         <ComputerPicker connect={connect} selectComputer={selectComputer} navigate={go} />
         <div className="desktop-sidebar-actions">
           <button type="button" className="desktop-new-session" disabled={!state.connection} onClick={() => sendDesktopCommand({ command: "new-session" })}>
@@ -701,80 +734,103 @@ function DesktopNavigation({
           )}
         </div>
       </SidebarHeader>
-      {managing ? (
-        <SidebarContent className="desktop-navigation">
-          <ManagementNav page={managePage(view)} navigate={(page) => go(manageView(page))} back={() => sendDesktopCommand({ command: "workspace" })} />
-        </SidebarContent>
-      ) : (<>
       <SidebarContent className="desktop-navigation">
         <nav className="desktop-places" aria-label="工作台">
-          {navigationItems.map(place)}
+          {primaryNavigationItems.map(place)}
+          <div className="desktop-tools-section">
+            <button
+              type="button"
+              className="desktop-tools-toggle"
+              aria-expanded={toolsOpen}
+              data-active={(!toolsOpen && toolsActive) || undefined}
+              onClick={toggleTools}
+            >
+              <ChevronRight size={12} className="tree-heading-chevron" data-open={toolsOpen || undefined} aria-hidden />
+              <span>工具</span>
+              {!toolsOpen && toolsActive && activeView && (
+                <span className="desktop-tools-active">{t(toolNavigationItems.find((item) => item.id === activeView)!.titleKey)}</span>
+              )}
+            </button>
+            {toolsOpen && (
+              <div className="desktop-tools-list">
+                {toolNavigationItems.map(place)}
+              </div>
+            )}
+          </div>
         </nav>
         {showAllProjects ? <AllProjectTree view={view} navigate={go} scopeMenu={scopeMenu}
           openComputerView={(target, id) => { openComputerView(target, id); setOpenMobile(false); }} />
           : state.connection ? <SessionTree key={state.connection.computer.key} connection={state.connection} view={view} navigate={go} scopeMenu={scopeMenu} />
           : <h2 className="tree-heading"><span>项目</span>{scopeMenu}</h2>}
       </SidebarContent>
-      {isElectronDesktop && <ManageEntry active={false} open={() => go(manageView())} />}
-      </>)}
       <SidebarFooter className="desktop-sidebar-footer">
         <Button variant="ghost" className="desktop-account" onClick={connect} aria-label="连接设置与账号">
-          <CircleUserRound size={16} /><span>{state.account ?? "登录"}</span>
+          <CircleUserRound size={16} /><span>{state.account ?? "账号与连接"}</span>
         </Button>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="外观与帮助">
-                  {appearance === "dark" ? <Moon size={16} /> : appearance === "light" ? <Sun size={16} /> : <SunMoon size={16} />}
+        <div className="desktop-footer-actions">
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="外观与帮助">
+                    {appearance === "dark" ? <Moon size={16} /> : appearance === "light" ? <Sun size={16} /> : <SunMoon size={16} />}
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>外观与帮助</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent className="desktop-appearance-menu" side="top" align="end" sideOffset={8}>
+              <DropdownMenuLabel>外观</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={appearance} onValueChange={(value) => setAppearance(value as Appearance)}>
+                <DropdownMenuRadioItem value="system">跟随系统</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="light">浅色</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="dark">深色</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{t("locale.label")}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={localePreference}
+                onValueChange={(value) => {
+                  if (isLocalePreference(value)) setWebLocalePreference(value);
+                }}
+              >
+                <DropdownMenuRadioItem value="system">{t("locale.system")}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="zh">{LOCALE_LABELS.zh}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="en">{LOCALE_LABELS.en}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="ja">{LOCALE_LABELS.ja}</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={openPalette}><Keyboard />命令与快捷键</DropdownMenuItem>
+              <DropdownMenuItem asChild><a href="https://liutianjie.github.io/LinkShell/docs/" target="_blank" rel="noreferrer"><BookOpen />使用指南</a></DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {isElectronDesktop && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="desktop-footer-manage"
+                  data-active={managementOpen || undefined}
+                  aria-label="设置与本机服务"
+                  onClick={() => openManagement()}
+                >
+                  <Settings2 size={16} />
+                  {(update || problem) && (
+                    <span
+                      className="desktop-manage-dot"
+                      data-tone={problem ? "warning" : undefined}
+                      aria-label={problem ? "本机服务需要处理" : "有新版本"}
+                    />
+                  )}
                 </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>外观与帮助</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent className="desktop-appearance-menu" side="top" align="end" sideOffset={8}>
-            <DropdownMenuLabel>外观</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={appearance} onValueChange={(value) => setAppearance(value as Appearance)}>
-              <DropdownMenuRadioItem value="system">跟随系统</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="light">浅色</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">深色</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t("locale.label")}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={localePreference}
-              onValueChange={(value) => {
-                if (isLocalePreference(value)) setWebLocalePreference(value);
-              }}
-            >
-              <DropdownMenuRadioItem value="system">{t("locale.system")}</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="zh">{LOCALE_LABELS.zh}</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="en">{LOCALE_LABELS.en}</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="ja">{LOCALE_LABELS.ja}</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={openPalette}><Keyboard />命令与快捷键</DropdownMenuItem>
-            <DropdownMenuItem asChild><a href="https://liutianjie.github.io/LinkShell/docs/" target="_blank" rel="noreferrer"><BookOpen />使用指南</a></DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </TooltipTrigger>
+              <TooltipContent>设置与本机服务 · {shortcutText(desktopShortcuts.settings)}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </SidebarFooter>
     </Sidebar>
-  );
-}
-
-/** This Mac's own service: below the working set, since it is rarely the job. */
-function ManageEntry({ active, open }: { active: boolean; open: () => void }) {
-  const update = useStore(management, newVersion);
-  const problem = useStore(management, (state) => !!state.problem);
-  return (
-    <nav className="desktop-places desktop-manage-entry" aria-label="本机">
-      <button type="button" className="desktop-place" data-active={active || undefined} aria-current={active ? "page" : undefined} onClick={open}>
-        <Settings2 size={16} aria-hidden />
-        <span>本机管理</span>
-        {(update || problem) && <span className="desktop-manage-dot" data-tone={problem ? "warning" : undefined} aria-label={problem ? "本机服务需要处理" : "有新版本"} />}
-        <kbd>⌘2</kbd>
-      </button>
-    </nav>
   );
 }
 
@@ -865,12 +921,25 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     try { saveLocal("desktopSidebarHidden", !hidden); } catch { /* A preference, not state. */ }
     return !hidden;
   });
-  const managing = isManageView(props.view);
-  // Where ⌘1 returns to: the workspace view that was up before management opened.
-  const lastWorkspace = useRef(managing ? "home" : props.view);
-  if (!managing) lastWorkspace.current = props.view;
-  const openManagement = (page?: ManagePage) => props.navigate(manageView(page));
-  const openWorkspace = () => { if (managing) props.navigate(lastWorkspace.current); };
+  const [manageModal, setManageModal] = useState<{ open: boolean; page: ManagePage }>(() => {
+    const initial = new URLSearchParams(location.hash.slice(1)).get("view") ?? "";
+    return isElectronDesktop && isManageView(initial)
+      ? { open: true, page: managePage(initial) }
+      : { open: false, page: "overview" };
+  });
+  const managing = manageModal.open;
+  // Where ⌘1 returns to: the workspace view that was up before screen or management opened.
+  const lastWorkspace = useRef(isManageView(props.view) ? "home" : props.view);
+  if (!isManageView(props.view) && props.view !== "screen" && !screenComputerKey(props.view)) {
+    lastWorkspace.current = props.view;
+  }
+  const openManagement = (page?: ManagePage) => setManageModal((prev) => ({ open: true, page: page ?? prev.page }));
+  const openWorkspace = () => {
+    setManageModal((prev) => (prev.open ? { ...prev, open: false } : prev));
+    if (isManageView(props.view) || props.view === "screen" || screenComputerKey(props.view)) {
+      props.navigate(lastWorkspace.current);
+    }
+  };
   useEffect(() => { if (isElectronDesktop) startManagement(); }, []);
   // The window tracks which of its two views is up (the tray and menu bar say so).
   useEffect(() => { if (isElectronDesktop && !managing) reportDesktopWorkspace(); }, [managing]);
@@ -879,9 +948,12 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     else if (command.command === "toggle-sidebar") toggleSidebar();
     else if (command.command === "manage" && isElectronDesktop) openManagement(command.page);
     else if (command.command === "workspace" && isElectronDesktop) openWorkspace();
-    else if (command.command === "new-session" && !opensNewSessions()) {
-      deferNewSession(command.cwd);
-      props.navigate(managing ? lastWorkspace.current : "home");
+    else if (command.command === "new-session") {
+      setManageModal((prev) => (prev.open ? { ...prev, open: false } : prev));
+      if (!opensNewSessions() || props.view === "screen" || screenComputerKey(props.view)) {
+        deferNewSession(command.cwd);
+        props.navigate(lastWorkspace.current);
+      }
     }
   });
   useEffect(() => {
@@ -908,6 +980,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
       else if (matchesShortcut(event, desktopShortcuts.nextSession)) act(() => step(1));
       else if (matchesShortcut(event, desktopShortcuts.back)) act(() => history.back());
       else if (matchesShortcut(event, desktopShortcuts.forward)) act(() => history.forward());
+      else if (isElectronDesktop && matchesShortcut(event, desktopShortcuts.settings)) act(() => sendDesktopCommand({ command: "manage" }));
       // The Mac's menu holds ⌘1/⌘2 too; these keep them working wherever the menu does not see the
       // key first, and are the only route on Windows, which has no menu. Both end in the same command.
       else if (isElectronDesktop && matchesShortcut(event, desktopModeShortcuts.workspace)) act(() => sendDesktopCommand({ command: "workspace" }));
@@ -970,10 +1043,24 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         {isElectronDesktop ? (
           // Kept mounted, so hiding it is a slide rather than a jump; inert while hidden.
           <div className="desktop-sidebar-slot" inert={(sidebarHidden && !peek) || undefined}>
-            <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
+            <DesktopNavigation
+              {...props}
+              appearance={appearance}
+              setAppearance={setAppearance}
+              openPalette={() => setPalette(true)}
+              openManagement={openManagement}
+              managementOpen={manageModal.open}
+            />
           </div>
         ) : !sidebarHidden && (
-          <DesktopNavigation {...props} appearance={appearance} setAppearance={setAppearance} openPalette={() => setPalette(true)} />
+          <DesktopNavigation
+            {...props}
+            appearance={appearance}
+            setAppearance={setAppearance}
+            openPalette={() => setPalette(true)}
+            openManagement={openManagement}
+            managementOpen={false}
+          />
         )}
         {!sidebarHidden && (
           <ColumnResizer
@@ -1014,6 +1101,14 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         selectComputer={props.selectComputer as (computer: Computer) => void}
         setAppearance={setAppearance}
       />
+      {isElectronDesktop && (
+        <ManagementDialog
+          open={manageModal.open}
+          page={manageModal.page}
+          onOpenChange={(open) => setManageModal((prev) => ({ ...prev, open }))}
+          onPageChange={(page) => setManageModal({ open: true, page })}
+        />
+      )}
     </div>
   );
 }

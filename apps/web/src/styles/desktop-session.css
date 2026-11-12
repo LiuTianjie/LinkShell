@@ -4,7 +4,7 @@
 /* ── Session ─────────────────────────────────────────────────────────────── */
 html[data-desktop] .desktop-main .session-page { background: transparent; }
 html[data-desktop] .desktop-main .live-session .session-layout { display: flex; gap: var(--gutter); min-height: 0; }
-html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: clip; }
+html[data-desktop] .desktop-main .session-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: clip; container: session-column / inline-size; }
 /* The session's title row is the toolbar: 46 px, no rule under it; the conversation scrolls beneath. */
 html[data-desktop] .desktop-main .session-heading { display: flex; flex: none; align-items: center; flex-wrap: nowrap; gap: 12px; height: var(--toolbar); min-height: var(--toolbar); padding: 0 8px 0 max(16px, var(--titlebar-inset, 0px)); border-bottom: 0; background: transparent; backdrop-filter: none; }
 /* The title row gets its hairline once the conversation has scrolled under it, as every page's
@@ -30,9 +30,12 @@ html[data-desktop] .desktop-main .session-subtitle > .separator { flex: none; ov
 html[data-desktop] .desktop-main .session-directory { color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .branch-chip { padding: 0 6px; border-radius: var(--radius-small); background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 18px; }
 html[data-desktop] .desktop-main .session-actions { display: flex; align-items: center; gap: 0; padding: 0; }
+html[data-desktop] .desktop-main .session-quick-tools { display: inline-flex; align-items: center; gap: 6px; }
+@container session-column (max-width: 520px) { html[data-desktop] .desktop-main .session-quick-tools { display: none; } }
 html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"] { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .session-actions [data-button][data-size="icon"]:hover { color: var(--label); }
-html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 6px; background: var(--separator); }
+html[data-desktop] .desktop-main .session-actions [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .session-actions-divider { width: var(--hairline); height: 16px; margin: 0 2px; background: var(--separator); }
 /* Who holds the session: a quiet line under the title, not a second bar. */
 html[data-desktop] .desktop-main .handoff-bar { flex: none; margin: 0 12px 4px; padding: 6px 10px; border: 0; border-radius: var(--radius-card); background: var(--fill); color: var(--secondaryLabel); font-size: 12px; }
 /* Catching up, or offline: a small notice floating at the top of the reading column, over the
@@ -46,6 +49,18 @@ html[data-desktop] .desktop-main .conversation-recovery [data-button]:hover:not(
 html[data-desktop] .desktop-main .conversation-recovery[data-offline] { color: var(--waiting); }
 @keyframes recovery-in { from { opacity: 0; translate: -50% -4px; } }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-main .conversation-recovery { animation: none; } }
+/* In-session search (`⌘F`): a compact bar docked under the session toolbar, using desktop tokens. */
+html[data-desktop] .desktop-main .session-find-bar { display: flex; flex: none; align-items: center; gap: 8px; height: 36px; margin: 0 16px; padding: 0 8px 0 10px; border-radius: var(--radius-card); background: var(--cardRaised); box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
+html[data-desktop] .desktop-main .session-find-bar:focus-within { box-shadow: inset 0 0 0 1px var(--focus, var(--link)); }
+html[data-desktop] .desktop-main .session-find-icon { flex: none; width: 14px; height: 14px; color: var(--tertiaryLabel); }
+html[data-desktop] .desktop-main .session-find-input { flex: 1; min-inline-size: 0; height: 28px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; outline: none; }
+html[data-desktop] .desktop-main .session-find-input::placeholder { color: var(--placeholder); }
+html[data-desktop] .desktop-main .session-find-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+html[data-desktop] .desktop-main .session-find-count { flex: none; color: var(--tertiaryLabel); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+html[data-desktop] .desktop-main .session-find-actions { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+html[data-desktop] .desktop-main .session-find-actions [data-button] { width: 24px; height: 24px; padding: 0; border-radius: var(--radius-control); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-main .session-find-actions [data-button]:hover:not(:disabled) { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-main .session-find-actions [data-button] svg { width: 14px; height: 14px; }
 
 /* Reading column: 48 rem centred, 32 px from the toolbar. The composer floats over the end of
    it, so the column leaves room for it (Session measures its height). Values from Codex's
@@ -79,31 +94,33 @@ html[data-desktop] .desktop-main .markdown li + li { margin-top: 4px; }
 html[data-desktop] .desktop-main .markdown li::marker { color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .markdown blockquote { margin: 0 0 14px; padding: 0 0 0 14px; border-left: 3.5px solid var(--separatorStrong); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .markdown hr { margin: 20px 0; border: 0; border-top: var(--hairline) solid var(--separator); }
-html[data-desktop] .desktop-main .markdown table { width: 100%; margin: 0 0 14px; border-collapse: collapse; font-size: 13px; }
-html[data-desktop] .desktop-main .markdown th { padding: 6px 10px; border-bottom: 1px solid var(--separatorStrong); font-weight: 600; text-align: left; }
-html[data-desktop] .desktop-main .markdown td { padding: 6px 10px; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .markdown .table-wrapper { margin: 0 0 14px; overflow-x: auto; border-radius: var(--radius-card); border: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .markdown .table-wrapper:focus-visible { outline: 2px solid var(--focus, var(--link)); outline-offset: 2px; }
+html[data-desktop] .desktop-main .markdown table { display: table; width: 100%; max-width: none; overflow: visible; margin: 0 0 14px; border-collapse: collapse; font-size: 13px; }
+html[data-desktop] .desktop-main .markdown .table-wrapper > table { margin: 0; }
+html[data-desktop] .desktop-main .markdown th { padding: 8px 14px; border: 0; border-bottom: var(--hairline) solid var(--separatorStrong); background: color-mix(in oklab, var(--label) 3%, transparent); font-weight: 600; text-align: left; white-space: nowrap; }
+html[data-desktop] .desktop-main .markdown td { padding: 8px 14px; border: 0; border-bottom: var(--hairline) solid var(--separator); }
+html[data-desktop] .desktop-main .markdown tr:last-child td { border-bottom: 0; }
 html[data-desktop] .desktop-main .markdown a { color: var(--link); text-decoration: none; }
 html[data-desktop] .desktop-main .markdown a:hover { text-decoration: underline; text-underline-offset: 2px; }
 html[data-desktop] .desktop-main .markdown code:not(pre code) { padding: 1px 6px; border-radius: var(--radius-small); background: color-mix(in oklab, var(--label) 6%, transparent); font-family: var(--mono); font-size: 13px; box-shadow: none; }
-/* Code blocks: the panel's surface barely tinted (2 % of the ink, 3 % in the dark), a subtle
-   edge, a container's 8 px corners; the language in the text face in a 48 px header with a
-   28 px copy button; the source 12 / 20 in the code face. */
-html[data-desktop] .desktop-main .markdown .code-surface { margin: 18px 0; overflow: hidden; border: 0; border-radius: var(--radius-card); background: color-mix(in oklab, var(--label) 2%, var(--plain)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 5%, transparent); contain: content; }
-html[data-desktop][data-theme="dark"] .desktop-main .markdown .code-surface { background: color-mix(in oklab, var(--label) 3%, var(--plain)); }
+/* Code blocks: dedicated code surface step (`var(--code)`), crisp hairline edge, compact 36 px
+   header with a subtle divider, and 12 / 20 monospace source. */
+html[data-desktop] .desktop-main .markdown .code-surface { margin: 14px 0; overflow: hidden; border: 0; border-radius: var(--radius-card); background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); contain: content; }
 html[data-desktop] .desktop-main .markdown .code-surface:first-child { margin-top: 0; }
-html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 6px 6px 6px 20px; border: 0; background: transparent; color: var(--label); font-family: inherit; font-size: 13px; font-weight: 500; }
+html[data-desktop] .desktop-main .markdown .code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 4px 6px 4px 16px; border-bottom: var(--hairline) solid var(--separator); background: transparent; color: var(--secondaryLabel); font-family: inherit; font-size: 12px; font-weight: 500; }
 html[data-desktop] .desktop-main .markdown .code-toolbar > span { font-family: inherit; }
 html[data-desktop] .desktop-main .markdown .code-copy[data-button] { width: 28px; height: 28px; border-radius: var(--radius-control); color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .markdown .code-copy:hover { color: var(--label); }
 html[data-desktop] .desktop-main .markdown .code-copy svg { width: 14px; height: 14px; }
-html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; padding: 0 20px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; }
+html[data-desktop] .desktop-main .markdown .code-surface pre { margin: 0; padding: 10px 16px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 20px; }
 html[data-desktop] .desktop-main .markdown pre { border: 0; border-radius: var(--radius-card); background: var(--fill); box-shadow: none; font-size: 12px; line-height: 20px; contain: content; }
 
 /* The reader's own messages: a quiet bubble at the right, at most 70 % of the column. */
 /* The message is a column at the right; the bubble is its words. The time and actions hang in
    the gap under the bubble and show with the pointer, so a bubble is only as tall as its text. */
 html[data-desktop] .desktop-main .user-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; width: auto; max-width: none; margin-left: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
-html[data-desktop] .desktop-main .user-bubble { max-width: 70%; padding: 10px 16px; border-radius: var(--radius-panel); background: var(--userBubble); color: var(--label); }
+html[data-desktop] .desktop-main .user-bubble { max-width: 70%; padding: 10px 16px; border-radius: var(--radius-panel); background: var(--userBubble); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--label); }
 /* The reader's words at the conversation's own size (14 / 1.625), as the replies. */
 html[data-desktop] .desktop-main .user-bubble,
 html[data-desktop] .desktop-main .user-bubble :is(.markdown, .markdown p, .question-reply p) { font-size: 14px; line-height: 1.625; }
@@ -211,6 +228,10 @@ html[data-desktop] .desktop-main .plan-card li[data-status="in_progress"] .plan-
 html[data-desktop] .desktop-main .notice-card { padding: 12px 14px; font-size: 13px; }
 html[data-desktop] .desktop-main .notice-card.error { background: var(--dangerSoft); box-shadow: none; }
 html[data-desktop] .desktop-main .notice-card.warning { background: var(--waitingSoft); box-shadow: none; }
+html[data-desktop] .desktop-main .timeline-error-card .error-detail { margin-top: 8px; }
+html[data-desktop] .desktop-main .timeline-error-card .error-detail > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; cursor: default; }
+html[data-desktop] .desktop-main .timeline-error-card .error-detail > summary:hover { color: var(--label); }
+html[data-desktop] .desktop-main .timeline-error-card .error-detail > pre { max-height: 180px; margin: 6px 0 0; padding: 8px 10px; overflow: auto; border-radius: var(--radius-control); background: color-mix(in oklab, var(--label) 5%, transparent); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--secondaryLabel); font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 html[data-desktop] .desktop-main .timeline-divider { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-main .timeline-divider::before,
 html[data-desktop] .desktop-main .timeline-divider::after { background: var(--separator); }
@@ -248,7 +269,12 @@ html[data-desktop] .desktop-main .approval-heading strong { font-size: 14px; fon
 html[data-desktop] .desktop-main .approval-heading > div > span { color: var(--tertiaryLabel); font-size: 13px; }
 html[data-desktop] .desktop-main .approval-icon { width: 28px; height: 28px; border-radius: var(--radius-control); background: var(--waitingSoft); color: var(--waiting); }
 /* The command or path: mono on the code surface, a container's 8 px corners. */
-html[data-desktop] .desktop-main .approval-card pre { border-radius: var(--radius-card); background: var(--code); color: var(--codeText); font-size: 12px; }
+html[data-desktop] .desktop-main .approval-card pre { border-radius: var(--radius-card); background: var(--code); box-shadow: inset 0 0 0 var(--hairline) var(--separator); color: var(--codeText); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+html[data-desktop] .desktop-main .approval-card > pre { margin: 10px 0 0; padding: 8px 12px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+html[data-desktop] .desktop-main .approval-card .approval-raw { margin-top: 8px; }
+html[data-desktop] .desktop-main .approval-card .approval-raw > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--secondaryLabel); font-size: 12px; font-weight: 500; cursor: default; }
+html[data-desktop] .desktop-main .approval-card .approval-raw > summary:hover { color: var(--label); }
+html[data-desktop] .desktop-main .approval-card .approval-raw > pre { max-height: 180px; margin: 6px 0 0; padding: 8px 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 html[data-desktop] .desktop-main .permission-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 8px; }
 /* 32 px and 6 px corners on every surface; a long option wraps, so the height is a minimum. */
 html[data-desktop] .desktop-main .permission-buttons [data-button] { min-height: 32px !important; height: auto; padding: 6px 12px; border-radius: var(--radius-control); font-size: 13px; }
@@ -384,7 +410,7 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
 }
 
 /* A new session: an empty conversation with the composer in its middle, as Codex starts a thread. */
-html[data-desktop] .desktop-main > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
+html[data-desktop] :is(.desktop-main, .workspace-stage) > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
 html[data-desktop] .new-session-stage { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(680px, calc(100% - 48px)); margin: auto; padding: 48px 0 18vh; }
 html[data-desktop] .new-session-stage > h1 { margin: 0 0 6px; color: var(--label); font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 30px; text-align: center; }
 html[data-desktop] .new-session-composer { display: flex; flex-direction: column; overflow: clip; border-radius: var(--radius-composer); background: var(--composerSurface); box-shadow: var(--composer-shadow); transition: box-shadow 180ms var(--ease-out); }

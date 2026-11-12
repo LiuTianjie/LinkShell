@@ -114,6 +114,23 @@ export function Permission({
   const repeated =
     permission.questions?.length === 1 &&
     permission.questions[0]!.text === permission.title;
+  const rawInputText = (() => {
+    const raw = body.rawInput;
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed === body.detail?.trim() || trimmed === permission.title.trim()) return undefined;
+      return raw;
+    }
+    if (typeof raw === "object" && !Array.isArray(raw)) {
+      const entries = Object.entries(raw as Record<string, unknown>).filter(([, v]) => v !== undefined && v !== "");
+      if (!entries.length) return undefined;
+      const coveredKeys = new Set(["command", "cmd", "description", "workdir", "cwd"]);
+      if (body.detail && entries.every(([k]) => coveredKeys.has(k))) return undefined;
+    }
+    return JSON.stringify(raw, null, 2);
+  })();
+  const hasPrimarySummary = Boolean(body.detail || body.markdown || body.content.length > 0);
   return (
     <section
       className="approval-card"
@@ -134,12 +151,15 @@ export function Permission({
       {permission.url && (
         <p className="muted approval-url">{permission.url.url}</p>
       )}
-      {body.rawInput !== undefined && (
-        <pre tabIndex={0} aria-label="待批准的工具参数">
-          {typeof body.rawInput === "string"
-            ? body.rawInput
-            : JSON.stringify(body.rawInput, null, 2)}
-        </pre>
+      {rawInputText !== undefined && (
+        hasPrimarySummary ? (
+          <details className="approval-raw">
+            <summary>查看完整参数</summary>
+            <pre tabIndex={0} aria-label="待批准的工具参数">{rawInputText}</pre>
+          </details>
+        ) : (
+          <pre tabIndex={0} aria-label="待批准的工具参数">{rawInputText}</pre>
+        )
       )}
       {permission.tool?.locations?.map((location, index) => (
         <code key={index}>

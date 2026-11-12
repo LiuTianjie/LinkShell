@@ -1,6 +1,6 @@
 export const NATIVE_SCREEN_EVENT = "linkshell-native-screen";
 export interface ScreenRect { x: number; y: number; width: number; height: number }
-export interface NativeScreenStatus { live?: boolean; hardware?: boolean; codec?: string; decoder?: string; control?: boolean; controlRequested?: boolean; controlError?: string; displayFps?: number; pacing?: "smooth" | "immediate" }
+export interface NativeScreenStatus { live?: boolean; hardware?: boolean; codec?: string; decoder?: string; control?: boolean; controlRequested?: boolean; controlError?: string; displayFps?: number; pacing?: "smooth" | "immediate"; exitFullScreen?: boolean }
 export interface NativeScreenEvent {
   id: string;
   type: "signal" | "status" | "error";
@@ -56,7 +56,10 @@ export function leaveScreenFullscreen(state: ScreenFullscreen): ScreenFullscreen
  * leaving (green button, ⌃⌘F, Esc) gives any screen still showing only the picture its toolbar back,
  * even one that already stopped owning the full screen. `focused` is what the page should then fill.
  */
-export function windowFullscreenChanged(state: ScreenFullscreen, fullscreen: boolean): (ScreenFullscreen & { focused: boolean }) | undefined {
-  if (fullscreen) return state.owns ? { owns: true, fullscreen: true, focused: true } : undefined;
+export function windowFullscreenChanged(state: ScreenFullscreen, fullscreen: boolean, adopt = false): (ScreenFullscreen & { focused: boolean }) | undefined {
+  if (fullscreen) {
+    const owns = state.owns || (adopt && !state.fullscreen);
+    return owns ? { owns: true, fullscreen: true, focused: true } : undefined;
+  }
   return state.owns || state.fullscreen ? { owns: false, fullscreen: false, focused: false } : undefined;
 }

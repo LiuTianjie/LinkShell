@@ -19,6 +19,8 @@ describe("desktop sign-in panel", () => {
     expect(markup).toContain('href="https://itool.tech/zh/forgot-password"');
     expect(markup).toContain('href="https://itool.tech/zh/register"');
     expect(markup).toContain("用浏览器登录");
+    expect(markup).toContain('aria-label="显示密码"');
+    expect(markup).toContain('aria-pressed="false"');
     // The marks are drawn inline, in the text's colour.
     expect(markup.match(/<svg[^>]*fill="currentColor"/g)).toHaveLength(2);
   });

@@ -1,6 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { getLocale, itoolMembershipUrl, itoolYearlyUpgradeUrl, type Locale } from "@linkshell/client-core";
-import { desktopInvoke, isElectronDesktop, openDesktopExternal, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
+import { desktopInvoke, isElectronDesktop, notifyDesktopHostChanged, openDesktopExternal, reportDesktopError, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./desktop";
 import {
   newerVersion,
   passwordProblem,
@@ -18,6 +18,8 @@ export interface ManagementState {
   snapshot?: DesktopSnapshot;
   problem?: string;
   busy: boolean;
+  /** True while the window's initial `startup` check / auto-start is still running. */
+  starting: boolean;
   started: boolean;
   about?: DesktopAbout;
   settings: DesktopSettings;
@@ -56,6 +58,7 @@ const ACCOUNT_INTERVAL = 300_000;
 
 export const management = createStore<ManagementState>(() => ({
   busy: false,
+  starting: false,
   started: false,
   settings: { opaqueWindow: false, autoCheck: true, updateChannel: "stable" },
   permissions: { known: false, recording: false, control: false },
@@ -108,16 +111,18 @@ function applySnapshot(next: DesktopSnapshot) {
 
 export const healthy = (state: ManagementState) => state.snapshot?.status === "running" && !state.problem;
 export const standalone = (state: ManagementState) => state.about?.standalone === true;
+export const installedCliVersion = (state: ManagementState) =>
+  state.snapshot?.cliVersion ?? state.snapshot?.machine?.hostVersion ?? state.about?.version;
 export const newVersion = (state: ManagementState) => {
   if (standalone(state)) return state.update.available;
-  const current = state.snapshot?.cliVersion;
+  const current = installedCliVersion(state);
   return !!state.update.latest && !!current && newerVersion(state.update.latest, current);
 };
 
 /** Once per window: recover an interrupted update, then start a stopped Host (DesktopModel.start). */
 export function startManagement(): void {
   if (!isElectronDesktop || get().started) return;
-  set({ started: true });
+  set({ started: true, starting: true });
   window.addEventListener(DESKTOP_UPDATE_EVENT, receiveUpdate);
   window.addEventListener(DESKTOP_LOGIN_EVENT, receiveLoginLink);
   window.addEventListener("focus", returnedFromShop);
@@ -135,13 +140,14 @@ export function startManagement(): void {
       applySnapshot(await desktopInvoke<DesktopSnapshot>("startup", {}, 100_000));
       recoveryProblem = undefined;
       managementEvent(`桌面启动：后台服务${get().snapshot?.status === "running" ? "已就绪" : "需要检查"}`);
+      notifyDesktopHostChanged();
     } catch (error) {
       const message = messageOf(error);
       if (message.startsWith("服务恢复")) recoveryProblem = message; else startupProblem = message;
       set({ problem: message });
       reportDesktopError(message);
     }
-    set({ busy: false });
+    set({ busy: false, starting: false });
     refreshManagement();
   })();
 }
@@ -156,12 +162,14 @@ export function refreshManagement(): void {
       const next = await desktopInvoke<DesktopSnapshot>("snapshot", {}, 30_000);
       if (get().busy || started !== revision) return;
       const before = get().snapshot;
-      if (next.status !== before?.status)
+      const statusChanged = next.status !== before?.status;
+      if (statusChanged)
         managementEvent(next.status === "running" ? "本机服务已连接" : `本机服务：${next.status === "stopped" ? "已停止" : "无法连接"}`);
       if (before?.gateway?.status && before.gateway.status !== next.gateway?.status) managementEvent("网关连接状态已变化");
       if (next.status === "running" && !next.error) startupProblem = undefined;
       applySnapshot(next);
       set({ problem: next.error ?? recoveryProblem ?? startupProblem });
+      if (statusChanged) notifyDesktopHostChanged();
       void refreshPermissions();
     } catch (error) {
       if (!get().busy && started === revision) set({ snapshot: undefined, problem: messageOf(error) });
@@ -209,6 +217,7 @@ export function serviceAction(name: "start" | "stop" | "restart" | "recover-upda
       applySnapshot(await desktopInvoke<DesktopSnapshot>("action", { name }));
       if (name === "recover-update") recoveryProblem = undefined;
       managementEvent({ start: "已启动本机服务", stop: "已停止本机服务", restart: "已重启本机服务", "recover-update": "已恢复后台服务" }[name]);
+      notifyDesktopHostChanged();
     } catch (error) {
       const message = messageOf(error);
       if (name === "recover-update") recoveryProblem = `服务恢复需要处理：${message}`;
@@ -227,6 +236,7 @@ function signIn(method: SignInMethod, run: () => Promise<DesktopSnapshot>) {
       applySnapshot(next);
       set({ accountMessage: `登录成功。手机登录同一账号后，可通过官方网关连接${THIS_COMPUTER}（需要 iTool 会员）。` });
       managementEvent("账号已登录");
+      notifyDesktopHostChanged();
     } catch (error) {
       set({ signInError: loginCancelled ? "" : messageOf(error) });
     } finally { set({ signingIn: false, signInMethod: undefined, signInLink: undefined }); }
@@ -265,6 +275,7 @@ export function accountAction(name: "logout") {
     try {
       applySnapshot(await desktopInvoke<DesktopSnapshot>("action", { name }));
       set({ accountMessage: `已退出${THIS_COMPUTER_SPACED}的账号。` });
+      notifyDesktopHostChanged();
     } catch (error) { set({ accountMessage: messageOf(error) }); }
   }, { accountMessage: "正在处理…" });
 }
@@ -345,6 +356,7 @@ export async function setGateway(choice: GatewayChoice): Promise<boolean> {
       applySnapshot(next);
       saved = true;
       managementEvent(choice.kind === "official" ? "已切换到官方网关" : choice.kind === "off" ? "已关闭网关" : `已切换到自建网关 ${choice.url}`);
+      notifyDesktopHostChanged();
     } catch (error) { set({ gatewayMessage: messageOf(error) }); }
   }, { gatewayMessage: "" });
   return saved;
@@ -411,8 +423,8 @@ export async function checkUpdates() {
     const body = (await response.json()) as { version?: unknown };
     if (!response.ok || typeof body.version !== "string") throw new Error("版本信息无效");
     const latest = body.version;
-    const current = get().snapshot?.cliVersion;
-    const message = !current ? `最新稳定版 ${latest}；当前 CLI 版本未知` : newerVersion(latest, current) ? `有新版本 ${latest}` : "当前已是最新稳定版";
+    const current = installedCliVersion(get());
+    const message = !current ? `最新稳定版 ${latest}；启动本机服务后可检测当前版本` : newerVersion(latest, current) ? `有新版本 ${latest}` : "当前已是最新稳定版";
     set({ update: { ...get().update, checking: false, latest, message, checkedAt: Date.now() } });
   } catch (error) {
     set({ update: { ...get().update, checking: false, message: `检查失败：${messageOf(error)}`, checkedAt: Date.now() } });
@@ -427,6 +439,7 @@ export function upgradeInstall() {
       const result = await desktopInvoke<{ message?: string }>("upgrade", {}, 250_000);
       set({ update: { ...get().update, message: result.message ?? "更新完成。" } });
       managementEvent("CLI 更新完成");
+      notifyDesktopHostChanged();
     } catch (error) {
       set({ update: { ...get().update, message: messageOf(error) } });
     }

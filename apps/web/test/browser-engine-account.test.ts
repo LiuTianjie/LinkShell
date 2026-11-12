@@ -73,7 +73,7 @@ beforeEach(async () => {
 });
 afterEach(() => { engine.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it("drops selected and hidden account connections on sign out while keeping paired access", () => {
+it("drops selected and hidden account connections on sign out while keeping paired access", async () => {
   engine.state.setState({ computers: [accountComputer, pairedComputer] });
   engine.select(accountComputer);
   const selectedClosed = mocks.disconnected.at(-1)!;
@@ -89,6 +89,9 @@ it("drops selected and hidden account connections on sign out while keeping pair
   expect(overviewClosed).toHaveBeenCalledTimes(1);
   expect(pairedClosed).not.toHaveBeenCalled();
   expect(mocks.saved.get("paired")).toEqual([pairedComputer]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.relays[0].request).toHaveBeenCalledWith("account.leave", {}, 5_000);
+  expect(mocks.relays[0].reauthenticate).toHaveBeenCalledTimes(1);
   overview.release(); paired.release();
   expect(pairedClosed).toHaveBeenCalledTimes(1);
 });

@@ -196,6 +196,40 @@ final class Callback {
   }
 }
 
+// MARK: Immersive Full Screen
+
+/// Hides the local Mac's menu bar during borderless (`simpleFullScreen`) remote-screen sessions so
+/// moving the pointer to `y = 0..24pt` targets the remote Mac's status bar instead of dropping this
+/// Mac's menu bar and titlebar over it. Never combined with an AppKit `.fullScreen` Space window.
+@MainActor private final class ImmersivePresentation {
+  static let shared = ImmersivePresentation()
+  private var wanted = false
+
+  private init() {
+    let center = NotificationCenter.default
+    for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+      center.addObserver(forName: name, object: nil, queue: .main) { _ in
+        MainActor.assumeIsolated { ImmersivePresentation.shared.sync() }
+      }
+    }
+  }
+
+  func set(_ enabled: Bool) {
+    wanted = enabled
+    sync()
+  }
+
+  func sync() {
+    let active = wanted
+      && NSApp.isActive
+      && !NSApp.windows.contains { $0.styleMask.contains(.fullScreen) }
+    let options: NSApplication.PresentationOptions = active ? [.autoHideDock, .hideMenuBar] : []
+    if NSApp.presentationOptions != options {
+      NSApp.presentationOptions = options
+    }
+  }
+}
+
 // MARK: Exports
 
 private typealias Export = @convention(c) (napi_env?, napi_callback_info?) -> napi_value?
@@ -260,7 +294,17 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
     else { return throwError(env, "screenStart: invalid arguments") }
     NativeScreen.current?.stop(); NativeScreen.current = nil
     let host = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
-    do { NativeScreen.current = try NativeScreen(host: host, helper: helper, id: id, rect: rect, smooth: DesktopScreenBridge.boolean(message["smooth"]) == true, callback: callback) }
+    do {
+      NativeScreen.current = try NativeScreen(
+        host: host,
+        helper: helper,
+        id: id,
+        rect: rect,
+        smooth: DesktopScreenBridge.boolean(message["smooth"]) == true,
+        fullScreen: DesktopScreenBridge.boolean(message["fullscreen"]) == true,
+        callback: callback
+      )
+    }
     catch { return throwError(env, error.localizedDescription) }
     return undefined(env)
   }
@@ -279,6 +323,12 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
   }
   define(env, exports, "screenStop") { env, _ in
     NativeScreen.current?.stop(); NativeScreen.current = nil
+    return undefined(env)
+  }
+  define(env, exports, "setImmersiveFullScreen") { env, info in
+    let argv = arguments(env, info, 1)
+    let enabled = bool(env, argv[0]) ?? false
+    MainActor.assumeIsolated { ImmersivePresentation.shared.set(enabled) }
     return undefined(env)
   }
   return exports

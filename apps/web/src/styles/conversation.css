@@ -489,6 +489,18 @@
     border: 0;
     border-top: 1px solid var(--separator);
   }
+  .markdown .table-wrapper {
+    margin: 14px 0;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .markdown .table-wrapper > table {
+    display: table;
+    width: 100%;
+    max-width: none;
+    overflow: visible;
+    margin: 0;
+  }
   .markdown table {
     display: block;
     overflow: auto;

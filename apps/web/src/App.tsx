@@ -34,7 +34,8 @@ import { Button } from "@/components/ui/button";
 import { deployment } from "./config";
 import { useDialogs } from "@/components/Dialogs";
 import { Choice } from "./components/Choice";
-import { useEffect, useState, type ReactNode } from "react";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
 import { NewSessionPage } from "./live/NewSessionPage";
@@ -89,7 +90,7 @@ import { SessionLookup } from "./live/SessionLookup";
 import { AllProjects, Projects } from "./live/Projects";
 import { projectScope, setProjectScope } from "./live/project-overview";
 import { isDesktop, isElectronDesktop, openDesktopManagement, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./live/desktop";
-import { Management } from "./live/Management";
+import { management, serviceAction } from "./live/management-store";
 import { isManageView, managePage, manageView } from "./live/management-model";
 import { takeDeferredNewSession, useDesktopCommand, useNewSessionTarget } from "./live/desktop-commands";
 import { useDesktopVisibility } from "./live/desktop-visibility";
@@ -97,14 +98,15 @@ import { useDesktopVisibility } from "./live/desktop-visibility";
 export function App() {
   return <LiveApp />;
 }
-/** Local management exists only in the Electron window; elsewhere a saved "manage" view opens the overview. */
+/** Management opens as a dialog over the workspace; saved/deep manage hashes resolve to home behind it. */
 function viewable(view: string): string {
-  return isManageView(view) && !isElectronDesktop ? "home" : view;
+  return isManageView(view) ? "home" : view;
 }
 function LiveApp() {
   const workspaceVisible = useDesktopVisibility();
   const projectsScope = useStore(projectScope, (state) => state.value);
   const state = useStore(engine.state);
+  const managementState = useStore(management);
   const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
   const [connect, setConnect] = useState(false);
@@ -114,14 +116,24 @@ function LiveApp() {
         readLocal("lastView", "home"),
     ),
   );
+  const lastWorkspaceView = useRef("home");
+  const isAllProjects = view === "projects" && projectsScope === "all";
+  const isScreenOverview = view === "screen";
+  const isScreenDetail = Boolean(screenComputerKey(view));
+  const workspaceHidden = isAllProjects || isScreenOverview || isScreenDetail;
+  if (!workspaceHidden) lastWorkspaceView.current = view;
   useEffect(() => {
     void engine.start();
   }, []);
   useEffect(() => {
     const change = () => {
-      const next = viewable(
-        new URLSearchParams(location.hash.slice(1)).get("view") ?? "home",
-      );
+      const raw = new URLSearchParams(location.hash.slice(1)).get("view") ?? "home";
+      if (isElectronDesktop && isManageView(raw)) {
+        history.replaceState(null, "", `#${new URLSearchParams({ view })}`);
+        openDesktopManagement(managePage(raw));
+        return;
+      }
+      const next = viewable(raw);
       if (next === view) return;
       // Keep the editor mounted while the user decides whether to leave.
       history.replaceState(null, "", `#${new URLSearchParams({ view })}`);
@@ -144,6 +156,10 @@ function LiveApp() {
     setView(id);
   }
   function navigate(id: string) {
+    if (isElectronDesktop && isManageView(id)) {
+      openDesktopManagement(managePage(id));
+      return;
+    }
     if (id !== view) void guard(() => commitView(id));
   }
   function selectComputer(computer: Computer) {
@@ -209,96 +225,147 @@ function LiveApp() {
           />
         )}
       </ScreenSessionSlot>
-      {isElectronDesktop && isManageView(view) ? (
-        <Management page={managePage(view)} navigate={(page) => navigate(manageView(page))} />
-      ) : state.locked ? (
-        <div className="welcome-live">
-          <h1>工作台已在另一个标签页打开</h1>
-          <p className="muted">
-            同一个浏览器设备只保持一条连接，避免标签页相互挤掉。
-          </p>
-          <Button variant="default" onClick={() => void engine.claim()}>
-            在此标签页继续
-          </Button>
-        </div>
-      ) : view === "projects" && projectsScope === "all" ? (
-        <div className="overview live-overview"><AllProjects openComputerView={openComputerView} /></div>
-      ) : view === "screen" ? (
-        <Screens
-          live={workspaceVisible}
-          connect={() => setConnect(true)}
-          open={(computer) => {
-            engine.select(computer);
-            navigate(screenView(computer.key));
-          }}
-        />
-      ) : screenComputerKey(view) ? null : state.connection ? (
-        <Runtime value={state.connection}>
-          <Workspace
-            key={state.connection.computer.key}
-            view={view}
-            navigate={navigate}
-            connect={openConnect}
-            selectComputer={selectComputer}
-            openComputerView={openComputerView}
-          />
-        </Runtime>
-      ) : (
-        <div className="welcome-live">
-          <img src={appMark} alt="LinkShell" />
-          <h1>连接你的电脑</h1>
-          <p className="muted">
-            {isDesktop
-              ? `在${THIS_COMPUTER_SPACED}上，继续每一台电脑的工作。`
-              : "会话在电脑上运行，网页让你继续对话、审批和操作。"}
-          </p>
-          {!isDesktop && <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>}
-          <Button
-            variant="default"
-            disabled={!state.ready}
-            onClick={() => setConnect(true)}
-          >
-            {state.ready
-              ? deployment === "self-hosted"
-                ? "配对电脑"
-                : "连接电脑"
-              : "正在准备设备身份…"}
-          </Button>
-          {isDesktop && (
-            <Button variant="ghost" onClick={() => openDesktopManagement()}>
-              管理{THIS_COMPUTER}
+      <ErrorBoundary resetKey={view} onResetHome={() => commitView("home")}>
+        {state.locked ? (
+          <div className="welcome-live">
+            <h1>工作台已在另一个标签页打开</h1>
+            <p className="muted">
+              同一个浏览器设备只保持一条连接，避免标签页相互挤掉。
+            </p>
+            <Button variant="default" onClick={() => void engine.claim()}>
+              在此标签页继续
             </Button>
-          )}
-          <p className="muted">
-            {deployment === "self-hosted"
-              ? "运行 linkshell pair，输入此网关的配对码即可连接。"
-              : isDesktop
-                ? "登录已有账号发现其他电脑，或使用配对码添加。"
-                : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
-          </p>
-          {state.computers.map((computer) => (
-            <Button
-              variant="outline"
-              key={computer.key}
-              onClick={() => engine.select(computer)}
-            >
-              {computerOption(computer, names)}
-            </Button>
-          ))}
-        </div>
-      )}
+          </div>
+        ) : (
+          <>
+            {isAllProjects && (
+              <div className="overview live-overview"><AllProjects openComputerView={openComputerView} /></div>
+            )}
+            {isScreenOverview && (
+              <Screens
+                live={workspaceVisible}
+                connect={() => setConnect(true)}
+                open={(computer) => {
+                  engine.select(computer);
+                  navigate(screenView(computer.key));
+                }}
+              />
+            )}
+            {state.connection ? (
+              <div className="workspace-stage" hidden={workspaceHidden || undefined}>
+                <Runtime value={state.connection}>
+                  <Workspace
+                    key={state.connection.computer.key}
+                    view={workspaceHidden ? lastWorkspaceView.current : view}
+                    active={!workspaceHidden}
+                    navigate={navigate}
+                    connect={openConnect}
+                    selectComputer={selectComputer}
+                    openComputerView={openComputerView}
+                  />
+                </Runtime>
+              </div>
+            ) : !workspaceHidden && (
+              isElectronDesktop && (managementState.starting || (managementState.busy && !managementState.snapshot)) ? (
+                <div className="welcome-live" role="status">
+                  <LoaderCircle className="size-6 animate-spin text-muted-foreground" aria-hidden />
+                  <h1>正在准备{THIS_COMPUTER}…</h1>
+                  <p className="muted">正在连接本机后台服务与会话记录。</p>
+                </div>
+              ) : isElectronDesktop && managementState.snapshot?.status === "stopped" ? (
+                <div className="welcome-live">
+                  <img src={appMark} alt="LinkShell" />
+                  <h1>本机服务已停止</h1>
+                  <p className="muted">
+                    启动{THIS_COMPUTER_SPACED}的后台服务以恢复本地会话、终端与预览，或连接其他电脑。
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Button
+                      variant="default"
+                      disabled={managementState.busy}
+                      onClick={() => void serviceAction("start")}
+                    >
+                      {managementState.busy ? "正在启动…" : "启动本机服务"}
+                    </Button>
+                    <Button variant="secondary" disabled={!state.ready} onClick={() => setConnect(true)}>
+                      连接其他电脑
+                    </Button>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => openDesktopManagement()}>
+                    设置与本机服务
+                  </Button>
+                  {state.computers.map((computer) => (
+                    <Button
+                      variant="outline"
+                      key={computer.key}
+                      onClick={() => engine.select(computer)}
+                    >
+                      {computerOption(computer, names)}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <div className="welcome-live">
+                  <img src={appMark} alt="LinkShell" />
+                  <h1>连接你的电脑</h1>
+                  <p className="muted">
+                    {isDesktop
+                      ? `在${THIS_COMPUTER_SPACED}上，继续每一台电脑的工作。`
+                      : "会话在电脑上运行，网页让你继续对话、审批和操作。"}
+                  </p>
+                  {!isDesktop && <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>}
+                  <Button
+                    variant="default"
+                    disabled={!state.ready}
+                    onClick={() => setConnect(true)}
+                  >
+                    {state.ready
+                      ? deployment === "self-hosted"
+                        ? "配对电脑"
+                        : "连接电脑"
+                      : "正在准备设备身份…"}
+                  </Button>
+                  {isDesktop && (
+                    <Button variant="ghost" onClick={() => openDesktopManagement()}>
+                      设置与本机服务
+                    </Button>
+                  )}
+                  <p className="muted">
+                    {deployment === "self-hosted"
+                      ? "运行 linkshell pair，输入此网关的配对码即可连接。"
+                      : isDesktop
+                        ? "登录已有账号发现其他电脑，或使用配对码添加。"
+                        : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
+                  </p>
+                  {state.computers.map((computer) => (
+                    <Button
+                      variant="outline"
+                      key={computer.key}
+                      onClick={() => engine.select(computer)}
+                    >
+                      {computerOption(computer, names)}
+                    </Button>
+                  ))}
+                </div>
+              )
+            )}
+          </>
+        )}
+      </ErrorBoundary>
       {connect && <Connect close={() => setConnect(false)} />}
     </ConsoleShell>
   );
 }
 function Workspace({
   view,
+  active = true,
   navigate,
   connect,
   selectComputer,
   openComputerView,
 }: {
   view: string;
+  active?: boolean;
   navigate: (id: string) => void;
   connect: () => void;
   selectComputer: (computer: Computer) => void;
@@ -311,6 +378,11 @@ function Workspace({
     const waiting = isDesktop ? takeDeferredNewSession() : undefined;
     return waiting ? waiting.cwd ?? null : undefined;
   });
+  useEffect(() => {
+    if (!active || !isDesktop) return;
+    const waiting = takeDeferredNewSession();
+    if (waiting) setCreate(waiting.cwd ?? null);
+  }, [active]);
   const [terminal, setTerminal] = useState<string>();
   const session = state.sessions[view];
   const engineState = useStore(engine.state);
@@ -354,7 +426,7 @@ function Workspace({
           }}
         />
       ) : session ? (
-        <Session key={session.id} session={session} navigate={navigate} />
+        <Session key={session.id} session={session} navigate={navigate} active={active} />
       ) : (
         <div className="overview live-overview">
           {["home", "archive"].includes(view) && (

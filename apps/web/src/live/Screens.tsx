@@ -15,6 +15,7 @@ import { useDialogs } from "@/components/Dialogs";
 import { DESKTOP_LOCAL, isWindowsDesktop } from "./desktop";
 import { RemoteScreen } from "./RemoteScreen";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
+import { useT } from "./i18n";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import {
@@ -55,6 +56,7 @@ export function Screens({
   connect: () => void;
   open: (computer: Computer) => void;
 }) {
+  const t = useT();
   const [visible, setVisible] = useState(() => !document.hidden);
   useEffect(() => {
     const changed = () => setVisible(!document.hidden);
@@ -65,7 +67,9 @@ export function Screens({
   const names = useStore(computerNames.store);
   const [query, setQuery] = useState("");
   const ready = useStore(engine.state, (state) => state.ready);
-  const online = computers.filter((computer) => computer.machine.online).length;
+  const onlineComputers = computers.filter((computer) => computer.machine.online);
+  const offlineComputers = computers.filter((computer) => !computer.machine.online);
+  const online = onlineComputers.length;
   const search = query.trim().toLocaleLowerCase();
   const matches = (computer: Computer) =>
     [
@@ -74,7 +78,9 @@ export function Screens({
       computerIdentity(computer),
       computer.machine.id,
     ].some((value) => value.toLocaleLowerCase().includes(search));
-  const found = computers.filter(matches).length;
+  const onlineFound = onlineComputers.filter(matches).length;
+  const offlineFound = offlineComputers.filter(matches).length;
+  const found = onlineFound + offlineFound;
   const searchField = (
     <InputGroup className="page-search">
       <InputGroupAddon>
@@ -98,7 +104,7 @@ export function Screens({
   return (
     <div className="screens-page">
       <PageHeader
-        title="我的电脑"
+        title={t("nav.screen")}
         detail={ready ? <><span>{computers.length} 台电脑</span><span>{online} 台在线</span></> : undefined}
         actions={<>
           {searchField}
@@ -109,9 +115,9 @@ export function Screens({
         <div className="computer-list" role="status" aria-label="正在加载电脑">
           {[0, 1, 2].map((key) => (
             <div key={key} className="computer-list-row computer-list-loading">
-              <Skeleton className="h-9 w-40" />
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-7 w-28 justify-self-end" />
+              <Skeleton className="h-8 w-44" />
+              <Skeleton className="h-7 w-48" />
+              <Skeleton className="h-7 w-24 justify-self-end" />
             </div>
           ))}
           <p className="screen-list-wait">
@@ -120,7 +126,7 @@ export function Screens({
           </p>
         </div>
       ) : computers.length ? (
-        <div className="computer-list">
+        <>
           {!found && (
             <EmptyState
               icon={<Search />}
@@ -132,16 +138,49 @@ export function Screens({
               </Button>
             </EmptyState>
           )}
-          {computers.map((computer) => (
-            <ComputerRow
-              key={computer.key}
-              computer={computer}
-              live={live && visible}
-              hidden={!matches(computer)}
-              open={() => open(computer)}
-            />
-          ))}
-        </div>
+          {onlineComputers.length > 0 && (
+            <section className="computers-group" hidden={!onlineFound} aria-label="在线电脑">
+              {offlineFound > 0 && (
+                <div className="computers-section-heading computer-group-heading">
+                  <h2>在线 <span>{onlineFound}</span></h2>
+                </div>
+              )}
+              <div className="computer-list">
+                {onlineComputers.map((computer) => (
+                  <ComputerRow
+                    key={computer.key}
+                    computer={computer}
+                    live={live && visible}
+                    hidden={!matches(computer)}
+                    open={() => open(computer)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+          {offlineFound > 0 && (
+            <section className="computers-group" aria-label="离线电脑">
+              <div className="computers-section-heading computer-group-heading">
+                <h2>离线 <span>{offlineFound}</span></h2>
+                <Button variant="ghost" size="sm" className="computer-group-refresh" onClick={() => engine.reconnect()}>
+                  <RefreshCw data-icon="inline-start" />
+                  刷新状态
+                </Button>
+              </div>
+              <div className="computer-list computer-list-offline">
+                {offlineComputers.map((computer) => (
+                  <ComputerRow
+                    key={computer.key}
+                    computer={computer}
+                    live={live && visible}
+                    hidden={!matches(computer)}
+                    open={() => open(computer)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       ) : (
         <EmptyState
           icon={<Icon name="computer" size={18} />}
@@ -151,9 +190,9 @@ export function Screens({
           <Button onClick={connect}>连接电脑</Button>
         </EmptyState>
       )}
-      {!!computers.length && (
+      {!!computers.length && found > 0 && (
         <p className="screen-note">
-          <LockKeyhole size={13} aria-hidden />
+          <LockKeyhole size={12} aria-hidden />
           主机状态、画面与操作端到端加密
         </p>
       )}
@@ -190,59 +229,39 @@ function ComputerRow({
       aria-label={name}
     >
       <header className="computer-list-header">
-        <Icon name="computer" size={18} />
+        <span className="computer-row-mark" aria-hidden="true">
+          <Icon name="computer" size={16} />
+        </span>
         <div className="computer-list-name">
-          <h2 title={name}>{name}</h2>
+          <div className="computer-list-title">
+            <h2 title={name}>{name}</h2>
+            {selected && <Badge variant="secondary">当前</Badge>}
+            <ComputerName computer={computer} iconOnly />
+          </div>
           <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computer.key === DESKTOP_LOCAL ? "本机" : computerIdentity(computer)}</span>
         </div>
-        {selected && <Badge variant="secondary">当前</Badge>}
-        <ComputerName computer={computer} iconOnly />
       </header>
-      {connection && computer.machine.online && watching ? (
-        <Runtime value={connection}><ComputerTelemetry /></Runtime>
-      ) : (
-        <ComputerMetrics status={!computer.machine.online ? "电脑离线" : error ? "暂时无法连接" : live ? "正在连接电脑…" : "刷新已暂停"} detail={error} />
+      {computer.machine.online && (
+        connection && watching ? (
+          <Runtime value={connection}><ComputerTelemetry /></Runtime>
+        ) : (
+          <ComputerMetrics
+            status={error ? "暂时无法连接" : live ? "正在读取负载…" : ""}
+            pending={Boolean(!error && live)}
+            detail={error}
+          />
+        )
       )}
       <footer className="computer-list-actions">
-        {connection && computer.machine.online && watching ? (
-          <Runtime value={connection}>
-            <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />
-          </Runtime>
-        ) : (
-          <div className="screen-idle" role="status">
-            <div className="screen-idle-status">
-              <StatusDot on={false} />
-              <div>
-                <strong>
-                  {error
-                    ? "暂时无法连接"
-                    : !computer.machine.online
-                      ? "电脑离线"
-                      : live
-                        ? "正在连接电脑…"
-                        : "画面已暂停"}
-                </strong>
-                <span title={error}>
-                  {error ??
-                    (!computer.machine.online
-                      ? "电脑开机并运行 LinkShell 后即可连接"
-                      : live
-                        ? "正在建立加密连接"
-                        : "窗口回到前台后继续")}
-                </span>
-              </div>
-            </div>
-            <div className="screen-idle-actions">
-              {error && (
-                <Button variant="outline" onClick={retry}>
-                  <RefreshCw data-icon="inline-start" />
-                  重新连接
-                </Button>
-              )}
-              {!computer.machine.online && computer.key !== DESKTOP_LOCAL && (
+        {!computer.machine.online ? (
+          <div className="screen-idle screen-idle-offline" role="status">
+            <span className="computer-offline-label" title="电脑开机并运行 LinkShell 后即可连接">离线</span>
+            {computer.key !== DESKTOP_LOCAL && (
+              <div className="screen-idle-actions">
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
+                  className="computer-row-hover-action"
                   aria-label={`移除 ${name}`}
                   title="移除这台电脑"
                   disabled={forgetting}
@@ -250,11 +269,30 @@ function ComputerRow({
                 >
                   <Trash2 />
                 </Button>
-              )}
-              {!computer.machine.online && (
-                <Button variant="outline" onClick={() => engine.reconnect()}>
+              </div>
+            )}
+          </div>
+        ) : connection && watching ? (
+          <Runtime value={connection}>
+            <ConnectedScreen name={name} primaryAction={selected} open={open} retry={retry} />
+          </Runtime>
+        ) : (
+          <div className="screen-idle" role="status">
+            <div className="screen-idle-status" data-tone={error ? "danger" : undefined} title={error}>
+              <StatusDot on={false} />
+              <span className="screen-idle-label">
+                {error ? "暂时无法连接" : live ? "正在连接…" : "画面已暂停"}
+              </span>
+            </div>
+            <div className="screen-idle-actions">
+              {error ? (
+                <Button size="sm" variant="outline" onClick={retry}>
                   <RefreshCw data-icon="inline-start" />
-                  刷新连接
+                  重新连接
+                </Button>
+              ) : (
+                <Button size="sm" variant={selected ? "default" : "outline"} disabled>
+                  打开桌面
                 </Button>
               )}
             </div>
@@ -287,8 +325,8 @@ function ConnectedScreen({
   useEffect(() => { if (status !== "locked") setUnlocking(false); }, [status]);
   if (status === "locked") return detail ? <AccessUnlock name={name} /> : (
     <div className="screen-idle">
-      <div className="screen-idle-status"><LockKeyhole size={14} /><div><strong>需要访问密码</strong><span>解锁后查看负载与桌面</span></div></div>
-      <div className="screen-idle-actions"><Button variant="outline" onClick={() => setUnlocking(true)}>解锁电脑</Button></div>
+      <div className="screen-idle-status"><LockKeyhole size={13} /><span className="screen-idle-label">需要访问密码</span></div>
+      <div className="screen-idle-actions"><Button size="sm" variant="outline" onClick={() => setUnlocking(true)}>解锁电脑</Button></div>
       {unlocking && <Modal title="解锁电脑" close={() => setUnlocking(false)}><AccessUnlock name={name} /></Modal>}
     </div>
   );
@@ -303,31 +341,33 @@ function ConnectedScreen({
         active={active}
       />
     );
+  const connecting = status === "connecting";
   return (
     <div className="screen-idle" role="status">
-      <div className="screen-idle-status">
+      <div className="screen-idle-status" data-pending={connecting || undefined} title={statusDetail ?? "正在建立加密连接"}>
         {status === "connecting" || status === "reconnecting" ? (
-          <LoaderCircle className="shrink-0 animate-spin text-muted-foreground" size={14} />
+          <LoaderCircle className="shrink-0 animate-spin text-muted-foreground" size={13} />
         ) : (
           <StatusDot on={false} />
         )}
-        <div>
-          <strong>
-            {status === "stopped"
-              ? "连接已断开"
-              : status === "reconnecting"
-                ? "正在恢复连接…"
-                : "正在连接电脑…"}
-          </strong>
-          <span>
-            {statusDetail ?? "正在建立加密连接"}
-          </span>
-        </div>
+        <span className="screen-idle-label">
+          {status === "stopped"
+            ? "连接已断开"
+            : status === "reconnecting"
+              ? "正在恢复连接…"
+              : "正在连接…"}
+        </span>
       </div>
       <div className="screen-idle-actions">
-        <Button variant="outline" onClick={retry ?? (() => link.reconnectNow())}>
-          重新连接
-        </Button>
+        {connecting && !detail ? (
+          <Button size="sm" variant={primaryAction ? "default" : "outline"} disabled>
+            打开桌面
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={retry ?? (() => link.reconnectNow())}>
+            重新连接
+          </Button>
+        )}
       </div>
     </div>
   );

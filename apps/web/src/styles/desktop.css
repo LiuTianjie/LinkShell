@@ -97,9 +97,11 @@ html[data-desktop] .desktop-main .live-side-panel { border: var(--hairline) soli
    with a margin above, 100 % would push its foot (the composer) out of the window. */
 html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; align-self: stretch; min-width: 0; min-height: 0; margin: var(--gutter) 0 0; overflow: clip; outline: none; container-type: inline-size; container-name: desktop-workspace; }
 html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) { container-type: normal; }
+html[data-desktop] .workspace-stage { display: contents; }
+html[data-desktop] .workspace-stage[hidden] { display: none !important; }
 /* Beside a session the main area is only a frame: the conversation and the inspector are the panels. */
-html[data-desktop] .desktop-main:has(> .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
-html[data-desktop] .desktop-main > .live-overview,
+html[data-desktop] .desktop-main:has(> .session-page, > .workspace-stage:not([hidden]) > .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+html[data-desktop] :is(.desktop-main, .workspace-stage) > .live-overview,
 html[data-desktop] .desktop-main > .screens-page { flex: 1; min-height: 0; overflow: auto; }
 
 /* The Electron window: the sidebar is a slot that slides away; the main view reaches the top
@@ -119,10 +121,8 @@ html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .
 html[data-desktop][data-fullscreen] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 44px; }
 html[data-desktop] .desktop-titlebar { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 2px; height: var(--toolbar); padding: 0 10px 0 82px; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html[data-desktop][data-fullscreen] .desktop-titlebar { padding-left: 12px; }
-/* The mark and name after the traffic lights; it takes the row's spare width, the buttons keep the end. */
-html[data-desktop] .desktop-brand { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; padding-left: 2px; color: var(--label); font-size: 14px; font-weight: 600; letter-spacing: -.015em; pointer-events: none; }
-html[data-desktop] .desktop-brand img { flex: none; width: 20px; height: 20px; object-fit: contain; }
-html[data-desktop] .desktop-brand span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Empty drag space after the traffic lights; the utility buttons keep the end. */
+html[data-desktop] .desktop-titlebar-spacer { flex: 1; min-inline-size: 0; }
 html[data-desktop] .desktop-titlebar :is(button, a, input, [role="button"]) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Beside the traffic lights, over the main panel's title row (which leaves it room). */
 html[data-desktop] .desktop-floating-titlebar { position: absolute; top: var(--gutter); left: 0; z-index: 7; display: flex; align-items: center; width: 120px; height: var(--toolbar); padding: 0 0 0 80px; justify-content: flex-start; -webkit-app-region: no-drag; app-region: no-drag; }
@@ -131,8 +131,11 @@ html[data-desktop][data-fullscreen] .desktop-floating-titlebar { width: 52px; pa
 html[data-desktop] .desktop-titlebar-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .desktop-titlebar-button:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .desktop-titlebar-button:active { background: var(--fillStrong); }
-/* Page title rows can drag the window too, where they have room to spare. */
+/* Page title rows can drag the window too, where they have room to spare; never in full screen,
+   where the window cannot be dragged and top-edge drag regions interfere with remote status bars. */
 html[data-desktop] .desktop-root[data-shell="electron"] :is(.session-heading, .desktop-page-title, .inspector-tabs) { -webkit-app-region: drag; app-region: drag; }
+html[data-desktop][data-fullscreen] :is(.desktop-titlebar, .page-header, .session-heading, .desktop-page-title, .inspector-tabs) { -webkit-app-region: no-drag; app-region: no-drag; }
+html[data-desktop] .desktop-root:has(.screen-fullscreen) .desktop-floating-titlebar { display: none; }
 html[data-desktop] .desktop-root[data-shell="electron"] :is(.session-heading, .desktop-page-title, .inspector-tabs) :is(button, a, input, select, [role="button"], [role="tab"], [role="combobox"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-sidebar-slot { transition: none; } }
 
@@ -144,13 +147,13 @@ html[data-desktop] .desktop-root[data-shell="electron"] .desktop-body,
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { padding: 0; }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main { margin: 0; border: 0; border-left: var(--hairline) solid var(--separator); border-radius: 0; }
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { border-left: 0; }
-html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page) { background: var(--plain); }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page, > .workspace-stage:not([hidden]) > .session-page) { background: var(--plain); }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main .live-session .session-layout { gap: 0; }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main :is(.session-main, .live-side-panel) { border: 0; border-radius: 0; }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main .live-side-panel { border-left: var(--hairline) solid var(--separator); }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main *::-webkit-scrollbar-track { margin-block: 0; }
 html[data-desktop] .desktop-root[data-shell="electron"] .desktop-floating-titlebar { top: 0; }
-html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page) > .connection-banner { margin: 8px; }
+html[data-desktop] .desktop-root[data-shell="electron"] .desktop-main:has(> .session-page, > .workspace-stage:not([hidden]) > .session-page) :is(> .connection-banner, > .workspace-stage > .connection-banner) { margin: 8px; }
 
 html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) .desktop-status-bar { display: none; }
 html[data-desktop] .desktop-root:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) .desktop-body { padding: 0; }
@@ -222,14 +225,27 @@ html[data-desktop] .desktop-place > svg { flex: none; width: var(--icon-navigati
 html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-place:hover { background: var(--fill); }
 html[data-desktop] .desktop-place:active { background: var(--fillStrong); }
-html[data-desktop] .desktop-place[data-active] { background: var(--fill); }
+html[data-desktop] .desktop-place[data-active] { background: var(--sidebarAccent); font-weight: 500; }
 html[data-desktop] .desktop-place[data-active] > svg { color: var(--label); }
+html[data-desktop] .desktop-tools-section { display: grid; gap: 1px; margin-top: 2px; }
+html[data-desktop] .desktop-tools-toggle { display: flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: color-mix(in oklab, var(--label) 52%, transparent); font: inherit; font-size: 12px; font-weight: 500; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .desktop-tools-toggle:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .desktop-tools-toggle[data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .desktop-tools-active { margin-left: auto; min-inline-size: 0; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .desktop-tools-list { display: grid; gap: 1px; }
+html[data-desktop] .desktop-tools-list > .desktop-place { height: 34px; padding-left: 16px; font-size: 13px; }
+html[data-desktop] .desktop-tools-list > .desktop-place > svg { width: 15px; height: 15px; }
 /* Headings contain plain text as well as optional presence marks, so a text box (not an
    anonymous flex item) provides an ellipsis while the adjacent actions keep their width. */
 html[data-desktop] .tree-heading-link { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 22px; margin-left: -6px; padding: 0 6px; overflow: hidden; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .tree-heading-link > .desktop-presence { margin-right: 6px; vertical-align: 1px; }
 html[data-desktop] .tree-heading-link > span { color: var(--tertiaryLabel); font-weight: 400; font-variant-numeric: tabular-nums; }
 html[data-desktop] .tree-heading-link:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-heading-toggle { display: inline-flex; align-items: center; gap: 4px; min-inline-size: 0; height: 22px; margin-left: -6px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; cursor: default; transition: background var(--transition), color var(--transition); }
+html[data-desktop] .tree-heading-toggle:hover { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-heading-toggle > span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-desktop] .tree-heading-chevron { flex: none; color: var(--tertiaryLabel); transition: transform 180ms var(--ease-out); }
+html[data-desktop] .tree-heading-chevron[data-open] { transform: rotate(90deg); }
 html[data-desktop] .desktop-nav-badge { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--waitingSoft); color: var(--waiting); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* The working set: what waits on you, then projects and their sessions. */
@@ -269,7 +285,7 @@ html[data-desktop] .tree-sessions { display: grid; grid-template-columns: minmax
 html[data-desktop] .tree-session { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .tree-session:hover { background: var(--fill); color: var(--label); }
 html[data-desktop] .tree-session:active { background: var(--fillStrong); }
-html[data-desktop] .tree-session[data-active] { background: var(--fill); color: var(--label); }
+html[data-desktop] .tree-session[data-active] { background: var(--sidebarAccent); color: var(--label); font-weight: 500; }
 /* The row a right-click menu belongs to, while it shows: the hover tint stays on it (ink, not a ring). */
 html[data-desktop] :is(.tree-session[data-menu-open], .tree-project-row[data-menu-open] .tree-project-toggle) { background: var(--fill); color: var(--label); }
 html[data-desktop] .tree-title { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-width: 0; }
@@ -305,7 +321,11 @@ html[data-desktop] .desktop-account > svg { flex: none; width: 16px; height: 16p
 html[data-desktop] .desktop-sidebar-footer { flex: none; flex-direction: row; align-items: center; gap: 2px; padding: 8px; border-top: var(--hairline) solid var(--separator); }
 html[data-desktop] .desktop-account { flex: 1; justify-content: flex-start; min-width: 0; height: 28px; padding: 0 8px; gap: 8px; border: 0; border-radius: var(--radius-row); color: var(--label); font-size: 13px; font-weight: 400; }
 html[data-desktop] .desktop-account span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html[data-desktop] .desktop-sidebar-footer > [data-button][data-size="icon"] { width: 28px; height: 28px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-footer-actions { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+html[data-desktop] .desktop-sidebar-footer :is(> [data-button][data-size="icon"], .desktop-footer-actions > [data-button][data-size="icon"]) { width: 28px; height: 28px; border-radius: var(--radius-row); color: var(--secondaryLabel); }
+html[data-desktop] .desktop-sidebar-footer .desktop-footer-manage { position: relative; }
+html[data-desktop] .desktop-sidebar-footer .desktop-footer-manage[data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] .desktop-sidebar-footer .desktop-footer-manage > .desktop-manage-dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--sidebarBackground); }
 html[data-desktop] .desktop-appearance-menu { min-width: 180px; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electron"]) .desktop-sidebar { display: none; }
 
@@ -340,15 +360,15 @@ html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outli
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, a.desktop-place, .list-row, [cmdk-item]) { cursor: default; }
 /* A button on its own is 32 px; toolbar buttons (sm) and icon buttons are 28. xs is for a control
    nested in another one. Toolbar labels can wrap. */
-html[data-desktop] .desktop-main [data-button][data-size="default"]:not(.resource-entry):not(.resource-service),
-html[data-desktop] .desktop-main [data-button][data-size="lg"] { height: 32px; padding-inline: 12px; gap: 6px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-button][data-size="sm"]:not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
-html[data-desktop] .desktop-main [data-button][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
-html[data-desktop] .desktop-main [data-button]:is([data-size="icon"], [data-size="icon-sm"]) { width: 28px; height: 28px; border-radius: var(--radius-control); }
-html[data-desktop] .desktop-main [data-button] svg:not([class*="size-"]) { width: var(--icon-size); height: var(--icon-size); }
-html[data-desktop] .desktop-main [data-button][data-size="xs"] svg:not([class*="size-"]) { width: var(--icon-small); height: var(--icon-small); }
-html[data-desktop] .desktop-main [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
-html[data-desktop] .desktop-main [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="default"]:not(.resource-entry):not(.resource-service),
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="lg"] { height: 32px; padding-inline: 12px; gap: 6px; font-size: 13px; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="sm"]:not(.resource-entry):not(.resource-service) { height: 28px; padding-inline: 10px; gap: 6px; font-size: 13px; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="xs"] { height: 24px; padding-inline: 8px; gap: 4px; font-size: 12px; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button]:is([data-size="icon"], [data-size="icon-sm"]) { width: 28px; height: 28px; border-radius: var(--radius-control); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button] svg:not([class*="size-"]) { width: var(--icon-size); height: var(--icon-size); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="xs"] svg:not([class*="size-"]) { width: var(--icon-small); height: var(--icon-small); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
 
 /* Selectable toolbar options share their geometry in new and existing conversations. */
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 28px; height: auto; padding: 4px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal; }
@@ -377,14 +397,14 @@ html[data-desktop] [data-slot="textarea"] { border: 0; border-radius: var(--radi
 /* Segmented filters: a recessed track; the current one is a raised plain step. 28 px, the height of
    the buttons and selects beside them. Terminal tabs share the primitive but are a tab strip (their
    own rules, desktop-resources.css): no thumb, no raised step. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
 /* In the dark the track is a tint of white over the panel (Codex's 5 %), never darker than the page. */
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
-html[data-desktop][data-theme="dark"] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { box-shadow: inset 0 0 0 var(--hairline) rgb(255 255 255 / .08); }
-html[data-desktop] .desktop-main [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
+html[data-desktop][data-theme="dark"] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { box-shadow: inset 0 0 0 var(--hairline) rgb(255 255 255 / .08); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
 
 /* Status marks: a hue on a tint of itself, a finished session stays grey. 20 px, 4 px corners. */
 html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 6px; border-radius: var(--radius-small); font-size: 12px; font-weight: 500; }
@@ -583,10 +603,15 @@ html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 4px;
 /* Rows in a group sit 16 px in from its edges, their hairlines too, as Codex's settings rows. A
    group's title and its line of why sit above its box, starting where the box does (13 / 500
    secondary); groups are 24 px apart. */
-html[data-desktop] .desktop-main .computers-page { gap: 24px; }
+html[data-desktop] .desktop-main .computers-page,
+html[data-desktop] .desktop-main .screens-page { gap: 22px; }
 html[data-desktop] .desktop-main .computers-group { display: flex; flex-direction: column; gap: 8px; }
+html[data-desktop] .desktop-main .computers-group[hidden] { display: none; }
 html[data-desktop] .desktop-main .computers-section-heading { padding: 0; }
-html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 18px; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 12.5px; font-weight: 500; line-height: 18px; }
+html[data-desktop] .desktop-main .computer-group-heading { padding: 0 2px; }
+html[data-desktop] .desktop-main .computer-group-refresh { height: 26px; padding-inline: 8px; color: color-mix(in oklab, var(--label) 55%, transparent); font-size: 12px; }
+html[data-desktop] .desktop-main .computer-group-refresh:hover:not(:disabled) { color: var(--label); }
 /* Marks in a group's rows are bare icons in one 18 px column, as the agents' and the computers'. */
 html[data-desktop] .desktop-main .computers-section .access-settings-mark { width: 18px; height: 18px; border-radius: 0; background: transparent; color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main .computers-section .access-settings { align-items: center; }
@@ -596,9 +621,10 @@ html[data-desktop] .desktop-main :is(.screen-list, .screens-page > div) > .scree
 html[data-desktop] .desktop-main .project-sessions > .project-session { padding: 0 16px; }
 html[data-desktop] .desktop-main .resource-service-list > .resource-service { padding: 0 16px; }
 /* The rename pencil beside a computer's name: there when the row is hovered or it has focus. */
-html[data-desktop] .desktop-main :is(.computer-row-name, .screen-row) [title="给电脑命名"] { width: 20px; height: 20px; border-radius: var(--radius-control); color: var(--tertiaryLabel); opacity: 0; transition: opacity var(--transition); }
-html[data-desktop] .desktop-main :is(.list-row:hover, .screen-row:hover) [title="给电脑命名"],
+html[data-desktop] .desktop-main :is(.computer-row-name, .screen-row, .computer-list-row) [title="给电脑命名"] { width: 22px; height: 22px; border-radius: var(--radius-control); color: var(--tertiaryLabel); opacity: 0; transition: opacity var(--transition); }
+html[data-desktop] .desktop-main :is(.list-row:hover, .list-row:focus-within, .screen-row:hover, .screen-row:focus-within, .computer-list-row:hover, .computer-list-row:focus-within) [title="给电脑命名"],
 html[data-desktop] .desktop-main [title="给电脑命名"]:is(:focus-visible, [data-state="open"]) { opacity: 1; }
+@media (hover: none) { html[data-desktop] .desktop-main [title="给电脑命名"] { opacity: 1; } }
 html[data-desktop] .desktop-main [title="给电脑命名"] svg { width: 13px; height: 13px; }
 html[data-desktop] .desktop-main .computer-agent-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 html[data-desktop] .desktop-main .computer-agent-row > * { margin-left: 0; }
@@ -656,8 +682,17 @@ html[data-desktop] .desktop-main .resource-entry + .resource-entry::before,
 html[data-desktop] .desktop-main .resource-service + .resource-service::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); pointer-events: none; }
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover::before,
 html[data-desktop] .desktop-main :is(.resource-entry, .resource-service):hover + :is(.resource-entry, .resource-service)::before { opacity: 0; }
-/* Screens: rows in the group like any other list; the current computer is marked by its badge,
-   not a second tinted box inside the group. */
+/* Screens: online and offline computer groups in crisp hairline boxes, compact single-line telemetry,
+   and edge-to-edge hover tint inside the rounded card box. */
+html[data-desktop] .desktop-main .computer-list { border: var(--hairline) solid var(--separator); border-radius: var(--radius-card); background: var(--plain); overflow: clip; }
+html[data-desktop][data-theme="dark"] .desktop-main .computer-list { background: color-mix(in oklab, var(--label) 2.5%, transparent); }
+html[data-desktop] .desktop-main .computer-list-row { min-height: 60px; padding: 10px 16px; }
+html[data-desktop] .desktop-main .computer-list-row[data-offline] { min-height: 50px; padding: 8px 16px; }
+html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):not(:has(.computer-telemetry-details)):hover { background: color-mix(in oklab, var(--fill) 72%, transparent); }
+html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):not(:has(.computer-telemetry-details)):hover::before,
+html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):not(:has(.computer-telemetry-details)):hover + .computer-list-row::before { opacity: 0; }
+html[data-desktop] .desktop-main .computer-list-title h2 { font-size: 13px; line-height: 18px; }
+html[data-desktop] .desktop-main .computer-list-actions .screen-idle-actions > [data-button]:not([data-size^="icon"]) { height: 28px; min-width: 76px; padding-inline: 11px; font-size: 12.5px; }
 html[data-desktop] .desktop-main .screen-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; min-height: 60px; margin: 0; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; transition: background var(--transition); }
 html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .screen-row:not(.screen-row-skeleton):hover { background: var(--fill); }
@@ -665,7 +700,7 @@ html[data-desktop] .desktop-main .screen-row:hover::before,
 html[data-desktop] .desktop-main .screen-row:hover + .screen-row::before { opacity: 0; }
 html[data-desktop] .desktop-main .screen-row > div:first-child > span:first-child { display: grid; place-items: center; width: 18px; color: var(--secondaryLabel); }
 /* Inside a group an empty state is just its words, the size of what it stands in for. */
-html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-sessions, .resource-directory, .screen-list, .acp-settings) [data-slot="empty"] { flex: none; margin: 0; padding: 24px; border: 0; background: transparent; }
+html[data-desktop] .desktop-main :is(.computers-section, .session-group, .project-sessions, .resource-directory, .screen-list, .computer-list, .acp-settings) [data-slot="empty"] { flex: none; margin: 0; padding: 24px; border: 0; background: transparent; }
 
 /* Empty, loading and welcome states: quiet, no frame, in the middle of the room the page has (a
    little above it, as 文件's own empty side is), the same on every page: a bare 28 px icon in
@@ -682,7 +717,7 @@ html[data-desktop] .desktop-main .welcome-live { max-width: 480px; gap: 14px; ma
 html[data-desktop] .desktop-main .welcome-live img { width: 56px; height: 56px; border-radius: var(--radius-panel); }
 html[data-desktop] .desktop-main .welcome-live h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 html[data-desktop] .desktop-main .connection-banner { flex: none; margin: 8px 8px 0; padding: 8px 12px; border: 0; border-radius: var(--radius-card); background: var(--waitingSoft); color: var(--waiting); font-size: 13px; }
-html[data-desktop] .desktop-main:has(> .session-page) > .connection-banner { margin: 0 0 var(--gutter); }
+html[data-desktop] .desktop-main:has(> .session-page, > .workspace-stage:not([hidden]) > .session-page) :is(> .connection-banner, > .workspace-stage > .connection-banner) { margin: 0 0 var(--gutter); }
 
 /* ── Tool pages ──────────────────────────────────────────────────────────── */
 /* The terminal below is already a framed well, so the tab bar is bare: no rule above or below,
