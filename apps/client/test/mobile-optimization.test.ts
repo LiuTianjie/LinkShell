@@ -269,14 +269,18 @@ describe("Mobile Coding UX Helpers", () => {
 
 describe("Android Update Checker, Power & Usage ROI Helpers", () => {
   it("never fetches or enables external update checks on iOS", async () => {
-    const fetchSpy = vi.fn<typeof fetch>();
+    let called = false;
+    const fetchSpy: typeof fetch = async () => {
+      called = true;
+      return new Response("[]", { status: 200 });
+    };
     const iosResult = await checkForAndroidAppUpdate({
       platformOs: "ios",
       currentVersion: "1.0.0",
       fetchImpl: fetchSpy,
     });
     expect(iosResult).toEqual({ supported: false, currentVersion: "1.0.0", upToDate: true });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(called).toBe(false);
   });
 
   it("compares mobile release semvers on Android while skipping desktop/gateway tags", async () => {
