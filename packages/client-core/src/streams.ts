@@ -51,9 +51,12 @@ export interface HostStreamsOptions {
   iceServers: () => string[] | undefined;
   /** How long a connection may take to open before it is given up (default 12 s). */
   connectTimeoutMs?: number;
-  /** Waits between attempts after a failure (default 5 s, 20 s, then a minute). */
+  /** Waits between attempts after a failure (default 15 s, then 45 s; pauses after 3 failed attempts until the link reconnects). */
   retryMs?: number[];
 }
+
+const DEFAULT_RETRY_MS = [15_000, 45_000];
+const MAX_DIRECT_ATTEMPTS = 3;
 
 const base64 = {
   encode(bytes: Uint8Array): string {
@@ -75,9 +78,13 @@ export class HostStreams {
   private attempt = 0;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  private relayEpoch = 0;
+  private openingRelayed = 0;
   private readonly pathListeners = new Set<(path: StreamPath) => void>();
   /** Streams on the RPC channel, by stream id. */
   private readonly relayed = new Map<string, StreamHandlers>();
+  /** Frames for a relayed stream whose `proxy.open` hasn't resolved yet. */
+  private readonly earlyRelayed = new Map<string, ({ type: "data"; data: Uint8Array } | { type: "closed"; error?: string })[]>();
   /** Streams on the direct channel, by their number there. */
   private readonly directed = new Map<number, StreamHandlers>();
   /** Frames for a direct stream whose `proxy.open` hasn't answered yet (a server that speaks first). */
@@ -87,21 +94,50 @@ export class HostStreams {
     private readonly link: HostLink,
     private readonly options: HostStreamsOptions,
   ) {
-    link.on("proxy.data", ({ streamId, data }) => this.relayed.get(streamId)?.data(base64.decode(data)));
+    link.on("proxy.data", ({ streamId, data }) => {
+      const handlers = this.relayed.get(streamId);
+      if (handlers) {
+        handlers.data(base64.decode(data));
+        return;
+      }
+      if (this.openingRelayed > 0) {
+        const held = this.earlyRelayed.get(streamId) ?? [];
+        if (held.length < 64 && this.earlyRelayed.size < 32) {
+          this.earlyRelayed.set(streamId, [...held, { type: "data", data: base64.decode(data) }]);
+        }
+      }
+    });
     link.on("proxy.closed", ({ streamId, error }) => {
       const handlers = this.relayed.get(streamId);
-      this.relayed.delete(streamId);
-      handlers?.closed(error);
+      if (handlers) {
+        this.relayed.delete(streamId);
+        handlers.closed(error);
+        return;
+      }
+      if (this.openingRelayed > 0) {
+        const held = this.earlyRelayed.get(streamId) ?? [];
+        if (held.length < 64 && this.earlyRelayed.size < 32) {
+          this.earlyRelayed.set(streamId, [...held, { type: "closed", error }]);
+        }
+      }
     });
     link.onStatus((status) => {
       if (status === "online") return;
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = undefined;
+      }
+      this.attempt = 0;
       // The channel dropped: the computer already closed its ends, and the direct channel was made through it.
       this.dropRelayed("连接已断开");
       const connection = this.connection;
       this.dropDirect();
       connection?.close();
     });
-    link.onOnline(() => this.connect());
+    link.onOnline(() => {
+      this.attempt = 0;
+      this.connect();
+    });
     if (link.status === "online") this.connect();
   }
 
@@ -116,7 +152,7 @@ export class HostStreams {
 
   /** Looks for a direct path now (after the machine's info arrived, or the network changed). */
   connect(): void {
-    if (this.stopped || !this.options.connector || this.connection || this.link.status !== "online") return;
+    if (this.stopped || !this.options.connector || this.connection || this.link.status !== "online" || this.attempt >= MAX_DIRECT_ATTEMPTS) return;
     const iceServers = this.options.iceServers();
     if (!iceServers) return;
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -153,9 +189,30 @@ export class HostStreams {
   }
 
   async open(port: number, handlers: StreamHandlers, options: { direct?: boolean } = {}): Promise<HostStream> {
+    if (this.stopped) throw new Error("连接已断开");
+    const relayEpoch = this.relayEpoch;
     const connection = options.direct !== false && this.pathValue === "direct" ? this.connection : undefined;
-    const result = await this.link.call("proxy.open", { port, direct: connection ? true : undefined });
+    if (!connection) this.openingRelayed += 1;
+    let result: { streamId: string; channel?: number };
+    try {
+      result = await this.link.call("proxy.open", { port, direct: connection ? true : undefined });
+    } finally {
+      if (!connection) this.openingRelayed -= 1;
+    }
     const { streamId } = result;
+    // Dropped or stopped while `proxy.open` was in flight: clean up the newly opened stream immediately.
+    if (this.stopped || this.relayEpoch !== relayEpoch) {
+      this.earlyRelayed.delete(streamId);
+      if (result.channel !== undefined) {
+        this.early.delete(result.channel);
+        if (connection && this.connection === connection) {
+          connection.send(encodeDirectFrame({ type: "close", stream: result.channel }));
+        }
+      } else if (this.link.status === "online") {
+        void this.link.call("proxy.close", { streamId }).catch(() => {});
+      }
+      throw new Error("连接已断开");
+    }
     if (result.channel !== undefined && connection && this.connection === connection) {
       const stream = result.channel;
       this.directed.set(stream, handlers);
@@ -182,6 +239,18 @@ export class HostStreams {
       throw new Error("直连中断了");
     }
     this.relayed.set(streamId, handlers);
+    const pendingRelayed = this.earlyRelayed.get(streamId);
+    if (pendingRelayed) {
+      this.earlyRelayed.delete(streamId);
+      for (const item of pendingRelayed) {
+        if (!this.relayed.has(streamId)) break;
+        if (item.type === "data") handlers.data(item.data);
+        else {
+          this.relayed.delete(streamId);
+          handlers.closed(item.error);
+        }
+      }
+    }
     let closed = false;
     return {
       direct: false,
@@ -202,6 +271,7 @@ export class HostStreams {
   /** Looks for a direct path again after `stop` (an app coming back to a connection it had put down). */
   start(): void {
     this.stopped = false;
+    this.attempt = 0;
     this.connect();
   }
 
@@ -237,15 +307,19 @@ export class HostStreams {
     for (const listener of this.pathListeners) listener(path);
   }
 
-  /** The direct connection failed or ended: its streams end, and another is tried after a while. */
+  /** The direct connection failed or ended: its streams end, and another is tried up to 3 times per link session. */
   private lose(connection: DirectConnection): void {
     if (this.connection !== connection) return;
     this.dropDirect();
     connection.close();
     if (this.stopped || this.link.status !== "online") return;
-    const waits = this.options.retryMs ?? [5000, 20_000, 60_000];
-    const wait = waits[Math.min(this.attempt, waits.length - 1)]!;
+    const waits = this.options.retryMs ?? DEFAULT_RETRY_MS;
+    const attemptIndex = this.attempt;
     this.attempt += 1;
+    // Pause after 3 consecutive failed attempts on this link session so UDP-blocked networks
+    // don't retry forever; reconnecting the link resets `attempt`.
+    if (this.attempt >= MAX_DIRECT_ATTEMPTS) return;
+    const wait = waits[Math.min(attemptIndex, waits.length - 1)]!;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       this.connect();
@@ -262,8 +336,10 @@ export class HostStreams {
   }
 
   private dropRelayed(error?: string): void {
+    this.relayEpoch += 1;
     const streams = [...this.relayed.values()];
     this.relayed.clear();
+    this.earlyRelayed.clear();
     for (const handlers of streams) handlers.closed(error);
   }
 }

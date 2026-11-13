@@ -179,13 +179,24 @@ function appendText(existing: string, block: ContentBlock): string {
   return block.type === "text" ? existing + block.text : existing;
 }
 
+/** Tracks items whose text was replaced (`replace: true`) so prepending earlier history doesn't re-prepend superseded chunks. */
+const replacedText = new WeakSet<TimelineItem>();
+
+function withReplacedText<T extends TimelineItem>(item: T, replaced: boolean): T {
+  if (replaced) replacedText.add(item);
+  return item;
+}
+
 /** Stops every streaming message (turn ended, or a message boundary). */
 function settleStreaming(view: SessionView, ts: number): SessionView {
   let items: TimelineItem[] | undefined;
   view.items.forEach((item, i) => {
     if ((item.kind === "agent" || item.kind === "thought") && item.streaming) {
       items ??= view.items.slice();
-      items[i] = item.kind === "thought" ? { ...item, streaming: false, endedTs: item.endedTs ?? ts } : { ...item, streaming: false };
+      items[i] = withReplacedText(
+        item.kind === "thought" ? { ...item, streaming: false, endedTs: item.endedTs ?? ts } : { ...item, streaming: false },
+        replacedText.has(item),
+      );
     }
   });
   return items ? { ...view, items } : view;
@@ -371,39 +382,49 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       const id = update.messageId ?? `user-${key}`;
       const existing = get(view, id, "user");
       // The host's copy confirms (and replaces) an optimistic one with the same id.
-      const blocks = existing && !existing.pending ? [...existing.blocks, update.content] : [update.content];
+      const blocks = existing && !existing.pending && !existing.failed ? [...existing.blocks, update.content] : [update.content];
       return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts });
     }
     case "agent_message_chunk": {
       const existing = get(view, update.messageId, "agent");
       const attachments =
         update.content.type === "text" ? existing?.attachments : [...(existing?.attachments ?? []), update.content];
-      return upsert(view, {
-        kind: "agent",
-        id: update.messageId,
-        text: appendText(existing?.text ?? "", update.content),
-        attachments,
-        streaming: true,
-        ts: existing?.ts ?? ts,
-      });
+      const next = withReplacedText(
+        {
+          kind: "agent" as const,
+          id: update.messageId,
+          text: appendText(update.replace ? "" : (existing?.text ?? ""), update.content),
+          ...(existing?.senderSessionId ? { senderSessionId: existing.senderSessionId } : {}),
+          ...(existing?.recipientSessionId ? { recipientSessionId: existing.recipientSessionId } : {}),
+          attachments,
+          streaming: true,
+          ts: existing?.ts ?? ts,
+        },
+        Boolean(update.replace || (existing && replacedText.has(existing))),
+      );
+      return upsert(view, next);
     }
     case "agent_thought_chunk": {
       const id = `thought:${update.messageId}`;
       const existing = get(view, id, "thought");
-      return upsert(view, {
-        kind: "thought",
-        id,
-        text: appendText(existing?.text ?? "", update.content),
-        streaming: true,
-        ts: existing?.ts ?? ts,
-      });
+      const next = withReplacedText(
+        {
+          kind: "thought" as const,
+          id,
+          text: appendText(update.replace ? "" : (existing?.text ?? ""), update.content),
+          streaming: true,
+          ts: existing?.ts ?? ts,
+        },
+        Boolean(update.replace || (existing && replacedText.has(existing))),
+      );
+      return upsert(view, next);
     }
     case "ls_message_done": {
       const id = update.role === "thought" ? `thought:${update.messageId}` : update.messageId;
       const agent = get(view, id, "agent");
-      if (agent) return upsert(view, { ...agent, streaming: false, ...(update.questions?.length ? { questions: update.questions } : {}) });
+      if (agent) return upsert(view, withReplacedText({ ...agent, streaming: false, ...(update.questions?.length ? { questions: update.questions } : {}) }, replacedText.has(agent)));
       const thought = get(view, id, "thought");
-      if (thought) return upsert(view, { ...thought, streaming: false, endedTs: thought.endedTs ?? ts });
+      if (thought) return upsert(view, withReplacedText({ ...thought, streaming: false, endedTs: thought.endedTs ?? ts }, replacedText.has(thought)));
       return view;
     }
     case "tool_call": {
@@ -637,9 +658,19 @@ function upsertUser(view: SessionView, existing: TimelineItem | undefined, item:
 function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
   if (earlier.kind === "agent" && later.kind === "agent") {
     const attachments = [...(earlier.attachments ?? []), ...(later.attachments ?? [])];
-    return { ...later, text: earlier.text + later.text, attachments: attachments.length ? attachments : undefined, ts: earlier.ts };
+    const replaced = replacedText.has(later);
+    return withReplacedText(
+      { ...later, text: replaced ? later.text : earlier.text + later.text, attachments: attachments.length ? attachments : undefined, ts: earlier.ts },
+      replaced || replacedText.has(earlier),
+    );
   }
-  if (earlier.kind === "thought" && later.kind === "thought") return { ...later, text: earlier.text + later.text, ts: earlier.ts };
+  if (earlier.kind === "thought" && later.kind === "thought") {
+    const replaced = replacedText.has(later);
+    return withReplacedText(
+      { ...later, text: replaced ? later.text : earlier.text + later.text, ts: earlier.ts },
+      replaced || replacedText.has(earlier),
+    );
+  }
   if (earlier.kind === "user" && later.kind === "user") {
     const blocks = mergeText([...earlier.blocks, ...later.blocks]);
     return { ...later, blocks, agentMessages: agentInboxMessages(blocks), ts: earlier.ts };

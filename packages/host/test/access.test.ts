@@ -115,24 +115,32 @@ it("drops remote connections and voids tokens when the password changes or goes"
   await expect(open.call("sessions.list", { limit: 10 })).resolves.toBeTruthy();
 });
 
-it("throttles wrong guesses per device", () => {
+it("throttles wrong guesses per device and caps concurrent scrypt derivations", async () => {
   const dir = join(tmpdir(), `ls-access-throttle-${process.pid}-${Date.now()}`);
   cleanups.push(async () => rm(dir, { recursive: true, force: true }));
-  const access = new AccessControl(dir);
-  return import("node:fs/promises").then(async ({ mkdir }) => {
-    await mkdir(dir, { recursive: true });
-    access.set("right-one");
-    const now = 1_000_000;
-    for (let i = 0; i < 5; i++) expect(access.unlock("a", { password: "nope" }, now)).toEqual({ ok: false, reason: "wrong" });
-    // Even the right password waits out the window once a device has guessed too often.
-    expect(access.unlock("a", { password: "right-one" }, now + 1000)).toEqual({ ok: false, reason: "throttled" });
-    expect(access.unlock("b", { password: "right-one" }, now + 1000)).toMatchObject({ ok: true });
-    expect(access.unlock("a", { password: "right-one" }, now + 5 * 60_000 + 1)).toMatchObject({ ok: true });
-    // An expired token doesn't open anything.
-    const issued = access.unlock("c", { password: "right-one" }, now);
-    if (!issued.ok) throw new Error("unlock failed");
-    expect(access.unlock("c", { token: issued.token }, issued.expiresAt + 1)).toEqual({ ok: false, reason: "invalid_token" });
-  });
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(dir, { recursive: true });
+  const access = new AccessControl(dir, { maxConcurrentScrypt: 2, maxQueuedScrypt: 1 });
+  access.set("right-one");
+  const now = 1_000_000;
+  for (let i = 0; i < 5; i++) expect(await access.unlock("a", { password: "nope" }, now)).toEqual({ ok: false, reason: "wrong" });
+  // Even the right password waits out the window once a device has guessed too often.
+  expect(await access.unlock("a", { password: "right-one" }, now + 1000)).toEqual({ ok: false, reason: "throttled" });
+  expect(await access.unlock("b", { password: "right-one" }, now + 1000)).toMatchObject({ ok: true });
+  expect(await access.unlock("a", { password: "right-one" }, now + 5 * 60_000 + 1)).toMatchObject({ ok: true });
+  // An expired token doesn't open anything.
+  const issued = await access.unlock("c", { password: "right-one" }, now);
+  if (!issued.ok) throw new Error("unlock failed");
+  expect(await access.unlock("c", { token: issued.token }, issued.expiresAt + 1)).toEqual({ ok: false, reason: "invalid_token" });
+
+  // Concurrent scrypt flood beyond maxConcurrentScrypt + maxQueuedScrypt (2 + 1 = 3) fast-fails with throttled.
+  const burst = await Promise.all(
+    Array.from({ length: 8 }, (_, idx) => access.unlock(`flood-${idx}`, { password: "right-one" }, now + 2000)),
+  );
+  expect(burst.filter((r) => r.ok)).toHaveLength(3);
+  expect(burst.filter((r) => !r.ok && r.reason === "throttled")).toHaveLength(5);
+  // Once the burst drains, subsequent unlocks succeed immediately.
+  expect(await access.unlock("after-flood", { password: "right-one" }, now + 3000)).toMatchObject({ ok: true });
 });
 
 it("stays locked when the password file is damaged", async () => {
@@ -141,5 +149,5 @@ it("stays locked when the password file is damaged", async () => {
   await writeFile(accessPath(home), "not json");
   const access = new AccessControl(home);
   expect(access.enabled).toBe(true);
-  expect(access.unlock("a", { password: "" })).toEqual({ ok: false, reason: "wrong" });
+  expect(await access.unlock("a", { password: "" })).toEqual({ ok: false, reason: "wrong" });
 });

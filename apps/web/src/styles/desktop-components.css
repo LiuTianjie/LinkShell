@@ -2,18 +2,19 @@
    Base primitives first (they reach every window at once), then each window and part of the
    conversation. Only the desktop shell gets these rules. */
 
+@layer components {
 /* ── Primitives, at Codex's values ───────────────────────────────────────── */
 /* Tooltips are inverted: ink with the page's colour as text in the light theme, a raised grey in
    the dark one; 13 px, a control's 6 px corner and the floating shadow. */
-html[data-desktop] [data-slot="tooltip-content"] { padding: 5px 10px; border: 0; border-radius: var(--radius-control); background: var(--label); box-shadow: 0 8px 18px rgb(15 23 42 / .2); color: var(--plain); font-size: 13px; font-weight: 400; letter-spacing: -.15px; line-height: 18px; }
-html[data-desktop][data-theme="dark"] [data-slot="tooltip-content"] { background: var(--cardRaised); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 18px rgb(0 0 0 / .4); color: var(--label); }
+html[data-desktop] [data-slot="tooltip-content"] { padding: 5px 10px !important; border: 0; border-radius: var(--radius-control); background: var(--label) !important; box-shadow: 0 8px 18px rgb(15 23 42 / .2); color: var(--plain) !important; font-size: 13px; font-weight: 400; letter-spacing: -.15px; line-height: 18px; }
+html[data-desktop][data-theme="dark"] [data-slot="tooltip-content"] { background: var(--cardRaised) !important; box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 18px rgb(0 0 0 / .4); color: var(--label) !important; }
 html[data-desktop] [data-slot="tooltip-content"] kbd { height: 16px; margin-left: 6px; padding: 0 4px; border-radius: var(--radius-small); background: color-mix(in oklab, currentColor 16%, transparent); color: inherit; font-size: 11px; }
 html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
 /* Switches: 32 × 20, the thumb 2 px in. Off is a dim track of the ink in either theme, so on (the accent fill) reads at once. */
-html[data-desktop] [data-slot="switch"] { width: 32px; height: 20px; padding: 0; border: 0; background: color-mix(in oklab, var(--label) 14%, transparent); transition: background 150ms cubic-bezier(.23, 1, .32, 1); }
-html[data-desktop] [data-slot="switch"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 20%, transparent); }
-html[data-desktop] [data-slot="switch"][data-state="checked"] { background: var(--accentFill); }
-html[data-desktop] [data-slot="switch-thumb"] { translate: none; width: 16px; height: 16px; background: var(--primaryForeground); box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
+html[data-desktop] [data-slot="switch"] { width: 32px; height: 20px; padding: 0; border: 0; background: color-mix(in oklab, var(--label) 14%, transparent) !important; transition: background 150ms cubic-bezier(.23, 1, .32, 1); }
+html[data-desktop] [data-slot="switch"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 20%, transparent) !important; }
+html[data-desktop] [data-slot="switch"][data-state="checked"] { background: var(--accentFill) !important; }
+html[data-desktop] [data-slot="switch-thumb"] { translate: none !important; width: 16px; height: 16px; background: var(--primaryForeground); box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform 150ms ease; }
 html[data-desktop] [data-slot="switch-thumb"][data-state="unchecked"] { transform: translateX(2px); }
 html[data-desktop] [data-slot="switch-thumb"][data-state="checked"] { background: var(--primaryForeground); transform: translateX(14px); }
 /* Segmented controls: a grey track 2 px deep, the chosen option a lighter step with a hairline. */
@@ -23,26 +24,30 @@ html[data-desktop][data-theme="dark"] [data-slot="tabs-list"] { --segment-track:
 /* ── Dialogs ─────────────────────────────────────────────────────────────── */
 html[data-desktop] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) { background: rgb(0 0 0 / .13); backdrop-filter: none; }
 html[data-desktop][data-theme="dark"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) { background: rgb(0 0 0 / .4); }
+/* Keep the top 46 px title strip draggable across modal backdrops without blocking dialog controls. */
+html[data-desktop]:has(.desktop-root[data-shell="electron"]):not([data-fullscreen]) :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--toolbar, 46px); -webkit-app-region: drag; app-region: drag; }
+html[data-desktop]:has(.desktop-root[data-shell="electron"][data-platform="windows"]):not([data-fullscreen]) :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])::before { right: 138px; }
+html[data-desktop]:has(.desktop-root[data-shell="electron"]) :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Dialogs: 520 px, 12 px corners, the page's surface at 92 % with a blur, a half-pixel ring and
    the floating shadow; a 16 px title over 14 px text; 20 px of room. */
-html[data-desktop] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { gap: 16px; padding: 20px; border: 0; border-radius: var(--radius-panel); background: color-mix(in oklab, var(--plain) 92%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); color: var(--label); font-size: 14px; }
-html[data-desktop][data-theme="dark"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { background: color-mix(in oklab, var(--cardRaised) 94%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 20px 40px -8px rgb(0 0 0 / .6); }
+html[data-desktop] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { gap: 16px; padding: 20px !important; border: 0; border-radius: var(--radius-panel) !important; background: color-mix(in oklab, var(--plain) 92%, transparent) !important; -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); color: var(--label); font-size: 14px; }
+html[data-desktop][data-theme="dark"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) { background: color-mix(in oklab, var(--cardRaised) 94%, transparent) !important; box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 20px 40px -8px rgb(0 0 0 / .6); }
 /* A confirmation: 400 px, so its sentence fits on two lines (the base caps it at 320). */
-html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)); max-width: none; }
-html[data-desktop] [data-slot="dialog-content"]:not(.command-center) { width: min(520px, calc(100vw - 48px)); max-width: none; }
-html[data-desktop] [data-slot="dialog-content"].sm\:max-w-5xl { width: min(980px, calc(100vw - 48px)); }
+html[data-desktop] [data-slot="alert-dialog-content"] { width: min(400px, calc(100vw - 48px)) !important; max-width: none !important; }
+html[data-desktop] [data-slot="dialog-content"]:not(.command-center) { width: min(520px, calc(100vw - 48px)) !important; max-width: none !important; }
+html[data-desktop] [data-slot="dialog-content"].sm\:max-w-5xl { width: min(980px, calc(100vw - 48px)) !important; }
 html[data-desktop] :is([data-slot="dialog-header"], [data-slot="alert-dialog-header"]) { gap: 2px; padding-right: 32px; text-align: left; place-items: start; }
 html[data-desktop] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"]) { font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
 html[data-desktop] :is([data-slot="dialog-description"], [data-slot="alert-dialog-description"]) { color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 14px; line-height: 20px; }
-html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"],
-html[data-desktop] [data-slot="dialog-content"] > button[data-button][aria-label="关闭"] { top: 18px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; min-width: 0; border-radius: var(--radius-control); color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
+html[data-desktop] [data-slot="dialog-content"]:not(.management-dialog) > [data-slot="dialog-close"],
+html[data-desktop] [data-slot="dialog-content"]:not(.management-dialog) > button[data-button][aria-label="关闭"] { top: 18px !important; right: 16px !important; display: grid; place-items: center; width: 28px; height: 28px; min-width: 0; border-radius: var(--radius-control); color: color-mix(in oklab, var(--label) 50%, transparent); opacity: 1; }
 html[data-desktop] [data-slot="dialog-content"] > [data-slot="dialog-close"]:hover { background: var(--fill); color: var(--label); }
 /* Footers are a row of buttons at the bottom right, not a grey band. */
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; flex-direction: row; justify-content: flex-end; gap: 12px; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { margin: 4px 0 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; flex-direction: row !important; justify-content: flex-end !important; gap: 12px; }
 /* Dialog buttons are the default 32 px buttons, 12 px in, 6 px corners; 8 px between. Long
    labels may wrap, so the height is a minimum. */
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { gap: 8px; }
-html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"], [data-slot="dialog-content"] .dialog-actions) [data-button] { height: auto; min-height: 32px; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) { gap: 8px !important; }
+html[data-desktop] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"], [data-slot="dialog-content"] .dialog-actions) [data-button] { height: auto !important; min-height: 32px; padding-inline: 12px !important; border-radius: var(--radius-control); font-size: 13px; }
 html[data-desktop] .modal-subtitle { margin-top: -10px; color: var(--secondaryLabel); font-size: 14px; }
 /* Inside a dialog, a button set on its own line keeps its own width, aligned to the end. */
 html[data-desktop] [data-slot="dialog-content"] :is([data-slot="field-group"], form, section) > [data-button],
@@ -52,20 +57,20 @@ html[data-desktop] .new-session-form-footer { display: flex; justify-content: fl
 /* The connect & sign-in dialogs (Connect.tsx, Management.tsx SignInDialog): a fixed-top 420 px
    sheet with one unified column width and locked panel height so switching tabs or accounts never
    jumps the dialog's top edge or tab bar. */
-html[data-desktop] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { top: clamp(40px, calc(50dvh - 246px), calc(100dvh - 512px)); translate: -50% 0; width: min(420px, calc(100vw - 48px)); gap: 14px; padding: 22px 24px 20px; background: var(--plain); -webkit-backdrop-filter: none; backdrop-filter: none; }
-html[data-desktop][data-theme="dark"] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { background: var(--cardRaised); }
+html[data-desktop] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { top: clamp(40px, calc(50dvh - 246px), calc(100dvh - 512px)) !important; translate: -50% 0 !important; width: min(420px, calc(100vw - 48px)) !important; gap: 14px !important; padding: 22px 24px 20px !important; background: var(--plain) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"]:is(.connect-dialog, .signin-dialog):not(.command-center) { background: var(--cardRaised) !important; }
 html[data-desktop] .connect-dialog [data-slot="dialog-header"].modal-header-with-icon { display: flex; flex-direction: row; align-items: center; gap: 12px; padding-right: 32px; text-align: left; place-items: initial; }
 html[data-desktop] :is(.connect-dialog, .signin-dialog) [data-slot="dialog-title"] { font-size: 16px; line-height: 22px; }
 html[data-desktop] :is(.connect-dialog, .signin-dialog) [data-slot="dialog-description"] { font-size: 12px; line-height: 17px; }
-html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] { height: 32px; padding: 2px; border-radius: var(--radius-card); }
-html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] [data-slot="tabs-trigger"] { height: 28px; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
+html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] { height: 32px !important; padding: 2px !important; border-radius: var(--radius-card); }
+html[data-desktop] .connect-dialog .connect-tabs[data-slot="tabs-list"] [data-slot="tabs-trigger"] { height: 28px !important; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
 html[data-desktop] .connect-dialog [data-slot="tabs-content"].connect-panel:not([hidden]),
-html[data-desktop] .connect-dialog > .connect-panel { display: flex; flex-direction: column; min-height: 316px; gap: 12px; padding-top: 14px !important; }
-html[data-desktop] .connect-dialog input[data-slot="input"] { height: 36px; border-radius: var(--radius-control); }
-html[data-desktop] .connect-dialog input[data-slot="input"][data-readonly] { background: var(--fill); border-color: var(--separator); color: var(--secondaryLabel); }
-html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill) { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 45%, var(--separatorStrong)), inset 0 0 0 100vmax var(--card); -webkit-text-fill-color: var(--label); caret-color: var(--label); }
-html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill):focus-visible { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 100vmax var(--card); }
-html[data-desktop] [data-slot="dialog-content"].connect-dialog .connect-submit[data-button] { align-self: stretch; justify-self: stretch; width: 100%; height: 36px; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
+html[data-desktop] .connect-dialog > .connect-panel { display: flex; flex-direction: column; min-height: 316px; gap: 12px; padding-top: 14px; }
+html[data-desktop] .connect-dialog input[data-slot="input"] { height: 36px !important; border-radius: var(--radius-control); }
+html[data-desktop] .connect-dialog input[data-slot="input"][data-readonly] { background: var(--fill) !important; border-color: var(--separator) !important; color: var(--secondaryLabel); }
+html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill) { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 45%, var(--separatorStrong)), inset 0 0 0 100vmax var(--card) !important; -webkit-text-fill-color: var(--label); caret-color: var(--label); }
+html[data-desktop] .connect-dialog input[data-slot="input"]:is(:autofill, :-webkit-autofill):focus-visible { border-color: var(--focus) !important; box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 100vmax var(--card) !important; }
+html[data-desktop] [data-slot="dialog-content"].connect-dialog .connect-submit[data-button] { align-self: stretch; justify-self: stretch; width: 100% !important; height: 36px !important; border-radius: var(--radius-control); font-size: 13px; font-weight: 500; }
 html[data-desktop] .connect-dialog .qr-dropzone { cursor: default; }
 html[data-desktop] .connect-dialog .qr-dropzone [data-button] { height: 28px; padding-inline: 10px; font-size: 12px; }
 
@@ -87,10 +92,10 @@ html[data-desktop] .form-error,
 html[data-desktop] .danger-text { color: var(--danger); font-size: 12px; }
 
 /* ── Segmented tabs (default variant) ────────────────────────────────────── */
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) { height: 28px; padding: 2px; gap: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 12px; border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background 150ms cubic-bezier(.23, 1, .32, 1), color 150ms cubic-bezier(.23, 1, .32, 1); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) { height: 28px !important; padding: 2px !important; gap: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { height: 24px !important; padding-inline: 12px !important; border: 0; border-radius: var(--radius-control); background: transparent !important; box-shadow: none; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background 150ms cubic-bezier(.23, 1, .32, 1), color 150ms cubic-bezier(.23, 1, .32, 1); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
+html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb) !important; color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] svg { width: var(--icon-size); height: var(--icon-size); }
 
 /* ── Forms ───────────────────────────────────────────────────────────────── */
@@ -100,13 +105,13 @@ html[data-desktop] :is([data-slot="field-label"], [data-slot="label"]) { color: 
 html[data-desktop] :is([data-slot="field-label"], [data-slot="label"]) .muted { color: var(--tertiaryLabel); font-weight: 400; }
 html[data-desktop] [data-slot="field-description"],
 html[data-desktop] .field-hint { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
-html[data-desktop] :is(input[data-slot="input"], [data-slot="select-trigger"], select:not([class*="sr-only"])) { height: 32px; padding-inline: 12px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; color: var(--label); font-size: 13px; }
-html[data-desktop] [data-slot="textarea"] { min-height: 84px; padding: 10px 12px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; color: var(--label); font-size: 13px; line-height: 1.6; }
-html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], select):focus-visible { border-color: var(--focus); box-shadow: none; outline: none; }
+html[data-desktop] :is(input[data-slot="input"], [data-slot="select-trigger"], select:not([class*="sr-only"])) { height: 32px; padding-inline: 12px !important; border: 1px solid var(--separatorStrong) !important; border-radius: var(--radius-control); background: var(--card) !important; box-shadow: none !important; color: var(--label); font-size: 13px; }
+html[data-desktop] [data-slot="textarea"] { min-height: 84px; padding: 10px 12px !important; border: 1px solid var(--separatorStrong) !important; border-radius: var(--radius-control); background: var(--card) !important; box-shadow: none !important; color: var(--label); font-size: 13px; line-height: 1.6; }
+html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], select):focus-visible { border-color: var(--focus) !important; box-shadow: none !important; outline: none; }
 html[data-desktop] :is(input[data-slot="input"], [data-slot="textarea"])::placeholder { color: var(--placeholder); }
-html[data-desktop] [data-slot="input-group"]:not(.composer) { border-color: var(--separatorStrong); border-radius: var(--radius-control); background: var(--card); box-shadow: none; }
+html[data-desktop] [data-slot="input-group"]:not(.composer) { border-color: var(--separatorStrong) !important; border-radius: var(--radius-control); background: var(--card) !important; box-shadow: none !important; }
 html[data-desktop] [data-slot="input-group"]:not(.composer) input[data-slot="input-group-control"] { font-size: 13px; }
-html[data-desktop] [data-slot="input-group"]:not(.composer):focus-within { border-color: var(--focus); box-shadow: none; }
+html[data-desktop] [data-slot="input-group"]:not(.composer):focus-within { border-color: var(--focus) !important; box-shadow: none !important; }
 html[data-desktop] :is(.code-input, .resource-path, .terminal-directory-input) { font-family: var(--mono); font-size: 12px; }
 /* Checkboxes and radios: a 16 pt mark, the accent fill (white on it) when on. */
 html[data-desktop] [data-slot="checkbox"] { width: 16px; height: 16px; border: 1px solid var(--separatorStrong); border-radius: var(--radius-small); background: var(--card); box-shadow: none; }
@@ -134,14 +139,14 @@ html[data-desktop] [data-slot="command-input-wrapper"] [data-slot="input-group"]
 html[data-desktop] [data-slot="sheet-content"] { border-color: var(--separator); background: var(--plain); box-shadow: var(--float-shadow); }
 html[data-desktop] details > summary { cursor: default; }
 /* A primary repeated down a list is no longer the one primary: each row's action is a hairline button. */
-html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong); background: transparent; color: var(--label); }
-html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill); }
+html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"] { border: 1px solid var(--separatorStrong) !important; background: transparent !important; color: var(--label) !important; }
+html[data-desktop] :is(.list-row, .screen-row, .resource-service, .resource-entry, .worktree-entry, .project-card) [data-button][data-variant="default"]:hover:not(:disabled) { background: var(--fill) !important; }
 
 /* ── Dialog tabs ─────────────────────────────────────────────────────────── */
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs"] { gap: 0; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-list"]:not([data-variant="line"]) { width: 100%; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-list"]:not([data-variant="line"]) [data-slot="tabs-trigger"] { flex: 1; }
-html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"]:not([hidden]):not(.connect-panel) { display: flex; flex-direction: column; gap: 14px; padding-top: 16px !important; }
+html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"]:not([hidden]):not(.connect-panel) { display: flex; flex-direction: column; gap: 14px; padding-top: 16px; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] > [data-slot="field-group"] { gap: 14px; }
 html[data-desktop] [data-slot="dialog-content"] [data-slot="tabs-content"] .field-hint { margin-top: 2px; }
 
@@ -236,3 +241,4 @@ html[data-desktop] .management-usage-skeleton { display: flex; flex-direction: c
 html[data-desktop] .management-usage-skeleton .management-fact { gap: 10px; }
 /* Claude's /mcp answer is markdown, not a status dump: read as prose. */
 html[data-desktop] .desktop-main div.service-status { white-space: normal; font-size: 13px; color: var(--label); }
+}

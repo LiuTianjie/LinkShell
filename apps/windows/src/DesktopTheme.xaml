@@ -1,15 +1,15 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <SolidColorBrush x:Key="Background" Color="#060709"/>
-  <SolidColorBrush x:Key="Sidebar" Color="#0B0C0F"/>
-  <SolidColorBrush x:Key="Primary" Color="#F0F1F3"/>
-  <SolidColorBrush x:Key="Secondary" Color="#A8ADB5"/>
+  <SolidColorBrush x:Key="Background" Color="#1D1D1D"/>
+  <SolidColorBrush x:Key="Sidebar" Color="#181818"/>
+  <SolidColorBrush x:Key="Primary" Color="#DFDFDF"/>
+  <SolidColorBrush x:Key="Secondary" Color="#9A9A9A"/>
   <!-- Dark values from apps/client/src/theme/brand-colors.json (the installer is dark only): Accent
        for focus and words, AccentFill under white, which the paler Accent can't carry. -->
   <SolidColorBrush x:Key="Accent" Color="#8D9BFF"/>
   <SolidColorBrush x:Key="AccentFill" Color="#5263E8"/>
   <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF"/>
-  <SolidColorBrush x:Key="Line" Color="#24262A"/>
-  <SolidColorBrush x:Key="Selection" Color="#1B1D21"/>
+  <SolidColorBrush x:Key="Line" Color="#2A2A2A"/>
+  <SolidColorBrush x:Key="Selection" Color="#242424"/>
   <SolidColorBrush x:Key="Danger" Color="#FF7B72"/>
   <Style TargetType="TextBlock">
     <Setter Property="Foreground" Value="{DynamicResource Primary}"/>

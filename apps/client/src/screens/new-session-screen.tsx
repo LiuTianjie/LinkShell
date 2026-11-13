@@ -171,7 +171,7 @@ export function NewSessionScreen() {
   const unavailableModel = selectedModel && models && !listing?.error && !models.models.some((entry) => entry.value === selectedModel);
 
   const targetCwd = cwd;
-  const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent) && !!listing && !listing.error)) && targetCwd.length > 0 && !busy;
+  const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent))) && targetCwd.length > 0 && !busy;
 
   const remember = (id: string) => {
     sessionPreferences.remember(machine?.machineId, id);

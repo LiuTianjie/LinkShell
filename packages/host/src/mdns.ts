@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { trackChild } from "./children.js";
 
 export interface MdnsAdvertiseOptions {
   port: number;
@@ -88,6 +89,7 @@ export class MdnsAdvertiser {
     try {
       const child = spawnFn(spec.command, spec.args);
       this.child = child;
+      trackChild(child, "mdns", spec.command, spec.args, false);
       child.unref?.();
       child.once("error", (error) => {
         if (this.child === child) this.child = undefined;

@@ -1,4 +1,13 @@
-import { ComposerConfig, ComposerPlace, ContextRing } from "./ComposerControls";
+import { ComposerConfig, ComposerPlace, ContextRing, type ComposerPickerRequest } from "./ComposerControls";
+import {
+  ComposerBox,
+  atFileMention,
+  buildComposerContentBlocks,
+  isImeComposing,
+  type ComposerBoxHandle,
+} from "./ComposerBox";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -9,14 +18,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import type { CSSProperties, ReactNode } from "react";
 import { AsyncQuestions } from "./AsyncQuestions";
 import { composerHeightRef } from "./composer-height";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupTextarea,
-} from "@/components/ui/input-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -26,18 +29,6 @@ import {
   EmptyDescription,
   EmptyMedia,
 } from "@/components/ui/empty";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from "@/components/ui/popover";
-import {
-  Command as CommandUI,
-  CommandList,
-  CommandGroup,
-  CommandItem,
-  CommandEmpty,
-} from "@/components/ui/command";
 import { useDialogs } from "@/components/Dialogs";
 import { ColumnResizer } from "@/components/ColumnResizer";
 import { confirmAndDeleteSession } from "./session-actions";
@@ -64,7 +55,6 @@ import {
   MessageSquare,
   MessagesSquare,
   Square,
-  Paperclip,
   Plus,
   X,
   Target,
@@ -72,6 +62,7 @@ import {
   Blocks,
   SquareTerminal,
   Ellipsis,
+  GitBranch,
   GitFork,
   PencilLine,
   Archive,
@@ -81,17 +72,17 @@ import {
   ListTree,
   ChevronUp,
   ChevronDown,
-  FileText,
-  Folder,
+  ExternalLink,
+  FolderOpen,
+  Code2,
+  Globe,
+  Monitor,
   Sparkles,
 } from "lucide-react";
 import { reconnectLabel, reconnectOf, shownQueue, userMessageView } from "@linkshell/client-core";
-import type { ContentBlock, ProjectFileEntry, SessionSummary, ToolDetail } from "@linkshell/wire";
+import type { ContentBlock, SessionSummary, ToolDetail } from "@linkshell/wire";
 import type { TimelineItem } from "@linkshell/client-core";
 import {
-  commandQuery,
-  matchCommands,
-  normalizeCommandText,
   parseCommand,
   sessionCommands,
   type Command,
@@ -113,61 +104,25 @@ import {
 } from "./common";
 import { Permission } from "./Permission";
 import { AgentInteractions } from "./Acp";
-import { StreamingText, TimelineNavigation } from "./Timeline";
+import { StreamingText, TimelineNavigation, timelineItemSearchText } from "./Timeline";
 import { Conversation } from "./Conversation";
 import { LiveActivity } from "./LiveActivity";
-import { FileView, Files, fileBase64 } from "./Files";
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, shrinkImage } from "./attachments";
+import { FileView, Files } from "./Files";
+import { MAX_ATTACHMENT_LABEL } from "./attachments";
 import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
+import { SessionPortPreview } from "./Ports";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
 import { readLocal, saveLocal } from "./storage";
-import { finishComposerSend, useComposerDraft } from "./composer-draft";
+import { finishComposerSend } from "./composer-draft";
 import { ComputerPreview } from "./Video";
 import { McpAppView, appTabId, type AppTab } from "./McpApp";
-import { isDesktop } from "./desktop";
+import { DESKTOP_LOCAL, isDesktop, isElectronDesktop, isWindowsDesktop } from "./desktop";
 import { sessionNeedsAttention, waitingLabel } from "./session-list";
 import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
 import { useT } from "./i18n";
 
-/** Extracts an active `@file` mention token ending at `caret` (ignoring emails and bare `/commands`). */
-export function atFileMention(
-  text: string,
-  caret: number,
-): { start: number; end: number; query: string } | undefined {
-  if (text.startsWith("/") && !text.includes(" ")) return undefined;
-  const safeCaret = Math.max(0, Math.min(caret, text.length));
-  const head = text.slice(0, safeCaret);
-  const match = /(?:^|\s)@([^\s@]*)$/.exec(head);
-  if (!match) return undefined;
-  const query = match[1] ?? "";
-  const start = safeCaret - query.length - 1;
-  return { start, end: safeCaret, query };
-}
-
-function timelineItemText(item: TimelineItem): string {
-  switch (item.kind) {
-    case "user":
-      return userMessageView(item.blocks).text;
-    case "agent":
-    case "thought":
-      return item.text;
-    case "error":
-      return item.message;
-    case "notice":
-      return [item.title, item.detail].filter(Boolean).join(" ");
-    case "plan":
-      return [item.title, item.markdown, ...item.entries.map((entry) => entry.content)]
-        .filter(Boolean)
-        .join(" ");
-    case "permission-result":
-      return [item.title, item.optionName].filter(Boolean).join(" ");
-    case "tool":
-      return [item.title, item.output].filter(Boolean).join(" ");
-    default:
-      return "";
-  }
-}
+export { atFileMention };
 
 type Panel =
   | "commands"
@@ -204,9 +159,6 @@ const appInput = (call: AppCall) =>
 // files, a terminal and the computer's preview. Tasks join while the session has some running
 // or done; settings, goal, side, MCP and apps are opened from elsewhere (the composer's chips,
 // the ••• menu) and show as a tab only while open.
-/** The engine sizes a textarea to its text by itself (conversation.css turns it on where it can). */
-const fieldSizing = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
-
 const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] = [
   { id: "changes", title: "变更" },
   { id: "files", title: "文件" },
@@ -222,7 +174,7 @@ const panelTitles: Record<Exclude<Panel, null | "commands" | AppPanel>, string> 
   side: "旁支对话",
   mcp: "MCP 服务",
   apps: "应用",
-  preview: "电脑操作预览",
+  preview: "预览",
   terminal: "终端",
 };
 export function Session({
@@ -241,6 +193,7 @@ export function Session({
   const actions = useActions();
   const job = useJob();
   const sendJob = useJob();
+  const openPathJob = useJob();
   const view = useClient((state) => state.views[session.id]);
   const hasTasks = useClient((state) => Object.keys(state.tasks[session.id] ?? {}).length > 0 || Object.keys(state.workflows[session.id] ?? {}).length > 0);
   const ready = useClient((state) => state.ready[session.id]);
@@ -259,15 +212,17 @@ export function Session({
       sessionCommands(session.agent, view?.commands ?? [], view?.config ?? [], !!agent?.capabilities.side),
     [session.agent, view?.commands, view?.config, agent?.capabilities.side],
   );
-  const draftKey = `draft.${connection.computer.key}.${session.id}`;
-  const { text: draft, setText: setDraft, readText: readDraft, clearSubmitted: clearDraft } = useComposerDraft(draftKey);
-  const [files, setFiles] = useState<File[]>([]);
+  const draftKey = `draft.${connection.computer?.key ?? "default"}.${session.id}`;
+  const composerRef = useRef<ComposerBoxHandle>(null);
+  const [pickerRequest, setPickerRequest] = useState<ComposerPickerRequest>();
+  const requestPicker = useCallback((category: "model" | "mode" | "effort") => {
+    setPickerRequest((prev) => ({ category, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
   const [attachmentError, setAttachmentError] = useState<string>();
-  const [dragging, setDragging] = useState(false);
   const [sendingFile, setSendingFile] = useState<string>();
   const uploaded = useRef(new WeakMap<File, string>());
-  const [blocks, setBlocks] = useState<ContentBlock[]>([]);
   const [panel, commitPanel] = useState<Panel>(null);
+  const [previewMode, setPreviewMode] = useState<"port" | "computer">("port");
   const [file, setFile] = useState<string>();
   const [fileLine, setFileLine] = useState<number>();
   const fileDirty = useRef(false);
@@ -314,6 +269,30 @@ export function Session({
     if (next) void setPanel(panel === next ? null : next);
     else void setPanel(panel && panel !== "commands" ? null : lastPanel.current);
   };
+
+  // Live Git branch & dirty indicator for all git repositories (not only LinkShell worktrees).
+  const sessionGit = useLoad(
+    () => (online && session.cwd ? actions.gitInfo(session.cwd) : Promise.resolve(undefined)),
+    [store, online, session.cwd],
+  );
+  const prevTurnActive = useRef(view?.turnActive);
+  useEffect(() => {
+    if (prevTurnActive.current && !view?.turnActive && online && session.cwd) {
+      sessionGit.reload();
+    }
+    prevTurnActive.current = view?.turnActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.turnActive, online, session.cwd]);
+
+  const canOpenLocalPath =
+    isElectronDesktop && connection.computer?.key === DESKTOP_LOCAL && Boolean(session.cwd);
+  const openLocalPath = (app: "default" | "cursor" | "vscode" | "zed" | "terminal") => {
+    if (!online || !session.cwd) return;
+    void openPathJob.run(async () => {
+      await link.call("desktop.openPath", { path: session.cwd, app });
+    });
+  };
+
   // MCP Apps (Codex): a tool's own page in the inspector. The agent's call to such a tool opens it
   // there by itself, as Codex does; the inspector's + menu opens one by hand.
   const [apps, setApps] = useState<AppTab[]>([]);
@@ -410,7 +389,6 @@ export function Session({
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
   });
-  const [choice, setChoice] = useState(0);
   const [forkAt, setForkAt] = useState<string | null>();
   const [newWorktree, setNewWorktree] = useState(false);
   const forkGit = useLoad(
@@ -420,8 +398,6 @@ export function Session({
         : Promise.resolve(undefined),
     [store, session.cwd, forkAt],
   );
-  const composer = useRef<HTMLTextAreaElement>(null);
-  const upload = useRef<HTMLInputElement>(null);
   // The conversation renders even with no messages when something in the footer
   // needs the user: a pending permission, an async question, or a live turn.
   const footerActive =
@@ -459,70 +435,6 @@ export function Session({
       actions.openSession(session.id);
     }
   };
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<string>();
-  const query =
-    dismissedSuggestions === draft ? undefined : commandQuery(draft);
-  const suggestions =
-    query === undefined ? [] : matchCommands(commands, query).slice(0, 10);
-
-  // `@file` fuzzy project file autocomplete
-  const [caret, setCaret] = useState(0);
-  const [dismissedMention, setDismissedMention] = useState<string>();
-  const rawMention = useMemo(() => atFileMention(draft, caret), [draft, caret]);
-  const mentionKey = rawMention ? `${rawMention.start}:${rawMention.query}` : undefined;
-  const mention = query === undefined && mentionKey && dismissedMention !== mentionKey ? rawMention : undefined;
-  const [mentionFiles, setMentionFiles] = useState<ProjectFileEntry[]>([]);
-  const [mentionLoading, setMentionLoading] = useState(false);
-  const [mentionChoice, setMentionChoice] = useState(0);
-  const hasMention = Boolean(mention);
-  const mentionQuery = mention?.query;
-  useEffect(() => {
-    setMentionChoice(0);
-  }, [mentionQuery]);
-  useEffect(() => {
-    if (!hasMention || !online || !session.cwd) {
-      setMentionFiles([]);
-      setMentionLoading(false);
-      return;
-    }
-    let alive = true;
-    setMentionLoading(true);
-    const timer = setTimeout(() => {
-      link
-        .call("fs.projectFiles", { cwd: session.cwd, query: mentionQuery ?? "", limit: 30 })
-        .then(
-          (res) => {
-            if (alive) setMentionFiles(res.files);
-          },
-          () => {
-            if (alive) setMentionFiles([]);
-          },
-        )
-        .finally(() => {
-          if (alive) setMentionLoading(false);
-        });
-    }, 90);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [link, online, session.cwd, hasMention, mentionQuery]);
-
-  const insertFileMention = (entry: ProjectFileEntry) => {
-    if (!mention) return;
-    const inserted = `@${entry.relativePath} `;
-    const nextDraft = draft.slice(0, mention.start) + inserted + draft.slice(mention.end);
-    const nextCaret = mention.start + inserted.length;
-    setDraft(nextDraft);
-    setCaret(nextCaret);
-    setDismissedMention(undefined);
-    requestAnimationFrame(() => {
-      const el = composer.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(nextCaret, nextCaret);
-    });
-  };
 
   // In-session search (`⌘F`) & Turn Outline jump
   const [searchOpen, setSearchOpen] = useState(false);
@@ -539,7 +451,7 @@ export function Session({
   const searchMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q || !view?.items.length) return [];
-    return view.items.filter((item) => timelineItemText(item).toLowerCase().includes(q));
+    return view.items.filter((item) => timelineItemSearchText(item).toLowerCase().includes(q));
   }, [searchQuery, view?.items]);
 
   const firstMatchId = searchMatches[0]?.id;
@@ -601,7 +513,10 @@ export function Session({
   useEffect(
     () =>
       link.on("session.preview.show", (event) => {
-        if (event.sessionId === session.id) void setPanel("preview");
+        if (event.sessionId === session.id) {
+          setPreviewMode("computer");
+          void setPanel("preview");
+        }
       }),
     [link, session.id, setPanel],
   );
@@ -610,56 +525,6 @@ export function Session({
     store.getState().openSession(session.id);
     return () => store.getState().closeSession(session.id);
   }, [connection.sessions, store, session.id]);
-  useEffect(() => {
-    setChoice(0);
-  }, [query]);
-  useLayoutEffect(() => {
-    const element = composer.current;
-    if (!element) return;
-    // Where the engine sizes a textarea to its text (Chromium: the Electron and Windows shells),
-    // CSS does it. Measuring by hand writes, reads and writes layout on every resize event, which
-    // is what made resizing the window stutter.
-    if (fieldSizing) return;
-    const resize = () => {
-      element.style.height = "auto";
-      element.style.height = `${element.scrollHeight}px`;
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, [draft, panel]);
-  function addFiles(picked: File[]) {
-    void (async () => {
-      // A photo is usually far bigger than it needs to be: made smaller first, it fits.
-      const incoming = await Promise.all(picked.map((file) => shrinkImage(file)));
-      takeFiles(incoming);
-    })();
-  }
-  function takeFiles(incoming: File[]) {
-    const rejected = incoming.filter(
-      (file) => file.size > MAX_ATTACHMENT_BYTES || file.name.length > 255,
-    );
-    setAttachmentError(
-      rejected.length
-        ? `未添加 ${rejected.map((file) => `「${file.name}」`).join("、")}。单个附件不能超过 ${MAX_ATTACHMENT_LABEL}（图片会先自动压缩），文件名不能超过 255 个字符。`
-        : undefined,
-    );
-    setFiles((previous) => {
-      const accepted = incoming.filter((file) => !rejected.includes(file));
-      return [
-        ...previous,
-        ...accepted.filter(
-          (file, index) =>
-            ![...previous, ...accepted.slice(0, index)].some(
-              (entry) =>
-                entry.name === file.name &&
-                entry.size === file.size &&
-                entry.lastModified === file.lastModified,
-            ),
-        ),
-      ];
-    });
-  }
   async function execute(text: string): Promise<boolean> {
     if (!canInteract) return false;
     const parsed = parseCommand(text);
@@ -751,95 +616,14 @@ export function Session({
     }
     return true;
   }
-  async function choose(command: Command) {
+  async function chooseFromModal(command: Command) {
     if (command.action && !canInteract) return;
     if (!(await setPanel(null))) return;
     if (command.action) {
-      const submittedDraft = readDraft();
-      const executed = await job.run(() => execute(`/${command.name}`));
-      if (executed) clearDraft(submittedDraft);
+      await job.run(() => execute(`/${command.name}`));
     } else {
-      setDraft(`/${command.name} `);
-      composer.current?.focus();
+      composerRef.current?.setDraft(`/${command.name} `);
     }
-  }
-  async function send(now = false) {
-    setSendingFile(undefined);
-    const submittedDraft = readDraft();
-    const text = normalizeCommandText(submittedDraft).trim();
-    if (!canInteract || (!text && !files.length && !blocks.length)) return;
-    if (!files.length && !blocks.length && (await execute(text))) {
-      clearDraft(submittedDraft);
-      return;
-    }
-    const content: ContentBlock[] = [...blocks];
-    if (text) content.unshift({ type: "text", text });
-    for (const file of files) {
-      setSendingFile(file.name);
-      const data = await fileBase64(file);
-      if (
-        /^image\/(png|jpe?g|webp|gif)$/.test(file.type) &&
-        agent?.capabilities.images
-      )
-        content.push({ type: "image", mimeType: file.type, data });
-      else if (
-        /^audio\//.test(file.type) &&
-        agent?.capabilities.audio &&
-        file.size <= 5 * 1024 * 1024
-      )
-        content.push({ type: "audio", mimeType: file.type, data });
-      else if (
-        agent?.capabilities.embeddedContext &&
-        file.size <= 5 * 1024 * 1024
-      )
-        content.push({
-          type: "resource",
-          resource: {
-            uri: `attachment:${encodeURIComponent(file.name)}`,
-            mimeType: file.type || "application/octet-stream",
-            ...(/^text\//.test(file.type) || file.type === "application/json"
-              ? { text: await file.text() }
-              : { blob: data }),
-          },
-        });
-      else {
-        // A send that fails after this file went up is retried with the same file: reuse the
-        // copy on the computer rather than writing "name 2.ext" beside it.
-        const path =
-          uploaded.current.get(file) ??
-          (
-            await link.call(
-              "fs.upload",
-              { dir: session.cwd, name: file.name, data },
-              180000,
-            )
-          ).path;
-        uploaded.current.set(file, path);
-        content.push({
-          type: "resource_link",
-          uri: path,
-          name: file.name,
-        });
-      }
-    }
-    setSendingFile(undefined);
-    const parsed = parseCommand(text);
-    const immediate =
-      now ||
-      (session.agent === "codex" &&
-        !!parsed &&
-        ["mcp", "apps", "status", "ps", "stop", "goal"].includes(parsed.name));
-    const current = store.getState();
-    if (current.status !== "online" || !current.ready[session.id])
-      throw new Error("会话连接正在恢复，输入和附件已保留，请同步完成后重试");
-    await finishComposerSend(actions.send(session.id, content, { now: immediate }), () => {
-      clearDraft(submittedDraft);
-      setFiles((current) => current.filter((file) => !files.includes(file)));
-      setBlocks((current) => current.filter((block) => !blocks.includes(block)));
-      setAttachmentError(undefined);
-      composer.current?.focus();
-      // The conversation scrolls to the message just sent (Conversation.tsx).
-    });
   }
   async function nativePanel(name: "mcp" | "apps") {
     if (!canInteract) return;
@@ -854,6 +638,13 @@ export function Session({
       if (result === "failed") throw new Error(`/${name} 执行失败`);
     });
   }
+
+  const branchLabel =
+    session.worktree?.branch ??
+    sessionGit.value?.branch ??
+    (sessionGit.value?.head ? `HEAD ${sessionGit.value.head}` : undefined);
+  const isGitDirty = Boolean(sessionGit.value?.dirty);
+
   const top = (
     <>
         <div className="session-heading">
@@ -880,13 +671,66 @@ export function Session({
                     <TooltipContent className="max-w-sm break-all">{session.cwd}</TooltipContent>
                   </Tooltip>
                 ) : <span title={session.cwd}>{session.cwd}</span>}
-                {session.worktree && (
-                  <span className="branch-chip">{session.worktree.branch}</span>
+                {branchLabel && (
+                  <span className="branch-chip" title={session.worktree ? `Worktree 分支：${branchLabel}` : `Git 分支：${branchLabel}`}>
+                    <GitBranch className="size-3 shrink-0" aria-hidden />
+                    <span>{branchLabel}</span>
+                    {isGitDirty && (
+                      <span className="branch-dirty-badge" title="工作区有未提交改动" aria-label="工作区有未提交改动">
+                        未提交
+                      </span>
+                    )}
+                  </span>
+                )}
+                {!branchLabel && isGitDirty && (
+                  <span className="branch-dirty-badge" title="工作区有未提交改动" aria-label="工作区有未提交改动">
+                    未提交
+                  </span>
                 )}
               </div>
             </div>
           </div>
           <div className="session-actions">
+            {canOpenLocalPath && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="session-open-in"
+                    disabled={!online || openPathJob.busy}
+                    aria-label="打开方式"
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    <span>打开方式</span>
+                    <ChevronDown data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuLabel>在外部应用中打开</DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onSelect={() => openLocalPath("cursor")}>
+                      <Code2 />Cursor
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openLocalPath("vscode")}>
+                      <Code2 />VS Code
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openLocalPath("zed")}>
+                      <Code2 />Zed
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onSelect={() => openLocalPath("terminal")}>
+                      <SquareTerminal />终端
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openLocalPath("default")}>
+                      <FolderOpen />{isWindowsDesktop ? "资源管理器" : "Finder"}
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {isDesktop && agent?.tier === "handoff" && (
               // Who holds the session, in its title row: one pill that takes it over or gives it back.
               <Tooltip>
@@ -1225,7 +1069,7 @@ export function Session({
     </>
   );
   const column = (
-          <div className="conversation-column">
+          <div className="session-body">
             {showRecovery && (
               <div className="conversation-recovery" role="status" data-offline={!online || undefined}>
                 <span>
@@ -1285,10 +1129,11 @@ export function Session({
                   aria-label={t("session.searchPlaceholder")}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   onKeyDown={(event) => {
+                    if (isImeComposing(event)) return;
                     if (event.key === "Escape") {
                       event.preventDefault();
                       setSearchOpen(false);
-                      composer.current?.focus();
+                      composerRef.current?.focus();
                     } else if (event.key === "Enter" && searchMatches.length > 0) {
                       event.preventDefault();
                       const delta = event.shiftKey ? searchMatches.length - 1 : 1;
@@ -1363,6 +1208,8 @@ export function Session({
                 onFile={handleFile}
                 onFork={setForkAt}
                 focusTarget={focusTarget}
+                searchOpen={searchOpen}
+                searchQuery={searchQuery}
                 onTerminal={(id) => {
                   setTerminal(id);
                   setTerminals(true);
@@ -1429,7 +1276,7 @@ export function Session({
               </div>
             )}
             <div className="composer-wrap" ref={captureComposerWrap}>
-              <ErrorNotice error={job.error} />
+              <ErrorNotice error={job.error ?? openPathJob.error} />
               <ErrorNotice error={sendJob.error} />
               <ErrorNotice error={attachmentError} />
               {sendJob.busy && (
@@ -1468,7 +1315,7 @@ export function Session({
                         onClick={() =>
                           void job.run(async () => {
                             if (
-                              (draft.trim() || files.length || blocks.length) &&
+                              composerRef.current?.hasUnsentContent() &&
                               !(await dialogs.confirm(
                                 "编辑这条待发送消息会替换当前草稿，继续吗？",
                               ))
@@ -1479,19 +1326,7 @@ export function Session({
                               item.clientMessageId,
                             );
                             if (content) {
-                              setDraft(
-                                content
-                                  .filter((block) => block.type === "text")
-                                  .map((block) => block.text)
-                                  .join("\n"),
-                              );
-                              setBlocks(
-                                content.filter(
-                                  (block) => block.type !== "text",
-                                ),
-                              );
-                              setFiles([]);
-                              composer.current?.focus();
+                              composerRef.current?.replaceWithQueued(content);
                             }
                           })
                         }
@@ -1540,433 +1375,214 @@ export function Session({
                   ))}
                 </div>
               )}
-              <Popover
-                open={query !== undefined || mention !== undefined}
-                onOpenChange={(open) => {
-                  if (!open) {
-                    if (query !== undefined) setDismissedSuggestions(draft);
-                    if (mentionKey) setDismissedMention(mentionKey);
+              <ComposerBox
+                ref={composerRef}
+                draftKey={draftKey}
+                cwd={session.cwd}
+                online={online}
+                busy={sendJob.busy}
+                active={active}
+                ariaLabel="消息"
+                ariaDescribedBy="composer-hint"
+                placeholder={
+                  !online
+                    ? "连接已断开，可以继续编辑草稿…"
+                    : showComposerCaption && isDesktop
+                      ? "正在同步会话，完成后可发送…"
+                      : t("composer.placeholder")
+                }
+                layoutKey={panel}
+                commands={commands}
+                inlineAttachmentError={false}
+                onAttachmentErrorChange={setAttachmentError}
+                onShortcutPicker={requestPicker}
+                onChooseCommand={async (command, helpers) => {
+                  if (command.action && !canInteract) return;
+                  if (!(await setPanel(null))) return;
+                  if (command.action) {
+                    const executed = await job.run(() => execute(`/${command.name}`));
+                    if (executed) helpers.clearDraft();
+                  } else {
+                    helpers.setDraftText(`/${command.name} `);
                   }
                 }}
-              >
-                <PopoverContent
-                  side="top"
-                  align="start"
-                  sideOffset={8}
-                  collisionPadding={12}
-                  aria-label={mention ? t("composer.mentionFiles") : "命令建议"}
-                  className="w-(--radix-popover-trigger-width) max-h-(--radix-popover-content-available-height) overflow-hidden p-0"
-                  onOpenAutoFocus={(event) => event.preventDefault()}
-                  onCloseAutoFocus={(event) => event.preventDefault()}
-                  onInteractOutside={(event) => {
-                    if (event.target === composer.current)
-                      event.preventDefault();
-                  }}
-                >
-                  {mention ? (
-                    <CommandUI
-                      className="h-auto"
-                      shouldFilter={false}
-                      value={mentionFiles[mentionChoice]?.relativePath ?? ""}
-                      onValueChange={(value) => {
-                        const index = mentionFiles.findIndex(
-                          (entry) => entry.relativePath === value,
-                        );
-                        if (index >= 0) setMentionChoice(index);
-                      }}
-                    >
-                      <CommandList
-                        aria-label={t("composer.mentionFiles")}
-                        className="max-h-[min(18rem,35dvh,var(--radix-popover-content-available-height))]"
-                      >
-                        <CommandEmpty>
-                          {mentionLoading ? t("composer.mentionSearching") : t("composer.mentionEmpty")}
-                        </CommandEmpty>
-                        <CommandGroup heading={t("composer.mentionFiles")}>
-                          {mentionFiles.map((entry) => (
-                            <CommandItem
-                              key={entry.relativePath}
-                              value={entry.relativePath}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onSelect={() => insertFileMention(entry)}
-                            >
-                              {entry.isDir ? (
-                                <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                              ) : (
-                                <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                              )}
-                              <span className="truncate font-mono text-xs">{entry.relativePath}</span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </CommandUI>
-                  ) : (
-                    <CommandUI
-                      className="h-auto"
-                      shouldFilter={false}
-                      value={suggestions[choice]?.name ?? ""}
-                      onValueChange={(value) => {
-                        const index = suggestions.findIndex(
-                          (command) => command.name === value,
-                        );
-                        if (index >= 0) setChoice(index);
-                      }}
-                    >
-                      <CommandList
-                        aria-label="命令建议"
-                        className="max-h-[min(18rem,35dvh,var(--radix-popover-content-available-height))]"
-                      >
-                        <CommandEmpty>
-                          没有匹配项，可打开命令面板查看全部。
-                        </CommandEmpty>
-                        <CommandGroup>
-                          {suggestions.map((command) => (
-                            <CommandItem
-                              key={command.name}
-                              value={command.name}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onSelect={() => choose(command)}
-                            >
-                              <strong>/{command.name}</strong>
-                              <span className="text-muted-foreground">
-                                {command.description}
-                              </span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </CommandUI>
-                  )}
-                </PopoverContent>
-                <PopoverAnchor asChild>
-                  <InputGroup
-                    className="composer rounded-[var(--radius-composer)] bg-[var(--plain)] dark:bg-[var(--plain)]"
-                    data-dragging={dragging || undefined}
-                    onDragOver={(event) => {
-                      if (!event.dataTransfer.types.includes("Files")) return;
-                      event.preventDefault();
-                      setDragging(true);
-                    }}
-                    onDragLeave={(event) => {
-                      if (
-                        !event.currentTarget.contains(
-                          event.relatedTarget as Node | null,
-                        )
-                      )
-                        setDragging(false);
-                    }}
-                    onDrop={(event) => {
-                      if (!event.dataTransfer.files.length) return;
-                      event.preventDefault();
-                      setDragging(false);
-                      addFiles(Array.from(event.dataTransfer.files));
-                    }}
-                  >
-                    {dragging && (
-                      <div className="composer-drop-hint">
-                        <Plus aria-hidden="true" />
-                        松开以添加附件
-                      </div>
-                    )}
-                    <div className="attachment-list">
-                      {files.map((file, index) => (
-                        <span key={`${file.name}-${index}`}>
-                          <Paperclip aria-hidden="true" />
-                          <span className="attachment-name" title={file.name}>
-                            {file.name}
-                          </span>
-                          <small>
-                            {file.size < 1_000_000
-                              ? `${Math.max(1, Math.round(file.size / 1000))} KB`
-                              : `${(file.size / 1_000_000).toFixed(1)} MB`}
-                          </small>
-                          <Button
-                            variant="ghost"
-                            size="plain"
-                            aria-label={`移除附件 ${file.name}`}
-                            disabled={sendJob.busy}
-                            onClick={() =>
-                              setFiles((previous) =>
-                                previous.filter((_, at) => at !== index),
-                              )
-                            }
-                          >
-                            <X />
-                          </Button>
-                        </span>
-                      ))}
-                      {blocks.length > 0 && (
-                        <span>
-                          {blocks.length} 个已有附件
-                          <Button
-                            variant="ghost"
-                            size="plain"
-                            aria-label="移除已有附件"
-                            disabled={sendJob.busy}
-                            onClick={() => setBlocks([])}
-                          >
-                            <X />
-                          </Button>
-                        </span>
-                      )}
-                    </div>
-                    <InputGroupTextarea
-                      ref={composer}
-                      className="px-3.5 pt-3 pb-1 text-md leading-relaxed"
-                      aria-label="消息"
-                      aria-describedby="composer-hint"
-                      value={draft}
-                      onChange={(event) => {
-                        setDraft(event.target.value);
-                        setCaret(event.target.selectionStart ?? event.target.value.length);
-                      }}
-                      onSelect={(event) => {
-                        setCaret(event.currentTarget.selectionStart ?? 0);
-                      }}
-                      onClick={(event) => {
-                        setCaret(event.currentTarget.selectionStart ?? 0);
-                      }}
-                      onKeyUp={(event) => {
-                        setCaret(event.currentTarget.selectionStart ?? 0);
-                      }}
-                      placeholder={
-                        !online
-                          ? "连接已断开，可以继续编辑草稿…"
-                          : showComposerCaption && isDesktop
-                            ? "正在同步会话，完成后可发送…"
-                            : t("composer.placeholder")
-                      }
-                      rows={2}
-                      onPaste={(event) => {
-                        const files = Array.from(event.clipboardData.files);
-                        if (files.length) {
-                          event.preventDefault();
-                          addFiles(files);
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (
-                          event.nativeEvent.isComposing ||
-                          event.nativeEvent.keyCode === 229
-                        )
-                          return;
-                        if (event.key === "Escape" && mention !== undefined) {
-                          event.preventDefault();
-                          if (mentionKey) setDismissedMention(mentionKey);
-                          return;
-                        }
-                        if (
-                          mention !== undefined &&
-                          mentionFiles.length > 0 &&
-                          ["ArrowDown", "ArrowUp"].includes(event.key)
-                        ) {
-                          event.preventDefault();
-                          setMentionChoice(
-                            (value) =>
-                              (value +
-                                (event.key === "ArrowDown"
-                                  ? 1
-                                  : mentionFiles.length - 1)) %
-                              mentionFiles.length,
-                          );
-                          return;
-                        }
-                        if (
-                          mention !== undefined &&
-                          mentionFiles.length > 0 &&
-                          (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))
-                        ) {
-                          event.preventDefault();
-                          const picked = mentionFiles[mentionChoice] ?? mentionFiles[0];
-                          if (picked) insertFileMention(picked);
-                          return;
-                        }
-                        if (event.key === "Escape" && query !== undefined) {
-                          event.preventDefault();
-                          setDismissedSuggestions(draft);
-                          return;
-                        }
-                        if (
-                          suggestions.length &&
-                          ["ArrowDown", "ArrowUp"].includes(event.key)
-                        ) {
-                          event.preventDefault();
-                          setChoice(
-                            (value) =>
-                              (value +
-                                (event.key === "ArrowDown"
-                                  ? 1
-                                  : suggestions.length - 1)) %
-                              suggestions.length,
-                          );
-                        } else if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          if (suggestions.length)
-                            void choose(suggestions[choice] ?? suggestions[0]);
-                          else
-                            void sendJob.run(() =>
-                              send(event.metaKey || event.ctrlKey),
-                            );
-                        }
-                      }}
-                    />
-                    <InputGroupAddon
-                      align="block-end"
-                      className="composer-toolbar justify-between"
-                    >
-                      <div className="composer-controls">
-                        <div className="composer-tools">
-                          <Input
-                            ref={upload}
-                            type="file"
-                            multiple
-                            hidden
-                            onChange={(event) => {
-                              addFiles(Array.from(event.target.files ?? []));
-                              event.target.value = "";
-                            }}
-                          />
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label="添加附件"
-                                onClick={() => upload.current?.click()}
-                              >
-                                <Icon name="attach" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">添加附件 · 单个文件最多 {MAX_ATTACHMENT_LABEL}，图片会自动压缩</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label="打开命令面板"
-                                onClick={() => setPanel("commands")}
-                              >
-                                <Icon name="commands" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">命令与技能 · /</TooltipContent>
-                          </Tooltip>
-                          <DropdownMenu>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    aria-label={t("composer.quickPrompts")}
-                                  >
-                                    <Sparkles />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">{t("composer.quickPrompts")}</TooltipContent>
-                            </Tooltip>
-                            <DropdownMenuContent align="start" side="top" className="w-56">
-                              <DropdownMenuLabel>{t("composer.quickPrompts")}</DropdownMenuLabel>
-                              {(
-                                [
-                                  ["composer.quickRunTests", "composer.quickRunTestsPrompt"],
-                                  ["composer.quickSummarize", "composer.quickSummarizePrompt"],
-                                  ["composer.quickContinue", "composer.quickContinuePrompt"],
-                                  ["composer.quickCommitPr", "composer.quickCommitPrPrompt"],
-                                ] as const
-                              ).map(([labelKey, promptKey]) => (
-                                <DropdownMenuItem
-                                  key={labelKey}
-                                  onSelect={() => {
-                                    const promptText = t(promptKey);
-                                    setDraft(promptText);
-                                    setCaret(promptText.length);
-                                    requestAnimationFrame(() => composer.current?.focus());
-                                  }}
-                                >
-                                  {t(labelKey)}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        <div className="composer-options">
-                          <ComposerConfig
-                            session={session}
-                            config={view?.config ?? []}
-                            disabled={!online}
-                            openSettings={() => setPanel("settings")}
-                          />
-                        </div>
-                      </div>
-                      <div className="composer-meta">
-                        <ComposerPlace session={session} />
-                        {view?.usage?.contextWindow ? (
-                          <ContextRing
-                            used={view.usage.usedTokens ?? 0}
-                            window={view.usage.contextWindow}
-                          />
-                        ) : null}
-                      </div>
-                      <div className="composer-actions">
-                        {(() => {
-                          // As Codex: while a turn runs and nothing is typed, the send button is the
-                          // stop button; typing turns it back into send (to the queue), with 插话
-                          // beside it and stop as a small square.
-                          const running = view?.turnActive || session.state === "unknown";
-                          const canStop = running && !!agent?.capabilities.interrupt;
-                          const typed = !!draft.trim() || files.length > 0 || blocks.length > 0;
-                          const stop = (primary: boolean) => (
+                onSubmit={(payload) =>
+                  sendJob.run(async () => {
+                    setSendingFile(undefined);
+                    const { text, files: pickedFiles, pastedTexts, blocks: existingBlocks, now, clear } = payload;
+                    if (!canInteract || (!text && !pickedFiles.length && !pastedTexts.length && !existingBlocks.length)) return;
+                    if (!pickedFiles.length && !pastedTexts.length && !existingBlocks.length && (await execute(text))) {
+                      clear();
+                      return;
+                    }
+                    const content = await buildComposerContentBlocks({
+                      text,
+                      files: pickedFiles,
+                      pastedTexts,
+                      blocks: existingBlocks,
+                      capabilities: agent?.capabilities,
+                      uploadDir: session.cwd,
+                      uploadCache: uploaded.current,
+                      callUpload: (dir, name, data) => link.call("fs.upload", { dir, name, data }, 180000),
+                      onSendingFile: setSendingFile,
+                    });
+                    if (!content.length) return;
+                    const parsed = parseCommand(text);
+                    const immediate =
+                      now ||
+                      (session.agent === "codex" &&
+                        !!parsed &&
+                        ["mcp", "apps", "status", "ps", "stop", "goal"].includes(parsed.name));
+                    const current = store.getState();
+                    if (current.status !== "online" || !current.ready[session.id])
+                      throw new Error("会话连接正在恢复，输入和附件已保留，请同步完成后重试");
+                    await finishComposerSend(actions.send(session.id, content, { now: immediate }), clear);
+                  })
+                }
+                toolbar={({ hasContent: typed, hasText, openFilePicker, setDraftText, submit }) => (
+                  <>
+                    <div className="composer-controls">
+                      <div className="composer-tools">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
                             <Button
-                              variant={primary ? "default" : "ghost"}
+                              type="button"
+                              variant="ghost"
                               size="icon"
-                              className={primary ? "send-button composer-stop" : "composer-stop-small"}
-                              aria-label="停止当前回合"
-                              title="停止当前回合"
-                              disabled={!canInteract || job.busy}
-                              onClick={() => void job.run(() => actions.cancel(session.id))}
+                              aria-label="添加附件"
+                              onClick={openFilePicker}
                             >
-                              <Square className="composer-stop-glyph" aria-hidden />
+                              <Icon name="attach" />
                             </Button>
-                          );
-                          if (canStop && !typed) return stop(true);
-                          return (
-                            <>
-                              {canStop && stop(false)}
-                              {view?.turnActive && agent?.capabilities.steer && (
+                          </TooltipTrigger>
+                          <TooltipContent side="top">添加附件 · 单个文件最多 {MAX_ATTACHMENT_LABEL}，图片会自动压缩</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label="打开命令面板"
+                              onClick={() => setPanel("commands")}
+                            >
+                              <Icon name="commands" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">命令与技能 · /</TooltipContent>
+                        </Tooltip>
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
                                 <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="composer-steer"
-                                  title="立即发送，不等这一轮结束 · ⌘/Ctrl Enter"
-                                  disabled={!canInteract || sendJob.busy || !draft.trim()}
-                                  onClick={() => void sendJob.run(() => send(true))}
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={t("composer.quickPrompts")}
                                 >
-                                  插话
+                                  <Sparkles />
                                 </Button>
-                              )}
-                              <Button
-                                variant="default"
-                                size="icon"
-                                className="send-button"
-                                aria-label={view?.turnActive ? "加入发送队列" : "发送消息"}
-                                title={view?.turnActive ? "加入队列 · Enter（⌘/Ctrl Enter 立即发送）" : "发送 · Enter（Shift Enter 换行）"}
-                                disabled={!canInteract || sendJob.busy || !typed}
-                                onClick={() => void sendJob.run(() => send())}
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">{t("composer.quickPrompts")}</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="start" side="top" className="w-56">
+                            <DropdownMenuLabel>{t("composer.quickPrompts")}</DropdownMenuLabel>
+                            {(
+                              [
+                                ["composer.quickRunTests", "composer.quickRunTestsPrompt"],
+                                ["composer.quickSummarize", "composer.quickSummarizePrompt"],
+                                ["composer.quickContinue", "composer.quickContinuePrompt"],
+                                ["composer.quickCommitPr", "composer.quickCommitPrPrompt"],
+                              ] as const
+                            ).map(([labelKey, promptKey]) => (
+                              <DropdownMenuItem
+                                key={labelKey}
+                                onSelect={() => setDraftText(t(promptKey))}
                               >
-                                {sendJob.busy ? <LoaderCircle className="animate-spin" /> : <Icon name="send" />}
-                              </Button>
-                            </>
-                          );
-                        })()}
+                                {t(labelKey)}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                    </InputGroupAddon>
-                  </InputGroup>
-                </PopoverAnchor>
-              </Popover>
+                      <div className="composer-options">
+                        <ComposerConfig
+                          session={session}
+                          config={view?.config ?? []}
+                          disabled={!online}
+                          openSettings={() => setPanel("settings")}
+                          pickerRequest={pickerRequest}
+                        />
+                      </div>
+                    </div>
+                    <div className="composer-meta">
+                      <ComposerPlace session={session} />
+                      {view?.usage?.contextWindow ? (
+                        <ContextRing
+                          used={view.usage.usedTokens ?? 0}
+                          window={view.usage.contextWindow}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="composer-actions">
+                      {(() => {
+                        // As Codex: while a turn runs and nothing is typed, the send button is the
+                        // stop button; typing turns it back into send (to the queue), with 插话
+                        // beside it and stop as a small square.
+                        const running = view?.turnActive || session.state === "unknown";
+                        const canStop = running && !!agent?.capabilities.interrupt;
+                        const stop = (primary: boolean) => (
+                          <Button
+                            type="button"
+                            variant={primary ? "default" : "ghost"}
+                            size="icon"
+                            className={primary ? "send-button composer-stop" : "composer-stop-small"}
+                            aria-label="停止当前回合"
+                            title="停止当前回合"
+                            disabled={!canInteract || job.busy}
+                            onClick={() => void job.run(() => actions.cancel(session.id))}
+                          >
+                            <Square className="composer-stop-glyph" aria-hidden />
+                          </Button>
+                        );
+                        if (canStop && !typed) return stop(true);
+                        return (
+                          <>
+                            {canStop && stop(false)}
+                            {view?.turnActive && agent?.capabilities.steer && (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                className="composer-steer"
+                                title="立即发送，不等这一轮结束 · ⌘/Ctrl Enter"
+                                disabled={!canInteract || sendJob.busy || !hasText}
+                                onClick={() => submit(true)}
+                              >
+                                插话
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="default"
+                              size="icon"
+                              className="send-button"
+                              aria-label={view?.turnActive ? "加入发送队列" : "发送消息"}
+                              title={view?.turnActive ? "加入队列 · Enter（⌘/Ctrl Enter 立即发送）" : "发送 · Enter（Shift Enter 换行）"}
+                              disabled={!canInteract || sendJob.busy || !typed}
+                              onClick={() => submit(false)}
+                            >
+                              {sendJob.busy ? <LoaderCircle className="animate-spin" /> : <Icon name="send" />}
+                            </Button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </>
+                )}
+              />
               {/* The keys are in the send button's tooltip; only a state worth knowing gets a line here. */}
               <span className="sr-only" id="composer-hint">
                 {view?.turnActive
@@ -2031,101 +1647,137 @@ export function Session({
             >
               <div className="side-panel-content" data-panel={panel}>
                 {apps.map((tab) => (
-                  <McpAppView key={tab.id} sessionId={session.id} tab={{ ...tab, title: appTitle(tab) }} hidden={panel !== tab.id} say={sayFromApp} />
+                  <ErrorBoundary key={tab.id} resetKey={`${session.id}:${tab.id}`}>
+                    <McpAppView sessionId={session.id} tab={{ ...tab, title: appTitle(tab) }} hidden={panel !== tab.id} say={sayFromApp} />
+                  </ErrorBoundary>
                 ))}
-                {panel === "settings" && (
-                  <Settings session={session} view={view} />
-                )}
-                {panel === "changes" && <Changes view={view} session={session} />}
-                {panel === "files" &&
-                  (file ? (
-                    <>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={() => void changeFile()}
-                      >
-                        返回文件列表
-                      </Button>
-                      <FileView
-                        key={file}
-                        line={fileLine}
-                        path={file}
+                <ErrorBoundary resetKey={`${session.id}:${panel}`}>
+                  {panel === "settings" && (
+                    <Settings session={session} view={view} />
+                  )}
+                  {panel === "changes" && (
+                    <Changes
+                      view={view}
+                      session={session}
+                      inspectorWidth={isDesktop ? inspectorWidth : undefined}
+                      onCommitted={sessionGit.reload}
+                    />
+                  )}
+                  {panel === "files" &&
+                    (file ? (
+                      <>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={() => void changeFile()}
+                        >
+                          返回文件列表
+                        </Button>
+                        <FileView
+                          key={file}
+                          line={fileLine}
+                          path={file}
+                          onDirtyChange={onFileDirtyChange}
+                        />
+                      </>
+                    ) : (
+                      <Files
+                        start={session.cwd}
                         onDirtyChange={onFileDirtyChange}
                       />
-                    </>
-                  ) : (
-                    <Files
-                      start={session.cwd}
-                      onDirtyChange={onFileDirtyChange}
+                    ))}
+                  {panel === "tasks" && (
+                    <Tasks
+                      session={session}
+                      onFile={handleFile}
+                      onTerminal={(id) => {
+                        setTerminal(id);
+                        if (isDesktop) void setPanel("terminal");
+                      }}
                     />
-                  ))}
-                {panel === "tasks" && (
-                  <Tasks
-                    session={session}
-                    onFile={handleFile}
-                    onTerminal={(id) => {
-                      setTerminal(id);
-                      if (isDesktop) void setPanel("terminal");
-                    }}
-                  />
-                )}
-                {panel === "goal" && <Goal session={session} view={view} />}
-                {panel === "side" && <Side session={session} label={agent?.label ?? session.agent} />}
-                {panel === "terminal" && (
-                  <Terminals
-                    cwd={session.cwd}
-                    sessionId={session.id}
-                    selected={terminal}
-                    onSelect={setTerminal}
-                  />
-                )}
-                {panel === "preview" && (
-                  <ComputerPreview sessionId={session.id} />
-                )}
-                {(panel === "mcp" || panel === "apps") && (
-                  <>
-                    <p className="muted">
-                      由电脑上的 {session.agent}{" "}
-                      提供。完整结果、授权请求和错误同时显示在会话中。
-                    </p>
-                    <Button
-                      variant="outline"
-                      disabled={!canInteract || job.busy}
-                      onClick={() => nativePanel(panel)}
-                    >
-                      刷新 /{panel}
-                    </Button>
-                    {(() => {
-                      // Codex says it as a notice; Claude answers the command as a reply of its own.
-                      const items = view?.items ?? [];
-                      let notice = -1;
-                      let asked = -1;
-                      items.forEach((item, at) => {
-                        if (item.kind === "notice" && item.title === `/${panel}`) notice = at;
-                        if (item.kind === "user" && item.blocks.length === 1 && item.blocks[0]?.type === "text" && item.blocks[0].text.trim() === `/${panel}`) asked = at;
-                      });
-                      const shown = items[notice];
-                      if (shown?.kind === "notice" && notice > asked)
-                        return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
-                      const reply = asked >= 0 ? items.slice(asked + 1).find((item) => item.kind === "agent") : undefined;
-                      if (reply?.kind === "agent")
-                        return <div className="service-status markdown"><StreamingText text={reply.text} streaming={!!reply.streaming && online} /></div>;
-                      if (shown?.kind === "notice") return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
-                      return null;
-                    })()}
-                  </>
-                )}
+                  )}
+                  {panel === "goal" && <Goal session={session} view={view} />}
+                  {panel === "side" && <Side session={session} label={agent?.label ?? session.agent} />}
+                  {panel === "terminal" && (
+                    <Terminals
+                      cwd={session.cwd}
+                      sessionId={session.id}
+                      selected={terminal}
+                      onSelect={setTerminal}
+                    />
+                  )}
+                  {panel === "preview" && (
+                    <div className="session-preview-inspector">
+                      <div className="session-preview-switcher">
+                        <Tabs
+                          value={previewMode}
+                          onValueChange={(next) => setPreviewMode(next as "port" | "computer")}
+                        >
+                          <TabsList aria-label="预览来源">
+                            <TabsTrigger value="port">
+                              <Globe className="size-3.5" aria-hidden />
+                              本地服务
+                            </TabsTrigger>
+                            <TabsTrigger value="computer">
+                              <Monitor className="size-3.5" aria-hidden />
+                              电脑操作
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                      <div className="session-preview-body">
+                        {previewMode === "port" ? (
+                          <SessionPortPreview sessionId={session.id} cwd={session.cwd} />
+                        ) : (
+                          <ComputerPreview sessionId={session.id} />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {(panel === "mcp" || panel === "apps") && (
+                    <>
+                      <p className="muted">
+                        由电脑上的 {session.agent}{" "}
+                        提供。完整结果、授权请求和错误同时显示在会话中。
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={!canInteract || job.busy}
+                        onClick={() => nativePanel(panel)}
+                      >
+                        刷新 /{panel}
+                      </Button>
+                      {(() => {
+                        // Codex says it as a notice; Claude answers the command as a reply of its own.
+                        const items = view?.items ?? [];
+                        let notice = -1;
+                        let asked = -1;
+                        items.forEach((item, at) => {
+                          if (item.kind === "notice" && item.title === `/${panel}`) notice = at;
+                          if (item.kind === "user" && item.blocks.length === 1 && item.blocks[0]?.type === "text" && item.blocks[0].text.trim() === `/${panel}`) asked = at;
+                        });
+                        const shown = items[notice];
+                        if (shown?.kind === "notice" && notice > asked)
+                          return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
+                        const reply = asked >= 0 ? items.slice(asked + 1).find((item) => item.kind === "agent") : undefined;
+                        if (reply?.kind === "agent")
+                          return <div className="service-status markdown"><StreamingText text={reply.text} streaming={!!reply.streaming && online} /></div>;
+                        if (shown?.kind === "notice") return <pre className="service-status">{shown.detail ?? "当前没有记录"}</pre>;
+                        return null;
+                      })()}
+                    </>
+                  )}
+                </ErrorBoundary>
               </div>
             </ConversationPanel>
           )}
         </div>
         {panel === "commands" && (
           <Commands
-            returnFocus={() => composer.current?.focus()}
+            returnFocus={() => composerRef.current?.focus()}
             commands={commands}
             close={() => setPanel(null)}
-            choose={choose}
+            choose={chooseFromModal}
           />
         )}
         {forkAt !== undefined && (

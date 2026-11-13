@@ -4,6 +4,7 @@
    a box. Ink: titles in the text colour at 500, explanations at 70 %, only times and fine print
    at 50 %. Desktop shell only. */
 
+@layer components {
 /* The sidebar's way in, just above its footer. */
 html[data-desktop] .desktop-manage-entry { flex: none; padding: 4px 8px; }
 html[data-desktop] .desktop-manage-entry kbd { flex: none; opacity: 0; transition: opacity var(--transition); }
@@ -35,10 +36,11 @@ html[data-desktop] .management-page { display: flex; flex-direction: column; gap
 html[data-desktop] .management-page > .page-header { margin-bottom: -8px; }
 
 /* Unified Settings & Local Service dialog (`⌘,` / `⌘2`): 208 px tonal left rail, scrollable content pane. */
-html[data-desktop] [data-slot="dialog-content"].management-dialog:not(.command-center) { width: min(940px, calc(100vw - 48px)); height: min(660px, calc(100dvh - 56px)); max-width: none; padding: 0; gap: 0; overflow: hidden; background: var(--plain); -webkit-backdrop-filter: none; backdrop-filter: none; }
-html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].management-dialog:not(.command-center) { background: var(--plain); }
+html[data-desktop] [data-slot="dialog-content"].management-dialog:not(.command-center) { width: min(940px, calc(100vw - 48px)) !important; height: min(660px, calc(100dvh - 56px)) !important; max-width: none !important; padding: 0 !important; gap: 0 !important; overflow: hidden; background: var(--plain) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].management-dialog:not(.command-center) { background: var(--plain) !important; }
+html[data-desktop]:has(.desktop-root[data-platform="windows"]) [data-slot="dialog-content"].management-dialog:not(.command-center) { top: 0 !important; translate: -50% 0 !important; margin-top: max(48px, calc((100dvh - min(660px, calc(100dvh - 64px))) / 2)) !important; height: min(660px, calc(100dvh - 64px)) !important; max-height: calc(100dvh - 64px) !important; }
 html[data-desktop] [data-slot="dialog-content"].management-dialog > [data-slot="dialog-close"],
-html[data-desktop] [data-slot="dialog-content"].management-dialog > button[data-button][aria-label="关闭"] { top: 9px; right: 10px; z-index: 6; -webkit-app-region: no-drag; app-region: no-drag; }
+html[data-desktop] [data-slot="dialog-content"].management-dialog > button[data-button][aria-label="关闭"] { top: 9px !important; right: 10px !important; z-index: 6; -webkit-app-region: no-drag; app-region: no-drag; }
 html[data-desktop] .management-dialog-shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; }
 html[data-desktop] .management-dialog-rail { display: flex; flex-direction: column; gap: 6px; min-inline-size: 0; min-height: 0; padding: 14px 10px 12px; overflow-y: auto; border-right: var(--hairline) solid var(--separator); background: var(--inset); }
 html[data-desktop] .management-dialog-nav { display: flex; flex-direction: column; gap: 1px; }
@@ -78,7 +80,7 @@ html[data-desktop] .management-rows { overflow: clip; }
 html[data-desktop] .management-footnote { display: block; padding: 0 16px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
 html[data-desktop] .management-footnote[data-tone="warning"] { color: var(--waiting); }
 html[data-desktop] .management-footnote[data-tone="success"] { color: var(--ok); }
-html[data-desktop] .management-footnote code { padding: 1px 5px; border-radius: var(--radius-small); background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+html[data-desktop] .management-footnote code { padding: 1px 5px; border-radius: var(--radius-small); background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
 /* Rows, as Codex's settings: 12 × 16 in, 48 px for one line and 60 for two. The control column
    gives back 2 px above and below, so a 28 px control centres in a 48 px row. */
@@ -232,3 +234,4 @@ html[data-desktop] .management-agent { display: flex; align-items: center; gap: 
 .gateway-option strong { color: var(--label); font-size: 13px; font-weight: 500; }
 .gateway-option small { color: var(--secondaryLabel); font-size: 12px; line-height: 1.45; }
 .gateway-error { margin: 0; color: var(--danger); font-size: 12px; }
+}

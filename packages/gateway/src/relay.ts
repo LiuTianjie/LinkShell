@@ -40,14 +40,13 @@ export interface GatewayOptions {
   /** The TURN server peers may use for video that finds no direct path (`turn.credentials`). */
   turn?: TurnOptions;
   /**
-   * How much may wait to be written to one peer before the gateway stops
-   * reading from whoever is sending to it (default 4 MB), and how long a peer
-   * may stay that far behind before it is dropped (default 60 s).
+   * How much may wait to be written to one receiver before the gateway closes
+   * that slow receiver with 1013/backpressure and returns `undeliverable` (default 4 MB).
    */
   maxBufferedBytes?: number;
-  /** How long a receiver may take nothing while its sender is held (default 15 s). */
+  /** @deprecated No longer used since slow receivers are closed rather than pausing senders. */
   stalledPeerMs?: number;
-  /** How long a receiver that is reading, slowly, may hold its sender (default 60 s). */
+  /** @deprecated No longer used since slow receivers are closed rather than pausing senders. */
   slowPeerMs?: number;
 }
 
@@ -71,8 +70,6 @@ interface Peer {
   record: PeerRecord;
   socket: GatewaySocket;
   email?: string;
-  /** Not being read: a peer it sends to can't keep up. */
-  held?: boolean;
   admissionCheckedAt: number;
   admissionCheck?: Promise<string | undefined>;
   admissionRefusal?: string;
@@ -97,6 +94,8 @@ class RelayError extends Error {
 const AUTH_TIMEOUT_MS = 10_000;
 const PAIR_DECISION_MS = 30_000;
 const MAX_CLAIM_ATTEMPTS = 8;
+const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+const IDLE_CHECKPOINT_MS = 5 * 60_000;
 
 /**
  * Gateway v2: authenticates peers by key, routes their end-to-end encrypted
@@ -116,6 +115,7 @@ export class Gateway {
   private readonly claimTimes = new Map<string, number[]>();
   private readonly turnTimes = new Map<string, number[]>();
   private heartbeat?: ReturnType<typeof setInterval>;
+  private lastCheckpointAt = 0;
   /** Sockets that answered the last ping. */
   private readonly alive = new WeakSet<GatewaySocket>();
   private stopped = false;
@@ -183,18 +183,21 @@ export class Gateway {
     const now = Date.now();
     for (const [code, offer] of this.offers) if (offer.expiresAt < now) this.offers.delete(code);
     for (const [deviceId, times] of this.claimTimes) if (times.every((t) => now - t >= 60_000)) this.claimTimes.delete(deviceId);
+    this.pruneTurnTimes(now);
     for (const peer of this.peers.values()) {
       if (this.options.admit && this.options.admissionCheckMs !== undefined && peer.record.role === "machine" && now - peer.admissionCheckedAt >= this.options.admissionCheckMs) {
         void this.checkAdmission(peer).catch((error) => this.log(`admission recheck failed: ${String(error)}`));
       }
-      // A held peer isn't read, so its pong can't arrive; it is checked again once released.
-      if (peer.held) continue;
       if (!this.alive.has(peer.socket)) {
         peer.socket.terminate();
         continue;
       }
       this.alive.delete(peer.socket);
       peer.socket.ping();
+    }
+    if (this.peers.size === 0 && now - this.lastCheckpointAt >= IDLE_CHECKPOINT_MS) {
+      this.lastCheckpointAt = now;
+      this.store.checkpoint();
     }
   }
 
@@ -282,9 +285,7 @@ export class Gateway {
     socket.on("close", () => {
       clearTimeout(timer);
       if (this.stopped || !peer || this.peers.get(peer.record.id)?.socket !== socket) return;
-      this.peers.delete(peer.record.id);
-      this.store.touch(peer.record.id);
-      this.announce(peer.record, false);
+      this.dropPeer(peer);
     });
   }
 
@@ -351,11 +352,11 @@ export class Gateway {
     this.peers.set(record.id, peer);
     // One live connection per identity: the newest wins.
     previous?.socket.close(4000, "replaced by a newer connection");
-    // The old connection's close won't announce anything, since this one is registered by then. A
-    // device's channels live and die with its gateway connection, so its machines must still drop
-    // them, and now: before this connection is ready and can open new ones. (Devices don't drop
-    // channels on presence; a machine that reconnects answers their next frame with `close`.)
-    if (previous && role === "device") this.announce(record, false);
+    // The old connection's close won't announce anything, since this one is registered by then.
+    // Announce offline before the caller announces online so both machines (when a device
+    // replaces) and devices (when a machine replaces) drop stale channels right away instead of
+    // waiting for ping timeouts.
+    if (previous) this.announce(record, false);
     this.log(`${role} ${record.id.slice(0, 8)} "${record.name}" online${userId ? " (account)" : ""}`);
     return peer;
   }
@@ -383,10 +384,22 @@ export class Gateway {
   private route(from: Peer, to: string, data: string): void {
     const via = this.store.route(from.record.id, to);
     const target = this.peers.get(to);
-    const undeliverable = (reason: string) =>
-      from.socket.send(JSON.stringify({ t: "undeliverable", to, reason } satisfies ServerFrame));
+    const undeliverable = (reason: string) => {
+      if (from.socket.readyState === WebSocket.OPEN) {
+        from.socket.send(JSON.stringify({ t: "undeliverable", to, reason } satisfies ServerFrame));
+      }
+    };
     if (!via) return undeliverable("not_allowed");
-    if (!target) return undeliverable("offline");
+    if (!target || target.socket.readyState !== WebSocket.OPEN) return undeliverable("offline");
+    const limit = this.options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
+    if (target.socket.bufferedAmount > limit) {
+      // Never pause the sender's multiplexed socket: closing only the slow receiver avoids
+      // freezing other devices and heartbeats sharing the machine's WebSocket.
+      this.log(`${target.record.role} ${target.record.id.slice(0, 8)} can't keep up; closing it`);
+      this.dropPeer(target);
+      target.socket.close(1013, "backpressure");
+      return undeliverable("backpressure");
+    }
     const frame = JSON.stringify({
       t: "from",
       from: { id: from.record.id, signKey: from.record.signKey, boxKey: from.record.boxKey },
@@ -395,45 +408,32 @@ export class Gateway {
     } satisfies ServerFrame);
     this.options.onRouted?.(frame);
     target.socket.send(frame);
-    this.holdWhileBehind(from, target);
   }
 
-  /**
-   * Backpressure. What a peer can't take yet would otherwise pile up here, in
-   * memory every user of this gateway shares: stop reading the sender instead,
-   * so the data waits on its side until the receiver catches up.
-   */
-  private holdWhileBehind(from: Peer, target: Peer): void {
-    const limit = this.options.maxBufferedBytes ?? 4 * 1024 * 1024;
-    if (from.held || target.socket.bufferedAmount <= limit) return;
-    from.held = true;
-    from.socket.pause();
-    const since = Date.now();
-    let lowest = target.socket.bufferedAmount;
-    let progressAt = since;
-    const timer = setInterval(() => {
-      const open = target.socket.readyState === WebSocket.OPEN;
-      const behind = target.socket.bufferedAmount;
-      if (behind < lowest) {
-        lowest = behind;
-        progressAt = Date.now();
-      }
-      if (open && behind > limit / 4) {
-        // While the sender is held, what it sends its other peers waits too, so a receiver that
-        // takes nothing (a phone suspended in the background, a dead link) is let go soon. One
-        // that is slowly reading gets longer. Either catches up from its last seq on reconnect.
-        const stalled = Date.now() - progressAt >= (this.options.stalledPeerMs ?? 15_000);
-        const tooLong = Date.now() - since >= (this.options.slowPeerMs ?? 60_000);
-        if (!stalled && !tooLong) return;
-        this.log(`${target.record.role} ${target.record.id.slice(0, 8)} can't keep up; dropping it`);
-        target.socket.terminate();
-      }
-      clearInterval(timer);
-      from.held = false;
-      this.alive.add(from.socket);
-      if (from.socket.readyState === WebSocket.OPEN) from.socket.resume();
-    }, 20);
-    timer.unref();
+  private dropPeer(peer: Peer): void {
+    if (this.peers.get(peer.record.id) !== peer) return;
+    this.peers.delete(peer.record.id);
+    this.locked.delete(peer.record.id);
+    this.namingConfigured.delete(peer.record.id);
+    this.pruneTurnTimes(Date.now(), peer.record.id);
+    this.store.touch(peer.record.id);
+    this.announce(peer.record, false);
+  }
+
+  private pruneTurnTimes(now: number, id?: string): void {
+    if (id !== undefined) {
+      const times = this.turnTimes.get(id);
+      if (!times) return;
+      const recent = times.filter((t) => now - t < 60_000);
+      if (recent.length === 0) this.turnTimes.delete(id);
+      else if (recent.length !== times.length) this.turnTimes.set(id, recent);
+      return;
+    }
+    for (const [machineId, times] of this.turnTimes) {
+      const recent = times.filter((t) => now - t < 60_000);
+      if (recent.length === 0) this.turnTimes.delete(machineId);
+      else if (recent.length !== times.length) this.turnTimes.set(machineId, recent);
+    }
   }
 
   private event<N extends keyof RelayEvents>(peerId: string, name: N, data: RelayEvents[N]): void {

@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { RpcPeer } from "@linkshell/wire";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startHost } from "../src/host.js";
 import { isLocalDevelopmentClient } from "../src/rpc/server.js";
 
@@ -60,6 +61,60 @@ describe("who may use the development port", () => {
       expect(await handshake(url, {})).toBe("open");
       expect(await handshake(url, { origin: "https://example.com" })).toBe(401);
       expect(await handshake(url, { host: "rebound.example:7878" })).toBe(401);
+    });
+
+    it("requires run/dev.token (0600) before granting local:true on --dev-port and disables mDNS on loopback", async () => {
+      const home = mkdtempSync(join(tmpdir(), "lsh-devtoken-"));
+      const spawnMdns = vi.fn();
+      const host = await startHost({
+        home,
+        version: "test",
+        tcpPort: 0,
+        mdns: true,
+        spawnMdnsProcess: spawnMdns as never,
+        drivers: () => [],
+        log: () => {},
+      });
+      cleanups.push(() => rmSync(home, { recursive: true, force: true }));
+      let stopped = false;
+      cleanups.push(async () => {
+        if (!stopped) await host.stop();
+      });
+
+      // Loopback-only --dev-port must not advertise over LAN mDNS.
+      expect(spawnMdns).not.toHaveBeenCalled();
+
+      const tokenFile = host.server.devTokenFile()!;
+      expect(tokenFile).toBe(join(host.paths.runDir, "dev.token"));
+      if (process.platform !== "win32") {
+        expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
+      }
+      const token = readFileSync(tokenFile, "utf8").trim();
+      expect(token).toMatch(/^[0-9a-f]{64}$/);
+
+      const openRpc = (headers: Record<string, string>) =>
+        new Promise<{ peer: RpcPeer; close: () => void }>((resolve, reject) => {
+          const ws = new WebSocket(`ws://127.0.0.1:${host.server.tcpAddress()}`, { headers });
+          const peer = new RpcPeer({ send: (text) => ws.send(text) });
+          ws.on("message", (data) => peer.receive(data.toString()));
+          ws.once("open", () => resolve({ peer, close: () => ws.close() }));
+          ws.once("error", reject);
+        });
+
+      const unauth = await openRpc({});
+      cleanups.push(() => unauth.close());
+      await expect(unauth.peer.request("access.status", {})).rejects.toMatchObject({ data: { code: "forbidden" } });
+      await expect(unauth.peer.request("desktop.openPath", { path: home })).rejects.toMatchObject({ data: { code: "forbidden" } });
+
+      const authed = await openRpc({ authorization: `Bearer ${token}` });
+      cleanups.push(() => authed.close());
+      await expect(authed.peer.request("access.status", {})).resolves.toEqual({ password: false });
+
+      unauth.close();
+      authed.close();
+      await host.stop();
+      stopped = true;
+      expect(existsSync(tokenFile)).toBe(false);
     });
   });
 });

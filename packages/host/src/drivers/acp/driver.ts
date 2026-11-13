@@ -576,6 +576,7 @@ export class AcpDriver implements AgentDriver {
       for (const notice of state.pendingNotices?.splice(0) ?? []) this.emit(nativeId, notice);
       return [];
     }
+    this.restoreMessageAliases(nativeId, state);
     const historyBehavior = this.acpBehavior.history;
     let history: HistoryItem[] = [];
     state.config = []; state.commands = undefined;
@@ -623,8 +624,15 @@ export class AcpDriver implements AgentDriver {
 
   async detach(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
-    if (!state?.loaded) return;
+    if (!state) return;
+    const wasLoaded = state.loaded;
     state.loaded = false;
+    state.tracker = new AcpItemTracker();
+    state.updates = new AcpUpdates();
+    state.messageAliases.clear();
+    state.deferredUserUpdates = [];
+    state.toolCalls.clear();
+    if (!wasLoaded) return;
     this.cancelPermissions(state);
     await this.services.close(nativeId);
     await this.mcp.close(nativeId);
@@ -879,6 +887,19 @@ export class AcpDriver implements AgentDriver {
     }
     this.current = { installed: true, version: this.current.version, problem: `${this.label} 正在重启` };
     this.scheduleRestart();
+  }
+
+  protected restoreMessageAliases(nativeId: string, state: AcpSessionState): void {
+    if (state.messageAliases.size > 0) return;
+    try {
+      const raw = this.host?.state(this.id, nativeId).get("acp-message-aliases");
+      if (!raw) return;
+      for (const [alias, target] of JSON.parse(raw) as [string, string][]) {
+        state.messageAliases.set(alias, target);
+      }
+    } catch {
+      // Corrupt state is ignored.
+    }
   }
 
   protected stateFor(nativeId: string, cwd: string): AcpSessionState {

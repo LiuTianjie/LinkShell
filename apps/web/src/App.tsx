@@ -9,7 +9,6 @@ import {
   InputGroupButton,
 } from "@/components/ui/input-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
   Field,
@@ -38,7 +37,15 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
-import { NewSessionPage } from "./live/NewSessionPage";
+import { NEW_SESSION_COMMANDS, NewSessionPage } from "./live/NewSessionPage";
+import {
+  ComposerBox,
+  buildComposerContentBlocks,
+  filesNeedUpload,
+  type ComposerBoxHandle,
+  type ComposerSubmitPayload,
+} from "./live/ComposerBox";
+import { finishComposerSend } from "./live/composer-draft";
 import { sessionPreferences } from "./live/session-preferences";
 import { configToCreate, creationOptions, modelName, modelToCreate, useAgentModels } from "./live/agent-models";
 import { creationOptionLabel } from "./live/NewSessionConfig";
@@ -372,6 +379,7 @@ function Workspace({
   openComputerView: (computer: Computer, view: string) => void;
 }) {
   const state = useClient((state) => state);
+  const { link } = useConnection();
   useNewSessionTarget();
   // Asked for from 本机管理 or the remote screen, before this workspace was showing to hear it.
   const [create, setCreate] = useState<string | null | undefined>(() => {
@@ -384,6 +392,7 @@ function Workspace({
     if (waiting) setCreate(waiting.cwd ?? null);
   }, [active]);
   const [terminal, setTerminal] = useState<string>();
+  const [filesStart, setFilesStart] = useState<string>();
   const session = state.sessions[view];
   const engineState = useStore(engine.state);
   const names = useStore(computerNames.store);
@@ -451,13 +460,30 @@ function Workspace({
             <>
               {/* On the desktop the browser's own toolbar is the page's: where you are and what to do. */}
               {!isDesktop && <PageHeader title="文件" />}
-              <Files page />
+              <Files key={filesStart ?? "default"} page start={filesStart} />
             </>
           )}
           {view === "terminals" && (
             <Terminals selected={terminal} onSelect={setTerminal} />
           )}
-          {view === "worktrees" && <Worktrees />}
+          {view === "worktrees" && (
+            <Worktrees
+              onNewSession={(cwd) => setCreate(cwd)}
+              onOpenTerminal={(cwd) => {
+                void link.call("terminals.create", { cwd }).then(
+                  ({ terminal: created }) => {
+                    setTerminal(created.id);
+                    navigate("terminals");
+                  },
+                  () => navigate("terminals"),
+                );
+              }}
+              onBrowseFiles={(cwd) => {
+                setFilesStart(cwd);
+                navigate("files");
+              }}
+            />
+          )}
           {view === "ports" && <Ports />}
           {![
             "home",
@@ -925,7 +951,7 @@ function NewSession({
 }) {
   const machine = useClient((state) => state.machine);
   const actions = useActions();
-  const { store } = useConnection();
+  const { store, link } = useConnection();
   const online = useClient((state) => state.status === "online");
   const job = useJob();
   const remembered = sessionPreferences.read(machine?.machineId);
@@ -937,9 +963,10 @@ function NewSession({
   const [directory, setCwd] = useState(initialDirectory);
   const cwd = directory ?? machine?.home ?? "";
   const quick = !!machine?.home && cwd === machine.home;
-  const [prompt, setPrompt] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [browse, setBrowse] = useState(false);
+  const composerRef = useRef<ComposerBoxHandle>(null);
+  const uploadCacheRef = useRef(new WeakMap<File, string>());
   // Each computer and agent retains its own explicit model and mode choices.
   const [picked, setPicked] = useState<{ store: typeof store; agent: string; model: string }>();
   const [configPick, setConfigPick] = useState<{ store: typeof store; key: string; values: Record<string, string> }>();
@@ -975,6 +1002,61 @@ function NewSession({
   const unavailableModel = pickedModel && models && !models.error && !models.models.some((entry) => entry.value === pickedModel);
   const ready = !job.busy && online && usable && !!cwd.trim() && gitPath === cwd && !!models && !models.error;
 
+  const submitNewSession = (payload: ComposerSubmitPayload) => {
+    if (!ready) return;
+    const trimmedCwd = cwd.trim();
+    const useWorktree = worktree && !!git.value && gitPath === cwd;
+    void job.run(async () => {
+      if (useWorktree && filesNeedUpload(payload.files, selectedAgent?.capabilities)) {
+        const createdSession = await actions.createSession({
+          agent,
+          cwd: trimmedCwd,
+          worktree: true,
+          model,
+          config: configToCreate(models?.config, pickedConfig),
+        });
+        const content = await buildComposerContentBlocks({
+          text: payload.text,
+          files: payload.files,
+          pastedTexts: payload.pastedTexts,
+          blocks: payload.blocks,
+          capabilities: selectedAgent?.capabilities,
+          uploadDir: createdSession.cwd,
+          uploadCache: uploadCacheRef.current,
+          callUpload: (dir, name, data) => link.call("fs.upload", { dir, name, data }),
+        });
+        if (content.length > 0) {
+          await finishComposerSend(actions.send(createdSession.id, content), payload.clear);
+        } else {
+          payload.clear();
+        }
+        created(createdSession);
+        return;
+      }
+      const content = await buildComposerContentBlocks({
+        text: payload.text,
+        files: payload.files,
+        pastedTexts: payload.pastedTexts,
+        blocks: payload.blocks,
+        capabilities: selectedAgent?.capabilities,
+        uploadDir: trimmedCwd,
+        uploadCache: uploadCacheRef.current,
+        callUpload: (dir, name, data) => link.call("fs.upload", { dir, name, data }),
+      });
+      const createdSession = await actions.createSession({
+        agent,
+        cwd: trimmedCwd,
+        worktree: useWorktree,
+        // Untouched, the agent picks as it always does: nothing is pinned.
+        model,
+        config: configToCreate(models?.config, pickedConfig),
+        prompt: content.length ? content : undefined,
+      });
+      payload.clear();
+      created(createdSession);
+    });
+  };
+
   return (
     <Modal
       title="新建会话"
@@ -1008,22 +1090,7 @@ function NewSession({
           className="new-session-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!ready) return;
-            void job.run(async () =>
-              created(
-                await actions.createSession({
-                  agent,
-                  cwd: cwd.trim(),
-                  worktree: worktree && !!git.value && gitPath === cwd,
-                  // Untouched, the agent picks as it always does: nothing is pinned.
-                  model,
-                  config: configToCreate(models?.config, pickedConfig),
-                  prompt: prompt.trim()
-                    ? [{ type: "text", text: prompt.trim() }]
-                    : undefined,
-                }),
-              ),
-            );
+            composerRef.current?.submit();
           }}
         >
           <FieldGroup>
@@ -1031,14 +1098,39 @@ function NewSession({
               <FieldLabel htmlFor="new-session-prompt">
                 任务描述 <span className="muted">可选</span>
               </FieldLabel>
-              <Textarea
+              <ComposerBox
+                ref={composerRef}
                 id="new-session-prompt"
-                autoFocus
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={4}
+                cwd={cwd}
+                online={online}
+                busy={job.busy}
                 disabled={job.busy}
+                autoFocus
+                rows={4}
+                ariaLabel="任务描述"
                 placeholder="描述想完成的工作，也可以稍后再说…"
+                commands={NEW_SESSION_COMMANDS}
+                inlineAttachmentError
+                onCancel={() => {
+                  if (!job.busy) close();
+                }}
+                onSubmit={submitNewSession}
+                toolbar={({ openFilePicker }) => (
+                  <div className="composer-controls">
+                    <div className="composer-tools">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={job.busy}
+                        onClick={openFilePicker}
+                      >
+                        <Icon name="attach" />
+                        添加附件
+                      </Button>
+                    </div>
+                  </div>
+                )}
               />
             </Field>
             <Field data-disabled={job.busy}>

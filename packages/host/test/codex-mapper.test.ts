@@ -408,3 +408,93 @@ describe("Codex Desktop's async questions", () => {
     expect(second).toMatchObject({ questions: [{ id: JSON.stringify(["request_user_input_async", "call_06bc", 1]), title: "Second?", options: ["a"] }] });
   });
 });
+
+describe("token usage and mid-turn command streaming", () => {
+  it("maps tokens and accounting in thread/tokenUsage/updated for session totals and turn fallbacks", () => {
+    const { map, states } = mapper();
+    states.set("t-1", { activeTurnId: "turn-9" });
+
+    const sessionUpdate = map("thread/tokenUsage/updated", {
+      threadId: "t-1",
+      tokenUsage: {
+        modelContextWindow: 200_000,
+        last: { totalTokens: 1_200, inputTokens: 800, outputTokens: 300, reasoningOutputTokens: 100, cachedInputTokens: 250 },
+        total: { totalTokens: 5_400, inputTokens: 4_000, outputTokens: 1_000, reasoningOutputTokens: 400, cachedInputTokens: 1_500 },
+      },
+    });
+    expect(sessionUpdate).toEqual([{
+      threadId: "t-1",
+      itemId: undefined,
+      update: {
+        sessionUpdate: "usage_update",
+        usedTokens: 1_200,
+        contextWindow: 200_000,
+        tokens: {
+          totalTokens: 5_400,
+          inputTokens: 4_000,
+          outputTokens: 1_000,
+          thoughtTokens: 400,
+          cachedReadTokens: 1_500,
+        },
+        accounting: {
+          id: "t-1:turn-9:5400",
+          scope: "session",
+        },
+      },
+    }]);
+
+    const turnFallback = map("thread/tokenUsage/updated", {
+      threadId: "t-1",
+      tokenUsage: {
+        last: { totalTokens: 700, inputTokens: 500, outputTokens: 200 },
+      },
+    });
+    expect(turnFallback[0]?.update).toMatchObject({
+      sessionUpdate: "usage_update",
+      usedTokens: 700,
+      tokens: { totalTokens: 700, inputTokens: 500, outputTokens: 200 },
+      accounting: { id: "turn-9", scope: "turn" },
+    });
+  });
+
+  it("streams live outputDelta and patchUpdated for underWay items joined mid-turn while preserving pre-join output", () => {
+    const { map, states } = mapper();
+    states.set("t-mid", {
+      begun: new Set(["cmd-1", "patch-1"]),
+      joinedUnderWay: new Map([["cmd-1", ""], ["patch-1", ""]]),
+    });
+
+    expect(map("item/commandExecution/outputDelta", { threadId: "t-mid", itemId: "cmd-1", delta: "live line\n" })).toEqual([
+      { threadId: "t-mid", itemId: undefined, update: { sessionUpdate: "tool_call_update", toolCallId: "cmd-1", appendOutput: "live line\n" } },
+    ]);
+    expect(map("item/fileChange/patchUpdated", {
+      threadId: "t-mid",
+      itemId: "patch-1",
+      changes: [{ path: "src/a.ts", oldText: "a", newText: "b" }],
+    })[0]?.update).toMatchObject({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "patch-1",
+      content: [{ type: "patch", path: "src/a.ts" }],
+    });
+
+    // When completion reveals pre-join output ahead of what streamed after join, full aggregatedOutput replaces the partial tail.
+    const done = map("item/completed", {
+      threadId: "t-mid",
+      item: {
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "make test",
+        cwd: "/w",
+        status: "completed",
+        exitCode: 0,
+        aggregatedOutput: "pre-join\nlive line\n",
+      },
+    });
+    expect(done[0]?.update).toMatchObject({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "cmd-1",
+      status: "completed",
+      replaceOutput: "pre-join\nlive line\n",
+    });
+  });
+});

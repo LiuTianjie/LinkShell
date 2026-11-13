@@ -1,14 +1,138 @@
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { loadAuth } from "../auth.js";
+import * as daemon from "../utils/daemon.js";
 import { hostRuntimeOk, resolveGateway, withRunningHost } from "./host.js";
 
 const requireFromCli = createRequire(import.meta.url);
 
-interface CheckResult {
+export interface CheckResult {
   name: string;
   ok: boolean;
   detail: string;
+}
+
+const WAL_BLOAT_WARN_BYTES = 64 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+function fileSize(path: string): number | undefined {
+  try {
+    return existsSync(path) ? statSync(path).size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export function inspectLocalState(options: {
+  home: string;
+  runDir: string;
+  hostSocket: string;
+  hostRunning: boolean;
+  walWarnBytes?: number;
+}): CheckResult[] {
+  const checks: CheckResult[] = [];
+  const walThreshold = options.walWarnBytes ?? WAL_BLOAT_WARN_BYTES;
+
+  const stateSize = fileSize(join(options.home, "state.db"));
+  const stateWalSize = fileSize(join(options.home, "state.db-wal")) ?? 0;
+  const lsaSize = fileSize(join(options.home, "lsa.db"));
+  const lsaWalSize = fileSize(join(options.home, "lsa.db-wal")) ?? 0;
+
+  if (stateSize === undefined && lsaSize === undefined) {
+    checks.push({ name: "Storage", ok: true, detail: "no database yet (created on first host start)" });
+  } else {
+    const parts: string[] = [];
+    const bloated: string[] = [];
+    if (stateSize !== undefined) {
+      parts.push(`state.db ${formatBytes(stateSize)}${stateWalSize > 0 ? ` (WAL ${formatBytes(stateWalSize)})` : ""}`);
+      if (stateWalSize > walThreshold) bloated.push(`state.db-wal (${formatBytes(stateWalSize)})`);
+    }
+    if (lsaSize !== undefined) {
+      parts.push(`lsa.db ${formatBytes(lsaSize)}${lsaWalSize > 0 ? ` (WAL ${formatBytes(lsaWalSize)})` : ""}`);
+      if (lsaWalSize > walThreshold) bloated.push(`lsa.db-wal (${formatBytes(lsaWalSize)})`);
+    }
+    if (bloated.length > 0) {
+      checks.push({
+        name: "Storage",
+        ok: false,
+        detail: `${parts.join(", ")} — WAL bloat in ${bloated.join(", ")}; restart or idle host to checkpoint`,
+      });
+    } else {
+      checks.push({ name: "Storage", ok: true, detail: parts.join(", ") });
+    }
+  }
+
+  const pidPath = join(options.home, "host.pid");
+  let rawPid: number | undefined;
+  let pidFileExists = false;
+  if (existsSync(pidPath)) {
+    pidFileExists = true;
+    const parsed = Number(readFileSync(pidPath, "utf8").trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) rawPid = parsed;
+  }
+  const pidAlive = rawPid !== undefined && isPidAlive(rawPid);
+  const isPipe = options.hostSocket.startsWith("\\\\.\\pipe\\");
+  const socketExists = !isPipe && existsSync(options.hostSocket);
+  const lockPath = join(options.runDir, "host.lock");
+  const lockExists = existsSync(lockPath);
+
+  if (options.hostRunning) {
+    if (pidFileExists && !pidAlive) {
+      checks.push({
+        name: "Host state",
+        ok: false,
+        detail: `host answers on ${options.hostSocket}, but host.pid (${rawPid ?? "invalid"}) is stale`,
+      });
+    } else {
+      checks.push({
+        name: "Host state",
+        ok: true,
+        detail: rawPid !== undefined ? `pid ${rawPid}, socket ${options.hostSocket}` : `socket ${options.hostSocket}`,
+      });
+    }
+  } else {
+    const staleIssues: string[] = [];
+    if (pidFileExists) {
+      staleIssues.push(
+        pidAlive
+          ? `host.pid points to live pid ${rawPid} that is not answering on ${options.hostSocket}`
+          : `stale host.pid (${rawPid ?? "invalid"})`,
+      );
+    }
+    if (socketExists) {
+      staleIssues.push(`stale socket ${options.hostSocket}`);
+    }
+    if (lockExists) {
+      staleIssues.push(`stale lock ${lockPath}`);
+    }
+    if (staleIssues.length > 0) {
+      checks.push({
+        name: "Host state",
+        ok: false,
+        detail: `${staleIssues.join("; ")} — run: linkshell host stop && linkshell host --daemon`,
+      });
+    }
+  }
+
+  return checks;
 }
 
 function check(name: string, fn: () => string): CheckResult {
@@ -104,6 +228,23 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
       const problem = agent.problem ?? (signedOut ? (agent.auth?.hint ?? "not logged in") : undefined);
       results.push({ name: agent.label, ok: !problem, detail: `v${agent.version ?? "?"}${problem ? ` — ${problem}` : ""}` });
     }
+  }
+
+  {
+    const home = daemon.linkshellDir();
+    let runDir = join(home, "run");
+    let hostSocket = join(runDir, "host.sock");
+    if (hostRuntimeOk()) {
+      try {
+        const { hostPaths } = await import("@linkshell/host");
+        const paths = hostPaths(home);
+        runDir = paths.runDir;
+        hostSocket = paths.hostSocket;
+      } catch {
+        // Fall back to default layout when @linkshell/host is unavailable.
+      }
+    }
+    results.push(...inspectLocalState({ home, runDir, hostSocket, hostRunning: Boolean(host) }));
   }
 
   const auth = loadAuth();

@@ -84,25 +84,59 @@ async function workingDirectories(pids: number[]): Promise<Map<number, string>> 
   return cwd;
 }
 
-/** Connects to a port on this machine's loopback, IPv4 first. */
-function connectLoopback(port: number): Promise<Socket> {
+const CONNECT_TIMEOUT_MS = 5000;
+const RPC_HIGH_WATER = 2 * 1024 * 1024;
+const RPC_LOW_WATER = 1024 * 1024;
+const RPC_DRAIN_POLL_MS = 25;
+
+/** Connects to a port on this machine's loopback, IPv4 first, bounded by `timeoutMs`. */
+export function connectLoopback(port: number, timeoutMs = CONNECT_TIMEOUT_MS): Promise<Socket> {
+  const deadline = Date.now() + timeoutMs;
   const attempt = (host: string) =>
     new Promise<Socket>((resolve, reject) => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        reject(new Error(`connect ${host}:${port} timed out after ${timeoutMs}ms`));
+        return;
+      }
       const socket = connect({ host, port });
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        reject(new Error(`connect ${host}:${port} timed out after ${timeoutMs}ms`));
+      }, remaining);
+      timer.unref();
       socket.once("connect", () => {
+        if (settled) {
+          socket.destroy();
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
         socket.removeAllListeners("error");
         resolve(socket);
       });
-      socket.once("error", reject);
+      socket.once("error", (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        reject(error);
+      });
     });
-  return attempt("127.0.0.1").catch(() => attempt("::1"));
+  return attempt("127.0.0.1").catch((error) => {
+    if (Date.now() >= deadline) throw error;
+    return attempt("::1");
+  });
 }
 
 /** Whether the port answers HTTP, and the page's <title> if it serves HTML. */
 async function probeHttp(port: number, timeoutMs = 1200): Promise<{ http: boolean; title?: string }> {
   let socket: Socket | undefined;
   try {
-    socket = await connectLoopback(port);
+    socket = await connectLoopback(port, Math.min(timeoutMs, CONNECT_TIMEOUT_MS));
     const open = socket;
     return await new Promise((resolve) => {
       let head = "";
@@ -169,24 +203,65 @@ const MAX_STREAMS = 96;
 /** One device connection's open streams; all end when the connection does. */
 export class ProxyStreams {
   private readonly streams = new Map<string, Socket>();
+  private readonly pausedForRpc = new Set<Socket>();
+  private rpcDrainTimer?: ReturnType<typeof setInterval>;
+  private closed = false;
 
   constructor(
     private readonly send: {
       data: (streamId: string, data: string) => void;
       closed: (streamId: string, error?: string) => void;
+      bufferedAmount?: () => number;
     },
     /** The connection's direct channel, when it can have one: streams asked onto it skip the RPC channel. */
     private readonly direct?: DirectPeer,
+    private readonly connectSocket: (port: number) => Promise<Socket> = (port) => connectLoopback(port),
   ) {}
+
+  private pauseForRpcDrain(socket: Socket): void {
+    this.pausedForRpc.add(socket);
+    if (this.rpcDrainTimer) return;
+    this.rpcDrainTimer = setInterval(() => {
+      if (this.closed || this.pausedForRpc.size === 0) {
+        clearInterval(this.rpcDrainTimer);
+        this.rpcDrainTimer = undefined;
+        this.pausedForRpc.clear();
+        return;
+      }
+      if ((this.send.bufferedAmount?.() ?? 0) <= RPC_LOW_WATER) {
+        clearInterval(this.rpcDrainTimer);
+        this.rpcDrainTimer = undefined;
+        const paused = [...this.pausedForRpc];
+        this.pausedForRpc.clear();
+        for (const candidate of paused) {
+          if (!candidate.destroyed) candidate.resume();
+        }
+      }
+    }, RPC_DRAIN_POLL_MS);
+    this.rpcDrainTimer.unref();
+  }
+
+  private unpauseSocket(socket: Socket): void {
+    this.pausedForRpc.delete(socket);
+    if (this.pausedForRpc.size === 0 && this.rpcDrainTimer) {
+      clearInterval(this.rpcDrainTimer);
+      this.rpcDrainTimer = undefined;
+    }
+  }
 
   /** Opens a stream to `port`. `channel` is its number on the direct channel when it goes there. */
   async open(port: number, wantDirect = false): Promise<{ streamId: string; channel?: number }> {
+    if (this.closed) throw RpcError.app("not_ready", "这个预览连接已关闭");
     if (this.streams.size >= MAX_STREAMS) throw RpcError.app("busy", "打开的预览连接太多了，请先关掉一些");
     let socket: Socket;
     try {
-      socket = await connectLoopback(port);
+      socket = await this.connectSocket(port);
     } catch (error) {
       throw RpcError.app("not_found", `端口 ${port} 上没有服务在监听`, { cause: String(error) });
+    }
+    if (this.closed) {
+      socket.destroy();
+      throw RpcError.app("not_ready", "这个预览连接已关闭");
     }
     const streamId = randomUUID();
     this.streams.set(streamId, socket);
@@ -195,9 +270,17 @@ export class ProxyStreams {
     socket.on("error", (error) => (failure = error.message));
     const direct = wantDirect && this.direct?.open ? this.direct : undefined;
     if (!direct) {
-      socket.on("data", (chunk) => this.send.data(streamId, chunk.toString("base64")));
+      socket.on("data", (chunk) => {
+        if (this.closed) return;
+        this.send.data(streamId, chunk.toString("base64"));
+        if ((this.send.bufferedAmount?.() ?? 0) > RPC_HIGH_WATER && !socket.isPaused()) {
+          socket.pause();
+          this.pauseForRpcDrain(socket);
+        }
+      });
       socket.on("close", () => {
-        if (this.streams.delete(streamId)) this.send.closed(streamId, failure);
+        this.unpauseSocket(socket);
+        if (this.streams.delete(streamId) && !this.closed) this.send.closed(streamId, failure);
       });
       return { streamId };
     }
@@ -242,11 +325,18 @@ export class ProxyStreams {
     const socket = this.streams.get(streamId);
     if (!socket) return;
     this.streams.delete(streamId);
+    this.unpauseSocket(socket);
     socket.end();
     setTimeout(() => socket.destroy(), 5000).unref();
   }
 
   closeAll(): void {
+    this.closed = true;
+    if (this.rpcDrainTimer) {
+      clearInterval(this.rpcDrainTimer);
+      this.rpcDrainTimer = undefined;
+    }
+    this.pausedForRpc.clear();
     for (const socket of this.streams.values()) socket.destroy();
     this.streams.clear();
   }

@@ -111,8 +111,10 @@ export function useLiveActivityPush() {
         writeSecret(KEY, null);
         for (const record of previous) void revoke(record);
         if (previousPushToStart) void revokePushToStart(previousPushToStart);
+        // Only reset activities delegated to a signed-out account's remote push grant;
+        // non-account / QR-paired users simply skip APNs registration and keep local Live Activities.
+        if (previous.length) void linkLayout.endNativeLiveActivity();
       }
-      void linkLayout.endNativeLiveActivity();
       return;
     }
     let disposed = false;

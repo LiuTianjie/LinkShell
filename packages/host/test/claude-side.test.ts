@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { openChildRegistry } from "../src/children.js";
 
 // The SDK's query, played: what the driver starts it with, and the side questions it is asked.
 const started: { options: Record<string, unknown>; asked: { question: string; options: unknown }[]; closed: boolean }[] = [];
@@ -45,5 +46,36 @@ describe("Claude side questions (/btw)", () => {
     await driver.sideClose("s1", "a");
     expect(started[0]!.closed).toBe(true);
     expect(driver.capabilities.side).toBe(true);
+
+    if (process.platform !== "win32") {
+      const runDir = mkdtempSync(join(tmpdir(), "lsh-side-children-"));
+      const registry = openChildRegistry(runDir);
+      try {
+        const spawner = started[0]!.options.spawnClaudeCodeProcess as (opts: {
+          command: string;
+          args: string[];
+          cwd?: string;
+          env?: NodeJS.ProcessEnv;
+          signal?: AbortSignal;
+        }) => import("node:child_process").ChildProcess;
+        expect(typeof spawner).toBe("function");
+        const controller = new AbortController();
+        const child = spawner({
+          command: process.execPath,
+          args: ["-e", "setInterval(() => {}, 1000)"],
+          cwd: tmpdir(),
+          env: process.env,
+          signal: controller.signal,
+        });
+        expect(registry.list()).toMatchObject([{ pid: child.pid, kind: "claude side", group: true }]);
+        controller.abort();
+        await new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once("exit", () => resolve())));
+        expect(registry.list()).toEqual([]);
+      } finally {
+        await registry.close(() => {});
+        rmSync(runDir, { recursive: true, force: true });
+      }
+    }
+    rmSync(configDir, { recursive: true, force: true });
   });
 });

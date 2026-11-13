@@ -105,12 +105,16 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
     parentToolCallId: z.string().optional(),
     messageId: z.string(),
     content: contentBlockSchema,
+    /** Replaces any buffered partial text for `messageId` (e.g. compacted turn chunks). */
+    replace: z.boolean().optional(),
   }),
   z.object({
     sessionUpdate: z.literal("agent_thought_chunk"),
     parentToolCallId: z.string().optional(),
     messageId: z.string(),
     content: contentBlockSchema,
+    /** Replaces any buffered partial thought for `messageId` (e.g. compacted turn chunks). */
+    replace: z.boolean().optional(),
   }),
   z.object({
     sessionUpdate: z.literal("tool_call"),

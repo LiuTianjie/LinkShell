@@ -303,6 +303,17 @@ describe("ActivityKit registration handoff", () => {
     expect(harness.end).toHaveBeenCalledOnce();
   });
 
+  it("skips remote APNs push registration for QR-paired non-account users without ending local Live Activities", async () => {
+    harness.owner = undefined;
+    harness.saved = undefined;
+    mount();
+    await settle();
+    expect(harness.end).not.toHaveBeenCalled();
+    expect(harness.getNative).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(harness.call).not.toHaveBeenCalled();
+  });
+
   it("registers iOS 17.2+ pushToStartToken with push service and hands it off to Host", async () => {
     harness.getNative.mockImplementation(async () => []);
     harness.pushToStartToken = "fe".repeat(32);

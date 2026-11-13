@@ -506,5 +506,31 @@ describe("Codex automation & heartbeat message formatting", () => {
       },
     });
   });
+
+  it("replaces agent message and thought text cleanly when replace is true, including across history pages", () => {
+    seq = 0;
+    const image = { type: "image" as const, mimeType: "image/png", data: "AAAA" };
+    const e1 = ev({ sessionUpdate: "agent_thought_chunk", messageId: "m1", content: text("draft ") }, 1000);
+    const e2 = ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: image }, 1005);
+    const e3 = ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: text("partial ") }, 1010);
+    const e4 = ev({ sessionUpdate: "agent_thought_chunk", messageId: "m1", content: text("final thought"), replace: true }, 1020);
+    const e5 = ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: text("clean answer"), replace: true }, 1030);
+    const e6 = ev({ sessionUpdate: "agent_message_chunk", messageId: "m1", content: text("!") }, 1040);
+    const e7 = ev({ sessionUpdate: "tool_call", toolCallId: "sub1", title: "Sub", kind: "other", status: "in_progress", detail: { type: "subagent", action: "spawn" } }, 1050);
+    const e8 = ev({ sessionUpdate: "agent_message_chunk", parentToolCallId: "sub1", messageId: "sm1", content: text("old") }, 1060);
+    const e9 = ev({ sessionUpdate: "agent_message_chunk", parentToolCallId: "sub1", messageId: "sm1", content: text("new"), replace: true }, 1070);
+
+    const view = applyEvents(emptyView("s"), [e1, e2, e3, e4, e5, e6, e7, e8, e9]);
+    expect(view.items[0]).toMatchObject({ kind: "thought", id: "thought:m1", text: "final thought", ts: 1000 });
+    expect(view.items[1]).toMatchObject({ kind: "agent", id: "m1", text: "clean answer!", attachments: [image], ts: 1005 });
+    expect(findTool(view, "sub1")?.sub?.items[0]).toMatchObject({ kind: "agent", id: "sm1", text: "new" });
+
+    // Prepending an earlier page before a replacement chunk must not concatenate superseded chunks.
+    let later = startWindow(emptyView("s"), 3);
+    later = applyEvents(later, [e4, e5, e6]);
+    const joined = prependEvents(later, [e1, e2, e3], 0);
+    expect(joined.items[0]).toMatchObject({ kind: "thought", id: "thought:m1", text: "final thought", ts: 1000 });
+    expect(joined.items[1]).toMatchObject({ kind: "agent", id: "m1", text: "clean answer!", attachments: [image], ts: 1005 });
+  });
 });
 

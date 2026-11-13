@@ -296,10 +296,13 @@ describe("native desktop workspace service", () => {
     response = nextMessage(client);
     for (const peer of host.peers.clients) peer.send(JSON.stringify({ jsonrpc: "2.0", method: "session.notice", params: { sessionId: "s1" } }));
     expect(await response).toMatchObject({ method: "session.notice" });
-    for (const method of ["desktop.attach", "desktop.yielded", "made.up", "__proto__"]) {
+    response = nextMessage(client);
+    client.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "desktop.openPath", params: { path: "/repo", app: "cursor" } }));
+    expect(await response).toEqual({ jsonrpc: "2.0", id: 2, result: { sessions: [] } });
+    for (const method of ["desktop.shutdown", "desktop.attach", "desktop.yielded", "made.up", "__proto__"]) {
       response = nextMessage(client);
-      client.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method, params: {} }));
-      expect(await response).toMatchObject({ id: 2, error: { code: -32601 } });
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method, params: {} }));
+      expect(await response).toMatchObject({ id: 3, error: { code: -32601 } });
       expect(host.received.some((item) => item.method === method)).toBe(false);
     }
     const closed = once(client, "close");

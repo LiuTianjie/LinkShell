@@ -53,6 +53,9 @@ describe("Smart On-Demand Keep-Awake & Battery Telemetry", () => {
     const linux = keepAwakeCommand("linux", 4242);
     expect(linux?.command).toBe("systemd-inhibit");
     expect(linux?.args).toContain("--what=idle");
+    expect(linux?.args).not.toContain("infinity");
+    expect(linux?.args.slice(-3)).toEqual(["sh", "-c", "read _"]);
+    expect(linux?.stdinPipe).toBe(true);
 
     const win = keepAwakeCommand("win32", 4242);
     expect(win?.command).toBe("powershell.exe");

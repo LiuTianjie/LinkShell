@@ -34,6 +34,7 @@ export class TunnelSocket implements SocketLike {
       return;
     }
     const opening = openTunnel(device, machine, this.ch);
+    let helloSent = false;
     this.cleanup.push(
       relay.onFrame((from, _via, frame) => {
         if (from.id !== machine.id || frame.ch !== this.ch) return;
@@ -71,10 +72,36 @@ export class TunnelSocket implements SocketLike {
             return;
         }
       }),
-      relay.onUndeliverable((to, reason) => {
+      relay.onUndeliverable((to, reason, channel) => {
         if (to !== machine.id) return;
-        this.fail(reason === "offline" ? "电脑不在线" : reason === "not_allowed" ? "没有权限连接这台电脑" : reason, reason);
+        if (channel !== undefined && channel !== this.ch) return;
+        const message =
+          reason === "offline"
+            ? "电脑不在线"
+            : reason === "not_allowed"
+              ? "没有权限连接这台电脑"
+              : reason === "backpressure"
+                ? "连接繁忙，正在重连"
+                : reason;
+        this.fail(message, reason);
       }),
+      ...(typeof relay.on === "function"
+        ? [
+            relay.on("presence", (presence) => {
+              if (presence.id !== machine.id) return;
+              const reset = Boolean((presence as { reset?: boolean }).reset);
+              if (!presence.online) {
+                this.fail("电脑不在线", "offline");
+                return;
+              }
+              // A fresh machine session on the gateway dropped every channel it held (including a
+              // hello sent before it reconnected), so fail over now instead of waiting on a timer.
+              if (reset || this.readyState === OPEN || helloSent) {
+                this.fail("连接已断开", "reset");
+              }
+            }),
+          ]
+        : []),
       relay.onStatus((status) => {
         // A new gateway connection is a new device session there: the computer has already
         // dropped this channel, and frames sent on it would vanish while it looked open.
@@ -88,6 +115,7 @@ export class TunnelSocket implements SocketLike {
         this.fail(relay.lastError?.message ?? "连不上网关");
         return;
       }
+      helloSent = true;
       relay.send(machine.id, opening.hello);
       this.timer = setTimeout(() => this.fail("电脑没有响应"), HANDSHAKE_TIMEOUT_MS);
     });

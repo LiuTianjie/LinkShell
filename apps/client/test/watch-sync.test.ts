@@ -1,24 +1,77 @@
 import type { PendingPermissionSummary, SessionSummary, TerminalInfo, WatchCommand } from "@linkshell/wire";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const harness = vi.hoisted(() => ({
-  effects: [] as Array<() => void | (() => void)>,
-  appState: "active",
-  onChange: undefined as undefined | ((state: string) => void),
-  removeAppState: vi.fn(),
-  syncWatch: vi.fn(() => Promise.resolve()),
-  pendingId: vi.fn<() => Promise<string | null>>(() => Promise.resolve(null)),
-  consumeCmd: vi.fn<(id: string) => Promise<WatchCommand | null>>(() => Promise.resolve(null)),
-  completeCmd: vi.fn(() => Promise.resolve()),
-  onWatchCmd: undefined as undefined | ((event: { id: string }) => void),
-  removeWatchCmd: vi.fn(),
-}));
+const harness = vi.hoisted(() => {
+  const refs: Array<{ current: unknown }> = [];
+  const slots: Array<{ deps?: readonly unknown[]; cleanup?: () => void }> = [];
+  let refIdx = 0;
+  let slotIdx = 0;
+  const queued: Array<() => void> = [];
+
+  return {
+    stateful: false,
+    effects: [] as Array<() => void | (() => void)>,
+    appState: "active",
+    addAppStateCalls: 0,
+    onChange: undefined as undefined | ((state: string) => void),
+    removeAppState: vi.fn(),
+    syncWatch: vi.fn(() => Promise.resolve()),
+    pendingId: vi.fn<() => Promise<string | null>>(() => Promise.resolve(null)),
+    consumeCmd: vi.fn<(id: string) => Promise<WatchCommand | null>>(() => Promise.resolve(null)),
+    completeCmd: vi.fn(() => Promise.resolve()),
+    onWatchCmd: undefined as undefined | ((event: { id: string }) => void),
+    removeWatchCmd: vi.fn(),
+    beginRender() {
+      refIdx = 0;
+      slotIdx = 0;
+      queued.length = 0;
+    },
+    commitRender() {
+      const batch = queued.splice(0, queued.length);
+      for (const fn of batch) fn();
+    },
+    resetStateful() {
+      for (const s of slots) s?.cleanup?.();
+      refs.length = 0;
+      slots.length = 0;
+      queued.length = 0;
+      this.stateful = false;
+    },
+    useRef<T>(initial: T) {
+      if (!this.stateful) return { current: initial };
+      const i = refIdx++;
+      if (!refs[i]) refs[i] = { current: initial };
+      return refs[i] as { current: T };
+    },
+    useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
+      if (!this.stateful) {
+        this.effects.push(effect);
+        return;
+      }
+      const i = slotIdx++;
+      const prev = slots[i];
+      const changed =
+        !prev ||
+        !deps ||
+        !prev.deps ||
+        deps.length !== prev.deps.length ||
+        deps.some((d, k) => !Object.is(d, prev.deps![k]));
+      if (changed) {
+        queued.push(() => {
+          prev?.cleanup?.();
+          const c = effect();
+          slots[i] = { deps, cleanup: typeof c === "function" ? c : undefined };
+        });
+      }
+    },
+  };
+});
 
 vi.mock("react", () => ({
-  useEffect: (effect: () => void | (() => void)) => harness.effects.push(effect),
+  useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => harness.useEffect(effect, deps),
   useState: <T>(initial: T) => [initial, vi.fn()],
   useMemo: <T>(fn: () => T) => fn(),
-  useRef: <T>(initial: T) => ({ current: initial }),
+  useRef: <T>(initial: T) => harness.useRef(initial),
   useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
 }));
 vi.mock("expo-sqlite/kv-store", () => ({ default: { getItemSync: () => null, setItemSync: vi.fn() } }));
@@ -30,6 +83,7 @@ vi.mock("react-native", () => ({
       return harness.appState;
     },
     addEventListener: (_name: string, callback: (state: string) => void) => {
+      harness.addAppStateCalls += 1;
       harness.onChange = callback;
       return { remove: harness.removeAppState };
     },
@@ -802,5 +856,120 @@ describe("Apple Watch client synchronization & command execution", () => {
     expect(actions.send).toHaveBeenCalledWith("s-run", [{ type: "text", text: "继续" }], { now: undefined, clientMessageId: "cmd-retry-1" });
     expect(harness.completeCmd).toHaveBeenCalledTimes(2);
     expect(harness.completeCmd).toHaveBeenNthCalledWith(2, "cmd-retry-1", true, "已发送给 Agent");
+  });
+
+  it("throttles 60Hz streaming updates to 600ms, flushes transitions immediately, and avoids AppState listener churn", async () => {
+    harness.stateful = true;
+    harness.addAppStateCalls = 0;
+    const actions = makeActions();
+
+    const renderWatch = (
+      sessions: SessionSummary[],
+      views?: Parameters<typeof buildClientWatchSnapshot>[0]["views"],
+      promptProgress?: Parameters<typeof buildClientWatchSnapshot>[0]["promptProgress"],
+      online = true,
+    ) => {
+      harness.beginRender();
+      useIOSWatchSync(
+        {
+          computerKey: "mac-1",
+          computerName: "Studio Mac",
+          sessions,
+          terminals: [],
+          online,
+          views,
+          promptProgress,
+        },
+        {
+          computerKey: "mac-1",
+          online,
+          sessions: Object.fromEntries(sessions.map((s) => [s.id, s])),
+          views,
+          computers: [{ key: "mac-1", name: "Studio Mac", online, selected: true }],
+          selectComputer: vi.fn(),
+          actions,
+        },
+        true,
+        undefined,
+        true,
+      );
+      harness.commitRender();
+    };
+
+    try {
+      renderWatch([runningSession], {
+        "s-run": {
+          sessionId: "s-run",
+          lastSeq: 1,
+          startSeq: 0,
+          items: [{ kind: "agent", id: "a-1", ts: 1000, text: "chunk 0", streaming: true }],
+          index: { "a-1": 0 },
+          permissions: [],
+          config: [],
+          commands: [],
+          state: "running",
+          turnActive: true,
+        },
+      });
+      expect(harness.syncWatch).toHaveBeenCalledTimes(1);
+      const initialListenerCount = harness.addAppStateCalls;
+
+      // 60 frames over 960ms (16ms apart) must be throttled to at most once per 600ms window.
+      for (let i = 1; i <= 60; i += 1) {
+        await vi.advanceTimersByTimeAsync(16);
+        renderWatch(
+          [{ ...runningSession, lastSeq: i + 1, preview: `chunk ${i}` }],
+          {
+            "s-run": {
+              sessionId: "s-run",
+              lastSeq: i + 1,
+              startSeq: 0,
+              items: [{ kind: "agent", id: "a-1", ts: 1000 + i, text: `chunk ${i}`, streaming: true }],
+              index: { "a-1": 0 },
+              permissions: [],
+              config: [],
+              commands: [],
+              state: "running",
+              turnActive: true,
+            },
+          },
+          { "s-run": { clientMessageId: `m-${i}`, phase: "sending", afterSeq: i } },
+        );
+      }
+
+      expect(harness.syncWatch.mock.calls.length).toBeLessThanOrEqual(3);
+      // AppState listeners were never torn down and re-registered across 60 renders (nor on online toggle).
+      renderWatch([{ ...runningSession, lastSeq: 62 }], undefined, undefined, false);
+      expect(harness.addAppStateCalls).toBe(initialListenerCount);
+      expect(harness.removeAppState).not.toHaveBeenCalled();
+
+      // Flush trailing throttled snapshot, then verify immediate transition flush inside a 600ms window.
+      await vi.advanceTimersByTimeAsync(600);
+      const callsBeforeTransition = harness.syncWatch.mock.calls.length;
+
+      // Re-rendering with identical content does not cross the bridge.
+      renderWatch([{ ...runningSession, lastSeq: 62 }], undefined, undefined, false);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(harness.syncWatch).toHaveBeenCalledTimes(callsBeforeTransition);
+
+      // Queue a streaming delta inside the 600ms throttle window, then fire a permission transition at +50ms.
+      renderWatch(
+        [{ ...runningSession, lastSeq: 63, preview: "delta" }],
+        undefined,
+        { "s-run": { clientMessageId: "m-63", phase: "starting", afterSeq: 62 } },
+        true,
+      );
+      await vi.advanceTimersByTimeAsync(50);
+      const callsMidWindow = harness.syncWatch.mock.calls.length;
+
+      renderWatch([waitingSession], undefined, undefined, true);
+      // Transition (`running` -> `waiting` + `pendingPermissions: 1`) flushes immediately with 0ms wait.
+      expect(harness.syncWatch).toHaveBeenCalledTimes(callsMidWindow + 1);
+      expect(harness.syncWatch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ waitingCount: 1, statusLabel: "1 项等待你的确认" }),
+      );
+    } finally {
+      harness.resetStateful();
+    }
   });
 });

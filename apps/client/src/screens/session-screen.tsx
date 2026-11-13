@@ -1,6 +1,5 @@
 import type { AsyncQuestion } from "@linkshell/wire";
-import { setComputerPreviewMode } from "@/lib/use-computer-preview";
-import type { LegendListRef } from "@legendapp/list/react-native";
+import { ComputerPreviewVisible, setComputerPreviewMode, useComputerPreview } from "@/lib/use-computer-preview";
 import { answeredQuestions, cardsAtTurnEnd, openWrapUp, shownQueue, workflowIsLive, type TimelineItem } from "@linkshell/client-core";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -16,6 +15,7 @@ import { speakNativeText, stopNativeSpeaking } from "../../modules/link-layout";
 import { AgentTile } from "@/components/agent-tile";
 import { AsyncQuestionCard } from "@/components/async-question-card";
 import { Composer } from "@/components/composer";
+import { ConnectionBanner } from "@/components/connection-banner";
 import { SessionNotices } from "@/components/session-notices";
 import { SessionOutlineSheet } from "@/components/session-outline-sheet";
 import { AgentInteractions } from "./acp-screen";
@@ -25,7 +25,7 @@ import { StatusDot } from "@/components/status";
 import { ScrollableState } from "@/components/scrollable-state";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
-import { Timeline } from "@/components/timeline/timeline";
+import { Timeline, type TimelineRef } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
 import {
   isCommuterTtsEnabled,
@@ -58,6 +58,18 @@ import { GoalCard } from "@/components/goal-card";
 import { turnActivity } from "@/lib/turn-activity";
 
 const NO_ITEMS: TimelineItem[] = [];
+
+function ComputerPreviewProbe({
+  sessionId,
+  onState,
+}: {
+  sessionId: string;
+  onState: (active: boolean, mode: "shown" | "collapsed" | "hidden") => void;
+}) {
+  const { frame, mode } = useComputerPreview(sessionId);
+  onState(!!frame, mode);
+  return null;
+}
 
 function HeaderTitle({
   agent,
@@ -183,7 +195,9 @@ export function SessionContent({
   const askAboutQuote = agentInfo?.capabilities.side && online ? (quote: string) => { quoteForSide(id, quote); openSide(); } : undefined;
   const commandControls = useSessionCommands(id, openSide);
   const hasDraft = useHasComposerDraft(id);
-  const { computer } = useConnection();
+  const { computer, link } = useConnection();
+  const hasComputerPreviewRef = useRef(false);
+  const previewModeRef = useRef<"shown" | "collapsed" | "hidden">("shown");
   const insets = usePageInsets();
   const systemInsets = useSafeAreaInsets();
   const focused = useIsFocused();
@@ -204,7 +218,7 @@ export function SessionContent({
   const headerHeight = useHeaderHeight();
   const headerConsumed = embedded || workspace?.headerConsumed === true;
   const introFrame = useAnimatedStyle(() => ({ bottom: composerInset.get(), paddingTop: headerConsumed ? 0 : headerHeight }));
-  const listRef = useRef<LegendListRef>(null);
+  const listRef = useRef<TimelineRef>(null);
   const [atEnd, setAtEnd] = useState(true);
 
   const [quickVoicePending, setQuickVoicePending] = useState(initialQuickVoice);
@@ -387,6 +401,9 @@ export function SessionContent({
     return (
       <View style={{ flex: 1, backgroundColor: colors.plain }}>
         {navigation ? <Stack.Screen options={{ title: "" }} /> : null}
+        <View style={{ paddingHorizontal: 16, paddingTop: headerConsumed ? 4 : headerHeight + 4 }}>
+          <ConnectionBanner />
+        </View>
         <ScrollableState>
           {loaded ? (
             <EmptyState
@@ -495,6 +512,15 @@ export function SessionContent({
     <View ref={ipadKeyboard.ref} onLayout={ipadKeyboard.measure} style={{ flex: 1, paddingBottom: ipadKeyboard.overlap }}>
       <ContentHeight value={contentHeight}>
         <View onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)} style={{ flex: 1, backgroundColor: colors.plain }}>
+          <ComputerPreviewVisible value={false}>
+            <ComputerPreviewProbe
+              sessionId={id}
+              onState={(active, mode) => {
+                hasComputerPreviewRef.current = active;
+                previewModeRef.current = mode;
+              }}
+            />
+          </ComputerPreviewVisible>
           {!navigation ? null : (
             <>
               <Stack.Screen
@@ -559,8 +585,8 @@ export function SessionContent({
                             : hasWorkflows
                               ? pick({ zh: "Agent 与工作流", en: "Agents & Workflows", ja: "Agent とワークフロー" })
                               : subagentsRunning
-                                ? `Subagents (${subagentsRunning})`
-                                : "Subagents",
+                                ? pick({ zh: `子代理（${subagentsRunning}）`, en: `Subagents (${subagentsRunning})`, ja: `サブエージェント (${subagentsRunning})` })
+                                : pick({ zh: "子代理", en: "Subagents", ja: "サブエージェント" }),
                           live: subagentsRunning > 0 || tasksRunning > 0,
                           onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                         },
@@ -650,7 +676,31 @@ export function SessionContent({
                         section: "look",
                         title: t("nav.screen"),
                         icon: { sf: "desktopcomputer", md: "desktop_windows" },
-                        onPress: () => setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown"),
+                        onPress: () => {
+                          if (hasComputerPreviewRef.current && previewModeRef.current !== "shown") {
+                            setComputerPreviewMode(JSON.stringify([computer.key, id]), "shown");
+                          } else {
+                            router.push("/screen");
+                          }
+                        },
+                      },
+                      {
+                        section: "look",
+                        title: pick({ zh: "打开终端", en: "Open Terminal", ja: "ターミナルを開く" }),
+                        icon: { sf: "terminal", md: "terminal" },
+                        onPress: () => {
+                          void link
+                            .call("terminals.create", { cwd: summary.cwd })
+                            .then(({ terminal: created }) => {
+                              router.push({ pathname: "/terminal/[id]", params: { id: created.id } });
+                            })
+                            .catch((error: unknown) => {
+                              Alert.alert(
+                                pick({ zh: "打开终端失败", en: "Failed to open terminal", ja: "ターミナルを開けませんでした" }),
+                                error instanceof Error ? error.message : String(error),
+                              );
+                            });
+                        },
                       },
                       {
                         section: "look",
@@ -770,6 +820,9 @@ export function SessionContent({
             </Animated.View>
           ) : null}
           {loading ? <TimelineSkeleton label={t("common.loading")} top={headerConsumed ? 16 : headerHeight + 16} /> : null}
+          <View pointerEvents="box-none" style={{ position: "absolute", left: 16, right: 16, top: headerConsumed ? 4 : headerHeight + 4, zIndex: 10 }}>
+            <ConnectionBanner />
+          </View>
           {forking ? (
             <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }} accessibilityViewIsModal>
               <Glass style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 22 }}>
@@ -807,6 +860,7 @@ export function SessionContent({
                 turnActive={turnActive || summary.state === "unknown"}
                 driver={driver}
                 permission={view?.permissions[0]}
+                permissions={view?.permissions}
                 permissionCount={view?.permissions.length ?? 0}
                 config={view?.config ?? []}
                 commands={commandControls.commands}
@@ -866,7 +920,8 @@ export function SessionContent({
             items={timelineItems}
             onClose={() => setOutlineOpen(false)}
             onSelectIndex={(timelineIndex) => {
-              void listRef.current?.scrollToIndex({ index: timelineIndex, animated: true });
+              const targetId = timelineItems[timelineIndex]?.id;
+              if (targetId) listRef.current?.scrollToItemId(targetId, true);
             }}
           />
         </View>

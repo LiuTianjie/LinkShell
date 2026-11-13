@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { displayModelName, type SessionConfigOption, type SessionSummary } from "@linkshell/wire";
 import { ChevronDown, Folder, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -144,31 +145,77 @@ export function valueDescription(text: string): string {
   return DESCRIPTIONS[text.trim().toLowerCase()] ?? text;
 }
 
+export interface ComposerPickerRequest {
+  category: "model" | "mode" | "effort";
+  nonce: number;
+}
+
 export function ComposerConfig({
   session,
   config,
   disabled,
   openSettings,
+  pickerRequest,
 }: {
   session: SessionSummary;
   config: SessionConfigOption[];
   disabled: boolean;
   openSettings: () => void;
+  pickerRequest?: ComposerPickerRequest;
 }) {
   const actions = useActions();
   const job = useJob();
+  const [openCategory, setOpenCategory] = useState<"model" | "effort" | "mode" | null>(null);
+  const handledNonce = useRef(0);
   const shown = (["model", "effort", "mode"] as const)
     .map((category) => config.find((option) => option.category === category && option.type !== "boolean" && option.values.length > 1))
     .filter((option): option is SessionConfigOption => !!option);
+  useEffect(() => {
+    if (!pickerRequest || pickerRequest.nonce === handledNonce.current) return;
+    handledNonce.current = pickerRequest.nonce;
+    if (disabled || job.busy) return;
+    const match = shown.find((option) => option.category === pickerRequest.category);
+    if (match) {
+      setOpenCategory(match.category as "model" | "effort" | "mode");
+      if (match.category === "model") {
+        void job.run(() => actions.agentModels(session.agent, session.cwd));
+      }
+      return;
+    }
+    if (pickerRequest.category === "mode") {
+      const boolMode = config.find(
+        (option) =>
+          option.type === "boolean" &&
+          (option.category === "mode" || /plan/i.test(option.id) || /plan/i.test(option.name)),
+      );
+      if (boolMode) {
+        void job.run(() =>
+          actions.setConfig(
+            session.id,
+            boolMode.id,
+            boolMode.current === "true" ? "false" : "true",
+          ),
+        );
+        return;
+      }
+    }
+    openSettings();
+  }, [actions, config, disabled, job, openSettings, pickerRequest, session.agent, session.cwd, session.id, shown]);
   return (
     <>
       {shown.map((option) => {
         const current = option.values.find((value) => value.value === option.current);
         const label = sessionConfigLabel(option);
+        const category = option.category as "model" | "effort" | "mode";
         return (
-          <DropdownMenu key={option.id} onOpenChange={(open) => {
-            if (open && option.category === "model") void job.run(() => actions.agentModels(session.agent, session.cwd));
-          }}>
+          <DropdownMenu
+            key={option.id}
+            open={openCategory === category}
+            onOpenChange={(open) => {
+              setOpenCategory((prev) => (open ? category : prev === category ? null : prev));
+              if (open && option.category === "model") void job.run(() => actions.agentModels(session.agent, session.cwd));
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="toolbar"

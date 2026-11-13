@@ -39,6 +39,7 @@
     --font-mono:
       "Berkeley Mono", "SF Mono", ui-monospace, SFMono-Regular,
       "JetBrains Mono", "Menlo", "Consolas", monospace;
+    --mono: var(--font-mono);
   }
 * {
     box-sizing: border-box;

@@ -681,7 +681,7 @@ export class BrowserEngine {
       relay.reconnectNow();
     }
     for (const connection of this.connections.values()) {
-      connection.link.probe?.();
+      void connection.link.probe?.();
       connection.link.reconnectNow();
       connection.streams.connect();
     }

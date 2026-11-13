@@ -48,7 +48,7 @@ describe("models for a new session", () => {
     const { store, call } = setup();
     call.mockResolvedValue({ session });
     await store.getState().createSession({ agent: "codex", cwd: "/work", model: "gpt-mini" });
-    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: "gpt-mini" }, 60_000);
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, requestId: expect.any(String), model: "gpt-mini" }, 60_000);
     await store.getState().createSession({ agent: "codex", cwd: "/work" });
     expect(call.mock.lastCall?.[1]).toMatchObject({ model: undefined });
   });
@@ -74,7 +74,7 @@ describe("models for a new session", () => {
     expect(call).toHaveBeenLastCalledWith("sessions.create", expect.objectContaining({ model: "gpt-mini", config: { effort: "low", permissions: "read-only" } }), 60_000);
     preferences.remember("mac", "codex", { model: "gone", config: { effort: "ultra", permissions: "removed" } });
     await store.getState().createSession({ agent: "codex", cwd: "/work" });
-    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: undefined }, 60_000);
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, requestId: expect.any(String), model: undefined }, 60_000);
   });
 
   it("creates with explicit input or defaults when remembered choices cannot be checked", async () => {
@@ -88,8 +88,8 @@ describe("models for a new session", () => {
       return { session };
     });
     await expect(store.getState().createSession({ agent: "codex", cwd: "/work" })).resolves.toEqual(session);
-    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: undefined }, 60_000);
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, requestId: expect.any(String), model: undefined }, 60_000);
     await store.getState().createSession({ agent: "codex", cwd: "/work", model: "gpt-mini", config: { effort: "low" } });
-    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, model: "gpt-mini", config: { effort: "low" } }, 60_000);
+    expect(call).toHaveBeenLastCalledWith("sessions.create", { agent: "codex", cwd: "/work", worktree: undefined, requestId: expect.any(String), model: "gpt-mini", config: { effort: "low" } }, 60_000);
   });
 });

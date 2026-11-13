@@ -46,10 +46,36 @@
     color: var(--secondaryLabel);
     font-size: 12px;
   }
-  .session-subtitle > span:not(.agent-mark):not(.separator):not(.branch-chip) {
+  .session-subtitle > span:not(.agent-mark):not(.separator):not(.branch-chip):not(.branch-dirty-badge) {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .branch-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    padding: 1px 6px;
+    border-radius: var(--radius-small);
+    background: var(--fill);
+    color: var(--secondaryLabel);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 18px;
+  }
+  .branch-dirty-badge {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    padding: 0 5px;
+    border-radius: var(--radius-small);
+    background: var(--waitingSoft);
+    color: var(--waiting);
+    font-family: var(--font-sans, inherit);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
   }
   .session-actions {
     display: flex;
@@ -96,6 +122,7 @@
     flex: 1;
     min-height: 0;
   }
+  .session-body,
   .conversation-column {
     position: relative;
     display: flex;
@@ -124,6 +151,18 @@
   }
   .conversation-footer:empty {
     display: none;
+  }
+
+  /* Offscreen historical timeline items skip layout/paint until scrolled near; disabled when ⌘F is open. */
+  .live-timeline > [data-historical] {
+    content-visibility: auto;
+    contain-intrinsic-size: auto none auto 120px;
+  }
+  mark.timeline-search-hit {
+    padding: 0 1px;
+    border-radius: 2px;
+    background: color-mix(in oklab, var(--waiting) 34%, transparent);
+    color: inherit;
   }
 
   /* ---- Timeline rhythm ---- */
@@ -984,6 +1023,65 @@
   .diff-sign { text-align: center; user-select: none; }
   .diff-line code { padding: 0; background: none; font: inherit; white-space: pre; }
   .diff-skip { padding: 2px 12px 2px calc(8ch + 24px); color: var(--tertiaryLabel); font-family: inherit; font-size: 12px; background: var(--fill); user-select: none; }
+  .diff-view-split {
+    display: flex;
+    flex-direction: column;
+  }
+  .diff-split-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-width: 100%;
+  }
+  .diff-split-cell {
+    display: grid;
+    grid-template-columns: 4ch 2ch minmax(0, 1fr);
+    gap: 0 6px;
+    min-width: 0;
+    padding: 0 10px 0 6px;
+    overflow-x: auto;
+  }
+  .diff-split-cell + .diff-split-cell {
+    border-left: 1px solid var(--separator);
+  }
+  .diff-split-cell[data-kind="add"] { background: var(--diffAdd); }
+  .diff-split-cell[data-kind="del"] { background: var(--diffDel); }
+  .diff-split-cell[data-kind="empty"] { background: color-mix(in oklab, var(--label) 3%, transparent); }
+  .diff-split-cell[data-kind="add"] .diff-sign { color: var(--diffAddText); }
+  .diff-split-cell[data-kind="del"] .diff-sign { color: var(--diffDelText); }
+  .diff-split-cell code { padding: 0; background: none; font: inherit; white-space: pre; }
+  .diff-line[data-interactive]:hover,
+  .diff-split-cell[data-interactive]:hover {
+    filter: brightness(0.97);
+  }
+  .diff-line[data-commented],
+  .diff-split-cell[data-commented] {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .git-commit-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .git-commit-bar [data-slot="input"] {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    border-radius: var(--radius-control);
+    font-size: 13px;
+  }
+  .git-commit-bar [data-button] {
+    flex: none;
+    border-radius: var(--radius-control);
+  }
+  .worktree-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .worktree-actions [data-button] {
+    border-radius: var(--radius-control);
+  }
 
   /* The inspector's changes: totals, then a row a file that opens to its diff. */
   .changes { display: flex; flex-direction: column; gap: 10px; }
@@ -1399,6 +1497,7 @@
     font-size: 13px;
     color: var(--secondaryLabel);
   }
+  .session-body > [data-slot="empty"],
   .conversation-column > [data-slot="empty"] {
     flex: 1;
     min-height: 0;
@@ -1476,15 +1575,21 @@
   /* Sizing/scroll the utilities don't cover; padding + font come from the
      textarea's own utility classes. */
   .composer textarea {
+    width: 100%;
+    height: auto;
     min-height: 52px;
     padding-inline: 16px;
     max-height: min(240px, 28dvh);
     overflow-y: auto;
     field-sizing: fixed;
   }
-  /* The engine grows the draft box with its text where it can (Session skips measuring it then). */
+  /* The engine grows the draft box with its text where it can (ComposerBox skips measuring it then). */
   @supports (field-sizing: content) {
-    .composer textarea { field-sizing: content; }
+    .composer textarea {
+      width: 100%;
+      height: auto;
+      field-sizing: content;
+    }
   }
   .composer-drop-hint {
     position: absolute;
@@ -1648,6 +1753,18 @@
     padding: 2px;
     flex-shrink: 0;
   }
+  .attachment-list > span > button.attachment-expand {
+    width: auto;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: var(--radius-control);
+    color: var(--link);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .attachment-list > span > button.attachment-expand:hover:not(:disabled) {
+    background: var(--fill);
+  }
 
   .inline-terminal {
     margin: 0 16px 12px;
@@ -1674,6 +1791,78 @@
     scrollbar-gutter: stable;
     overflow-wrap: anywhere;
   }
+  .side-panel-content[data-panel="preview"] {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .session-preview-inspector {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+  }
+  .session-preview-switcher {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .session-preview-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .session-port-preview {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+  .session-port-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .session-port-form {
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+  .session-port-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .session-port-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .session-port-chips [data-button] {
+    gap: 6px;
+    border-radius: var(--radius-control);
+  }
+  .session-port-stage {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 360px;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-card);
+    background: var(--plain);
+  }
+  .session-port-stage > * {
+    flex: 1;
+    min-height: 0;
+  }
+
   .side-panel-content h3 {
     margin-bottom: 12px;
     font-size: 14px;

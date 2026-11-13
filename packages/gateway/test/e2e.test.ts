@@ -478,7 +478,7 @@ describe("gateway v2 end to end", () => {
     expect(gateway.store.peer(identity.id)?.userId).toBeUndefined();
   });
 
-  it("holds a fast sender back instead of buffering for a slow receiver", async () => {
+  it("drops only a slow receiver on backpressure without pausing the sender or starving healthy devices", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lsh-gw-"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const limit = 256 * 1024;
@@ -492,7 +492,6 @@ describe("gateway v2 end to end", () => {
     });
     const url = `ws://127.0.0.1:${await gateway.start()}`;
     cleanups.push(() => gateway.stop());
-    // Two peers on one account may reach each other; the device reads nothing for a while.
     const sender = new RelayClient({
       url: url + RELAY_PATH,
       identity: createIdentity(),
@@ -501,41 +500,61 @@ describe("gateway v2 end to end", () => {
       token: () => "token-alice",
       createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
     });
+    const undeliverable: { to: string; reason: string }[] = [];
+    sender.onUndeliverable((to, reason) => undeliverable.push({ to, reason }));
     sender.start();
     cleanups.push(() => sender.stop());
-    let receiverSocket: WebSocket | undefined;
-    const receiverIdentity = createIdentity();
-    const receiver = new RelayClient({
-      url: url + RELAY_PATH,
-      identity: receiverIdentity,
-      role: "device",
-      name: "iPhone",
-      token: () => "token-alice",
-      createSocket: (target) => (receiverSocket = new WebSocket(target)) as unknown as RelaySocket,
-    });
-    let received = 0;
-    receiver.onFrame(() => received++);
-    receiver.start();
-    cleanups.push(() => receiver.stop());
-    await sender.waitOnline(5000);
-    await receiver.waitOnline(5000);
 
-    receiverSocket!.pause();
-    const frames = 400;
+    let slowSocket: WebSocket | undefined;
+    const slowIdentity = createIdentity();
+    const slowReceiver = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: slowIdentity,
+      role: "device",
+      name: "Slow iPhone",
+      token: () => "token-alice",
+      createSocket: (target) => (slowSocket = new WebSocket(target)) as unknown as RelaySocket,
+    });
+    let slowReceived = 0;
+    slowReceiver.onFrame(() => slowReceived++);
+    slowReceiver.start();
+    cleanups.push(() => slowReceiver.stop());
+
+    const healthyIdentity = createIdentity();
+    const healthyReceiver = new RelayClient({
+      url: url + RELAY_PATH,
+      identity: healthyIdentity,
+      role: "device",
+      name: "Healthy iPad",
+      token: () => "token-alice",
+      createSocket: (target) => new WebSocket(target) as unknown as RelaySocket,
+    });
+    let healthyReceived = 0;
+    healthyReceiver.onFrame(() => healthyReceived++);
+    healthyReceiver.start();
+    cleanups.push(() => healthyReceiver.stop());
+
+    await Promise.all([sender.waitOnline(5000), slowReceiver.waitOnline(5000), healthyReceiver.waitOnline(5000)]);
+
+    const slowClosed = new Promise<{ code: number; reason: string }>((resolve) => {
+      slowSocket!.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+    slowSocket!.pause();
     const payload = "x".repeat(64 * 1024);
-    let peak = 0;
-    const watch = setInterval(() => (peak = Math.max(peak, gateway.bufferedBytes)), 5);
-    for (let i = 0; i < frames; i++) sender.send(receiverIdentity.id, { k: "data", ch: "c", box: payload });
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    // 26 MB were sent; the gateway holds a few frames past its limit, not all of it.
-    expect(received).toBe(0);
-    expect(peak).toBeGreaterThan(0);
-    expect(peak).toBeLessThan(limit * 8);
-    // Once the receiver reads again, everything arrives, in order.
-    receiverSocket!.resume();
-    await until(() => received === frames, 15_000);
-    clearInterval(watch);
-    expect(peak).toBeLessThan(limit * 8);
+    for (let i = 0; i < 40; i++) sender.send(slowIdentity.id, { k: "data", ch: "c", box: payload });
+    // Even while the slow receiver is backed up, the shared machine sender keeps delivering to healthy devices.
+    for (let i = 0; i < 10; i++) sender.send(healthyIdentity.id, { k: "data", ch: "c", box: `ok-${i}` });
+
+    await until(() => healthyReceived === 10 && undeliverable.some((entry) => entry.to === slowIdentity.id));
+    expect(slowReceived).toBe(0);
+    expect(undeliverable.some((entry) => entry.to === slowIdentity.id && (entry.reason === "backpressure" || entry.reason === "offline"))).toBe(true);
+    expect(gateway.bufferedBytes).toBeLessThan(limit * 4);
+
+    // Resume the paused socket first so it drains the server's 1013 close frame before RelayClient stops.
+    const socketToResume = slowSocket!;
+    socketToResume.resume();
+    await expect(slowClosed).resolves.toEqual({ code: 1013, reason: "backpressure" });
+    slowReceiver.stop();
   });
 
   it("follows a login, a gateway change and a logout on a running host", async () => {

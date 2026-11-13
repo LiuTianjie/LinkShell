@@ -12,8 +12,15 @@
    - Corners, sizes and motion are docs/design/visual-system.md's: 4 / 6 / 8 / 12 px, 28 and
      32 px controls, 120–200 ms ease-out for every change of state, nothing that bounces.
 
-   These rules sit outside Tailwind layers and only apply inside the desktop shell. */
+   These rules only apply inside the desktop shell, inside `@layer components` so Tailwind utilities
+   can override component defaults cleanly. */
 
+@property --navigation-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --palette-fade-top { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --palette-fade-end { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --page-inline { syntax: "<length>"; inherits: true; initial-value: 24px; }
+
+@layer components {
 html[data-desktop] {
   --icon-stroke: 1.75;
   --icon-size: 16px;
@@ -98,7 +105,7 @@ html[data-desktop] .desktop-main .live-side-panel { border: var(--hairline) soli
 html[data-desktop] .desktop-main { position: relative; display: flex; flex-direction: column; flex: 1; align-self: stretch; min-width: 0; min-height: 0; margin: var(--gutter) 0 0; overflow: clip; outline: none; container-type: inline-size; container-name: desktop-workspace; }
 html[data-desktop] .desktop-main:has(.screen-focused, .port-preview-focused, .terminal-fullscreen) { container-type: normal; }
 html[data-desktop] .workspace-stage { display: contents; }
-html[data-desktop] .workspace-stage[hidden] { display: none !important; }
+html[data-desktop] .workspace-stage[hidden] { display: none; }
 /* Beside a session the main area is only a frame: the conversation and the inspector are the panels. */
 html[data-desktop] .desktop-main:has(> .session-page, > .workspace-stage:not([hidden]) > .session-page) { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 html[data-desktop] :is(.desktop-main, .workspace-stage) > .live-overview,
@@ -200,7 +207,7 @@ html[data-desktop] .desktop-menu-computer-name { flex: 1; min-width: 0; overflow
 html[data-desktop] .desktop-computer-menu small { color: var(--tertiaryLabel); font-size: 12px; }
 html[data-desktop] .desktop-menu-empty { min-width: 0; max-width: 230px; padding: 10px; overflow: hidden; color: var(--secondaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-sidebar-actions { display: flex; gap: 4px; }
-html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 400; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-new-session { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-new-session > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-new-session > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-new-session kbd { flex: none; margin-left: auto; opacity: 0; transition: opacity var(--transition); }
@@ -216,11 +223,10 @@ html[data-desktop] .desktop-search:hover { background: var(--fill); color: var(-
    not as cut off (its bottom padding keeps the last row clear of the fade when it all fits).
    Its top fades the same way once it has scrolled, so a row half under the header isn't a
    sliced line of text; at the top nothing fades. */
-@property --navigation-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes navigation-scrolled { to { --navigation-fade: 16px; } }
 html[data-desktop] .desktop-navigation { gap: 0; min-width: 0; padding: 0 8px 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--navigation-fade), #000 calc(100% - 16px), transparent); animation: navigation-scrolled linear both; animation-timeline: scroll(self); animation-range: 0 24px; }
 html[data-desktop] .desktop-places { display: grid; gap: 1px; }
-html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 14px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition); }
+html[data-desktop] .desktop-place { display: flex; align-items: center; gap: 10px; min-width: 0; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--label); font: inherit; font-size: 13px; font-weight: 400; text-align: left; cursor: default; transition: background var(--transition); }
 html[data-desktop] .desktop-place > svg { flex: none; width: var(--icon-navigation); height: var(--icon-navigation); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-place > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-place:hover { background: var(--fill); }
@@ -333,29 +339,29 @@ html[data-desktop] .desktop-root[data-sidebar="hidden"]:not([data-shell="electro
 /* Primary actions, utility controls and navigation have distinct, shared states. */
 html[data-desktop] [data-button] { font-weight: 500; transition: background var(--transition), color var(--transition), box-shadow var(--transition), opacity var(--transition); }
 /* Primary actions share the indigo accent; secondary and ghost actions use neutral surfaces. */
-html[data-desktop] [data-button][data-variant="default"] { border: 0; border-radius: var(--radius-control); background: var(--accentFill); box-shadow: none; color: var(--primaryForeground); }
-html[data-desktop] [data-button][data-variant="default"]:is(:hover, :active):not(:disabled) { background: var(--accentHover); }
-html[data-desktop] [data-button][data-variant="default"]:disabled { background: var(--accentFill); color: var(--primaryForeground); opacity: .4; }
-html[data-desktop] [data-button][data-variant="secondary"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: none; color: var(--label); }
+html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):not([aria-pressed="true"]) { border: 0 !important; border-radius: var(--radius-control); background: var(--accentFill) !important; box-shadow: none; color: var(--primaryForeground) !important; }
+html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):not([aria-pressed="true"]):is(:hover, :active):not(:disabled) { background: var(--accentHover) !important; }
+html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):not([aria-pressed="true"]):disabled { background: var(--accentFill) !important; color: var(--primaryForeground) !important; opacity: .4 !important; }
+html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]) { border: 0 !important; border-radius: var(--radius-control); background: var(--fill) !important; box-shadow: none; color: var(--label) !important; }
 /* Codex's secondary states: a little darker on hover, lighter while pressed (light); in the dark, steps of white. */
-html[data-desktop] [data-button][data-variant="secondary"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 10%, transparent); }
-html[data-desktop] [data-button][data-variant="secondary"]:active:not(:disabled) { background: color-mix(in oklab, var(--label) 4%, transparent); }
-html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"] { background: color-mix(in oklab, var(--label) 5%, transparent); }
-html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:hover:not(:disabled) { background: color-mix(in oklab, var(--label) 8%, transparent); }
-html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:active:not(:disabled) { background: color-mix(in oklab, var(--label) 12%, transparent); }
-html[data-desktop] [data-button][data-variant="outline"] { border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label); }
-html[data-desktop] [data-button][data-variant="outline"]:hover:not(:disabled) { background: var(--fill); }
-html[data-desktop] [data-button][data-variant="outline"]:active:not(:disabled) { background: var(--fillStrong); }
-html[data-desktop] [data-button][data-variant="ghost"] { border-radius: var(--radius-control); box-shadow: none; }
-html[data-desktop] [data-button][data-variant="ghost"]:hover:not(:disabled),
-html[data-desktop] [data-button][data-variant="ghost"][data-state="open"] { background: var(--fill); }
-html[data-desktop] [data-button][data-variant="ghost"]:active:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):hover:not(:disabled) { background: color-mix(in oklab, var(--label) 10%, transparent) !important; }
+html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):active:not(:disabled) { background: color-mix(in oklab, var(--label) 4%, transparent) !important; }
+html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]) { background: color-mix(in oklab, var(--label) 5%, transparent) !important; }
+html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):hover:not(:disabled) { background: color-mix(in oklab, var(--label) 8%, transparent) !important; }
+html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):active:not(:disabled) { background: color-mix(in oklab, var(--label) 12%, transparent) !important; }
+html[data-desktop] [data-button][data-variant="outline"]:not(.terminal-bottom):not([aria-pressed="true"]) { border: 0 !important; border-radius: var(--radius-control); background: transparent !important; box-shadow: inset 0 0 0 1px var(--separatorStrong); color: var(--label) !important; }
+html[data-desktop] [data-button][data-variant="outline"]:not(.terminal-bottom):not([aria-pressed="true"]):hover:not(:disabled) { background: var(--fill) !important; }
+html[data-desktop] [data-button][data-variant="outline"]:not(.terminal-bottom):not([aria-pressed="true"]):active:not(:disabled) { background: var(--fillStrong) !important; }
+html[data-desktop] [data-button][data-variant="ghost"]:not(.terminal-bottom):not([aria-pressed="true"]) { border-radius: var(--radius-control); box-shadow: none; }
+html[data-desktop] [data-button][data-variant="ghost"]:not(.terminal-bottom):not([aria-pressed="true"]):hover:not(:disabled),
+html[data-desktop] [data-button][data-variant="ghost"]:not(.terminal-bottom):not([aria-pressed="true"])[data-state="open"] { background: var(--fill) !important; }
+html[data-desktop] [data-button][data-variant="ghost"]:not(.terminal-bottom):not([aria-pressed="true"]):active:not(:disabled) { background: var(--fillStrong) !important; }
 html[data-desktop] [data-button][data-variant="destructive"] { border-radius: var(--radius-control); box-shadow: none; }
 /* A single focus outline replaces the primitive's border and inset ring. */
-html[data-desktop] [data-button][data-variant]:focus-visible { border-color: transparent; box-shadow: none; outline: 2px solid var(--focus); outline-offset: 2px; }
+html[data-desktop] [data-button][data-variant]:focus-visible { border-color: transparent !important; box-shadow: none !important; outline: 2px solid var(--focus); outline-offset: 2px; }
 html[data-desktop] [data-button]:disabled { cursor: default; }
 /* Disabled controls fade, as Codex's (40 %), instead of turning grey. */
-html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4; }
+html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4 !important; }
 /* Interactive things keep the arrow, as in a native app. */
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, a.desktop-place, .list-row, [cmdk-item]) { cursor: default; }
 /* A button on its own is 32 px; toolbar buttons (sm) and icon buttons are 28. xs is for a control
@@ -368,19 +374,19 @@ html[data-desktop] :is(.desktop-main, .management-dialog) [data-button]:is([data
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-button] svg:not([class*="size-"]) { width: var(--icon-size); height: var(--icon-size); }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="xs"] svg:not([class*="size-"]) { width: var(--icon-small); height: var(--icon-small); }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-size="plain"] { text-align: left; justify-content: flex-start; }
-html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-active] { background: var(--sidebarAccent); color: var(--label); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-button][data-active] { background: var(--sidebarAccent) !important; color: var(--label) !important; }
 
 /* Selectable toolbar options share their geometry in new and existing conversations. */
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 28px; height: auto; padding: 4px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal; }
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:is(:hover, [data-state="open"]):not(:disabled) { background: var(--fill); color: var(--label); }
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:active:not(:disabled) { background: var(--fillStrong); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] { display: inline-flex; flex: 0 1 auto; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; max-width: 100%; min-height: 28px; height: auto !important; padding: 4px 8px !important; border: 0 !important; border-radius: var(--radius-control); background: transparent !important; color: var(--secondaryLabel) !important; font-size: 13px; font-weight: 500; line-height: 20px; white-space: normal !important; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:is(:hover, [data-state="open"]):not(:disabled) { background: var(--fill) !important; color: var(--label) !important; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:active:not(:disabled) { background: var(--fillStrong) !important; }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg { width: var(--icon-size); height: var(--icon-size); color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > svg[data-icon="inline-end"] { width: var(--icon-caret); height: var(--icon-caret); margin-left: 1px; color: var(--tertiaryLabel); }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-risky] > svg[data-icon="inline-start"] { color: var(--waiting); }
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] { background: var(--accentSoft); color: var(--link); }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] { background: var(--accentSoft) !important; color: var(--link) !important; }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"][data-active] > svg { color: inherit; }
 html[data-desktop] .desktop-main [data-button][data-variant="toolbar"] > span:not(.agent-mark) { min-width: 0; overflow-wrap: anywhere; white-space: normal; text-align: left; }
-html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:disabled { opacity: .45; }
+html[data-desktop] .desktop-main [data-button][data-variant="toolbar"]:disabled { opacity: .45 !important; }
 html[data-desktop] .desktop-titlebar-button > svg { width: var(--icon-navigation); height: var(--icon-navigation); }
 html[data-desktop] :is([data-slot="dropdown-menu-sub-trigger"], [data-slot="select-trigger"]) > svg:last-child { width: var(--icon-caret); height: var(--icon-caret); }
 
@@ -388,26 +394,26 @@ html[data-desktop] :is([data-slot="dropdown-menu-sub-trigger"], [data-slot="sele
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer),
 html[data-desktop] .desktop-main [data-slot="select-trigger"],
 html[data-desktop] .desktop-main input[data-slot="input"],
-html[data-desktop] [data-slot="dialog-content"] input[data-slot="input"] { height: 32px; border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); font-size: 13px; }
+html[data-desktop] [data-slot="dialog-content"]:not(.connect-dialog) input[data-slot="input"] { height: 32px; border: 0 !important; border-radius: var(--radius-control); background: var(--fill) !important; box-shadow: inset 0 0 0 var(--hairline) var(--separator) !important; font-size: 13px; }
 html[data-desktop] .desktop-main [data-slot="input-group"]:not(.composer):focus-within,
 html[data-desktop] .desktop-main [data-slot="select-trigger"]:focus-visible,
-html[data-desktop] :is(.desktop-main, [data-slot="dialog-content"]) input[data-slot="input"]:focus-visible { background: var(--plain); box-shadow: inset 0 0 0 1px var(--focus, var(--link)); outline: none; }
-html[data-desktop] [data-slot="textarea"] { border: 0; border-radius: var(--radius-control); background: var(--fill); box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+html[data-desktop] :is(.desktop-main, [data-slot="dialog-content"]:not(.connect-dialog)) input[data-slot="input"]:focus-visible { background: var(--plain) !important; box-shadow: inset 0 0 0 1px var(--focus, var(--link)) !important; outline: none; }
+html[data-desktop] [data-slot="textarea"] { border: 0 !important; border-radius: var(--radius-control); background: var(--fill) !important; box-shadow: inset 0 0 0 var(--hairline) var(--separator) !important; }
 
 /* Segmented filters: a recessed track; the current one is a raised plain step. 28 px, the height of
    the buttons and selects beside them. Terminal tabs share the primitive but are a tab strip (their
    own rules, desktop-resources.css): no thumb, no raised step. */
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
 /* In the dark the track is a tint of white over the panel (Codex's 5 %), never darker than the page. */
-html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px; padding-inline: 10px; border: 0; border-radius: var(--radius-control); color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px !important; padding-inline: 10px !important; border: 0 !important; border-radius: var(--radius-control) !important; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
-html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb); color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
+html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { background: var(--segment-thumb) !important; color: var(--label); box-shadow: 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop][data-theme="dark"] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"][data-state="active"] { box-shadow: inset 0 0 0 var(--hairline) rgb(255 255 255 / .08); }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] > span { color: var(--tertiaryLabel); font-variant-numeric: tabular-nums; }
 
 /* Status marks: a hue on a tint of itself, a finished session stays grey. 20 px, 4 px corners. */
-html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 6px; border-radius: var(--radius-small); font-size: 12px; font-weight: 500; }
+html[data-desktop] [data-slot="badge"] { height: 20px; padding-inline: 6px !important; border-radius: var(--radius-small); font-size: 12px; font-weight: 500; }
 html[data-desktop] [data-slot="badge"][data-variant="info"] { background: var(--runningSoft); color: var(--running); }
 html[data-desktop] [data-slot="badge"][data-variant="warning"] { background: var(--waitingSoft); color: var(--waiting); }
 html[data-desktop] [data-slot="badge"][data-variant="destructive"] { background: var(--dangerSoft); color: var(--danger); }
@@ -419,25 +425,25 @@ html[data-desktop] [data-slot="badge"][data-variant="secondary"] { background: v
 html[data-desktop] [data-slot="dropdown-menu-content"],
 html[data-desktop] [data-slot="select-content"],
 html[data-desktop] [data-slot="popover-content"],
-html[data-desktop] [data-slot="context-menu-content"] { padding: 6px; border: 0; border-radius: var(--radius-card); background: color-mix(in oklab, var(--plain) 96%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12); color: var(--label); animation: none !important; }
-html[data-desktop][data-theme="dark"] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"]) { background: color-mix(in oklab, var(--cardRaised) 96%, transparent); box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 8px 24px -4px rgb(0 0 0 / .5); }
-html[data-desktop] [data-slot="popover-content"] { padding: 12px; }
+html[data-desktop] [data-slot="context-menu-content"] { padding: 6px !important; border: 0 !important; border-radius: var(--radius-card) !important; background: color-mix(in oklab, var(--plain) 96%, transparent) !important; -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 8px 16px -4px rgb(0 0 0 / .12) !important; color: var(--label) !important; animation: none !important; }
+html[data-desktop][data-theme="dark"] :is([data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="popover-content"], [data-slot="context-menu-content"]) { background: color-mix(in oklab, var(--cardRaised) 96%, transparent) !important; box-shadow: 0 0 0 .5px rgb(255 255 255 / .1), 0 8px 24px -4px rgb(0 0 0 / .5) !important; }
+html[data-desktop] [data-slot="popover-content"] { padding: 12px !important; }
 html[data-desktop] [data-slot="tooltip-arrow"] { display: none; }
 html[data-desktop] [data-slot="dropdown-menu-item"],
 html[data-desktop] [data-slot="dropdown-menu-radio-item"],
 html[data-desktop] [data-slot="dropdown-menu-checkbox-item"],
 html[data-desktop] [data-slot="dropdown-menu-sub-trigger"],
 html[data-desktop] [data-slot="context-menu-item"],
-html[data-desktop] [data-slot="select-item"] { min-height: 32px; padding: 6px 8px; gap: 8px; border-radius: var(--radius-control); color: var(--label); font-size: 13px; font-weight: 400; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 32px; }
-html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"])[data-highlighted] { background: var(--fill); color: var(--label); }
+html[data-desktop] [data-slot="select-item"] { min-height: 32px; padding: 6px 8px !important; gap: 8px; border-radius: var(--radius-control); color: var(--label); font-size: 13px; font-weight: 400; line-height: 18px; cursor: default; content-visibility: auto; contain-intrinsic-size: auto 32px; }
+html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"])[data-highlighted] { background: var(--fill) !important; color: var(--label) !important; }
 html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"], [data-slot="select-item"]) svg:not([class*="size-"]) { width: 16px; height: 16px; color: var(--secondaryLabel); }
-html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"])[data-disabled] { opacity: .4; }
-html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"] { color: var(--danger); }
-html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"] svg { color: var(--danger); }
+html[data-desktop] :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-radio-item"])[data-disabled] { opacity: .4 !important; }
+html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"] { color: var(--danger) !important; }
+html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"] svg { color: var(--danger) !important; }
 html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"][data-disabled],
-html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"][data-disabled] svg { color: var(--label); }
-html[data-desktop] [data-slot="dropdown-menu-label"] { padding: 6px 8px 4px; color: color-mix(in oklab, var(--label) 50%, transparent); font-size: 12px; font-weight: 500; }
-html[data-desktop] [data-slot="dropdown-menu-separator"] { height: 1px; margin: 4px 8px; background: var(--separator); }
+html[data-desktop] [data-slot="dropdown-menu-item"][data-variant="destructive"][data-disabled] svg { color: var(--label) !important; }
+html[data-desktop] [data-slot="dropdown-menu-label"] { padding: 6px 8px 4px !important; color: color-mix(in oklab, var(--label) 50%, transparent) !important; font-size: 12px; font-weight: 500; }
+html[data-desktop] [data-slot="dropdown-menu-separator"] { height: 1px; margin: 4px 8px !important; background: var(--separator) !important; }
 html[data-desktop] [data-slot="dropdown-menu-shortcut"] { height: 16px; margin-left: auto; padding: 0 4px; border-radius: var(--radius-small); background: color-mix(in oklab, currentColor 10%, transparent); color: var(--secondaryLabel); font-size: 11px; letter-spacing: 0; line-height: 16px; }
 html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 
@@ -445,8 +451,8 @@ html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
    ones not chosen at 75 %. */
 /* Opaque enough (with a 32 px blur) that the page behind never reads through as text; in the dark,
    Codex's 1 px inner light on the edge. */
-html[data-desktop] [data-slot="dialog-content"].command-center { top: 14%; width: min(520px, calc(100vw - 48px)); max-width: none; padding: 4px; overflow: hidden; border-radius: var(--radius-panel); background: color-mix(in oklab, var(--plain) 94%, transparent); -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
-html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, var(--cardRaised) 94%, transparent); box-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6); }
+html[data-desktop] [data-slot="dialog-content"].command-center { top: 14% !important; width: min(520px, calc(100vw - 48px)) !important; max-width: none !important; padding: 4px !important; overflow: hidden; border-radius: var(--radius-panel) !important; background: color-mix(in oklab, var(--plain) 94%, transparent) !important; -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
+html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, var(--cardRaised) 94%, transparent) !important; box-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6) !important; }
 html[data-desktop] .command-center [data-slot="command"] { border-radius: var(--radius-card) !important; background: transparent; padding: 0; }
 html[data-desktop] .command-center [data-slot="command-input-wrapper"] { padding: 2px 4px 0; }
 html[data-desktop] .command-center [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 40px !important; padding: 0 6px; border: 0; background: transparent !important; box-shadow: none !important; }
@@ -455,8 +461,6 @@ html[data-desktop] .desktop-main .live-side-panel:focus-visible { outline: none;
 /* The list never shows a row cut through by its edges (group headings break any whole-row
    height): while more is below, its last 20 px fade out, and once it has scrolled its first 20 px
    do, as the sidebar's list; at either end that edge is plain and the last row has 8 px of room. */
-@property --palette-fade-top { syntax: "<length>"; inherits: false; initial-value: 0px; }
-@property --palette-fade-end { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes palette-scrolled { to { --palette-fade-top: 20px; } }
 @keyframes palette-more { from { --palette-fade-end: 20px; } to { --palette-fade-end: 0px; } }
 html[data-desktop] .command-center-list { max-height: min(440px, 60dvh); margin-top: 4px; padding: 4px 0 8px; scroll-padding-block: 4px 8px; border-top: 1px solid var(--separator); -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--palette-fade-top), #000 calc(100% - var(--palette-fade-end)), transparent); mask-image: linear-gradient(to bottom, transparent, #000 var(--palette-fade-top), #000 calc(100% - var(--palette-fade-end)), transparent); animation: palette-scrolled linear both, palette-more linear both; animation-timeline: scroll(self), scroll(self); animation-range: 0 24px, calc(100% - 24px) 100%; }
@@ -470,7 +474,7 @@ html[data-desktop] .command-session-title { min-width: 0; overflow: hidden; text
 html[data-desktop] .command-session-project { flex: none; max-width: 40%; overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .command-presence { flex: none; width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: var(--quaternaryLabel); }
 html[data-desktop] .command-presence[data-online] { background: var(--ok); }
-html[data-desktop] .shortcut-sheet { width: min(440px, calc(100vw - 48px)); }
+html[data-desktop] .shortcut-sheet { width: min(440px, calc(100vw - 48px)) !important; }
 html[data-desktop] .shortcut-sheet dl { display: grid; margin-top: 8px; }
 html[data-desktop] .shortcut-sheet dl > div { display: flex; align-items: center; justify-content: space-between; min-height: 36px; border-top: var(--hairline) solid var(--separator); font-size: 13px; }
 html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-size: 11px; }
@@ -481,7 +485,6 @@ html[data-desktop] .shortcut-sheet dd kbd { height: 22px; padding: 0 8px; font-s
 /* The column's margin, worked out once on the scroller from the panel's width and inherited as
    that length (a registered property), so the page's padding and its toolbar's reach out to the
    panel's edges agree wherever they are used. */
-@property --page-inline { syntax: "<length>"; inherits: true; initial-value: 24px; }
 html[data-desktop] .desktop-main :is(.live-overview, .screens-page, .management-content) { --page-inline: max(24px, calc((100cqw - 880px) / 2)); }
 html[data-desktop] .desktop-main .live-overview,
 html[data-desktop] .desktop-main .screens-page,
@@ -608,7 +611,7 @@ html[data-desktop] .desktop-main .screens-page { gap: 22px; }
 html[data-desktop] .desktop-main .computers-group { display: flex; flex-direction: column; gap: 8px; }
 html[data-desktop] .desktop-main .computers-group[hidden] { display: none; }
 html[data-desktop] .desktop-main .computers-section-heading { padding: 0; }
-html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 12.5px; font-weight: 500; line-height: 18px; }
+html[data-desktop] .desktop-main .computers-section-heading h2 { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; line-height: 18px; }
 html[data-desktop] .desktop-main .computer-group-heading { padding: 0 2px; }
 html[data-desktop] .desktop-main .computer-group-refresh { height: 26px; padding-inline: 8px; color: color-mix(in oklab, var(--label) 55%, transparent); font-size: 12px; }
 html[data-desktop] .desktop-main .computer-group-refresh:hover:not(:disabled) { color: var(--label); }
@@ -692,7 +695,7 @@ html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):
 html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):not(:has(.computer-telemetry-details)):hover::before,
 html[data-desktop] .desktop-main .computer-list-row:not(.computer-list-loading):not(:has(.computer-telemetry-details)):hover + .computer-list-row::before { opacity: 0; }
 html[data-desktop] .desktop-main .computer-list-title h2 { font-size: 13px; line-height: 18px; }
-html[data-desktop] .desktop-main .computer-list-actions .screen-idle-actions > [data-button]:not([data-size^="icon"]) { height: 28px; min-width: 76px; padding-inline: 11px; font-size: 12.5px; }
+html[data-desktop] .desktop-main .computer-list-actions .screen-idle-actions > [data-button]:not([data-size^="icon"]) { height: 28px; min-width: 76px; padding-inline: 11px; font-size: 13px; }
 html[data-desktop] .desktop-main .screen-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; min-height: 60px; margin: 0; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; transition: background var(--transition); }
 html[data-desktop] .desktop-main .screen-row + .screen-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 16px; height: var(--hairline); background: var(--separator); transition: opacity var(--transition); }
 html[data-desktop] .desktop-main .screen-row:not(.screen-row-skeleton):hover { background: var(--fill); }
@@ -814,3 +817,4 @@ html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-side
 html[data-desktop] .desktop-root[data-sidebar="hidden"][data-peek] .desktop-sidebar { background: transparent; }
 @keyframes sidebar-peek { from { opacity: 0; transform: translateX(-12px); } }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-root[data-peek] .desktop-sidebar-slot { animation: none; } }
+}

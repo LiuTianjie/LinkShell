@@ -5,9 +5,7 @@ import { useIOSAttentionSync } from "@/lib/session-attention";
 import { useTerminals } from "@/lib/terminals";
 import { useLiveActivityPush } from "@/lib/live-activity-push";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
-import { useAccount } from "@/lib/account";
 import { useIOSWatchSync } from "@/lib/watch-sync";
-import { liveActivityPushURL } from "../../modules/link-layout";
 
 /** Also mounted on cold launches straight from an activity. */
 export function IOSAttentionSync() {
@@ -17,7 +15,6 @@ export function IOSAttentionSync() {
 }
 
 function ComputerAttentionSync() {
-  const signedIn = useAccount((state) => Boolean(state.session));
   const { computer, link } = useConnection();
   const actions = useActions();
   const subscribeSession = useSessionSubscriber();
@@ -60,7 +57,7 @@ function ComputerAttentionSync() {
     views,
     progress,
     computer.key,
-    loaded && terminalsLoaded && (!liveActivityPushURL || signedIn),
+    loaded && terminalsLoaded,
   );
 
   useIOSWatchSync(

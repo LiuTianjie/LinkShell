@@ -12,9 +12,13 @@ export function nestUnder(update: SessionUpdate, parent: string): SessionUpdate 
     case "agent_thought_chunk":
     case "tool_call":
     case "tool_call_update":
+    case "ls_message":
     case "ls_message_done":
     case "ls_turn":
-      return { ...update, parentToolCallId: parent };
+    case "ls_error":
+    case "ls_notice":
+    case "plan":
+      return { ...update, parentToolCallId: parent } as SessionUpdate;
     default:
       return undefined;
   }

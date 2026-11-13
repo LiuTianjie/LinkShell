@@ -242,7 +242,7 @@ export function postDesktopMessage(message: Record<string, unknown>): boolean {
   return true;
 }
 
-function nativeCommand(message: { action: "manage" } | { action: "workspace" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean; immersive?: boolean } | { action: "screenKeys"; captured: boolean }): boolean {
+function nativeCommand(message: { action: "manage" } | { action: "workspace" } | { action: "renderer-ready" } | { action: "external"; url: string } | { action: "appearance"; value: "system" | "light" | "dark" } | { action: "contentFocus"; focused: boolean } | { action: "screenFullScreen"; enabled: boolean; immersive?: boolean } | { action: "screenKeys"; captured: boolean }): boolean {
   if (electron) return postDesktopMessage(message);
   const handler = (window as Window & {
     webkit?: { messageHandlers?: { linkshellDesktop?: { postMessage(value: unknown): void } } };
@@ -334,6 +334,11 @@ export function openDesktopManagement(page?: string | unknown): void {
 /** Tells the Electron window the workspace is showing again (it tracks which view is up). */
 export function reportDesktopWorkspace(): void {
   if (isElectronDesktop) nativeCommand({ action: "workspace" });
+}
+
+/** Tells Electron that the renderer has attached its desktop command listener and can receive queued commands. */
+export function reportDesktopRendererReady(): void {
+  if (isElectronDesktop) nativeCommand({ action: "renderer-ready" });
 }
 
 export function setDesktopAppearance(value: "system" | "light" | "dark"): void {

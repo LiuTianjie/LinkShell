@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
-import { HOST_PROTOCOL, type SessionSummary } from "@linkshell/wire";
+import { HOST_PROTOCOL, type ProjectSummary, type SessionSummary } from "@linkshell/wire";
 import type { ProjectGroup } from "@linkshell/client-core";
 import { LOCALE_LABELS, isLocalePreference, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
 import {
@@ -515,6 +515,76 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   );
 }
 
+export interface SessionStepTarget {
+  computerKey: string;
+  computer?: Computer;
+  sessionId: string;
+}
+
+/**
+ * Logical session order for ⌘⇧[ / ⌘⇧]: walks project groups and parent->child families directly,
+ * ignoring DOM order so an expanded 活跃会话 section or a collapsed sidebar never scrambles jumps.
+ */
+export function orderedComputerSessionTargets(
+  computerKey: string,
+  projects: readonly ProjectSummary[],
+  sessions: readonly SessionSummary[],
+  computer?: Computer,
+): SessionStepTarget[] {
+  const tree = desktopSessionTree([...projects], [...sessions]);
+  const seen = new Set<string>();
+  const targets: SessionStepTarget[] = [];
+  for (const group of tree.groups) {
+    for (const family of sessionFamilies(group.sessions)) {
+      for (const session of [family.root, ...family.children]) {
+        if (seen.has(session.id)) continue;
+        seen.add(session.id);
+        targets.push({ computerKey, computer, sessionId: session.id });
+      }
+    }
+  }
+  return targets;
+}
+
+export function orderedCrossComputerSessionTargets(
+  sources: readonly ProjectSource[],
+  projects: readonly CrossComputerProject[],
+): SessionStepTarget[] {
+  const byKey = new Map(sources.map((source) => [source.computer.key, source]));
+  const seen = new Set<string>();
+  const targets: SessionStepTarget[] = [];
+  for (const project of projects) {
+    for (const member of project.members) {
+      const source = byKey.get(member.computerKey);
+      if (!source) continue;
+      for (const family of sessionFamilies(member.project.sessions)) {
+        for (const session of [family.root, ...family.children]) {
+          const key = `${member.computerKey}\0${session.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          targets.push({ computerKey: member.computerKey, computer: source.computer, sessionId: session.id });
+        }
+      }
+    }
+  }
+  return targets;
+}
+
+export function stepSessionTarget(
+  targets: readonly SessionStepTarget[],
+  active: { computerKey?: string; sessionId?: string },
+  direction: 1 | -1,
+): SessionStepTarget | undefined {
+  if (!targets.length) return undefined;
+  const at = targets.findIndex(
+    (entry) => entry.sessionId === active.sessionId && (!active.computerKey || entry.computerKey === active.computerKey),
+  );
+  if (at < 0) return direction === 1 ? targets[0] : targets[targets.length - 1];
+  return targets[(at + direction + targets.length) % targets.length];
+}
+
+let latestAllScopeTargets: SessionStepTarget[] = [];
+
 function AllProjectTree({ view, openComputerView, navigate, scopeMenu }: {
   view: string; openComputerView: ConsoleShellProps["openComputerView"];
   navigate: (view: string) => void; scopeMenu: ReactNode;
@@ -527,6 +597,10 @@ function CrossProjectTree({ sources, projects, view, openComputerView, navigate,
   sources: ProjectSource[]; projects: CrossComputerProject[]; view: string;
   openComputerView: ConsoleShellProps["openComputerView"]; navigate: (view: string) => void; scopeMenu: ReactNode;
 }) {
+  useEffect(() => {
+    latestAllScopeTargets = orderedCrossComputerSessionTargets(sources, projects);
+    return () => { latestAllScopeTargets = []; };
+  }, [sources, projects]);
   const names = useStore(computerNames.store);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => readLocal("desktopTree.all", {}));
   const [showAll, setShowAll] = useState(false);
@@ -958,17 +1032,24 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
   });
   useEffect(() => {
     const step = (direction: 1 | -1) => {
-      const seen = new Set<string>();
-      const rows = [...document.querySelectorAll<HTMLButtonElement>(".desktop-sidebar .tree-session[data-session-id]")].filter((row) => {
-        const key = JSON.stringify([row.dataset.computerKey, row.dataset.sessionId]);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      if (!rows.length) return;
-      const at = rows.findIndex((row) => row.dataset.active === "true");
-      // The row owns its computer route and unsaved-change guard, as it does on a click.
-      rows[at < 0 ? 0 : (at + direction + rows.length) % rows.length]!.click();
+      const connection = engine.state.getState().connection;
+      const activeComputerKey = connection ? (engine.computerForKey(connection.computer.key)?.key ?? connection.computer.key) : undefined;
+      let targets: SessionStepTarget[] = [];
+      if (projectScope.getState().value === "all" && latestAllScopeTargets.length > 0) {
+        targets = latestAllScopeTargets;
+      } else if (connection) {
+        const current = connection.store.getState();
+        targets = orderedComputerSessionTargets(
+          activeComputerKey ?? connection.computer.key,
+          current.projects,
+          Object.values(current.sessions),
+          connection.computer,
+        );
+      }
+      const next = stepSessionTarget(targets, { computerKey: activeComputerKey, sessionId: props.view }, direction);
+      if (!next) return;
+      if (next.computer && next.computerKey !== activeComputerKey) props.openComputerView(next.computer, next.sessionId);
+      else props.navigate(next.sessionId);
     };
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || keysBelongToContent()) return;
@@ -1099,6 +1180,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
         navigate={props.navigate}
         connect={props.connect}
         selectComputer={props.selectComputer as (computer: Computer) => void}
+        openComputerView={props.openComputerView}
         setAppearance={setAppearance}
       />
       {isElectronDesktop && (

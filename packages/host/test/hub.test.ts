@@ -28,6 +28,7 @@ class FakeDriver implements AgentDriver {
   nativeSessionAvailability?: AgentDriver["nativeSessionAvailability"];
   listModels?: AgentDriver["listModels"];
   setConfig?: AgentDriver["setConfig"];
+  answerQuestion?: AgentDriver["answerQuestion"];
 
   async start(host: DriverHost) {
     this.host = host;
@@ -679,6 +680,230 @@ describe("SessionHub", () => {
     release();
     await Promise.all([creating, prompting]);
     expect(driver.prompts).toEqual([{ nativeId: "new", clientMessageId: "another-client", content: [text("start")] }]);
+  });
+
+  it("deduplicates sessions.create by requestId while in flight and across reconnect retries", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let creates = 0;
+    driver.createSession = async (options: { cwd: string }) => {
+      creates += 1;
+      await gate;
+      return { nativeId: `dedup-${creates}`, cwd: options.cwd, createdAt: 10, updatedAt: 10 };
+    };
+
+    const first = hub.createSession({ agent: "fake", cwd: "/w/other", requestId: "req-1", prompt: [text("start")], clientMessageId: "c-1" });
+    const second = hub.createSession({ agent: "fake", cwd: "/w/other", requestId: "req-1", prompt: [text("start")], clientMessageId: "c-1" });
+    await Promise.resolve();
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.id).toBe("fake:dedup-1");
+    expect(b.id).toBe("fake:dedup-1");
+    expect(creates).toBe(1);
+    expect(driver.prompts).toHaveLength(1);
+
+    const third = await hub.createSession({ agent: "fake", cwd: "/w/other", requestId: "req-1", prompt: [text("start")], clientMessageId: "c-1" });
+    expect(third.id).toBe("fake:dedup-1");
+    expect(creates).toBe(1);
+    expect(driver.prompts).toHaveLength(1);
+
+    // A failed create is not cached, so a retry with the same requestId can succeed.
+    driver.createSession = async () => { throw new Error("spawn failed"); };
+    await expect(hub.createSession({ agent: "fake", cwd: "/w/other", requestId: "req-retry" })).rejects.toThrow("spawn failed");
+    driver.createSession = async (options: { cwd: string }) => ({ nativeId: "recovered", cwd: options.cwd, createdAt: 11, updatedAt: 11 });
+    const retried = await hub.createSession({ agent: "fake", cwd: "/w/other", requestId: "req-retry" });
+    expect(retried.id).toBe("fake:recovered");
+  });
+
+  it("coalesces in-flight sessions.prompt retries instead of returning premature duplicate", async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    driver.prompt = async (nativeId, content, clientMessageId) => {
+      driver.prompts.push({ nativeId, content, clientMessageId });
+      entered();
+      await gate;
+      return "started" as const;
+    };
+
+    const initial = hub.prompt("fake:s1", "c-inflight", [text("hello")]);
+    await started;
+    const retry = hub.prompt("fake:s1", "c-inflight", [text("hello")]);
+    release();
+    await expect(Promise.all([initial, retry])).resolves.toEqual(["started", "started"]);
+    expect(driver.prompts).toHaveLength(1);
+    await expect(hub.prompt("fake:s1", "c-inflight", [text("hello")])).resolves.toBe("duplicate");
+
+    // When an in-flight delivery rejects, both callers see the error and a later retry can deliver.
+    let failEntered!: () => void;
+    let failNow!: (error: Error) => void;
+    const failStarted = new Promise<void>((resolve) => { failEntered = resolve; });
+    const failGate = new Promise<void>((_resolve, reject) => { failNow = reject; });
+    driver.prompt = async () => {
+      failEntered();
+      await failGate;
+      return "started" as const;
+    };
+    const failing = hub.prompt("fake:s1", "c-fail", [text("again")]);
+    await failStarted;
+    const failingRetry = hub.prompt("fake:s1", "c-fail", [text("again")]);
+    const bothRejected = Promise.all([
+      expect(failing).rejects.toThrow("socket closed"),
+      expect(failingRetry).rejects.toThrow("socket closed"),
+    ]);
+    failNow(new Error("socket closed"));
+    await bothRejected;
+
+    driver.prompt = async (nativeId, content, clientMessageId) => {
+      driver.prompts.push({ nativeId, content, clientMessageId });
+      return "started" as const;
+    };
+    await expect(hub.prompt("fake:s1", "c-fail", [text("again")])).resolves.toBe("started");
+  });
+
+  it("atomically claims permission and question requests across simultaneous phone and desktop clicks", async () => {
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    const options = [
+      { optionId: "allow", name: "Allow", kind: "allow_once" as const },
+      { optionId: "deny", name: "Deny", kind: "reject_once" as const },
+    ];
+    driver.emit({ sessionUpdate: "ls_turn", state: "started", turnId: "t1" });
+    driver.emit({ sessionUpdate: "ls_permission", requestId: "p-race", title: "Run tool", options });
+
+    // Invalid option still fails without locking out the valid click.
+    await expect(hub.respondPermission("fake:s1", "p-race", "bogus")).rejects.toMatchObject({ appCode: "invalid_params" });
+
+    let releasePerm!: () => void;
+    const permGate = new Promise<void>((resolve) => { releasePerm = resolve; });
+    let permCalls = 0;
+    driver.respondPermission = async (_nativeId, requestId, optionId) => {
+      permCalls += 1;
+      await permGate;
+      driver.answers.push({ requestId, optionId });
+      driver.emit({ sessionUpdate: "ls_permission_resolved", requestId, optionId });
+    };
+
+    const phonePerm = hub.respondPermission("fake:s1", "p-race", "allow");
+    const desktopPerm = hub.respondPermission("fake:s1", "p-race", "deny");
+    releasePerm();
+    await Promise.all([phonePerm, desktopPerm]);
+    expect(permCalls).toBe(1);
+    expect(driver.answers).toEqual([{ requestId: "p-race", optionId: "allow" }]);
+
+    // Simultaneous question answers are likewise claimed once, and driver failure releases the claim.
+    driver.emit({
+      sessionUpdate: "ls_permission",
+      requestId: "q-race",
+      title: "Pick one",
+      options: [],
+      questions: [{ id: "env", title: "Env?", kind: "choice", options: [{ value: "prod", label: "prod" }, { value: "dev", label: "dev" }] }],
+    });
+    let questionCalls = 0;
+    let shouldFail = true;
+    let releaseQuestion!: () => void;
+    let questionGate = new Promise<void>((resolve) => { releaseQuestion = resolve; });
+    driver.answerQuestion = async (_nativeId, requestId) => {
+      questionCalls += 1;
+      await questionGate;
+      if (shouldFail) throw new Error("temporary failure");
+      driver.emit({ sessionUpdate: "ls_permission_resolved", requestId });
+    };
+
+    const fail1 = hub.answerQuestion("fake:s1", "q-race", [{ id: "env", values: ["prod"] }]);
+    const fail2 = hub.answerQuestion("fake:s1", "q-race", [{ id: "env", values: ["dev"] }]);
+    const bothFailed = Promise.all([
+      expect(fail1).rejects.toThrow("temporary failure"),
+      expect(fail2).rejects.toThrow("temporary failure"),
+    ]);
+    releaseQuestion();
+    await bothFailed;
+    expect(questionCalls).toBe(1);
+
+    shouldFail = false;
+    questionGate = new Promise<void>((resolve) => { releaseQuestion = resolve; });
+    const ok1 = hub.answerQuestion("fake:s1", "q-race", [{ id: "env", values: ["prod"] }]);
+    const ok2 = hub.answerQuestion("fake:s1", "q-race", [{ id: "env", values: ["dev"] }]);
+    releaseQuestion();
+    await Promise.all([ok1, ok2]);
+    expect(questionCalls).toBe(2);
+  });
+
+  it("exposes getSession / findSession and forwards beforeId / nextBeforeId across equal timestamps", async () => {
+    driver.sessions = [
+      { nativeId: "s1", cwd: "/w/app", createdAt: 1, updatedAt: 10 },
+      { nativeId: "s2", cwd: "/w/app", createdAt: 2, updatedAt: 10 },
+      { nativeId: "s3", cwd: "/w/app", createdAt: 3, updatedAt: 10 },
+    ];
+    await hub.refreshDiscovery();
+
+    expect(hub.getSession("fake:s2").id).toBe("fake:s2");
+    expect(hub.findSession("fake:s2")?.id).toBe("fake:s2");
+    expect(hub.findSession("fake:missing")).toBeUndefined();
+
+    const first = hub.listSessions({ limit: 2 });
+    expect(first.sessions).toHaveLength(2);
+    expect(first.nextBefore).toBe(10);
+    expect(first.nextBeforeId).toBe(first.sessions[1]!.id);
+
+    const second = hub.listSessions({ limit: 2, before: first.nextBefore, beforeId: first.nextBeforeId });
+    expect(second.sessions).toHaveLength(1);
+    expect([...first.sessions, ...second.sessions].map((s) => s.id).sort()).toEqual(["fake:s1", "fake:s2", "fake:s3"]);
+    expect(second.nextBefore).toBeUndefined();
+    expect(second.nextBeforeId).toBeUndefined();
+  });
+
+  it("evicts idle detached LiveSession entries after 10 minutes only once turns and permissions are clear", async () => {
+    driver.detachWhenIdle = true;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const liveMap = (hub as unknown as { live: Map<string, unknown> }).live;
+      const sub = collector();
+      await hub.subscribe("fake:s1", 0, sub.subscriber);
+      expect(liveMap.has("fake:s1")).toBe(true);
+
+      driver.emit({
+        sessionUpdate: "ls_permission",
+        requestId: "p-hold",
+        title: "Approve",
+        options: [{ optionId: "ok", name: "OK", kind: "allow_once" }],
+      });
+      hub.unsubscribe("fake:s1", sub.subscriber);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(liveMap.has("fake:s1")).toBe(true);
+      expect(driver.detaches).toBe(0);
+
+      driver.emit({ sessionUpdate: "ls_permission_resolved", requestId: "p-hold", optionId: "ok" });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(driver.detaches).toBe(1);
+      expect(liveMap.has("fake:s1")).toBe(false);
+
+      // A session driven without an active subscriber also detaches/evicts 10m after its turn ends, clearing claimedPermissions.
+      const claimed = (hub as unknown as { claimedPermissions: Set<string> }).claimedPermissions;
+      const created = await hub.createSession({ agent: "fake", cwd: "/w/other", prompt: [text("headless")] });
+      driver.emit({ sessionUpdate: "ls_turn", state: "started", turnId: "t-headless" }, undefined, created.nativeId);
+      driver.emit({
+        sessionUpdate: "ls_permission",
+        requestId: "p-headless",
+        title: "Approve",
+        options: [{ optionId: "ok", name: "OK", kind: "allow_once" }],
+      }, undefined, created.nativeId);
+      await hub.respondPermission(created.id, "p-headless", "ok");
+      driver.emit({ sessionUpdate: "ls_turn", state: "ended", turnId: "t-headless", stopReason: "end_turn" }, undefined, created.nativeId);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(liveMap.has(created.id)).toBe(false);
+      expect([...claimed].some((key) => key.startsWith(`${created.id}\n`))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces superseded draft text in summary preview when agent_message_chunk has replace: true", async () => {
+    await hub.subscribe("fake:s1", 0, collector().subscriber);
+    driver.emit(chunk("m-rep", "superseded draft "));
+    driver.emit({ sessionUpdate: "agent_message_chunk", messageId: "m-rep", replace: true, content: text("final answer") });
+    driver.emit({ sessionUpdate: "ls_message_done", messageId: "m-rep", role: "agent" });
+    expect(hub.getSession("fake:s1").preview).toBe("final answer");
   });
 });
 

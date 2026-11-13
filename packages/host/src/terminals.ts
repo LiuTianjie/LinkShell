@@ -33,10 +33,21 @@ const SAVE_EVERY_MS = 3000;
 /** Output is sent in slices at most this often, so a flood of small writes isn't a flood of messages. */
 const FLUSH_MS = 8;
 const FLUSH_BYTES = 64 * 1024;
+/** SQLite frame writes are coalesced into one transaction per 80ms (or size cap) instead of per PTY chunk. */
+const FRAME_FLUSH_MS = 80;
+const FRAME_FLUSH_MAX = 128;
+const FRAME_FLUSH_BYTES = 256 * 1024;
 const MAX_TERMINALS = 24;
 
 interface Chunk {
   seq: number;
+  data: string;
+}
+
+interface PendingFrame {
+  frame: number;
+  cols: number;
+  rows: number;
   data: string;
 }
 
@@ -57,6 +68,9 @@ class Terminal {
   private closed = false;
   private pending = "";
   private flushTimer?: ReturnType<typeof setTimeout>;
+  private readonly pendingFrames: PendingFrame[] = [];
+  private pendingFrameBytes = 0;
+  private frameFlushTimer?: ReturnType<typeof setTimeout>;
   private readonly listeners = new Set<OutputListener>();
   private readonly mirror: InstanceType<typeof ScreenMirror>;
   private readonly serializer = new SerializeAddon();
@@ -88,6 +102,7 @@ class Terminal {
     pty.onExit(({ exitCode }) => {
       if (this.closed) return;
       this.flush();
+      this.flushFrames();
       this.exitCode = exitCode;
       this.changed(this);
     });
@@ -119,6 +134,7 @@ class Terminal {
 
   record(): TerminalRecord {
     this.flush();
+    this.flushFrames();
     const buffer = this.snapshot(SAVED_SCROLLBACK);
     return {
       id: this.id,
@@ -138,6 +154,7 @@ class Terminal {
 
   captureState(): { frame: number; cols: number; rows: number; data: string } | undefined {
     this.flush();
+    this.flushFrames();
     if (!this.state) return undefined;
     if (this.stateSnapshot?.frame === this.frame) return this.stateSnapshot;
     try {
@@ -169,6 +186,7 @@ class Terminal {
 
   attach(listener: OutputListener, fromSeq?: number): { replay: string; reset: boolean; seq: number } {
     this.flush();
+    this.flushFrames();
     this.listeners.add(listener);
     const first = this.chunks[0]?.seq ?? this.seq + 1;
     // Everything after fromSeq is still here: send just that.
@@ -199,9 +217,19 @@ class Terminal {
     catch { this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined; }
   }
 
-  close(): void {
+  close(discardFrames = false): void {
+    if (!this.closed && !discardFrames) {
+      this.flush();
+      this.flushFrames();
+    } else {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+      clearTimeout(this.frameFlushTimer);
+      this.frameFlushTimer = undefined;
+      this.pendingFrames.length = 0;
+      this.pendingFrameBytes = 0;
+    }
     this.closed = true;
-    clearTimeout(this.flushTimer);
     this.listeners.clear();
     this.mirror.dispose();
     this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
@@ -249,8 +277,26 @@ class Terminal {
     }
   }
 
+  flushFrames(): void {
+    clearTimeout(this.frameFlushTimer);
+    this.frameFlushTimer = undefined;
+    if (this.pendingFrames.length === 0) return;
+    const batch = this.pendingFrames.splice(0);
+    this.pendingFrameBytes = 0;
+    this.store?.appendTerminalFrames(this.id, batch);
+  }
+
   private recordFrame(data: string): void {
-    this.store?.appendTerminalFrame(this.id, ++this.frame, this.cols, this.rows, data);
+    const nextFrame = ++this.frame;
+    if (!this.store) return;
+    this.pendingFrames.push({ frame: nextFrame, cols: this.cols, rows: this.rows, data });
+    this.pendingFrameBytes += data.length;
+    if (this.pendingFrames.length >= FRAME_FLUSH_MAX || this.pendingFrameBytes >= FRAME_FLUSH_BYTES) {
+      this.flushFrames();
+    } else if (!this.frameFlushTimer) {
+      this.frameFlushTimer = setTimeout(() => this.flushFrames(), FRAME_FLUSH_MS);
+      this.frameFlushTimer.unref();
+    }
   }
 }
 
@@ -476,7 +522,9 @@ export class TerminalManager {
   }
 
   replay(id: string, afterFrame: number, throughFrame: number) {
-    if (!this.terminals.has(id) && !this.history.has(id)) throw RpcError.app("not_found", "终端不存在");
+    const live = this.terminals.get(id);
+    if (!live && !this.history.has(id)) throw RpcError.app("not_found", "终端不存在");
+    live?.flushFrames();
     const latest = this.store?.lastTerminalFrame(id) ?? 0;
     if (throughFrame > latest || afterFrame > throughFrame) throw RpcError.app("invalid_params", "终端回放范围无效");
     const frames = this.store?.terminalFrames(id, afterFrame, throughFrame) ?? [];
@@ -514,7 +562,7 @@ export class TerminalManager {
     const ended = this.history.get(id);
     if (!terminal && !ended) throw RpcError.app("not_found", "找不到这个终端");
     const info = terminal ? terminal.info() : recordInfo(ended!.record, ended!.interrupted);
-    terminal?.close();
+    terminal?.close(true);
     this.terminals.delete(id);
     this.history.delete(id);
     this.store?.deleteTerminal(id);
@@ -534,9 +582,12 @@ export class TerminalManager {
   stop(): void {
     clearInterval(this.timer);
     // Saved as still running: next start lists them as interrupted.
-    for (const terminal of this.terminals.values()) this.save(terminal);
+    for (const terminal of this.terminals.values()) {
+      terminal.flushFrames();
+      this.save(terminal);
+    }
     this.stopped = true;
-    for (const terminal of this.terminals.values()) terminal.close();
+    for (const terminal of this.terminals.values()) terminal.close(true);
     this.terminals.clear();
     this.snapshots.clear();
   }

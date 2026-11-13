@@ -19,6 +19,7 @@ import {
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
+PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS lsa_meta (
@@ -411,9 +412,14 @@ export class LsaStore {
     this.db.close();
   }
 
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   // ── Controller Epoch & Session Fencing ────────────────────────────
 
   getControllerEpoch(): number {
+    if (this.closed) return 1;
     const row = this.db
       .prepare("SELECT value FROM lsa_meta WHERE key = 'controller_epoch'")
       .get() as { value: string } | undefined;
@@ -427,6 +433,7 @@ export class LsaStore {
    * When omitted, increments the current epoch by 1.
    */
   advanceControllerEpoch(requestedEpoch?: number): number {
+    if (this.closed) return requestedEpoch === undefined ? 1 : Math.max(1, Math.trunc(requestedEpoch));
     return this.inTransaction(() => {
       const current = this.getControllerEpoch();
       const target = requestedEpoch === undefined ? current + 1 : Math.trunc(requestedEpoch);
@@ -450,6 +457,7 @@ export class LsaStore {
   }
 
   claimSessionFence(sessionId: string, epoch: number): void {
+    if (this.closed) return;
     const now = this.clock();
     this.inTransaction(() => {
       const existing = this.db
@@ -483,6 +491,7 @@ export class LsaStore {
   }
 
   markSessionHijacked(sessionId: string, hijacked = true): void {
+    if (this.closed) return;
     const now = this.clock();
     this.inTransaction(() => {
       const existing = this.db
@@ -502,6 +511,7 @@ export class LsaStore {
   }
 
   getSessionFence(sessionId: string): { controllerEpoch: number; hijacked: boolean } | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare("SELECT controller_epoch, hijacked FROM lsa_session_fences WHERE session_id = ?")
       .get(sessionId) as { controller_epoch: number; hijacked: number } | undefined;
@@ -517,8 +527,29 @@ export class LsaStore {
     const updatedAt = input.updatedAt ?? createdAt;
     const id = input.id ?? `lsa_task_${randomUUID()}`;
     const status: LsaTaskStatus = input.status ?? "queued";
-    const generation = input.generation ?? this.currentGeneration().generation;
     const checksJson = JSON.stringify(input.acceptanceChecks ?? []);
+    if (this.closed) {
+      return rowToTask({
+        id,
+        title: input.title,
+        goal: input.goal,
+        status,
+        cwd: input.cwd,
+        worktree: input.worktree ? 1 : 0,
+        worktree_path: input.worktreePath ?? null,
+        agent: input.agent,
+        session_id: input.sessionId ?? null,
+        controller_epoch: input.controllerEpoch,
+        acceptance_json: checksJson,
+        verification_summary: input.verificationSummary ?? null,
+        retry_count: input.retryCount ?? 0,
+        max_retries: input.maxRetries ?? LSA_DEFAULT_MAX_RETRIES,
+        generation: input.generation ?? 1,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
+    }
+    const generation = input.generation ?? this.currentGeneration().generation;
 
     this.inTransaction(() => {
       if (input.sessionId) {
@@ -557,6 +588,7 @@ export class LsaStore {
   }
 
   getTask(id: string): LsaTask | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare("SELECT * FROM lsa_tasks WHERE id = ?")
       .get(id) as TaskRow | undefined;
@@ -564,6 +596,7 @@ export class LsaStore {
   }
 
   findActiveTaskBySession(sessionId: string): LsaTask | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare(
         `SELECT * FROM lsa_tasks
@@ -575,6 +608,7 @@ export class LsaStore {
   }
 
   listActiveTasks(limit = 200): LsaTask[] {
+    if (this.closed) return [];
     return this.listTasks({
       status: ["queued", "running", "verifying", "waiting_decision"],
       limit,
@@ -588,6 +622,7 @@ export class LsaStore {
       limit?: number;
     } = {},
   ): LsaTask[] {
+    if (this.closed) return [];
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (options.status) {
@@ -610,6 +645,28 @@ export class LsaStore {
   }
 
   updateTask(id: string, patch: LsaTaskPatch, options?: { expectedEpoch?: number }): LsaTask {
+    if (this.closed) {
+      const now = patch.updatedAt ?? this.clock();
+      return rowToTask({
+        id,
+        title: patch.title ?? "",
+        goal: patch.goal ?? "",
+        status: patch.status ?? "cancelled",
+        cwd: patch.cwd ?? "",
+        worktree: patch.worktree ? 1 : 0,
+        worktree_path: patch.worktreePath ?? null,
+        agent: patch.agent ?? "unknown",
+        session_id: patch.sessionId ?? null,
+        controller_epoch: patch.controllerEpoch ?? options?.expectedEpoch ?? 1,
+        acceptance_json: JSON.stringify(patch.acceptanceChecks ?? []),
+        verification_summary: patch.verificationSummary ?? null,
+        retry_count: patch.retryCount ?? 0,
+        max_retries: patch.maxRetries ?? LSA_DEFAULT_MAX_RETRIES,
+        generation: 1,
+        created_at: now,
+        updated_at: now,
+      });
+    }
     return this.inTransaction(() => {
       const existing = this.db
         .prepare("SELECT * FROM lsa_tasks WHERE id = ?")
@@ -722,6 +779,17 @@ export class LsaStore {
     const tagsText = tags.join(" ");
     const updatedAt = input.updatedAt ?? this.clock();
 
+    if (this.closed) {
+      return {
+        id: input.id ?? `lsa_mem_${randomUUID()}`,
+        scope,
+        key,
+        content: input.content,
+        tags,
+        updatedAt,
+      };
+    }
+
     return this.inTransaction(() => {
       const existing = this.db
         .prepare("SELECT id FROM lsa_memories WHERE scope = ? AND key = ?")
@@ -754,6 +822,7 @@ export class LsaStore {
   }
 
   getMemory(scope: string, key: string): LsaMemory | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare("SELECT * FROM lsa_memories WHERE scope = ? AND key = ?")
       .get(scope, key) as MemoryRow | undefined;
@@ -761,6 +830,7 @@ export class LsaStore {
   }
 
   deleteMemory(target: { id?: string; scope?: string; key?: string }): boolean {
+    if (this.closed) return false;
     return this.inTransaction(() => {
       let row: { id: string } | undefined;
       if (target.id) {
@@ -787,6 +857,7 @@ export class LsaStore {
       limit?: number;
     } = {},
   ): LsaMemory[] {
+    if (this.closed) return [];
     const limit = Math.max(1, Math.min(options.limit ?? 20, 200));
     const trimmedQuery = options.query?.trim() ?? "";
     const requiredTags = (options.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
@@ -918,18 +989,31 @@ export class LsaStore {
     }
     const id = input.id ?? `lsa_fu_${randomUUID()}`;
     const createdAt = input.createdAt ?? this.clock();
+    const dueAt = Math.trunc(input.dueAt);
+    if (this.closed) {
+      return {
+        id,
+        ...(input.taskId ? { taskId: input.taskId } : {}),
+        note,
+        dueAt,
+        status: "pending",
+        done: false,
+        createdAt,
+      };
+    }
 
     this.db
       .prepare(
         `INSERT INTO lsa_followups (id, task_id, note, due_at, triggered_at, status, created_at)
          VALUES (?, ?, ?, ?, NULL, 'pending', ?)`,
       )
-      .run(id, input.taskId ?? null, note, Math.trunc(input.dueAt), createdAt);
+      .run(id, input.taskId ?? null, note, dueAt, createdAt);
 
     return this.getFollowup(id)!;
   }
 
   getFollowup(id: string): LsaFollowup | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare("SELECT * FROM lsa_followups WHERE id = ?")
       .get(id) as FollowupRow | undefined;
@@ -944,6 +1028,7 @@ export class LsaStore {
       limit?: number;
     } = {},
   ): LsaFollowup[] {
+    if (this.closed) return [];
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (options.taskId) {
@@ -972,6 +1057,7 @@ export class LsaStore {
    * `triggered` with `triggered_at = now` so repeated polls never double-fire.
    */
   claimDueFollowups(now = this.clock()): LsaFollowup[] {
+    if (this.closed) return [];
     return this.inTransaction(() => {
       const dueRows = this.db
         .prepare(
@@ -995,6 +1081,7 @@ export class LsaStore {
   }
 
   nextPendingFollowupDueAt(): number | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare(
         "SELECT MIN(due_at) AS next_due FROM lsa_followups WHERE status = 'pending'",
@@ -1004,6 +1091,17 @@ export class LsaStore {
   }
 
   updateFollowupStatus(id: string, status: LsaFollowupStatus, now = this.clock()): LsaFollowup {
+    if (this.closed) {
+      return {
+        id,
+        note: "",
+        dueAt: now,
+        ...(status === "triggered" ? { triggeredAt: now } : {}),
+        status,
+        done: status === "done",
+        createdAt: now,
+      };
+    }
     const existing = this.getFollowup(id);
     if (!existing) throw RpcError.app("not_found", `找不到跟进提醒：${id}`);
     const triggeredAt =
@@ -1015,6 +1113,7 @@ export class LsaStore {
   }
 
   cancelFollowupsForTask(taskId: string): number {
+    if (this.closed) return 0;
     const result = this.db
       .prepare(
         "UPDATE lsa_followups SET status = 'cancelled' WHERE task_id = ? AND status = 'pending'",
@@ -1026,6 +1125,9 @@ export class LsaStore {
   // ── Generations (`lsa_generations`) ───────────────────────────────
 
   currentGeneration(): LsaGeneration {
+    if (this.closed) {
+      return { generation: 1, startedAt: this.clock(), tokenEstimate: 0 };
+    }
     const open = this.db
       .prepare(
         "SELECT * FROM lsa_generations WHERE ended_at IS NULL ORDER BY generation DESC LIMIT 1",
@@ -1052,6 +1154,7 @@ export class LsaStore {
   }
 
   getGeneration(generation: number): LsaGeneration | undefined {
+    if (this.closed) return undefined;
     const row = this.db
       .prepare("SELECT * FROM lsa_generations WHERE generation = ?")
       .get(generation) as GenerationRow | undefined;
@@ -1059,6 +1162,7 @@ export class LsaStore {
   }
 
   listGenerations(limit = 50): LsaGeneration[] {
+    if (this.closed) return [];
     const rows = this.db
       .prepare("SELECT * FROM lsa_generations ORDER BY generation DESC LIMIT ?")
       .all(Math.max(1, Math.min(limit, 500))) as unknown as GenerationRow[];
@@ -1067,6 +1171,9 @@ export class LsaStore {
 
   updateCurrentGenerationTokens(tokenEstimate: number): LsaGeneration {
     const safeTokens = Math.max(0, Math.trunc(tokenEstimate));
+    if (this.closed) {
+      return { generation: 1, startedAt: this.clock(), tokenEstimate: safeTokens };
+    }
     return this.inTransaction(() => {
       const current = this.currentGeneration();
       this.db
@@ -1083,6 +1190,22 @@ export class LsaStore {
   }): { closed: LsaGeneration; current: LsaGeneration } {
     const now = input.now ?? this.clock();
     const safeTokens = Math.max(0, Math.trunc(input.tokenEstimate));
+    if (this.closed) {
+      return {
+        closed: {
+          generation: 1,
+          startedAt: now,
+          endedAt: now,
+          tokenEstimate: safeTokens,
+          handoffSummary: input.handoffSummary,
+        },
+        current: {
+          generation: 2,
+          startedAt: now,
+          tokenEstimate: 0,
+        },
+      };
+    }
 
     return this.inTransaction(() => {
       const prev = this.currentGeneration();

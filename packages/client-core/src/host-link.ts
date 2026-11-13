@@ -43,6 +43,30 @@ export interface HostLinkOptions {
 }
 
 const OPEN = 1;
+const STUCK_SOCKET_MS = 5_000;
+const MIN_CALL_EXECUTION_MS = 15_000;
+
+/** Maps raw OS and WebSocket transport errors to user-facing Chinese messages. */
+export function translateSocketError(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) return "连接已断开";
+  if (/No WebSocket implementation available/i.test(trimmed)) return "当前环境不支持 WebSocket 连接";
+  if (/ECONNREFUSED|connection refused/i.test(trimmed)) return "连接被拒绝，请确认电脑上的 LinkShell 正在运行";
+  if (/ETIMEDOUT|ESOCKETTIMEDOUT|timed?\s*out|lan_timeout/i.test(trimmed)) return "连接电脑超时，请检查网络连接";
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(trimmed)) return "找不到电脑的网络地址，请检查网络设置";
+  if (/ECONNRESET|ECONNABORTED|EPIPE|socket hang up|connection reset/i.test(trimmed)) return "网络连接意外中断";
+  if (
+    /Network request failed|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EHOSTDOWN|failed to connect|Software caused connection abort|Internet connection appears to be offline|Socket is not connected/i.test(
+      trimmed,
+    )
+  ) {
+    return "网络请求失败，请检查网络连接";
+  }
+  if (/WebSocket (is|was) closed|WebSocket is already in CLOSING or CLOSED|network connection was lost/i.test(trimmed)) {
+    return "连接已断开";
+  }
+  return trimmed;
+}
 
 function defaultSocket(url: string): SocketLike {
   const Ctor = (globalThis as { WebSocket?: new (url: string) => SocketLike }).WebSocket;
@@ -79,10 +103,15 @@ export class HostLink {
   /** Set while away (`resumeLatest`): the next subscriptions start at the latest turns. */
   private latest = false;
   private openedAt = 0;
+  private probePromise?: Promise<boolean>;
   /** Used when no `accessToken` store is given: lasts as long as this link. */
   private heldToken?: string;
 
   constructor(private readonly options: HostLinkOptions) {}
+
+  get url(): string {
+    return this.options.url;
+  }
 
   get status(): LinkStatus {
     return this.statusValue;
@@ -127,20 +156,26 @@ export class HostLink {
     this.setStatus("stopped");
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.probePromise = undefined;
     this.peer?.close("连接已停止");
     this.socket?.close();
     this.socket = undefined;
     for (const wake of this.waiters) wake();
   }
 
-  /** Reconnects now (e.g. the app came back to the foreground). */
-  reconnectNow(): void {
+  /** Reconnects now (e.g. the app came back to the foreground, or a liveness probe failed). */
+  reconnectNow(force = false): void {
     if (this.statusValue === "stopped") return;
-    if (this.statusValue === "online" || this.statusValue === "locked") return;
-    // A connection being made right now is left to finish: starting another would abandon it
-    // half open (on the computer too, which keeps a few channels per device and drops the
-    // oldest). One that has been at it for a while is stuck (made before a suspension).
-    if (this.socket && Date.now() - this.openedAt < 30_000) return;
+    if (!force && (this.statusValue === "online" || this.statusValue === "locked")) return;
+    // A connection being made right now is left to finish unless forced: starting another would
+    // abandon it half open (on the computer too, which keeps a few channels per device and drops
+    // the oldest). One that has been at it for > 5 s is stuck (made before a suspension).
+    if (!force && this.socket && Date.now() - this.openedAt < STUCK_SOCKET_MS) return;
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    this.probePromise = undefined;
     if (this.socket) {
       const stuck = this.socket;
       this.socket = undefined;
@@ -155,15 +190,27 @@ export class HostLink {
   }
 
   /**
-   * Checks an online connection still answers (the app came back to the foreground): one that
-   * doesn't within `timeoutMs` is closed, and made again.
+   * Checks an online connection still answers (the app came back to the foreground): concurrent
+   * checks share one request, and a socket that fails to answer reconnects immediately.
    */
-  probe(timeoutMs = 8000): void {
+  probe(timeoutMs = 2500): Promise<boolean> {
     const socket = this.socket;
-    if (this.statusValue !== "online" || !socket || !this.peer) return;
-    this.peer.request("machine.info", {}, timeoutMs).catch(() => {
-      if (this.socket === socket) socket.close();
-    });
+    if (this.statusValue !== "online" || !socket || !this.peer) return Promise.resolve(false);
+    if (this.probePromise) return this.probePromise;
+    const active = this.peer
+      .request("machine.info", {}, timeoutMs)
+      .then(
+        () => true,
+        () => {
+          if (this.socket === socket && this.statusValue !== "stopped") this.reconnectNow(true);
+          return false;
+        },
+      )
+      .finally(() => {
+        if (this.probePromise === active) this.probePromise = undefined;
+      });
+    this.probePromise = active;
+    return active;
   }
 
   /**
@@ -185,7 +232,9 @@ export class HostLink {
     if (!this.peer || this.statusValue !== "online") {
       throw RpcError.app("offline", "没有连上电脑");
     }
-    return this.peer.request<MethodResult<M>>(method, params, limit === 0 ? 0 : Math.max(1000, deadline - Date.now())).catch((error: unknown) => {
+    // Even if reconnecting consumed most of `waitOnline`, leave enough budget for the RPC itself.
+    const requestTimeout = limit === 0 ? 0 : Math.max(Math.min(limit, MIN_CALL_EXECUTION_MS), deadline - Date.now());
+    return this.peer.request<MethodResult<M>>(method, params, requestTimeout).catch((error: unknown) => {
       // A method this app knows and the computer doesn't: what to do about it, not the RPC error.
       if (error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND) {
         throw RpcError.app("host_outdated", "电脑上的 LinkShell 比 App 旧，还不支持这个功能：请更新电脑上的 LinkShell", { method });
@@ -249,7 +298,7 @@ export class HostLink {
     try {
       socket = (this.options.createSocket ?? defaultSocket)(this.options.url);
     } catch (error) {
-      this.scheduleReconnect(error instanceof Error ? error.message : String(error));
+      this.scheduleReconnect(translateSocketError(error instanceof Error ? error.message : String(error)));
       return;
     }
     this.socket = socket;
@@ -271,12 +320,13 @@ export class HostLink {
     socket.onerror = (event) => {
       // Browsers hide the reason; React Native and `ws` put it on `message`.
       const message = (event as { message?: unknown } | null)?.message;
-      if (typeof message === "string" && message) socketError = message;
+      if (typeof message === "string" && message) socketError = translateSocketError(message);
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
       peer.close("连接已断开");
       this.socket = undefined;
+      this.probePromise = undefined;
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       if (this.statusValue !== "stopped") this.scheduleReconnect(socketError ?? "连接已断开");
     };
@@ -284,7 +334,6 @@ export class HostLink {
 
   private async onOpen(socket: SocketLike): Promise<void> {
     if (this.socket !== socket) return;
-    this.attempt = 0;
     // Watched from the start: restoring a long backlog mustn't leave a dead socket unnoticed.
     const heartbeat = this.options.heartbeatMs ?? 25_000;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
@@ -298,8 +347,27 @@ export class HostLink {
       }, heartbeat);
     }
     // Hosts without a password (and older hosts) don't say `locked`: nothing changes for them.
-    const info = await this.peer?.request<{ locked?: boolean }>("machine.info", {}, 10_000).catch(() => undefined);
+    let info: { locked?: boolean } | undefined;
+    try {
+      info = await this.peer?.request<{ locked?: boolean }>("machine.info", {}, 10_000);
+    } catch (error) {
+      if (this.socket !== socket) return;
+      if (!(error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND)) {
+        if (this.heartbeatTimer) {
+          clearInterval(this.heartbeatTimer);
+          this.heartbeatTimer = undefined;
+        }
+        this.peer?.close("电脑没有响应");
+        this.socket = undefined;
+        socket.onclose = null;
+        socket.close();
+        this.scheduleReconnect(error instanceof RpcError ? translateSocketError(error.message) : "电脑没有响应");
+        return;
+      }
+    }
     if (this.socket !== socket) return;
+    // Reset backoff only once `machine.info` proves the end-to-end RPC channel works.
+    this.attempt = 0;
     if (info?.locked) {
       const token = this.loadToken();
       const unlocked = token ? await this.peer?.request<{ token: string }>("access.unlock", { token }, 10_000).then((result) => result, () => undefined) : undefined;

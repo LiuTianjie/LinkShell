@@ -24,6 +24,11 @@ it("acts only on the command shapes the shell understands", async () => {
   expect(desktopCommand({ command: "manage", page: "更新" })).toEqual({ command: "manage", page: "updates" });
   expect(desktopCommand({ command: "manage", page: "usage" })).toEqual({ command: "manage", page: "usage" });
   expect(desktopCommand({ command: "manage", page: "../etc" })).toEqual({ command: "manage" });
+  expect(desktopCommand({ command: "composer", target: "focus" })).toEqual({ command: "composer", target: "focus" });
+  expect(desktopCommand({ command: "composer", target: "model" })).toEqual({ command: "composer", target: "model" });
+  expect(desktopCommand({ command: "composer", target: "mode" })).toEqual({ command: "composer", target: "mode" });
+  expect(desktopCommand({ command: "composer", target: "effort" })).toEqual({ command: "composer", target: "effort" });
+  expect(desktopCommand({ command: "composer", target: "unknown" })).toBeUndefined();
   expect(desktopCommand({ command: "eval" })).toBeUndefined();
   expect(desktopCommand("palette")).toBeUndefined();
   expect(desktopCommand(null)).toBeUndefined();
@@ -41,6 +46,62 @@ it("matches shortcuts by the physical key, with ⌘ on the Mac", async () => {
   // An IME composition owns its keys.
   expect(matchesShortcut(key({ metaKey: true, code: "KeyK", key: "k", isComposing: true }), desktopShortcuts.palette)).toBe(false);
   expect(shortcutText(desktopShortcuts.toggleInspector)).toBe("⌥⌘B");
+  expect(matchesShortcut(key({ metaKey: true, code: "KeyL", key: "l" }), desktopShortcuts.focusComposer)).toBe(true);
+  expect(matchesShortcut(key({ metaKey: true, shiftKey: true, code: "KeyM", key: "M" }), desktopShortcuts.modelPicker)).toBe(true);
+  expect(matchesShortcut(key({ metaKey: true, shiftKey: true, code: "KeyA", key: "A" }), desktopShortcuts.modePicker)).toBe(true);
+  expect(matchesShortcut(key({ metaKey: true, shiftKey: true, code: "KeyE", key: "E" }), desktopShortcuts.effortPicker)).toBe(true);
+});
+
+it("matches ⇧Tab without ⌘/Ctrl and formats both Mac and Windows labels", async () => {
+  const mac = await load();
+  expect(mac.matchesShortcut(key({ shiftKey: true, code: "Tab", key: "Tab" }), mac.shiftTabShortcut)).toBe(true);
+  expect(mac.matchesShortcut(key({ metaKey: true, shiftKey: true, code: "Tab", key: "Tab" }), mac.shiftTabShortcut)).toBe(false);
+  expect(mac.shortcutText(mac.shiftTabShortcut)).toBe("⇧Tab");
+  expect(mac.shortcutText(mac.desktopShortcuts.modelPicker)).toBe("⇧⌘M");
+  expect(mac.shortcutText(mac.desktopShortcuts.focusComposer)).toBe("⌘L");
+
+  vi.resetModules();
+  const win = await load("win32");
+  expect(win.matchesShortcut(key({ shiftKey: true, code: "Tab", key: "Tab" }), win.shiftTabShortcut)).toBe(true);
+  expect(win.shortcutText(win.shiftTabShortcut)).toBe("Shift+Tab");
+  expect(win.shortcutText(win.desktopShortcuts.modelPicker)).toBe("Ctrl+Shift+M");
+});
+
+it("signals renderer-ready to Electron only after attaching the command listener", async () => {
+  const events: string[] = [];
+  const received: unknown[] = [];
+  const target = new EventTarget();
+  const origAdd = target.addEventListener.bind(target);
+  vi.stubGlobal(
+    "window",
+    Object.assign(target, {
+      __LINKSHELL_CONFIG__: { desktop: true, desktopPlatform: "darwin" },
+      linkshellDesktop: {
+        shell: "electron",
+        platform: "darwin",
+        postMessage: (msg: { action?: string }) => {
+          events.push(`ipc:${msg.action}`);
+          if (msg.action === "renderer-ready") {
+            // Simulate Electron immediately flushing a queued startup command on renderer-ready!
+            window.dispatchEvent(
+              new CustomEvent("linkshell-desktop-command", {
+                detail: { command: "new-session", cwd: "/work/repo" },
+              }),
+            );
+          }
+        },
+      },
+      addEventListener: ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+        if (type === "linkshell-desktop-command") events.push("listen");
+        origAdd(type, listener, options);
+      }) as typeof window.addEventListener,
+    }),
+  );
+  const { attachDesktopCommandListener } = await import("../src/live/desktop-commands");
+  const detach = attachDesktopCommandListener((cmd) => received.push(cmd));
+  expect(events).toEqual(["listen", "ipc:renderer-ready"]);
+  expect(received).toEqual([{ command: "new-session", cwd: "/work/repo" }]);
+  detach();
 });
 
 it("uses Ctrl and spelled-out keys on Windows", async () => {

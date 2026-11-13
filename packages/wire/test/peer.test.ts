@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ABANDON, RpcError, RpcPeer } from "../src/peer.js";
-import { parseSessionId, sessionIdFor, sessionUpdateSchema } from "../src/index.js";
+import { decodeDirectFrame, DIRECT_MAX_FRAME_BYTES, encodeDirectFrame, parseSessionId, sessionIdFor, sessionUpdateSchema } from "../src/index.js";
 
 function pair(handlers: {
   onRequest?: ConstructorParameters<typeof RpcPeer>[0]["onRequest"];
@@ -59,6 +59,73 @@ describe("RpcPeer", () => {
     left.close();
     await expect(pending).rejects.toMatchObject({ data: { code: "closed" } });
   });
+
+  it("emits $/cancelRequest on outbound timeout and aborts the remote handler's AbortSignal", async () => {
+    const wireFrames: Array<Record<string, unknown>> = [];
+    let aborted = false;
+    let release!: () => void;
+    let right!: RpcPeer;
+    const left = new RpcPeer({
+      send: (text) => {
+        wireFrames.push(JSON.parse(text) as Record<string, unknown>);
+        queueMicrotask(() => right.receive(text));
+      },
+      requestTimeoutMs: 20,
+    });
+    const rightSent: string[] = [];
+    right = new RpcPeer({
+      send: (text) => {
+        rightSent.push(text);
+        queueMicrotask(() => left.receive(text));
+      },
+      onRequest: (_method, _params, _id, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          release = () => resolve({ ok: true });
+        }),
+    });
+
+    const err = await left.request("fs.projectFiles", { cwd: "/repo" }, 20).catch((e: unknown) => e);
+    expect((err as RpcError).appCode).toBe("timeout");
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(wireFrames).toContainEqual({
+      jsonrpc: "2.0",
+      method: "$/cancelRequest",
+      params: { id: 1 },
+    });
+    expect(aborted).toBe(true);
+
+    // Resolving after cancellation does not emit a stale response frame.
+    release();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(rightSent).toEqual([]);
+  });
+
+  it("aborts only the matching inbound request on $/cancelRequest and aborts remaining inbound requests on close()", async () => {
+    const signals = new Map<string | number, AbortSignal>();
+    const peer = new RpcPeer({
+      send: () => {},
+      onRequest: (_method, _params, id, signal) => {
+        signals.set(id, signal);
+        return new Promise(() => {});
+      },
+    });
+
+    peer.receive(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "slowA", params: {} }));
+    peer.receive(
+      `${JSON.stringify({ jsonrpc: "2.0", id: "req-2", method: "slowB", params: {} })}\n${JSON.stringify({ jsonrpc: "2.0", method: "$/cancelRequest", params: { id: 1 } })}`,
+    );
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(signals.get(1)?.aborted).toBe(true);
+    expect(signals.get("req-2")?.aborted).toBe(false);
+
+    peer.close();
+    expect(signals.get("req-2")?.aborted).toBe(true);
+  });
 });
 
 describe("wire model", () => {
@@ -68,17 +135,32 @@ describe("wire model", () => {
     expect(parseSessionId("nocolon")).toBeNull();
   });
 
-  it("validates ACP-shaped updates", () => {
+  it("validates ACP-shaped updates including replace flag on message and thought chunks", () => {
     expect(
       sessionUpdateSchema.safeParse({
         sessionUpdate: "agent_message_chunk",
         messageId: "m1",
         content: { type: "text", text: "hi" },
+        replace: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      sessionUpdateSchema.safeParse({
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "t1",
+        content: { type: "text", text: "thinking" },
+        replace: true,
       }).success,
     ).toBe(true);
     expect(
       sessionUpdateSchema.safeParse({ sessionUpdate: "ls_permission", requestId: "1", title: "Run", options: [] })
         .success,
     ).toBe(false);
+  });
+
+  it("rejects direct frames exceeding 16 MiB while accepting valid frames", () => {
+    const ok = encodeDirectFrame({ type: "data", stream: 7, data: new Uint8Array([1, 2, 3]) });
+    expect(decodeDirectFrame(ok)).toEqual({ type: "data", stream: 7, data: new Uint8Array([1, 2, 3]) });
+    expect(decodeDirectFrame(new Uint8Array(DIRECT_MAX_FRAME_BYTES + 1))).toBeUndefined();
   });
 });

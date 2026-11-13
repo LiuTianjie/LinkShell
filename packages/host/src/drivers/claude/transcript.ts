@@ -604,6 +604,41 @@ export function transcriptLine(
       });
     }
   }
+  if (!apiError && !options.sidechain && message.stop_reason !== null) {
+    const usage = obj(message.usage);
+    if (usage) {
+      const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0);
+      const inputTokens = count(usage.input_tokens);
+      const outputTokens = count(usage.output_tokens);
+      const cachedReadTokens = typeof usage.cache_read_input_tokens === "number" ? count(usage.cache_read_input_tokens) : undefined;
+      const cachedWriteTokens = typeof usage.cache_creation_input_tokens === "number" ? count(usage.cache_creation_input_tokens) : undefined;
+      const contextTokens = inputTokens + (cachedReadTokens ?? 0) + (cachedWriteTokens ?? 0);
+      const totalTokens = contextTokens + outputTokens;
+      if (totalTokens > 0) {
+        updates.push({
+          sessionUpdate: "usage_update",
+          usedTokens: contextTokens > 0 ? contextTokens : totalTokens,
+          ...(messageId
+            ? {
+                accounting: {
+                  id: `claude:${messageId}`,
+                  scope: "turn",
+                  ...(str(message.model) ? { model: str(message.model) } : {}),
+                  ...(ts !== undefined ? { timestamp: ts } : {}),
+                },
+              }
+            : {}),
+          tokens: {
+            totalTokens,
+            inputTokens,
+            outputTokens,
+            ...(cachedReadTokens !== undefined ? { cachedReadTokens } : {}),
+            ...(cachedWriteTokens !== undefined ? { cachedWriteTokens } : {}),
+          },
+        });
+      }
+    }
+  }
   // Anything but a tool call (or a reply still being written) is the turn's last word.
   const stop = message.stop_reason;
   if (stop === "end_turn" || stop === "stop_sequence") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });

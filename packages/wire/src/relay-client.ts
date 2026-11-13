@@ -52,6 +52,8 @@ export interface RelayClientOptions {
 /** Errors no retry soon will fix (wrong key, no account support, no subscription). */
 const LASTING_ERRORS = new Set(["bad_identity", "accounts_disabled", "not_admitted"]);
 const LASTING_RETRY_MS = 2 * 60_000;
+const HANDSHAKE_TIMEOUT_MS = 15_000;
+const STABLE_ONLINE_MS = 15_000;
 
 export class RelayRequestError extends Error {
   constructor(
@@ -68,7 +70,11 @@ export class RelayClient {
   private socket?: RelaySocket;
   private statusValue: RelayStatus = "offline";
   private attempt = 0;
+  private replacedCount = 0;
+  private onlineAt = 0;
   private timer?: ReturnType<typeof setTimeout>;
+  private handshakeTimer?: ReturnType<typeof setTimeout>;
+  private stableTimer?: ReturnType<typeof setTimeout>;
   private pinger?: ReturnType<typeof setInterval>;
   private probeTimer?: ReturnType<typeof setTimeout>;
   /** When the current socket last received anything. */
@@ -77,7 +83,7 @@ export class RelayClient {
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly statusListeners = new Set<(status: RelayStatus, error?: { code: string; message: string }) => void>();
   private readonly frameListeners = new Set<(from: PublicIdentity, via: "paired" | "account", frame: TunnelFrame) => void>();
-  private readonly undeliverableListeners = new Set<(to: string, reason: string) => void>();
+  private readonly undeliverableListeners = new Set<(to: string, reason: string, channel?: string) => void>();
   private readonly eventListeners = new Map<string, Set<(data: unknown) => void>>();
   private readonly waiters = new Set<() => void>();
   /** Account the gateway recognised on the last connection. */
@@ -104,7 +110,7 @@ export class RelayClient {
     return () => this.frameListeners.delete(listener);
   }
 
-  onUndeliverable(listener: (to: string, reason: string) => void): () => void {
+  onUndeliverable(listener: (to: string, reason: string, channel?: string) => void): () => void {
     this.undeliverableListeners.add(listener);
     return () => this.undeliverableListeners.delete(listener);
   }
@@ -119,12 +125,17 @@ export class RelayClient {
 
   start(): void {
     if (this.statusValue === "connecting" || this.statusValue === "online") return;
+    clearTimeout(this.timer);
+    this.replacedCount = 0;
     this.open();
   }
 
   stop(): void {
     this.setStatus("stopped");
     clearTimeout(this.timer);
+    this.clearHandshakeTimer();
+    this.clearStableTimer();
+    this.onlineAt = 0;
     this.stopPinging();
     this.socket?.close(1000, "stopped");
     this.socket = undefined;
@@ -137,6 +148,7 @@ export class RelayClient {
     if (this.statusValue === "stopped" || this.statusValue === "online" || this.statusValue === "connecting") return;
     clearTimeout(this.timer);
     this.attempt = 0;
+    this.replacedCount = 0;
     this.open();
   }
 
@@ -159,8 +171,12 @@ export class RelayClient {
   reauthenticate(): void {
     if (this.statusValue === "stopped") return;
     clearTimeout(this.timer);
+    this.clearHandshakeTimer();
+    this.clearStableTimer();
+    this.onlineAt = 0;
     this.stopPinging();
     this.attempt = 0;
+    this.replacedCount = 0;
     const socket = this.socket;
     this.socket = undefined;
     socket?.close(1000, "signing in again");
@@ -239,6 +255,24 @@ export class RelayClient {
     }
     this.socket = socket;
     this.heardAt = Date.now();
+    this.clearHandshakeTimer();
+    this.handshakeTimer = setTimeout(() => {
+      this.handshakeTimer = undefined;
+      if (this.socket !== socket || this.statusValue === "stopped") return;
+      this.socket = undefined;
+      this.clearStableTimer();
+      this.onlineAt = 0;
+      this.stopPinging();
+      socket.onclose = null;
+      socket.onmessage = null;
+      try {
+        socket.close(4002, "handshake timeout");
+      } catch {
+        // Already closed.
+      }
+      this.failPending("连接网关超时");
+      this.scheduleReconnect({ code: "handshake_timeout", message: "连接网关超时" });
+    }, HANDSHAKE_TIMEOUT_MS);
     let fatal: { code: string; message: string } | undefined;
     socket.onmessage = (event) => {
       if (this.socket !== socket) return;
@@ -256,10 +290,19 @@ export class RelayClient {
           void this.authenticate(frame.nonce, socket);
           return;
         case "ready":
+          this.clearHandshakeTimer();
           this.attempt = 0;
+          this.onlineAt = Date.now();
           this.account = frame.userId ? { userId: frame.userId, email: frame.email } : undefined;
           this.setStatus("online");
           this.startPinging(socket);
+          this.clearStableTimer();
+          if (this.replacedCount > 0) {
+            this.stableTimer = setTimeout(() => {
+              this.stableTimer = undefined;
+              if (this.socket === socket && this.statusValue === "online") this.replacedCount = 0;
+            }, STABLE_ONLINE_MS);
+          }
           return;
         case "res": {
           const entry = this.pending.get(frame.id);
@@ -286,7 +329,7 @@ export class RelayClient {
           return;
         }
         case "undeliverable":
-          for (const listener of this.undeliverableListeners) listener(frame.to, frame.reason);
+          for (const listener of this.undeliverableListeners) listener(frame.to, frame.reason, frame.channel);
           return;
         case "error":
           fatal = { code: frame.code, message: frame.message };
@@ -299,16 +342,38 @@ export class RelayClient {
     socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.socket = undefined;
+      this.clearHandshakeTimer();
+      const wasOnline = this.statusValue === "online";
+      if (wasOnline && this.onlineAt > 0 && Date.now() - this.onlineAt >= STABLE_ONLINE_MS) {
+        this.replacedCount = 0;
+      }
+      this.onlineAt = 0;
+      this.clearStableTimer();
       this.stopPinging();
       this.failPending("与网关的连接断开了");
       if (this.statusValue === "stopped") return;
-      // Another connection with our identity took over: don't fight it.
+      // Transient dual-socket handoffs can trigger 4000; retry a few times with wide jitter,
+      // and only stop permanently when another peer persistently reclaims the identity.
       if (event.code === 4000) {
+        this.replacedCount += 1;
         this.setStatus("offline", { code: "replaced", message: "这台设备已在别处连上网关" });
+        if (this.replacedCount > 3) return;
+        const delay = 5_000 + Math.random() * 10_000;
+        this.timer = setTimeout(() => this.open(), delay);
         return;
       }
-      this.scheduleReconnect(fatal ?? { code: "disconnected", message: event.reason || "与网关的连接断开了" });
+      this.scheduleReconnect(fatal ?? { code: "disconnected", message: event.reason || "与网关的连接断开了" }, wasOnline);
     };
+  }
+
+  private clearHandshakeTimer(): void {
+    clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = undefined;
+  }
+
+  private clearStableTimer(): void {
+    clearTimeout(this.stableTimer);
+    this.stableTimer = undefined;
   }
 
   private startPinging(socket: RelaySocket): void {
@@ -348,6 +413,13 @@ export class RelayClient {
   private drop(socket: RelaySocket, message: string): void {
     if (this.socket !== socket) return;
     this.socket = undefined;
+    this.clearHandshakeTimer();
+    const wasOnline = this.statusValue === "online";
+    if (wasOnline && this.onlineAt > 0 && Date.now() - this.onlineAt >= STABLE_ONLINE_MS) {
+      this.replacedCount = 0;
+    }
+    this.onlineAt = 0;
+    this.clearStableTimer();
     this.stopPinging();
     socket.onclose = null;
     socket.onmessage = null;
@@ -361,7 +433,7 @@ export class RelayClient {
     this.failPending("与网关的连接断开了");
     if (this.statusValue === "stopped") return;
     this.attempt = 0;
-    this.scheduleReconnect({ code: "disconnected", message });
+    this.scheduleReconnect({ code: "disconnected", message }, wasOnline);
   }
 
   private async authenticate(nonce: string, socket: RelaySocket): Promise<void> {
@@ -386,14 +458,18 @@ export class RelayClient {
     });
   }
 
-  private scheduleReconnect(error: { code: string; message: string }): void {
+  private scheduleReconnect(error: { code: string; message: string }, wasOnline = this.statusValue === "online"): void {
     this.setStatus("offline", error);
     const min = this.options.minBackoffMs ?? 500;
     const max = this.options.maxBackoffMs ?? 30_000;
     // Still tried now and then (a subscription can be bought, a key re-registered), and at once
     // on reconnectNow, but not every 30 s for as long as the program runs.
     const floor = LASTING_ERRORS.has(error.code) ? LASTING_RETRY_MS : 0;
-    const delay = Math.max(floor, Math.min(max, min * 2 ** this.attempt)) * (0.75 + Math.random() * 0.5);
+    // Spread out peers dropping together when a gateway restarts.
+    const delay =
+      wasOnline && this.attempt === 0 && !floor
+        ? Math.min(max, min + Math.random() * (min * 5))
+        : Math.max(floor, Math.min(max, min * 2 ** this.attempt)) * (0.75 + Math.random() * 0.5);
     this.attempt += 1;
     this.timer = setTimeout(() => this.open(), delay);
   }

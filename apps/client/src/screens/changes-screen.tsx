@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from "re
 import type { Locale } from "@linkshell/client-core";
 import type { GitDiffFileStatus } from "@linkshell/wire";
 import { Button } from "@/components/button";
+import { ConnectionBanner } from "@/components/connection-banner";
 import { Text, TextInput } from "@/components/fixed-text";
 import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
@@ -242,6 +243,9 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
   const online = status === "online";
   const items = useItems(sessionId);
   const cwd = useClient((state) => state.sessions[sessionId]?.cwd);
+  const base = useClient(
+    (state) => (state.sessions[sessionId]?.worktree as { branch: string; source: string; base?: string } | undefined)?.base,
+  );
   const actions = useActions();
 
   const [mode, setMode] = useState<DiffSourceMode>("git");
@@ -259,7 +263,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
     if (!cwd || !online) return;
     setGitLoading(true);
     try {
-      const res = await link.call("git.diff", { cwd, includeUntracked: true });
+      const res = await link.call("git.diff", { cwd, ...(base ? { base } : {}), includeUntracked: true });
       const converted: FileEntry[] = res.files.map((file) => {
         const change = gitDiffFileToChange(file);
         return {
@@ -282,7 +286,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
     } finally {
       setGitLoading(false);
     }
-  }, [cwd, link, online]);
+  }, [base, cwd, link, online]);
 
   useEffect(() => {
     if (mode === "git") void loadGitDiff();
@@ -425,6 +429,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 16, paddingBottom: commentList.length > 0 ? 96 : 24, gap: 12 }}
       >
+        <ConnectionBanner />
         {/* Mode Switcher: Real Git Diff vs Session Edits */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <View style={{ flexDirection: "row", backgroundColor: colors.fill, borderRadius: 999, padding: 3, gap: 2 }}>

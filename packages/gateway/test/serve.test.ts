@@ -201,6 +201,13 @@ describe("startGateway", () => {
     // Nobody is trusted: the header is ignored, and this machine itself is never limited.
     const direct = await gateway({ wsConnectLimit: limit });
     for (let i = 0; i < 4; i++) expect(await upgrade(direct.ws + RELAY_PATH, forwarded)).toBe("open");
+
+    // Default limit is 60 connections per minute per address.
+    const defaulted = await gateway({ trustedProxies: ["127.0.0.1"] });
+    for (let i = 0; i < 60; i++) {
+      expect(await upgrade(defaulted.ws + RELAY_PATH, { "x-forwarded-for": "198.51.100.42" })).toBe("open");
+    }
+    expect(await upgrade(defaulted.ws + RELAY_PATH, { "x-forwarded-for": "198.51.100.42" })).toBe(429);
   });
 
   it("asks admit about each peer, and refuses with its reason", async () => {

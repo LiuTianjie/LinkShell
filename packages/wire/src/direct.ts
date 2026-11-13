@@ -11,6 +11,9 @@ export const DIRECT_LABEL = "linkshell-bulk";
 /** The most stream bytes in one message: every WebRTC stack takes this size. */
 export const DIRECT_CHUNK = 16 * 1024;
 
+/** Hard cap on decoded direct frames so a malformed frame cannot exhaust receiver memory. */
+export const DIRECT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+
 /**
  * STUN servers used when a host names none: they only tell each side its
  * public address. (Several, because none of them is reachable everywhere.)
@@ -41,7 +44,7 @@ export function encodeDirectFrame(frame: DirectFrame): Uint8Array {
 }
 
 export function decodeDirectFrame(bytes: Uint8Array): DirectFrame | undefined {
-  if (bytes.length < 5) return undefined;
+  if (bytes.length < 5 || bytes.length > DIRECT_MAX_FRAME_BYTES) return undefined;
   const stream = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(1);
   const payload = bytes.subarray(5);
   if (bytes[0] === DATA) return { type: "data", stream, data: payload };

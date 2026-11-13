@@ -2,8 +2,16 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ArrowDown, LoaderCircle } from "lucide-react";
 import { foldStepRuns, cardsAtTurnEnd, openWrapUp, type SessionView, type Step } from "@linkshell/client-core";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/button";
-import { OpenWrapUp, StepsSummary, TimelineEntry, answeredMap } from "./Timeline";
+import {
+  OpenWrapUp,
+  StepsSummary,
+  TimelineEntry,
+  TimelineSearch,
+  answeredMap,
+  timelineItemSearchText,
+} from "./Timeline";
 import { isDesktop } from "./desktop";
 
 /** A folded-steps row with a stable toggle, so it is memoizable like the message entries. */
@@ -11,19 +19,25 @@ const StepsRow = memo(function StepsRow({
   stepKey,
   steps,
   open,
+  historical,
   toggle,
 }: {
   stepKey: string;
   steps: Step[];
   open: boolean;
+  historical?: boolean;
   toggle: (key: string) => void;
 }) {
-  return <StepsSummary steps={steps} open={open} onToggle={() => toggle(stepKey)} />;
+  return <StepsSummary steps={steps} open={open} historical={historical} onToggle={() => toggle(stepKey)} />;
 }, (before, after) =>
   // Every streamed chunk folds the runs again into new arrays of the same steps: only a run whose
   // steps changed is summed up again.
-  before.stepKey === after.stepKey && before.open === after.open && before.toggle === after.toggle &&
-  before.steps.length === after.steps.length && before.steps.every((step, index) => step === after.steps[index]));
+  before.stepKey === after.stepKey &&
+  before.open === after.open &&
+  before.historical === after.historical &&
+  before.toggle === after.toggle &&
+  before.steps.length === after.steps.length &&
+  before.steps.every((step, index) => step === after.steps[index]));
 
 /**
  * The first row element whose bottom is at or below the top of the view — the
@@ -68,6 +82,8 @@ export function Conversation({
   onTerminal,
   footer,
   focusTarget,
+  searchOpen = false,
+  searchQuery = "",
 }: {
   view: SessionView;
   sessionId: string;
@@ -81,12 +97,40 @@ export function Conversation({
   onTerminal: (id: string) => void;
   footer: React.ReactNode;
   focusTarget?: { itemId: string; nonce: number };
+  searchOpen?: boolean;
+  searchQuery?: string;
 }) {
-  // Opening a session lands on its newest message at once; later growth follows smoothly.
-  const { scrollRef, contentRef, scrollToBottom, isAtBottom, state } = useStickToBottom({
-    initial: "instant",
-    resize: "smooth",
-  });
+  const streamingRef = useRef(view.turnActive);
+  streamingRef.current = view.turnActive;
+  const composerResizeUntil = useRef(0);
+  // Active streaming and composer height changes stick instantly to eliminate smooth-scroll jitter.
+  const stickOptions = useMemo(
+    () => ({
+      initial: "instant" as const,
+      get resize(): "instant" | "smooth" {
+        return view.turnActive || streamingRef.current || performance.now() < composerResizeUntil.current
+          ? "instant"
+          : "smooth";
+      },
+    }),
+    [view.turnActive],
+  );
+  const { scrollRef, contentRef, scrollToBottom, isAtBottom, state } = useStickToBottom(stickOptions);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const composerWrap = scroller
+      ?.closest(".session-body, .session-main, .session-page")
+      ?.querySelector<HTMLElement>(".composer-wrap");
+    if (!composerWrap) return;
+    let mounted = false;
+    const observer = new ResizeObserver(() => {
+      if (mounted) composerResizeUntil.current = performance.now() + 200;
+      mounted = true;
+    });
+    observer.observe(composerWrap);
+    return () => observer.disconnect();
+  }, [scrollRef]);
 
   // First load and reconnect deliver a complete snapshot. Place it before paint;
   // the resize observer should animate only the live growth that follows it.
@@ -94,6 +138,7 @@ export function Conversation({
     if (state.isAtBottom) state.scrollTop = state.calculatedTargetScrollTop;
   }, [online, state]);
 
+  const activeSearchQuery = searchOpen ? searchQuery.trim().toLowerCase() : "";
   const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
   // Stable, so a folded-steps row re-renders only when its own open state flips, not every chunk.
   const toggleSteps = useCallback(
@@ -106,7 +151,27 @@ export function Conversation({
       }),
     [],
   );
-  const rows = useMemo(() => foldStepRuns(cardsAtTurnEnd(view.items, view.turnBreaks), openSteps), [view.items, view.turnBreaks, openSteps]);
+  const orderedItems = useMemo(() => cardsAtTurnEnd(view.items, view.turnBreaks), [view.items, view.turnBreaks]);
+  const effectiveOpenSteps = useMemo(() => {
+    if (!activeSearchQuery) return openSteps;
+    const base = foldStepRuns(orderedItems, openSteps);
+    let expanded: Set<string> | undefined;
+    for (const row of base) {
+      if (
+        row.type === "steps" &&
+        !openSteps.has(row.key) &&
+        row.steps.some((step) => timelineItemSearchText(step).toLowerCase().includes(activeSearchQuery))
+      ) {
+        expanded ??= new Set(openSteps);
+        expanded.add(row.key);
+      }
+    }
+    return expanded ?? openSteps;
+  }, [orderedItems, openSteps, activeSearchQuery]);
+  const rows = useMemo(
+    () => foldStepRuns(orderedItems, effectiveOpenSteps),
+    [orderedItems, effectiveOpenSteps],
+  );
   const openBox = useMemo(() => openWrapUp(view.items), [view.items]);
   // Every entry gets this map; it keeps its identity until its content changes, or each streamed
   // chunk (a new items array) would re-render the whole conversation.
@@ -314,33 +379,40 @@ export function Conversation({
               ) : null)}
           </div>
           <div ref={list} className="live-timeline">
-            <OpenWrapUp.Provider value={openBox}>
-            {rows.map((row) =>
-              row.type === "steps" ? (
-                <StepsRow
-                  key={row.key}
-                  stepKey={row.key}
-                  steps={row.steps}
-                  open={openSteps.has(row.key)}
-                  toggle={toggleSteps}
-                />
-              ) : (
-                <TimelineEntry
-                  key={row.item.id}
-                  anchorId={row.item.id}
-                  item={row.item}
-                  sessionId={sessionId}
-                  agent={agent}
-                  showAsyncQuestions={showAsyncQuestions}
-                  answered={answered}
-                  onFile={openFile}
-                  onFork={fork}
-                  onTerminal={terminal}
-                  live={view.turnActive && row.item.id === lastId}
-                />
-              ),
-            )}
-            </OpenWrapUp.Provider>
+            <TimelineSearch.Provider value={activeSearchQuery}>
+              <OpenWrapUp.Provider value={openBox}>
+                {rows.map((row, index) => {
+                  const historical = !searchOpen && index < rows.length - 10;
+                  return row.type === "steps" ? (
+                    <ErrorBoundary key={row.key} resetKey={row.key}>
+                      <StepsRow
+                        stepKey={row.key}
+                        steps={row.steps}
+                        open={effectiveOpenSteps.has(row.key)}
+                        historical={historical}
+                        toggle={toggleSteps}
+                      />
+                    </ErrorBoundary>
+                  ) : (
+                    <ErrorBoundary key={row.item.id} resetKey={row.item.id}>
+                      <TimelineEntry
+                        anchorId={row.item.id}
+                        item={row.item}
+                        sessionId={sessionId}
+                        agent={agent}
+                        showAsyncQuestions={showAsyncQuestions}
+                        answered={answered}
+                        onFile={openFile}
+                        onFork={fork}
+                        onTerminal={terminal}
+                        live={view.turnActive && row.item.id === lastId}
+                        historical={historical}
+                      />
+                    </ErrorBoundary>
+                  );
+                })}
+              </OpenWrapUp.Provider>
+            </TimelineSearch.Provider>
           </div>
           <div className="conversation-footer">{footer}</div>
         </div>

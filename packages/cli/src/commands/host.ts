@@ -247,8 +247,18 @@ export async function runHostForeground(version: string): Promise<void> {
     if (shutdownRequested) return;
     shutdownRequested = true;
     log("[host] shutting down");
-    await running.stop();
-    daemon.removePid("host");
+    const hardDeadline = setTimeout(() => {
+      log("[host] shutdown timed out after 10s; forcing exit");
+      daemon.removePid("host");
+      process.exit(1);
+    }, 10_000);
+    hardDeadline.unref();
+    try {
+      await running.stop();
+    } finally {
+      clearTimeout(hardDeadline);
+      daemon.removePid("host");
+    }
     process.exit(0);
   };
   requestShutdown = () => void shutdown();

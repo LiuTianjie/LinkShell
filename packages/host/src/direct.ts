@@ -58,12 +58,18 @@ export class DirectPeer {
     connection.connectionStateChange.subscribe((state) => {
       if (state === "failed" || state === "closed") this.lose(connection);
     });
-    await connection.setRemoteDescription({ type: "offer", sdp });
-    await connection.setLocalDescription(await connection.createAnswer());
-    await gathered(connection);
-    const answer = connection.localDescription?.sdp;
-    if (!answer) throw new Error("no answer could be made");
-    return answer;
+    try {
+      await connection.setRemoteDescription({ type: "offer", sdp });
+      await connection.setLocalDescription(await connection.createAnswer());
+      await gathered(connection);
+      const answer = connection.localDescription?.sdp;
+      if (!answer) throw new Error("no answer could be made");
+      return answer;
+    } catch (error) {
+      if (this.connection === connection) this.close();
+      else void connection.close().catch(() => {});
+      throw error;
+    }
   }
 
   /** A stream on the channel: its number, for the device to use too. */
@@ -99,7 +105,6 @@ export class DirectPeer {
     const connection = this.connection;
     if (!connection) return;
     this.lose(connection);
-    void connection.close().catch(() => {});
   }
 
   private receive(frame: DirectFrame): void {
@@ -128,6 +133,7 @@ export class DirectPeer {
     this.waiting.clear();
     if (streams.length > 0) this.log(`[direct] channel lost with ${streams.length} stream${streams.length === 1 ? "" : "s"} open`);
     for (const handler of streams) handler.close(true);
+    void connection.close().catch(() => {});
   }
 }
 
@@ -135,11 +141,21 @@ export class DirectPeer {
 function gathered(connection: RTCPeerConnection): Promise<void> {
   if (connection.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, GATHER_MS);
-    connection.iceGatheringStateChange.subscribe((state) => {
-      if (state !== "complete") return;
+    let settled = false;
+    let sub: { unSubscribe?: () => void } | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      sub?.unSubscribe?.();
       resolve();
+    };
+    const timer = setTimeout(finish, GATHER_MS);
+    timer.unref();
+    sub = connection.iceGatheringStateChange.subscribe((state) => {
+      if (state !== "complete") return;
+      finish();
     });
+    if (connection.iceGatheringState === "complete") finish();
   });
 }

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, open, readdir, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, existsSync } from "node:fs";
+import { lstat, mkdir, open, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -28,22 +28,37 @@ function expand(path: string | undefined): string {
   return resolve(path);
 }
 
+const SUBDIR_CONCURRENCY = 16;
+
+async function mapLimit<T, R>(items: readonly T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]!);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 async function subdirectories(path: string, hidden: boolean): Promise<{ entries: DirectoryEntry[]; names: Set<string> }> {
   const dirents = await readdir(path, { withFileTypes: true });
   const names = new Set(dirents.map((d) => d.name));
   const dirs = dirents.filter((d) => (d.isDirectory() || d.isSymbolicLink()) && (hidden || !d.name.startsWith(".")));
-  const entries = await Promise.all(
-    dirs.map(async (d): Promise<DirectoryEntry | undefined> => {
-      const full = join(path, d.name);
-      try {
-        if (d.isSymbolicLink() && !(await stat(full)).isDirectory()) return undefined;
-        const children = new Set(await readdir(full).catch(() => [] as string[]));
-        return { name: d.name, path: full, project: isProject(children) || undefined };
-      } catch {
-        return undefined;
-      }
-    }),
-  );
+  const entries = await mapLimit(dirs, SUBDIR_CONCURRENCY, async (d): Promise<DirectoryEntry | undefined> => {
+    const full = join(path, d.name);
+    try {
+      if (d.isSymbolicLink() && !(await stat(full)).isDirectory()) return undefined;
+      const children = new Set(await readdir(full).catch(() => [] as string[]));
+      return { name: d.name, path: full, project: isProject(children) || undefined };
+    } catch {
+      return undefined;
+    }
+  });
   return {
     entries: entries
       .filter((e): e is DirectoryEntry => Boolean(e))
@@ -84,7 +99,13 @@ export async function listDirectory(input: { path?: string; hidden: boolean; fil
   });
   const parent = dirname(path);
   const base = { path, parent: parent === path ? undefined : parent, home: homedir() };
-  if (!input.files) return { ...base, entries };
+  if (!input.files) {
+    return {
+      ...base,
+      entries: entries.slice(0, MAX_ENTRIES),
+      truncated: entries.length > MAX_ENTRIES || undefined,
+    };
+  }
   // Browsing a project: directories by name (not projects first), then files.
   const dirs = entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).slice(0, MAX_ENTRIES);
   const files = await filesIn(path, input.hidden, MAX_ENTRIES - dirs.length);
@@ -243,11 +264,68 @@ async function existingDirectory(path: string): Promise<string> {
   return dir;
 }
 
-/** Writes an uploaded file into `dir`, never over an existing one. */
-export async function uploadFile(input: { dir: string; name: string; data: string }) {
+const MAX_UPLOAD_FILE_BYTES = 512 * 1024 * 1024;
+
+/** Writes an uploaded file into `dir`, never over an existing one; appends subsequent chunks at `offset`. */
+export async function uploadFile(input: {
+  dir: string;
+  name: string;
+  data: string;
+  offset?: number;
+  appendPath?: string;
+}) {
   const dir = await existingDirectory(input.dir);
-  const name = safeName(input.name);
   const bytes = Buffer.from(input.data, "base64");
+
+  if (input.appendPath !== undefined) {
+    const realDir = await realpath(dir);
+    const candidate = expand(input.appendPath);
+    const base = basename(candidate);
+    if (base !== safeName(base) || (dirname(candidate) !== dir && dirname(candidate) !== realDir)) {
+      throw RpcError.app("invalid_params", "上传路径超出目标文件夹范围");
+    }
+    const linkInfo = await lstat(candidate).catch(() => undefined);
+    if (!linkInfo) throw RpcError.app("not_found", "上传目标文件不存在，请重新上传");
+    if (linkInfo.isSymbolicLink() || !linkInfo.isFile()) {
+      throw RpcError.app("invalid_params", "上传目标文件无效");
+    }
+    const realParent = await realpath(dirname(candidate)).catch(() => undefined);
+    if (realParent !== realDir) {
+      throw RpcError.app("invalid_params", "上传路径超出目标文件夹范围");
+    }
+    const flags = process.platform === "win32" ? fsConstants.O_RDWR : fsConstants.O_RDWR | fsConstants.O_NOFOLLOW;
+    const handle = await open(candidate, flags).catch(() => {
+      throw RpcError.app("not_found", "无法写入上传目标文件，请重新上传");
+    });
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw RpcError.app("invalid_params", "上传目标文件无效");
+      const offset = input.offset ?? info.size;
+      if (offset !== info.size) {
+        throw RpcError.app("invalid_params", `上传分片偏移量不匹配（期望 ${info.size}，收到 ${offset}）`);
+      }
+      if (offset + bytes.length > MAX_UPLOAD_FILE_BYTES) {
+        throw RpcError.app("too_large", `上传文件超过上限（${megabytes(MAX_UPLOAD_FILE_BYTES)}）`);
+      }
+      let written = 0;
+      while (written < bytes.length) {
+        const { bytesWritten } = await handle.write(bytes, written, bytes.length - written, offset + written);
+        if (bytesWritten <= 0) throw RpcError.app("internal", "写入上传分片失败");
+        written += bytesWritten;
+      }
+      return { path: candidate, size: offset + written };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  if (input.offset !== undefined && input.offset !== 0) {
+    throw RpcError.app("invalid_params", "首块上传偏移量必须为 0");
+  }
+  if (bytes.length > MAX_UPLOAD_FILE_BYTES) {
+    throw RpcError.app("too_large", `上传文件超过上限（${megabytes(MAX_UPLOAD_FILE_BYTES)}）`);
+  }
+  const name = safeName(input.name);
   const ext = extname(name);
   const stem = basename(name, ext);
   for (let attempt = 1; attempt < 1000; attempt++) {

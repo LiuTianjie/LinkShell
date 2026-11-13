@@ -252,7 +252,6 @@ export function PairScreen() {
           )}
         </View>
 
-        {__DEV__ ? (
         <Pressable
           onPress={() => router.push("/connect")}
           accessibilityRole="button"
@@ -262,7 +261,6 @@ export function PairScreen() {
           <Icon sf="wifi" md="wifi" size={13} color={colors.secondaryLabel} />
           <Text style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel, textAlign: "center" }]}>在同一个局域网里？直接连接</Text>
         </Pressable>
-        ) : null}
       </KeyboardAwareScrollView>
     </View>
   );

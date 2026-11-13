@@ -99,6 +99,70 @@ describe("HostStore", () => {
     expect(store.markItemLogged("codex:a", "item-1")).toBe(false);
     expect(store.isItemLogged("codex:a", "item-1")).toBe(true);
   });
+
+  it("pages tied updatedAt sessions deterministically with composite (before, beforeId) cursor", () => {
+    for (const id of ["codex:a", "codex:b", "codex:c", "codex:d"]) {
+      store.upsertSession({ ...base, id, nativeId: id, updatedAt: 5000 });
+    }
+    store.upsertSession({ ...base, id: "codex:older", nativeId: "older", updatedAt: 4000 });
+
+    const page1 = store.listSessions({ limit: 2 });
+    expect(page1.map((s) => s.id)).toEqual(["codex:d", "codex:c"]);
+
+    const page2 = store.listSessions({ limit: 2, before: page1[1]!.updatedAt, beforeId: page1[1]!.id });
+    expect(page2.map((s) => s.id)).toEqual(["codex:b", "codex:a"]);
+
+    const page3 = store.listSessions({ limit: 2, before: page2[1]!.updatedAt, beforeId: page2[1]!.id });
+    expect(page3.map((s) => s.id)).toEqual(["codex:older"]);
+  });
+
+  it("resolves orphaned ls_permission events on resetLiveSessions() and guards writes after close()", () => {
+    store.upsertSession({ ...base, id: "codex:perm", nativeId: "perm", state: "waiting", pendingPermissions: 2 });
+    store.appendEvent(
+      "codex:perm",
+      {
+        sessionUpdate: "ls_permission",
+        requestId: "req-open",
+        title: "Run git push",
+        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+      },
+      2000,
+    );
+    store.appendEvent(
+      "codex:perm",
+      {
+        sessionUpdate: "ls_permission",
+        requestId: "req-done",
+        title: "Read file",
+        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+      },
+      2001,
+    );
+    store.appendEvent("codex:perm", { sessionUpdate: "ls_permission_resolved", requestId: "req-done", optionId: "allow" }, 2002);
+
+    store.resetLiveSessions();
+    const summary = store.getSession("codex:perm")!;
+    expect(summary.state).toBe("offline");
+    expect(summary.pendingPermissions).toBe(0);
+    // Activity timestamp is not artificially bumped by restart cleanup.
+    expect(summary.updatedAt).toBe(2002);
+
+    const resolutions = store
+      .readEvents("codex:perm", 0, 20)
+      .filter((e) => e.update.sessionUpdate === "ls_permission_resolved")
+      .map((e) => e.update);
+    expect(resolutions).toEqual([
+      { sessionUpdate: "ls_permission_resolved", requestId: "req-done", optionId: "allow" },
+      { sessionUpdate: "ls_permission_resolved", requestId: "req-open" },
+    ]);
+
+    // Late async callbacks after close() do not throw ERR_INVALID_STATE.
+    store.close();
+    expect(store.isClosed).toBe(true);
+    expect(() => store.appendEvent("codex:perm", { sessionUpdate: "ls_status", state: "idle" })).not.toThrow();
+    expect(() => store.appendTerminalFrames("t1", [{ frame: 1, cols: 80, rows: 24, data: "x" }])).not.toThrow();
+    expect(() => store.setDriverState("codex:perm", "k", "v")).not.toThrow();
+  });
 });
 
 describe("terminal recording storage", () => {

@@ -1,6 +1,12 @@
 import { UsageStatistics } from "../usage.js";
+import { execFile } from "node:child_process";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import net from "node:net";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import WebSocket, { WebSocketServer } from "ws";
 import {
   RPC_INVALID_PARAMS,
@@ -20,7 +26,8 @@ import {
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
 import { downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
-import { gitDiff, gitRevertFile } from "../git-diff.js";
+import { gitCommit, gitDiff, gitRevertFile } from "../git-diff.js";
+import { isNamedPipe } from "../local-transport.js";
 import { readClipboard, writeClipboard } from "../clipboard.js";
 import type { KeepAwakeManager } from "../keep-awake.js";
 import { createLsaService, type LsaService } from "../lsa/index.js";
@@ -56,6 +63,142 @@ export function isLocalDevelopmentClient(headers: { host?: string; origin?: stri
   }
 }
 
+const execFileAsync = promisify(execFile);
+const DEFAULT_HEARTBEAT_MS = 30_000;
+
+export type DesktopOpenApp = "default" | "reveal" | "cursor" | "vscode" | "zed" | "terminal";
+
+export function buildDesktopOpenCommand(
+  resolvedPath: string,
+  isDirectory: boolean,
+  app: DesktopOpenApp = "default",
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  const dirTarget = isDirectory ? resolvedPath : dirname(resolvedPath);
+  if (platform === "darwin") {
+    switch (app) {
+      case "reveal":
+        return { command: "/usr/bin/open", args: ["-R", resolvedPath] };
+      case "cursor":
+        return { command: "/usr/bin/open", args: ["-a", "Cursor", resolvedPath] };
+      case "vscode":
+        return { command: "/usr/bin/open", args: ["-a", "Visual Studio Code", resolvedPath] };
+      case "zed":
+        return { command: "/usr/bin/open", args: ["-a", "Zed", resolvedPath] };
+      case "terminal":
+        return { command: "/usr/bin/open", args: ["-a", "Terminal", dirTarget] };
+      default:
+        return { command: "/usr/bin/open", args: [resolvedPath] };
+    }
+  }
+  if (platform === "win32") {
+    switch (app) {
+      case "reveal":
+        return { command: "explorer.exe", args: [isDirectory ? resolvedPath : `/select,${resolvedPath}`] };
+      case "cursor":
+        return { command: "cursor.exe", args: ["--", resolvedPath] };
+      case "vscode":
+        return { command: "code.exe", args: ["--", resolvedPath] };
+      case "zed":
+        return { command: "zed.exe", args: [resolvedPath] };
+      case "terminal":
+        return { command: "wt.exe", args: ["-d", dirTarget] };
+      default:
+        return { command: "explorer.exe", args: [resolvedPath] };
+    }
+  }
+  switch (app) {
+    case "reveal":
+      return { command: "xdg-open", args: [dirTarget] };
+    case "cursor":
+      return { command: "cursor", args: ["--", resolvedPath] };
+    case "vscode":
+      return { command: "code", args: ["--", resolvedPath] };
+    case "zed":
+      return { command: "zed", args: [resolvedPath] };
+    case "terminal":
+      return { command: "x-terminal-emulator", args: ["--working-directory", dirTarget] };
+    default:
+      return { command: "xdg-open", args: [resolvedPath] };
+  }
+}
+
+export async function openDesktopPath(
+  params: { path: string; app?: DesktopOpenApp },
+  runner?: (command: string, args: string[]) => Promise<void>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ ok: boolean }> {
+  if (!params.path || params.path.includes("\0")) {
+    throw RpcError.app("invalid_params", "路径无效");
+  }
+  const expanded =
+    params.path === "~"
+      ? homedir()
+      : params.path.startsWith("~/") || params.path.startsWith("~\\")
+        ? resolve(homedir(), params.path.slice(2))
+        : resolve(params.path);
+  let info;
+  try {
+    info = statSync(expanded);
+  } catch {
+    throw RpcError.app("not_found", `找不到路径：${expanded}`);
+  }
+  const spec = buildDesktopOpenCommand(expanded, info.isDirectory(), params.app ?? "default", platform);
+  try {
+    if (runner) {
+      await runner(spec.command, spec.args);
+    } else {
+      await execFileAsync(spec.command, spec.args, { timeout: 10_000, windowsHide: true });
+    }
+  } catch (error) {
+    throw RpcError.app("internal", `打开路径失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { ok: true };
+}
+
+function probeLiveUnixSocket(socketPath: string, timeoutMs = 1000): Promise<boolean> {
+  if (process.platform === "win32" || isNamedPipe(socketPath) || !existsSync(socketPath)) {
+    return Promise.resolve(false);
+  }
+  return new Promise<boolean>((resolvePromise) => {
+    let settled = false;
+    const socket = net.connect({ path: socketPath });
+    const done = (alive: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolvePromise(alive);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref();
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
+}
+
+function extractDevBearerToken(req: IncomingMessage | undefined): string | undefined {
+  if (!req) return undefined;
+  const auth = req.headers.authorization;
+  if (typeof auth === "string") {
+    const match = /^Bearer\s+(\S+)$/i.exec(auth.trim());
+    if (match) return match[1];
+  }
+  const headerToken = req.headers["x-linkshell-dev-token"];
+  if (typeof headerToken === "string" && headerToken.trim()) {
+    return headerToken.trim();
+  }
+  if (req.url) {
+    try {
+      const token = new URL(req.url, "http://127.0.0.1").searchParams.get("token");
+      if (token) return token;
+    } catch {
+      // Malformed request URL falls back to unauthenticated.
+    }
+  }
+  return undefined;
+}
+
 export interface HostRpcServerOptions {
   hub: SessionHub;
   terminals: TerminalManager;
@@ -63,8 +206,14 @@ export interface HostRpcServerOptions {
   renameMachine?: (name: string) => MachineInfo;
   /** Unix socket for local clients (terminal shims, CLI). */
   socketPath: string;
+  /** Run directory where ephemeral `dev.token` (`0600`) is written when `tcpPort` is active. */
+  runDir?: string;
   /** Optional loopback TCP port, for local development clients. */
   tcpPort?: number;
+  /** WebSocket ping/pong liveness interval in milliseconds (default 30s; 0 disables). */
+  heartbeatIntervalMs?: number;
+  /** Optional override for `desktop.openPath` subprocess invocation (tests). */
+  openPathRunner?: (command: string, args: string[]) => Promise<void>;
   log: (message: string) => void;
   liveActivities?: LiveActivityRelay;
   usage?: UsageStatistics;
@@ -78,7 +227,7 @@ export interface HostRpcServerOptions {
   onAccessChanged?: () => void;
 }
 
-type Handler = (params: never, context: ConnectionContext) => Promise<unknown> | unknown;
+type Handler = (params: never, context: ConnectionContext, signal: AbortSignal) => Promise<unknown> | unknown;
 
 /** Anything that carries JSON-RPC text both ways: a local WebSocket, or an encrypted tunnel through the gateway. */
 export interface RpcTransport {
@@ -86,6 +235,7 @@ export interface RpcTransport {
   close(): void;
   onMessage(listener: (text: string) => void): void;
   onClose(listener: () => void): void;
+  bufferedAmount?: () => number;
   /** Local transports (this machine's own sockets) may use desktop.* methods. */
   local: boolean;
   /** The device on the other end of a gateway channel. */
@@ -118,7 +268,13 @@ interface ConnectionContext {
 export class HostRpcServer {
   private readonly servers: Server[] = [];
   private readonly sockets = new Set<WebSocket>();
+  private readonly aliveSockets = new WeakSet<WebSocket>();
   private readonly connections = new Map<RpcPeer, ConnectionContext>();
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private boundUnixSocket = false;
+  private tcpBoundHost?: string;
+  private devToken?: Buffer;
+  private devTokenPath?: string;
   private gateway?: GatewayLink;
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
@@ -127,7 +283,7 @@ export class HostRpcServer {
   private readonly lsa: LsaService;
   private readonly ownsLsa: boolean;
   private readonly demandListeners = new Set<() => void>();
-  private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext) => Promise<MethodResult<M>> | MethodResult<M> };
+  private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext, signal: AbortSignal) => Promise<MethodResult<M>> | MethodResult<M> };
 
   constructor(private readonly options: HostRpcServerOptions) {
     this.metrics = new MachineMetricsSampler({
@@ -161,6 +317,10 @@ export class HostRpcServer {
         // Let the response reach the local CLI before closing its connection.
         setTimeout(() => options.shutdown?.(), 50).unref();
         return {};
+      },
+      "desktop.openPath": async (params: P<"desktop.openPath">, context) => {
+        if (!context.local) throw RpcError.app("forbidden", "desktop.openPath 只能在电脑本机上使用");
+        return openDesktopPath(params, options.openPathRunner);
       },
       "usage.summary": (params: P<"usage.summary">) => usage.summary(params),
       "liveActivities.subscribe": (params: P<"liveActivities.subscribe">) => {
@@ -207,18 +367,20 @@ export class HostRpcServer {
       },
       "projects.list": async (params: P<"projects.list">) => ({ projects: await hub.listProjects(params.limit) }),
       "sessions.list": (params: P<"sessions.list">) => hub.listSessions(params),
+      "sessions.get": (params: P<"sessions.get">) => ({ session: hub.findSession(params.sessionId) }),
       "agents.models": (params: P<"agents.models">) => hub.agentModels(params.agent, params.cwd, params.model),
       "sessions.create": async (params: P<"sessions.create">) => ({ session: await hub.createSession(params) }),
       "sessions.fork": async (params: P<"sessions.fork">) => ({ session: await hub.fork(params.sessionId, { itemId: params.itemId, worktree: params.worktree }) }),
       "git.info": async (params: P<"git.info">) => ({ git: await hub.gitInfo(params.path) }),
       "git.diff": (params: P<"git.diff">) => gitDiff(params),
       "git.revertFile": (params: P<"git.revertFile">) => gitRevertFile(params),
+      "git.commit": (params: P<"git.commit">) => gitCommit(params),
       "worktrees.list": async () => ({ worktrees: await hub.listWorktrees() }),
       "worktrees.remove": async (params: P<"worktrees.remove">) => {
         await hub.removeWorktree(params.path, params.force);
         return {};
       },
-      "sessions.subscribe": async (params: P<"sessions.subscribe">, context) => {
+      "sessions.subscribe": async (params: P<"sessions.subscribe">, context, signal) => {
         const previous = context.subscriptions.get(params.sessionId);
         if (previous) hub.unsubscribe(params.sessionId, previous);
         const slim = { lazyImages: params.lazyImages };
@@ -230,7 +392,11 @@ export class HostRpcServer {
         };
         context.subscriptions.set(params.sessionId, subscriber);
         try {
-          return await hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
+          const result = await hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
+          if (signal.aborted && current()) {
+            context.subscriptions.delete(params.sessionId);
+          }
+          return result;
         } finally {
           // Native attachment may finish after the reader leaves, reconnects or reopens.
           // In that case it has just registered a subscriber that no connection owns.
@@ -350,12 +516,12 @@ export class HostRpcServer {
         if (!this.gateway) throw RpcError.app("not_supported", "还没有设置网关：运行 linkshell login 使用官方网关，或运行 linkshell host --gateway <地址> 使用自己的网关");
         return this.gateway.startPairing();
       },
-      "access.unlock": (params: P<"access.unlock">, context) => {
+      "access.unlock": async (params: P<"access.unlock">, context) => {
         if (context.local || !options.access?.enabled) {
           this.unlock(context);
           return { token: "", expiresAt: Date.now() };
         }
-        const result = options.access.unlock(context.deviceId ?? "", params);
+        const result = await options.access.unlock(context.deviceId ?? "", params);
         if (!result.ok) {
           if (result.reason === "throttled") throw RpcError.app("busy", "密码错误次数过多，请 5 分钟后再试");
           if (result.reason === "invalid_token") throw RpcError.app("locked", "请输入这台电脑的访问密码");
@@ -482,17 +648,53 @@ export class HostRpcServer {
   }
 
   async start(): Promise<void> {
-    if (process.platform !== "win32" && existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
-    await this.listen((server) => server.listen(this.options.socketPath));
+    if (process.platform !== "win32" && !isNamedPipe(this.options.socketPath) && existsSync(this.options.socketPath)) {
+      if (await probeLiveUnixSocket(this.options.socketPath)) {
+        throw new Error(`a LinkShell host is already listening on ${this.options.socketPath}`);
+      }
+      rmSync(this.options.socketPath, { force: true });
+    }
+    await this.listen((server) => server.listen(this.options.socketPath), undefined, () => true);
+    this.boundUnixSocket = true;
     if (this.options.tcpPort !== undefined) {
+      this.writeDevToken();
+      this.tcpBoundHost = "127.0.0.1";
       // The unix socket is guarded by its directory's permissions; a TCP port is open to every
-      // browser tab on this machine, so it checks who is asking.
-      await this.listen((server) => server.listen(this.options.tcpPort, "127.0.0.1"), isLocalDevelopmentClient);
+      // browser tab and local process on this machine, so it checks Origin/Host and requires
+      // `run/dev.token` before granting `local: true` privileges.
+      await this.listen(
+        (server) => server.listen(this.options.tcpPort, "127.0.0.1"),
+        isLocalDevelopmentClient,
+        (req) => this.matchesDevToken(req),
+      );
+    }
+    const heartbeatMs = this.options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS;
+    if (heartbeatMs > 0) {
+      this.heartbeatTimer = setInterval(() => {
+        for (const socket of this.sockets) {
+          if (socket.readyState !== WebSocket.OPEN) continue;
+          if (!this.aliveSockets.has(socket)) {
+            socket.terminate();
+            continue;
+          }
+          this.aliveSockets.delete(socket);
+          try {
+            socket.ping();
+          } catch {
+            socket.terminate();
+          }
+        }
+      }, heartbeatMs);
+      this.heartbeatTimer.unref?.();
     }
     this.metrics.start();
   }
 
   async stop(): Promise<void> {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
     this.metrics.stop();
     this.screen.stop();
     this.computerPreview.stop();
@@ -504,7 +706,15 @@ export class HostRpcServer {
     for (const socket of this.sockets) socket.terminate();
     await Promise.all(closed);
     await Promise.all(this.servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
-    if (process.platform !== "win32") rmSync(this.options.socketPath, { force: true });
+    if (process.platform !== "win32" && this.boundUnixSocket && !isNamedPipe(this.options.socketPath)) {
+      rmSync(this.options.socketPath, { force: true });
+      this.boundUnixSocket = false;
+    }
+    if (this.devTokenPath) {
+      rmSync(this.devTokenPath, { force: true });
+      this.devTokenPath = undefined;
+    }
+    this.devToken = undefined;
   }
 
   /** The TCP port actually bound (useful when started with port 0). */
@@ -513,7 +723,49 @@ export class HostRpcServer {
     return address && typeof address === "object" ? address.port : undefined;
   }
 
-  private listen(bind: (server: Server) => void, allowed?: (headers: { host?: string; origin?: string }) => boolean): Promise<void> {
+  /** True when the optional TCP server is bound strictly to loopback. */
+  isTcpLoopbackOnly(): boolean {
+    if (!this.servers[1]) return false;
+    return this.tcpBoundHost === "127.0.0.1" || this.tcpBoundHost === "::1" || this.tcpBoundHost === "localhost";
+  }
+
+  /** Path to the per-boot `0600` bearer token file written when `tcpPort` is enabled. */
+  devTokenFile(): string | undefined {
+    return this.devTokenPath;
+  }
+
+  private writeDevToken(): void {
+    const tokenHex = randomBytes(32).toString("hex");
+    this.devToken = Buffer.from(tokenHex, "utf8");
+    const runDir =
+      this.options.runDir ?? (!isNamedPipe(this.options.socketPath) ? dirname(this.options.socketPath) : undefined);
+    if (!runDir) return;
+    mkdirSync(runDir, { recursive: true, mode: 0o700 });
+    const filePath = join(runDir, "dev.token");
+    writeFileSync(filePath, `${tokenHex}\n`, { mode: 0o600 });
+    if (process.platform !== "win32") {
+      try {
+        chmodSync(filePath, 0o600);
+      } catch {
+        // Ignore chmod failure on exotic filesystems.
+      }
+    }
+    this.devTokenPath = filePath;
+  }
+
+  private matchesDevToken(req: IncomingMessage | undefined): boolean {
+    if (!this.devToken) return false;
+    const candidate = extractDevBearerToken(req);
+    if (!candidate) return false;
+    const actual = Buffer.from(candidate, "utf8");
+    return actual.length === this.devToken.length && timingSafeEqual(actual, this.devToken);
+  }
+
+  private listen(
+    bind: (server: Server) => void,
+    allowed?: (headers: { host?: string; origin?: string }) => boolean,
+    isLocal: (req: IncomingMessage | undefined) => boolean = () => true,
+  ): Promise<void> {
     const server = createServer((_, response) => {
       response.writeHead(426, { "content-type": "text/plain" });
       response.end("LinkShell host: WebSocket required\n");
@@ -524,7 +776,7 @@ export class HostRpcServer {
       maxPayload: 32 * 1024 * 1024,
       verifyClient: allowed && (({ req }: { req: IncomingMessage }) => allowed({ host: req.headers.host, origin: req.headers.origin })),
     });
-    wss.on("connection", (socket) => this.accept(socket));
+    wss.on("connection", (socket, req) => this.accept(socket, isLocal(req)));
     this.servers.push(server);
     return new Promise((resolve, reject) => {
       server.once("error", reject);
@@ -557,16 +809,24 @@ export class HostRpcServer {
     context.desktops.set(sessionId, entry);
   }
 
-  private accept(socket: WebSocket): void {
+  private accept(socket: WebSocket, local: boolean): void {
     this.sockets.add(socket);
+    this.aliveSockets.add(socket);
     const listeners: { message?: (text: string) => void; close?: () => void } = {};
-    socket.on("message", (data) => listeners.message?.(data.toString()));
+    socket.on("pong", () => {
+      this.aliveSockets.add(socket);
+    });
+    socket.on("message", (data) => {
+      this.aliveSockets.add(socket);
+      listeners.message?.(data.toString());
+    });
     socket.on("close", () => {
       this.sockets.delete(socket);
       listeners.close?.();
     });
     this.connect({
-      local: true,
+      local,
+      bufferedAmount: () => socket.bufferedAmount,
       send: (text) => {
         if (socket.readyState === WebSocket.OPEN) socket.send(text);
       },
@@ -608,7 +868,7 @@ export class HostRpcServer {
   connect(transport: RpcTransport): void {
     const peer = new RpcPeer({
       send: (text) => transport.send(text),
-      onRequest: (method, params) => this.dispatch(method, params, context),
+      onRequest: (method, params, _id, signal) => this.dispatch(method, params, context, signal),
     });
     const direct = new DirectPeer(this.options.machineInfo().direct?.iceServers ?? [], this.options.log);
     const context: ConnectionContext = {
@@ -623,6 +883,7 @@ export class HostRpcServer {
         {
           data: (streamId, data) => peer.notify("proxy.data", { streamId, data }),
           closed: (streamId, error) => peer.notify("proxy.closed", error ? { streamId, error } : { streamId }),
+          bufferedAmount: transport.bufferedAmount,
         },
         direct,
       ),
@@ -674,7 +935,8 @@ export class HostRpcServer {
     });
   }
 
-  private async dispatch(method: string, params: unknown, context: ConnectionContext): Promise<unknown> {
+  private async dispatch(method: string, params: unknown, context: ConnectionContext, signal: AbortSignal): Promise<unknown> {
+    if (signal.aborted) throw RpcError.app("internal", `请求已取消（${method}）`);
     if (!isMethodName(method)) throw new RpcError(RPC_METHOD_NOT_FOUND, `unknown method ${method}`);
     // The terminal shim's methods launch local processes with a given environment: never over the network.
     if (method.startsWith("desktop.") && !context.local) throw RpcError.app("forbidden", `${method} 只能在电脑本机上使用`);
@@ -689,7 +951,7 @@ export class HostRpcServer {
     }
     const handler = this.handlers[method] as Handler;
     try {
-      return await handler(parsed.data as never, context);
+      return await handler(parsed.data as never, context, signal);
     } catch (error) {
       if (!(error instanceof RpcError)) this.options.log(`[rpc] ${method} failed: ${error instanceof Error ? error.stack : String(error)}`);
       throw error;

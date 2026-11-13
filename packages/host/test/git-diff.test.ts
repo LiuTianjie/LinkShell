@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitDiff, gitRevertFile } from "../src/git-diff.js";
+import { gitCommit, gitDiff, gitRevertFile } from "../src/git-diff.js";
 import { startHost } from "../src/host.js";
 import { connectHost } from "../src/rpc/client.js";
 
@@ -142,6 +142,64 @@ describe("Real git.diff and git.revertFile", { timeout: 15_000 }, () => {
 
       expect(await gitRevertFile({ cwd: repo, path: "staged-new.txt" })).toEqual({ ok: true });
       expect(existsSync(join(repo, "staged-new.txt"))).toBe(false);
+    } finally {
+      client.close();
+      await host.stop();
+    }
+  });
+
+  it("batches gitDiff across many changed files and commits staged/scoped/stageAll changes safely via git.commit", async () => {
+    const repo = tempRepo();
+    execFileSync("git", ["config", "user.email", "test@linkshell.dev"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "LinkShell"], { cwd: repo });
+    mkdirSync(join(repo, "pkg"), { recursive: true });
+    for (let i = 0; i < 20; i++) {
+      writeFileSync(join(repo, `pkg/f-${i}.ts`), `export const v${i} = ${i};\n`);
+    }
+    commitAll(repo, "baseline");
+
+    for (let i = 0; i < 18; i++) {
+      writeFileSync(join(repo, `pkg/f-${i}.ts`), `export const v${i} = ${i + 100};\n`);
+    }
+    rmSync(join(repo, "pkg/f-18.ts"));
+    writeFileSync(join(repo, "pkg/new-a.ts"), "export const a = 'a';\n");
+    writeFileSync(join(repo, "pkg/new-b.ts"), "export const b = 'b';\n");
+
+    const diff = await gitDiff({ cwd: repo });
+    expect(diff.files).toHaveLength(21);
+    expect(diff.files.find((f) => f.path === "pkg/f-0.ts")?.additions).toBe(1);
+    expect(diff.files.find((f) => f.path === "pkg/f-18.ts")?.status).toBe("deleted");
+
+    // Empty staging area without stageAll/paths fails cleanly.
+    await expect(gitCommit({ cwd: repo, message: "nothing staged" })).rejects.toMatchObject({ appCode: "invalid_params" });
+    await expect(gitCommit({ cwd: repo, message: "   ", stageAll: true })).rejects.toMatchObject({ appCode: "invalid_params" });
+    await expect(gitCommit({ cwd: repo, message: "escape", paths: ["../outside.ts"] })).rejects.toMatchObject({ appCode: "invalid_params" });
+
+    // Stage one file manually, then commit a DIFFERENT explicit path via `paths` — unrelated staged file stays staged!
+    execFileSync("git", ["add", "pkg/new-a.ts"], { cwd: repo });
+    const scoped = await gitCommit({
+      cwd: repo,
+      message: "feat: commit only new-b $(not-shell-expanded)",
+      paths: ["pkg/new-b.ts"],
+    });
+    expect(scoped.branch).toBe("main");
+    expect(scoped.summary).toBe("feat: commit only new-b $(not-shell-expanded)");
+    expect(scoped.sha).toMatch(/^[0-9a-f]{40}$/);
+
+    // Now commit the already-staged pkg/new-a.ts over HostRpcServer's git.commit RPC.
+    const home = mkdtempSync(join(tmpdir(), "ls-git-commit-host-"));
+    dirs.push(home);
+    const host = await startHost({ home, version: "test", drivers: () => [], discoveryIntervalMs: 0, log: () => {} });
+    const client = await connectHost(host.paths.hostSocket);
+    try {
+      const stagedOnly = await client.call("git.commit", { cwd: repo, message: "feat: commit staged new-a" });
+      expect(stagedOnly.summary).toBe("feat: commit staged new-a");
+
+      const allRest = await client.call("git.commit", { cwd: repo, message: "chore: commit remaining", stageAll: true });
+      expect(allRest.summary).toBe("chore: commit remaining");
+
+      const cleanAfter = await client.call("git.diff", { cwd: repo });
+      expect(cleanAfter.files).toEqual([]);
     } finally {
       client.close();
       await host.stop();

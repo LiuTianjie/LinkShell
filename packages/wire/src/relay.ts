@@ -81,7 +81,7 @@ export const serverFrameSchema = z.discriminatedUnion("t", [
   /** An encrypted frame from a peer, with the keys the gateway verified it holds. */
   z.object({ t: z.literal("from"), from: publicIdentitySchema, via: z.enum(["paired", "account"]), d: z.string() }),
   /** A frame couldn't be delivered: the peer is offline or not reachable. */
-  z.object({ t: z.literal("undeliverable"), to: z.string(), reason: z.string() }),
+  z.object({ t: z.literal("undeliverable"), to: z.string(), reason: z.string(), channel: z.string().optional() }),
   z.object({ t: z.literal("pong") }),
   z.object({ t: z.literal("error"), code: z.string(), message: z.string() }),
 ]);

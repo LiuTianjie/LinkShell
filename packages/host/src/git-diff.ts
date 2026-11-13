@@ -35,10 +35,25 @@ export interface GitDiffResult {
   branch?: string;
 }
 
+export interface GitCommitParams {
+  cwd: string;
+  message: string;
+  stageAll?: boolean;
+  paths?: string[];
+}
+
+export interface GitCommitResult {
+  sha: string;
+  branch?: string;
+  summary: string;
+}
+
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const MAX_ALLOWED_BYTES = 8 * 1024 * 1024;
 const MAX_SINGLE_FILE_BYTES = 256 * 1024;
 const BINARY_SNIFF_BYTES = 8192;
+const BATCH_BLOB_MAX_BYTES = 2 * 1024 * 1024;
+const DIFF_READ_CONCURRENCY = 8;
 
 function expandPath(input: string): string {
   if (!input || input === "~") return homedir();
@@ -269,6 +284,243 @@ async function readGitBlobBounded(
   };
 }
 
+type DiffSide = { exists: boolean; binary: boolean; text: string; bytes: number; truncated: boolean };
+
+const EMPTY_SIDE: DiffSide = { exists: false, binary: false, text: "", bytes: 0, truncated: false };
+
+function trimSideToBudget(side: DiffSide, maxBytes: number): DiffSide {
+  if (!side.exists || side.binary || side.bytes <= maxBytes) return side;
+  const raw = Buffer.from(side.text, "utf8");
+  const decoded = bufferToSafeUtf8(raw, maxBytes);
+  return {
+    exists: true,
+    binary: false,
+    text: decoded.text,
+    bytes: Buffer.byteLength(decoded.text),
+    truncated: true,
+  };
+}
+
+interface BlobCheckEntry {
+  exists: boolean;
+  oid?: string;
+  size: number;
+}
+
+async function batchCheckBlobs(realRoot: string, specs: string[]): Promise<Map<string, BlobCheckEntry>> {
+  const result = new Map<string, BlobCheckEntry>();
+  if (specs.length === 0) return result;
+  const output = await new Promise<string>((resolvePromise, rejectPromise) => {
+    const child = spawn("git", ["-C", realRoot, "cat-file", "--batch-check"], {
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill("SIGKILL");
+        rejectPromise(new Error("git cat-file --batch-check timed out"));
+      }
+    }, 10_000);
+    timer.unref();
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        rejectPromise(error);
+      }
+    });
+    child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) rejectPromise(new Error(`git cat-file --batch-check exited with ${code}`));
+      else resolvePromise(Buffer.concat(chunks).toString("utf8"));
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(`${specs.join("\n")}\n`);
+  });
+
+  const lines = output.split("\n");
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i]!;
+    const line = lines[i] ?? "";
+    const match = /^([0-9a-f]{40,64}) (\S+) (\d+)$/.exec(line);
+    if (!match || match[2] !== "blob") {
+      result.set(spec, { exists: false, size: 0 });
+      continue;
+    }
+    const size = Number(match[3]);
+    if (!Number.isFinite(size) || size < 0) {
+      result.set(spec, { exists: false, size: 0 });
+      continue;
+    }
+    result.set(spec, { exists: true, oid: match[1]!, size });
+  }
+  return result;
+}
+
+/**
+ * Persistent `git cat-file --batch` reader scoped to a single `gitDiff` call so
+ * tracked old-side blobs stream over one pipe instead of spawning two git
+ * processes per changed file.
+ */
+class GitCatFileBatch {
+  private child?: ReturnType<typeof spawn>;
+  private chunks: Buffer[] = [];
+  private buffered = 0;
+  private closed = false;
+  private failed?: Error;
+  private waiter?: () => void;
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(private readonly realRoot: string) {}
+
+  private ensureStarted(): void {
+    if (this.child || this.closed) return;
+    const child = spawn("git", ["-C", this.realRoot, "cat-file", "--batch"], {
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    this.child = child;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      this.chunks.push(chunk);
+      this.buffered += chunk.length;
+      const wake = this.waiter;
+      this.waiter = undefined;
+      wake?.();
+    });
+    const fail = (error: Error) => {
+      this.failed ??= error;
+      this.closed = true;
+      const wake = this.waiter;
+      this.waiter = undefined;
+      wake?.();
+    };
+    child.once("error", fail);
+    child.once("close", () => fail(new Error("git cat-file --batch closed")));
+    child.stdin?.on("error", () => {});
+  }
+
+  private waitForData(timeoutMs = 10_000): Promise<void> {
+    if (this.failed) return Promise.reject(this.failed);
+    return new Promise<void>((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => {
+        this.waiter = undefined;
+        this.close();
+        rejectPromise(new Error("git cat-file --batch timed out"));
+      }, timeoutMs);
+      timer.unref();
+      this.waiter = () => {
+        clearTimeout(timer);
+        if (this.failed && this.buffered === 0) rejectPromise(this.failed);
+        else resolvePromise();
+      };
+    });
+  }
+
+  private consume(length: number, retainLength: number): Buffer {
+    const out = Buffer.allocUnsafe(Math.min(length, retainLength));
+    let written = 0;
+    let remaining = length;
+    while (remaining > 0 && this.chunks.length > 0) {
+      const head = this.chunks[0]!;
+      const take = Math.min(remaining, head.length);
+      if (written < out.length) {
+        const copyLen = Math.min(take, out.length - written);
+        head.copy(out, written, 0, copyLen);
+        written += copyLen;
+      }
+      if (take === head.length) {
+        this.chunks.shift();
+      } else {
+        this.chunks[0] = head.subarray(take);
+      }
+      this.buffered -= take;
+      remaining -= take;
+    }
+    return written === out.length ? out : out.subarray(0, written);
+  }
+
+  private async readLine(): Promise<string> {
+    for (;;) {
+      let scanned = 0;
+      for (const chunk of this.chunks) {
+        const nl = chunk.indexOf(0x0a);
+        if (nl >= 0) {
+          const total = scanned + nl;
+          const lineBuf = this.consume(total + 1, total);
+          return lineBuf.toString("utf8");
+        }
+        scanned += chunk.length;
+      }
+      await this.waitForData();
+    }
+  }
+
+  private async readExact(length: number, retainLength: number): Promise<Buffer> {
+    while (this.buffered < length) {
+      await this.waitForData();
+    }
+    return this.consume(length, retainLength);
+  }
+
+  readBlob(oid: string, maxBytes: number): Promise<DiffSide> {
+    const run = async (): Promise<DiffSide> => {
+      this.ensureStarted();
+      if (!this.child?.stdin || this.failed) throw this.failed ?? new Error("git cat-file --batch unavailable");
+      this.child.stdin.write(`${oid}\n`);
+      const header = await this.readLine();
+      const match = /^([0-9a-f]{40,64}) (\S+) (\d+)$/.exec(header);
+      if (!match || match[2] !== "blob") {
+        return EMPTY_SIDE;
+      }
+      const blobSize = Number(match[3]);
+      if (blobSize === 0) {
+        await this.readExact(1, 0);
+        return { exists: true, binary: false, text: "", bytes: 0, truncated: false };
+      }
+      const cap = Math.min(blobSize, Math.max(maxBytes + 4, BINARY_SNIFF_BYTES));
+      const buffer = await this.readExact(blobSize + 1, cap);
+      if (buffer.subarray(0, BINARY_SNIFF_BYTES).includes(0)) {
+        return { exists: true, binary: true, text: "", bytes: 0, truncated: false };
+      }
+      const decoded = bufferToSafeUtf8(buffer, maxBytes);
+      return {
+        exists: true,
+        binary: false,
+        text: decoded.text,
+        bytes: Buffer.byteLength(decoded.text),
+        truncated: decoded.truncated || blobSize > maxBytes,
+      };
+    };
+    const next = this.queue.then(run, run);
+    this.queue = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  close(): void {
+    if (this.closed && !this.child) return;
+    this.closed = true;
+    const child = this.child;
+    this.child = undefined;
+    if (!child) return;
+    try {
+      child.stdin?.end();
+    } catch {
+      // Ignore broken pipe on teardown.
+    }
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Already exited.
+    }
+  }
+}
+
 function splitLines(text: string): string[] {
   if (!text) return [];
   const lines = text.split("\n");
@@ -460,6 +712,17 @@ export async function gitDiff(params: GitDiffParams): Promise<GitDiffResult> {
   let usedBytes = 0;
   let truncated = false;
 
+  interface PreparedChange {
+    change: RawChange;
+    resolvedNew: { fullPath: string; repoPath: string };
+    resolvedOldPath?: string;
+    needOld: boolean;
+    needNew: boolean;
+    oldSpec?: string;
+  }
+
+  const prepared: PreparedChange[] = [];
+  const checkSpecs = new Set<string>();
   for (const change of rawChanges) {
     let resolvedNew: { fullPath: string; repoPath: string };
     let resolvedOldPath: string | undefined;
@@ -472,64 +735,121 @@ export async function gitDiff(params: GitDiffParams): Promise<GitDiffResult> {
       // Skip malformed paths rather than aborting the entire diff view.
       continue;
     }
-
-    const remaining = maxBytes - usedBytes;
-    if (remaining <= 0) {
-      truncated = true;
-      break;
-    }
-    const perSideBudget = Math.max(512, Math.min(MAX_SINGLE_FILE_BYTES, remaining));
-
     const needOld = compareRef !== undefined && (change.status === "modified" || change.status === "deleted" || change.status === "renamed");
     const needNew = change.status !== "deleted";
-
-    const [oldSide, newSide] = await Promise.all([
-      needOld
-        ? readGitBlobBounded(realRoot, compareRef!, resolvedOldPath ?? resolvedNew.repoPath, perSideBudget)
-        : Promise.resolve({ exists: false, binary: false, text: "", bytes: 0, truncated: false }),
-      needNew
-        ? readWorkingFileBounded(realRoot, resolvedNew.fullPath, perSideBudget)
-        : Promise.resolve({ exists: false, binary: false, text: "", bytes: 0, truncated: false }),
-    ]);
-
-    if (oldSide.truncated || newSide.truncated) truncated = true;
-
-    // A file marked modified in index but restored on disk back to exact HEAD content: skip no-op.
-    if (change.status === "modified" && !oldSide.binary && !newSide.binary && oldSide.exists && newSide.exists && oldSide.text === newSide.text && !oldSide.truncated && !newSide.truncated) {
-      continue;
+    const oldRepoPath = resolvedOldPath ?? resolvedNew.repoPath;
+    const oldSpec = needOld ? `${compareRef!}:${oldRepoPath}` : undefined;
+    if (oldSpec && !/[\r\n\0]/.test(oldSpec)) {
+      checkSpecs.add(oldSpec);
     }
+    prepared.push({ change, resolvedNew, resolvedOldPath, needOld, needNew, oldSpec });
+  }
 
-    if (oldSide.binary || newSide.binary) {
-      files.push({
-        path: resolvedNew.repoPath,
-        ...(resolvedOldPath ? { oldPath: resolvedOldPath } : {}),
-        status: change.status,
-        oldText: "",
-        newText: "",
-        additions: 0,
-        deletions: 0,
-        binary: true,
-      });
-      usedBytes += 64;
-      continue;
+  const checkedBlobs = await batchCheckBlobs(realRoot, [...checkSpecs]).catch(() => new Map<string, BlobCheckEntry>());
+  const batch = new GitCatFileBatch(realRoot);
+
+  const loadOldSide = async (item: PreparedChange, budget: number): Promise<DiffSide> => {
+    if (!item.needOld || !item.oldSpec) return EMPTY_SIDE;
+    const oldRepoPath = item.resolvedOldPath ?? item.resolvedNew.repoPath;
+    const checked = checkedBlobs.get(item.oldSpec);
+    if (checked) {
+      if (!checked.exists) return EMPTY_SIDE;
+      if (checked.size === 0) return { exists: true, binary: false, text: "", bytes: 0, truncated: false };
+      if (checked.oid && checked.size <= BATCH_BLOB_MAX_BYTES) {
+        return batch.readBlob(checked.oid, budget).catch(() =>
+          readGitBlobBounded(realRoot, compareRef!, oldRepoPath, budget),
+        );
+      }
     }
+    return readGitBlobBounded(realRoot, compareRef!, oldRepoPath, budget);
+  };
 
-    // Refine status if file was deleted from disk after staging or vice versa.
-    let status = change.status;
-    if (status === "modified" && oldSide.exists && !newSide.exists) status = "deleted";
-    else if (status === "deleted" && newSide.exists && oldSide.exists) status = "modified";
+  try {
+    for (let offset = 0; offset < prepared.length; offset += DIFF_READ_CONCURRENCY) {
+      const windowRemaining = maxBytes - usedBytes;
+      if (windowRemaining <= 0) {
+        truncated = true;
+        break;
+      }
+      const windowBudget = Math.max(512, Math.min(MAX_SINGLE_FILE_BYTES, windowRemaining));
+      const slice = prepared.slice(offset, offset + DIFF_READ_CONCURRENCY);
+      const loaded = await Promise.all(
+        slice.map(async (item) => {
+          const [oldSide, newSide] = await Promise.all([
+            loadOldSide(item, windowBudget),
+            item.needNew ? readWorkingFileBounded(realRoot, item.resolvedNew.fullPath, windowBudget) : Promise.resolve(EMPTY_SIDE),
+          ]);
+          return { item, oldSide, newSide };
+        }),
+      );
 
-    const { additions, deletions } = countLineChanges(oldSide.text, newSide.text);
-    files.push({
-      path: resolvedNew.repoPath,
-      ...(resolvedOldPath ? { oldPath: resolvedOldPath } : {}),
-      status,
-      oldText: oldSide.text,
-      newText: newSide.text,
-      additions,
-      deletions,
-    });
-    usedBytes += oldSide.bytes + newSide.bytes + 64;
+      for (const entry of loaded) {
+        const remaining = maxBytes - usedBytes;
+        if (remaining <= 0) {
+          truncated = true;
+          break;
+        }
+        const perSideBudget = Math.max(512, Math.min(MAX_SINGLE_FILE_BYTES, remaining));
+        const oldSide = trimSideToBudget(entry.oldSide, perSideBudget);
+        const newSide = trimSideToBudget(entry.newSide, perSideBudget);
+        const { change, resolvedNew, resolvedOldPath } = entry.item;
+
+        if (oldSide.truncated || newSide.truncated) truncated = true;
+
+        // A file marked modified in index but restored on disk back to exact HEAD content: skip no-op.
+        if (
+          change.status === "modified" &&
+          !oldSide.binary &&
+          !newSide.binary &&
+          oldSide.exists &&
+          newSide.exists &&
+          oldSide.text === newSide.text &&
+          !oldSide.truncated &&
+          !newSide.truncated
+        ) {
+          continue;
+        }
+
+        if (oldSide.binary || newSide.binary) {
+          files.push({
+            path: resolvedNew.repoPath,
+            ...(resolvedOldPath ? { oldPath: resolvedOldPath } : {}),
+            status: change.status,
+            oldText: "",
+            newText: "",
+            additions: 0,
+            deletions: 0,
+            binary: true,
+          });
+          usedBytes += 64;
+          continue;
+        }
+
+        // Refine status if file was deleted from disk after staging or vice versa.
+        let status = change.status;
+        if (status === "modified" && oldSide.exists && !newSide.exists) status = "deleted";
+        else if (status === "deleted" && newSide.exists && oldSide.exists) status = "modified";
+
+        const { additions, deletions } = countLineChanges(oldSide.text, newSide.text);
+        files.push({
+          path: resolvedNew.repoPath,
+          ...(resolvedOldPath ? { oldPath: resolvedOldPath } : {}),
+          status,
+          oldText: oldSide.text,
+          newText: newSide.text,
+          additions,
+          deletions,
+        });
+        usedBytes += oldSide.bytes + newSide.bytes + 64;
+      }
+
+      if (maxBytes - usedBytes <= 0 && offset + DIFF_READ_CONCURRENCY < prepared.length) {
+        truncated = true;
+        break;
+      }
+    }
+  } finally {
+    batch.close();
   }
 
   return {
@@ -585,4 +905,74 @@ export async function gitRevertFile(params: { cwd: string; path: string }): Prom
   }
   unlinkSync(fullPath);
   return { ok: true };
+}
+
+function formatGitError(error: unknown): string {
+  if (error && typeof error === "object") {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (Buffer.isBuffer(stderr) && stderr.length > 0) {
+      return stderr.toString("utf8").trim().split("\n").slice(-2).join(" ").trim();
+    }
+    if (typeof stderr === "string" && stderr.trim()) {
+      return stderr.trim().split("\n").slice(-2).join(" ").trim();
+    }
+  }
+  return error instanceof Error ? error.message.split("\n").slice(-2).join(" ").trim() : String(error);
+}
+
+export async function gitCommit(params: GitCommitParams): Promise<GitCommitResult> {
+  const message = params.message.trim();
+  if (!message) {
+    throw RpcError.app("invalid_params", "提交说明不能为空");
+  }
+  const realRoot = await resolveRepoRoot(params.cwd);
+  const repoPaths =
+    params.paths !== undefined
+      ? [...new Set(params.paths.map((rawPath) => resolveRepoPath(realRoot, rawPath).repoPath))]
+      : undefined;
+
+  if (repoPaths !== undefined && repoPaths.length === 0 && !params.stageAll) {
+    throw RpcError.app("invalid_params", "未指定要提交的文件");
+  }
+
+  try {
+    if (params.stageAll) {
+      await gitBuffer(realRoot, ["add", "-A"], 30_000);
+    } else if (repoPaths && repoPaths.length > 0) {
+      await gitBuffer(realRoot, ["add", "-A", "--", ...repoPaths], 30_000);
+    }
+  } catch (error) {
+    throw RpcError.app("git_failed", `暂存文件失败：${formatGitError(error)}`);
+  }
+
+  const scopedPaths = !params.stageAll && repoPaths && repoPaths.length > 0 ? repoPaths : undefined;
+  const stagedOut = await gitText(
+    realRoot,
+    scopedPaths ? ["diff", "--cached", "--name-only", "--", ...scopedPaths] : ["diff", "--cached", "--name-only"],
+    10_000,
+  ).catch(() => "");
+  if (!stagedOut) {
+    throw RpcError.app("invalid_params", scopedPaths ? "所选文件没有可提交的改动" : "暂存区没有可提交的改动");
+  }
+
+  try {
+    await gitBuffer(
+      realRoot,
+      scopedPaths ? ["commit", "-m", message, "--", ...scopedPaths] : ["commit", "-m", message],
+      30_000,
+    );
+  } catch (error) {
+    throw RpcError.app("git_failed", `提交失败：${formatGitError(error)}`);
+  }
+
+  const [sha, summary, branch] = await Promise.all([
+    gitText(realRoot, ["rev-parse", "HEAD"], 5000),
+    gitText(realRoot, ["log", "-1", "--pretty=%s", "HEAD"], 5000),
+    gitBranch(realRoot),
+  ]);
+  return {
+    sha,
+    ...(branch ? { branch } : {}),
+    summary,
+  };
 }

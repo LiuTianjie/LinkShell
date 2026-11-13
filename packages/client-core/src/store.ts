@@ -48,7 +48,9 @@ export interface ClientState {
   sessionsLoaded: boolean;
   sessionsError?: string;
   sessionsNextBefore?: number;
+  sessionsNextBeforeId?: string;
   archivedNextBefore?: number;
+  archivedNextBeforeId?: string;
   notices: Record<string, (SessionNotice & { id: string })[]>;
   interactions: Record<string, PendingPermissionSummary[]>;
   projects: ProjectSummary[];
@@ -140,7 +142,16 @@ export interface ClientActions {
    * `worktree`: start in a new git worktree of the project instead of its working directory.
    * `model`: one of `agentModels`; absent, the agent's own default.
    */
-  createSession(input: { agent: string; cwd: string; prompt?: ContentBlock[]; worktree?: boolean; model?: string; config?: Record<string, string> }): Promise<SessionSummary>;
+  createSession(input: {
+    agent: string;
+    cwd: string;
+    prompt?: ContentBlock[];
+    clientMessageId?: string;
+    requestId?: string;
+    worktree?: boolean;
+    model?: string;
+    config?: Record<string, string>;
+  }): Promise<SessionSummary>;
   /**
    * A new session that starts with this one's conversation (through the turn
    * of `itemId` when given), in the same directory or in a new worktree. The
@@ -165,7 +176,7 @@ export interface ClientActions {
   /** `worktree`: what to do with a worktree only this session used ("remove" even if work in it is lost, "keep"; default: removed when nothing would be lost). */
   deleteSession(sessionId: string, worktree?: "keep" | "remove"): Promise<void>;
   /** Adds archived sessions to `sessions` (the regular list leaves them out). */
-  loadArchived(before?: number): Promise<void>;
+  loadArchived(before?: number, beforeId?: string): Promise<void>;
   loadMoreSessions(): Promise<void>;
   /**
    * Adds the page of history before what the session shows (its view's
@@ -205,8 +216,22 @@ function eventForSubagent(view: SessionView, call: string, event: SessionEvent):
   return undefined;
 }
 
+export interface OutboxItem {
+  clientMessageId: string;
+  sessionId: string;
+  content: ContentBlock[];
+  createdAt: number;
+}
+
 export interface ClientStoreOptions {
   sessionPreferences?: SessionPreferencesStore;
+  /** Persists unsent or failed messages across app restarts, keyed by computer (`outboxKey` or link URL). */
+  outboxStorage?: {
+    load(key: string): OutboxItem[] | Promise<OutboxItem[]>;
+    save(key: string, items: OutboxItem[]): void;
+  };
+  /** Storage key passed to `outboxStorage` (defaults to `link.url` or `"default"`). */
+  outboxKey?: string;
   /** Generates client message ids; defaults to crypto.randomUUID when available. */
   newId?: () => string;
   /** The link was created with `lazyImages`: ask for history the same way. */
@@ -230,6 +255,10 @@ export function describeError(error: unknown): string {
 
 export function createClientStore(link: HostLink, options: ClientStoreOptions = {}): ClientStore {
   const newId = options.newId ?? defaultId;
+  const outboxKey = options.outboxKey ?? (link as { url?: string }).url ?? "default";
+  const outboxCreatedAt = new Map<string, number>();
+  const dismissedOutbox = new Set<string>();
+  let suppressOutboxSave = false;
   let pending: SessionEvent[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   // A subscription's backlog can span many socket frames. Keep it off screen until its
@@ -255,8 +284,18 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     let workflows = state.workflows;
     let tasks = state.tasks;
     let promptProgress = state.promptProgress;
+    let outbox = state.outbox;
     const bySession = new Map<string, SessionEvent[]>();
     for (const event of batch) {
+      if (event.update.sessionUpdate === "user_message_chunk" && event.update.messageId?.startsWith("local-")) {
+        const confirmedId = event.update.messageId.slice("local-".length);
+        if (confirmedId in outbox) {
+          outbox = { ...outbox };
+          delete outbox[confirmedId];
+          outboxCreatedAt.delete(confirmedId);
+          dismissedOutbox.add(confirmedId);
+        }
+      }
       const records = tasks[event.sessionId] ?? {};
       const nextTasks = applyTaskEvent(records, event);
       if (nextTasks !== records) tasks = { ...tasks, [event.sessionId]: nextTasks };
@@ -293,7 +332,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       const next = applyEvents(current, events);
       if (next !== current) views = { ...views, [sessionId]: next };
     }
-    return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks && promptProgress === state.promptProgress ? state : { views, subagentViews, workflows, tasks, promptProgress };
+    return views === state.views && subagentViews === state.subagentViews && workflows === state.workflows && tasks === state.tasks && promptProgress === state.promptProgress && outbox === state.outbox
+      ? state
+      : { views, subagentViews, workflows, tasks, promptProgress, ...(outbox === state.outbox ? {} : { outbox }) };
   };
   const flushEvents = () => {
     if (flushTimer) clearTimeout(flushTimer);
@@ -370,6 +411,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         delete next[sessionId];
         return next;
       };
+      let outbox = state.outbox;
+      for (const [id, entry] of Object.entries(state.outbox)) {
+        if (entry.sessionId !== sessionId) continue;
+        if (outbox === state.outbox) outbox = { ...state.outbox };
+        delete outbox[id];
+        outboxCreatedAt.delete(id);
+        dismissedOutbox.add(id);
+      }
       return {
         sessions: without(state.sessions),
         notices: without(state.notices),
@@ -383,6 +432,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         sides: without(state.sides),
         workflows: without(state.workflows),
         tasks: without(state.tasks),
+        outbox,
         subagentViews: Object.fromEntries(Object.entries(state.subagentViews).filter(([key]) => !key.startsWith(`${sessionId}\n`))),
       };
     });
@@ -436,10 +486,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         });
         // A fast turn may already have finished before the RPC response arrives.
         flushEvents();
+        const accepted = result.delivery === "started" || result.delivery === "steered" || result.delivery === "duplicate";
         finish(result.delivery === "started" || result.delivery === "steered" ? "starting" : undefined);
-        if (result.delivery === "started" || result.delivery === "steered") updateView(pending.sessionId, (view) => markMessageAccepted(view, clientMessageId));
+        if (accepted) updateView(pending.sessionId, (view) => markMessageAccepted(view, clientMessageId));
         if (result.delivery === "queued") rememberQueued(clientMessageId, pending.content);
+        dismissedOutbox.add(clientMessageId);
+        outboxCreatedAt.delete(clientMessageId);
         set((state) => {
+          if (!(clientMessageId in state.outbox)) return state;
           const outbox = { ...state.outbox };
           delete outbox[clientMessageId];
           return { outbox };
@@ -517,7 +571,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
               for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
             }
             for (const session of list.sessions) sessions[session.id] = session;
-            return { sessions, sessionsNextBefore: list.nextBefore, projects: projects.projects, sessionsLoaded: true, sessionsError: undefined };
+            return {
+              sessions,
+              sessionsNextBefore: list.nextBefore,
+              sessionsNextBeforeId: list.nextBeforeId,
+              projects: projects.projects,
+              sessionsLoaded: true,
+              sessionsError: undefined,
+            };
           });
         } catch (error) {
           set({ sessionsError: describeError(error) });
@@ -556,6 +617,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         // A turn is running (or messages already wait): this one is headed for the
         // queue, so that is where it shows from the start, not as a sent message first.
         const queues = !sendOptions?.now && (session?.state === "running" || session?.state === "waiting" || (session?.queue?.length ?? 0) > 0);
+        dismissedOutbox.delete(clientMessageId);
+        outboxCreatedAt.set(clientMessageId, Date.now());
         set((state) => ({ outbox: { ...state.outbox, [clientMessageId]: { sessionId, content } } }));
         if (queues) {
           const entry: QueueEntry = {
@@ -584,7 +647,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           return { queueing };
         });
         // The turn ended meanwhile and it went straight out, or it didn't go at all: a message like any other.
-        if (delivery === "started" || delivery === "steered" || delivery === "failed") {
+        if (delivery === "started" || delivery === "steered" || delivery === "duplicate" || delivery === "failed") {
           updateView(sessionId, (view) => (view.index[`local-${clientMessageId}`] === undefined ? addOptimisticMessage(view, clientMessageId, content, Date.now(), delivery !== "failed") : view));
           if (delivery === "failed") updateView(sessionId, (view) => markMessageFailed(view, clientMessageId));
         }
@@ -601,6 +664,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       discard(clientMessageId) {
         const pending = get().outbox[clientMessageId];
         if (!pending) return;
+        dismissedOutbox.add(clientMessageId);
+        outboxCreatedAt.delete(clientMessageId);
         updateView(pending.sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
         set((state) => {
           const outbox = { ...state.outbox };
@@ -728,28 +793,39 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       async loadMoreSessions() {
-        const before = get().sessionsNextBefore;
+        const { sessionsNextBefore: before, sessionsNextBeforeId: beforeId } = get();
         if (before === undefined) return;
-        const list = await link.call("sessions.list", { limit: 200, before });
+        const list = await link.call("sessions.list", {
+          limit: 200,
+          before,
+          ...(beforeId !== undefined ? { beforeId } : {}),
+        });
         set((state) => {
           const sessions = { ...state.sessions };
           for (const session of list.sessions) {
             if (!sessions[session.id] || sessions[session.id]!.updatedAt <= session.updatedAt)
               sessions[session.id] = session;
           }
-          return { sessions, sessionsNextBefore: list.nextBefore };
+          return { sessions, sessionsNextBefore: list.nextBefore, sessionsNextBeforeId: list.nextBeforeId };
         });
       },
 
-      async loadArchived(before) {
-        const list = await link.call("sessions.list", { limit: 200, includeArchived: true, before });
+      async loadArchived(before, beforeId) {
+        const resolvedBeforeId =
+          beforeId ?? (before !== undefined && before === get().archivedNextBefore ? get().archivedNextBeforeId : undefined);
+        const list = await link.call("sessions.list", {
+          limit: 200,
+          includeArchived: true,
+          before,
+          ...(resolvedBeforeId !== undefined ? { beforeId: resolvedBeforeId } : {}),
+        });
         set((state) => {
           const sessions = { ...state.sessions };
           for (const session of list.sessions) {
             if (!sessions[session.id] || sessions[session.id]!.updatedAt <= session.updatedAt)
               sessions[session.id] = session;
           }
-          return { sessions, archivedNextBefore: list.nextBefore };
+          return { sessions, archivedNextBefore: list.nextBefore, archivedNextBeforeId: list.nextBeforeId };
         });
       },
 
@@ -892,15 +968,103 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const machineId = get().machine?.machineId;
         const chosen = await resolveSessionPreferences(input, options.sessionPreferences?.read(machineId).agents[input.agent],
           (model) => get().agentModels(input.agent, input.cwd, model));
-        const { session } = await link.call("sessions.create", { agent: input.agent, cwd: input.cwd, worktree: input.worktree, model: chosen.model, ...(chosen.config ? { config: chosen.config } : {}) }, 60_000);
+        const hasPrompt = Boolean(input.prompt && input.prompt.length > 0);
+        const clientMessageId = hasPrompt ? (input.clientMessageId || newId()) : undefined;
+        const requestId = input.requestId || (clientMessageId ? `create-${clientMessageId}` : newId());
+        const { session } = await link.call(
+          "sessions.create",
+          {
+            agent: input.agent,
+            cwd: input.cwd,
+            worktree: input.worktree,
+            requestId,
+            model: chosen.model,
+            ...(chosen.config ? { config: chosen.config } : {}),
+            ...(hasPrompt ? { prompt: input.prompt, clientMessageId } : {}),
+          },
+          60_000,
+        );
         options.sessionPreferences?.remember(machineId, input.agent, { ...(chosen.model ? { model: chosen.model } : {}), config: chosen.config });
-        set((state) => ({ sessions: { ...state.sessions, [session.id]: session } }));
+        set((state) => ({
+          sessions: { ...state.sessions, [session.id]: session },
+          ...(hasPrompt && clientMessageId
+            ? {
+                views: {
+                  ...state.views,
+                  [session.id]: addOptimisticMessage(state.views[session.id] ?? emptyView(session.id), clientMessageId, input.prompt!, Date.now(), true),
+                },
+                ...(session.state === "idle"
+                  ? { promptProgress: { ...state.promptProgress, [session.id]: { clientMessageId, phase: "starting" as const, afterSeq: 0 } } }
+                  : {}),
+              }
+            : {}),
+        }));
         get().openSession(session.id);
-        if (input.prompt && input.prompt.length > 0) await get().send(session.id, input.prompt);
         return session;
       },
     };
   });
+
+  if (options.outboxStorage) {
+    const storage = options.outboxStorage;
+    store.subscribe((state, previous) => {
+      if (suppressOutboxSave || state.outbox === previous.outbox) return;
+      const items: OutboxItem[] = Object.entries(state.outbox).map(([clientMessageId, entry]) => ({
+        clientMessageId,
+        sessionId: entry.sessionId,
+        content: entry.content,
+        createdAt: outboxCreatedAt.get(clientMessageId) ?? Date.now(),
+      }));
+      try {
+        storage.save(outboxKey, items);
+      } catch {
+        // Persistence errors must never block sending or discarding messages.
+      }
+    });
+    const hydrateOutbox = (items: OutboxItem[]) => {
+      if (!Array.isArray(items) || items.length === 0) return;
+      const hadLocalChanges = Object.keys(store.getState().outbox).length > 0;
+      suppressOutboxSave = !hadLocalChanges;
+      try {
+        store.setState((state) => {
+          let outbox = state.outbox;
+          let views = state.views;
+          let changed = false;
+          for (const item of items) {
+            if (!item?.clientMessageId || !item.sessionId || !Array.isArray(item.content)) continue;
+            if (dismissedOutbox.has(item.clientMessageId) || outbox[item.clientMessageId]) continue;
+            const ts = item.createdAt || Date.now();
+            outboxCreatedAt.set(item.clientMessageId, ts);
+            outbox = { ...outbox, [item.clientMessageId]: { sessionId: item.sessionId, content: item.content } };
+            const currentView = views[item.sessionId] ?? emptyView(item.sessionId);
+            if (currentView.index[`local-${item.clientMessageId}`] === undefined) {
+              views = {
+                ...views,
+                [item.sessionId]: markMessageFailed(
+                  addOptimisticMessage(currentView, item.clientMessageId, item.content, ts),
+                  item.clientMessageId,
+                ),
+              };
+            }
+            changed = true;
+          }
+          return changed ? { outbox, views } : state;
+        });
+      } finally {
+        suppressOutboxSave = false;
+      }
+    };
+    try {
+      const loaded = storage.load(outboxKey);
+      if (loaded && typeof (loaded as Promise<OutboxItem[]>).then === "function") {
+        void (loaded as Promise<OutboxItem[]>).then(hydrateOutbox, () => {});
+      } else if (Array.isArray(loaded)) {
+        hydrateOutbox(loaded);
+      }
+    } catch {
+      // Ignore corrupt storage on startup.
+    }
+  }
 
   link.onStatus((status, detail) => {
     if (status !== "online") {

@@ -77,6 +77,30 @@ describe("background processes", () => {
       daemon.removePid("host");
     }
   });
+
+  it.skipIf(process.platform === "win32")("verifies process cmdline before signaling PID in stopDaemon()", async () => {
+    expect(daemon.matchesServiceProcess("host", "/usr/local/bin/node /opt/linkshell/dist/index.js host --_foreground-host")).toBe(true);
+    expect(daemon.matchesServiceProcess("gateway", "node /opt/linkshell/dist/index.js gateway --_foreground-gw --port 8787")).toBe(true);
+    expect(daemon.matchesServiceProcess("host", "/usr/bin/python3 -m http.server 8000")).toBe(false);
+
+    // Simulate a recycled PID running an unrelated node script: stopDaemon must NOT kill it!
+    const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000); process.stdout.write('up');"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const exited = new Promise<void>((resolve) => unrelated.once("exit", () => resolve()));
+    try {
+      await new Promise<void>((resolve) => unrelated.stdout!.once("data", () => resolve()));
+      daemon.savePid("host", unrelated.pid!);
+      expect(daemon.stopDaemon("host")).toBe(false);
+      // Stale PID file was cleaned up, and the unrelated process is still alive!
+      expect(existsSync(join(home, "host.pid"))).toBe(false);
+      expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
+    } finally {
+      unrelated.kill("SIGKILL");
+      await exited;
+      daemon.removePid("host");
+    }
+  });
 });
 
 describe("host launch settings", () => {

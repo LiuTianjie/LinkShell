@@ -8,7 +8,7 @@ import type { AgentDriver, DiscoveredSession, DriverHost, ForkOptions } from "..
 import type { DriverBehavior } from "../src/drivers/behavior.js";
 import { SessionHub } from "../src/hub.js";
 import { HostStore } from "../src/store.js";
-import { createWorktree, gitBranch, gitInfo, removeWorktree, worktreeState } from "../src/worktrees.js";
+import { createWorktree, gitBranch, gitInfo, removeWorktree, slug, worktreeState } from "../src/worktrees.js";
 
 // Sessions in git worktrees, and forks: against a real repository.
 
@@ -103,6 +103,30 @@ describe("worktrees", () => {
     expect(existsSync(join(made.path, ".env"))).toBe(true);
     expect(existsSync(join(made.cwd, ".env.local"))).toBe(true);
     await removeWorktree(made);
+  });
+
+  it("derives distinct readable ASCII/hash slugs for CJK titles instead of identical session-xxxxxx branches", async () => {
+    const slugA = slug("重构订单状态流转");
+    const slugB = slug("修复登录超时弹窗");
+    expect(slugA).toMatch(/^s-[0-9a-f]{8}$/);
+    expect(slugB).toMatch(/^s-[0-9a-f]{8}$/);
+    expect(slugA).not.toBe(slugB);
+
+    const mixedA = slug("修复 API");
+    const mixedB = slug("重构 API");
+    expect(mixedA).toMatch(/^api-[0-9a-f]{8}$/);
+    expect(mixedB).toMatch(/^api-[0-9a-f]{8}$/);
+    expect(mixedA).not.toBe(mixedB);
+
+    expect(slug("")).toBe("session");
+    expect(slug("   ")).toBe("session");
+
+    const wtA = await createWorktree(repo, home, "重构订单状态流转");
+    const wtB = await createWorktree(repo, home, "修复登录超时弹窗");
+    expect(wtA.branch).toContain(slugA);
+    expect(wtB.branch).toContain(slugB);
+    await removeWorktree(wtA);
+    await removeWorktree(wtB);
   });
 });
 

@@ -35,7 +35,7 @@
   .remote-screen-toast, .remote-screen-hint { position: absolute; left: 50%; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100% - 32px)); padding: 7px 12px; border-radius: var(--radius-card); transform: translateX(-50%); color: #fff; font-size: 13px; line-height: 18px; background: rgb(28 28 30 / .86); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 0 0 .5px rgb(255 255 255 / .12), 0 8px 24px -6px rgb(0 0 0 / .5); pointer-events: auto; }
   .remote-screen-toast { top: 14px; }
   .remote-screen-toast[data-tone="warning"] { align-items: flex-start; }
-  .remote-screen-toast [data-button] { flex: none; border-color: rgb(255 255 255 / .25); background: transparent; color: #fff; }
+  :is(html[data-desktop][data-theme="dark"], html) .remote-screen-toast [data-button] { flex: none; border-color: rgb(255 255 255 / .25) !important; background: transparent !important; color: #fff !important; }
   .remote-screen-hint { bottom: 18px; color: rgb(255 255 255 / .9); pointer-events: none; animation: remote-screen-hint 3.2s ease-out forwards; }
   @keyframes remote-screen-hint { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 
@@ -84,21 +84,22 @@
     .remote-screen-fullscreen > .remote-screen-bar { transition: none; }
     .remote-screen-hint { animation: none; }
   }
+
+  /* The full-screen bar is dark in either theme; !important beats Button's own `@layer utilities`
+     (`text-secondary-foreground`, `bg-secondary`, `hover:text-foreground`) inside `@layer components`. */
+  :is(html[data-desktop][data-theme="dark"], html) .remote-screen-fullscreen .remote-screen-actions [data-button] { flex: none; color: rgb(255 255 255 / .82) !important; white-space: nowrap; }
+  :is(html[data-desktop][data-theme="dark"], html) .remote-screen-fullscreen .remote-screen-actions [data-button]:is(:hover, [aria-expanded="true"]) { background: rgb(255 255 255 / .12) !important; color: #fff !important; }
+  :is(html[data-desktop][data-theme="dark"], html) .remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"] { background: rgb(255 255 255 / .16) !important; color: #fff !important; }
+  :is(html[data-desktop][data-theme="dark"], html) .remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"]:hover { background: rgb(255 255 255 / .22) !important; }
+
+  /* In the desktop window the bar is the page's title row: it drags the window, its controls don't. */
+  html[data-desktop] .desktop-root[data-shell="electron"] .remote-screen:not(.remote-screen-fullscreen) > .remote-screen-bar { -webkit-app-region: drag; app-region: drag; }
+  html[data-desktop] .desktop-root[data-platform="windows"] .remote-screen-bar { padding-right: max(8px, var(--caption-inset, 0px)); }
+  html[data-desktop] .desktop-root[data-shell="electron"] .remote-screen-bar :is(button, a, [role="button"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
+  /* A container is the containing block of a fixed descendant: full screen must reach the window's edges. */
+  html[data-desktop] .desktop-main:has(.remote-screen-fullscreen) { container-type: normal; }
+  html[data-desktop] .desktop-main .screen-detail-page.remote-screen-page { gap: 0; overflow: hidden; padding: 0; }
+  html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-status-bar { display: none; }
+  html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-main { margin: 0; border: 0; border-radius: 0; }
+  html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-floating-titlebar { display: none; }
 }
-
-/* The full-screen bar is dark in either theme. Outside the layers: the buttons' own utilities (`text-secondary-foreground`,
-   `hover:text-foreground`) would otherwise draw dark text on it, whatever these selectors' weight. */
-.remote-screen-fullscreen .remote-screen-actions [data-button] { flex: none; color: rgb(255 255 255 / .82); white-space: nowrap; }
-.remote-screen-fullscreen .remote-screen-actions [data-button]:is(:hover, [aria-expanded="true"]) { background: rgb(255 255 255 / .12); color: #fff; }
-.remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"] { background: rgb(255 255 255 / .16); color: #fff; }
-.remote-screen-fullscreen .remote-screen-actions [data-button][data-variant="secondary"]:hover { background: rgb(255 255 255 / .22); }
-
-/* In the desktop window the bar is the page's title row: it drags the window, its controls don't. */
-html[data-desktop] .desktop-root[data-shell="electron"] .remote-screen:not(.remote-screen-fullscreen) > .remote-screen-bar { -webkit-app-region: drag; app-region: drag; }
-html[data-desktop] .desktop-root[data-shell="electron"] .remote-screen-bar :is(button, a, [role="button"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
-/* A container is the containing block of a fixed descendant: full screen must reach the window's edges. */
-html[data-desktop] .desktop-main:has(.remote-screen-fullscreen) { container-type: normal; }
-html[data-desktop] .desktop-main .screen-detail-page.remote-screen-page { gap: 0; overflow: hidden; padding: 0; }
-html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-status-bar { display: none; }
-html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-main { margin: 0; border: 0; border-radius: 0; }
-html[data-desktop] .desktop-root:has(.remote-screen-fullscreen) .desktop-floating-titlebar { display: none; }

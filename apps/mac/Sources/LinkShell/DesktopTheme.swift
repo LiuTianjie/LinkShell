@@ -25,30 +25,30 @@ enum DesktopStyle {
     NSColor(srgbRed: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: alpha)
   }
 
-  /// The window ground (#ececec / #1b1b1b); the titlebar shares it so a resize never shows a seam.
-  static let windowBackground = gray(0.925, 0.105)
+  /// The window ground (#f3f3f3 / #1d1d1d); the titlebar shares it so a resize never shows a seam.
+  static let windowBackground = gray(0.953, 0.114)
   static let background = Color(nsColor: windowBackground)
-  /// A panel: the sidebar, the page, a sheet (#fff / #111).
-  static let panel = Color(nsColor: gray(1.0, 0.067))
+  /// A panel: the sidebar, the page, a sheet (#ffffff / #181818).
+  static let panel = Color(nsColor: gray(1.0, 0.094))
   static let sidebar = panel
-  /// Content set into a panel: a group of rows, a chart, a log (#f5f5f5 / #0b0b0b).
-  static let card = Color(nsColor: gray(0.962, 0.043))
+  /// Content set into a panel: a group of rows, a chart, a log (#f3f3f3 / #141414).
+  static let card = Color(nsColor: gray(0.953, 0.078))
   /// The resting fill of a quiet control.
-  static let raised = Color(nsColor: gray(0.938, 0.135))
+  static let raised = Color(nsColor: gray(0.938, 0.145))
   /// The current page in a list, the chosen segment.
-  static let selection = Color(nsColor: gray(0.895, 0.17))
+  static let selection = Color(nsColor: gray(0.895, 0.175))
   /// Panel and well edges, and row rules.
-  static let line = Color(nsColor: gray(0.885, 0.15))
+  static let line = Color(nsColor: gray(0.885, 0.165))
   /// The outline of something that can be clicked: one step stronger than a hairline.
   static let controlStroke = Color(nsColor: gray(0.80, 0.24))
 
   // AppKit views (the setup window) draw with the same values.
-  static let panelColor = gray(1.0, 0.067)
-  static let raisedColor = gray(0.938, 0.135)
-  static let selectionColor = gray(0.895, 0.17)
-  static let lineColor = gray(0.885, 0.15)
+  static let panelColor = gray(1.0, 0.094)
+  static let raisedColor = gray(0.938, 0.145)
+  static let selectionColor = gray(0.895, 0.175)
+  static let lineColor = gray(0.885, 0.165)
   static let controlStrokeColor = gray(0.80, 0.24)
-  static let primaryText = gray(0.07, 0.95)
+  static let primaryText = gray(0.10, 0.875)
   static let secondaryText = gray(0.30, 0.71)
   static let tertiaryText = gray(0.38, 0.59)
 

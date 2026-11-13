@@ -112,6 +112,40 @@ describe("membership revalidation during outages", () => {
     expect(await admit(machine)).toBeUndefined();
     now = 10_000;
     expect(await admit(machine)).toBeUndefined();
+    now = 70_000;
+    expect(await admit(machine)).toBeUndefined();
+  });
+
+  it("coalesces concurrent checks and caches short-term results even when enforceGrace is false", async () => {
+    let now = 0;
+    let finish!: (result: SubscriptionCheck) => void;
+    const check = vi.fn(() => new Promise<SubscriptionCheck>((resolve) => { finish = resolve; }));
+    const admit = requirePro(check, () => {}, { enforceGrace: false, now: () => now, cacheMs: 60_000, graceMs: 100 });
+
+    const first = admit(machine);
+    const second = admit(machine);
+    expect(check).toHaveBeenCalledTimes(1);
+    finish({ status: "active" });
+    expect(await first).toBeUndefined();
+    expect(await second).toBeUndefined();
+
+    // Subsequent check within cacheMs uses the cached result without calling check again.
+    now = 30_000;
+    expect(await admit(machine)).toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(1);
+
+    // Past cacheMs it revalidates, and an inactive -> unknown transition still admits when enforceGrace is false.
+    now = 60_000;
+    const third = admit(machine);
+    finish({ status: "inactive" });
+    expect(await third).toContain("需要 iTool 会员");
+    expect(check).toHaveBeenCalledTimes(2);
+
+    now = 120_000;
+    const fourth = admit(machine);
+    finish({ status: "unknown", reason: "outage" });
+    expect(await fourth).toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(3);
   });
 
   it("provides locale-neutral URLs, bilingual 7-day free trial hints, and localized helpers", async () => {

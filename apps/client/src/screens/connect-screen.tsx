@@ -65,7 +65,12 @@ export function ConnectScreen() {
     } else {
       setUrl(normalized);
     }
-    router.back();
+    if (!hasComputer) {
+      router.dismissAll();
+      router.navigate("/");
+    } else {
+      router.back();
+    }
   };
 
   const addSeparateDirect = () => {
@@ -78,7 +83,12 @@ export function ConnectScreen() {
     const label = pick({ zh: "局域网电脑", en: "LAN Computer", ja: "LAN コンピュータ" });
     const computers = useComputers.getState();
     computers.select(computers.addDirect(normalized, label));
-    router.back();
+    if (!hasComputer) {
+      router.dismissAll();
+      router.navigate("/");
+    } else {
+      router.back();
+    }
   };
 
   return (

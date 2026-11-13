@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scrypt as scryptCallback, scryptSync, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,6 +7,43 @@ const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 32 } as const;
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60_000;
 const FAILURE_WINDOW_MS = 5 * 60_000;
 const MAX_FAILURES = 5;
+const DEFAULT_MAX_CONCURRENT_SCRYPT = 4;
+const DEFAULT_MAX_QUEUED_SCRYPT = 8;
+
+let globalActiveScrypt = 0;
+const globalScryptQueue: Array<() => void> = [];
+
+function deriveScryptAsync(password: string, salt: Buffer, keylen: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(password, salt, keylen, SCRYPT, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
+
+async function acquireScryptSlot(maxConcurrent: number, maxQueued: number): Promise<(() => void) | undefined> {
+  if (globalActiveScrypt < maxConcurrent) {
+    globalActiveScrypt++;
+    return releaseScryptSlot;
+  }
+  if (globalScryptQueue.length >= maxQueued) {
+    return undefined;
+  }
+  await new Promise<void>((resolve) => {
+    globalScryptQueue.push(resolve);
+  });
+  return releaseScryptSlot;
+}
+
+function releaseScryptSlot(): void {
+  const next = globalScryptQueue.shift();
+  if (next) {
+    next();
+  } else {
+    globalActiveScrypt = Math.max(0, globalActiveScrypt - 1);
+  }
+}
 
 interface AccessFile {
   salt: string;
@@ -51,13 +88,22 @@ function readAccessFile(home: string): AccessFile | undefined {
 
 export type UnlockResult = { ok: true; token: string; expiresAt: number } | { ok: false; reason: "wrong" | "throttled" | "invalid_token" };
 
+export interface AccessControlOptions {
+  maxConcurrentScrypt?: number;
+  maxQueuedScrypt?: number;
+}
+
 /** The computer's optional access password. Remote connections must unlock before anything else. */
 export class AccessControl {
   private file: AccessFile | undefined;
   private readonly failures = new Map<string, { since: number; count: number }>();
+  private readonly maxConcurrentScrypt: number;
+  private readonly maxQueuedScrypt: number;
 
-  constructor(private readonly home: string) {
+  constructor(private readonly home: string, options?: AccessControlOptions) {
     this.file = readAccessFile(home);
+    this.maxConcurrentScrypt = options?.maxConcurrentScrypt ?? DEFAULT_MAX_CONCURRENT_SCRYPT;
+    this.maxQueuedScrypt = options?.maxQueuedScrypt ?? DEFAULT_MAX_QUEUED_SCRYPT;
   }
 
   get enabled(): boolean {
@@ -70,7 +116,7 @@ export class AccessControl {
     this.failures.clear();
   }
 
-  unlock(deviceId: string, input: { password?: string; token?: string }, now = Date.now()): UnlockResult {
+  async unlock(deviceId: string, input: { password?: string; token?: string }, now = Date.now()): Promise<UnlockResult> {
     const file = this.file;
     if (!file) return { ok: true, ...this.issue(deviceId, now) };
     if (input.token !== undefined && input.password === undefined) {
@@ -78,19 +124,30 @@ export class AccessControl {
     }
     const failure = this.failures.get(deviceId);
     if (failure && now - failure.since < FAILURE_WINDOW_MS && failure.count >= MAX_FAILURES) return { ok: false, reason: "throttled" };
-    if (this.matches(file, input.password ?? "")) {
+    const release = await acquireScryptSlot(this.maxConcurrentScrypt, this.maxQueuedScrypt);
+    if (!release) return { ok: false, reason: "throttled" };
+    let matched: boolean;
+    try {
+      matched = await this.matches(file, input.password ?? "");
+    } finally {
+      release();
+    }
+    // Re-check in case the password was changed or removed while scrypt ran.
+    if (this.file !== file) return { ok: false, reason: "wrong" };
+    if (matched) {
       this.failures.delete(deviceId);
       return { ok: true, ...this.issue(deviceId, now) };
     }
-    if (!failure || now - failure.since >= FAILURE_WINDOW_MS) this.failures.set(deviceId, { since: now, count: 1 });
-    else failure.count++;
+    const currentFailure = this.failures.get(deviceId);
+    if (!currentFailure || now - currentFailure.since >= FAILURE_WINDOW_MS) this.failures.set(deviceId, { since: now, count: 1 });
+    else currentFailure.count++;
     return { ok: false, reason: "wrong" };
   }
 
-  private matches(file: AccessFile, password: string): boolean {
+  private async matches(file: AccessFile, password: string): Promise<boolean> {
     if (!file.hash) return false;
     const expected = Buffer.from(file.hash, "base64");
-    const actual = scryptSync(password, Buffer.from(file.salt, "base64"), expected.length, SCRYPT);
+    const actual = await deriveScryptAsync(password, Buffer.from(file.salt, "base64"), expected.length);
     return timingSafeEqual(actual, expected);
   }
 

@@ -68,6 +68,7 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
       expect(thought).toEqual({
         sessionUpdate: "agent_thought_chunk",
         messageId: "t1",
+        replace: true,
         content: { type: "text", text: "First second third." },
       });
 
@@ -75,6 +76,7 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
       expect(msg).toEqual({
         sessionUpdate: "agent_message_chunk",
         messageId: "m1",
+        replace: true,
         content: { type: "text", text: "Hello from LinkShell!" },
       });
 
@@ -83,6 +85,7 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
         sessionUpdate: "agent_message_chunk",
         parentToolCallId: "sub-1",
         messageId: "m1",
+        replace: true,
         content: { type: "text", text: "Child A + B" },
       });
 
@@ -92,6 +95,53 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
 
       const next = store.appendEvent(sessionId, { sessionUpdate: "ls_notice", level: "info", title: "after" }, 1013);
       expect(next.seq).toBe(13);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("bounds compactTurnChunks row scans per call without splitting contiguous chunk runs", () => {
+    const dir = tempDir();
+    const store = new HostStore(join(dir, "state.db"));
+    try {
+      const sessionId = "codex:bounded-scan";
+      store.upsertSession({
+        id: sessionId,
+        agent: "codex",
+        nativeId: "bounded-scan",
+        cwd: dir,
+        createdAt: 1000,
+        updatedAt: 1000,
+      });
+
+      // Message 1: 4 chunks + ls_message_done (5 rows)
+      for (let i = 1; i <= 4; i++) {
+        store.appendEvent(sessionId, { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: `A${i}` } }, 1000 + i);
+      }
+      store.appendEvent(sessionId, { sessionUpdate: "ls_message_done", messageId: "m1", role: "agent" }, 1005);
+      // Message 2: 4 chunks (including a mid-stream replace: true) + ls_message_done (5 rows)
+      store.appendEvent(sessionId, { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "draft" } }, 1011);
+      store.appendEvent(sessionId, { sessionUpdate: "agent_message_chunk", messageId: "m2", replace: true, content: { type: "text", text: "B1B2" } }, 1012);
+      store.appendEvent(sessionId, { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "B3" } }, 1013);
+      store.appendEvent(sessionId, { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "B4" } }, 1014);
+      store.appendEvent(sessionId, { sessionUpdate: "ls_message_done", messageId: "m2", role: "agent" }, 1015);
+      store.appendEvent(sessionId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" }, 1016);
+
+      // Scan limit 7 lands inside Message 2's chunk run, so pass 1 compacts Message 1 and defers Message 2 intact.
+      const pass1 = store.compactTurnChunks(sessionId, { maxScanRows: 7 });
+      expect(pass1).toEqual({ coalescedRuns: 1, removedRows: 3 });
+
+      const pass2 = store.compactTurnChunks(sessionId, { maxScanRows: 7 });
+      expect(pass2).toEqual({ coalescedRuns: 1, removedRows: 3 });
+
+      const chunks = store
+        .readEvents(sessionId, 0, 50)
+        .filter((e) => e.update.sessionUpdate === "agent_message_chunk")
+        .map((e) => e.update);
+      expect(chunks).toEqual([
+        { sessionUpdate: "agent_message_chunk", messageId: "m1", replace: true, content: { type: "text", text: "A1A2A3A4" } },
+        { sessionUpdate: "agent_message_chunk", messageId: "m2", replace: true, content: { type: "text", text: "B1B2B3B4" } },
+      ]);
     } finally {
       store.close();
     }
@@ -160,7 +210,7 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
     }
   });
 
-  it("prunes exited terminal_frames >7d (preserving snapshots) and client_messages/removed_sessions >30d", () => {
+  it("prunes exited terminal_frames >7d, caps live terminal_frames window, retains removed_sessions by count cap, and checkpoints WAL", () => {
     const dir = tempDir();
     const dbPath = join(dir, "state.db");
     const store = new HostStore(dbPath);
@@ -186,7 +236,7 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
     store.appendTerminalFrame("term-old-exited", 1, 80, 24, "old frame");
     store.saveTerminalSnapshot("term-old-exited", { frame: 1, cols: 80, rows: 24, data: "preserved snapshot" });
 
-    // Still-running terminal (>7d activeAt, ended = false): frames preserved!
+    // Still-running terminal (ended = false): sliding window prunes older frames beyond maxTerminalFrames!
     store.saveTerminal({
       id: "term-running",
       title: "zsh",
@@ -199,9 +249,11 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
       ended: false,
       buffer: "",
     });
-    store.appendTerminalFrame("term-running", 1, 80, 24, "running frame");
+    for (let f = 1; f <= 5; f++) {
+      store.appendTerminalFrame("term-running", f, 80, 24, `running-${f}`);
+    }
 
-    // Recent exited terminal (2d ago): frames preserved!
+    // Recent exited terminal (2d ago): frames within window preserved!
     store.saveTerminal({
       id: "term-recent-exited",
       title: "zsh",
@@ -219,11 +271,12 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
     store.claimClientMessage("codex:s1", "old-msg", fortyDaysAgo);
     store.claimClientMessage("codex:s1", "fresh-msg", twoDaysAgo);
 
-    // Backdate removed_sessions directly for deterministic TTL verification.
+    // Backdate removed_sessions directly to verify >30d tombstones stay until count cap is exceeded.
     store.close();
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
       INSERT INTO removed_sessions (id, ts) VALUES
+        ('codex:oldest-removed', ${fortyDaysAgo - 1000}),
         ('codex:old-removed', ${fortyDaysAgo}),
         ('codex:fresh-removed', ${twoDaysAgo});
     `);
@@ -231,18 +284,26 @@ describe("state.db post-turn chunk compaction and lifecycle TTL maintenance", ()
 
     const reopened = new HostStore(dbPath);
     try {
-      const result = reopened.runMaintenance(now);
-      expect(result.prunedTerminalFrames).toBe(1);
-      expect(result.prunedClientMessages).toBe(1);
-      expect(result.prunedRemovedSessions).toBe(1);
+      // Default 50,000 cap keeps >30d tombstones so deleted sessions never resurrect on discovery.
+      const first = reopened.runMaintenance(now, { maxTerminalFrames: 3, idle: true });
+      expect(first.prunedTerminalFrames).toBe(3); // 1 from term-old-exited + 2 excess from term-running (frames 1,2)
+      expect(first.prunedClientMessages).toBe(1);
+      expect(first.prunedRemovedSessions).toBe(0);
+      expect(reopened.isRemoved("codex:oldest-removed")).toBe(true);
+      expect(reopened.isRemoved("codex:old-removed")).toBe(true);
+
+      // Enforcing a smaller count cap (2) prunes only the oldest tombstone.
+      const second = reopened.runMaintenance(now, { maxRemovedSessions: 2, maxTerminalFrames: 3, idle: true });
+      expect(second.prunedRemovedSessions).toBe(1);
+      expect(reopened.isRemoved("codex:oldest-removed")).toBe(false);
+      expect(reopened.isRemoved("codex:old-removed")).toBe(true);
+      expect(reopened.isRemoved("codex:fresh-removed")).toBe(true);
 
       expect(reopened.lastTerminalFrame("term-old-exited")).toBe(0);
       expect(reopened.terminalSnapshot("term-old-exited")?.data).toBe("preserved snapshot");
-      expect(reopened.lastTerminalFrame("term-running")).toBe(1);
+      expect(reopened.terminalFrames("term-running", 0, 10).map((f) => f.frame)).toEqual([3, 4, 5]);
       expect(reopened.lastTerminalFrame("term-recent-exited")).toBe(1);
 
-      expect(reopened.isRemoved("codex:old-removed")).toBe(false);
-      expect(reopened.isRemoved("codex:fresh-removed")).toBe(true);
       // Old client message id was pruned so claiming it succeeds; fresh one is still deduplicated.
       expect(reopened.claimClientMessage("codex:s1", "old-msg")).toBe(true);
       expect(reopened.claimClientMessage("codex:s1", "fresh-msg")).toBe(false);

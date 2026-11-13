@@ -6,6 +6,7 @@ import {
   CircleHelp,
   Monitor,
   Moon,
+  Search,
   Sun,
 } from "lucide-react";
 import appMark from "../../../client/assets/mark.png";
@@ -17,7 +18,16 @@ import {
 } from "../live/computer-names";
 import { readLocal, saveLocal } from "../live/storage";
 import { isDesktop } from "../live/desktop";
+import {
+  desktopShortcuts,
+  keysBelongToContent,
+  matchesShortcut,
+  sendDesktopCommand,
+  shortcutText,
+  useDesktopCommand,
+} from "../live/desktop-commands";
 import { LanguageDropdown, useT } from "../live/i18n";
+import { CommandCenter } from "./CommandCenter";
 import { DesktopShell } from "./DesktopShell";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
@@ -187,22 +197,54 @@ function WebConsoleShell({
   navigate,
   connect,
   selectComputer,
+  openComputerView,
   children,
 }: ConsoleShellProps) {
   const state = useStore(engine.state);
   const names = useStore(computerNames.store);
   const t = useT();
   const groups = useNavGroups();
-  const [theme, setTheme] = useState(() =>
-    readLocal(
-      "theme",
-      matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
-    ),
-  );
+  const [palette, setPalette] = useState(false);
+  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
+    const saved = readLocal<string>("theme", "");
+    if (saved === "light" || saved === "dark" || saved === "system") return saved;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+  const resolvedTheme =
+    theme === "system"
+      ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : theme;
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = resolvedTheme;
     saveLocal("theme", theme);
-  }, [theme]);
+  }, [resolvedTheme, theme]);
+  useDesktopCommand((command) => {
+    if (command.command === "palette") setPalette(true);
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (keysBelongToContent()) return;
+      const nonAppleCtrlK =
+        typeof navigator !== "undefined" &&
+        !/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) &&
+        !event.isComposing &&
+        event.keyCode !== 229 &&
+        event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        (event.code === "KeyK" || event.key.toLowerCase() === "k");
+      if (matchesShortcut(event, desktopShortcuts.palette) || nonAppleCtrlK) {
+        event.preventDefault();
+        setPalette((open) => !open);
+      } else if (matchesShortcut(event, desktopShortcuts.newSession)) {
+        event.preventDefault();
+        sendDesktopCommand({ command: "new-session" });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const currentComputer = state.computers.find(
     (computer) => computer.key === state.connection?.computer.key,
   );
@@ -258,6 +300,19 @@ function WebConsoleShell({
                   />
                 )}
               </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="搜索与命令"
+                    onClick={() => setPalette(true)}
+                  >
+                    <Search />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>搜索与命令 {shortcutText(desktopShortcuts.palette)}</TooltipContent>
+              </Tooltip>
               <LanguageDropdown />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -266,10 +321,10 @@ function WebConsoleShell({
                     size="icon"
                     aria-label="切换外观"
                     onClick={() =>
-                      setTheme(theme === "light" ? "dark" : "light")
+                      setTheme(resolvedTheme === "light" ? "dark" : "light")
                     }
                   >
-                    {theme === "light" ? <Moon /> : <Sun />}
+                    {resolvedTheme === "light" ? <Moon /> : <Sun />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>切换明暗外观</TooltipContent>
@@ -296,6 +351,15 @@ function WebConsoleShell({
           {children}
         </main>
       </SidebarProvider>
+      <CommandCenter
+        open={palette}
+        onOpenChange={setPalette}
+        navigate={navigate}
+        connect={connect}
+        selectComputer={selectComputer}
+        openComputerView={openComputerView}
+        setAppearance={setTheme}
+      />
     </div>
   );
 }

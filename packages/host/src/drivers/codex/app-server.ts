@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { trackChild } from "../../children.js";
 import { spawnAgent as spawn, probeAgent as execFileAsync, stopAgent } from "../../process.js";
 import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -222,11 +223,15 @@ export class CodexAppServer {
       await stopOrphan(this.options.socketPath, this.options.log);
       if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     }
+    const command = this.options.command ?? "codex";
+    const args = ["app-server", ...(await featureArgs(this.options.command, this.options.env)), "--listen", process.platform === "win32" ? "stdio://" : `unix://${this.options.socketPath}`];
+    const grouped = process.platform !== "win32";
     const child = spawn(
-      this.options.command ?? "codex",
-      ["app-server", ...(await featureArgs(this.options.command, this.options.env)), "--listen", process.platform === "win32" ? "stdio://" : `unix://${this.options.socketPath}`],
-      { env: this.options.env, windowsHide: true, stdio: [process.platform === "win32" ? "pipe" : "ignore", "pipe", "pipe"] },
+      command,
+      args,
+      { env: this.options.env, detached: grouped, windowsHide: true, stdio: [process.platform === "win32" ? "pipe" : "ignore", "pipe", "pipe"] },
     );
+    trackChild(child, "codex app-server", command, args, grouped);
     this.child = child;
     let stderrTail = "";
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -253,7 +258,7 @@ export class CodexAppServer {
     this.socket?.close();
     const child = this.child;
     this.child = undefined;
-    if (child) await stopAgent(child);
+    if (child) await stopAgent(child, { group: process.platform !== "win32" });
     if (process.platform !== "win32") rmSync(this.options.socketPath, { force: true });
   }
 

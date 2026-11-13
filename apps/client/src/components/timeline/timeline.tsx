@@ -73,7 +73,13 @@ export interface TimelineProps {
   alignEnd?: boolean;
 }
 
-export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeline(
+export interface TimelineRef {
+  scrollToEnd: (params?: Parameters<LegendListRef["scrollToEnd"]>[0]) => void;
+  scrollToIndex: (params: Parameters<LegendListRef["scrollToIndex"]>[0]) => void;
+  scrollToItemId: (itemId: string, animated?: boolean) => void;
+}
+
+export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline(
   { items, computerPreview = false, previewHeaderConsumed = false, planId, turnActive, activity, composerInset, keyboardOffset, onFailedMessage, onScroll, header, earlier, anchorEnd = true, alignEnd = anchorEnd },
   ref,
 ) {
@@ -91,7 +97,6 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   // first jump to the end can land short on a long session; keep settling
   // there until the user scrolls away, and follow new rows while pinned.
   const list = useRef<LegendListRef>(null);
-  useImperativeHandle(ref, () => list.current as LegendListRef, []);
   const pinned = useRef(anchorEnd);
   const dragging = useRef(false);
   const momentum = useRef(false);
@@ -134,6 +139,53 @@ export const Timeline = forwardRef<LegendListRef, TimelineProps>(function Timeli
   }, [waiting]);
   const visibleItems = shown.current;
   const rows = useMemo(() => buildRows(visibleItems, Date.now(), open, seams.current, turnActive), [visibleItems, open, turnActive]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const pendingScrollItemRef = useRef<{ id: string; animated: boolean } | null>(null);
+
+  const scrollToItemId = useCallback((itemId: string, animated = true) => {
+    const currentRows = rowsRef.current;
+    const directIndex = currentRows.findIndex((row) => row.type === "item" && row.item.id === itemId);
+    if (directIndex >= 0) {
+      pendingScrollItemRef.current = null;
+      pinned.current = false;
+      void list.current?.scrollToIndex({ index: directIndex, animated, viewPosition: 0.2 });
+      return;
+    }
+    const foldedRow = currentRows.find((row): row is Extract<Row, { type: "steps" }> => row.type === "steps" && row.steps.some((step) => step.id === itemId));
+    if (foldedRow) {
+      pendingScrollItemRef.current = { id: itemId, animated };
+      pinned.current = false;
+      setOpen((current) => {
+        if (current.has(foldedRow.key)) return current;
+        const next = new Set(current);
+        next.add(foldedRow.key);
+        return next;
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const pending = pendingScrollItemRef.current;
+    if (!pending) return;
+    const targetIndex = rows.findIndex((row) => row.type === "item" && row.item.id === pending.id);
+    if (targetIndex < 0) return;
+    pendingScrollItemRef.current = null;
+    const frame = requestAnimationFrame(() => {
+      void list.current?.scrollToIndex({ index: targetIndex, animated: pending.animated, viewPosition: 0.2 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [rows]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToEnd: (params) => list.current?.scrollToEnd(params),
+      scrollToIndex: (params) => list.current?.scrollToIndex(params),
+      scrollToItemId,
+    }),
+    [scrollToItemId],
+  );
 
   const toEnd = useCallback(() => {
     if (anchorEnd && pinned.current && !dragging.current && !momentum.current) {

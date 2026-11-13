@@ -167,6 +167,14 @@ const acpMethods = {
 
 const coreMethods = {
   "desktop.shutdown": { params: z.object({ pid: z.number().int().positive() }), result: empty },
+  /** Opens a local path in the chosen desktop editor, file manager, or terminal (local only). */
+  "desktop.openPath": {
+    params: z.object({
+      path: z.string().min(1),
+      app: z.enum(["default", "reveal", "cursor", "vscode", "zed", "terminal"]).optional(),
+    }),
+    result: z.object({ ok: z.boolean() }),
+  },
   "usage.summary": { params: usageQuerySchema, result: usageReportSchema },
   "liveActivities.subscribe": {
     params: liveActivitySubscriptionSchema,
@@ -203,12 +211,19 @@ const coreMethods = {
       limit: z.number().int().positive().max(200).optional(),
       /** Only sessions updated strictly before this timestamp (pagination). */
       before: z.number().optional(),
+      /** Tie-breaker session id when multiple sessions share the `before` timestamp. */
+      beforeId: z.string().optional(),
       includeArchived: z.boolean().optional(),
     }),
     result: z.object({
       sessions: z.array(sessionSummarySchema),
       nextBefore: z.number().optional(),
+      nextBeforeId: z.string().optional(),
     }),
+  },
+  "sessions.get": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.object({ session: sessionSummarySchema.optional() }),
   },
   /**
    * The models a new session of `agent` can start on, for choosing one before
@@ -243,6 +258,8 @@ const coreMethods = {
       cwd: z.string().min(1),
       prompt: z.array(contentBlockSchema).optional(),
       clientMessageId: z.string().optional(),
+      /** Client-generated idempotency key so a retried create does not spawn a duplicate session. */
+      requestId: z.string().max(128).optional(),
       /** One of `agents.models`' values; absent: the agent's own default. */
       model: z.string().optional(),
       /** Explicit choices from agents.models.config, applied before the first prompt. */
@@ -577,6 +594,20 @@ const coreMethods = {
     params: z.object({ cwd: z.string().min(1), path: z.string().min(1) }),
     result: z.object({ ok: z.boolean() }),
   },
+  /** Commits staged or specified paths inside `cwd`'s repository. */
+  "git.commit": {
+    params: z.object({
+      cwd: z.string().min(1),
+      message: z.string().min(1).max(4000),
+      stageAll: z.boolean().optional(),
+      paths: z.array(z.string().min(1)).max(500).optional(),
+    }),
+    result: z.object({
+      sha: z.string(),
+      branch: z.string().optional(),
+      summary: z.string(),
+    }),
+  },
   /** The worktrees LinkShell made, newest first. */
   "worktrees.list": { params: empty, result: z.object({ worktrees: z.array(worktreeEntrySchema) }) },
   /** Removes a worktree and its branch. Refused (`busy`) while a session uses it, or (`dirty`) when work in it would be lost, unless `force`. */
@@ -645,14 +676,17 @@ const coreMethods = {
   },
   /**
    * Saves a file from the device into `dir`. A name that's taken gets a
-   * numbered suffix ("photo 2.jpg") rather than overwriting.
+   * numbered suffix ("photo 2.jpg") rather than overwriting; subsequent chunks
+   * pass `appendPath` and `offset` so each chunk stays below the relay frame cap.
    */
   "fs.upload": {
     params: z.object({
       dir: z.string().min(1),
       name: z.string().min(1).max(255),
-      /** base64; up to ~30 MB of file. */
-      data: z.string().max(40_000_000),
+      /** base64; up to ~20 MB single-shot upload (smaller when chunked via `offset`/`appendPath`). */
+      data: z.string().max(30_000_000),
+      offset: z.number().int().nonnegative().optional(),
+      appendPath: z.string().optional(),
     }),
     result: z.object({ path: z.string(), size: z.number().int() }),
   },

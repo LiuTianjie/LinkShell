@@ -38,7 +38,7 @@ import {
   WatchCommandRejected,
   type NativeWatchStatus,
 } from "../../modules/link-layout";
-import { mergeLiveViewsIntoSessions, usePinnedSessionIds } from "./session-attention";
+import { mergeLiveViewsIntoSessions, sessionTransitionSignature, usePinnedSessionIds } from "./session-attention";
 import { holdTerminal } from "./terminal-attach";
 
 /* eslint-disable no-control-regex -- Terminal output contains ANSI escapes and backspace control bytes. */
@@ -814,6 +814,8 @@ export function useWatchStatus(): {
   return { status, refreshStatus };
 }
 
+export const WATCH_STREAM_THROTTLE_MS = 600;
+
 /** Content identity of a snapshot: the same state rebuilt later differs only in generatedAt. */
 export function watchSnapshotKey(snapshot: WatchSnapshot): string {
   const { generatedAt: _generatedAt, ...content } = snapshot;
@@ -821,40 +823,49 @@ export function watchSnapshotKey(snapshot: WatchSnapshot): string {
 }
 
 export interface WatchSnapshotScheduler {
-  /** Takes the latest builder; sends after a quiet spell, or at once if nothing was sent yet. */
-  schedule(build: () => WatchSnapshot): void;
+  /** Takes the latest builder; sends after a quiet spell / throttle window, or at once if `immediate` or nothing was sent yet. */
+  schedule(build: () => WatchSnapshot, options?: { immediate?: boolean }): void;
   /** Sends now when the content changed (or the last send is getting old). */
   flush(): Promise<boolean>;
   /** Waits for the next schedule (React committing what a command changed), then flushes. */
   flushAfterUpdate(timeoutMs: number): Promise<boolean>;
+  /** Cancels any pending scheduled timer without clearing the last sent fingerprint. */
+  cancelPending(): void;
   dispose(): void;
 }
 
 /**
  * Streaming agent output changes the views many times a second; each snapshot is a
- * full bounded rebuild and a WatchConnectivity transfer. Trailing debounce with a
- * maximum wait, and nothing sent when only the timestamp would change.
+ * full bounded rebuild and a WatchConnectivity transfer. Supports fixed-window throttling
+ * (600ms in `useIOSWatchSync`) or trailing debounce, and nothing is sent when only the timestamp would change.
  */
 export function createWatchSnapshotScheduler(
   send: (snapshot: WatchSnapshot) => Promise<unknown>,
-  options: { delayMs?: number; maxWaitMs?: number; refreshMs?: number } = {},
+  options: { delayMs?: number; maxWaitMs?: number; refreshMs?: number; throttle?: boolean } = {},
 ): WatchSnapshotScheduler {
   const delayMs = options.delayMs ?? 400;
   const maxWaitMs = options.maxWaitMs ?? 1_500;
   // The watch calls a snapshot stale after 10 minutes; an unchanged one is resent well before.
   const refreshMs = options.refreshMs ?? 4 * 60_000;
+  const throttle = options.throttle ?? false;
   let build: (() => WatchSnapshot) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let firstPendingAt: number | undefined;
+  let lastFlushAt = 0;
   let lastKey: string | undefined;
   let lastSentAt = 0;
   const waiters = new Set<() => void>();
 
-  const flush = async (): Promise<boolean> => {
+  const cancelPending = () => {
     if (timer) clearTimeout(timer);
     timer = undefined;
     firstPendingAt = undefined;
+  };
+
+  const flush = async (): Promise<boolean> => {
+    cancelPending();
     if (!build) return false;
+    lastFlushAt = Date.now();
     const snapshot = build();
     const key = watchSnapshotKey(snapshot);
     if (key === lastKey && Date.now() - lastSentAt < refreshMs) return false;
@@ -871,14 +882,25 @@ export function createWatchSnapshotScheduler(
   };
 
   return {
-    schedule(next) {
+    schedule(next, scheduleOptions) {
       build = next;
       for (const wake of [...waiters]) wake();
-      if (lastKey === undefined) {
+      if (scheduleOptions?.immediate || lastKey === undefined) {
         void flush();
         return;
       }
       const now = Date.now();
+      if (throttle) {
+        const elapsed = now - lastFlushAt;
+        if (elapsed >= delayMs) {
+          void flush();
+          return;
+        }
+        if (!timer) {
+          timer = setTimeout(() => void flush(), Math.max(0, delayMs - elapsed));
+        }
+        return;
+      }
       firstPendingAt ??= now;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void flush(), Math.max(0, Math.min(delayMs, firstPendingAt + maxWaitMs - now)));
@@ -896,9 +918,9 @@ export function createWatchSnapshotScheduler(
         waiters.add(done);
       }).then(flush);
     },
+    cancelPending,
     dispose() {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
+      cancelPending();
       for (const wake of [...waiters]) wake();
       build = undefined;
     },
@@ -992,8 +1014,57 @@ export function useIOSWatchSync(
   const heldTerminalsRef = useRef<Map<string, () => void>>(new Map());
   const heldSessionsRef = useRef<Map<string, () => void>>(new Map());
   const schedulerRef = useRef<WatchSnapshotScheduler | null>(null);
-  schedulerRef.current ??= createWatchSnapshotScheduler(syncNativeWatchSnapshot);
+  schedulerRef.current ??= createWatchSnapshotScheduler(syncNativeWatchSnapshot, {
+    delayMs: WATCH_STREAM_THROTTLE_MS,
+    maxWaitMs: WATCH_STREAM_THROTTLE_MS,
+    throttle: true,
+  });
   const scheduler = schedulerRef.current;
+  const prevTransitionRef = useRef<string | undefined>(undefined);
+  const latestRef = useRef<{ active: boolean; online: boolean; snapshotInput: BuildClientWatchSnapshotInput }>({
+    active,
+    online,
+    snapshotInput: {
+      computerKey,
+      computerName,
+      sessions,
+      terminals,
+      online,
+      views,
+      promptProgress,
+      computers,
+      agents,
+      projects,
+      homeDir,
+      terminalOutputs,
+      itemLimits,
+      focusedSessionId,
+      now,
+      pinnedSessionIds: pinned,
+    },
+  });
+  latestRef.current = {
+    active,
+    online,
+    snapshotInput: {
+      computerKey,
+      computerName,
+      sessions,
+      terminals,
+      online,
+      views,
+      promptProgress,
+      computers,
+      agents,
+      projects,
+      homeDir,
+      terminalOutputs,
+      itemLimits,
+      focusedSessionId,
+      now,
+      pinnedSessionIds: pinned,
+    },
+  };
 
   const attachForWatch = async (terminalId: string) => {
     if (!link) return;
@@ -1125,27 +1196,27 @@ export function useIOSWatchSync(
   );
 
   useEffect(() => {
-    if (!active) return;
-    scheduler.schedule(() =>
-      buildClientWatchSnapshot({
-        computerKey,
-        computerName,
-        sessions,
-        terminals,
-        online,
-        views,
-        promptProgress,
-        computers,
-        agents,
-        projects,
-        homeDir,
-        terminalOutputs,
-        itemLimits,
-        focusedSessionId,
-        now,
-        pinnedSessionIds: pinned,
-      }),
-    );
+    if (!active) {
+      prevTransitionRef.current = undefined;
+      scheduler.cancelPending();
+      return;
+    }
+    const computersKey = (computers ?? [])
+      .map((item) => `${item.key}:${item.online ? 1 : 0}:${item.selected ? 1 : 0}`)
+      .join(",");
+    const transitionKey = `${sessionTransitionSignature(
+      sessions,
+      terminals,
+      online,
+      views,
+      promptProgress,
+      computerKey,
+      computerName,
+      pinned,
+    )}\n${focusedSessionId ?? ""}\n${JSON.stringify(itemLimits)}\n${computersKey}`;
+    const immediate = prevTransitionRef.current !== transitionKey;
+    prevTransitionRef.current = transitionKey;
+    scheduler.schedule(() => buildClientWatchSnapshot(latestRef.current.snapshotInput), { immediate });
   }, [
     active,
     scheduler,
@@ -1168,20 +1239,23 @@ export function useIOSWatchSync(
   ]);
 
   useEffect(() => {
-    if (!active) return;
+    if (Platform.OS !== "ios") return;
     const heartbeat = setInterval(() => {
-      if (online) void scheduler.flush();
+      if (latestRef.current.active && latestRef.current.online) {
+        void schedulerRef.current?.flush();
+      }
     }, 30_000);
     const sub = AppState.addEventListener("change", (nextState) => {
+      if (!latestRef.current.active) return;
       if (nextState === "inactive" || nextState === "background" || nextState === "active") {
-        void scheduler.flush();
+        void schedulerRef.current?.flush();
       }
     });
     return () => {
       clearInterval(heartbeat);
       sub.remove();
     };
-  }, [active, online, scheduler]);
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== "ios") return;

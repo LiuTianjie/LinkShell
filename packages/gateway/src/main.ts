@@ -13,7 +13,7 @@ import { turnOptionsFromEnv } from "./turn.js";
 //   TURN_SECRET + TURN_URLS       lend computers a TURN server for video with no direct path: coturn's static-auth-secret,
 //                                 and its stun:/turn:/turns: URLs (comma separated). TURN_TTL_SECONDS (28800), TURN_MAX_KBPS (3000)
 //   TRUSTED_PROXIES               comma-separated proxy addresses (or IPv4 ranges, 10.0.0.0/8) whose X-Forwarded-For is believed
-//   WS_CONNECT_RATE_LIMIT_MAX / WS_CONNECT_RATE_LIMIT_WINDOW_MS   connections per address (20 per 60000 ms)
+//   WS_CONNECT_RATE_LIMIT_MAX / WS_CONNECT_RATE_LIMIT_WINDOW_MS   connections per address (60 per 60000 ms)
 //   LOG_LEVEL                     debug | info | warn | error (info)
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -55,7 +55,7 @@ const gateway = await startGateway({
   turn,
   trustedProxies: (process.env.TRUSTED_PROXIES ?? "").split(","),
   wsConnectLimit: {
-    max: Number(process.env.WS_CONNECT_RATE_LIMIT_MAX ?? 20),
+    max: Number(process.env.WS_CONNECT_RATE_LIMIT_MAX ?? 60),
     windowMs: Number(process.env.WS_CONNECT_RATE_LIMIT_WINDOW_MS ?? 60_000),
   },
 });

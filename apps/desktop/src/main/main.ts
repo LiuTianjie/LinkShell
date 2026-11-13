@@ -23,15 +23,15 @@ const server = new WorkspaceServer(runtime);
 const settings = new Map<string, unknown>();
 const keepAwake = new KeepAwake(powerSaveBlocker);
 
-// Codex's window: the toolbar row is 46px; the traffic lights sit centred on its 44px chrome.
-const TOOLBAR = 44;
+// Codex's window: the toolbar row is 46px; the traffic lights sit centred in its 46px chrome.
+const TOOLBAR = 46;
 const TRAFFIC_LIGHTS = { x: 16, y: Math.round((TOOLBAR - 14) / 2) };
 const MAC = process.platform === "darwin";
 const WINDOWS = process.platform === "win32";
 /** The page's own ground where the window is not translucent (theme.ts `background`). */
 const ground = () => (nativeTheme.shouldUseDarkColors ? "#1d1d1d" : "#f3f3f3");
 /** Windows draws its caption buttons over the page's 46 px title row (--toolbar), in the page's ink. */
-const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: 46 });
+const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: TOOLBAR });
 /** The theme the opaque ground and the caption buttons were last painted for. */
 let surfaceDark: boolean | undefined;
 
@@ -235,7 +235,7 @@ function createWindow() {
       safeDialogs: true,
     },
   });
-  window.on("closed", () => { nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; });
+  window.on("closed", () => { clearPageReadyTimer(); pageReady = false; nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
@@ -295,20 +295,21 @@ function createWindow() {
     if (wantedFullScreen !== true) send("linkshell-desktop-fullscreen", { fullscreen: false });
     reconcileFullScreen();
   });
-  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { pageReady = false; nativeModule?.screenStop(); setNativeScreenShown(false); } });
+  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { clearPageReadyTimer(); pageReady = false; nativeModule?.screenStop(); setNativeScreenShown(false); } });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
     send("linkshell-desktop-visibility", { visible });
     applyAppearance();
-    // React mounts after load; its command listeners are there a moment later.
-    setTimeout(() => {
-      pageReady = true;
-      updateWindowSurface();
-      send("linkshell-desktop-window", { fullscreen: isWindowFullScreen() });
-      if (pendingCommand) { send("linkshell-desktop-command", pendingCommand); pendingCommand = undefined; }
-    }, 300);
+    // Wait for `renderer-ready` once `useDesktopCommand` attaches its listener; keep a 2500ms fallback
+    // so an older/partial renderer still surfaces and receives any queued command.
+    if (!pageReady) {
+      clearPageReadyTimer();
+      pageReadyTimer = setTimeout(() => { markPageReady(); }, 2500);
+    }
   });
   web.on("render-process-gone", () => {
+    clearPageReadyTimer();
+    pageReady = false;
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
@@ -361,10 +362,27 @@ function guard(web: WebContents) {
 
 function startServer() {
   if (!window) return;
+  showLoading();
   server.start((url) => {
     if (!window) return;
-    void window.loadURL(url.href).catch((error: Error) => showProblem(`无法打开工作台：${error.message}`));
+    void window.loadURL(url.href).catch((error: Error & { code?: string }) => {
+      if (error.code !== "ERR_ABORTED") showProblem(`无法打开工作台：${error.message}`);
+    });
   }, (message) => showProblem(message));
+}
+
+/** Immediate themed shell shown while the local workspace server cold-starts, preventing a blank 1-3s delay. */
+function showLoading() {
+  if (!window) return;
+  const html = `<!doctype html><meta charset="utf-8"><title>LinkShell</title><style>
+    :root{color-scheme:light dark;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+    body{margin:0;height:100vh;display:grid;place-items:center;background:light-dark(#f3f3f3,#1d1d1d);color:light-dark(rgb(26 28 31/.58),rgb(223 223 223/.58));-webkit-app-region:drag;user-select:none}
+    main{display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
+    .spinner{width:14px;height:14px;border-radius:999px;border:1.5px solid light-dark(rgb(26 28 31/.16),rgb(223 223 223/.2));border-top-color:light-dark(#4c5fd5,#5263e8);animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.spinner{animation:none;border-color:light-dark(#4c5fd5,#5263e8)}}
+  </style><main><span class="spinner" aria-hidden="true"></span><span>正在打开工作台…</span></main>`;
+  void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
 }
 
 /** Shown when the page itself cannot be: the native shell has no other way to say it. */
@@ -411,6 +429,25 @@ function cameBack<T>(result: T): T {
 
 /** A command for the page; one sent before it has loaded (a second launch, --check-updates) waits for it. */
 let pendingCommand: Record<string, unknown> | undefined;
+let pageReadyTimer: ReturnType<typeof setTimeout> | undefined;
+function clearPageReadyTimer() {
+  if (!pageReadyTimer) return;
+  clearTimeout(pageReadyTimer);
+  pageReadyTimer = undefined;
+}
+function markPageReady() {
+  clearPageReadyTimer();
+  if (!window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return;
+  if (!pageReady) {
+    pageReady = true;
+    updateWindowSurface();
+    send("linkshell-desktop-window", { fullscreen: isWindowFullScreen() });
+  }
+  if (pendingCommand) {
+    send("linkshell-desktop-command", pendingCommand);
+    pendingCommand = undefined;
+  }
+}
 function command(detail: Record<string, unknown>) {
   if (pageReady) send("linkshell-desktop-command", detail);
   else pendingCommand = detail;
@@ -435,6 +472,9 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     // The page switches between the workspace and management itself; nothing native follows it.
     case "manage":
     case "workspace": return;
+    case "renderer-ready":
+      markPageReady();
+      return;
     case "appearance":
       if (WorkspacePolicy.validAppearance(message.value) && message.value !== appearance()) {
         settings.set("appearance", message.value); void saveSettings(); applyAppearance(); updateTray();

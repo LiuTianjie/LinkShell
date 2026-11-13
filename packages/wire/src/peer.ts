@@ -36,6 +36,7 @@ export type RequestHandler = (
   method: string,
   params: unknown,
   id: RpcId,
+  signal: AbortSignal,
 ) => unknown | Promise<unknown>;
 export type NotificationHandler = (method: string, params: unknown) => void;
 
@@ -62,6 +63,7 @@ interface Pending {
 export class RpcPeer {
   private nextId = 1;
   private readonly pending = new Map<RpcId, Pending>();
+  private readonly inbound = new Map<RpcId, AbortController>();
   private closed = false;
 
   constructor(private readonly options: RpcPeerOptions) {}
@@ -75,6 +77,7 @@ export class RpcPeer {
       if (limit > 0) {
         entry.timer = setTimeout(() => {
           this.pending.delete(id);
+          this.notify("$/cancelRequest", { id });
           reject(new RpcError(RPC_APP_ERROR, `请求超时（${method}，${limit} ms）`, { code: "timeout" }));
         }, limit);
       }
@@ -89,30 +92,42 @@ export class RpcPeer {
   }
 
   receive(text: string): void {
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      let message: Record<string, unknown> | Record<string, unknown>[];
-      try {
-        message = JSON.parse(line) as typeof message;
-      } catch {
-        continue;
-      }
-      if (Array.isArray(message)) {
-        if (!message.length || message.length > 128) {
-          this.write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid JSON-RPC batch" } });
-          continue;
-        }
-        const responses: Record<string, unknown>[] = [];
-        void Promise.all(message.map((entry) => Promise.resolve(this.dispatch(entry, (response) => { responses.push(response); }))))
-          .then(() => { if (responses.length) this.write(responses); });
-      } else void this.dispatch(message);
+    if (!text.includes("\n")) {
+      this.receiveLine(text);
+      return;
     }
+    for (const line of text.split("\n")) {
+      this.receiveLine(line);
+    }
+  }
+
+  private receiveLine(line: string): void {
+    if (!line || !line.trim()) return;
+    let message: Record<string, unknown> | Record<string, unknown>[];
+    try {
+      message = JSON.parse(line) as typeof message;
+    } catch {
+      return;
+    }
+    if (Array.isArray(message)) {
+      if (!message.length || message.length > 128) {
+        this.write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid JSON-RPC batch" } });
+        return;
+      }
+      const responses: Record<string, unknown>[] = [];
+      void Promise.all(message.map((entry) => Promise.resolve(this.dispatch(entry, (response) => { responses.push(response); }))))
+        .then(() => { if (responses.length) this.write(responses); });
+    } else void this.dispatch(message);
   }
 
   /** Rejects every in-flight request; later calls fail immediately. */
   close(reason = "连接已断开"): void {
     if (this.closed) return;
     this.closed = true;
+    for (const controller of this.inbound.values()) {
+      controller.abort();
+    }
+    this.inbound.clear();
     for (const [id, entry] of this.pending) {
       if (entry.timer) clearTimeout(entry.timer);
       entry.reject(new RpcError(RPC_APP_ERROR, `${reason} (${entry.method})`, { code: "closed" }));
@@ -147,6 +162,17 @@ export class RpcPeer {
     }
 
     if (id === undefined) {
+      if (method === "$/cancelRequest") {
+        const cancelId = (message.params as { id?: unknown } | null | undefined)?.id;
+        if (typeof cancelId === "string" || typeof cancelId === "number") {
+          const controller = this.inbound.get(cancelId);
+          if (controller) {
+            this.inbound.delete(cancelId);
+            controller.abort();
+          }
+        }
+        return;
+      }
       this.options.onNotification?.(method, message.params);
       return;
     }
@@ -156,14 +182,26 @@ export class RpcPeer {
       respond({ jsonrpc: "2.0", id, error: { code: RPC_METHOD_NOT_FOUND, message: `no handler for ${method}` } });
       return;
     }
+    const controller = new AbortController();
+    if (this.closed) {
+      controller.abort();
+      return;
+    }
+    this.inbound.set(id, controller);
+    const cleanup = () => {
+      if (this.inbound.get(id) === controller) this.inbound.delete(id);
+    };
     return Promise.resolve()
-      .then(() => handler(method, message.params, id))
+      .then(() => handler(method, message.params, id, controller.signal))
       .then(
         (result) => {
-          if (result === ABANDON) return;
+          cleanup();
+          if (result === ABANDON || controller.signal.aborted) return;
           respond({ jsonrpc: "2.0", id, result: result ?? {} });
         },
         (error: unknown) => {
+          cleanup();
+          if (controller.signal.aborted) return;
           const rpcError =
             error instanceof RpcError
               ? error

@@ -70,6 +70,8 @@ export interface CodexThreadState {
   midTurn?: boolean;
   /** Items seen starting and not yet finished. A tool that finishes without having been seen to start is reported whole. */
   begun?: Set<string>;
+  /** Output streamed for tools that were already running when the thread was joined mid-turn. */
+  joinedUnderWay?: Map<string, string>;
 }
 
 /**
@@ -92,6 +94,28 @@ const num = (value: unknown): number | undefined => (typeof value === "number" ?
 const obj = (value: unknown): Json | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : undefined;
 const arr = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+function tokenBreakdown(raw: Json | undefined): Extract<SessionUpdate, { sessionUpdate: "usage_update" }>["tokens"] | undefined {
+  if (!raw) return undefined;
+  const inputTokens = num(raw.inputTokens) ?? num(raw.input_tokens);
+  const outputTokens = num(raw.outputTokens) ?? num(raw.output_tokens);
+  const cachedReadTokens = num(raw.cachedInputTokens) ?? num(raw.cached_input_tokens);
+  const cachedWriteTokens = num(raw.cacheCreationInputTokens) ?? num(raw.cache_creation_input_tokens);
+  const thoughtTokens = num(raw.reasoningOutputTokens) ?? num(raw.reasoning_output_tokens);
+  const totalTokens =
+    num(raw.totalTokens) ??
+    num(raw.total_tokens) ??
+    (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
+  if (totalTokens === undefined || inputTokens === undefined || outputTokens === undefined) return undefined;
+  return {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    ...(thoughtTokens !== undefined ? { thoughtTokens } : {}),
+    ...(cachedReadTokens !== undefined ? { cachedReadTokens } : {}),
+    ...(cachedWriteTokens !== undefined ? { cachedWriteTokens } : {}),
+  };
+}
 
 export function threadStateOf(status: CodexThread["status"]): SessionState {
   switch (status?.type) {
@@ -779,11 +803,28 @@ export function mapNotification(
     }
     case "thread/tokenUsage/updated": {
       const usage = obj(params.tokenUsage);
+      const last = obj(usage?.last) ?? obj(usage?.last_token_usage);
+      const total = obj(usage?.total) ?? obj(usage?.total_token_usage);
+      const totalTokens = tokenBreakdown(total);
+      const lastTokens = tokenBreakdown(last);
+      const tokens = totalTokens ?? lastTokens;
+      const scope = totalTokens ? ("session" as const) : ("turn" as const);
+      const turnId = str(params.turnId) ?? state.activeTurnId;
+      const model = str(usage?.model) ?? str(params.model);
+      const accounting = tokens
+        ? {
+            id: scope === "session" ? `${threadId}:${turnId ?? "session"}:${tokens.totalTokens}` : (turnId ?? `${threadId}:last:${tokens.totalTokens}`),
+            scope,
+            ...(model ? { model } : {}),
+          }
+        : undefined;
       return [
         out({
           sessionUpdate: "usage_update",
-          usedTokens: num(obj(usage?.last)?.totalTokens) ?? num(obj(usage?.total)?.totalTokens),
-          contextWindow: num(usage?.modelContextWindow),
+          usedTokens: num(last?.totalTokens ?? last?.total_tokens) ?? num(total?.totalTokens ?? total?.total_tokens),
+          contextWindow: num(usage?.modelContextWindow ?? usage?.model_context_window),
+          ...(tokens ? { tokens } : {}),
+          ...(accounting ? { accounting } : {}),
         }),
       ];
     }
@@ -832,7 +873,11 @@ export function mapNotification(
       const itemId = str(params.itemId);
       const delta = str(params.delta);
       // (Without its card, output has nowhere to go: the tool is reported whole when it finishes.)
-      return itemId && delta && state.begun?.has(itemId) ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })] : [];
+      if (!itemId || !delta || !state.begun?.has(itemId)) return [];
+      if (state.joinedUnderWay?.has(itemId)) {
+        state.joinedUnderWay.set(itemId, state.joinedUnderWay.get(itemId)! + delta);
+      }
+      return [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })];
     }
     case "item/fileChange/patchUpdated": {
       const itemId = str(params.itemId);
@@ -889,7 +934,12 @@ export function mapNotification(
           return [out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "thought" }, itemId)];
         default: {
           if (item.type === "exitedReviewMode") state.reviewing = false;
-          const finish = toolFinish(item, { includeOutput: false }, lookup);
+          const streamed = state.joinedUnderWay?.get(itemId);
+          state.joinedUnderWay?.delete(itemId);
+          const finish = toolFinish(item, { includeOutput: streamed === "" }, lookup);
+          if (finish && streamed && item.type === "commandExecution" && typeof item.aggregatedOutput === "string" && item.aggregatedOutput !== streamed) {
+            finish.replaceOutput = item.aggregatedOutput;
+          }
           return finish ? [out(finish, itemId)] : [];
         }
       }

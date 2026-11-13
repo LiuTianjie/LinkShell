@@ -27,6 +27,8 @@ export class GatewayStore {
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
+      PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS peers (
         id TEXT PRIMARY KEY,
         role TEXT NOT NULL,
@@ -50,6 +52,11 @@ export class GatewayStore {
 
   close(): void {
     this.db.close();
+  }
+
+  /** Truncates the WAL when the gateway is idle so the journal cannot grow unboundedly. */
+  checkpoint(): void {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
   peer(id: string): PeerRecord | undefined {

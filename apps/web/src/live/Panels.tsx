@@ -17,7 +17,7 @@ import {
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge as PillBadge } from "@/components/ui/badge";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { subagentKey, type Locale, type SessionView } from "@linkshell/client-core";
 import type {
   GitDiffFileStatus,
@@ -47,12 +47,28 @@ import {
 import { DiffStat, DiffView, Timeline, TimelineNavigation, changeLines } from "./Timeline";
 import { diffLines, diffStat, type DiffLine } from "./line-diff";
 import { AcpSettings } from "./Acp";
+import { isImeComposing } from "./ComposerBox";
 import { optionDescription, sessionConfigLabel, valueDescription, valueName } from "./ComposerControls";
 import { useLocale, useT } from "./i18n";
 
 const KNOWN_CATEGORIES = new Set(["mode", "model", "effort"]);
 import { isDesktop } from "./desktop";
-import { ChevronRight, GitBranch, GitPullRequest, MessageSquarePlus, Play, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Columns2,
+  FolderOpen,
+  GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  LoaderCircle,
+  MessageSquarePlus,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Rows2,
+  SquareTerminal,
+  Trash2,
+} from "lucide-react";
 
 export function Commands({
   commands,
@@ -288,14 +304,19 @@ function gitStatusLabelKey(status: GitDiffFileStatus) {
 
 /**
  * What the session changed, or the live Git working-tree diff (`git.diff`), with inline
- * click-on-line review annotations, per-file revert (`git.revertFile`), and 1-click wrap-up actions.
+ * click-on-line review annotations, per-file revert (`git.revertFile`), side-by-side split view,
+ * inline git commit (`git.commit`), and 1-click wrap-up actions.
  */
 export function Changes({
   view,
   session,
+  inspectorWidth,
+  onCommitted,
 }: {
   view?: SessionView;
   session?: SessionSummary;
+  inspectorWidth?: number;
+  onCommitted?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -304,21 +325,42 @@ export function Changes({
   const actions = useActions();
   const online = useSessionOnline();
   const job = useJob();
+  const commitJob = useJob();
   const navCwd = useContext(TimelineNavigation)?.cwd;
   const cwd = session?.cwd ?? navCwd;
+  const worktreeBase = (session?.worktree as { branch: string; source: string; base?: string } | undefined)?.base;
+  const sectionRef = useRef<HTMLElement>(null);
+  const [measuredWidth, setMeasuredWidth] = useState(0);
   const [mode, setMode] = useState<"session" | "git">("session");
+  const [userPickedMode, setUserPickedMode] = useState(false);
+  const [diffViewMode, setDiffViewMode] = useState<"unified" | "split">("unified");
+  const [commitMessage, setCommitMessage] = useState("");
   const [notice, setNotice] = useState<string>();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [comments, setComments] = useState<Record<string, Record<number, string>>>({});
   const [editing, setEditing] = useState<{ key: string; lineIndex: number; draft: string } | null>(null);
 
-  const gitDiff = useLoad(
-    () =>
-      mode === "git" && online && cwd
-        ? link.call("git.diff", { cwd, includeUntracked: true })
-        : Promise.resolve(undefined),
-    [link, mode, online, cwd],
-  );
+  useEffect(() => {
+    setUserPickedMode(false);
+    setMode("session");
+    setNotice(undefined);
+  }, [session?.id, cwd]);
+
+  useEffect(() => {
+    if (inspectorWidth !== undefined || typeof ResizeObserver === "undefined") return;
+    const node = sectionRef.current;
+    if (!node) return;
+    setMeasuredWidth(node.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width;
+      if (typeof next === "number") setMeasuredWidth(Math.round(next));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [inspectorWidth]);
+
+  const effectiveWidth = inspectorWidth ?? measuredWidth;
+  const canSplit = effectiveWidth >= 640;
 
   const sessionFiles = useMemo<ShownChangeFile[]>(() => {
     const byPath = new Map<string, { path: string; lines: DiffLine[]; first?: string; last?: string; patches: DiffLine[][] }>();
@@ -341,6 +383,30 @@ export function Changes({
       return { path: entry.path, lines, stat: diffStat(lines) };
     });
   }, [view?.items]);
+
+  const shouldLoadGit = Boolean(online && cwd && (mode === "git" || sessionFiles.length === 0));
+  const gitDiff = useLoad(
+    () =>
+      shouldLoadGit && cwd
+        ? link.call("git.diff", {
+            cwd,
+            ...(worktreeBase ? { base: worktreeBase } : {}),
+            includeUntracked: true,
+          })
+        : Promise.resolve(undefined),
+    [link, shouldLoadGit, cwd, worktreeBase],
+  );
+
+  useEffect(() => {
+    if (
+      !userPickedMode &&
+      mode === "session" &&
+      sessionFiles.length === 0 &&
+      (gitDiff.value?.files.length ?? 0) > 0
+    ) {
+      setMode("git");
+    }
+  }, [userPickedMode, mode, sessionFiles.length, gitDiff.value?.files.length]);
 
   const gitFiles = useMemo<ShownChangeFile[]>(
     () =>
@@ -445,39 +511,130 @@ export function Changes({
       });
       setNotice(t("changes.reverted", { path: displayPath }));
       gitDiff.reload();
+      onCommitted?.();
+    });
+  };
+
+  const commitAll = () => {
+    const trimmed = commitMessage.trim();
+    if (!cwd || !trimmed || !online || commitJob.busy || job.busy) return;
+    setNotice(undefined);
+    void commitJob.run(async () => {
+      const res = await link.call("git.commit", {
+        cwd,
+        message: trimmed,
+        stageAll: true,
+      });
+      setCommitMessage("");
+      setComments((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith("git:")) delete next[key];
+        }
+        return next;
+      });
+      setEditing(null);
+      setNotice(`已提交 ${res.sha.slice(0, 7)}：${res.summary}`);
+      gitDiff.reload();
+      onCommitted?.();
     });
   };
 
   return (
-    <section className="changes flex flex-col gap-3">
+    <section ref={sectionRef} className="changes flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Tabs value={mode} onValueChange={(next) => { setMode(next as "session" | "git"); setEditing(null); setNotice(undefined); }}>
+        <Tabs
+          value={mode}
+          onValueChange={(next) => {
+            setUserPickedMode(true);
+            setMode(next as "session" | "git");
+            setEditing(null);
+            setNotice(undefined);
+          }}
+        >
           <TabsList aria-label={t("changes.title")}>
             <TabsTrigger value="session">{t("changes.sessionEdits")}</TabsTrigger>
             <TabsTrigger value="git" disabled={!cwd}>{t("changes.gitWorkingTree")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        {mode === "git" && (
-          <div className="flex items-center gap-1.5">
-            {gitDiff.value?.branch && (
-              <PillBadge variant="outline" className="gap-1">
-                <GitBranch className="size-3" aria-hidden />
-                {gitDiff.value.branch}
-              </PillBadge>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("common.refresh")}
-              title={t("common.refresh")}
-              disabled={!online || gitDiff.loading}
-              onClick={gitDiff.reload}
+        <div className="flex items-center gap-1.5">
+          {canSplit && files.length > 0 && (
+            <Tabs
+              value={diffViewMode}
+              onValueChange={(next) => setDiffViewMode(next as "unified" | "split")}
             >
-              <RefreshCw className={gitDiff.loading ? "animate-spin" : undefined} />
-            </Button>
-          </div>
-        )}
+              <TabsList aria-label="差异布局">
+                <TabsTrigger value="unified" title="统一视图">
+                  <Rows2 className="size-3.5" aria-hidden />
+                  统一
+                </TabsTrigger>
+                <TabsTrigger value="split" title="并排对比视图">
+                  <Columns2 className="size-3.5" aria-hidden />
+                  并排
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+          {mode === "git" && (
+            <>
+              {gitDiff.value?.branch && (
+                <PillBadge variant="outline" className="gap-1">
+                  <GitBranch className="size-3" aria-hidden />
+                  {gitDiff.value.branch}
+                </PillBadge>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("common.refresh")}
+                title={t("common.refresh")}
+                disabled={!online || gitDiff.loading}
+                onClick={gitDiff.reload}
+              >
+                <RefreshCw className={gitDiff.loading ? "animate-spin" : undefined} />
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
+      {mode === "git" && cwd && files.length > 0 && (
+        <form
+          className="git-commit-bar"
+          onSubmit={(event) => {
+            event.preventDefault();
+            commitAll();
+          }}
+        >
+          <Input
+            value={commitMessage}
+            disabled={!online || commitJob.busy || job.busy}
+            maxLength={4000}
+            aria-label="提交说明"
+            placeholder="输入提交说明（自动暂存全部改动）…"
+            onChange={(event) => setCommitMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (isImeComposing(event)) return;
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                commitAll();
+              }
+            }}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!online || commitJob.busy || job.busy || !commitMessage.trim()}
+          >
+            {commitJob.busy ? (
+              <LoaderCircle className="animate-spin" data-icon="inline-start" />
+            ) : (
+              <GitCommitHorizontal data-icon="inline-start" />
+            )}
+            {commitJob.busy ? "正在提交…" : "提交改动"}
+          </Button>
+        </form>
+      )}
 
       {session && files.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -516,7 +673,7 @@ export function Changes({
         </div>
       )}
 
-      <ErrorNotice error={job.error} />
+      <ErrorNotice error={job.error ?? commitJob.error} />
       {mode === "git" && <LoadState {...gitDiff} />}
       {notice && <p className="text-xs text-muted-foreground" role="status">{notice}</p>}
       {mode === "git" && gitDiff.value?.truncated && (
@@ -577,7 +734,7 @@ export function Changes({
                         variant="ghost"
                         size="xs"
                         className="shrink-0"
-                        disabled={!online || job.busy}
+                        disabled={!online || job.busy || commitJob.busy}
                         title={t("changes.revertFile")}
                         aria-label={`${t("changes.revertFile")} ${displayPath}`}
                         onClick={() => void revertFile(file.path)}
@@ -594,6 +751,7 @@ export function Changes({
                       <DiffView
                         lines={file.lines}
                         path={file.path}
+                        viewMode={canSplit ? diffViewMode : "unified"}
                         comments={fileComments}
                         activeLine={editing?.key === fileKey ? editing.lineIndex : null}
                         onSelectLine={(lineIndex) =>
@@ -619,6 +777,7 @@ export function Changes({
                                 )
                               }
                               onKeyDown={(event) => {
+                                if (isImeComposing(event)) return;
                                 if (event.key === "Escape") {
                                   event.preventDefault();
                                   setEditing(null);
@@ -1235,7 +1394,17 @@ function Workflow({
     </details>
   );
 }
-export function Worktrees() {
+export function Worktrees({
+  onNewSession,
+  onOpenTerminal,
+  onBrowseFiles,
+  initialEntries,
+}: {
+  onNewSession?: (cwd: string) => void;
+  onOpenTerminal?: (cwd: string) => void;
+  onBrowseFiles?: (cwd: string) => void;
+  initialEntries?: Awaited<ReturnType<ReturnType<typeof useActions>["listWorktrees"]>>;
+} = {}) {
   const t = useT();
   const dialogs = useDialogs();
   const actions = useActions();
@@ -1244,6 +1413,7 @@ export function Worktrees() {
   const online = useSessionOnline();
   const [removing, setRemoving] = useState<string>();
   const loaded = useLoad(() => actions.listWorktrees(), [store]);
+  const items = loaded.value ?? initialEntries;
   return (
     <section className="worktrees-page">
       <PageHeader
@@ -1260,7 +1430,7 @@ export function Worktrees() {
       </Button>
         </>}
       />
-      <LoadState {...loaded} />
+      {!initialEntries && <LoadState {...loaded} />}
       <ErrorNotice error={job.error} />
       {!online && (
         <p className="muted" role="status">
@@ -1268,7 +1438,7 @@ export function Worktrees() {
         </p>
       )}
       <div className="worktree-list">
-        {loaded.value?.map((entry) => (
+        {items?.map((entry) => (
           <article className="worktree-entry" key={entry.path}>
             <div className="worktree-info">
               <h2>
@@ -1287,6 +1457,39 @@ export function Worktrees() {
               </p>
             </div>
             <div className="worktree-actions">
+              {onNewSession && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!online || job.busy}
+                  onClick={() => onNewSession(entry.path)}
+                >
+                  <MessageSquarePlus data-icon="inline-start" />
+                  新建会话
+                </Button>
+              )}
+              {onOpenTerminal && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!online || job.busy}
+                  onClick={() => onOpenTerminal(entry.path)}
+                >
+                  <SquareTerminal data-icon="inline-start" />
+                  打开终端
+                </Button>
+              )}
+              {onBrowseFiles && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!online || job.busy}
+                  onClick={() => onBrowseFiles(entry.path)}
+                >
+                  <FolderOpen data-icon="inline-start" />
+                  浏览文件
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -1324,7 +1527,7 @@ export function Worktrees() {
           </article>
         ))}
       </div>
-      {loaded.value?.length === 0 && (
+      {items?.length === 0 && (
         <EmptyState
           icon={<GitBranch />}
           title="暂无独立工作目录"

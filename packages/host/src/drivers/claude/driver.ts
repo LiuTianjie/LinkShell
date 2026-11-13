@@ -1,10 +1,11 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, questionReplies, type AsyncQuestion, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
+import { trackChild } from "../../children.js";
 import { AcpDriver, inOrder } from "../acp/driver.js";
 import { AcpItemTracker, modelOption, toConfigOptions, toHistory, type SourcedConfigOption } from "../acp/mapper.js";
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
@@ -39,6 +40,18 @@ const execFileAsync = promisify(execFile);
 
 /** How the adapter's Claude marks the transcript lines it writes. */
 const REMOTE_ENTRYPOINT = '"entrypoint":"sdk-ts"';
+/** Grace window after `session/close` for late SDK JSONL flushes to disk. */
+const LATE_FLUSH_GRACE_MS = 2000;
+
+interface StreamWindow {
+  from: number;
+  closedAt: number;
+  until: number;
+  ids: Set<string>;
+  agentMessageIds: Set<string>;
+  userTexts: Set<string>;
+  externalTurnAfterClose?: boolean;
+}
 
 /** A message in the transcript that some other Claude (the desktop app, a terminal) wrote. */
 function writtenByAnotherClaude(line: string): boolean {
@@ -250,8 +263,8 @@ export class ClaudeDriver extends AcpDriver {
   private readonly backgroundAgents = new Map<string, Set<string>>();
   /** Ids of the transcript lines read lately: Claude writes some again after compacting. */
   private readonly seenLines = new Map<string, Set<string>>();
-  /** Native message times covered by this host's ACP stream, including late disk flushes. */
-  private readonly streamedTranscripts = new Map<string, { from: number; until: number }[]>();
+  /** Native message times and ids covered by this host's ACP stream, including late disk flushes. */
+  private readonly streamedTranscripts = new Map<string, StreamWindow[]>();
   private readonly claudeCommand: string;
   private readonly configDir: string;
   private readonly transcriptIndex: ClaudeTranscriptIndex;
@@ -664,9 +677,14 @@ export class ClaudeDriver extends AcpDriver {
     this.activity.delete(nativeId);
     this.reportedStates.delete(nativeId);
     this.reportedQuestions.delete(nativeId);
+    this.seenLines.delete(nativeId);
+    this.hiddenTools.delete(nativeId);
+    this.backgroundAgents.delete(nativeId);
+    this.observed.delete(nativeId);
+    this.tasks.delete(nativeId);
     await super.detach(nativeId);
     this.unwrittenSessions.delete(nativeId);
-    this.endTranscriptStream(nativeId);
+    this.streamedTranscripts.delete(nativeId);
   }
 
   /**
@@ -828,8 +846,8 @@ export class ClaudeDriver extends AcpDriver {
 
   /**
    * Stops the turn another Claude (the desktop app, a `claude` in a terminal)
-   * is running in this session, the way Ctrl-C would: asked to stop first,
-   * told to quit if it doesn't. Only ever the processes that have this session open.
+   * is running in this session, the way Ctrl-C would. Never escalates to SIGTERM,
+   * so an unmanaged user terminal or desktop app process is never terminated.
    */
   private async interruptElsewhere(nativeId: string, ask?: WaitingAsk): Promise<void> {
     // A turn waiting on a question is stopped however long it has waited; it is
@@ -851,16 +869,14 @@ export class ClaudeDriver extends AcpDriver {
       }
       return false;
     };
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
-      for (const pid of new Set(pids)) {
-        try {
-          process.kill(pid, signal);
-        } catch {
-          // Already gone.
-        }
+    for (const pid of new Set(pids)) {
+      try {
+        process.kill(pid, "SIGINT");
+      } catch {
+        // Already gone.
       }
-      if (await stopped(signal === "SIGINT" ? 6000 : 4000)) return;
     }
+    if (await stopped(6000)) return;
     throw RpcError.app("busy", "没能停下电脑上的这一轮：请在电脑上按 Esc 停止它");
   }
 
@@ -950,6 +966,22 @@ export class ClaudeDriver extends AcpDriver {
         strictMcpConfig: true,
         mcpServers: {},
         stderr: (data: string) => this.host?.log(`[claude] side: ${data.trim().slice(0, 300)}`),
+        spawnClaudeCodeProcess: (spawnOpts) => {
+          const grouped = process.platform !== "win32";
+          const child = spawn(spawnOpts.command, spawnOpts.args, {
+            cwd: spawnOpts.cwd,
+            env: spawnOpts.env as NodeJS.ProcessEnv,
+            signal: spawnOpts.signal,
+            stdio: ["pipe", "pipe", "pipe"],
+            detached: grouped,
+            windowsHide: true,
+          });
+          child.on("error", () => {});
+          child.stderr.setEncoding("utf8");
+          child.stderr.on("data", (data: string) => this.host?.log(`[claude] side: ${data.trim().slice(0, 300)}`));
+          trackChild(child, "claude side", spawnOpts.command, spawnOpts.args, grouped);
+          return child;
+        },
       },
     }) as unknown as SideQuery;
     if (typeof started.askSideQuestion !== "function") {
@@ -1063,8 +1095,7 @@ export class ClaudeDriver extends AcpDriver {
     const result = transcriptLine(line, { hidden, agents, seen });
     // Claude may flush SDK messages after session/close has returned and the
     // desktop has reclaimed it. Still record their UUIDs, but don't echo them.
-    if (result.ts !== undefined && line.includes(REMOTE_ENTRYPOINT) &&
-        this.streamedTranscripts.get(nativeId)?.some(({ from, until }) => result.ts! >= from && result.ts! <= until)) return;
+    if (line.includes(REMOTE_ENTRYPOINT) && this.isStreamedTranscriptLine(nativeId, line, result)) return;
     if (result.title) this.host?.update(this.id, nativeId, { sessionUpdate: "session_info_update", title: result.title });
     for (const update of result.updates) this.emit(nativeId, update);
     // Changed on the computer (another model, effort, permission mode): the phone shows it.
@@ -1109,6 +1140,7 @@ export class ClaudeDriver extends AcpDriver {
     }
     const target = this.stateFor(nativeId, cwd);
     if (!target.loaded) {
+      this.restoreMessageAliases(nativeId, target);
       // Leaves a little of the budget for the settings below.
       const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.routedMeta(nativeId) }, Math.max(5000, deadline - Date.now() - 8000))
         .catch((error: unknown) => {
@@ -1314,14 +1346,97 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private beginTranscriptStream(nativeId: string): void {
-    const windows = this.streamedTranscripts.get(nativeId) ?? [];
-    windows.push({ from: Date.now(), until: Infinity });
+    const now = Date.now();
+    const windows = (this.streamedTranscripts.get(nativeId) ?? []).filter((entry) => entry.until === Infinity || now - entry.until < 60_000);
+    windows.push({ from: now, closedAt: Infinity, until: Infinity, ids: new Set(), agentMessageIds: new Set(), userTexts: new Set() });
+    if (windows.length > 8) windows.splice(0, windows.length - 8);
     this.streamedTranscripts.set(nativeId, windows);
   }
 
   private endTranscriptStream(nativeId: string): void {
     const window = this.streamedTranscripts.get(nativeId)?.at(-1);
-    if (window?.until === Infinity) window.until = Date.now();
+    if (window?.until === Infinity) {
+      const now = Date.now();
+      window.closedAt = now;
+      window.until = now + LATE_FLUSH_GRACE_MS;
+    }
+  }
+
+  private recordStreamedUpdate(nativeId: string, update: SessionUpdate): void {
+    const window = this.streamedTranscripts.get(nativeId)?.at(-1);
+    if (!window || window.until !== Infinity) return;
+    if (
+      update.sessionUpdate === "agent_message_chunk" ||
+      update.sessionUpdate === "agent_thought_chunk" ||
+      update.sessionUpdate === "ls_message"
+    ) {
+      if (update.messageId) {
+        window.ids.add(update.messageId);
+        if (update.sessionUpdate !== "ls_message" || update.role !== "user") {
+          window.agentMessageIds.add(update.messageId);
+        }
+      }
+    } else if (update.sessionUpdate === "user_message_chunk") {
+      if (update.messageId) window.ids.add(update.messageId);
+      if (update.content.type === "text") {
+        const normalized = update.content.text.replace(/\s+/g, " ").trim();
+        if (normalized) window.userTexts.add(normalized);
+      }
+    } else if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      window.ids.add(update.toolCallId);
+    }
+  }
+
+  private isStreamedTranscriptLine(nativeId: string, line: string, result: { updates: SessionUpdate[]; ts?: number }): boolean {
+    const windows = this.streamedTranscripts.get(nativeId);
+    if (!windows?.length) return false;
+    let uuid: string | undefined;
+    let messageId: string | undefined;
+    const toolIds: string[] = [];
+    try {
+      const parsed = JSON.parse(line) as {
+        uuid?: unknown;
+        message?: { id?: unknown; content?: unknown };
+      };
+      if (typeof parsed.uuid === "string" && parsed.uuid) uuid = parsed.uuid;
+      if (typeof parsed.message?.id === "string" && parsed.message.id) messageId = parsed.message.id;
+      if (Array.isArray(parsed.message?.content)) {
+        for (const block of parsed.message.content as Record<string, unknown>[]) {
+          if (block?.type === "tool_use" && typeof block.id === "string") toolIds.push(block.id);
+          else if (block?.type === "tool_result" && typeof block.tool_use_id === "string") toolIds.push(block.tool_use_id);
+        }
+      }
+    } catch {
+      // Malformed line is handled by transcriptLine.
+    }
+    const userTexts = result.updates.flatMap((update) =>
+      update.sessionUpdate === "user_message_chunk" && update.content.type === "text"
+        ? [update.content.text.replace(/\s+/g, " ").trim()]
+        : [],
+    ).filter(Boolean);
+    const hasAgentBody = result.updates.some(
+      (update) =>
+        update.sessionUpdate === "agent_message_chunk" ||
+        update.sessionUpdate === "agent_thought_chunk" ||
+        update.sessionUpdate === "tool_call",
+    );
+    for (const window of windows) {
+      if (uuid && window.ids.has(uuid)) return true;
+      if (messageId && window.ids.has(messageId)) return true;
+      if (toolIds.length > 0 && toolIds.every((id) => window.ids.has(id))) return true;
+      if (result.ts === undefined) continue;
+      if (result.ts >= window.from && result.ts <= window.closedAt) return true;
+      if (result.ts > window.closedAt && result.ts <= window.until) {
+        if (userTexts.length > 0) {
+          if (userTexts.every((text) => window.userTexts.has(text))) return true;
+          window.externalTurnAfterClose = true;
+          continue;
+        }
+        if (hasAgentBody && (window.externalTurnAfterClose || (messageId && window.agentMessageIds.size > 0))) continue;
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1387,6 +1502,7 @@ export class ClaudeDriver extends AcpDriver {
   /** Mirrors remote progress to the terminal that stepped aside. */
   protected override emit(nativeId: string, update: SessionUpdate): void {
     update = this.withPage(nativeId, update);
+    this.recordStreamedUpdate(nativeId, update);
     super.emit(nativeId, update);
     if (this.modes.get(nativeId) !== "remote") return;
     const desktop = this.host?.desktop(this.id, nativeId);

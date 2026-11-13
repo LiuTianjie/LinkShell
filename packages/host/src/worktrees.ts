@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, join, relative, normalize } from "node:path";
 import { promisify } from "node:util";
@@ -59,15 +59,25 @@ export interface CreatedWorktree {
 }
 
 /** Letters, digits and dashes from a title, for a directory and branch name. */
-function slug(label: string): string {
-  const cleaned = label
+export function slug(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return "session";
+  const cleaned = trimmed
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 24)
     .replace(/-+$/, "");
-  return cleaned || "session";
+  const hasNonAscii = [...trimmed].some((ch) => ch.charCodeAt(0) > 0x7f);
+  if (cleaned.length >= 8 || (!hasNonAscii && cleaned.length > 0)) {
+    return cleaned;
+  }
+  if (!hasNonAscii) return "session";
+  // Non-ASCII / CJK titles strip down to little or no ASCII; append a stable
+  // content hash so distinct CJK sessions get distinct readable branch slugs.
+  const digest = createHash("sha256").update(trimmed).digest("hex").slice(0, 8);
+  return cleaned ? `${cleaned}-${digest}` : `s-${digest}`;
 }
 
 /**

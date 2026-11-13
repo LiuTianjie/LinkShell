@@ -441,6 +441,10 @@ export class AcpItemTracker {
       out.push({ update: { ...update, messageId } as SessionUpdate });
       return out;
     }
+    if (update.sessionUpdate === "usage_update") {
+      out.push({ update });
+      return out;
+    }
     // Any other update ends the message in progress.
     out.push(...this.close());
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
@@ -524,7 +528,12 @@ export function toHistory(
       }
       continue;
     }
-    if (update.sessionUpdate === "ls_turn" && update.state === "ended" && !update.parentToolCallId && group.length === 0 && history.length > 0) {
+    if (
+      ((update.sessionUpdate === "ls_turn" && update.state === "ended" && !update.parentToolCallId) ||
+        update.sessionUpdate === "usage_update") &&
+      group.length === 0 &&
+      history.length > 0
+    ) {
       history[history.length - 1]!.updates.push(update);
       continue;
     }

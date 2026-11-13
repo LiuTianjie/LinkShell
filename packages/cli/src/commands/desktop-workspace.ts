@@ -220,8 +220,10 @@ function proxyHost(client: WebSocket, target: string, upstreams: Set<WebSocket>)
       fail(1008, "无效的 RPC 请求"); return;
     }
     const { method, id } = message.data;
-    // Unix clients include privileged native-agent shims; this browser is only a normal client.
-    if (method.startsWith("desktop.") || !isMethodName(method)) {
+    // Unix clients include privileged native-agent shims; this browser is only a normal client
+    // (plus `desktop.openPath`, which is local-only and enforces explicit app targets on the host).
+    const allowedNotification = method === "$/cancelRequest" && id === undefined;
+    if (!allowedNotification && ((method.startsWith("desktop.") && method !== "desktop.openPath") || !isMethodName(method))) {
       if (id !== undefined && client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "不支持此操作" } }));
       }

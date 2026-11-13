@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { basename } from "node:path";
 import type {
   ProjectSummary,
@@ -12,6 +12,7 @@ import type {
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
+PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   agent TEXT NOT NULL,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   archived INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS sessions_by_updated ON sessions (updated_at DESC);
+CREATE INDEX IF NOT EXISTS sessions_by_updated_id ON sessions (updated_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS events (
   session_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
@@ -274,6 +276,47 @@ function isHistoryLoadError(update: SessionUpdate | undefined): boolean {
   return update?.sessionUpdate === "ls_error" && update.message.startsWith("读取会话消息失败：") && update.hint === "重新打开会话可重试";
 }
 
+const VISIBLE_SESSION_WHERE =
+  "NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1')";
+
+interface PreparedStatements {
+  isRemoved: StatementSync;
+  getSession: StatementSync;
+  insertSession: StatementSync;
+  listSessionsActive: StatementSync;
+  listSessionsActiveBefore: StatementSync;
+  listSessionsActiveCursor: StatementSync;
+  listSessionsAll: StatementSync;
+  listSessionsAllBefore: StatementSync;
+  listSessionsAllCursor: StatementSync;
+  sessionsForAgent: StatementSync;
+  selectLastSeq: StatementSync;
+  insertEvent: StatementSync;
+  insertEventMeta: StatementSync;
+  updateSessionSeq: StatementSync;
+  readEvents: StatementSync;
+  sizeAfter: StatementSync;
+  pageStartBatch: StatementSync;
+  markItemLogged: StatementSync;
+  isItemLogged: StatementSync;
+  claimClientMessage: StatementSync;
+  releaseClientMessage: StatementSync;
+  getDriverState: StatementSync;
+  setDriverState: StatementSync;
+  deleteDriverState: StatementSync;
+  getAgentState: StatementSync;
+  setAgentState: StatementSync;
+  clearAgentState: StatementSync;
+  saveTerminal: StatementSync;
+  appendTerminalFrame: StatementSync;
+  lastTerminalFrame: StatementSync;
+  saveTerminalSnapshot: StatementSync;
+  terminalSnapshot: StatementSync;
+  terminalFrameCandidates: StatementSync;
+  terminalFramesRange: StatementSync;
+  hasBusySession: StatementSync;
+}
+
 /**
  * Durable host state: session summaries plus one append-only event log per
  * session. Every update a client sees gets a per-session `seq`, so a client
@@ -281,11 +324,18 @@ function isHistoryLoadError(update: SessionUpdate | undefined): boolean {
  */
 export class HostStore {
   private readonly db: DatabaseSync;
+  private readonly stmts: PreparedStatements;
+  private closed = false;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
     this.migrate();
+    this.stmts = this.prepareStatements();
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
   }
 
   /** Columns added after the first release. */
@@ -301,6 +351,7 @@ export class HostStore {
       this.db.exec("ALTER TABLE event_meta ADD COLUMN tool TEXT; ALTER TABLE event_meta ADD COLUMN parent TEXT; ALTER TABLE event_meta ADD COLUMN spawns INTEGER NOT NULL DEFAULT 0;");
     }
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS sessions_by_updated_id ON sessions (updated_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS event_meta_by_tool ON event_meta (session_id, tool, seq) WHERE tool IS NOT NULL;
       CREATE INDEX IF NOT EXISTS event_meta_by_parent ON event_meta (session_id, parent, seq) WHERE parent IS NOT NULL;
       CREATE INDEX IF NOT EXISTS event_meta_spawns ON event_meta (session_id, seq) WHERE spawns = 1;
@@ -324,19 +375,160 @@ export class HostStore {
     }
   }
 
+  private prepareStatements(): PreparedStatements {
+    return {
+      isRemoved: this.db.prepare("SELECT 1 FROM removed_sessions WHERE id = ?"),
+      getSession: this.db.prepare("SELECT * FROM sessions WHERE id = ?"),
+      insertSession: this.db.prepare(
+        `INSERT INTO sessions (id, agent, native_id, title, preview, cwd, state, model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ),
+      listSessionsActive: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE} AND archived = 0
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      listSessionsActiveBefore: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE} AND archived = 0 AND updated_at < ?
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      listSessionsActiveCursor: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE} AND archived = 0
+           AND (updated_at < ? OR (updated_at = ? AND id < ?))
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      listSessionsAll: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE}
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      listSessionsAllBefore: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE} AND updated_at < ?
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      listSessionsAllCursor: this.db.prepare(
+        `SELECT * FROM sessions WHERE ${VISIBLE_SESSION_WHERE}
+           AND (updated_at < ? OR (updated_at = ? AND id < ?))
+         ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      ),
+      sessionsForAgent: this.db.prepare("SELECT * FROM sessions WHERE agent = ?"),
+      selectLastSeq: this.db.prepare("SELECT last_seq FROM sessions WHERE id = ?"),
+      insertEvent: this.db.prepare("INSERT INTO events (session_id, seq, ts, body) VALUES (?, ?, ?, ?)"),
+      insertEventMeta: this.db.prepare(
+        "INSERT INTO event_meta (session_id, seq, kind, bytes, opens_turn, tool, parent, spawns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ),
+      updateSessionSeq: this.db.prepare("UPDATE sessions SET last_seq = ?, updated_at = MAX(updated_at, ?) WHERE id = ?"),
+      readEvents: this.db.prepare(
+        "SELECT seq, ts, body FROM events WHERE session_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?",
+      ),
+      sizeAfter: this.db.prepare(
+        `SELECT COALESCE(SUM(NOT (kind IN (${STREAMED_SQL}) AND kind IS before_kind AND parent IS before_parent)), 0) AS events,
+                COALESCE(SUM(bytes), 0) + COUNT(*) * ? AS bytes
+         FROM (SELECT kind, parent, bytes, LAG(kind) OVER (ORDER BY seq) AS before_kind, LAG(parent) OVER (ORDER BY seq) AS before_parent
+               FROM event_meta WHERE session_id = ? AND seq > ?)`,
+      ),
+      pageStartBatch: this.db.prepare(
+        "SELECT seq, kind, bytes, opens_turn, parent FROM event_meta WHERE session_id = ? AND seq <= ? ORDER BY seq DESC LIMIT ?",
+      ),
+      markItemLogged: this.db.prepare("INSERT OR IGNORE INTO logged_items (session_id, item_id) VALUES (?, ?)"),
+      isItemLogged: this.db.prepare("SELECT 1 FROM logged_items WHERE session_id = ? AND item_id = ?"),
+      claimClientMessage: this.db.prepare("INSERT OR IGNORE INTO client_messages (session_id, client_message_id, ts) VALUES (?, ?, ?)"),
+      releaseClientMessage: this.db.prepare("DELETE FROM client_messages WHERE session_id = ? AND client_message_id = ?"),
+      getDriverState: this.db.prepare("SELECT value FROM driver_state WHERE session_id = ? AND key = ?"),
+      setDriverState: this.db.prepare(
+        "INSERT INTO driver_state (session_id, key, value) VALUES (?, ?, ?) ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value",
+      ),
+      deleteDriverState: this.db.prepare("DELETE FROM driver_state WHERE session_id = ? AND key = ?"),
+      getAgentState: this.db.prepare("SELECT value FROM agent_state WHERE agent = ? AND key = ?"),
+      setAgentState: this.db.prepare(
+        "INSERT INTO agent_state (agent, key, value) VALUES (?, ?, ?) ON CONFLICT (agent, key) DO UPDATE SET value = excluded.value",
+      ),
+      clearAgentState: this.db.prepare("DELETE FROM agent_state WHERE agent = ?"),
+      saveTerminal: this.db.prepare(
+        `INSERT INTO terminals (id, cwd, title, command, cols, rows, created_at, active_at, exit_code, ended, buffer, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title, cols = excluded.cols, rows = excluded.rows,
+           active_at = excluded.active_at, exit_code = excluded.exit_code, ended = excluded.ended, buffer = excluded.buffer`,
+      ),
+      appendTerminalFrame: this.db.prepare(
+        "INSERT INTO terminal_frames (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)",
+      ),
+      lastTerminalFrame: this.db.prepare("SELECT MAX(frame) AS frame FROM terminal_frames WHERE terminal_id = ?"),
+      saveTerminalSnapshot: this.db.prepare(
+        "INSERT OR REPLACE INTO terminal_snapshots (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)",
+      ),
+      terminalSnapshot: this.db.prepare("SELECT frame, cols, rows, data FROM terminal_snapshots WHERE terminal_id = ?"),
+      terminalFrameCandidates: this.db.prepare(
+        "SELECT frame, octet_length(data) AS bytes FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame LIMIT 256",
+      ),
+      terminalFramesRange: this.db.prepare(
+        "SELECT frame, cols, rows, data FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame",
+      ),
+      hasBusySession: this.db.prepare(
+        `SELECT 1 FROM sessions
+         WHERE archived = 0
+           AND state IN ('running', 'waiting')
+           AND NOT EXISTS (SELECT 1 FROM driver_state d WHERE d.session_id = sessions.id AND d.key = 'native-missing' AND d.value = '1')
+         LIMIT 1`,
+      ),
+    };
+  }
+
   // ── removal ───────────────────────────────────────────────────────
 
   /** A previous host's busy flags are not evidence that an agent is still working. */
   resetLiveSessions(): string[] {
-    const rows = this.db.prepare("SELECT id FROM sessions WHERE state IN ('running', 'waiting') OR pending_permissions > 0").all() as { id: string }[];
-    this.db.prepare("UPDATE sessions SET state = 'offline', pending_permissions = 0 WHERE state IN ('running', 'waiting') OR pending_permissions > 0").run();
-    const clearQuestions = this.db.prepare("DELETE FROM driver_state WHERE session_id = ? AND key = 'asyncQuestions'");
-    for (const { id } of rows) clearQuestions.run(id);
-    return rows.map(({ id }) => id);
+    if (this.closed) return [];
+    const now = Date.now();
+    const candidates = this.db
+      .prepare(
+        `SELECT id, state, pending_permissions FROM sessions s
+         WHERE s.state IN ('running', 'waiting')
+            OR s.pending_permissions > 0
+            OR EXISTS (SELECT 1 FROM event_meta m WHERE m.session_id = s.id AND m.kind = 'ls_permission')`,
+      )
+      .all() as { id: string; state: string; pending_permissions: number }[];
+    if (candidates.length === 0) return [];
+
+    const permEventsStmt = this.db.prepare(
+      `SELECT m.kind, json_extract(e.body, '$.requestId') AS request_id
+       FROM event_meta m
+       JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+       WHERE m.session_id = ? AND m.kind IN ('ls_permission', 'ls_permission_resolved')
+       ORDER BY m.seq ASC`,
+    );
+
+    const affected = new Set<string>();
+    for (const candidate of candidates) {
+      if (candidate.state === "running" || candidate.state === "waiting" || candidate.pending_permissions > 0) {
+        affected.add(candidate.id);
+      }
+      const permRows = permEventsStmt.all(candidate.id) as { kind: string; request_id: string | null }[];
+      const unresolved = new Set<string>();
+      for (const row of permRows) {
+        if (!row.request_id) continue;
+        if (row.kind === "ls_permission") unresolved.add(row.request_id);
+        else if (row.kind === "ls_permission_resolved") unresolved.delete(row.request_id);
+      }
+      if (unresolved.size > 0) {
+        affected.add(candidate.id);
+        // Close orphaned approval cards from a crashed/stopped host without bumping session activity.
+        for (const requestId of unresolved) {
+          this.appendEvent(candidate.id, { sessionUpdate: "ls_permission_resolved", requestId }, now, false);
+        }
+      }
+    }
+
+    this.db
+      .prepare("UPDATE sessions SET state = 'offline', pending_permissions = 0 WHERE state IN ('running', 'waiting') OR pending_permissions > 0")
+      .run();
+    for (const id of affected) {
+      this.stmts.deleteDriverState.run(id, "asyncQuestions");
+    }
+    return [...affected];
   }
 
   /** Deleted by the user: forgotten, and kept out of rediscovery. */
   removeSession(id: string): void {
+    if (this.closed) return;
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of ["sessions", "events", "event_meta", "logged_items", "driver_state", "client_messages"]) {
@@ -352,25 +544,30 @@ export class HostStore {
   }
 
   isRemoved(id: string): boolean {
-    return this.db.prepare("SELECT 1 FROM removed_sessions WHERE id = ?").get(id) !== undefined;
+    if (this.closed) return false;
+    return this.stmts.isRemoved.get(id) !== undefined;
   }
 
   /** Missing native history is reversible; never use the user's deletion tombstone. */
   setNativeMissing(id: string, missing: boolean): void {
+    if (this.closed) return;
     if (missing) this.setDriverState(id, "native-missing", "1");
-    else this.db.prepare("DELETE FROM driver_state WHERE session_id = ? AND key = 'native-missing'").run(id);
+    else this.stmts.deleteDriverState.run(id, "native-missing");
   }
 
   isNativeMissing(id: string): boolean {
+    if (this.closed) return false;
     return this.getDriverState(id, "native-missing") === "1";
   }
 
   nativeMissingSessionIds(): string[] {
+    if (this.closed) return [];
     return this.db.prepare("SELECT session_id FROM driver_state WHERE key = 'native-missing' AND value = '1'")
       .all().map((row) => String(row.session_id));
   }
 
   hasHistoryLoadErrors(id: string): boolean {
+    if (this.closed) return false;
     return this.db.prepare(`SELECT 1 FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
       WHERE m.session_id = ? AND m.kind = 'ls_error' AND json_extract(e.body, '$.message') LIKE '读取会话消息失败：%'
       AND json_extract(e.body, '$.hint') = '重新打开会话可重试' LIMIT 1`).get(id) !== undefined;
@@ -378,6 +575,7 @@ export class HostStore {
 
   /** Undo only the old subscribe path's synthetic execution failure. Keep real failed turns. */
   historyFailureRecoveryState(id: string): SessionState | undefined {
+    if (this.closed) return undefined;
     const rows = this.db.prepare(`
       SELECT e.body, next.body AS following FROM event_meta m
       JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
@@ -401,33 +599,46 @@ export class HostStore {
   }
 
   errorSessions(): SessionSummary[] {
+    if (this.closed) return [];
     return (this.db.prepare("SELECT * FROM sessions WHERE state = 'error'").all() as unknown as SessionRow[]).map(toSummary);
   }
 
   /** Keep the original log and cursors intact, but stop replaying old synthetic failures. */
   isHistoryLoadEvent(event: SessionEvent): boolean {
-    return isHistoryLoadError(event.update) || (event.update.sessionUpdate === "ls_status" && event.update.state === "error"
-      && isHistoryLoadError(this.readEvent(event.sessionId, event.seq + 1)?.update));
+    if (isHistoryLoadError(event.update)) return true;
+    if (this.closed) return false;
+    return event.update.sessionUpdate === "ls_status" && event.update.state === "error"
+      && isHistoryLoadError(this.readEvent(event.sessionId, event.seq + 1)?.update);
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 
   // ── terminals ─────────────────────────────────────────────────────
 
   saveTerminal(t: TerminalRecord): void {
-    this.db
-      .prepare(
-        `INSERT INTO terminals (id, cwd, title, command, cols, rows, created_at, active_at, exit_code, ended, buffer, session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET title = excluded.title, cols = excluded.cols, rows = excluded.rows,
-           active_at = excluded.active_at, exit_code = excluded.exit_code, ended = excluded.ended, buffer = excluded.buffer`,
-      )
-      .run(t.id, t.cwd, t.title, t.command ?? null, t.cols, t.rows, t.createdAt, t.activeAt, t.exitCode, t.ended ? 1 : 0, t.buffer, t.sessionId ?? null);
+    if (this.closed) return;
+    this.stmts.saveTerminal.run(
+      t.id,
+      t.cwd,
+      t.title,
+      t.command ?? null,
+      t.cols,
+      t.rows,
+      t.createdAt,
+      t.activeAt,
+      t.exitCode,
+      t.ended ? 1 : 0,
+      t.buffer,
+      t.sessionId ?? null,
+    );
   }
 
   listTerminals(): TerminalRecord[] {
+    if (this.closed) return [];
     const rows = this.db.prepare("SELECT * FROM terminals ORDER BY active_at DESC").all() as Record<string, unknown>[];
     return rows.map((row) => ({
       id: String(row.id),
@@ -446,41 +657,64 @@ export class HostStore {
   }
 
   appendTerminalFrame(id: string, frame: number, cols: number, rows: number, data: string): void {
-    this.db.prepare("INSERT INTO terminal_frames (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)")
-      .run(id, frame, cols, rows, data);
+    if (this.closed) return;
+    this.stmts.appendTerminalFrame.run(id, frame, cols, rows, data);
+  }
+
+  appendTerminalFrames(
+    id: string,
+    frames: readonly { frame: number; cols: number; rows: number; data: string }[],
+  ): void {
+    if (this.closed || frames.length === 0) return;
+    if (frames.length === 1) {
+      const f = frames[0]!;
+      this.stmts.appendTerminalFrame.run(id, f.frame, f.cols, f.rows, f.data);
+      return;
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const f of frames) {
+        this.stmts.appendTerminalFrame.run(id, f.frame, f.cols, f.rows, f.data);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   lastTerminalFrame(id: string): number {
-    const row = this.db.prepare("SELECT MAX(frame) AS frame FROM terminal_frames WHERE terminal_id = ?").get(id) as { frame: number | null };
+    if (this.closed) return 0;
+    const row = this.stmts.lastTerminalFrame.get(id) as { frame: number | null };
     return row.frame ?? 0;
   }
 
   saveTerminalSnapshot(id: string, snapshot: { frame: number; cols: number; rows: number; data: string }): void {
-    this.db.prepare("INSERT OR REPLACE INTO terminal_snapshots (terminal_id, frame, cols, rows, data) VALUES (?, ?, ?, ?, ?)")
-      .run(id, snapshot.frame, snapshot.cols, snapshot.rows, snapshot.data);
+    if (this.closed) return;
+    this.stmts.saveTerminalSnapshot.run(id, snapshot.frame, snapshot.cols, snapshot.rows, snapshot.data);
   }
 
   terminalSnapshot(id: string): { frame: number; cols: number; rows: number; data: string } | undefined {
-    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_snapshots WHERE terminal_id = ?")
-      .get(id) as { frame: number; cols: number; rows: number; data: string } | undefined;
+    if (this.closed) return undefined;
+    return this.stmts.terminalSnapshot.get(id) as { frame: number; cols: number; rows: number; data: string } | undefined;
   }
 
   terminalFrames(id: string, after: number, through: number): { frame: number; cols: number; rows: number; data: string }[] {
+    if (this.closed) return [];
     // Tiny PTY writes must not cost one network round trip per eight frames.
     // Read lengths first so large frames don't inflate the database read just
     // to decide where the bounded response ends.
-    const candidates = this.db.prepare("SELECT frame, octet_length(data) AS bytes FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame LIMIT 256")
-      .all(id, after, through) as { frame: number; bytes: number }[];
+    const candidates = this.stmts.terminalFrameCandidates.all(id, after, through) as { frame: number; bytes: number }[];
     let end = after, bytes = 0;
     for (const candidate of candidates) {
       if (end > after && bytes + candidate.bytes > 512 * 1024) break;
       bytes += candidate.bytes; end = candidate.frame;
     }
-    return this.db.prepare("SELECT frame, cols, rows, data FROM terminal_frames WHERE terminal_id = ? AND frame > ? AND frame <= ? ORDER BY frame")
-      .all(id, after, end) as { frame: number; cols: number; rows: number; data: string }[];
+    return this.stmts.terminalFramesRange.all(id, after, end) as { frame: number; cols: number; rows: number; data: string }[];
   }
 
   deleteTerminal(id: string): void {
+    if (this.closed) return;
     this.db.prepare("DELETE FROM terminal_snapshots WHERE terminal_id = ?").run(id);
     this.db.prepare("DELETE FROM terminal_frames WHERE terminal_id = ?").run(id);
     this.db.prepare("DELETE FROM terminals WHERE id = ?").run(id);
@@ -488,25 +722,40 @@ export class HostStore {
 
   /** Inserts a session, or refreshes discovery fields of an existing one. */
   upsertSession(input: SessionInsert): { summary: SessionSummary; created: boolean } {
+    if (this.closed) {
+      return {
+        summary: {
+          id: input.id,
+          agent: input.agent,
+          nativeId: input.nativeId,
+          title: input.title,
+          preview: input.preview,
+          cwd: input.cwd,
+          state: input.state ?? "idle",
+          pendingPermissions: 0,
+          model: input.model,
+          createdAt: input.createdAt,
+          updatedAt: input.updatedAt,
+          lastSeq: 0,
+          archived: false,
+        },
+        created: false,
+      };
+    }
     const existing = this.getSession(input.id);
     if (!existing) {
-      this.db
-        .prepare(
-          `INSERT INTO sessions (id, agent, native_id, title, preview, cwd, state, model, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          input.id,
-          input.agent,
-          input.nativeId,
-          input.title ?? null,
-          input.preview ?? null,
-          input.cwd,
-          input.state ?? "idle",
-          input.model ?? null,
-          input.createdAt,
-          input.updatedAt,
-        );
+      this.stmts.insertSession.run(
+        input.id,
+        input.agent,
+        input.nativeId,
+        input.title ?? null,
+        input.preview ?? null,
+        input.cwd,
+        input.state ?? "idle",
+        input.model ?? null,
+        input.createdAt,
+        input.updatedAt,
+      );
       return { summary: this.getSession(input.id)!, created: true };
     }
     const patch: SessionPatch = {};
@@ -521,6 +770,26 @@ export class HostStore {
   }
 
   patchSession(id: string, patch: SessionPatch): SessionSummary {
+    if (this.closed) {
+      const colon = id.indexOf(":");
+      const now = patch.updatedAt ?? Date.now();
+      return {
+        id,
+        agent: colon > 0 ? id.slice(0, colon) : "unknown",
+        nativeId: colon > 0 ? id.slice(colon + 1) : id,
+        title: (patch.customTitle ?? patch.title) ?? undefined,
+        preview: patch.preview ?? undefined,
+        cwd: patch.cwd ?? "",
+        state: patch.state ?? "offline",
+        driver: patch.driver ?? undefined,
+        pendingPermissions: patch.pendingPermissions ?? 0,
+        model: patch.model ?? undefined,
+        createdAt: now,
+        updatedAt: now,
+        lastSeq: 0,
+        archived: patch.archived ?? false,
+      };
+    }
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
     for (const [key, value] of Object.entries(patch) as [keyof SessionPatch, unknown][]) {
@@ -537,30 +806,48 @@ export class HostStore {
   }
 
   getSession(id: string): SessionSummary | undefined {
-    const row = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | undefined;
+    if (this.closed) return undefined;
+    const row = this.stmts.getSession.get(id) as SessionRow | undefined;
     return row ? toSummary(row) : undefined;
   }
 
-  listSessions(options: { limit?: number; before?: number; includeArchived?: boolean } = {}): SessionSummary[] {
-    const where: string[] = ["NOT EXISTS (SELECT 1 FROM driver_state WHERE session_id = sessions.id AND key = 'native-missing' AND value = '1')"];
-    const values: (number | string)[] = [];
-    if (!options.includeArchived) where.push("archived = 0");
-    if (options.before !== undefined) {
-      where.push("updated_at < ?");
-      values.push(options.before);
+  listSessions(
+    options: { limit?: number; before?: number; beforeId?: string; includeArchived?: boolean } = {},
+  ): SessionSummary[] {
+    if (this.closed) return [];
+    const limit = options.limit ?? 50;
+    let before = options.before;
+    const beforeId = options.beforeId;
+    if (before === undefined && beforeId !== undefined) {
+      before = this.getSession(beforeId)?.updatedAt;
     }
-    const sql = `SELECT * FROM sessions ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-      ORDER BY updated_at DESC LIMIT ?`;
-    const rows = this.db.prepare(sql).all(...values, options.limit ?? 50) as unknown as SessionRow[];
+    let rows: SessionRow[];
+    if (options.includeArchived) {
+      if (before !== undefined && beforeId !== undefined) {
+        rows = this.stmts.listSessionsAllCursor.all(before, before, beforeId, limit) as unknown as SessionRow[];
+      } else if (before !== undefined) {
+        rows = this.stmts.listSessionsAllBefore.all(before, limit) as unknown as SessionRow[];
+      } else {
+        rows = this.stmts.listSessionsAll.all(limit) as unknown as SessionRow[];
+      }
+    } else if (before !== undefined && beforeId !== undefined) {
+      rows = this.stmts.listSessionsActiveCursor.all(before, before, beforeId, limit) as unknown as SessionRow[];
+    } else if (before !== undefined) {
+      rows = this.stmts.listSessionsActiveBefore.all(before, limit) as unknown as SessionRow[];
+    } else {
+      rows = this.stmts.listSessionsActive.all(limit) as unknown as SessionRow[];
+    }
     return rows.map(toSummary);
   }
 
   sessionsForAgent(agent: string): SessionSummary[] {
-    const rows = this.db.prepare("SELECT * FROM sessions WHERE agent = ?").all(agent) as unknown as SessionRow[];
+    if (this.closed) return [];
+    const rows = this.stmts.sessionsForAgent.all(agent) as unknown as SessionRow[];
     return rows.map(toSummary);
   }
 
   listProjects(limit = 50): ProjectSummary[] {
+    if (this.closed) return [];
     const rows = this.db
       .prepare(`SELECT cwd, MIN(created_at) AS created_at,
         MAX(CASE WHEN archived = 0 THEN updated_at ELSE 0 END) AS last_active_at,
@@ -585,12 +872,14 @@ export class HostStore {
   // ── worktrees ─────────────────────────────────────────────────────
 
   saveWorktree(worktree: WorktreeRecord): void {
+    if (this.closed) return;
     this.db
       .prepare("INSERT OR REPLACE INTO worktrees (path, branch, source, source_cwd, base, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(worktree.path, worktree.branch, worktree.source, worktree.sourceCwd, worktree.base, worktree.createdAt);
   }
 
   listWorktrees(): WorktreeRecord[] {
+    if (this.closed) return [];
     const rows = this.db.prepare("SELECT * FROM worktrees ORDER BY created_at DESC").all() as Record<string, unknown>[];
     return rows.map((row) => ({
       path: String(row.path),
@@ -603,17 +892,20 @@ export class HostStore {
   }
 
   deleteWorktree(path: string): void {
+    if (this.closed) return;
     this.db.prepare("DELETE FROM worktrees WHERE path = ?").run(path);
   }
 
   /** Sessions whose directory is `path` or inside it. */
   sessionsUnder(path: string): string[] {
+    if (this.closed) return [];
     const rows = this.db.prepare("SELECT id FROM sessions WHERE cwd = ? OR substr(cwd, 1, ?) IN (?, ?)").all(path, path.length + 1, `${path}/`, `${path}\\`) as { id: string }[];
     return rows.map((row) => row.id);
   }
 
   /** The seq of the latest event that mentions message or tool call `itemId`, and how many turns had started by then. */
   locateItem(sessionId: string, itemId: string): { seq: number; turn: number } | undefined {
+    if (this.closed) return undefined;
     const tool = this.db
       .prepare("SELECT MAX(seq) AS seq FROM event_meta WHERE session_id = ? AND tool = ?")
       .get(sessionId, itemId) as { seq: number | null };
@@ -631,6 +923,7 @@ export class HostStore {
 
   /** Where the exchange that `seq` is in ends: just before the user speaks next, or the end of the session. */
   turnEnd(sessionId: string, seq: number): number {
+    if (this.closed) return seq;
     const next = this.db
       .prepare("SELECT MIN(seq) AS seq FROM event_meta WHERE session_id = ? AND kind IN ('user_message_chunk', 'ls_message') AND opens_turn = 1 AND seq > ?")
       .get(sessionId, seq) as { seq: number | null };
@@ -643,15 +936,17 @@ export class HostStore {
    * is not something happening in the session).
    */
   appendEvent(sessionId: string, update: SessionUpdate, ts = Date.now(), activity = true): SessionEvent {
-    this.db.exec("BEGIN IMMEDIATE");
+    if (this.closed) return { sessionId, seq: 1, ts, update };
+    const inOuterTx = this.db.isTransaction;
+    if (!inOuterTx) this.db.exec("BEGIN IMMEDIATE");
     try {
-      const row = this.db.prepare("SELECT last_seq FROM sessions WHERE id = ?").get(sessionId) as
+      const row = this.stmts.selectLastSeq.get(sessionId) as
         | { last_seq: number }
         | undefined;
       if (!row) throw new Error(`unknown session ${sessionId}`);
       const seq = row.last_seq + 1;
       const body = JSON.stringify(update);
-      this.db.prepare("INSERT INTO events (session_id, seq, ts, body) VALUES (?, ?, ?, ?)").run(sessionId, seq, ts, body);
+      this.stmts.insertEvent.run(sessionId, seq, ts, body);
       const fields = update as { toolCallId?: string; parentToolCallId?: string };
       const userMessage = update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "ls_message" && update.role === "user" && !update.parentToolCallId;
       const messageKey = userMessage && update.messageId ? `ls:user-present:${update.messageId}` : undefined;
@@ -659,23 +954,29 @@ export class HostStore {
       const opensTurn = newUser || (update.sessionUpdate === "ls_turn" && update.state === "started" && !fields.parentToolCallId);
       if (messageKey) this.markItemLogged(sessionId, messageKey);
       const spawns = update.sessionUpdate === "tool_call" && update.detail?.type === "subagent" && (update.detail.action ?? "spawn") === "spawn";
-      this.db
-        .prepare("INSERT INTO event_meta (session_id, seq, kind, bytes, opens_turn, tool, parent, spawns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(sessionId, seq, update.sessionUpdate, Buffer.byteLength(body), opensTurn ? 1 : 0, fields.toolCallId ?? null, fields.parentToolCallId ?? null, spawns ? 1 : 0);
-      this.db.prepare("UPDATE sessions SET last_seq = ?, updated_at = MAX(updated_at, ?) WHERE id = ?").run(seq, activity ? ts : 0, sessionId);
-      this.db.exec("COMMIT");
+      this.stmts.insertEventMeta.run(
+        sessionId,
+        seq,
+        update.sessionUpdate,
+        Buffer.byteLength(body),
+        opensTurn ? 1 : 0,
+        fields.toolCallId ?? null,
+        fields.parentToolCallId ?? null,
+        spawns ? 1 : 0,
+      );
+      this.stmts.updateSessionSeq.run(seq, activity ? ts : 0, sessionId);
+      if (!inOuterTx) this.db.exec("COMMIT");
       return { sessionId, seq, ts, update };
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      if (!inOuterTx) this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   /** Events after `afterSeq`, up to and including `upToSeq` when given. */
   readEvents(sessionId: string, afterSeq: number, limit = 5000, upToSeq = Number.MAX_SAFE_INTEGER): SessionEvent[] {
-    const rows = this.db
-      .prepare("SELECT seq, ts, body FROM events WHERE session_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?")
-      .all(sessionId, afterSeq, upToSeq, limit) as { seq: number; ts: number; body: string }[];
+    if (this.closed) return [];
+    const rows = this.stmts.readEvents.all(sessionId, afterSeq, upToSeq, limit) as { seq: number; ts: number; body: string }[];
     return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
   }
 
@@ -685,15 +986,8 @@ export class HostStore {
 
   /** How much was logged after `afterSeq`, counted as a page is (see `PageBudget`). */
   sizeAfter(sessionId: string, afterSeq: number, page: PageBudget = PAGE): { events: number; bytes: number } {
-    const row = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(NOT (kind IN (${STREAMED_SQL}) AND kind IS before_kind AND parent IS before_parent)), 0) AS events,
-                COALESCE(SUM(bytes), 0) + COUNT(*) * ? AS bytes
-         FROM (SELECT kind, parent, bytes, LAG(kind) OVER (ORDER BY seq) AS before_kind, LAG(parent) OVER (ORDER BY seq) AS before_parent
-               FROM event_meta WHERE session_id = ? AND seq > ?)`,
-      )
-      .get(page.eventOverhead, sessionId, afterSeq) as { events: number; bytes: number };
-    return row;
+    if (this.closed) return { events: 0, bytes: 0 };
+    return this.stmts.sizeAfter.get(page.eventOverhead, sessionId, afterSeq) as { events: number; bytes: number };
   }
 
   /**
@@ -702,14 +996,18 @@ export class HostStore {
    * back until one is worth showing; only a newest turn too big for a page is cut.
    */
   pageStart(sessionId: string, beforeSeq: number, page: PageBudget = PAGE): number {
-    const statement = this.db.prepare("SELECT seq, kind, bytes, opens_turn, parent FROM event_meta WHERE session_id = ? AND seq <= ? ORDER BY seq DESC LIMIT ?");
+    if (this.closed) return 0;
     const batch = 1000;
     const rows: MetaRow[] = [];
     let complete = false;
     // Read back only as far as needed: a page of streamed pieces holds many more rows than events.
     const at = (i: number): MetaRow | undefined => {
       while (i >= rows.length && !complete) {
-        const more = statement.all(sessionId, rows.length ? rows[rows.length - 1]!.seq - 1 : beforeSeq, batch) as unknown as MetaRow[];
+        const more = this.stmts.pageStartBatch.all(
+          sessionId,
+          rows.length ? rows[rows.length - 1]!.seq - 1 : beforeSeq,
+          batch,
+        ) as unknown as MetaRow[];
         rows.push(...more);
         complete = more.length < batch;
       }
@@ -767,6 +1065,7 @@ export class HostStore {
 
   /** A tool call's latest status, whether the sub-agent under it is in a turn, and when that sub-agent last did anything. */
   toolState(sessionId: string, toolCallId: string): { status?: string; ts?: number; seq?: number; turnActive?: boolean; lastChildTs?: number } {
+    if (this.closed) return {};
     const last = this.db
       .prepare(
         `SELECT e.ts, e.seq, json_extract(e.body, '$.status') AS status FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
@@ -789,6 +1088,7 @@ export class HostStore {
   }
 
   private joined(where: string, values: (string | number)[]): SessionEvent[] {
+    if (this.closed) return [];
     const rows = this.db
       .prepare(`SELECT e.seq, e.ts, e.body FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq WHERE ${where}`)
       .all(...values) as { seq: number; ts: number; body: string }[];
@@ -798,6 +1098,7 @@ export class HostStore {
 
   /** Read numeric usage only; include earlier counters to establish cumulative baselines. */
   *usageEvents(): Iterable<SessionEvent & { agent: string }> {
+    if (this.closed) return;
     const rows = this.db.prepare(`SELECT e.session_id, e.seq, e.ts, e.body, s.agent
       FROM sessions s JOIN event_meta m ON m.session_id = s.id AND m.kind = 'usage_update'
       JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
@@ -813,6 +1114,7 @@ export class HostStore {
 
   /** The latest event of `kind` at or before `seq`. */
   latestOfKind(sessionId: string, kind: SessionUpdate["sessionUpdate"], seq: number, limit = 1): SessionEvent[] {
+    if (this.closed) return [];
     const rows = this.db
       .prepare(
         `SELECT e.seq, e.ts, e.body FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
@@ -824,64 +1126,58 @@ export class HostStore {
 
   /** Marks a native item (message, tool call) as present in the log. Returns false if it already was. */
   markItemLogged(sessionId: string, itemId: string): boolean {
-    const result = this.db
-      .prepare("INSERT OR IGNORE INTO logged_items (session_id, item_id) VALUES (?, ?)")
-      .run(sessionId, itemId);
+    if (this.closed) return false;
+    const result = this.stmts.markItemLogged.run(sessionId, itemId);
     return Number(result.changes) > 0;
   }
 
   isItemLogged(sessionId: string, itemId: string): boolean {
-    return (
-      this.db.prepare("SELECT 1 FROM logged_items WHERE session_id = ? AND item_id = ?").get(sessionId, itemId) !==
-      undefined
-    );
+    if (this.closed) return false;
+    return this.stmts.isItemLogged.get(sessionId, itemId) !== undefined;
   }
 
   /** Records a client message id. Returns false when it was already delivered. */
   claimClientMessage(sessionId: string, clientMessageId: string, ts = Date.now()): boolean {
-    const result = this.db
-      .prepare("INSERT OR IGNORE INTO client_messages (session_id, client_message_id, ts) VALUES (?, ?, ?)")
-      .run(sessionId, clientMessageId, ts);
+    if (this.closed) return false;
+    const result = this.stmts.claimClientMessage.run(sessionId, clientMessageId, ts);
     return Number(result.changes) > 0;
   }
 
   /** Small per-session values a driver keeps across restarts (e.g. a transcript read offset). */
   getDriverState(sessionId: string, key: string): string | undefined {
-    const row = this.db.prepare("SELECT value FROM driver_state WHERE session_id = ? AND key = ?").get(sessionId, key) as
+    if (this.closed) return undefined;
+    const row = this.stmts.getDriverState.get(sessionId, key) as
       | { value: string }
       | undefined;
     return row?.value;
   }
 
   setDriverState(sessionId: string, key: string, value: string): void {
-    this.db
-      .prepare(
-        "INSERT INTO driver_state (session_id, key, value) VALUES (?, ?, ?) ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value",
-      )
-      .run(sessionId, key, value);
+    if (this.closed) return;
+    this.stmts.setDriverState.run(sessionId, key, value);
   }
 
   /** Small values a driver keeps for the agent as a whole across restarts (what it last said its models were). */
   getAgentState(agent: string, key: string): string | undefined {
-    const row = this.db.prepare("SELECT value FROM agent_state WHERE agent = ? AND key = ?").get(agent, key) as { value: string } | undefined;
+    if (this.closed) return undefined;
+    const row = this.stmts.getAgentState.get(agent, key) as { value: string } | undefined;
     return row?.value;
   }
 
   setAgentState(agent: string, key: string, value: string): void {
-    this.db
-      .prepare("INSERT INTO agent_state (agent, key, value) VALUES (?, ?, ?) ON CONFLICT (agent, key) DO UPDATE SET value = excluded.value")
-      .run(agent, key, value);
+    if (this.closed) return;
+    this.stmts.setAgentState.run(agent, key, value);
   }
 
   /** Forgets what was kept for an agent: another agent may come to have its id. */
   clearAgentState(agent: string): void {
-    this.db.prepare("DELETE FROM agent_state WHERE agent = ?").run(agent);
+    if (this.closed) return;
+    this.stmts.clearAgentState.run(agent);
   }
 
   releaseClientMessage(sessionId: string, clientMessageId: string): void {
-    this.db
-      .prepare("DELETE FROM client_messages WHERE session_id = ? AND client_message_id = ?")
-      .run(sessionId, clientMessageId);
+    if (this.closed) return;
+    this.stmts.releaseClientMessage.run(sessionId, clientMessageId);
   }
 
   /**
@@ -890,7 +1186,12 @@ export class HostStore {
    * single consolidated chunk row, preserving the final chunk's `seq` so
    * `lastSeq`, `fromSeq`, and `pageStart` / `sessions.history` stay monotonic.
    */
-  compactTurnChunks(sessionId: string): { coalescedRuns: number; removedRows: number } {
+  compactTurnChunks(
+    sessionId: string,
+    options: { maxScanRows?: number } = {},
+  ): { coalescedRuns: number; removedRows: number } {
+    if (this.closed) return { coalescedRuns: 0, removedRows: 0 };
+    const maxScanRows = Math.max(2, Math.trunc(options.maxScanRows ?? 5_000));
     const ended = this.db
       .prepare(
         `SELECT MAX(m.seq) AS seq FROM event_meta m
@@ -911,9 +1212,14 @@ export class HostStore {
          FROM event_meta m
          JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
          WHERE m.session_id = ? AND m.seq > ? AND m.seq <= ?
-         ORDER BY m.seq ASC`,
+         ORDER BY m.seq ASC
+         LIMIT ?`,
       )
-      .all(sessionId, afterSeq, maxEndedSeq) as { seq: number; kind: string; parent: string | null; body: string }[];
+      .all(sessionId, afterSeq, maxEndedSeq, maxScanRows) as { seq: number; kind: string; parent: string | null; body: string }[];
+    if (rows.length === 0) {
+      this.setDriverState(sessionId, "compacted-seq", String(maxEndedSeq));
+      return { coalescedRuns: 0, removedRows: 0 };
+    }
 
     type ChunkUpdate = Extract<SessionUpdate, { sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" }>;
     interface Run {
@@ -943,6 +1249,7 @@ export class HostStore {
         const mergedUpdate: ChunkUpdate = {
           ...current.lastUpdate,
           content: { ...current.lastUpdate.content, type: "text", text: mergedText },
+          replace: true,
         };
         const mergedBody = JSON.stringify(mergedUpdate);
         plans.push({
@@ -986,7 +1293,11 @@ export class HostStore {
         current.annotationsKey === annotationsKey
       ) {
         current.seqs.push(row.seq);
-        current.texts.push(parsed.content.text);
+        if (parsed.replace) {
+          current.texts = [parsed.content.text];
+        } else {
+          current.texts.push(parsed.content.text);
+        }
         current.lastUpdate = parsed;
       } else {
         flush();
@@ -1001,7 +1312,25 @@ export class HostStore {
         };
       }
     }
-    flush();
+
+    const lastScannedSeq = rows[rows.length - 1]!.seq;
+    const hitLimit = rows.length === maxScanRows && lastScannedSeq < maxEndedSeq;
+    let nextCursor: number;
+    if (!hitLimit) {
+      flush();
+      nextCursor = maxEndedSeq;
+    } else if (!current) {
+      nextCursor = lastScannedSeq;
+    } else if (current.seqs[0]! > rows[0]!.seq) {
+      // Stop right before the trailing run so the next batch coalesces it whole instead of splitting `replace: true` chunks.
+      nextCursor = current.seqs[0]! - 1;
+      current = undefined;
+    } else {
+      // A single run spans the entire batch: merge this prefix and start the next scan at keptSeq so the remainder joins it.
+      const keptSeq = current.seqs[current.seqs.length - 1]!;
+      flush();
+      nextCursor = keptSeq - 1;
+    }
 
     let removedRows = 0;
     this.db.exec("BEGIN IMMEDIATE");
@@ -1021,7 +1350,7 @@ export class HostStore {
           updMeta.run(plan.mergedBytes, sessionId, plan.keptSeq);
         }
       }
-      this.setDriverState(sessionId, "compacted-seq", String(maxEndedSeq));
+      this.setDriverState(sessionId, "compacted-seq", String(nextCursor));
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -1032,25 +1361,38 @@ export class HostStore {
   }
 
   /**
-   * Periodic database lifecycle pruning and passive WAL checkpoint:
-   * - Prunes `terminal_frames` for exited terminals older than 7 days while keeping `terminal_snapshots`.
-   * - Prunes `client_messages` and `removed_sessions` older than 30 days.
-   * - Runs `PRAGMA wal_checkpoint(PASSIVE)`.
+   * Periodic database lifecycle pruning and WAL checkpoint:
+   * - Prunes `terminal_frames` for exited terminals older than 7 days while keeping `terminal_snapshots`,
+   *   and trims any terminal's `terminal_frames` (even while `ended = 0`) to a sliding window of 8,192 frames.
+   * - Prunes `client_messages` older than 30 days.
+   * - Retains `removed_sessions` tombstones by count cap (default latest 50,000) so deleted sessions never resurrect.
+   * - Runs `PRAGMA wal_checkpoint(TRUNCATE)` when idle, or `PASSIVE` while sessions are busy.
    */
   runMaintenance(
     now = Date.now(),
-    options: { terminalFramesMaxAgeMs?: number; ephemeralMaxAgeMs?: number } = {},
+    options: {
+      terminalFramesMaxAgeMs?: number;
+      ephemeralMaxAgeMs?: number;
+      maxTerminalFrames?: number;
+      maxRemovedSessions?: number;
+      idle?: boolean;
+    } = {},
   ): { prunedTerminalFrames: number; prunedClientMessages: number; prunedRemovedSessions: number } {
+    if (this.closed) {
+      return { prunedTerminalFrames: 0, prunedClientMessages: 0, prunedRemovedSessions: 0 };
+    }
     const terminalCutoff = now - (options.terminalFramesMaxAgeMs ?? 7 * 24 * 60 * 60 * 1000);
     const ephemeralCutoff = now - (options.ephemeralMaxAgeMs ?? 30 * 24 * 60 * 60 * 1000);
+    const maxTerminalFrames = Math.max(1, Math.trunc(options.maxTerminalFrames ?? 8_192));
+    const maxRemovedSessions = Math.max(0, Math.trunc(options.maxRemovedSessions ?? 50_000));
 
-    let prunedTerminalFrames: number;
+    let prunedTerminalFrames = 0;
     let prunedClientMessages: number;
-    let prunedRemovedSessions: number;
+    let prunedRemovedSessions = 0;
 
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      prunedTerminalFrames = Number(
+      prunedTerminalFrames += Number(
         this.db
           .prepare(
             `DELETE FROM terminal_frames
@@ -1058,22 +1400,66 @@ export class HostStore {
           )
           .run(terminalCutoff).changes,
       );
+
+      const oversizedTerminals = this.db
+        .prepare(
+          `SELECT terminal_id
+           FROM terminal_frames
+           GROUP BY terminal_id
+           HAVING COUNT(*) > ?`,
+        )
+        .all(maxTerminalFrames) as { terminal_id: string }[];
+      if (oversizedTerminals.length > 0) {
+        const windowCutoffStmt = this.db.prepare(
+          `SELECT frame FROM terminal_frames
+           WHERE terminal_id = ?
+           ORDER BY frame DESC
+           LIMIT 1 OFFSET ?`,
+        );
+        const pruneWindowStmt = this.db.prepare(
+          "DELETE FROM terminal_frames WHERE terminal_id = ? AND frame < ?",
+        );
+        for (const { terminal_id: terminalId } of oversizedTerminals) {
+          const row = windowCutoffStmt.get(terminalId, maxTerminalFrames - 1) as { frame: number } | undefined;
+          if (row !== undefined) {
+            prunedTerminalFrames += Number(pruneWindowStmt.run(terminalId, row.frame).changes);
+          }
+        }
+      }
+
       prunedClientMessages = Number(
         this.db.prepare("DELETE FROM client_messages WHERE ts < ?").run(ephemeralCutoff).changes,
       );
-      prunedRemovedSessions = Number(
-        this.db.prepare("DELETE FROM removed_sessions WHERE ts < ?").run(ephemeralCutoff).changes,
-      );
+
+      const { total: totalRemoved } = this.db
+        .prepare("SELECT COUNT(*) AS total FROM removed_sessions")
+        .get() as { total: number };
+      if (totalRemoved > maxRemovedSessions) {
+        prunedRemovedSessions = Number(
+          this.db
+            .prepare(
+              `DELETE FROM removed_sessions
+               WHERE id IN (
+                 SELECT id FROM removed_sessions
+                 ORDER BY ts ASC, id ASC
+                 LIMIT ?
+               )`,
+            )
+            .run(totalRemoved - maxRemovedSessions).changes,
+        );
+      }
+
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
 
+    const isIdle = options.idle ?? !this.hasBusySession();
     try {
-      this.db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      this.db.exec(`PRAGMA wal_checkpoint(${isIdle ? "TRUNCATE" : "PASSIVE"})`);
     } catch {
-      // Passive checkpoint is best-effort and never blocks readers.
+      // Checkpoint is best-effort and never fails maintenance if another handle holds the WAL.
     }
 
     return { prunedTerminalFrames, prunedClientMessages, prunedRemovedSessions };
@@ -1081,20 +1467,13 @@ export class HostStore {
 
   /** Fast check for any non-archived stored session in `running` or `waiting` state. */
   hasBusySession(): boolean {
-    const row = this.db
-      .prepare(
-        `SELECT 1 FROM sessions
-         WHERE archived = 0
-           AND state IN ('running', 'waiting')
-           AND NOT EXISTS (SELECT 1 FROM driver_state d WHERE d.session_id = sessions.id AND d.key = 'native-missing' AND d.value = '1')
-         LIMIT 1`,
-      )
-      .get();
-    return row !== undefined;
+    if (this.closed) return false;
+    return this.stmts.hasBusySession.get() !== undefined;
   }
 
   /** Non-archived session IDs whose latest `ls_goal` record has `status === "active"`. */
   activeGoalSessionIds(): string[] {
+    if (this.closed) return [];
     const rows = this.db
       .prepare(
         `SELECT s.id
@@ -1113,6 +1492,7 @@ export class HostStore {
 
   /** Counts LinkShell-submitted turns and answered permission/question approvals within `[sinceMs, untilMs]`. */
   remoteStats(sinceMs: number, untilMs: number, agent = "all"): { remoteTurns: number; remoteApprovals: number } {
+    if (this.closed) return { remoteTurns: 0, remoteApprovals: 0 };
     const filterAgent = agent !== "all";
     const turnsRow = (filterAgent
       ? this.db

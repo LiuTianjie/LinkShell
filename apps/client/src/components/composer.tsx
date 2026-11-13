@@ -15,7 +15,8 @@ import { composerCardsHeight, composerCardsKeyboardOffset, composerViewport } fr
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useComposerDraft } from "@/lib/use-composer-draft";
 import { useIsFocused } from "expo-router/react-navigation";
-import { useConnection } from "@/lib/client";
+import type { MenuAction } from "@react-native-menu/menu";
+import { useConnection, useActions } from "@/lib/client";
 import {
   applyAtMention,
   defaultQuickPrompts,
@@ -27,17 +28,18 @@ import {
 import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from "@/lib/commands";
 import { haptics } from "@/lib/haptics";
 import { imageMimeType } from "@/lib/image-type";
+import { isRisky, isToggle, modelChipLabel, optionLabel, valueHint, valueLabel } from "@/lib/labels";
 import { useLocale, type LocalizedTriplet } from "@/lib/locale";
 import { queuedSendAction } from "@/lib/queued-send-action";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
 import { mono, radius, type } from "@/theme/type";
+import { AppMenu } from "./app-menu";
 import { Button } from "./button";
-import { ConfigSummary } from "./config-menu";
 import { Glass } from "./glass";
 import { Icon } from "./icon";
 import { PermissionActions } from "./permission-actions";
-import { PermissionContext } from "./permission-context";
+import { PermissionContext, PermissionPager } from "./permission-context";
 import { openAuthorization } from "@/lib/authorization";
 import { mergeVoiceTranscript, useVoiceInput } from "@/lib/voice-input";
 import { PlusMenu } from "./plus-menu";
@@ -61,6 +63,7 @@ export interface ComposerProps {
   turnActive: boolean;
   driver?: SessionDriver;
   permission?: PendingPermission;
+  permissions?: PendingPermission[];
   permissionCount: number;
   config: SessionConfigOption[];
   commands: { name: string; description: string; hint?: string }[];
@@ -130,9 +133,24 @@ function blockedReason(props: ComposerProps, pick: (copy: LocalizedTriplet) => s
 }
 
 export function Composer(props: ComposerProps) {
-  const { agent, turnActive, driver, permission, permissionCount, config, bottomInset } = props;
+  const { agent, turnActive, driver, permission: firstPermission, permissions: permissionList, permissionCount, config, bottomInset } = props;
   const { locale, t, pick, speechLocale } = useLocale();
   const { link } = useConnection();
+  const { setConfig } = useActions();
+  const allPermissions = useMemo(
+    () => (permissionList?.length ? permissionList : firstPermission ? [firstPermission] : []),
+    [permissionList, firstPermission],
+  );
+  const [permIndex, setPermIndex] = useState(0);
+  useEffect(() => {
+    setPermIndex(0);
+  }, [props.sessionId]);
+  useEffect(() => {
+    setPermIndex((current) => (allPermissions.length ? Math.min(current, allPermissions.length - 1) : 0));
+  }, [allPermissions.length]);
+  const safePermIndex = allPermissions.length ? Math.min(permIndex, allPermissions.length - 1) : 0;
+  const permission = allPermissions[safePermIndex];
+  const totalPermissions = Math.max(permissionCount, allPermissions.length);
   const height = useContentHeight();
   const keyboardHeight = useKeyboardState((state) => state.height);
   const viewport = composerViewport(height, keyboardHeight, bottomInset, props.accessoryHeight ?? 0, props.keyboardOffset ?? bottomInset);
@@ -233,7 +251,7 @@ export function Composer(props: ComposerProps) {
   }, [focused, commandPicked]);
 
   const addImage = async (camera: boolean) => {
-    const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true, quality: 0.8, allowsMultipleSelection: !camera, selectionLimit: 4 };
+    const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true, quality: 0.75, allowsMultipleSelection: !camera, selectionLimit: 4 };
     try {
       if (camera) {
         const permissionRes = await ImagePicker.requestCameraPermissionsAsync();
@@ -252,12 +270,18 @@ export function Composer(props: ComposerProps) {
         .map((asset) => ({ uri: asset.uri, mimeType: imageMimeType(asset.base64!, asset.mimeType), data: asset.base64! }));
       if (picked.length < result.assets.length) {
         Alert.alert(
-          pick({ zh: "有图片太大", en: "Image too large", ja: "画像サイズが大きすぎます" }),
-          pick({ zh: "单张图片不能超过 5 MB。", en: "Each image must be 5 MB or smaller.", ja: "1枚あたり 5 MB 以下にしてください。" }),
+          pick({ zh: "图片超过 5 MB 上限", en: "Image exceeds 5 MB limit", ja: "画像が 5 MB の上限を超えています" }),
+          pick({
+            zh: "单张图片不能超过 5 MB，已跳过过大的图片，请压缩或换一张更小的图片。",
+            en: "Each image must be 5 MB or smaller. Oversized images were skipped.",
+            ja: "1枚あたり 5 MB 以下にしてください。",
+          }),
         );
       }
-      setAttachments((current) => [...current, ...picked].slice(0, 4));
-      haptics.selection();
+      if (picked.length) {
+        setAttachments((current) => [...current, ...picked].slice(0, 4));
+        haptics.selection();
+      }
     } catch (error) {
       Alert.alert(pick({ zh: "没能添加图片", en: "Could not add image", ja: "画像を追加できませんでした" }), error instanceof Error ? error.message : String(error));
     }
@@ -372,11 +396,6 @@ export function Composer(props: ComposerProps) {
 
   const stop = async () => {
     haptics.medium();
-    const queued = (props.queue ?? [])
-      .filter((entry) => !entry.pending)
-      .map((entry) => entry.text)
-      .filter(Boolean);
-    if (queued.length) setText((current) => [...queued, current].filter(Boolean).join("\n\n"));
     setStopping(true);
     try {
       await props.onStop();
@@ -519,19 +538,31 @@ export function Composer(props: ComposerProps) {
 
           {props.leadingContent}
           {permission ? (
-            <View collapsable={false} style={{ flexShrink: 0 }}>
+            <View collapsable={false} style={{ flexShrink: 0, gap: 6 }}>
               {permission.questions?.length ? (
-                <QuestionCard
-                  sessionId={props.sessionId}
-                  contained
-                  key={permission.requestId}
-                  request={permission}
-                  count={permissionCount}
-                  agentName={name}
-                  disabled={!props.online}
-                  onAnswer={props.onAnswer}
-                  onChoose={props.onRespond}
-                />
+                <>
+                  {totalPermissions > 1 ? (
+                    <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 4 }}>
+                      <PermissionPager
+                        index={safePermIndex}
+                        total={totalPermissions}
+                        onPrev={() => setPermIndex((i) => Math.max(0, i - 1))}
+                        onNext={() => setPermIndex((i) => Math.min(allPermissions.length - 1, i + 1))}
+                      />
+                    </View>
+                  ) : null}
+                  <QuestionCard
+                    sessionId={props.sessionId}
+                    contained
+                    key={permission.requestId}
+                    request={permission}
+                    count={totalPermissions}
+                    agentName={name}
+                    disabled={!props.online}
+                    onAnswer={props.onAnswer}
+                    onChoose={props.onRespond}
+                  />
+                </>
               ) : (
                 <Glass style={{ borderRadius: radius.panel, padding: 14, gap: 10 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -539,9 +570,12 @@ export function Composer(props: ComposerProps) {
                     <Text numberOfLines={2} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
                       {permission.title}
                     </Text>
-                    {permissionCount > 1 ? (
-                      <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{permissionCount}</Text>
-                    ) : null}
+                    <PermissionPager
+                      index={safePermIndex}
+                      total={totalPermissions}
+                      onPrev={() => setPermIndex((i) => Math.max(0, i - 1))}
+                      onNext={() => setPermIndex((i) => Math.min(allPermissions.length - 1, i + 1))}
+                    />
                   </View>
                   <PermissionContext request={permission} />
                   <PermissionActions
@@ -640,7 +674,17 @@ export function Composer(props: ComposerProps) {
               ) : null}
               {compact && configShown.length ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }}>
-                  <ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} />
+                  <ConfigPillMenu
+                    options={configShown}
+                    allOptions={config}
+                    disabled={!props.online || !!blocked}
+                    onSelectConfig={(optionId, value) =>
+                      void setConfig(props.sessionId, optionId, value).catch((error: unknown) =>
+                        Alert.alert("切换失败", error instanceof Error ? error.message : String(error)),
+                      )
+                    }
+                    onMoreSettings={props.onSettings}
+                  />
                   <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} />
                 </View>
               ) : null}
@@ -663,7 +707,8 @@ export function Composer(props: ComposerProps) {
               accessibilityLabel={chip.label}
               onPress={() => {
                 haptics.selection();
-                void sendWithText(chip.prompt);
+                setText(chip.prompt);
+                input.current?.focus();
               }}
               onLongPress={() => {
                 haptics.selection();
@@ -675,7 +720,10 @@ export function Composer(props: ComposerProps) {
                       { text: t("common.cancel"), style: "cancel" },
                       {
                         text: pick({ zh: "填入输入框", en: "Insert into input", ja: "入力欄に挿入" }),
-                        onPress: () => setText(chip.prompt),
+                        onPress: () => {
+                          setText(chip.prompt);
+                          input.current?.focus();
+                        },
                       },
                       {
                         text: pick({ zh: "删除", en: "Delete", ja: "削除" }),
@@ -686,6 +734,7 @@ export function Composer(props: ComposerProps) {
                   );
                 } else {
                   setText(chip.prompt);
+                  input.current?.focus();
                 }
               }}
               style={({ pressed }) => ({
@@ -796,7 +845,19 @@ export function Composer(props: ComposerProps) {
                   />
                   {!compact ? (
                     <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>
-                      {configShown.length ? <ConfigSummary options={configShown} disabled={!props.online || !!blocked} onPress={props.onSettings} /> : null}
+                      {configShown.length ? (
+                        <ConfigPillMenu
+                          options={configShown}
+                          allOptions={config}
+                          disabled={!props.online || !!blocked}
+                          onSelectConfig={(optionId, value) =>
+                            void setConfig(props.sessionId, optionId, value).catch((error: unknown) =>
+                              Alert.alert("切换失败", error instanceof Error ? error.message : String(error)),
+                            )
+                          }
+                          onMoreSettings={props.onSettings}
+                        />
+                      ) : null}
                     </View>
                   ) : null}
                   {!compact ? <UsageRing used={props.usage?.usedTokens} window={props.usage?.contextWindow} /> : null}
@@ -990,5 +1051,110 @@ function TakeoverPanel({ onTakeover, onStop, stopping = false }: { onTakeover: (
         </Text>
       ) : null}
     </Glass>
+  );
+}
+
+const MENU_CATEGORY_ORDER = { model: 0, mode: 1, effort: 2, model_config: 3, other: 4 } as const;
+
+function ConfigPillMenu({
+  options,
+  allOptions,
+  disabled = false,
+  onSelectConfig,
+  onMoreSettings,
+}: {
+  options: SessionConfigOption[];
+  allOptions: SessionConfigOption[];
+  disabled?: boolean;
+  onSelectConfig: (optionId: string, value: string) => void;
+  onMoreSettings: () => void;
+}) {
+  const model = options.find((option) => option.category === "model");
+  const effort = options.find((option) => option.category === "effort");
+  const mode = options.find((option) => option.category === "mode" && !isToggle(option));
+  const risky = !!mode && isRisky(mode.current);
+  const on = options.filter((option) => isToggle(option) && option.current === "on");
+  const words = [
+    model ? modelChipLabel(model) : mode ? valueLabel(mode, mode.current) : undefined,
+    effort ? valueLabel(effort, effort.current) : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const label = options.map((option) => `${optionLabel(option)}：${valueLabel(option, option.current)}`).join("，");
+
+  const { menuActions, handlers } = useMemo(() => {
+    const map = new Map<string, () => void>();
+    const configurable = allOptions
+      .filter((option) => option.values.length > 1)
+      .sort((a, b) => MENU_CATEGORY_ORDER[a.category] - MENU_CATEGORY_ORDER[b.category]);
+    const actions: MenuAction[] = configurable.map((option) => ({
+      id: `opt:${option.id}`,
+      title: optionLabel(option),
+      subtitle: valueLabel(option, option.current),
+      image:
+        option.category === "model"
+          ? "cpu"
+          : option.category === "mode"
+            ? isRisky(option.current)
+              ? "exclamationmark.shield"
+              : "lock.shield"
+            : option.category === "effort"
+              ? "gauge.medium"
+              : undefined,
+      subactions: option.values.map((entry, idx) => {
+        const actionId = `set:${option.id}:${idx}`;
+        map.set(actionId, () => {
+          if (entry.value !== option.current) onSelectConfig(option.id, entry.value);
+        });
+        return {
+          id: actionId,
+          title: entry.group ? `${entry.group} · ${valueLabel(option, entry.value)}` : valueLabel(option, entry.value),
+          subtitle: entry.description ?? valueHint(option, entry.value),
+          state: entry.value === option.current ? ("on" as const) : ("off" as const),
+          attributes: { disabled },
+        };
+      }),
+    }));
+    map.set("__more_settings__", onMoreSettings);
+    actions.push({
+      id: "__more_settings__",
+      title: "更多设置…",
+      image: "slider.horizontal.3",
+    });
+    return { menuActions: actions, handlers: map };
+  }, [allOptions, disabled, onMoreSettings, onSelectConfig]);
+
+  const chip = (
+    <View
+      accessible
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      accessibilityLabel={`会话设置，${label}`}
+      style={{ minHeight: 44, minWidth: 0, flexShrink: 1, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 5, opacity: disabled ? 0.5 : 1 }}
+    >
+      {risky ? <Icon sf="exclamationmark.shield.fill" md="gpp_maybe" size={14} color={colors.waiting} /> : null}
+      {on.map((option) => (
+        <Icon key={option.id} sf={option.id === "plan" ? "list.bullet.clipboard" : "bolt.fill"} md={option.id === "plan" ? "checklist" : "bolt"} size={13} color={colors.accent} />
+      ))}
+      <Text numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.label, fontWeight: "600" }]}>{words || "会话设置"}</Text>
+      <Icon sf="chevron.down" md="expand_more" size={8} color={colors.tertiaryLabel} weight="bold" />
+    </View>
+  );
+
+  if (disabled) return chip;
+
+  return (
+    <AppMenu
+      title="会话设置"
+      actions={menuActions}
+      shouldOpenOnLongPress={false}
+      onOpenMenu={() => haptics.selection()}
+      onPressAction={({ nativeEvent }) => {
+        haptics.selection();
+        handlers.get(nativeEvent.event)?.();
+      }}
+    >
+      {chip}
+    </AppMenu>
   );
 }

@@ -249,6 +249,8 @@ export class CodexDriver implements AgentDriver {
   private readonly approvals = new Map<string, PendingApproval>();
   /** Recent tool titles by item, so a file-change approval can name its files. */
   private readonly toolTitles = new Map<string, string>();
+  /** Tool call ids remembered per root thread, evicted when the thread detaches. */
+  private readonly threadTools = new Map<string, Set<string>>();
   private readonly settings = new Map<string, CodexSettings>();
   /** What a device chose for each thread; kept in the host's state so a restart before the next turn doesn't lose it. */
   private readonly overrides = new Map<string, CodexOverrides>();
@@ -593,15 +595,25 @@ export class CodexDriver implements AgentDriver {
     state.activeTurnId = active?.id;
     state.midTurn = active ? true : undefined;
     state.begun = undefined;
+    state.joinedUnderWay = undefined;
     // A turn already running: the session shows as working, and its end has a start to close.
     if (active) this.host?.update(this.id, threadId, { sessionUpdate: "ls_turn", state: "started", turnId: active.id });
     this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: threadStateOf(thread.status) });
     this.announceQuestions(threadId, thread, true);
     const read = new Set((thread.turns ?? []).flatMap((turn) => turn.items.map((item) => item.id)));
     for (const item of underWay) {
-      // A command still running: its card. (Its output so far was missed, so the whole of it comes when it finishes.)
-      const start = read.has(item.id) ? undefined : toolStart(item, this.mcpApps.lookup(threadId));
-      if (start) this.host?.update(this.id, threadId, start);
+      const start = typeof item.id === "string" && read.has(item.id) ? undefined : toolStart(item, this.mcpApps.lookup(threadId));
+      if (start) {
+        (state.begun ??= new Set()).add(start.toolCallId);
+        const initialOutput = item.type === "commandExecution" && typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "";
+        (state.joinedUnderWay ??= new Map()).set(start.toolCallId, initialOutput);
+        this.rememberTitle(threadId, start.toolCallId, start.title);
+        const seeded = this.rememberSpawn(threadId, start);
+        this.host?.update(this.id, threadId, seeded);
+        if (initialOutput) {
+          this.host?.update(this.id, threadId, { sessionUpdate: "tool_call_update", toolCallId: start.toolCallId, appendOutput: initialOutput });
+        }
+      }
     }
     const held = this.joining.get(threadId) ?? [];
     this.joining.delete(threadId);
@@ -1161,12 +1173,29 @@ export class CodexDriver implements AgentDriver {
     });
   }
 
+  private clearThreadCaches(nativeId: string): void {
+    const toolIds = this.threadTools.get(nativeId);
+    if (toolIds) {
+      this.threadTools.delete(nativeId);
+      for (const id of toolIds) {
+        this.toolTitles.delete(id);
+        this.spawnDetails.delete(id);
+      }
+    }
+    this.threads.delete(nativeId);
+    this.joining.delete(nativeId);
+    for (const [childId, parent] of this.children) {
+      if (parent.threadId === nativeId) this.threads.delete(childId);
+    }
+  }
+
   async detach(nativeId: string): Promise<void> {
     clearTimeout(this.taskPolls.get(nativeId));
     this.taskPolls.delete(nativeId);
     this.taskProcesses.delete(nativeId);
     this.cancelRelease(nativeId);
     this.stopObserving(nativeId);
+    this.clearThreadCaches(nativeId);
     if (!this.attached.delete(nativeId)) return;
     await this.rpcFor(nativeId, "thread/unsubscribe", { threadId: nativeId }).catch(() => {});
   }
@@ -1792,6 +1821,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   async delete(nativeId: string): Promise<void> {
+    this.clearThreadCaches(nativeId);
     await this.rpcFor(nativeId, "thread/delete", { threadId: nativeId });
   }
 
@@ -2067,7 +2097,7 @@ export class CodexDriver implements AgentDriver {
           ? { ...mapped.update, requestId: sharedRequestId(mapped.update.requestId) }
           : mapped.update;
       if (update.sessionUpdate === "ls_goal" && !this.isNews(`goal:${mapped.threadId}`, update.goal)) continue;
-      if (update.sessionUpdate === "tool_call") this.rememberTitle(update.toolCallId, update.title);
+      if (update.sessionUpdate === "tool_call") this.rememberTitle(mapped.threadId, update.toolCallId, update.title);
       if (update.sessionUpdate === "ls_permission_resolved") {
         const pending = this.approvals.get(update.requestId);
         if (pending) {
@@ -2076,7 +2106,7 @@ export class CodexDriver implements AgentDriver {
           pending.abandon();
         }
       }
-      update = this.rememberSpawn(update);
+      update = this.rememberSpawn(mapped.threadId, update);
       const parent = this.children.get(mapped.threadId);
       if (parent) {
         const nested = nestUnder(update, parent.toolCallId);
@@ -2096,10 +2126,18 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
+  private trackThreadTool(threadId: string, toolCallId: string): void {
+    const root = this.children.get(threadId)?.threadId ?? threadId;
+    let ids = this.threadTools.get(root);
+    if (!ids) this.threadTools.set(root, (ids = new Set()));
+    ids.add(toolCallId);
+  }
+
   /** Keeps a spawn card's detail; a later report of the call keeps the running state already said on it. */
-  private rememberSpawn(update: SessionUpdate): SessionUpdate {
+  private rememberSpawn(threadId: string, update: SessionUpdate): SessionUpdate {
     if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return update;
     if (update.detail?.type !== "subagent" || update.detail.action !== "spawn") return update;
+    this.trackThreadTool(threadId, update.toolCallId);
     const known = this.spawnDetails.get(update.toolCallId);
     const detail = { ...update.detail, ...(known?.state ? { state: known.state, nativeSessionId: known.nativeSessionId, canCancel: known.canCancel } : {}) };
     this.spawnDetails.delete(update.toolCallId);
@@ -2137,6 +2175,7 @@ export class CodexDriver implements AgentDriver {
     const last = child.turns?.at(-1);
     const state = last?.status === "interrupted" ? "stopped" as const : last?.status === "failed" ? "failed" as const : "completed" as const;
     const next = { type: "subagent" as const, action: "spawn" as const, ...detail, nativeSessionId: childId, canCancel: false, state };
+    this.trackThreadTool(threadId, callId);
     this.spawnDetails.set(callId, next);
     this.host?.update(this.id, threadId, { sessionUpdate: "tool_call_update", toolCallId: callId, detail: next });
   }
@@ -2213,7 +2252,8 @@ export class CodexDriver implements AgentDriver {
     }
   }
 
-  private rememberTitle(toolCallId: string, title: string): void {
+  private rememberTitle(threadId: string, toolCallId: string, title: string): void {
+    this.trackThreadTool(threadId, toolCallId);
     this.toolTitles.delete(toolCallId);
     this.toolTitles.set(toolCallId, title);
     if (this.toolTitles.size > 200) this.toolTitles.delete(this.toolTitles.keys().next().value!);

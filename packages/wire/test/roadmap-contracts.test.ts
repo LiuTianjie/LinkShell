@@ -11,6 +11,7 @@ import {
   methods,
   notifications,
   RELAY_PATH,
+  serverFrameSchema,
   usageReportSchema,
   wakeupNoticeSchema,
 } from "../src/index.js";
@@ -291,5 +292,49 @@ describe("new host RPC methods & LSA Phase 1 contracts", () => {
         followups: [{ id: "fu-1", taskId: task.id, dueAt: 1_760_086_400_000, note: "Verify prod metrics", done: false }],
       }).followups[0]?.done,
     ).toBe(false);
+  });
+
+  it("validates sessions.get, pagination beforeId, chunked fs.upload, git.commit, desktop.openPath, and undeliverable channel", () => {
+    expect(isMethodName("sessions.get")).toBe(true);
+    expect(isMethodName("git.commit")).toBe(true);
+    expect(isMethodName("desktop.openPath")).toBe(true);
+
+    expect(methods["sessions.list"].params.parse({ limit: 50, before: 1000, beforeId: "codex:1" })).toEqual({
+      limit: 50,
+      before: 1000,
+      beforeId: "codex:1",
+    });
+    expect(methods["sessions.list"].result.parse({ sessions: [], nextBefore: 900, nextBeforeId: "codex:0" })).toEqual({
+      sessions: [],
+      nextBefore: 900,
+      nextBeforeId: "codex:0",
+    });
+    expect(methods["sessions.get"].params.parse({ sessionId: "codex:1" })).toEqual({ sessionId: "codex:1" });
+    expect(methods["sessions.get"].result.parse({})).toEqual({});
+
+    expect(
+      methods["sessions.create"].params.parse({ agent: "codex", cwd: "/repo", requestId: "req-create-1" }),
+    ).toEqual({ agent: "codex", cwd: "/repo", requestId: "req-create-1" });
+
+    expect(
+      methods["fs.upload"].params.parse({ dir: "/tmp", name: "video.mp4", data: "AAAA", offset: 1024, appendPath: "/tmp/video.mp4" }),
+    ).toEqual({ dir: "/tmp", name: "video.mp4", data: "AAAA", offset: 1024, appendPath: "/tmp/video.mp4" });
+    expect(
+      methods["fs.upload"].params.safeParse({ dir: "/tmp", name: "huge.bin", data: "A".repeat(30_000_001) }).success,
+    ).toBe(false);
+
+    expect(
+      methods["git.commit"].params.parse({ cwd: "/repo", message: "feat: commit from phone", stageAll: true, paths: ["src/a.ts"] }),
+    ).toEqual({ cwd: "/repo", message: "feat: commit from phone", stageAll: true, paths: ["src/a.ts"] });
+    expect(
+      methods["git.commit"].result.parse({ sha: "abc1234", branch: "main", summary: "1 file changed" }),
+    ).toEqual({ sha: "abc1234", branch: "main", summary: "1 file changed" });
+
+    expect(methods["desktop.openPath"].params.parse({ path: "/repo", app: "cursor" })).toEqual({ path: "/repo", app: "cursor" });
+    expect(methods["desktop.openPath"].result.parse({ ok: true })).toEqual({ ok: true });
+
+    expect(
+      serverFrameSchema.parse({ t: "undeliverable", to: "peer-1", reason: "offline", channel: "ch-1" }),
+    ).toEqual({ t: "undeliverable", to: "peer-1", reason: "offline", channel: "ch-1" });
   });
 });

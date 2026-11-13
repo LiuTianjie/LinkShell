@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { trackChild } from "./children.js";
 
 export type KeepAwakeMode = "smart" | "always" | "off";
 
@@ -83,9 +84,12 @@ export function keepAwakeCommand(platform: NodeJS.Platform, pid = process.pid): 
     return { command: "/usr/bin/caffeinate", args: ["-i", "-w", String(pid)] };
   }
   if (platform === "linux") {
+    // Hold open a piped stdin into `read` instead of `sleep infinity` so a
+    // SIGKILLed host closes the pipe and immediately releases systemd-inhibit.
     return {
       command: "systemd-inhibit",
-      args: ["--what=idle", "--who=LinkShell", "--why=Active coding session or remote connection", "--mode=block", "sleep", "infinity"],
+      args: ["--what=idle", "--who=LinkShell", "--why=Active coding session or remote connection", "--mode=block", "sh", "-c", "read _"],
+      stdinPipe: true,
     };
   }
   if (platform === "win32") {
@@ -111,6 +115,7 @@ export const defaultSpawnAssertion: SpawnAssertion = (platform, pid, onUnexpecte
     log(`[keep-awake] failed to spawn ${spec.command}: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
+  trackChild(child, "keep-awake", spec.command, spec.args, false);
   child.unref();
   let released = false;
   let alive = true;

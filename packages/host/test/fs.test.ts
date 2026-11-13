@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -133,5 +133,65 @@ describe("fs.list", () => {
     expect(await makeDirectory({ parent: root, name: "assets" })).toEqual({ path: join(root, "assets") });
     await expect(makeDirectory({ parent: root, name: "assets" })).rejects.toThrow(/已经有同名/);
     await expect(makeDirectory({ parent: root, name: ".." })).rejects.toThrow(/名称无效/);
+  });
+
+  it("caps fs.list directory listings at 1000 entries even when files:false", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-many-dirs-"));
+    for (let i = 0; i < 1005; i++) {
+      mkdirSync(join(root, `dir-${String(i).padStart(4, "0")}`));
+    }
+    const listed = await listDirectory({ path: root, hidden: false, files: false });
+    expect(listed.entries).toHaveLength(1000);
+    expect(listed.truncated).toBe(true);
+  });
+
+  it("supports chunked uploads via offset + appendPath while blocking offset mismatches and symlink escapes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-chunk-up-"));
+    const outside = mkdtempSync(join(tmpdir(), "lsh-outside-up-"));
+    const secret = join(outside, "secret.bin");
+    writeFileSync(secret, "keep");
+    symlinkSync(secret, join(root, "sym.bin"));
+
+    const part1 = Buffer.from("Hello, ");
+    const part2 = Buffer.from("chunked ");
+    const part3 = Buffer.from("world!");
+
+    await expect(
+      uploadFile({ dir: root, name: "video.bin", data: part1.toString("base64"), offset: 5 }),
+    ).rejects.toMatchObject({ appCode: "invalid_params" });
+
+    const c1 = await uploadFile({ dir: root, name: "video.bin", data: part1.toString("base64"), offset: 0 });
+    expect(c1).toEqual({ path: join(root, "video.bin"), size: part1.length });
+
+    // Wrong offset is rejected without corrupting file.
+    await expect(
+      uploadFile({ dir: root, name: "video.bin", data: part2.toString("base64"), offset: 99, appendPath: c1.path }),
+    ).rejects.toMatchObject({ appCode: "invalid_params" });
+
+    const c2 = await uploadFile({
+      dir: root,
+      name: "video.bin",
+      data: part2.toString("base64"),
+      offset: c1.size,
+      appendPath: c1.path,
+    });
+    const c3 = await uploadFile({
+      dir: root,
+      name: "video.bin",
+      data: part3.toString("base64"),
+      offset: c2.size,
+      appendPath: c1.path,
+    });
+    expect(c3.size).toBe(part1.length + part2.length + part3.length);
+    expect(readFileSync(c1.path, "utf8")).toBe("Hello, chunked world!");
+
+    // Path traversal and symlink append targets are rejected.
+    await expect(
+      uploadFile({ dir: root, name: "secret.bin", data: part1.toString("base64"), offset: 4, appendPath: secret }),
+    ).rejects.toMatchObject({ appCode: "invalid_params" });
+    await expect(
+      uploadFile({ dir: root, name: "sym.bin", data: part1.toString("base64"), offset: 4, appendPath: join(root, "sym.bin") }),
+    ).rejects.toMatchObject({ appCode: "invalid_params" });
+    expect(readFileSync(secret, "utf8")).toBe("keep");
   });
 });

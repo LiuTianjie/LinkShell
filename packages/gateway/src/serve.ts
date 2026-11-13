@@ -27,7 +27,7 @@ export interface StartGatewayOptions {
   turn?: GatewayOptions["turn"];
   /** Addresses of the reverse proxies in front, whose X-Forwarded-For is believed. */
   trustedProxies?: readonly string[];
-  /** Connections one address may open per window (default 20 a minute). */
+  /** Connections one address may open per window (default 60 a minute). */
   wsConnectLimit?: { max: number; windowMs: number };
   /** The watch's HTTPS transport; the defaults suit production, tests shrink them. */
   pollLimits?: Partial<PollLimits>;
@@ -57,7 +57,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
   });
   const version = options.version ?? packageVersion();
   const trustedProxies = trustedProxySet(options.trustedProxies ?? []);
-  const limit = options.wsConnectLimit ?? { max: 20, windowMs: 60_000 };
+  const limit = options.wsConnectLimit ?? { max: 60, windowMs: 60_000 };
   const connectLimiter = new RateLimiter(limit.max, limit.windowMs);
 
   // A proxy that isn't in `trustedProxies` makes every user share one allowance. Said once per address, so

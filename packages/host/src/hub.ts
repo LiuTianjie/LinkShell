@@ -189,6 +189,9 @@ interface LiveSession {
 const IDLE_DETACH_MS = 10 * 60_000;
 /** Grace window after the last subscriber leaves before post-turn chunk compaction runs. */
 const DEFERRED_COMPACT_MS = 10_000;
+/** How long a completed `sessions.create(requestId)` result is kept for reconnect retries. */
+const CREATE_DEDUP_TTL_MS = 5 * 60_000;
+const CREATE_DEDUP_LIMIT = 500;
 
 const PREVIEW_LENGTH = 160;
 const TITLE_LENGTH = 60;
@@ -226,6 +229,11 @@ export class SessionHub {
   private readonly sides: SideChats;
   private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly compactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly createsInFlight = new Map<string, Promise<SessionSummary>>();
+  private readonly recentCreates = new Map<string, { sessionId: string; promptDone: boolean; expiresAt: number }>();
+  private readonly promptsInFlight = new Map<string, Promise<"started" | "steered" | "queued">>();
+  private readonly permissionsInFlight = new Map<string, Promise<void>>();
+  private readonly claimedPermissions = new Set<string>();
   private readonly activeGoals = new Set<string>();
   private readonly auth = new Map<string, { value: AgentAuth; checkedAt: number }>();
   /** Terminals (`linkshell <agent>`) currently driving handoff sessions. */
@@ -269,8 +277,11 @@ export class SessionHub {
       return this.ensureAttached(sessionId);
     },
     detached: (agent, nativeId) => {
-      const live = this.live.get(sessionIdFor(agent, nativeId));
-      if (live) live.attached = false;
+      const sessionId = sessionIdFor(agent, nativeId);
+      const live = this.live.get(sessionId);
+      if (!live) return;
+      live.attached = false;
+      if (live.subscribers.size === 0) this.detachWhenIdle(sessionId);
     },
     queue: (agent, nativeId, items) => {
       const sessionId = sessionIdFor(agent, nativeId);
@@ -429,6 +440,11 @@ export class SessionHub {
     this.idleTimers.clear();
     for (const timer of this.compactionTimers.values()) clearTimeout(timer);
     this.compactionTimers.clear();
+    this.createsInFlight.clear();
+    this.recentCreates.clear();
+    this.promptsInFlight.clear();
+    this.permissionsInFlight.clear();
+    this.claimedPermissions.clear();
     await this.sides.stop((sessionId) => this.sideTarget(sessionId));
     await Promise.allSettled([...this.drivers.values()].map((driver) => driver.stop()));
     await this.previews.stop();
@@ -665,14 +681,20 @@ export class SessionHub {
     return () => this.summaryListeners.delete(listener);
   }
 
-  listSessions(options: { limit?: number; before?: number; includeArchived?: boolean }): {
+  listSessions(options: { limit?: number; before?: number; beforeId?: string; includeArchived?: boolean }): {
     sessions: SessionSummary[];
     nextBefore?: number;
+    nextBeforeId?: string;
   } {
     const limit = options.limit ?? 50;
     const sessions = this.store.listSessions({ ...options, limit }).map((session) => this.decorate(session));
     const last = sessions[sessions.length - 1];
-    return { sessions, nextBefore: sessions.length === limit && last ? last.updatedAt : undefined };
+    const hasMore = sessions.length === limit && !!last;
+    return {
+      sessions,
+      nextBefore: hasMore ? last.updatedAt : undefined,
+      nextBeforeId: hasMore ? last.id : undefined,
+    };
   }
 
   /** Projects, each with the branch checked out there now. */
@@ -696,6 +718,12 @@ export class SessionHub {
     const summary = this.store.getSession(sessionId);
     if (!summary) throw RpcError.app("not_found", `找不到会话 ${sessionId}`);
     if (this.store.isNativeMissing(sessionId)) throw RpcError.app("not_found", "这个会话的原始记录已不存在，已从列表隐藏；本地缓存仍保留。");
+    return this.decorate(summary);
+  }
+
+  findSession(sessionId: string): SessionSummary | undefined {
+    const summary = this.store.getSession(sessionId);
+    if (!summary || this.store.isNativeMissing(sessionId)) return undefined;
     return this.decorate(summary);
   }
 
@@ -824,6 +852,15 @@ export class SessionHub {
     return (await driver.listModels?.(cwd, model)) ?? { models: [] };
   }
 
+  private pruneRecentCreates(now = Date.now()): void {
+    for (const [key, entry] of this.recentCreates) {
+      if (entry.expiresAt <= now) this.recentCreates.delete(key);
+    }
+    while (this.recentCreates.size > CREATE_DEDUP_LIMIT) {
+      this.recentCreates.delete(this.recentCreates.keys().next().value!);
+    }
+  }
+
   async createSession(input: {
     agent: string;
     cwd: string;
@@ -831,57 +868,104 @@ export class SessionHub {
     config?: Record<string, string>;
     prompt?: ContentBlock[];
     clientMessageId?: string;
+    requestId?: string;
     /** Start in a new git worktree of `cwd`'s repository. */
     worktree?: boolean;
   }): Promise<SessionSummary> {
-    const driver = this.requireDriver(input.agent);
-    const config = Object.entries(input.config ?? {});
-    if (config.length) {
-      if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} 不支持新会话设置`);
-      const available = await this.agentModels(input.agent, input.cwd, input.model);
-      for (const [id, value] of config) {
-        const option = available.config?.find((entry) => entry.id === id && entry.category !== "model");
-        if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `新会话设置不可用：${id}=${value}，请刷新后重试`);
-      }
+    const requestId = input.requestId?.trim() || undefined;
+    if (!requestId) return this.createSessionOnce(input);
+    const inflight = this.createsInFlight.get(requestId);
+    if (inflight) return inflight;
+    const now = Date.now();
+    this.pruneRecentCreates(now);
+    const cached = this.recentCreates.get(requestId);
+    if (cached && cached.expiresAt > now) {
+      const existing = this.findSession(cached.sessionId);
+      if (existing && cached.promptDone) return existing;
+      if (!existing) this.recentCreates.delete(requestId);
     }
-    const worktree = input.worktree ? await this.newWorktree(input.cwd, promptLabel(input.prompt)) : undefined;
-    const discovered = await driver.createSession({ cwd: worktree?.cwd ?? input.cwd, model: input.model }).catch(async (error: unknown) => {
-      // The app shows "not logged in" from the agent list; make it current.
-      if (error instanceof RpcError && error.appCode === "not_logged_in") await this.refreshAuth(driver);
-      if (worktree) await this.dropWorktree(worktree.path);
-      throw error;
+    const creating = this.createSessionOnce(input, requestId).finally(() => {
+      if (this.createsInFlight.get(requestId) === creating) this.createsInFlight.delete(requestId);
     });
-    this.recordDiscovered(driver.id, discovered);
-    const sessionId = sessionIdFor(driver.id, discovered.nativeId);
-    const live = this.liveFor(sessionId);
-    const configuring = Promise.resolve().then(async () => {
-      await this.ensureAttached(sessionId);
-      for (const [id, value] of config) await driver.setConfig!(discovered.nativeId, id, value);
-    });
-    // Discovery can show this session on another device before create returns. Its first
-    // prompt must wait for the same initial permissions as the device that created it.
-    live.settingsChange = configuring;
-    try {
-      await configuring;
-    } catch (error) {
-      // This session has never had a prompt. Retrying should not accumulate empty sessions/worktrees.
+    this.createsInFlight.set(requestId, creating);
+    return creating;
+  }
+
+  private async createSessionOnce(
+    input: {
+      agent: string;
+      cwd: string;
+      model?: string;
+      config?: Record<string, string>;
+      prompt?: ContentBlock[];
+      clientMessageId?: string;
+      worktree?: boolean;
+    },
+    requestId?: string,
+  ): Promise<SessionSummary> {
+    const cached = requestId ? this.recentCreates.get(requestId) : undefined;
+    let sessionId = cached && this.findSession(cached.sessionId) ? cached.sessionId : undefined;
+    if (!sessionId) {
+      const driver = this.requireDriver(input.agent);
+      const config = Object.entries(input.config ?? {});
+      if (config.length) {
+        if (!driver.setConfig) throw RpcError.app("not_supported", `${driver.label} 不支持新会话设置`);
+        const available = await this.agentModels(input.agent, input.cwd, input.model);
+        for (const [id, value] of config) {
+          const option = available.config?.find((entry) => entry.id === id && entry.category !== "model");
+          if (!option?.values.some((entry) => entry.value === value)) throw RpcError.app("invalid_params", `新会话设置不可用：${id}=${value}，请刷新后重试`);
+        }
+      }
+      const worktree = input.worktree ? await this.newWorktree(input.cwd, promptLabel(input.prompt)) : undefined;
+      const discovered = await driver.createSession({ cwd: worktree?.cwd ?? input.cwd, model: input.model }).catch(async (error: unknown) => {
+        // The app shows "not logged in" from the agent list; make it current.
+        if (error instanceof RpcError && error.appCode === "not_logged_in") await this.refreshAuth(driver);
+        if (worktree) await this.dropWorktree(worktree.path);
+        throw error;
+      });
+      this.recordDiscovered(driver.id, discovered);
+      sessionId = sessionIdFor(driver.id, discovered.nativeId);
+      const live = this.liveFor(sessionId);
+      const configuring = Promise.resolve().then(async () => {
+        await this.ensureAttached(sessionId!);
+        for (const [id, value] of config) await driver.setConfig!(discovered.nativeId, id, value);
+      });
+      // Discovery can show this session on another device before create returns. Its first
+      // prompt must wait for the same initial permissions as the device that created it.
+      live.settingsChange = configuring;
       try {
-        await this.delete(sessionId, worktree ? "remove" : "keep");
-      } catch (cleanupError) {
-        this.log(`[hub] cleaning failed new session ${sessionId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
-        if (this.store.getSession(sessionId)) {
-          const detail = error instanceof Error ? error.message : String(error);
-          this.commit(sessionId, { sessionUpdate: "ls_notice", level: "warning", title: "新会话设置失败，任务尚未开始", detail });
-          throw RpcError.app("not_ready", `新会话设置失败，首条消息未发送。空会话已保留在会话列表，可打开后重试设置：${detail}`, { sessionId });
+        await configuring;
+      } catch (error) {
+        // This session has never had a prompt. Retrying should not accumulate empty sessions/worktrees.
+        try {
+          await this.delete(sessionId, worktree ? "remove" : "keep");
+        } catch (cleanupError) {
+          this.log(`[hub] cleaning failed new session ${sessionId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+          if (this.store.getSession(sessionId)) {
+            const detail = error instanceof Error ? error.message : String(error);
+            this.commit(sessionId, { sessionUpdate: "ls_notice", level: "warning", title: "新会话设置失败，任务尚未开始", detail });
+            throw RpcError.app("not_ready", `新会话设置失败，首条消息未发送。空会话已保留在会话列表，可打开后重试设置：${detail}`, { sessionId });
+          }
+          throw error;
         }
         throw error;
+      } finally {
+        if (live.settingsChange === configuring) live.settingsChange = undefined;
       }
-      throw error;
-    } finally {
-      if (live.settingsChange === configuring) live.settingsChange = undefined;
+      if (requestId) {
+        this.recentCreates.set(requestId, {
+          sessionId,
+          promptDone: !(input.prompt && input.prompt.length > 0),
+          expiresAt: Date.now() + CREATE_DEDUP_TTL_MS,
+        });
+        this.pruneRecentCreates();
+      }
     }
     if (input.prompt && input.prompt.length > 0) {
       await this.prompt(sessionId, input.clientMessageId ?? `create-${sessionId}`, input.prompt);
+      if (requestId) {
+        this.recentCreates.set(requestId, { sessionId, promptDone: true, expiresAt: Date.now() + CREATE_DEDUP_TTL_MS });
+      }
     }
     return this.getSession(sessionId);
   }
@@ -1307,26 +1391,55 @@ export class SessionHub {
    */
   private detachWhenIdle(sessionId: string, delay = IDLE_DETACH_MS): void {
     const summary = this.store.getSession(sessionId);
-    const driver = summary && this.drivers.get(summary.agent);
-    if (!summary || !driver?.detachWhenIdle) return;
+    if (!summary) {
+      this.live.delete(sessionId);
+      return;
+    }
+    const driver = this.drivers.get(summary.agent);
+    const current = this.live.get(sessionId);
+    if (!current || (current.attached && !driver?.detachWhenIdle)) return;
     clearTimeout(this.idleTimers.get(sessionId));
     const timer = setTimeout(() => {
       this.idleTimers.delete(sessionId);
       const live = this.live.get(sessionId);
-      if (!live || live.subscribers.size > 0 || !live.attached || live.attaching || live.detaching) return;
+      if (!live || live.subscribers.size > 0 || live.attaching || live.detaching || live.importing || live.buffer) return;
       const tasks = this.tasksOf(sessionId, live);
       const working = live.turnActive || live.permissions.size > 0 || !!live.queue?.length || live.held.length > 0
+        || !!live.sendingHeld || !!live.settingsChange
         || [...tasks.values()].some((task) => task.state === "running")
         || [...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state));
       // Something is under way: looked at again later.
       if (working) return this.detachWhenIdle(sessionId, delay);
+      if (!live.attached) {
+        this.evictIfIdle(sessionId, live);
+        return;
+      }
+      if (!driver?.detachWhenIdle) return;
       live.attached = false;
       live.detaching = driver.detach(summary.nativeId)
         .catch((error: unknown) => this.log(`[hub] idle detach ${sessionId}: ${String(error)}`))
-        .finally(() => { live.detaching = undefined; });
+        .finally(() => {
+          live.detaching = undefined;
+          this.evictIfIdle(sessionId, live);
+        });
     }, delay);
     timer.unref?.();
     this.idleTimers.set(sessionId, timer);
+  }
+
+  private evictIfIdle(sessionId: string, live: LiveSession): void {
+    if (this.live.get(sessionId) !== live) return;
+    if (live.attached || live.attaching || live.detaching || live.importing || live.buffer) return;
+    if (live.subscribers.size > 0 || live.turnActive || live.permissions.size > 0) return;
+    if (live.queue?.length || live.held.length > 0 || live.sendingHeld || live.settingsChange) return;
+    const tasks = this.tasksOf(sessionId, live);
+    if ([...tasks.values()].some((task) => task.state === "running")) return;
+    if ([...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state))) return;
+    if (live.pendingCompaction) this.compactSessionChunks(sessionId);
+    for (const key of this.claimedPermissions) {
+      if (key.startsWith(`${sessionId}\n`)) this.claimedPermissions.delete(key);
+    }
+    this.live.delete(sessionId);
   }
 
   async prompt(
@@ -1338,6 +1451,9 @@ export class SessionHub {
     await this.live.get(sessionId)?.settingsChange;
     const summary = this.getSession(sessionId);
     const driver = this.requireDriver(summary.agent);
+    const inflightKey = `${sessionId}:${clientMessageId}`;
+    const active = this.promptsInFlight.get(inflightKey);
+    if (active) return active;
     let joinAfterSend = false;
     try {
       await this.ensureAttached(sessionId);
@@ -1346,6 +1462,8 @@ export class SessionHub {
       if (!(error instanceof RpcError && error.appCode === "not_ready")) throw error;
       joinAfterSend = true;
     }
+    const afterAttach = this.promptsInFlight.get(inflightKey);
+    if (afterAttach) return afterAttach;
     if (!this.store.claimClientMessage(sessionId, clientMessageId)) return "duplicate";
     const live = this.liveFor(sessionId);
     // An answer belongs in the turn that asked it, even from an older client using the normal queue.
@@ -1358,15 +1476,21 @@ export class SessionHub {
       this.announce(sessionId);
       return "queued";
     }
-    let delivery: "started" | "steered" | "queued";
-    try {
-      delivery = await this.deliver(summary, driver, content, clientMessageId);
-    } catch (error) {
-      this.store.releaseClientMessage(sessionId, clientMessageId);
-      throw error;
-    }
-    if (joinAfterSend) void this.attachWhenReady(sessionId);
-    return delivery;
+    const delivering = (async (): Promise<"started" | "steered" | "queued"> => {
+      let delivery: "started" | "steered" | "queued";
+      try {
+        delivery = await this.deliver(summary, driver, content, clientMessageId);
+      } catch (error) {
+        this.store.releaseClientMessage(sessionId, clientMessageId);
+        throw error;
+      }
+      if (joinAfterSend) void this.attachWhenReady(sessionId);
+      return delivery;
+    })().finally(() => {
+      if (this.promptsInFlight.get(inflightKey) === delivering) this.promptsInFlight.delete(inflightKey);
+    });
+    this.promptsInFlight.set(inflightKey, delivering);
+    return delivering;
   }
 
   /** Retries attaching a session that just became joinable. */
@@ -1565,6 +1689,15 @@ export class SessionHub {
     this.compactionTimers.delete(sessionId);
     this.activeGoals.delete(sessionId);
     this.live.delete(sessionId);
+    for (const [key, entry] of this.recentCreates) {
+      if (entry.sessionId === sessionId) this.recentCreates.delete(key);
+    }
+    for (const key of this.claimedPermissions) {
+      if (key.startsWith(`${sessionId}\n`)) this.claimedPermissions.delete(key);
+    }
+    for (const key of this.permissionsInFlight.keys()) {
+      if (key.startsWith(`${sessionId}\n`)) this.permissionsInFlight.delete(key);
+    }
     this.previews.forget(sessionId);
     this.sides.forget(sessionId);
     this.store.removeSession(sessionId);
@@ -1599,19 +1732,42 @@ export class SessionHub {
 
   async respondPermission(sessionId: string, requestId: string, optionId: string): Promise<void> {
     const summary = this.getSession(sessionId);
+    const key = `${sessionId}\n${requestId}`;
+    const inflight = this.permissionsInFlight.get(key);
     const request = this.live.get(sessionId)?.permissions.get(requestId);
-    if (!request) throw RpcError.app("not_found", "这个请求已经处理过或已失效");
+    if (!request) {
+      if (inflight) return inflight;
+      throw RpcError.app("not_found", "这个请求已经处理过或已失效");
+    }
     if (!request.options.some((option) => option.optionId === optionId)) {
       throw RpcError.app("invalid_params", `未知选项 ${optionId}`);
     }
-    await this.requireDriver(summary.agent).respondPermission(summary.nativeId, requestId, optionId);
+    if (inflight) return inflight;
+    if (this.claimedPermissions.has(key)) return;
+    const driver = this.requireDriver(summary.agent);
+    this.claimedPermissions.add(key);
+    const run = driver.respondPermission(summary.nativeId, requestId, optionId)
+      .catch((error: unknown) => {
+        this.claimedPermissions.delete(key);
+        throw error;
+      })
+      .finally(() => {
+        if (this.permissionsInFlight.get(key) === run) this.permissionsInFlight.delete(key);
+      });
+    this.permissionsInFlight.set(key, run);
+    return run;
   }
 
   /** Answers the questions an agent is waiting on. */
   async answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void> {
     const summary = this.getSession(sessionId);
+    const key = `${sessionId}\n${requestId}`;
+    const inflight = this.permissionsInFlight.get(key);
     const request = this.live.get(sessionId)?.permissions.get(requestId);
-    if (!request?.questions) throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    if (!request?.questions) {
+      if (inflight) return inflight;
+      throw RpcError.app("not_found", "这个问题已经不在等回答了");
+    }
     const driver = this.requireDriver(summary.agent);
     if (!driver.answerQuestion) throw RpcError.app("not_supported", `${driver.label} 不能在这里回答问题`);
     // Only what was asked: answers to its questions, with values the question offers.
@@ -1627,7 +1783,19 @@ export class SessionHub {
       const error = questionAnswerError(question, kept.find((answer) => answer.id === question.id));
       if (error) throw RpcError.app("invalid_params", error);
     }
-    await driver.answerQuestion(summary.nativeId, requestId, kept);
+    if (inflight) return inflight;
+    if (this.claimedPermissions.has(key)) return;
+    this.claimedPermissions.add(key);
+    const run = driver.answerQuestion(summary.nativeId, requestId, kept)
+      .catch((error: unknown) => {
+        this.claimedPermissions.delete(key);
+        throw error;
+      })
+      .finally(() => {
+        if (this.permissionsInFlight.get(key) === run) this.permissionsInFlight.delete(key);
+      });
+    this.permissionsInFlight.set(key, run);
+    return run;
   }
 
   async desktopLaunch(
@@ -1903,6 +2071,7 @@ export class SessionHub {
       if (!live.importing) {
         if (live.subscribers.size === 0) {
           this.compactSessionChunks(sessionId);
+          this.detachWhenIdle(sessionId);
         } else {
           live.pendingCompaction = true;
         }
@@ -1952,7 +2121,10 @@ export class SessionHub {
       }
       case "agent_message_chunk":
         if (update.content.type === "text") {
-          live.messageText.set(update.messageId, (live.messageText.get(update.messageId) ?? "") + update.content.text);
+          live.messageText.set(
+            update.messageId,
+            (update.replace ? "" : (live.messageText.get(update.messageId) ?? "")) + update.content.text,
+          );
         }
         if (live.turnActive) setActivity({ kind: "responding" });
         break;
@@ -1984,11 +2156,13 @@ export class SessionHub {
         }
         break;
       case "ls_permission":
+        this.claimedPermissions.delete(`${sessionId}\n${update.requestId}`);
         live.permissions.set(update.requestId, update);
         patch.pendingPermissions = live.permissions.size;
         patch.state = "waiting";
         break;
       case "ls_permission_resolved":
+        this.claimedPermissions.delete(`${sessionId}\n${update.requestId}`);
         live.permissions.delete(update.requestId);
         patch.pendingPermissions = live.permissions.size;
         if (live.permissions.size === 0 && before.state === "waiting") patch.state = live.turnActive ? "running" : "idle";

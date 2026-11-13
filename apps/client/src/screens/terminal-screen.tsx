@@ -11,6 +11,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { BranchTag } from "@/components/branch-tag";
+import { ConnectionBanner } from "@/components/connection-banner";
 import { Glass } from "@/components/glass";
 import { HeaderActions } from "@/components/header-actions";
 import { Icon } from "@/components/icon";
@@ -577,6 +578,9 @@ export function TerminalScreen() {
           </Pressable>
         </View>
       ) : null}
+      <View style={{ paddingHorizontal: 14 }}>
+        <ConnectionBanner />
+      </View>
       <Animated.View style={[{ flex: 1 }, lift]}>
         <View style={{ flex: 1 }}>
           <NativeTerminal

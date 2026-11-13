@@ -25,6 +25,7 @@ import { directConnector } from "./direct";
 import { createSessionSubscriptions } from "./session-subscriptions";
 import { syncComputerName } from "./computer-names";
 import { useAccount } from "./account";
+import { outboxStorage } from "./outbox-db";
 
 type Client = ClientState & ClientActions;
 
@@ -55,7 +56,7 @@ const NO_COMPUTER_KEY = "none";
 
 function temporaryDisconnect(message: string): boolean {
   // Identity, pairing, account and other explicit refusals must remain visible immediately.
-  return /^(?:连接已断开|电脑不在线|电脑没有响应|与网关的连接断开了|连不上网关|网关没有响应|没有连上网关|网关没有及时响应（[^）]*）|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
+  return /^(?:连接已断开|电脑不在线|电脑没有响应|连接电脑超时，请检查网络连接|连接网关超时|网络连接意外中断|网络请求失败，请检查网络连接|连接繁忙，正在重连|与网关的连接断开了|连不上网关|网关没有响应|没有连上网关|网关没有及时响应（[^）]*）|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
 }
 
 function fallbackComputer(): Computer {
@@ -124,7 +125,12 @@ function createConnection(computer: Computer): Connection {
         });
   const url = computer.kind === "direct" ? computer.url : computer.lanUrl ?? computer.gateway;
   // Pictures in history come as references and load when shown (`useImage`).
-  const store = createClientStore(link, { newId: randomUUID, lazyImages: true, sessionPreferences });
+  const store = createClientStore(link, {
+    newId: randomUUID,
+    lazyImages: true,
+    sessionPreferences,
+    ...(computer.key !== NO_COMPUTER_KEY ? { outboxStorage, outboxKey: computer.key } : {}),
+  });
   // Paths render as ~/… with this computer's home, set before anything renders them.
   setHostHome(undefined);
   const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });
@@ -218,13 +224,22 @@ export function ClientProvider({ children }: { children: ReactNode }) {
         // catches up in place.
         clearTimeout(latestTimer);
         latestTimer = setTimeout(() => link.resumeLatest(false), 45_000);
-        reconnectRelays();
-        if (hasComputer) link.reconnectNow();
-        // While suspended the sockets may have died without a word: ask, instead of waiting a
-        // heartbeat (up to 35 s) to find out.
-        probeRelays();
-        if (hasComputer) {
-          link.probe();
+        if (!hasComputer) {
+          reconnectRelays();
+          probeRelays();
+        } else if (link.status === "online") {
+          // While suspended the sockets may have died without a word: probe with a 2.5s deadline
+          // instead of waiting a heartbeat (up to 35 s) or tearing down a live socket.
+          probeRelays();
+          void Promise.resolve(link.probe(2500)).then((alive) => {
+            if (alive === false) reconnectRelays();
+          });
+          connection.streams.connect();
+        } else if (link.status === "locked") {
+          probeRelays();
+        } else {
+          reconnectRelays();
+          link.reconnectNow(true);
           connection.streams.connect();
         }
       } else if (state === "background") {

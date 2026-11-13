@@ -39,6 +39,7 @@ import { socketBootstrap } from "./Video";
 import { openWebSocket } from "./transport";
 import { isDesktop } from "./desktop";
 import { initialPortTabs, portTabsReducer } from "./port-tabs";
+import { isImeComposing } from "./ComposerBox";
 import { useT } from "./i18n";
 
 function previewOrigin() {
@@ -471,6 +472,146 @@ export function PortPreview({
           setFailure("隔离预览页面加载失败，请检查预览域名配置");
         }}
       />
+    </div>
+  );
+}
+
+export function SessionPortPreview({
+  sessionId,
+  cwd,
+}: {
+  sessionId: string;
+  cwd?: string;
+}) {
+  const t = useT();
+  const { link } = useConnection();
+  const load = useLoad(() => link.call("ports.list", {}), [link], 10_000);
+  const [selectedPort, setSelectedPort] = useState<number>();
+  const [manualInput, setManualInput] = useState<string | undefined>(undefined);
+  const [revision, setRevision] = useState(0);
+
+  const services = [...(load.value?.ports ?? [])].sort((a, b) => {
+    const aMatchesCwd = Boolean(cwd && a.cwd && (a.cwd === cwd || a.cwd.startsWith(`${cwd}/`)));
+    const bMatchesCwd = Boolean(cwd && b.cwd && (b.cwd === cwd || b.cwd.startsWith(`${cwd}/`)));
+    return (
+      Number(bMatchesCwd) - Number(aMatchesCwd) ||
+      Number(b.http) - Number(a.http) ||
+      a.port - b.port
+    );
+  });
+
+  const defaultPort = (services.find((entry) => entry.http) ?? services[0])?.port;
+  const activePort = selectedPort ?? defaultPort;
+
+  const openPort = (port: number) => {
+    setSelectedPort(port);
+    setManualInput(String(port));
+  };
+
+  const submitManual = (event: FormEvent) => {
+    event.preventDefault();
+    const raw = manualInput?.trim();
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) {
+      openPort(parsed);
+    }
+  };
+
+  return (
+    <div className="session-port-preview">
+      <div className="session-port-toolbar">
+        <form className="session-port-form" onSubmit={submitManual}>
+          <InputGroup className="session-port-field">
+            <InputGroupAddon>
+              <Globe aria-hidden="true" />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label="预览端口"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="65535"
+              step="1"
+              value={manualInput ?? (activePort !== undefined ? String(activePort) : "")}
+              onChange={(event) => setManualInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && isImeComposing(event)) {
+                  event.preventDefault();
+                }
+              }}
+              placeholder="端口，如 3000"
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton type="submit" variant="secondary" disabled={!manualInput?.trim()}>
+                {t("ports.openPreview")}
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </form>
+        <div className="session-port-actions">
+          {activePort !== undefined && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="重新加载预览"
+              title="重新加载预览"
+              onClick={() => setRevision((value) => value + 1)}
+            >
+              <RefreshCw />
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={load.loading}
+            onClick={load.reload}
+          >
+            <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
+            {t("common.refresh")}
+          </Button>
+        </div>
+      </div>
+      {services.length > 0 && (
+        <div className="session-port-chips" role="group" aria-label="已发现的开发服务">
+          {services.map((entry) => (
+            <Button
+              key={entry.port}
+              type="button"
+              variant={activePort === entry.port ? "secondary" : "ghost"}
+              size="xs"
+              aria-pressed={activePort === entry.port}
+              title={[entry.title ?? entry.process, entry.cwd, `127.0.0.1:${entry.port}`]
+                .filter(Boolean)
+                .join(" · ")}
+              onClick={() => openPort(entry.port)}
+            >
+              <span>{entry.title || entry.process || "服务"}</span>
+              <Badge variant="outline">{entry.port}</Badge>
+            </Button>
+          ))}
+        </div>
+      )}
+      {activePort !== undefined ? (
+        <div className="session-port-stage">
+          <PortPreview
+            key={`${activePort}:${revision}`}
+            port={activePort}
+            retry={() => setRevision((value) => value + 1)}
+            sessionId={sessionId}
+          />
+        </div>
+      ) : load.loading ? (
+        <LoadState loading />
+      ) : (
+        <EmptyState
+          icon={<Server />}
+          title="还没有可预览的本地端口"
+          description="在终端启动本地开发服务（如 localhost:3000），或直接在上方输入端口号打开预览。页面报错可一键发给当前会话。"
+        />
+      )}
     </div>
   );
 }

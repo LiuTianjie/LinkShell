@@ -90,7 +90,7 @@ export function requirePro(
   const cacheMs = options.cacheMs ?? 60_000;
   const graceMs = options.graceMs ?? 60 * 60_000;
   const startedAt = now();
-  let pruneAt = startedAt + graceMs;
+  let pruneAt = startedAt + (options.enforceGrace ? graceMs : Math.max(cacheMs, 60_000));
   const accounts = new Map<string, {
     checkedAt: number;
     result?: SubscriptionCheck;
@@ -101,19 +101,18 @@ export function requirePro(
   return async ({ role, userId }) => {
     if (role !== "machine") return undefined;
     if (!userId) return admissionDenialMessage(LOGIN_REQUIRED_CODE, options.locale);
-    // Roll out revalidation explicitly; a code upgrade alone must preserve the
-    // existing admission behavior during a Supabase/network incident.
-    if (!options.enforceGrace) {
-      const subscription = await check(userId);
-      if (subscription.status === "inactive") return admissionDenialMessage(MEMBERSHIP_REQUIRED_CODE, options.locale);
-      if (subscription.status === "unknown") warn(`subscription check unavailable (${subscription.reason}); admitting ${userId}`);
-      return undefined;
-    }
     if (now() >= pruneAt) {
-      for (const [id, entry] of accounts) {
-        if (!entry.pending && now() - entry.checkedAt >= graceMs && (entry.graceFrom === undefined || now() - entry.graceFrom >= graceMs)) accounts.delete(id);
+      if (options.enforceGrace) {
+        for (const [id, entry] of accounts) {
+          if (!entry.pending && now() - entry.checkedAt >= graceMs && (entry.graceFrom === undefined || now() - entry.graceFrom >= graceMs)) accounts.delete(id);
+        }
+        pruneAt = now() + Math.max(1, Math.min(graceMs, 60_000));
+      } else {
+        for (const [id, entry] of accounts) {
+          if (!entry.pending && now() - entry.checkedAt >= cacheMs) accounts.delete(id);
+        }
+        pruneAt = now() + Math.max(cacheMs, 60_000);
       }
-      pruneAt = now() + Math.max(1, Math.min(graceMs, 60_000));
     }
     let account = accounts.get(userId);
     if (!account) {
@@ -130,7 +129,7 @@ export function requirePro(
           if (result.status !== "unknown") {
             entry.lastKnown = result.status;
             entry.graceFrom = result.status === "active" ? entry.checkedAt : undefined;
-          } else {
+          } else if (options.enforceGrace) {
             // A fresh gateway also tolerates a brief outage. Repeated failures must not
             // restart this window, or reconnecting would grant membership forever.
             // Bootstrap grace belongs to this gateway start, not each new cache entry.
@@ -138,10 +137,18 @@ export function requirePro(
             // regain grace after a known-expired account's entry has been evicted.
             entry.graceFrom ??= startedAt;
             warn(`subscription check unavailable (${result.reason}); ${entry.lastKnown !== "inactive" && now() - entry.graceFrom < graceMs ? "admitting" : "refusing"} ${userId}`);
+          } else {
+            warn(`subscription check unavailable (${result.reason}); admitting ${userId}`);
           }
           return result;
         }).finally(() => { entry.pending = undefined; });
       await entry.pending;
+    }
+    // Roll out revalidation explicitly; a code upgrade alone must preserve the
+    // existing admission behavior during a Supabase/network incident.
+    if (!options.enforceGrace) {
+      if (account.result?.status === "inactive") return admissionDenialMessage(MEMBERSHIP_REQUIRED_CODE, options.locale);
+      return undefined;
     }
     if (account.result?.status === "active") return undefined;
     if (account.result?.status === "inactive" || account.lastKnown === "inactive") {

@@ -13,6 +13,7 @@ import {
   Children,
   Fragment,
   isValidElement,
+  cloneElement,
   createContext,
   memo,
   useContext,
@@ -21,8 +22,10 @@ import {
   useRef,
   useState,
   type DetailsHTMLAttributes,
+  type ReactElement,
   type ReactNode,
 } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Check, CircleAlert, CircleDashed, CircleHelp, CircleMinus, Copy, GitFork, LoaderCircle } from "lucide-react";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
@@ -89,15 +92,133 @@ export function DiffStat({ added, removed, className = "diff-stat" }: { added: n
   );
 }
 
+/** Active `⌘F` find query (lowercased & trimmed), or `""` when closed/empty. */
+export const TimelineSearch = createContext("");
+
+export function highlightSearchText(text: string, query: string): ReactNode {
+  if (!query || !text) return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  if (!lowerText.includes(lowerQuery)) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+  if (parts.length <= 1) return text;
+  return parts.map((part, index) =>
+    part.toLowerCase() === lowerQuery ? (
+      <mark key={index} className="timeline-search-hit">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function highlightReactChildren(node: ReactNode, query: string): ReactNode {
+  if (!query || node === null || node === undefined || typeof node === "boolean") return node;
+  if (typeof node === "string") return highlightSearchText(node, query);
+  if (typeof node === "number") return highlightSearchText(String(node), query);
+  if (Array.isArray(node)) return node.map((child, idx) => <Fragment key={idx}>{highlightReactChildren(child, query)}</Fragment>);
+  if (isValidElement(node)) {
+    const element = node as ReactElement<{ children?: ReactNode }>;
+    if (element.type === "mark" || element.props.children === undefined) return node;
+    return cloneElement(element, undefined, highlightReactChildren(element.props.children, query));
+  }
+  return node;
+}
+
+function SearchableText({ text }: { text: string }) {
+  const query = useContext(TimelineSearch);
+  return <>{query ? highlightSearchText(text, query) : text}</>;
+}
+
+/** Extracts full searchable text for a timeline item, including folded tool outputs, diffs and thoughts. */
+export function timelineItemSearchText(item: TimelineItem): string {
+  switch (item.kind) {
+    case "user":
+      return [
+        userMessageView(item.blocks).text,
+        ...(item.agentMessages?.flatMap((m) => [m.sender, m.summary, m.body]) ?? []),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    case "agent":
+    case "thought":
+      return item.text;
+    case "error": {
+      const shown = presentError(item);
+      return [item.message, shown.title, shown.hint, shown.detail].filter(Boolean).join("\n");
+    }
+    case "notice":
+      return [item.title, item.detail].filter(Boolean).join("\n");
+    case "plan":
+      return [item.title, item.markdown, ...item.entries.map((entry) => entry.content)]
+        .filter(Boolean)
+        .join("\n");
+    case "permission-result":
+      return [
+        item.title,
+        item.optionName,
+        ...(item.answers?.map((answer) => `${answer.question} ${answer.answer}`) ?? []),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    case "tool": {
+      const label = toolLabel(item);
+      const command = label.action === "command" ? toolCommand(item) : undefined;
+      const plan = label.action === "plan" ? proposedPlan(item) : undefined;
+      const out = toolOutput(item);
+      const diffTexts = item.content.flatMap((entry) => {
+        if (entry.type === "diff") return [entry.path, entry.oldText, entry.newText];
+        if (entry.type === "patch") return [entry.path, entry.movePath, entry.diff];
+        if (entry.type === "content" && entry.content.type === "text") return [entry.content.text];
+        return [];
+      });
+      const rawIn =
+        item.rawInput === undefined
+          ? ""
+          : typeof item.rawInput === "string"
+            ? item.rawInput
+            : JSON.stringify(item.rawInput);
+      const rawOut =
+        item.rawOutput === undefined
+          ? ""
+          : typeof item.rawOutput === "string"
+            ? item.rawOutput
+            : JSON.stringify(item.rawOutput);
+      const subText = item.sub ? item.sub.items.map(timelineItemSearchText).join("\n") : "";
+      return [
+        item.title,
+        toolLabelText(label, { note: true }),
+        command,
+        plan,
+        item.output,
+        out,
+        ...diffTexts,
+        ...(item.locations?.map((loc) => loc.path) ?? []),
+        rawIn,
+        rawOut,
+        subText,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    default:
+      return "";
+  }
+}
+
 /** A folded run of finished steps — "已编辑 2 个文件，已运行 5 个命令", one click open. */
 export function StepsSummary({
   steps,
   open,
   onToggle,
+  historical,
 }: {
   steps: Step[];
   open: boolean;
   onToggle: () => void;
+  historical?: boolean;
 }) {
   const t = tallySteps(steps);
   const label = describeSteps(t);
@@ -107,6 +228,7 @@ export function StepsSummary({
       type="button"
       className="steps-summary"
       aria-expanded={open}
+      data-historical={historical ? "" : undefined}
       onClick={onToggle}
     >
       <Layers className="steps-summary-icon" aria-hidden="true" />
@@ -119,41 +241,67 @@ export function StepsSummary({
 }
 
 /**
- * A `<details>` whose body is built the first time it's opened, then kept. A
- * long session has hundreds of folded tool calls, thoughts and sub-agent
- * transcripts; built up front they were about half of the page's elements.
+ * A `<details>` whose body mounts when opened and unmounts again when closed, keeping folded
+ * diffs, command outputs and sub-agent logs out of the DOM unless expanded or matched by `⌘F`.
  */
 /** Folds build their bodies up front (a static render, which can't open one). */
 export const FoldsBuilt = createContext(false);
 
-function Fold({
+export interface FoldClickLikeEvent {
+  defaultPrevented: boolean;
+  currentTarget: unknown;
+  target: unknown;
+  preventDefault(): void;
+}
+
+export function consumeDirectFoldSummaryClick(event: FoldClickLikeEvent): boolean {
+  if (event.defaultPrevented) return false;
+  const target = event.target as { closest?: (selector: string) => { parentElement?: unknown } | null } | null;
+  const summary = target?.closest?.("summary");
+  if (!summary || summary.parentElement !== event.currentTarget) return false;
+  event.preventDefault();
+  return true;
+}
+
+export function Fold({
   summary,
   children,
   className,
   defaultOpen = false,
+  open: controlledOpen,
+  searchText,
+  onClick,
   ...rest
 }: {
   summary: ReactNode;
   children: ReactNode;
   className?: string;
   defaultOpen?: boolean;
+  open?: boolean;
+  searchText?: string;
 } & Omit<DetailsHTMLAttributes<HTMLElement>, "open" | "onToggle" | "children">) {
-  const [opened, setOpened] = useState(defaultOpen);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const userOpen = controlledOpen ?? uncontrolledOpen;
   const built = useContext(FoldsBuilt);
+  const searchQuery = useContext(TimelineSearch);
+  const searchMatched = Boolean(
+    searchQuery && searchText && searchText.toLowerCase().includes(searchQuery),
+  );
+  const effectiveOpen = userOpen || searchMatched;
   return (
     <details
       className={className}
-      open={defaultOpen || undefined}
-      // On the summary's click, so the body is there before the row opens and its height
-      // animates to the full size; toggle covers opening any other way (find in page).
+      open={(effectiveOpen || built) || undefined}
       onClick={(event) => {
-        if ((event.target as Element).closest("summary")?.parentElement === event.currentTarget) setOpened(true);
+        onClick?.(event);
+        if (consumeDirectFoldSummaryClick(event) && !searchMatched) {
+          setUncontrolledOpen((prev) => !prev);
+        }
       }}
-      onToggle={(event) => event.currentTarget.open && setOpened(true)}
       {...rest}
     >
       {summary}
-      {(opened || built) && children}
+      {(effectiveOpen || built) && children}
     </details>
   );
 }
@@ -236,7 +384,8 @@ function CodeBlock({ children }: { children: ReactNode }) {
   const className = element && (element.props as { className?: string }).className;
   const language = className?.match(/language-([\w+-]+)/)?.[1];
   const source = useMemo(() => nodeText(element).replace(/\n$/, ""), [element]);
-  const tokens = useHighlight(source, language, useContext(HighlightCode));
+  const searchQuery = useContext(TimelineSearch);
+  const tokens = useHighlight(source, language, useContext(HighlightCode) && !searchQuery);
   const code = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
   const job = useJob();
@@ -279,7 +428,9 @@ function CodeBlock({ children }: { children: ReactNode }) {
         aria-label={language ? language + " 代码" : "代码"}
       >
         {/* Keep identical line breaks before and after the idle highlighter finishes. */}
-        <code className={className} data-highlighted={tokens ? true : undefined}>{tokens ? <TokenLines tokens={tokens} /> : source}</code>
+        <code className={className} data-highlighted={tokens ? true : undefined}>
+          {searchQuery ? highlightSearchText(source, searchQuery) : tokens ? <TokenLines tokens={tokens} /> : source}
+        </code>
       </pre>
       <ErrorNotice
         error={job.error ? "无法访问剪贴板，请选中代码后复制。" : undefined}
@@ -327,8 +478,29 @@ const markdownComponents: Components = {
 };
 
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  const searchQuery = useContext(TimelineSearch);
+  const components = useMemo<Components>(() => {
+    if (!searchQuery) return markdownComponents;
+    return {
+      ...markdownComponents,
+      p: ({ children, ...props }) => <p {...props}>{highlightReactChildren(children, searchQuery)}</p>,
+      li: ({ children, ...props }) => <li {...props}>{highlightReactChildren(children, searchQuery)}</li>,
+      td: ({ children, ...props }) => <td {...props}>{highlightReactChildren(children, searchQuery)}</td>,
+      th: ({ children, ...props }) => <th scope="col" {...props}>{highlightReactChildren(children, searchQuery)}</th>,
+      h1: ({ children, ...props }) => <h1 {...props}>{highlightReactChildren(children, searchQuery)}</h1>,
+      h2: ({ children, ...props }) => <h2 {...props}>{highlightReactChildren(children, searchQuery)}</h2>,
+      h3: ({ children, ...props }) => <h3 {...props}>{highlightReactChildren(children, searchQuery)}</h3>,
+      h4: ({ children, ...props }) => <h4 {...props}>{highlightReactChildren(children, searchQuery)}</h4>,
+      blockquote: ({ children, ...props }) => <blockquote {...props}>{highlightReactChildren(children, searchQuery)}</blockquote>,
+      code: ({ children, className, ...props }) => (
+        <code className={className} {...props}>
+          {className ? children : highlightReactChildren(children, searchQuery)}
+        </code>
+      ),
+    };
+  }, [searchQuery]);
   return (
-    <Markdown remarkPlugins={markdownPlugins} urlTransform={markdownURL} components={markdownComponents}>
+    <Markdown remarkPlugins={markdownPlugins} urlTransform={markdownURL} components={components}>
       {text}
     </Markdown>
   );
@@ -631,11 +803,46 @@ export function changeLines(change: Extract<ToolCallContent, { type: "diff" | "p
   return change.type === "diff" ? diffLines(change.oldText ?? "", change.newText) : parsePatch(change.diff);
 }
 
-/** A file's change as a unified diff: numbered lines, what went and what came tinted, the
-    unchanged stretches between folded to a line. */
+export interface SplitDiffRow {
+  left?: DiffLine;
+  right?: DiffLine;
+}
+
+/** Pairs contiguous deletion/addition runs side-by-side while aligning unchanged context lines. */
+export function pairSplitLines(lines: DiffLine[]): SplitDiffRow[] {
+  const rows: SplitDiffRow[] = [];
+  let cursor = 0;
+  while (cursor < lines.length) {
+    const current = lines[cursor]!;
+    if (current.kind === "same") {
+      rows.push({ left: current, right: current });
+      cursor++;
+      continue;
+    }
+    const dels: DiffLine[] = [];
+    while (cursor < lines.length && lines[cursor]!.kind === "del") {
+      dels.push(lines[cursor]!);
+      cursor++;
+    }
+    const adds: DiffLine[] = [];
+    while (cursor < lines.length && lines[cursor]!.kind === "add") {
+      adds.push(lines[cursor]!);
+      cursor++;
+    }
+    const count = Math.max(dels.length, adds.length);
+    for (let i = 0; i < count; i++) {
+      rows.push({ left: dels[i], right: adds[i] });
+    }
+  }
+  return rows;
+}
+
+/** A file's change as a unified or side-by-side diff: numbered lines, what went and what came tinted,
+    the unchanged stretches between folded to a line. */
 export function DiffView({
   lines,
   path,
+  viewMode = "unified",
   comments,
   activeLine,
   onSelectLine,
@@ -643,6 +850,7 @@ export function DiffView({
 }: {
   lines: DiffLine[];
   path?: string;
+  viewMode?: "unified" | "split";
   comments?: Readonly<Record<number, string>>;
   activeLine?: number | null;
   onSelectLine?: (lineIndex: number, line: DiffLine) => void;
@@ -670,6 +878,104 @@ export function DiffView({
     return tokens?.[sides.at[index.get(line)!]!];
   };
   const interactive = Boolean(onSelectLine || comments || activeLine !== undefined);
+  if (viewMode === "split") {
+    return (
+      <div className="diff-view diff-view-split" role="table" aria-label="并排差异">
+        {parts.map((part, partIndex) => {
+          const splitRows = pairSplitLines(part.lines);
+          return (
+            <Fragment key={partIndex}>
+              {part.skipped > 0 && <div className="diff-skip" role="row">{part.skipped} 行未改动</div>}
+              {splitRows.map((pair, rowAt) => {
+                const leftIdx = pair.left ? (index.get(pair.left) ?? -1) : -1;
+                const rightIdx = pair.right ? (index.get(pair.right) ?? -1) : -1;
+                const sameLine = pair.left && pair.left === pair.right;
+                const leftComment = leftIdx >= 0 ? comments?.[leftIdx] : undefined;
+                const rightComment = !sameLine && rightIdx >= 0 ? comments?.[rightIdx] : undefined;
+                const leftEditing = leftIdx >= 0 && activeLine === leftIdx && Boolean(renderLineEditor);
+                const rightEditing = !sameLine && rightIdx >= 0 && activeLine === rightIdx && Boolean(renderLineEditor);
+                return (
+                  <Fragment key={rowAt}>
+                    <div className="diff-split-row" role="row">
+                      <div
+                        className="diff-split-cell"
+                        data-kind={pair.left?.kind ?? "empty"}
+                        data-interactive={pair.left && onSelectLine ? "" : undefined}
+                        data-commented={leftComment ? "" : undefined}
+                        style={pair.left && onSelectLine ? { cursor: "pointer" } : undefined}
+                        onClick={
+                          pair.left && onSelectLine && leftIdx >= 0
+                            ? () => onSelectLine(leftIdx, pair.left!)
+                            : undefined
+                        }
+                      >
+                        <span className="diff-number" aria-hidden>{pair.left?.old ?? ""}</span>
+                        <span className="diff-sign" aria-hidden>{pair.left?.kind === "del" ? "−" : ""}</span>
+                        <code>{pair.left?.text ? <DiffCode text={pair.left.text} tokens={tokensOf(pair.left)} /> : " "}</code>
+                      </div>
+                      <div
+                        className="diff-split-cell"
+                        data-kind={pair.right?.kind ?? "empty"}
+                        data-interactive={pair.right && onSelectLine ? "" : undefined}
+                        data-commented={rightComment ? "" : undefined}
+                        style={pair.right && onSelectLine ? { cursor: "pointer" } : undefined}
+                        onClick={
+                          pair.right && onSelectLine && rightIdx >= 0
+                            ? () => onSelectLine(rightIdx, pair.right!)
+                            : undefined
+                        }
+                      >
+                        <span className="diff-number" aria-hidden>{pair.right?.new ?? ""}</span>
+                        <span className="diff-sign" aria-hidden>{pair.right?.kind === "add" ? "+" : ""}</span>
+                        <code>{pair.right?.text ? <DiffCode text={pair.right.text} tokens={tokensOf(pair.right)} /> : " "}</code>
+                      </div>
+                    </div>
+                    {leftComment && !leftEditing && pair.left && (
+                      <div
+                        className="diff-line-comment border-y border-border bg-muted/40 px-3 py-1.5 text-xs text-foreground flex items-center justify-between gap-2"
+                        role="row"
+                        style={onSelectLine ? { cursor: "pointer" } : undefined}
+                        onClick={onSelectLine ? () => onSelectLine(leftIdx, pair.left!) : undefined}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="whitespace-pre-wrap break-words">{leftComment}</span>
+                        </span>
+                      </div>
+                    )}
+                    {rightComment && !rightEditing && pair.right && (
+                      <div
+                        className="diff-line-comment border-y border-border bg-muted/40 px-3 py-1.5 text-xs text-foreground flex items-center justify-between gap-2"
+                        role="row"
+                        style={onSelectLine ? { cursor: "pointer" } : undefined}
+                        onClick={onSelectLine ? () => onSelectLine(rightIdx, pair.right!) : undefined}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="whitespace-pre-wrap break-words">{rightComment}</span>
+                        </span>
+                      </div>
+                    )}
+                    {leftEditing && pair.left && (
+                      <div className="diff-line-editor border-y border-border bg-muted/30 p-2.5" role="row">
+                        {renderLineEditor?.(leftIdx, pair.left)}
+                      </div>
+                    )}
+                    {rightEditing && pair.right && (
+                      <div className="diff-line-editor border-y border-border bg-muted/30 p-2.5" role="row">
+                        {renderLineEditor?.(rightIdx, pair.right)}
+                      </div>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+        {!parts.length && <div className="diff-skip">没有内容变化</div>}
+      </div>
+    );
+  }
   return (
     <div className="diff-view" role="table" aria-label="差异">
       {parts.map((part, partIndex) => (
@@ -849,6 +1155,8 @@ interface EntryProps {
   live?: boolean;
   /** Optional DOM anchor id (`data-item-id`) used by Conversation search & outline jump. */
   anchorId?: string;
+  /** Historical item strictly above the bottom 10 items (receives `content-visibility: auto` unless `⌘F` is open). */
+  historical?: boolean;
 }
 
 /**
@@ -866,17 +1174,20 @@ export const TimelineEntry = memo(function TimelineEntry({
   answered,
   live = false,
   anchorId,
+  historical = false,
 }: EntryProps & { item: TimelineItem }) {
   const actions = useActions();
   const navigation = useContext(TimelineNavigation);
+  const searchQuery = useContext(TimelineSearch);
   // A long message folds to its first lines, as Codex folds one past 20.
   const [unfolded, setUnfolded] = useState(false);
   const job = useJob();
   const online = useSessionOnline();
+  const historicalAttr = historical ? "" : undefined;
   const entry = (() => {
     if (item.kind === "turn-end" || item.kind === "driver")
           return (
-            <p className="timeline-divider" key={item.id} data-item-id={anchorId}>
+            <p className="timeline-divider" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
               {item.kind === "driver"
                 ? `会话控制：${item.driver === "desktop" ? "电脑端" : item.driver === "remote" ? "远程端" : "空闲"}`
                 : item.stopReason === "cancelled"
@@ -896,30 +1207,35 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "user" && item.agentMessages?.length)
           return (
-            <article key={item.id} className="agent-message" data-item-id={anchorId}>
+            <article key={item.id} className="agent-message" data-item-id={anchorId} data-historical={historicalAttr}>
               {item.agentMessages.map((message, index) => {
                 // Another session's message names it by the app's id: its title now, and a way there.
                 const sender = message.sessionId ? navigation?.findSession?.(message.sessionId) : undefined;
                 return (
-                  <details key={`${message.sender}:${index}`}>
-                    <summary>
-                      <span className="message-label">{inboxLabel(message, sender?.title)}</span>
-                      {message.summary ? ` · ${message.summary}` : ""}
-                      {sender && (
-                        <button
-                          type="button"
-                          className="agent-message-open"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            sender.open();
-                          }}
-                        >
-                          打开会话
-                        </button>
-                      )}
-                    </summary>
+                  <Fold
+                    key={`${message.sender}:${index}`}
+                    searchText={`${message.sender} ${message.summary ?? ""} ${message.body ?? ""}`}
+                    summary={
+                      <summary>
+                        <span className="message-label"><SearchableText text={inboxLabel(message, sender?.title)} /></span>
+                        {message.summary ? <> · <SearchableText text={message.summary} /></> : ""}
+                        {sender && (
+                          <button
+                            type="button"
+                            className="agent-message-open"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              sender.open();
+                            }}
+                          >
+                            打开会话
+                          </button>
+                        )}
+                      </summary>
+                    }
+                  >
                     <RichText text={message.body || "当前空闲，等待后续任务。"} />
-                  </details>
+                  </Fold>
                 );
               })}
             </article>
@@ -927,7 +1243,7 @@ export const TimelineEntry = memo(function TimelineEntry({
         const said = item.kind === "user" ? userMessageView(item.blocks) : undefined;
         if (said?.event)
           return (
-            <p className="timeline-event" key={item.id} data-item-id={anchorId}>
+            <p className="timeline-event" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
               {userEventLabel(said.event)}
             </p>
           );
@@ -936,23 +1252,24 @@ export const TimelineEntry = memo(function TimelineEntry({
           // person's, so on their side, in the terminal's type.
           const output = said.shell ? [said.shell.stdout, said.shell.stderr].filter(Boolean).join("\n") : said.output;
           return (
-            <article className="user-shell" key={item.id} data-item-id={anchorId}>
+            <article className="user-shell" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
               {said.shell?.command && (
                 <code className="user-shell-command">
-                  <span aria-hidden>!</span> {said.shell.command}
+                  <span aria-hidden>!</span> <SearchableText text={said.shell.command} />
                 </code>
               )}
-              {output && <pre tabIndex={0} className="user-shell-output">{output}</pre>}
+              {output && <pre tabIndex={0} className="user-shell-output"><SearchableText text={output} /></pre>}
             </article>
           );
         }
-        if (item.kind === "user")
+        if (item.kind === "user") {
+          const searchHitsUser = Boolean(searchQuery && said && said.text.toLowerCase().includes(searchQuery));
           return (
-            <article className="user-message" key={item.id} data-item-id={anchorId}>
+            <article className="user-message" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
               {said && said.context.length > 0 && <UserContextChips context={said.context} />}
               {/* The words in their own box, so the desktop can hang the time and actions under
                   the bubble instead of inside it. */}
-              <div className="user-bubble" data-folded={(said && longMessage(said.text) && !unfolded) || undefined}>
+              <div className="user-bubble" data-folded={(said && longMessage(said.text) && !unfolded && !searchHitsUser) || undefined}>
                 <UserBlocks
                   blocks={item.blocks}
                   sessionId={sessionId}
@@ -1020,9 +1337,10 @@ export const TimelineEntry = memo(function TimelineEntry({
               </div>
             </article>
           );
+        }
         if (item.kind === "agent")
           return (
-            <article className="assistant-message" key={item.id} data-item-id={anchorId}>
+            <article className="assistant-message" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
               {item.senderSessionId || item.recipientSessionId ? (
                 <small className="muted">
                   {item.senderSessionId ?? "Agent"} →{" "}
@@ -1072,26 +1390,33 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "thought")
           return (
-            <Fold className="thought-block" key={item.id} data-item-id={anchorId} summary={<summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>}>
+            <Fold
+              className="thought-block"
+              key={item.id}
+              data-item-id={anchorId}
+              data-historical={historicalAttr}
+              searchText={item.text}
+              summary={<summary>{item.streaming ? "思考中…" : item.endedTs && item.endedTs - item.ts >= 1000 ? `思考了 ${formatElapsed(item.endedTs - item.ts)}` : "思考过程"}</summary>}
+            >
               <StreamingText text={item.text} streaming={item.streaming && online} />
             </Fold>
           );
-        if (item.kind === "error") return <ErrorCard key={item.id} item={item} anchorId={anchorId} />;
+        if (item.kind === "error") return <ErrorCard key={item.id} item={item} anchorId={anchorId} historical={historical} />;
         if (item.kind === "notice") {
           const reconnect = reconnectOf(item.title, item.detail);
           if (reconnect)
             return (
-              <p className="timeline-divider timeline-reconnect" key={item.id} data-item-id={anchorId} role={live ? "status" : undefined}>
+              <p className="timeline-divider timeline-reconnect" key={item.id} data-item-id={anchorId} data-historical={historicalAttr} role={live ? "status" : undefined}>
                 {live && <LoaderCircle className="tool-state-spinner" aria-hidden />}
-                {reconnectLabel(reconnect, live)}
+                <SearchableText text={reconnectLabel(reconnect, live)} />
               </p>
             );
           return (
-            <Alert variant="info" key={item.id} data-item-id={anchorId}>
-              <AlertTitle>{item.title}</AlertTitle>
+            <Alert variant="info" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
+              <AlertTitle><SearchableText text={item.title} /></AlertTitle>
               {item.detail ? (
                 <AlertDescription>
-                  <pre>{item.detail}</pre>
+                  <pre><SearchableText text={item.detail} /></pre>
                 </AlertDescription>
               ) : null}
             </Alert>
@@ -1099,8 +1424,8 @@ export const TimelineEntry = memo(function TimelineEntry({
         }
         if (item.kind === "plan")
           return (
-            <section className="plan-card" key={item.id} data-item-id={anchorId}>
-              <strong>{item.title ?? "执行计划"}</strong>
+            <section className="plan-card" key={item.id} data-item-id={anchorId} data-historical={historicalAttr}>
+              <strong><SearchableText text={item.title ?? "执行计划"} /></strong>
               {item.markdown ? <RichText text={item.markdown} /> : null}
               {item.path ? (
                 <Button
@@ -1119,7 +1444,7 @@ export const TimelineEntry = memo(function TimelineEntry({
                     <span className="plan-mark" aria-label={entry.status === "completed" ? "已完成" : entry.status === "in_progress" ? "进行中" : "待办"}>
                       {entry.status === "completed" ? <Check strokeWidth={3} /> : null}
                     </span>
-                    <span className="plan-text">{entry.content}</span>
+                    <span className="plan-text"><SearchableText text={entry.content} /></span>
                   </li>
                 ))}
               </ul>
@@ -1127,18 +1452,26 @@ export const TimelineEntry = memo(function TimelineEntry({
           );
         if (item.kind === "permission-result")
           return (
-            <details className="notice-card" key={item.id} data-item-id={anchorId}>
-              <summary>
-                {item.asked ? "已回答" : item.allowed ? "已允许" : "已拒绝"} ·{" "}
-                {item.title}
-              </summary>
-              <p>{item.optionName}</p>
+            <Fold
+              className="notice-card"
+              key={item.id}
+              data-item-id={anchorId}
+              data-historical={historicalAttr}
+              searchText={[item.title, item.optionName, ...(item.answers?.map((a) => `${a.question} ${a.answer}`) ?? [])].join(" ")}
+              summary={
+                <summary>
+                  {item.asked ? "已回答" : item.allowed ? "已允许" : "已拒绝"} ·{" "}
+                  <SearchableText text={item.title} />
+                </summary>
+              }
+            >
+              {item.optionName && <p><SearchableText text={item.optionName} /></p>}
               {item.answers?.map((answer, index) => (
                 <p key={index}>
-                  {answer.question}：{answer.answer}
+                  <SearchableText text={`${answer.question}：${answer.answer}`} />
                 </p>
               ))}
-            </details>
+            </Fold>
           );
         return (
           <ToolRecord
@@ -1149,6 +1482,7 @@ export const TimelineEntry = memo(function TimelineEntry({
             onFile={onFile}
             onTerminal={onTerminal}
             anchorId={anchorId}
+            historical={historical}
           />
         );
   })();
@@ -1165,19 +1499,18 @@ export const TimelineEntry = memo(function TimelineEntry({
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
 /** An error as the Claude app shows it: what kind of failure, what to do, the agent's words one click away. */
-function ErrorCard({ item, anchorId }: { item: Extract<TimelineItem, { kind: "error" }>; anchorId?: string }) {
+function ErrorCard({ item, anchorId, historical }: { item: Extract<TimelineItem, { kind: "error" }>; anchorId?: string; historical?: boolean }) {
   const shown = presentError(item);
   return (
-    <Alert variant="destructive" className="timeline-error-card" data-kind={shown.kind} data-item-id={anchorId}>
-      <AlertTitle>{shown.title}</AlertTitle>
+    <Alert variant="destructive" className="timeline-error-card" data-kind={shown.kind} data-item-id={anchorId} data-historical={historical ? "" : undefined}>
+      <AlertTitle><SearchableText text={shown.title} /></AlertTitle>
       {(shown.hint || (shown.kind && shown.detail)) ? (
         <AlertDescription>
-          {shown.hint && <p className="whitespace-pre-wrap break-words">{shown.hint}</p>}
+          {shown.hint && <p className="whitespace-pre-wrap break-words"><SearchableText text={shown.hint} /></p>}
           {shown.kind && shown.detail && (
-            <details className="error-detail">
-              <summary>查看详情</summary>
-              <pre tabIndex={0}>{shown.detail}</pre>
-            </details>
+            <Fold className="error-detail" searchText={shown.detail} summary={<summary>查看详情</summary>}>
+              <pre tabIndex={0}><SearchableText text={shown.detail} /></pre>
+            </Fold>
           )}
         </AlertDescription>
       ) : null}
@@ -1221,7 +1554,7 @@ const SUBAGENT_STATES: Record<string, string | null> = {
  * the open box (the last, nobody has written since), a reply button sends its words as the next
  * message, as the app's does; the app's own actions (commit, create a PR…) are done in the app.
  */
-function WrapUpCard({ item, sessionId, anchorId }: { item: ToolItem; sessionId: string; anchorId?: string }) {
+function WrapUpCard({ item, sessionId, anchorId, historical }: { item: ToolItem; sessionId: string; anchorId?: string; historical?: boolean }) {
   const box = wrapUpOf(item);
   const open = useContext(OpenWrapUp) === item.id;
   const actions = useActions();
@@ -1229,10 +1562,10 @@ function WrapUpCard({ item, sessionId, anchorId }: { item: ToolItem; sessionId: 
   const job = useJob();
   const [sent, setSent] = useState<number>();
   return (
-    <section className="wrap-up-card" aria-label="已收尾" data-item-id={anchorId}>
+    <section className="wrap-up-card" aria-label="已收尾" data-item-id={anchorId} data-historical={historical ? "" : undefined}>
       <small className="wrap-up-label">已收尾</small>
       {box.recap && <RichText text={box.recap} />}
-      {box.ask && <p className="wrap-up-ask">{box.ask}</p>}
+      {box.ask && <p className="wrap-up-ask"><SearchableText text={box.ask} /></p>}
       {box.actions.length > 0 && (
         <div className="wrap-up-actions">
           {box.actions.map((action, index) =>
@@ -1271,7 +1604,7 @@ function WrapUpCard({ item, sessionId, anchorId }: { item: ToolItem; sessionId: 
 const SESSION_STATES = { starting: "正在启动", started: "已启动", proposed: "已提议，等你开始", failed: "启动失败" } as const;
 
 /** A session the Claude app started from this one: opens it when this computer has it. */
-function SessionCard({ item, anchorId }: { item: ToolItem; anchorId?: string }) {
+function SessionCard({ item, anchorId, historical }: { item: ToolItem; anchorId?: string; historical?: boolean }) {
   const navigation = useContext(TimelineNavigation);
   const started = startedSession(item);
   const target = started.appId ? navigation?.findSession?.(started.appId) : undefined;
@@ -1279,18 +1612,18 @@ function SessionCard({ item, anchorId }: { item: ToolItem; anchorId?: string }) 
     <>
       {started.state === "starting" ? <LoaderCircle className="tool-state-spinner" aria-hidden /> : <MessageSquareText aria-hidden />}
       <span className="session-card-text">
-        <strong>{started.title}</strong>
+        <strong><SearchableText text={started.title} /></strong>
         <small>{SESSION_STATES[started.state]}</small>
       </span>
     </>
   );
   return target ? (
-    <button type="button" className="session-card" data-state={started.state} data-item-id={anchorId} onClick={target.open} title={`打开「${target.title}」`}>
+    <button type="button" className="session-card" data-state={started.state} data-item-id={anchorId} data-historical={historical ? "" : undefined} onClick={target.open} title={`打开「${target.title}」`}>
       {body}
       <ChevronRight className="session-card-chevron" aria-hidden />
     </button>
   ) : (
-    <div className="session-card" data-state={started.state} data-item-id={anchorId}>{body}</div>
+    <div className="session-card" data-state={started.state} data-item-id={anchorId} data-historical={historical ? "" : undefined}>{body}</div>
   );
 }
 
@@ -1300,11 +1633,11 @@ function CommandBody({ item, command }: { item: ToolItem; command: string }) {
   const ended = exitNote(item);
   return (
     <div className="tool-terminal">
-      <pre className="tool-terminal-command" tabIndex={0} aria-label="命令"><span className="tool-terminal-prompt" aria-hidden>$ </span>{command}</pre>
+      <pre className="tool-terminal-command" tabIndex={0} aria-label="命令"><span className="tool-terminal-prompt" aria-hidden>$ </span><SearchableText text={command} /></pre>
       {output && (
         <>
           <CopyText text={output} label="复制命令输出" />
-          <pre className="tool-output-text" tabIndex={0} aria-label="命令输出">{output}</pre>
+          <pre className="tool-output-text" tabIndex={0} aria-label="命令输出"><SearchableText text={output} /></pre>
         </>
       )}
       {ended && <small className="tool-terminal-exit" data-ok={ended === "成功" || undefined}>{ended}</small>}
@@ -1324,6 +1657,7 @@ function ToolRecord({
   onFile,
   onTerminal,
   anchorId,
+  historical,
 }: {
   item: ToolItem;
   sessionId: string;
@@ -1331,23 +1665,26 @@ function ToolRecord({
   onFile: (path: string, line?: number) => void;
   onTerminal?: (id: string) => void;
   anchorId?: string;
+  historical?: boolean;
 }) {
   const { link } = useConnection();
   const navigation = useContext(TimelineNavigation);
+  const searchQuery = useContext(TimelineSearch);
   const job = useJob();
   const online = useSessionOnline();
   const label = toolLabel(item);
   const action = label.action;
+  const historicalAttr = historical ? "" : undefined;
   if (action === "compaction")
     return (
-      <p className="timeline-divider" data-item-id={anchorId} role={item.status === "in_progress" ? "status" : undefined}>
+      <p className="timeline-divider" data-item-id={anchorId} data-historical={historicalAttr} role={item.status === "in_progress" ? "status" : undefined}>
         {item.status === "in_progress" && <LoaderCircle className="tool-state-spinner" aria-hidden />}
-        {compactionLabel(item)}
+        <SearchableText text={compactionLabel(item)} />
       </p>
     );
-  if (action === "chapter") return <p className="timeline-divider timeline-chapter" data-item-id={anchorId}>{label.subject ?? "新章节"}</p>;
-  if (action === "wrap_up") return <WrapUpCard item={item} sessionId={sessionId} anchorId={anchorId} />;
-  if (action === "start_session") return <SessionCard item={item} anchorId={anchorId} />;
+  if (action === "chapter") return <p className="timeline-divider timeline-chapter" data-item-id={anchorId} data-historical={historicalAttr}><SearchableText text={label.subject ?? "新章节"} /></p>;
+  if (action === "wrap_up") return <WrapUpCard item={item} sessionId={sessionId} anchorId={anchorId} historical={historical} />;
+  if (action === "start_session") return <SessionCard item={item} anchorId={anchorId} historical={historical} />;
 
   const parts = toolLabelParts(label);
   const command = action === "command" ? toolCommand(item) : undefined;
@@ -1378,7 +1715,7 @@ function ToolRecord({
     <>
       <ToolState item={item} />
       <strong className="tool-label" title={toolLabelText(label, { note: true })}>
-        <span className="tool-verb">{parts.verb}</span>
+        <span className="tool-verb"><SearchableText text={parts.verb} /></span>
         {parts.subject &&
           (label.style === "file" && label.path ? (
             <button
@@ -1390,12 +1727,12 @@ function ToolRecord({
                 onFile(label.path!);
               }}
             >
-              {parts.subject}
+              <SearchableText text={parts.subject} />
             </button>
           ) : label.style === "code" ? (
-            <code className="tool-subject-code">{parts.subject}</code>
+            <code className="tool-subject-code"><SearchableText text={parts.subject} /></code>
           ) : (
-            <span className="tool-subject">{parts.subject}</span>
+            <span className="tool-subject"><SearchableText text={parts.subject} /></span>
           ))}
       </strong>
       {/* Keep the outcome visible when the command itself is truncated. */}
@@ -1422,12 +1759,33 @@ function ToolRecord({
   );
   if (!hasBody)
     return (
-      <div className={`tool-record tool-line ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} data-item-id={anchorId}>
+      <div className={`tool-record tool-line ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} data-item-id={anchorId} data-historical={historicalAttr}>
         <div className="tool-summary">{summary}</div>
       </div>
     );
+  const rawInputText =
+    item.rawInput === undefined
+      ? undefined
+      : typeof item.rawInput === "string"
+        ? item.rawInput
+        : JSON.stringify(item.rawInput, null, 2);
+  const rawOutputText =
+    item.rawOutput === undefined
+      ? undefined
+      : typeof item.rawOutput === "string"
+        ? item.rawOutput
+        : JSON.stringify(item.rawOutput, null, 2);
+  const bodySearchText = searchQuery ? timelineItemSearchText(item) : undefined;
   return (
-    <Fold className={`tool-record ${item.status}`} data-action={action} data-agent-failed={agentFailed || undefined} data-item-id={anchorId} summary={<summary>{summary}</summary>}>
+    <Fold
+      className={`tool-record ${item.status}`}
+      data-action={action}
+      data-agent-failed={agentFailed || undefined}
+      data-item-id={anchorId}
+      data-historical={historicalAttr}
+      searchText={bodySearchText}
+      summary={<summary>{summary}</summary>}
+    >
       {cancel ? (
         <Button
           variant="outline"
@@ -1448,22 +1806,22 @@ function ToolRecord({
             {questions.map((question, index) => (
               <li key={index}>
                 {question.header && <small>{question.header}{question.multiple ? "（可多选）" : ""}</small>}
-                <p>{question.question}</p>
-                {question.options.length > 0 && <p className="muted">{question.options.join(" · ")}</p>}
+                <p><SearchableText text={question.question} /></p>
+                {question.options.length > 0 && <p className="muted"><SearchableText text={question.options.join(" · ")} /></p>}
               </li>
             ))}
           </ul>
-          {toolOutput(item) && <pre className="tool-output-text" tabIndex={0} aria-label="回答">{toolOutput(item)}</pre>}
+          {toolOutput(item) && <pre className="tool-output-text" tabIndex={0} aria-label="回答"><SearchableText text={toolOutput(item)!} /></pre>}
         </>
       ) : exploring ? (
-        <pre className="tool-output-text" tabIndex={0} aria-label="工具输出">{toolOutput(item)}</pre>
+        <pre className="tool-output-text" tabIndex={0} aria-label="工具输出"><SearchableText text={toolOutput(item) ?? ""} /></pre>
       ) : (
         <>
           {item.output && (
             <>
               <CopyText text={item.output} label="复制工具输出" />
               <pre className="tool-output-text" tabIndex={0} aria-label="工具输出">
-                {item.output}
+                <SearchableText text={item.output} />
               </pre>
             </>
           )}
@@ -1484,19 +1842,19 @@ function ToolRecord({
               {location.line ? `:${location.line}` : ""}
             </Button>
           ))}
-          {item.rawInput !== undefined && (
-            <Fold summary={<summary>工具参数</summary>}>
-              <pre tabIndex={0}>{typeof item.rawInput === "string" ? item.rawInput : JSON.stringify(item.rawInput, null, 2)}</pre>
+          {rawInputText !== undefined && (
+            <Fold searchText={rawInputText} summary={<summary>工具参数</summary>}>
+              <pre tabIndex={0}><SearchableText text={rawInputText} /></pre>
             </Fold>
           )}
-          {item.rawOutput !== undefined && (
-            <Fold summary={<summary>原始结果</summary>}>
-              <pre tabIndex={0}>{typeof item.rawOutput === "string" ? item.rawOutput : JSON.stringify(item.rawOutput, null, 2)}</pre>
+          {rawOutputText !== undefined && (
+            <Fold searchText={rawOutputText} summary={<summary>原始结果</summary>}>
+              <pre tabIndex={0}><SearchableText text={rawOutputText} /></pre>
             </Fold>
           )}
         </>
       )}
-      {item.sub && <Timeline items={item.sub.items} sessionId={sessionId} agent={agent} onFile={onFile} onTerminal={onTerminal} />}
+      {item.sub && <Timeline items={item.sub.items} sessionId={sessionId} agent={agent} onFile={onFile} onTerminal={onTerminal} nested />}
     </Fold>
   );
 }
@@ -1522,6 +1880,9 @@ export function Timeline({
   onFork,
   onTerminal,
   showAsyncQuestions = true,
+  searchOpen = false,
+  searchQuery = "",
+  nested = false,
 }: {
   items: TimelineItem[];
   sessionId: string;
@@ -1530,7 +1891,16 @@ export function Timeline({
   onFork?: (id: string) => void;
   onTerminal?: (id: string) => void;
   showAsyncQuestions?: boolean;
+  searchOpen?: boolean;
+  searchQuery?: string;
+  nested?: boolean;
 }) {
+  const inheritedSearch = useContext(TimelineSearch);
+  const activeQuery = nested
+    ? inheritedSearch
+    : searchOpen
+      ? searchQuery.trim().toLowerCase()
+      : "";
   // Which folded step runs the reader has opened in place.
   const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
   const toggleSteps = (key: string) =>
@@ -1540,34 +1910,57 @@ export function Timeline({
       else next.add(key);
       return next;
     });
+  const effectiveOpenSteps = useMemo(() => {
+    if (!activeQuery) return openSteps;
+    const base = foldStepRuns(items, openSteps);
+    let expanded: Set<string> | undefined;
+    for (const row of base) {
+      if (
+        row.type === "steps" &&
+        !openSteps.has(row.key) &&
+        row.steps.some((step) => timelineItemSearchText(step).toLowerCase().includes(activeQuery))
+      ) {
+        expanded ??= new Set(openSteps);
+        expanded.add(row.key);
+      }
+    }
+    return expanded ?? openSteps;
+  }, [items, openSteps, activeQuery]);
   // Finished runs of tool/thought steps fold into one summary line, Desktop-style.
-  const rows = foldStepRuns(items, openSteps);
+  const rows = foldStepRuns(items, effectiveOpenSteps);
   // The agent's async questions (Codex Desktop) are answered by a message quoting them, here or on the computer.
   const answered = answeredMap(items);
-  return (
+  const hideDeferred = nested || searchOpen || Boolean(activeQuery);
+  const list = (
     <div className="live-timeline">
-      {rows.map((row) =>
-        row.type === "steps" ? (
-          <StepsSummary
-            key={row.key}
-            steps={row.steps}
-            open={openSteps.has(row.key)}
-            onToggle={() => toggleSteps(row.key)}
-          />
+      {rows.map((row, index) => {
+        const historical = !hideDeferred && index < rows.length - 10;
+        return row.type === "steps" ? (
+          <ErrorBoundary key={row.key} resetKey={row.key}>
+            <StepsSummary
+              steps={row.steps}
+              open={effectiveOpenSteps.has(row.key)}
+              historical={historical}
+              onToggle={() => toggleSteps(row.key)}
+            />
+          </ErrorBoundary>
         ) : (
-          <TimelineEntry
-            key={row.item.id}
-            item={row.item}
-            sessionId={sessionId}
-            agent={agent}
-            onFile={onFile}
-            onFork={onFork}
-            onTerminal={onTerminal}
-            showAsyncQuestions={showAsyncQuestions}
-            answered={answered}
-          />
-        ),
-      )}
+          <ErrorBoundary key={row.item.id} resetKey={row.item.id}>
+            <TimelineEntry
+              item={row.item}
+              sessionId={sessionId}
+              agent={agent}
+              onFile={onFile}
+              onFork={onFork}
+              onTerminal={onTerminal}
+              showAsyncQuestions={showAsyncQuestions}
+              answered={answered}
+              historical={historical}
+            />
+          </ErrorBoundary>
+        );
+      })}
     </div>
   );
+  return nested ? list : <TimelineSearch.Provider value={activeQuery}>{list}</TimelineSearch.Provider>;
 }

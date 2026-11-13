@@ -1,11 +1,13 @@
 import { needsAttention, sessionTitle } from "@/lib/describe";
 import { LegendList } from "@legendapp/list/react-native";
-import type { Locale } from "@linkshell/client-core";
+import type { ClientState, Locale } from "@linkshell/client-core";
 import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
-import { useHeaderHeight } from "expo-router/react-navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import ReanimatedSwipeable, { type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
+import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
@@ -27,10 +29,12 @@ import { Welcome } from "@/components/welcome";
 import { haptics } from "@/lib/haptics";
 import { useLocale } from "@/lib/locale";
 import { useMachineMetrics } from "@/lib/machine-metrics";
+import { toggleArchived } from "@/lib/session-actions";
 import {
   buildLiveActivityPayload,
   isSessionSnoozed,
   mergeLiveViewsIntoSessions,
+  toggleSessionPinned,
   usePinnedSessionIds,
   useSnoozedSessions,
   type HomeFilterMode,
@@ -626,6 +630,100 @@ function HomeWorkspace() {
   );
 }
 
+function SwipeableSessionRow({
+  session,
+  position,
+  now,
+  onPress,
+  selected,
+}: {
+  session: SessionSummary;
+  position: RowPosition;
+  now: number;
+  onPress: () => void;
+  selected: boolean;
+}) {
+  const swipeRef = useRef<SwipeableMethods>(null);
+  const actions = useActions();
+  const pinnedIds = usePinnedSessionIds();
+  const pinned = pinnedIds.includes(session.id);
+
+  useEffect(() => {
+    swipeRef.current?.close();
+  }, [session.id]);
+
+  const top = position === "first" || position === "only";
+  const bottom = position === "last" || position === "only";
+  const leftCorners = {
+    borderTopLeftRadius: top ? radius.card : 0,
+    borderBottomLeftRadius: bottom ? radius.card : 0,
+    borderCurve: "continuous",
+  } as const;
+  const rightCorners = {
+    borderTopRightRadius: top ? radius.card : 0,
+    borderBottomRightRadius: bottom ? radius.card : 0,
+    borderCurve: "continuous",
+  } as const;
+
+  const handlePin = () => {
+    haptics.selection();
+    toggleSessionPinned(session.id);
+    swipeRef.current?.close();
+  };
+
+  const handleArchive = () => {
+    swipeRef.current?.close();
+    void toggleArchived(session, actions);
+  };
+
+  return (
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      friction={2}
+      leftThreshold={40}
+      rightThreshold={40}
+      overshootLeft={false}
+      overshootRight={false}
+      dragOffsetFromLeftEdge={16}
+      dragOffsetFromRightEdge={16}
+      renderLeftActions={() => (
+        <Animated.View style={{ width: 84, backgroundColor: colors.accentFill, ...leftCorners }}>
+          <Pressable
+            onPress={handlePin}
+            accessibilityRole="button"
+            accessibilityLabel={pinned ? "取消置顶" : "置顶会话"}
+            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.7 : 1 })}
+          >
+            <Icon sf={pinned ? "pin.slash" : "pin.fill"} md="push_pin" size={17} color="#fff" />
+            <Text style={[type.caption, { color: "#fff", fontWeight: "600" }]}>{pinned ? "取消置顶" : "置顶"}</Text>
+          </Pressable>
+        </Animated.View>
+      )}
+      renderRightActions={() => (
+        <Animated.View style={{ width: 84, backgroundColor: colors.waitingFill, ...rightCorners }}>
+          <Pressable
+            onPress={handleArchive}
+            accessibilityRole="button"
+            accessibilityLabel={session.archived ? "取消归档" : "归档"}
+            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.7 : 1 })}
+          >
+            <Icon sf={session.archived ? "tray.and.arrow.up" : "archivebox"} md={session.archived ? "unarchive" : "archive"} size={17} color="#fff" />
+            <Text style={[type.caption, { color: "#fff", fontWeight: "600" }]}>{session.archived ? "取消归档" : "归档"}</Text>
+          </Pressable>
+        </Animated.View>
+      )}
+    >
+      <SessionRow
+        session={session}
+        position={position}
+        now={now}
+        onPress={onPress}
+        selected={selected}
+      />
+    </ReanimatedSwipeable>
+  );
+}
+
 function HomeList({
   onSelect,
   selectedId,
@@ -637,24 +735,37 @@ function HomeList({
   compact: boolean;
   inlineControls: boolean;
 }) {
+  const focused = useIsFocused();
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
   const insets = usePageInsets();
   const tabInset = useFloatingTabInset();
   const { locale, t, pick } = useLocale();
-  const sessionsById = useClient((state) => state.sessions);
+  const frozenSessionsRef = useRef<ClientState["sessions"] | null>(null);
+  const frozenViewsRef = useRef<ClientState["views"] | null>(null);
+  const frozenProgressRef = useRef<ClientState["promptProgress"] | null>(null);
+  const sessionsById = useClient((state) => {
+    if (focusedRef.current || frozenSessionsRef.current === null) {
+      frozenSessionsRef.current = state.sessions;
+    }
+    return frozenSessionsRef.current;
+  });
   const { computer } = useConnection();
   const names = useComputerNames((state) => state.names);
   const online = useClient((state) => state.status === "online");
   const loaded = useClient((state) => state.sessionsLoaded);
+  const sessionsNextBefore = useClient((state) => state.sessionsNextBefore);
   const error = useClient((state) => state.sessionsError);
   const connectionStatus = useConnectionStatus();
   const offline = unreachable(connectionStatus);
   const hasComputer = useHasComputer();
-  const { refresh } = useActions();
+  const { refresh, loadMoreSessions } = useActions();
   const { metrics } = useMachineMetrics();
   const power = metrics?.power;
   const lowBattery = isHostLowBattery(power);
-  const now = useNow();
+  const now = useNow(focused ? 30_000 : null);
   const [refreshing, setRefreshing] = useState(false);
+  const loadingMoreRef = useRef(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<HomeFilterMode>("all");
   const words = useMemo(() => searchWords(query), [query]);
@@ -664,35 +775,57 @@ function HomeList({
   const snoozedMap = useSnoozedSessions();
 
   const day = new Date(now).toDateString();
-  const views = useClient((state) => state.views);
-  const promptProgress = useClient((state) => state.promptProgress);
+  const views = useClient((state) => {
+    if (focusedRef.current || frozenViewsRef.current === null) {
+      frozenViewsRef.current = state.views;
+    }
+    return frozenViewsRef.current;
+  });
+  const promptProgress = useClient((state) => {
+    if (focusedRef.current || frozenProgressRef.current === null) {
+      frozenProgressRef.current = state.promptProgress;
+    }
+    return frozenProgressRef.current;
+  });
   const { terminals } = useTerminals();
-  const allSessions = useMemo(
-    () => mergeLiveViewsIntoSessions(Object.values(sessionsById), views, promptProgress),
-    [sessionsById, views, promptProgress],
-  );
+
+  const frozenAllSessionsRef = useRef<SessionSummary[] | null>(null);
+  const allSessions = useMemo(() => {
+    if (!focused && frozenAllSessionsRef.current !== null) return frozenAllSessionsRef.current;
+    const next = mergeLiveViewsIntoSessions(Object.values(sessionsById), views, promptProgress);
+    frozenAllSessionsRef.current = next;
+    return next;
+  }, [focused, sessionsById, views, promptProgress]);
   const computerName = computerDisplayName(computer, names);
 
-  const liveActivityPayload = useMemo(
-    () => buildLiveActivityPayload(computerName, allSessions, terminals, online, views, promptProgress),
-    [computerName, allSessions, terminals, online, views, promptProgress],
-  );
+  const frozenLiveActivityRef = useRef<ReturnType<typeof buildLiveActivityPayload> | null>(null);
+  const liveActivityPayload = useMemo(() => {
+    if (!focused && frozenLiveActivityRef.current !== null) return frozenLiveActivityRef.current;
+    const next = buildLiveActivityPayload(computerName, allSessions, terminals, online, views, promptProgress);
+    frozenLiveActivityRef.current = next;
+    return next;
+  }, [focused, computerName, allSessions, terminals, online, views, promptProgress]);
 
-  const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(
-    () =>
-      buildItems(allSessions, terminals, Date.now(), locale, {
-        pinnedIds,
-        snoozedMap,
-        filter,
-      }),
+  const frozenBuiltRef = useRef<ReturnType<typeof buildItems> | null>(null);
+  const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(() => {
+    if (!focused && frozenBuiltRef.current !== null) return frozenBuiltRef.current;
+    const next = buildItems(allSessions, terminals, Date.now(), locale, {
+      pinnedIds,
+      snoozedMap,
+      filter,
+    });
+    frozenBuiltRef.current = next;
+    return next;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` invalidates date buckets on midnight rollover.
-    [allSessions, terminals, day, locale, pinnedIds, snoozedMap, filter],
-  );
+  }, [focused, allSessions, terminals, day, locale, pinnedIds, snoozedMap, filter]);
   const empty = loaded && Object.keys(sessionsById).length === 0 && terminals.length === 0;
-  const results = useMemo(
-    () => (searching ? searchItems(allSessions, terminals, words, locale) : []),
-    [searching, allSessions, terminals, words, locale],
-  );
+  const frozenResultsRef = useRef<Item[] | null>(null);
+  const results = useMemo(() => {
+    if (!focused && frozenResultsRef.current !== null) return frozenResultsRef.current;
+    const next = searching ? searchItems(allSessions, terminals, words, locale) : [];
+    frozenResultsRef.current = next;
+    return next;
+  }, [focused, searching, allSessions, terminals, words, locale]);
 
   const filterChips = useMemo(() => {
     const copy = sectionWords(locale);
@@ -719,6 +852,14 @@ function HomeList({
     setRefreshing(false);
   }, [refresh]);
 
+  const onEndReached = useCallback(() => {
+    if (!online || !loaded || searching || sessionsNextBefore === undefined || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    void loadMoreSessions().catch(() => undefined).finally(() => {
+      loadingMoreRef.current = false;
+    });
+  }, [online, loaded, searching, sessionsNextBefore, loadMoreSessions]);
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       switch (item.type) {
@@ -733,7 +874,7 @@ function HomeList({
         case "row":
           return (
             <View style={compact && item.position !== "last" && item.position !== "only" ? { paddingBottom: 8 } : undefined}>
-              <SessionRow
+              <SwipeableSessionRow
                 session={item.session}
                 position={compact ? "only" : item.position}
                 now={now}
@@ -789,6 +930,8 @@ function HomeList({
         style={{ flex: 1, backgroundColor: colors.background }}
         refreshing={refreshing}
         onRefresh={onRefresh}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
         ListHeaderComponent={
           <View>
             <View style={{ paddingTop: (inlineControls ? 8 : 16) + (Platform.OS === "ios" ? 0 : insets.top), paddingBottom: 8, gap: inlineControls ? 8 : 12 }}>

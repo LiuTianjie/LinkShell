@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, renameSync, statSync } from "node:fs";
+import { closeSync, existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, uptime } from "node:os";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 const LINKSHELL_DIR = process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 
@@ -114,30 +114,75 @@ export function spawnDaemon(service: ServiceName, args: string[], env: NodeJS.Pr
   rotateLog(log);
   const out = openSync(log, "a");
   const err = openSync(log, "a");
+  try {
+    const entryScript = process.argv[1]!;
 
-  const entryScript = process.argv[1]!;
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, entryScript, ...args],
+      {
+        detached: true,
+        windowsHide: true,
+        stdio: ["ignore", out, err],
+        // The launching terminal's environment is the most faithful one agents can get.
+        env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: env.LINKSHELL_APP_BUNDLE ? "0" : "1" },
+      },
+    );
 
-  const child = spawn(
-    process.execPath,
-    [...process.execArgv, entryScript, ...args],
-    {
-      detached: true,
-      windowsHide: true,
-      stdio: ["ignore", out, err],
-      // The launching terminal's environment is the most faithful one agents can get.
-      env: { ...env, LINKSHELL_ENV_FROM_TERMINAL: env.LINKSHELL_APP_BUNDLE ? "0" : "1" },
-    },
-  );
+    child.unref();
+    const pid = child.pid!;
+    savePid(service, pid);
+    return pid;
+  } finally {
+    try { closeSync(out); } catch {}
+    try { closeSync(err); } catch {}
+  }
+}
 
-  child.unref();
-  const pid = child.pid!;
-  savePid(service, pid);
-  return pid;
+export function matchesServiceProcess(service: ServiceName, commandLine: string, savedEntry?: string): boolean {
+  const cmd = commandLine.trim();
+  if (!cmd) return false;
+  if (savedEntry && cmd.includes(savedEntry)) return true;
+  const lower = cmd.toLowerCase();
+  if (service === "host") {
+    return cmd.includes("--_foreground-host") || (lower.includes("linkshell") && /\bhost\b/.test(lower));
+  }
+  if (service === "gateway") {
+    return cmd.includes("--_foreground-gw") || (lower.includes("linkshell") && /\bgateway\b/.test(lower));
+  }
+  return lower.includes("linkshell") || /\bbridge\b/.test(lower);
+}
+
+function readSavedHostEntry(pid: number): string | undefined {
+  try {
+    const saved = JSON.parse(readFileSync(hostLaunchFile, "utf8")) as { pid?: unknown; entry?: unknown };
+    return saved.pid === pid && typeof saved.entry === "string" && saved.entry ? saved.entry : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function verifyDaemonIdentity(service: ServiceName, pid: number): boolean {
+  if (process.platform === "win32") return true;
+  try {
+    const stdout = execFileSync("ps", ["-p", String(pid), "-ww", "-o", "command="], {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    const savedEntry = service === "host" ? readSavedHostEntry(pid) : undefined;
+    return matchesServiceProcess(service, stdout, savedEntry);
+  } catch {
+    return false;
+  }
 }
 
 export function stopDaemon(service: ServiceName): boolean {
   const pid = readPid(service);
   if (!pid) return false;
+  if (!verifyDaemonIdentity(service, pid)) {
+    removePid(service);
+    return false;
+  }
   try {
     process.kill(pid, "SIGTERM");
     removePid(service);
