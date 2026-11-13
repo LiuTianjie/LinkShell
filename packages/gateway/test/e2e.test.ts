@@ -541,7 +541,7 @@ describe("gateway v2 end to end", () => {
     });
     slowSocket!.pause();
     const payload = "x".repeat(64 * 1024);
-    for (let i = 0; i < 40; i++) sender.send(slowIdentity.id, { k: "data", ch: "c", box: payload });
+    for (let i = 0; i < 256; i++) sender.send(slowIdentity.id, { k: "data", ch: "c", box: payload });
     // Even while the slow receiver is backed up, the shared machine sender keeps delivering to healthy devices.
     for (let i = 0; i < 10; i++) sender.send(healthyIdentity.id, { k: "data", ch: "c", box: `ok-${i}` });
 

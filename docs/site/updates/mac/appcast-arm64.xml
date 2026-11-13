@@ -3,13 +3,13 @@
     <channel>
         <title>LinkShell</title>
         <item>
-            <title>0.10.101</title>
-            <pubDate>Thu, 12 Nov 2026 20:44:55 +0800</pubDate>
-            <sparkle:version>0.10.101</sparkle:version>
-            <sparkle:shortVersionString>0.10.101</sparkle:shortVersionString>
+            <title>0.10.102</title>
+            <pubDate>Fri, 13 Nov 2026 11:08:10 +0800</pubDate>
+            <sparkle:version>0.10.102</sparkle:version>
+            <sparkle:shortVersionString>0.10.102</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.101/LinkShell-0.10.101-arm64.dmg" length="147240371" type="application/octet-stream" sparkle:edSignature="m2CZha/Teh+dyzrk6JD5ErrRf61BkLx9TQSlVJmfEQGs/Wh9omh23aG5Bsj3zufxri6LhgNIFLMDVtWfXDElDA=="/>
+            <enclosure url="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.102/LinkShell-0.10.102-arm64.dmg" length="147362460" type="application/octet-stream" sparkle:edSignature="nEHZQ7+R49Knm+QTyM9eF8a7nemWFePqLF4j0qDsmf3j4eSzMslul2p3Q0opTX424knyQk4YycrgSGmOWp4ZDA=="/>
         </item>
     </channel>
 </rss>
