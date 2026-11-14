@@ -566,6 +566,7 @@ export function InspectorWorkbench({
                 selected={tab.id === activeTabItem.id}
                 title={labelForTab(tab)}
                 closeLabel={ti("closeTab")}
+                closeNamedLabel={ti("closeTabNamed", { name: labelForTab(tab) })}
                 dirtyLabel={ti("unsavedBadge")}
                 diffStats={tab.kind === "changes" ? effectiveDiffStats : undefined}
                 count={
@@ -802,6 +803,7 @@ interface InspectorTabButtonProps {
   selected: boolean;
   title: string;
   closeLabel: string;
+  closeNamedLabel: string;
   dirtyLabel: string;
   diffStats?: ChangesStatsSummary;
   count: number;
@@ -817,6 +819,7 @@ function InspectorTabButton({
   selected,
   title,
   closeLabel,
+  closeNamedLabel,
   dirtyLabel,
   diffStats,
   count,
@@ -891,7 +894,7 @@ function InspectorTabButton({
 
       <button
         type="button"
-        aria-label={`${closeLabel} ${title}`}
+        aria-label={closeNamedLabel}
         title={closeLabel}
         className="ls-inspector-tab__close"
         onClick={(e) => {
