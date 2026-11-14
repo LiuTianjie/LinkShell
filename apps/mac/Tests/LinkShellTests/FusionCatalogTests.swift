@@ -48,12 +48,15 @@ final class FusionCatalogTests: XCTestCase {
       ],
     ])
 
-    let catalogURL = tempHome.appendingPathComponent(".linkshell/fusion-icons/studiom4/catalog.json")
+    // Keyed by the computer, not its name (two computers may share "StudioM4").
+    let slug = Fusion.slug(computerKey: "wss://gateway.itool.tech#test-mac")
+    let catalogURL = tempHome.appendingPathComponent(".linkshell/fusion-icons/\(slug)/catalog.json")
     XCTAssertTrue(FileManager.default.fileExists(atPath: catalogURL.path))
     let data = try Data(contentsOf: catalogURL)
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     XCTAssertEqual(json["computerKey"] as? String, "wss://gateway.itool.tech#test-mac")
-    XCTAssertEqual(json["hostSlug"] as? String, "studiom4")
+    XCTAssertEqual(json["hostSlug"] as? String, slug)
+    XCTAssertEqual(json["hostLabel"] as? String, "StudioM4")
     let apps = try XCTUnwrap(json["apps"] as? [[String: Any]])
     XCTAssertEqual(apps.count, 2)
     XCTAssertEqual(apps[0]["bundle"] as? String, "com.apple.Safari")
@@ -93,7 +96,8 @@ final class FusionCatalogTests: XCTestCase {
       ],
     ])
 
-    let catalogURL = tempHome.appendingPathComponent(".linkshell/fusion-icons/legacymini/catalog.json")
+    let slug = Fusion.slug(computerKey: "wss://gateway.itool.tech#legacy-mac")
+    let catalogURL = tempHome.appendingPathComponent(".linkshell/fusion-icons/\(slug)/catalog.json")
     let data = try Data(contentsOf: catalogURL)
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let apps = try XCTUnwrap(json["apps"] as? [[String: Any]])

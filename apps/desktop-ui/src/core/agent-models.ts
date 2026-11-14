@@ -32,9 +32,10 @@ export function useAgentModels(
   model?: string,
   revision = 0,
 ): (MethodResult<"agents.models"> & { error?: string }) | undefined {
+  const scope = JSON.stringify([agent, cwd.trim()]);
   const key = JSON.stringify([agent, cwd.trim(), model, revision]);
   const [listed, setListed] = useState<
-    ({ key: string; store: ClientStore; error?: string } & MethodResult<"agents.models">) | undefined
+    ({ key: string; scope: string; store: ClientStore; error?: string } & MethodResult<"agents.models">) | undefined
   >();
 
   useEffect(() => {
@@ -48,6 +49,7 @@ export function useAgentModels(
           if (!alive) return;
           setListed({
             key,
+            scope,
             store,
             ...result,
             models: Array.isArray(result?.models) ? result.models : [],
@@ -57,6 +59,7 @@ export function useAgentModels(
           if (!alive) return;
           setListed({
             key,
+            scope,
             store,
             models: [],
             error: error instanceof Error ? error.message : String(error),
@@ -66,9 +69,11 @@ export function useAgentModels(
     return () => {
       alive = false;
     };
-  }, [store, agent, cwd, ready, model, key]);
+  }, [store, agent, cwd, ready, model, key, scope]);
 
-  return store && ready && listed?.key === key && listed.store === store ? listed : undefined;
+  // Picking a model asks again (its defaults can differ), but the menu keeps showing the last list
+  // for this agent and directory meanwhile instead of collapsing into a loading chip.
+  return store && ready && listed?.scope === scope && listed.store === store ? listed : undefined;
 }
 
 export function creationOptions(

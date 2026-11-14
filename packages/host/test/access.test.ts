@@ -68,6 +68,7 @@ it("holds a remote connection at machine.info and access.unlock until the passwo
   expect(info.home).toBeUndefined();
   await expect(device.call("sessions.list", { limit: 10 })).rejects.toMatchObject({ data: { code: "locked" } });
   await expect(device.call("fs.list", {})).rejects.toMatchObject({ data: { code: "locked" } });
+  await expect(device.call("fs.write", { path: join(home, "locked.txt"), text: "x" })).rejects.toMatchObject({ data: { code: "locked" } });
   await expect(device.call("machine.rename", { name: "Locked computer" })).rejects.toMatchObject({ data: { code: "locked" } });
   await expect(device.call("machine.metrics")).rejects.toMatchObject({ data: { code: "locked" } });
   await expect(device.call("access.set", {})).rejects.toMatchObject({ data: { code: "locked" } });

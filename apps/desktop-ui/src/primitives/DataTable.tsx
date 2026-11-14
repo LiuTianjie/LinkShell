@@ -6,6 +6,7 @@ import {
 } from "react";
 import { DesktopIcon } from "../icons";
 import { cn } from "./utils";
+import { usePrimitiveLabels } from "./labels";
 
 export type SortDirection = "asc" | "desc";
 
@@ -57,6 +58,7 @@ export function DataTable<Row>({
   className,
   ...props
 }: DataTableProps<Row>) {
+  const labels = usePrimitiveLabels();
   const [uncontrolledCol, setUncontrolledCol] = useState<string | undefined>(
     defaultSortColumnId,
   );
@@ -176,7 +178,7 @@ export function DataTable<Row>({
           {sortedRows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="ls-table__empty">
-                {emptyState ?? "暂无数据"}
+                {emptyState ?? labels.noData}
               </td>
             </tr>
           ) : (

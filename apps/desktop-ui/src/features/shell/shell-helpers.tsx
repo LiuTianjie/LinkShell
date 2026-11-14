@@ -8,22 +8,29 @@ import {
   isElectronRuntime,
   type DesktopPlatform,
 } from "../../bridge/desktop-bridge";
+import type { SessionSummary } from "@linkshell/wire";
 import {
   computerName,
   computerNames,
   connectAndStartComputerFusion,
+  dateLocaleTag,
   engine,
   evaluateFusionCapability,
   fusionCapabilityMessage,
+  reportActionError,
   routerStore,
+  sessionGroup,
   thisComputerLabel,
+  translateDesktop,
   useFusionState,
   useI18n,
+  waitingLabel,
   type Computer,
   type ComputerSessionInput,
   type Connection,
   type FusionCapabilityEnv,
   type SessionActionDialogs,
+  type WorkspaceRoute,
 } from "../../core";
 import { DesktopIcon, type DesktopIconName } from "../../icons";
 import {
@@ -38,7 +45,7 @@ import {
 export function asSessionActionDialogs(dialogs: DialogsController): SessionActionDialogs {
   return {
     confirm: (message, options) => dialogs.confirm(message, options),
-    prompt: (title, initialValue) => dialogs.prompt(title, initialValue),
+    prompt: (title, initialValue, submitLabel) => dialogs.prompt(title, initialValue, submitLabel),
     choose: <T extends string>(
       message: string,
       choices: { value: T; label: string; destructive?: boolean }[],
@@ -253,6 +260,124 @@ export function switchToComputer(computer: Computer): void {
   }
 }
 
+/** Opens a session on any computer, selecting that computer first so every pane agrees on it. */
+export function openSessionOnComputer(computerKey: string, sessionId: string): void {
+  const computer = engine.computerForKey(computerKey);
+  if (computer && computer.key !== engine.state.getState().connection?.computer.key) {
+    engine.select(computer);
+  }
+  routerStore.getState().openSession(computerKey, sessionId);
+}
+
+/**
+ * History entries can outlive what they point at. Only what we can actually know is rejected:
+ * a computer that is gone, or a session missing from a computer whose list has loaded.
+ */
+export function isRouteStillValid(route: WorkspaceRoute): boolean {
+  const computerKey = "computerKey" in route ? route.computerKey : undefined;
+  if (!computerKey) return true;
+  const state = engine.state.getState();
+  if (
+    computerKey !== DESKTOP_LOCAL &&
+    state.computers.length > 0 &&
+    !engine.computerForKey(computerKey)
+  ) {
+    return false;
+  }
+  if (route.kind === "session") {
+    const connection = state.connection;
+    if (connection && connection.computer.key === computerKey) {
+      const client = connection.store.getState();
+      if (client.sessionsLoaded && !client.sessions[route.sessionId]) return false;
+    }
+  }
+  return true;
+}
+
+export interface SidebarSessionRef {
+  computerKey: string;
+  sessionId: string;
+}
+
+/**
+ * The sidebar's visible session order, read from the docked sidebar so ⌘1…9 and ⇧⌘[ / ] follow
+ * exactly what the user sees (collapsed groups are `inert` and skipped; pinned duplicates collapse).
+ */
+export function visibleSidebarSessions(root: ParentNode = document): SidebarSessionRef[] {
+  const rows = root.querySelectorAll<HTMLElement>(
+    ".desktop-sidebar .tree-session[data-row-session-id]",
+  );
+  const seen = new Set<string>();
+  const result: SidebarSessionRef[] = [];
+  for (const row of rows) {
+    if (row.closest("[inert]")) continue;
+    const sessionId = row.dataset.rowSessionId;
+    const computerKey = row.dataset.computerKey;
+    if (!sessionId || !computerKey) continue;
+    const id = `${computerKey}\n${sessionId}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push({ computerKey, sessionId });
+  }
+  return result;
+}
+
+/** Reports a failed user action through the shell's notice host, in words rather than RPC codes. */
+export function reportShellError(error: unknown, locale?: Locale): void {
+  reportActionError(error, locale);
+}
+
+/** Re-renders once a minute so relative times ("3 分钟前") do not freeze. */
+export function useMinuteTick(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  return tick;
+}
+
+export type SessionActivity =
+  | { kind: "waiting"; label: string }
+  | { kind: "running"; label: string }
+  | { kind: "danger"; label: string }
+  | undefined;
+
+/** One source for the waiting / running indicator, so sidebar rows and the home hub never disagree. */
+export function sessionActivity(session: SessionSummary, locale: Locale): SessionActivity {
+  const group = sessionGroup(session);
+  if (group === "waiting") return { kind: "waiting", label: waitingLabel(session, locale) };
+  if (group === "running") {
+    return { kind: "running", label: translateDesktop(locale, "desktop.shell.running") };
+  }
+  // A session that stopped on an error is the third thing worth a colour in a list.
+  if (session.state === "error") {
+    return { kind: "danger", label: translateDesktop(locale, "desktop.shell.sessionFailed") };
+  }
+  return undefined;
+}
+
+export type SessionListState = "ready" | "loading" | "offline";
+
+/**
+ * What an empty session list actually means: still connecting, a computer that is away, or truly
+ * nothing yet. Without this the sidebar claims "no sessions" while it is merely connecting.
+ */
+export function sessionListState(
+  computer: Computer | undefined,
+  status: string,
+  sessionsLoaded: boolean,
+): SessionListState {
+  if (sessionsLoaded) return "ready";
+  if (computer && computer.key !== DESKTOP_LOCAL && !computer.machine.online) return "offline";
+  if (status === "stopped") return "offline";
+  return "loading";
+}
+
+export function sessionRecency(session: SessionSummary): number {
+  return session.updatedAt ?? session.createdAt;
+}
+
 export function buildComputerSessionInputs(
   computers: readonly Computer[],
   activeConnection: Connection | undefined,
@@ -330,23 +455,15 @@ export function relativeSubdirLabel(projectRoot: string, cwd: string): string | 
 }
 
 export function formatSessionCountLabel(count: number, locale: Locale = "zh"): string {
-  if (locale === "en") {
-    return count === 1 ? "1 session" : `${count} sessions`;
-  }
-  if (locale === "ja") {
-    return `${count} セッション`;
-  }
-  return `${count} 个会话`;
+  return count === 1
+    ? translateDesktop(locale, "desktop.shell.sessionCountOne")
+    : translateDesktop(locale, "desktop.shell.sessionCount", { count });
 }
 
 export function formatProjectCountLabel(count: number, locale: Locale = "zh"): string {
-  if (locale === "en") {
-    return count === 1 ? "1 project" : `${count} projects`;
-  }
-  if (locale === "ja") {
-    return `${count} プロジェクト`;
-  }
-  return `${count} 个项目`;
+  return count === 1
+    ? translateDesktop(locale, "desktop.shell.projectCountOne")
+    : translateDesktop(locale, "desktop.shell.projectCount", { count });
 }
 
 export function displayComputerName(
@@ -378,20 +495,20 @@ export function connectionRouteBadge(
 ): RouteBadgeDescriptor {
   if (!computer || computer.key === DESKTOP_LOCAL) {
     return {
-      label: locale === "en" ? "Local" : locale === "ja" ? "ローカル" : "本机",
+      label: translateDesktop(locale, "desktop.shell.routeLocal"),
       icon: "host-daemon",
       tone: "neutral",
     };
   }
   if (directState === "connected" || computer.gateway === "direct" || computer.gateway.startsWith("ws://127.")) {
     return {
-      label: locale === "en" ? "Direct" : locale === "ja" ? "直接接続" : "直连",
+      label: translateDesktop(locale, "desktop.shell.routeDirect"),
       icon: "direct-p2p",
       tone: "ok",
     };
   }
   return {
-    label: locale === "en" ? "Relay" : locale === "ja" ? "中継" : "网关",
+    label: translateDesktop(locale, "desktop.shell.routeRelay"),
     icon: "gateway-relay",
     tone: "neutral",
   };
@@ -409,85 +526,20 @@ export function formatBytesCompact(bytes: number | undefined): string {
 export function formatRelativeTimestamp(timestamp: number | undefined, locale: Locale = "zh"): string {
   if (!timestamp || !Number.isFinite(timestamp)) return "";
   const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (diffSec < 60) return locale === "en" ? "just now" : locale === "ja" ? "たった今" : "刚刚";
+  if (diffSec < 60) return translateDesktop(locale, "desktop.shell.justNow");
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) {
-    return locale === "en" ? `${diffMin}m` : locale === "ja" ? `${diffMin}分前` : `${diffMin} 分钟前`;
-  }
+  if (diffMin < 60) return translateDesktop(locale, "desktop.shell.minutesAgo", { count: diffMin });
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) {
-    return locale === "en" ? `${diffHr}h` : locale === "ja" ? `${diffHr}時間前` : `${diffHr} 小时前`;
-  }
+  if (diffHr < 24) return translateDesktop(locale, "desktop.shell.hoursAgo", { count: diffHr });
   const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) {
-    return locale === "en" ? `${diffDay}d` : locale === "ja" ? `${diffDay}日前` : `${diffDay} 天前`;
-  }
-  return new Date(timestamp).toLocaleDateString(
-    locale === "en" ? "en-US" : locale === "ja" ? "ja-JP" : "zh-CN",
-  );
+  if (diffDay < 30) return translateDesktop(locale, "desktop.shell.daysAgo", { count: diffDay });
+  return new Date(timestamp).toLocaleDateString(dateLocaleTag(locale));
 }
 
 export function folderBasename(pathValue: string): string {
   const trimmed = pathValue.replace(/[\\/]+$/, "");
   const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx >= 0 ? trimmed.slice(idx + 1) || trimmed : trimmed;
-}
-
-export interface ProjectMonogramPalette {
-  letters: string;
-  tone: 0 | 1 | 2 | 3 | 4 | 5;
-}
-
-/**
- * Deterministic 2-letter monogram & jewel tone (0..5) for a project/folder name
- * (T3 Code / Paseo workspace badge aesthetic).
- */
-export function computeProjectMonogram(nameOrPath: string): ProjectMonogramPalette {
-  const base = folderBasename(nameOrPath).trim() || "WS";
-  const parts = base
-    .replace(/^[@._-]+/, "")
-    .split(/[-_.\s/\\]+/)
-    .filter(Boolean);
-
-  let letters = "WS";
-  if (parts.length >= 2) {
-    letters = `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
-  } else if (parts.length === 1) {
-    const word = parts[0]!;
-    const camel = word.slice(1).match(/[A-Z0-9]/);
-    letters = camel
-      ? `${word[0]!}${camel[0]!}`.toUpperCase()
-      : word.slice(0, 2).toUpperCase();
-  }
-
-  // FNV-1a 32-bit hash for stable palette index across sessions
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < base.length; i += 1) {
-    hash ^= base.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  const tone = ((hash >>> 0) % 6) as 0 | 1 | 2 | 3 | 4 | 5;
-  return { letters, tone };
-}
-
-export function ProjectMonogram({
-  name,
-  size = "sm",
-}: {
-  name: string;
-  size?: "xs" | "sm" | "md";
-}) {
-  const { letters, tone } = computeProjectMonogram(name);
-  return (
-    <span
-      aria-hidden="true"
-      data-tone={tone}
-      data-size={size}
-      className="project-monogram"
-    >
-      {letters}
-    </span>
-  );
 }
 
 export interface ShellRenderSlots {

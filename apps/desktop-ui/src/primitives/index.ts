@@ -126,3 +126,10 @@ export {
   toCssAnchorName,
   yieldToMain,
 } from "./utils";
+
+export {
+  getPrimitiveLabels,
+  setPrimitiveLocale,
+  usePrimitiveLabels,
+  type PrimitiveLabels,
+} from "./labels";

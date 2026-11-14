@@ -33,6 +33,12 @@ import {
 } from "../../primitives";
 import { FileExtBadge } from "./file-ext-badge";
 import {
+  INSPECTOR_FILE_SAVED_EVENT,
+  INSPECTOR_FOCUS_FILE_SEARCH_EVENT,
+  takeFileSearchFocus,
+} from "./inspector-tabs-store";
+import {
+  canOpenOnThisComputer,
   formatByteSize,
   openPathInExternalApp,
   parseFileSpec,
@@ -107,6 +113,7 @@ export function FilesPanel({
   const [currentDir, setCurrentDir] = useState<string>(cwd ?? "");
   const [parentDir, setParentDir] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
+  const [dirTruncated, setDirTruncated] = useState(false);
   const [dirLoading, setDirLoading] = useState(false);
   const [dirError, setDirError] = useState<string | null>(null);
 
@@ -117,6 +124,25 @@ export function FilesPanel({
   );
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  const openLocally = canOpenOnThisComputer(connection);
+
+  useEffect(() => {
+    const focusSearch = () => {
+      const input = searchWrapRef.current?.querySelector<HTMLInputElement>("input");
+      if (!input) return;
+      takeFileSearchFocus();
+      input.focus();
+      input.select();
+    };
+    if (takeFileSearchFocus()) focusSearch();
+    window.addEventListener(INSPECTOR_FOCUS_FILE_SEARCH_EVENT, focusSearch);
+    return () => window.removeEventListener(INSPECTOR_FOCUS_FILE_SEARCH_EVENT, focusSearch);
+  }, []);
+
+  const copyPath = useCallback((path: string) => {
+    void navigator.clipboard?.writeText(path).catch(() => undefined);
+  }, []);
   const dirLoadSeqRef = useRef(0);
   const forwardedInitialSpecRef = useRef<string | undefined>(undefined);
   const prevRootRef = useRef<{ connection?: Connection; cwd?: string }>({
@@ -144,6 +170,7 @@ export function FilesPanel({
         setCurrentDir(res?.path ?? "");
         setParentDir(res?.parent);
         setEntries(Array.isArray(res?.entries) ? res.entries : []);
+        setDirTruncated(Boolean(res?.truncated));
         setDirError(null);
       } catch (err) {
         if (reqSeq !== dirLoadSeqRef.current) return;
@@ -182,6 +209,15 @@ export function FilesPanel({
     void loadDirectory(currentDir || cwd || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload when host comes online, root cwd changes, or hidden toggle changes.
   }, [connection, online, cwd, showHidden]);
+
+  // Saving from the viewer changes a size and a time this list shows.
+  useEffect(() => {
+    const reload = () => {
+      if (connection && online) void loadDirectory(currentDir || cwd || "");
+    };
+    window.addEventListener(INSPECTOR_FILE_SAVED_EVENT, reload);
+    return () => window.removeEventListener(INSPECTOR_FILE_SAVED_EVENT, reload);
+  }, [connection, online, currentDir, cwd, loadDirectory]);
 
   useEffect(() => {
     if (
@@ -424,40 +460,36 @@ export function FilesPanel({
             </MenuItem>
             {activeDirPath ? (
               <>
+                {openLocally ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      icon="code"
+                      onSelect={() => {
+                        void handleOpenExternal(activeDirPath, "vscode");
+                      }}
+                    >
+                      {ti("openInVscode")}
+                    </MenuItem>
+                    <MenuItem
+                      icon="code"
+                      onSelect={() => {
+                        void handleOpenExternal(activeDirPath, "cursor");
+                      }}
+                    >
+                      {ti("openInCursor")}
+                    </MenuItem>
+                    <MenuItem
+                      icon="folder-open"
+                      onSelect={() => {
+                        void handleOpenExternal(activeDirPath, "reveal");
+                      }}
+                    >
+                      {revealLabel}
+                    </MenuItem>
+                  </>
+                ) : null}
                 <MenuSeparator />
-                <MenuItem
-                  icon="code"
-                  onSelect={() => {
-                    void handleOpenExternal(activeDirPath, "vscode");
-                  }}
-                >
-                  {ti("openInVscode")}
-                </MenuItem>
-                <MenuItem
-                  icon="code"
-                  onSelect={() => {
-                    void handleOpenExternal(activeDirPath, "cursor");
-                  }}
-                >
-                  {ti("openInCursor")}
-                </MenuItem>
-                <MenuItem
-                  icon="sparkles"
-                  onSelect={() => {
-                    void handleOpenExternal(activeDirPath, "antigravity");
-                  }}
-                >
-                  {ti("openInAntigravity")}
-                </MenuItem>
-                <MenuSeparator />
-                <MenuItem
-                  icon="folder-open"
-                  onSelect={() => {
-                    void handleOpenExternal(activeDirPath, "reveal");
-                  }}
-                >
-                  {revealLabel}
-                </MenuItem>
                 <MenuItem
                   icon="terminal"
                   onSelect={() => {
@@ -482,7 +514,7 @@ export function FilesPanel({
         </div>
       </div>
 
-      <div className="ls-files-search">
+      <div className="ls-files-search" ref={searchWrapRef}>
         <Input
           size="sm"
           type="search"
@@ -531,6 +563,8 @@ export function FilesPanel({
               </Button>
             }
           />
+        ) : displayedEntries.length === 0 && isSearching ? (
+          <EmptyState compact icon="search" title={ti("noSearchHitsTitle")} />
         ) : displayedEntries.length === 0 ? (
           <EmptyState
             compact
@@ -549,7 +583,13 @@ export function FilesPanel({
             }
           />
         ) : (
-          displayedEntries.map((entry) => {
+          <>
+          {dirTruncated && !isSearching ? (
+            <div className="inspector-banner" role="status">
+              <span>{ti("dirTruncatedNote")}</span>
+            </div>
+          ) : null}
+          {displayedEntries.map((entry) => {
             const isFile = Boolean(entry.file);
             const entryPath =
               entry.path || joinChildPath(currentDir, entry.name);
@@ -559,9 +599,13 @@ export function FilesPanel({
             const nativeItems = (): NativeContextMenuItem[] => [
               { id: "open", label: base },
               { id: "sep-1", label: "", type: "separator" },
-              { id: "vscode", label: ti("openInVscode") },
-              { id: "cursor", label: ti("openInCursor") },
-              { id: "reveal", label: revealLabel },
+              ...(openLocally
+                ? [
+                    { id: "vscode", label: ti("openInVscode") },
+                    { id: "cursor", label: ti("openInCursor") },
+                    { id: "reveal", label: revealLabel },
+                  ]
+                : []),
               { id: "copyPath", label: t("desktop.menu.copyPath") },
               ...(isFile
                 ? [{ id: "download", label: t("desktop.inspector.download") }]
@@ -583,7 +627,7 @@ export function FilesPanel({
                   ) {
                     void handleOpenExternal(entryPath, actionId);
                   } else if (actionId === "copyPath") {
-                    void navigator.clipboard?.writeText(entryPath);
+                    copyPath(entryPath);
                   } else if (actionId === "download" && isFile) {
                     void handleDownload(entryPath);
                   }
@@ -597,27 +641,29 @@ export function FilesPanel({
                       {base}
                     </MenuItem>
                     <MenuSeparator />
-                    <MenuItem
-                      icon="code"
-                      onSelect={() => {
-                        void handleOpenExternal(entryPath, "vscode");
-                      }}
-                    >
-                      {ti("openInVscode")}
-                    </MenuItem>
-                    <MenuItem
-                      icon="folder-open"
-                      onSelect={() => {
-                        void handleOpenExternal(entryPath, "reveal");
-                      }}
-                    >
-                      {revealLabel}
-                    </MenuItem>
+                    {openLocally ? (
+                      <>
+                        <MenuItem
+                          icon="code"
+                          onSelect={() => {
+                            void handleOpenExternal(entryPath, "vscode");
+                          }}
+                        >
+                          {ti("openInVscode")}
+                        </MenuItem>
+                        <MenuItem
+                          icon="folder-open"
+                          onSelect={() => {
+                            void handleOpenExternal(entryPath, "reveal");
+                          }}
+                        >
+                          {revealLabel}
+                        </MenuItem>
+                      </>
+                    ) : null}
                     <MenuItem
                       icon="copy"
-                      onSelect={() => {
-                        void navigator.clipboard?.writeText(entryPath);
-                      }}
+                      onSelect={() => copyPath(entryPath)}
                     >
                       {t("desktop.menu.copyPath")}
                     </MenuItem>
@@ -665,7 +711,8 @@ export function FilesPanel({
                 </button>
               </ContextMenu>
             );
-          })
+          })}
+          </>
         )}
       </div>
     </div>

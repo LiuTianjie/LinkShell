@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { cn } from "./utils";
+import { usePrimitiveLabels } from "./labels";
 
 export interface SplitResizerProps {
   label: string;
@@ -45,6 +46,7 @@ export function SplitResizer({
   onResize,
   className,
 }: SplitResizerProps) {
+  const labels = usePrimitiveLabels();
   const directionMultiplier = side === "start" ? -1 : 1;
   const cancelDragRef = useRef<(() => void) | null>(null);
   const clamp = (value: number): number =>
@@ -116,7 +118,7 @@ export function SplitResizer({
       aria-valuemin={min}
       aria-valuemax={max}
       tabIndex={0}
-      title="拖动调整尺寸，双击恢复默认"
+      title={labels.resizeHint}
       data-orientation={orientation}
       className={cn("ls-split-resizer", className)}
       onDoubleClick={() => {

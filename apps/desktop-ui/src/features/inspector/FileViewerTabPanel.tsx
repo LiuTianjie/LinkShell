@@ -14,6 +14,7 @@ import {
   RPC_METHOD_NOT_FOUND,
   RpcError,
   type AgentInfo,
+  type MethodResult,
 } from "@linkshell/wire";
 import {
   DESKTOP_LOCAL,
@@ -23,12 +24,12 @@ import {
   revealOnDesktop,
 } from "../../bridge/desktop-bridge";
 import type { Connection } from "../../core/connections";
+import { engine } from "../../core/engine";
 import {
   HighlightedCodeBlock,
   grammarForPath,
   useHighlight,
 } from "../../core/markdown-shiki";
-import { registerUnsavedWork } from "../../core/unsaved-work";
 import {
   Badge,
   Button,
@@ -47,7 +48,12 @@ import {
   useConnectionTargetPlatform,
   useInspectorI18n,
 } from "./i18n-inspector";
-import { openFileTabInInspector } from "./inspector-tabs-store";
+import {
+  getFileDraft,
+  openFileTabInInspector,
+  setFileDraft,
+  INSPECTOR_FILE_SAVED_EVENT,
+} from "./inspector-tabs-store";
 import {
   resolveFileHrefTarget,
 } from "../session/session-helpers";
@@ -75,13 +81,15 @@ function joinDirAndRelative(dir: string, rel: string): string {
   return `${base}${sep}${cleanRel}`;
 }
 
+/**
+ * What `desktop.openPath` accepts, plus Xcode, which only the desktop app's own opener knows
+ * (Mac only). The in-app terminal is handled separately.
+ */
 export type ExternalOpenTarget =
   | "vscode"
   | "cursor"
   | "zed"
   | "xcode"
-  | "windsurf"
-  | "antigravity"
   | "reveal"
   | "terminal";
 
@@ -130,6 +138,22 @@ export function isMarkdownPath(path: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(path);
 }
 
+/**
+ * Editors, the file manager and the system terminal open on the computer the host runs on;
+ * for a remote computer that is not the screen in front of the user, so only the local
+ * computer offers them.
+ */
+export function canOpenOnThisComputer(connection?: Connection): boolean {
+  if (!connection) return true;
+  const { key, machine } = connection.computer;
+  if (key === DESKTOP_LOCAL) return true;
+  // This machine reached through its gateway alias is still this machine.
+  const local = engine.state.getState().localComputer;
+  return Boolean(
+    local && (local.key === key || (local.relayId && local.relayId === machine.id)),
+  );
+}
+
 export async function openPathInExternalApp(params: {
   targetPath: string;
   app: ExternalOpenTarget;
@@ -141,37 +165,67 @@ export async function openPathInExternalApp(params: {
     onOpenTerminalAt(targetPath);
     return;
   }
-  const isLocalConnection =
-    !connection || connection.computer.key === DESKTOP_LOCAL;
-  if (app === "reveal" && isElectronRuntime() && isLocalConnection) {
+  if (!canOpenOnThisComputer(connection)) return;
+  if (app === "reveal" && isElectronRuntime()) {
     const ok = await revealOnDesktop(targetPath);
     if (ok) return;
   }
-  if (!connection) return;
-  if (
-    app === "vscode" ||
-    app === "cursor" ||
-    app === "zed" ||
-    app === "reveal" ||
-    app === "terminal"
-  ) {
-    await connection.link.call("desktop.openPath", {
-      path: targetPath,
-      app,
-    });
+  if (app === "xcode") {
+    await desktopInvoke("openPath", { path: targetPath, app });
     return;
   }
-  const rawCall = connection.link.call.bind(connection.link) as (
-    method: string,
-    args: Record<string, unknown>,
-  ) => Promise<unknown>;
-  const invoked = await desktopInvoke<{ ok?: boolean }>("openPath", {
+  if (!connection) return;
+  await connection.link.call("desktop.openPath", {
     path: targetPath,
     app,
   });
-  if (!invoked?.ok) {
-    await rawCall("desktop.openPath", { path: targetPath, app });
+}
+
+type FileReadResult = MethodResult<"fs.read">;
+
+/** Never join chunks from two different versions of a file. */
+export function appendFileChunk(
+  file: FileReadResult,
+  chunk: FileReadResult,
+): FileReadResult {
+  if (
+    file.kind !== "text" ||
+    chunk.kind !== "text" ||
+    chunk.path !== file.path ||
+    chunk.size !== file.size ||
+    chunk.modifiedAt !== file.modifiedAt ||
+    file.nextOffset === undefined ||
+    (chunk.nextOffset !== undefined && chunk.nextOffset <= file.nextOffset)
+  ) {
+    throw new FileChangedWhileReadingError();
   }
+  return { ...chunk, text: (file.text ?? "") + (chunk.text ?? "") };
+}
+
+export class FileChangedWhileReadingError extends Error {
+  constructor() {
+    super("file changed while reading");
+  }
+}
+
+/** A line link must load enough bytes to reach the requested line before scrolling. */
+export async function readFileAtLine(
+  read: (offset?: number) => Promise<FileReadResult>,
+  line?: number,
+): Promise<FileReadResult> {
+  let file = await read();
+  let lines = file.text?.split("\n").length ?? 0;
+  while (
+    file.kind === "text" &&
+    line &&
+    lines <= line &&
+    file.nextOffset !== undefined
+  ) {
+    const chunk = await read(file.nextOffset);
+    lines += (chunk.text?.split("\n").length ?? 1) - 1;
+    file = appendFileChunk(file, chunk);
+  }
+  return file;
 }
 
 export async function triggerRemoteFileDownload(
@@ -203,22 +257,55 @@ export async function triggerRemoteFileDownload(
 interface LoadedFileState {
   path: string;
   size: number;
+  modifiedAt?: number;
   kind: "text" | "image" | "binary";
   text: string;
   data?: string;
   mimeType?: string;
   truncated: boolean;
+  nextOffset?: number;
+}
+
+function toLoadedFile(res: FileReadResult): LoadedFileState {
+  return {
+    path: res.path,
+    size: res.size,
+    modifiedAt: res.modifiedAt,
+    kind: res.kind,
+    text: res.text ?? "",
+    data: res.data,
+    mimeType: res.mimeType,
+    truncated: res.truncated,
+    nextOffset: res.nextOffset,
+  };
+}
+
+const READ_CHUNK_BYTES = 512_000;
+
+function rpcAppCode(err: unknown): string | undefined {
+  return err instanceof RpcError ? err.appCode : undefined;
+}
+
+function isMethodMissing(err: unknown): boolean {
+  return (
+    err instanceof RpcError &&
+    (err.code === RPC_METHOD_NOT_FOUND || err.appCode === "host_outdated")
+  );
 }
 
 export interface FileViewerTabPanelProps {
   computerKey?: string;
   sessionId?: string;
+  /** Inspector tab owning this view; its unsaved draft is kept under this id. */
+  tabId?: string;
   connection?: Connection;
   online: boolean;
   cwd?: string;
   agents?: AgentInfo[];
   filePath: string;
   lineSpec?: string;
+  /** Changes when the file is asked for again: re-read it unless there is an unsaved edit. */
+  reloadNonce?: number;
   onOpenTerminalAt?: (dir: string) => void;
   onBack?: () => void;
 }
@@ -226,19 +313,23 @@ export interface FileViewerTabPanelProps {
 export function FileViewerTabPanel({
   computerKey,
   sessionId,
+  tabId,
   connection,
   online,
   cwd,
   agents = [],
   filePath,
   lineSpec,
+  reloadNonce,
   onOpenTerminalAt,
   onBack,
 }: FileViewerTabPanelProps): JSX.Element {
   const targetPlatform = useConnectionTargetPlatform(connection);
-  const { t, ti, revealLabel, resolvedPlatform } =
-    useInspectorI18n(targetPlatform);
+  const { t, ti, revealLabel, resolvedPlatform } = useInspectorI18n(targetPlatform);
   const dialogs = useDialogs();
+  const draftOwner = computerKey ?? "default";
+  const draftTabId = tabId ?? `file:${filePath}`;
+  const openLocally = canOpenOnThisComputer(connection);
 
   const parsedAnchor = useMemo(
     () => parseFileSpec(lineSpec ?? filePath),
@@ -260,7 +351,11 @@ export function FileViewerTabPanel({
 
   const [loadedFile, setLoadedFile] = useState<LoadedFileState | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [alternatePath, setAlternatePath] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [saveUnsupported, setSaveUnsupported] = useState(false);
 
   const [markdownMode, setMarkdownMode] = useState<"preview" | "source">(() =>
     isMarkdownPath(effectivePath) ? "preview" : "source",
@@ -268,6 +363,7 @@ export function FileViewerTabPanel({
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [savedNotice, setSavedNotice] = useState(false);
 
   const sourcePreRef = useRef<HTMLPreElement | null>(null);
@@ -277,10 +373,23 @@ export function FileViewerTabPanel({
     editing && loadedFile?.kind === "text" && draftText !== loadedFile.text,
   );
 
+  // The draft lives in the tab store: closing the tab asks, and a session switch that unmounts
+  // this view finds it again on return.
   useEffect(() => {
-    if (!isDirty) return undefined;
-    return registerUnsavedWork();
-  }, [isDirty]);
+    if (!loadedFile || loadedFile.kind !== "text") return;
+    setFileDraft(
+      draftOwner,
+      sessionId,
+      draftTabId,
+      editing
+        ? {
+            text: draftText,
+            baseText: loadedFile.text,
+            baseModifiedAt: loadedFile.modifiedAt,
+          }
+        : undefined,
+    );
+  }, [draftOwner, draftTabId, draftText, editing, loadedFile, sessionId]);
 
   // Sync incoming `#L` anchor updates without discarding an already loaded file.
   useEffect(() => {
@@ -295,14 +404,39 @@ export function FileViewerTabPanel({
     }
   }, [effectivePath, parsedAnchor.endLine, parsedAnchor.startLine]);
 
+  // An unsaved edit wins over "show me the file again"; the reload button can still discard it.
+  const lastNonceRef = useRef(reloadNonce);
+  useEffect(() => {
+    if (lastNonceRef.current === reloadNonce) return;
+    lastNonceRef.current = reloadNonce;
+    if (!getFileDraft(draftOwner, sessionId, draftTabId)) {
+      setReloadTick((n) => n + 1);
+    }
+  }, [draftOwner, draftTabId, reloadNonce, sessionId]);
+
+  const readAt = useCallback(
+    (path: string, offset?: number) => {
+      if (!connection) return Promise.reject(new Error("offline"));
+      return connection.link.call("fs.read", {
+        path,
+        offset: offset ?? 0,
+        maxBytes: READ_CHUNK_BYTES,
+      });
+    },
+    [connection],
+  );
+
   // Load file contents when host connection or target path becomes ready.
   useEffect(() => {
     if (!connection || !online || !effectivePath) return;
     const seq = ++readSeqRef.current;
-    setEditing(false);
+    const draft = getFileDraft(draftOwner, sessionId, draftTabId);
+    // Leaving edit mode would clear the stored draft; with one, stay put until the read lands.
+    if (!draft) setEditing(false);
     setSavedNotice(false);
+    setAlternatePath(null);
     setMarkdownMode(
-      parsedAnchor.startLine
+      parsedAnchor.startLine || draft
         ? "source"
         : isMarkdownPath(effectivePath)
           ? "preview"
@@ -311,91 +445,124 @@ export function FileViewerTabPanel({
     setFileLoading(true);
     setFileError(null);
 
-    const applyReadResult = (res: {
-      path: string;
-      size: number;
-      kind: "text" | "image" | "binary";
-      text?: string;
-      data?: string;
-      mimeType?: string;
-      truncated: boolean;
-    }) => {
-      if (seq !== readSeqRef.current) return;
-      const text = res.text ?? "";
-      setFileError(null);
-      setLoadedFile({
-        path: res.path,
-        size: res.size,
-        kind: res.kind,
-        text,
-        data: res.data,
-        mimeType: res.mimeType,
-        truncated: res.truncated,
-      });
-      setDraftText(text);
-    };
-
-    void connection.link
-      .call("fs.read", {
-        path: effectivePath,
-        offset: 0,
-        maxBytes: 512_000,
-      })
+    void readFileAtLine(
+      (offset) => readAt(effectivePath, offset),
+      parsedAnchor.endLine ?? parsedAnchor.startLine,
+    )
       .then((res) => {
-        applyReadResult(res);
-      })
-      .catch(async (err) => {
         if (seq !== readSeqRef.current) return;
-        const baseName = basenameOfFilePath(effectivePath);
-        if (cwd && baseName) {
-          try {
-            const searchRes = await connection.link.call("fs.projectFiles", {
-              cwd,
-              query: baseName,
-              limit: 30,
-            });
-            const candidates = Array.isArray(searchRes?.files)
-              ? searchRes.files
-              : [];
-            const exact = candidates.find((item) => {
-              const rec = item as {
-                path?: string;
-                file?: boolean;
-                isDir?: boolean;
-              };
-              if (!rec.path || rec.file === false || rec.isDir) return false;
-              return basenameOfFilePath(rec.path) === baseName;
-            }) as { path: string } | undefined;
-            if (exact?.path) {
-              const fallbackPath =
-                exact.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(exact.path)
-                  ? exact.path
-                  : joinDirAndRelative(cwd, exact.path);
-              if (fallbackPath !== effectivePath) {
-                const fallbackRes = await connection.link.call("fs.read", {
-                  path: fallbackPath,
-                  offset: 0,
-                  maxBytes: 512_000,
-                });
-                applyReadResult(fallbackRes);
-                return;
-              }
-            }
-          } catch {
-            // Fall through to surface original read error.
-          }
+        const next = toLoadedFile(res);
+        if (draft && next.kind === "text") {
+          // Compare and save against what the draft was written over, so a change on disk
+          // since then still surfaces as a conflict.
+          next.text = draft.baseText;
+          next.modifiedAt = draft.baseModifiedAt ?? next.modifiedAt;
         }
+        setLoadedFile(next);
+        if (draft && next.kind === "text") {
+          setDraftText(draft.text);
+          setEditing(true);
+        } else {
+          setDraftText(next.text);
+        }
+      })
+      .catch(async (err: unknown) => {
         if (seq !== readSeqRef.current) return;
         setLoadedFile(null);
-        setFileError(err instanceof Error ? err.message : String(err));
+        setFileError(
+          err instanceof FileChangedWhileReadingError
+            ? ti("fileChangedWhileReading")
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+        // A path from an agent can be stale; offer (never silently open) a same-named file.
+        const baseName = basenameOfFilePath(effectivePath);
+        if (rpcAppCode(err) !== "not_found" || !cwd || !baseName) return;
+        try {
+          const searchRes = await connection.link.call("fs.projectFiles", {
+            cwd,
+            query: baseName,
+            limit: 30,
+          });
+          if (seq !== readSeqRef.current) return;
+          const exact = (searchRes?.files ?? []).find(
+            (item) => !item.isDir && basenameOfFilePath(item.path) === baseName,
+          );
+          if (!exact) return;
+          const candidate =
+            exact.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(exact.path)
+              ? exact.path
+              : joinDirAndRelative(cwd, exact.path);
+          if (candidate !== effectivePath) setAlternatePath(candidate);
+        } catch {
+          // The original error is what the user needs to see.
+        }
       })
       .finally(() => {
         if (seq === readSeqRef.current) {
           setFileLoading(false);
         }
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload only when connection, online, or target file path changes.
-  }, [connection, online, effectivePath, cwd]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload only when connection, online, target path or an explicit reload changes.
+  }, [connection, online, effectivePath, cwd, reloadTick]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!loadedFile || loadedFile.nextOffset === undefined || loadingMore) return;
+    const seq = readSeqRef.current;
+    setLoadingMore(true);
+    try {
+      const chunk = await readAt(loadedFile.path, loadedFile.nextOffset);
+      if (seq !== readSeqRef.current) return;
+      const merged = appendFileChunk(
+        {
+          path: loadedFile.path,
+          size: loadedFile.size,
+          modifiedAt: loadedFile.modifiedAt ?? 0,
+          kind: loadedFile.kind,
+          text: loadedFile.text,
+          truncated: loadedFile.truncated,
+          nextOffset: loadedFile.nextOffset,
+        },
+        chunk,
+      );
+      const next = toLoadedFile(merged);
+      setLoadedFile(next);
+      setDraftText(next.text);
+    } catch (err) {
+      await dialogs.alert(
+        err instanceof FileChangedWhileReadingError
+          ? ti("fileChangedWhileReading")
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [dialogs, loadedFile, loadingMore, readAt, ti]);
+
+  const discardDraftAndReload = useCallback(() => {
+    setFileDraft(draftOwner, sessionId, draftTabId, undefined);
+    setEditing(false);
+    setReloadTick((n) => n + 1);
+  }, [draftOwner, draftTabId, sessionId]);
+
+  const handleReload = useCallback(async () => {
+    if (isDirty) {
+      const ok = await dialogs.confirm(
+        ti("reloadDirtyBody", { name: basenameOfFilePath(effectivePath) }),
+        {
+          title: ti("discardDraftTitle"),
+          confirmLabel: ti("discardDraftConfirm"),
+          cancelLabel: ti("cancel"),
+          destructive: true,
+        },
+      );
+      if (!ok) return;
+    }
+    discardDraftAndReload();
+  }, [dialogs, discardDraftAndReload, effectivePath, isDirty, ti]);
 
   useEffect(() => {
     if (!highlightRange || !sourcePreRef.current) return;
@@ -403,7 +570,7 @@ export function FileViewerTabPanel({
       `[data-line-number="${highlightRange.start}"]`,
     );
     row?.scrollIntoView({ block: "center" });
-  }, [highlightRange, loadedFile?.path, markdownMode]);
+  }, [highlightRange, loadedFile?.path, loadedFile?.text, markdownMode]);
 
   const confirmDiscardIfDirty = useCallback(async (): Promise<boolean> => {
     if (!isDirty) return true;
@@ -415,85 +582,131 @@ export function FileViewerTabPanel({
     });
   }, [dialogs, isDirty, t, ti]);
 
-  const handleSaveFile = useCallback(async () => {
-    if (!connection || !loadedFile || loadedFile.kind !== "text" || saving) {
-      return;
-    }
-    setSaving(true);
-    try {
-      const rawCall = connection.link.call.bind(connection.link) as (
-        method: string,
-        params: Record<string, unknown>,
-      ) => Promise<unknown>;
-
-      try {
-        await rawCall("fs.write", {
-          path: loadedFile.path,
-          text: draftText,
-          content: draftText,
-        });
-      } catch (err) {
-        const errData =
-          err instanceof RpcError &&
-          typeof err.data === "object" &&
-          err.data !== null
-            ? (err.data as { code?: string })
-            : undefined;
-        const isNotFound =
-          err instanceof RpcError &&
-          (err.code === RPC_METHOD_NOT_FOUND ||
-            errData?.code === "host_outdated");
-        if (!isNotFound) throw err;
-
-        const acpAgent =
-          agents.find((a) => a.installed && a.id !== "claude")?.id ??
-          agents.find((a) => a.installed)?.id ??
-          "codex";
-        const opened = await connection.link.call("agents.editor", {
-          agent: acpAgent,
-          operation: "open",
-          cwd: cwd || "/",
-          path: loadedFile.path,
-        });
-        if (!opened.editorId) {
-          throw err;
-        }
+  /** Older hosts have no `fs.write`; an ACP agent with an editor can still save for them. */
+  const saveThroughAgentEditor = useCallback(
+    async (path: string, text: string): Promise<boolean> => {
+      if (!connection) return false;
+      const candidates = agents.filter((a) => a.installed && a.capabilities?.acp);
+      for (const agent of candidates) {
+        let editorId: string | undefined;
         try {
-          await connection.link.call("agents.editor", {
-            agent: acpAgent,
-            operation: "save",
-            editorId: opened.editorId,
-            text: draftText,
+          const opened = await connection.link.call("agents.editor", {
+            agent: agent.id,
+            operation: "open",
+            cwd: cwd || "/",
+            path,
           });
+          editorId = opened.editorId;
+          if (!editorId) continue;
+          await connection.link.call("agents.editor", {
+            agent: agent.id,
+            operation: "save",
+            editorId,
+            text,
+          });
+          return true;
+        } catch {
+          // This agent can't edit (no editor support, or the path is outside its folders).
         } finally {
-          await connection.link
-            .call("agents.editor", {
-              agent: acpAgent,
-              operation: "close",
-              editorId: opened.editorId,
-            })
-            .catch(() => undefined);
+          if (editorId) {
+            await connection.link
+              .call("agents.editor", { agent: agent.id, operation: "close", editorId })
+              .catch(() => undefined);
+          }
         }
       }
+      return false;
+    },
+    [agents, connection, cwd],
+  );
 
+  const finishSave = useCallback(
+    (text: string, result?: { modifiedAt: number; size: number }) => {
       setLoadedFile((prev) =>
         prev
           ? {
               ...prev,
-              text: draftText,
-              size: new TextEncoder().encode(draftText).byteLength,
+              text,
+              size: result?.size ?? new TextEncoder().encode(text).byteLength,
+              modifiedAt: result?.modifiedAt ?? prev.modifiedAt,
             }
           : null,
       );
+      setFileDraft(draftOwner, sessionId, draftTabId, undefined);
       setEditing(false);
       setSavedNotice(true);
+      window.dispatchEvent(new CustomEvent(INSPECTOR_FILE_SAVED_EVENT));
       setTimeout(() => setSavedNotice(false), 1400);
-    } catch (err) {
-      await dialogs.alert(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [agents, connection, cwd, dialogs, draftText, loadedFile, saving]);
+    },
+    [draftOwner, draftTabId, sessionId],
+  );
+
+  const handleSaveFile = useCallback(
+    async (overwrite = false) => {
+      // A ref, not state: the overwrite retry runs from inside the first attempt's handler.
+      if (!connection || !loadedFile || loadedFile.kind !== "text" || savingRef.current) {
+        return;
+      }
+      const text = draftText;
+      savingRef.current = true;
+      setSaving(true);
+      try {
+        const result = await connection.link.call("fs.write", {
+          path: loadedFile.path,
+          text,
+          ...(overwrite || loadedFile.modifiedAt === undefined
+            ? {}
+            : { expectedModifiedAt: loadedFile.modifiedAt }),
+        });
+        finishSave(text, result);
+      } catch (err) {
+        if (rpcAppCode(err) === "conflict") {
+          const choice = await dialogs.choose(
+            ti("saveConflictBody", { path: toRepoRelativePath(loadedFile.path, cwd) }),
+            [
+              { value: "reload", label: ti("saveConflictReload") },
+              { value: "overwrite", label: ti("saveConflictOverwrite"), destructive: true },
+            ],
+            { title: ti("saveConflictTitle"), cancelLabel: ti("cancel") },
+          );
+          savingRef.current = false;
+          setSaving(false);
+          if (choice === "overwrite") {
+            await handleSaveFileRef.current?.(true);
+          } else if (choice === "reload") {
+            discardDraftAndReload();
+          }
+          return;
+        }
+        if (isMethodMissing(err)) {
+          if (await saveThroughAgentEditor(loadedFile.path, text)) {
+            finishSave(text);
+          } else {
+            setSaveUnsupported(true);
+            await dialogs.alert(ti("saveOldHost"));
+          }
+          return;
+        }
+        await dialogs.alert(err instanceof Error ? err.message : String(err));
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
+    },
+    [
+      connection,
+      cwd,
+      dialogs,
+      discardDraftAndReload,
+      draftText,
+      finishSave,
+      loadedFile,
+      saveThroughAgentEditor,
+      ti,
+    ],
+  );
+  const handleSaveFileRef = useRef(handleSaveFile);
+  handleSaveFileRef.current = handleSaveFile;
 
   const handleEditorKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -586,6 +799,24 @@ export function FileViewerTabPanel({
     return stripped || cwd || activePath;
   }, [activePath, cwd]);
 
+  const loadMoreBanner =
+    loadedFile?.kind === "text" && loadedFile.nextOffset !== undefined ? (
+      <div className="inspector-banner">
+        <span>{ti("truncatedNote")}</span>
+        <Button
+          size="xs"
+          variant="secondary"
+          loading={loadingMore}
+          disabled={!online}
+          onClick={() => {
+            void handleLoadMore();
+          }}
+        >
+          {ti("loadMoreFile")}
+        </Button>
+      </div>
+    ) : null;
+
   return (
     <div
       className="ls-file-tab-panel inspector-panel-fill"
@@ -601,6 +832,7 @@ export function FileViewerTabPanel({
               onClick={() => {
                 void (async () => {
                   if (await confirmDiscardIfDirty()) {
+                    setFileDraft(draftOwner, sessionId, draftTabId, undefined);
                     onBack();
                   }
                 })();
@@ -690,21 +922,23 @@ export function FileViewerTabPanel({
               </>
             ) : (
               <>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  leadingIcon="edit"
-                  disabled={loadedFile.truncated}
-                  disabledReason={
-                    loadedFile.truncated ? ti("truncatedNote") : undefined
-                  }
-                  onClick={() => {
-                    setDraftText(loadedFile.text);
-                    setEditing(true);
-                  }}
-                >
-                  {ti("editFile")}
-                </Button>
+                {saveUnsupported ? null : (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    leadingIcon="edit"
+                    disabled={loadedFile.truncated}
+                    disabledReason={
+                      loadedFile.truncated ? ti("truncatedNote") : undefined
+                    }
+                    onClick={() => {
+                      setDraftText(loadedFile.text);
+                      setEditing(true);
+                    }}
+                  >
+                    {ti("editFile")}
+                  </Button>
+                )}
                 <CopyButton
                   value={() => loadedFile.text}
                   size="sm"
@@ -713,6 +947,17 @@ export function FileViewerTabPanel({
               </>
             )
           ) : null}
+
+          <IconButton
+            icon="refresh"
+            size="icon-sm"
+            label={ti("reloadFile")}
+            loading={fileLoading}
+            disabled={!online}
+            onClick={() => {
+              void handleReload();
+            }}
+          />
 
           <Menu
             label={t("desktop.inspector.openIn")}
@@ -749,71 +994,59 @@ export function FileViewerTabPanel({
             <MenuItem
               icon="copy"
               onSelect={() => {
-                void navigator.clipboard?.writeText(activePath);
+                void navigator.clipboard?.writeText(activePath).catch(() => undefined);
               }}
             >
               {t("desktop.menu.copyPath")}
             </MenuItem>
-            <MenuSeparator />
-            <MenuItem
-              icon="code"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "vscode");
-              }}
-            >
-              {ti("openInVscode")}
-            </MenuItem>
-            <MenuItem
-              icon="code"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "cursor");
-              }}
-            >
-              {ti("openInCursor")}
-            </MenuItem>
-            <MenuItem
-              icon="code"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "zed");
-              }}
-            >
-              {ti("openInZed")}
-            </MenuItem>
-            {resolvedPlatform === "macos" ? (
-              <MenuItem
-                icon="code"
-                onSelect={() => {
-                  void handleOpenExternal(activePath, "xcode");
-                }}
-              >
-                {ti("openInXcode")}
-              </MenuItem>
+            {openLocally ? (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  icon="code"
+                  onSelect={() => {
+                    void handleOpenExternal(activePath, "vscode");
+                  }}
+                >
+                  {ti("openInVscode")}
+                </MenuItem>
+                <MenuItem
+                  icon="code"
+                  onSelect={() => {
+                    void handleOpenExternal(activePath, "cursor");
+                  }}
+                >
+                  {ti("openInCursor")}
+                </MenuItem>
+                <MenuItem
+                  icon="code"
+                  onSelect={() => {
+                    void handleOpenExternal(activePath, "zed");
+                  }}
+                >
+                  {ti("openInZed")}
+                </MenuItem>
+                {resolvedPlatform === "macos" && isElectronRuntime() ? (
+                  <MenuItem
+                    icon="code"
+                    onSelect={() => {
+                      void handleOpenExternal(activePath, "xcode");
+                    }}
+                  >
+                    {ti("openInXcode")}
+                  </MenuItem>
+                ) : null}
+                <MenuItem
+                  icon="folder-open"
+                  onSelect={() => {
+                    void handleOpenExternal(activePath, "reveal");
+                  }}
+                >
+                  {revealLabel}
+                </MenuItem>
+              </>
             ) : null}
-            <MenuItem
-              icon="code"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "windsurf");
-              }}
-            >
-              {ti("openInWindsurf")}
-            </MenuItem>
-            <MenuItem
-              icon="sparkles"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "antigravity");
-              }}
-            >
-              {ti("openInAntigravity")}
-            </MenuItem>
             <MenuSeparator />
-            <MenuItem
-              icon="folder-open"
-              onSelect={() => {
-                void handleOpenExternal(activePath, "reveal");
-              }}
-            >
-              {revealLabel}
-            </MenuItem>
             <MenuItem
               icon="terminal"
               onSelect={() => {
@@ -835,6 +1068,24 @@ export function FileViewerTabPanel({
             icon="alert-circle"
             title={displayRelPath}
             description={fileError}
+            actions={
+              alternatePath && computerKey ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leadingIcon="file-code"
+                  onClick={() =>
+                    openFileTabInInspector(computerKey, sessionId, alternatePath, {
+                      openPanel: true,
+                    })
+                  }
+                >
+                  {ti("openOtherFile", {
+                    path: toRepoRelativePath(alternatePath, cwd),
+                  })}
+                </Button>
+              ) : undefined
+            }
           />
         ) : !loadedFile ? (
           <EmptyState
@@ -848,7 +1099,7 @@ export function FileViewerTabPanel({
             <img
               src={`data:${loadedFile.mimeType ?? "image/png"};base64,${loadedFile.data}`}
               alt={loadedFile.path}
-              style={{ maxWidth: "100%", borderRadius: "var(--ls-radius-md)" }}
+              className="inspector-file-image"
             />
           </div>
         ) : loadedFile.kind === "binary" ? (
@@ -871,6 +1122,8 @@ export function FileViewerTabPanel({
           />
         ) : editing ? (
           <textarea
+            // Edit means "let me type": the caret is in the file as soon as the editor shows.
+            autoFocus
             aria-label={loadedFile.path}
             className="inspector-editor-textarea"
             spellCheck={false}
@@ -880,6 +1133,7 @@ export function FileViewerTabPanel({
           />
         ) : isMarkdownPath(loadedFile.path) && markdownMode === "preview" ? (
           <div className="inspector-markdown-body ls-markdown">
+            {loadMoreBanner}
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               skipHtml
@@ -950,11 +1204,7 @@ export function FileViewerTabPanel({
           </div>
         ) : (
           <>
-            {loadedFile.truncated ? (
-              <div className="inspector-banner">
-                <span>{ti("truncatedNote")}</span>
-              </div>
-            ) : null}
+            {loadMoreBanner}
             <pre
               ref={sourcePreRef}
               tabIndex={0}

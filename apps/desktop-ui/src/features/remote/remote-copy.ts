@@ -18,6 +18,16 @@ export type FusionCategoryKey =
   | "creative"
   | "other";
 
+export type FusionAlertCopyKind =
+  | "accessibility"
+  | "recording"
+  | "locked"
+  | "webrtc"
+  | "launch"
+  | "stub"
+  | "disconnected"
+  | "generic";
+
 export interface RemoteCopy {
   fullDesktop: string;
   fusionMode: string;
@@ -68,6 +78,11 @@ export interface RemoteCopy {
   fusionConnectionErrorTitle: string;
   fusionRetry: string;
   fusionCheckPermissions: string;
+  fusionOffTitle: string;
+  fusionOffDesc: string;
+  fusionReconnecting: (attempt: number, max: number) => string;
+  fusionAlertsLabel: string;
+  fusionAlerts: Record<FusionAlertCopyKind, { title: string; remedy: string }>;
   categories: Record<FusionCategoryKey, string>;
 
   /* Unified Remote Screen */
@@ -207,6 +222,20 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   fusionConnectionErrorTitle: "融合模式连接异常",
   fusionRetry: "重新连接",
   fusionCheckPermissions: "请求远端权限检查",
+  fusionOffTitle: "融合模式未开启",
+  fusionOffDesc: "开启后，远端 Mac 的应用会以独立窗口出现在这台 Mac 的程序坞和 ⌘Tab 中。",
+  fusionReconnecting: (attempt, max) => `连接中断，正在重新连接（第 ${attempt}/${max} 次）`,
+  fusionAlertsLabel: "融合模式提示",
+  fusionAlerts: {
+    accessibility: { title: "远端 Mac 未授权辅助功能", remedy: "在远端 Mac 打开「系统设置 › 隐私与安全性 › 辅助功能」，允许 LinkShell，然后重新开启融合模式。" },
+    recording: { title: "远端 Mac 未授权屏幕录制", remedy: "在远端 Mac 打开「系统设置 › 隐私与安全性 › 屏幕录制」，允许 LinkShell，然后重新开启融合模式。" },
+    locked: { title: "远端 Mac 已锁屏", remedy: "切换到「完整桌面」解锁远端 Mac，融合窗口随后恢复正常。" },
+    webrtc: { title: "窗口画面连接失败", remedy: "当前网络无法建立窗口画面直连。请确认两台电脑网络畅通，或重新开启融合模式。" },
+    launch: { title: "远端应用无法打开", remedy: "确认该应用仍安装在远端 Mac 上，然后重试。" },
+    stub: { title: "本机融合应用反复退出", remedy: "远端应用仍在运行。可在下方重新打开该应用，或断开后重新开启融合模式。" },
+    disconnected: { title: "融合连接已断开", remedy: "检查远端 Mac 是否睡眠或离线，然后重新开启融合模式。" },
+    generic: { title: "融合模式出现问题", remedy: "可尝试重新开启融合模式。" },
+  },
   categories: {
     all: "全部",
     running: "运行中",
@@ -375,6 +404,20 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
   fusionConnectionErrorTitle: "Fusion connection interrupted",
   fusionRetry: "Reconnect",
   fusionCheckPermissions: "Prompt Remote Permission Check",
+  fusionOffTitle: "Fusion Mode is off",
+  fusionOffDesc: "Turn it on to open the remote Mac's apps as their own windows here, in the Dock and ⌘Tab.",
+  fusionReconnecting: (attempt, max) => `Connection lost, reconnecting (attempt ${attempt} of ${max})`,
+  fusionAlertsLabel: "Fusion notices",
+  fusionAlerts: {
+    accessibility: { title: "Accessibility not allowed on the remote Mac", remedy: "On the remote Mac, open System Settings › Privacy & Security › Accessibility, allow LinkShell, then start Fusion again." },
+    recording: { title: "Screen Recording not allowed on the remote Mac", remedy: "On the remote Mac, open System Settings › Privacy & Security › Screen Recording, allow LinkShell, then start Fusion again." },
+    locked: { title: "The remote Mac is locked", remedy: "Switch to Full Desktop and unlock the remote Mac; fused windows recover afterwards." },
+    webrtc: { title: "A window's picture could not connect", remedy: "This network cannot carry the window picture directly. Check both Macs' connection, or start Fusion again." },
+    launch: { title: "The remote app could not open", remedy: "Make sure the app is still installed on the remote Mac, then try again." },
+    stub: { title: "A fused app keeps quitting on this Mac", remedy: "The remote app is still running. Open it again below, or disconnect and start Fusion again." },
+    disconnected: { title: "Fusion disconnected", remedy: "Check whether the remote Mac is asleep or offline, then start Fusion again." },
+    generic: { title: "Fusion ran into a problem", remedy: "Try starting Fusion again." },
+  },
   categories: {
     all: "All",
     running: "Running",
@@ -513,6 +556,10 @@ const JA_COPY = (locale: Locale): RemoteCopy => ({
   fusionQuitApp: "終了",
   fusionForceQuitApp: "強制終了",
   fusionRetry: "再接続",
+  fusionOffTitle: "融合モードはオフです",
+  fusionOffDesc: "オンにすると、リモート Mac のアプリがこの Mac の Dock と ⌘Tab に独立したウインドウとして現れます。",
+  fusionReconnecting: (attempt, max) => `接続が切れました。再接続中（${attempt}/${max} 回目）`,
+  fusionAlertsLabel: "融合モードのお知らせ",
   categories: {
     all: "すべて",
     running: "実行中",

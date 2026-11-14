@@ -10,6 +10,7 @@ import { DesktopIcon, type DesktopIconName } from "../icons";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverPlacement } from "./Popover";
 import { Tooltip } from "./Tooltip";
 import { cn, isImeComposing } from "./utils";
+import { usePrimitiveLabels } from "./labels";
 
 export interface ComboboxOption {
   value: string;
@@ -51,9 +52,9 @@ export function Combobox({
   value,
   onValueChange,
   options,
-  placeholder = "选择",
-  searchPlaceholder = "筛选",
-  emptyText = "无匹配结果",
+  placeholder: placeholderProp,
+  searchPlaceholder: searchPlaceholderProp,
+  emptyText: emptyTextProp,
   ariaLabel,
   size = "md",
   placement = "bottom-start",
@@ -63,6 +64,10 @@ export function Combobox({
   className,
   popoverClassName,
 }: ComboboxProps) {
+  const labels = usePrimitiveLabels();
+  const placeholder = placeholderProp ?? labels.select;
+  const searchPlaceholder = searchPlaceholderProp ?? labels.filter;
+  const emptyText = emptyTextProp ?? labels.noMatches;
   const listboxId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

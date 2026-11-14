@@ -20,6 +20,7 @@ import {
 } from "../../core";
 import { DesktopIcon } from "../../icons";
 import {
+  AlertDialog,
   Badge,
   Button,
   Dialog,
@@ -64,6 +65,7 @@ export function SignInPairModal(props: {
   const [authLink, setAuthLink] = useState<string>();
   const [authError, setAuthError] = useState<string>();
   const [accountBusy, setAccountBusy] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const loginRunningRef = useRef(false);
   const loginCancelledRef = useRef(false);
 
@@ -252,17 +254,8 @@ export function SignInPairModal(props: {
                 userId={engineState.accountUserId}
                 locale={locale}
                 busy={accountBusy}
-                onSignOut={() => {
-                  setAccountBusy(true);
-                  void logoutDesktopAccount()
-                    .then(() => engine.connectAccount())
-                    .catch((err: unknown) =>
-                      setAuthError(
-                        err instanceof Error ? err.message : String(err),
-                      ),
-                    )
-                    .finally(() => setAccountBusy(false));
-                }}
+                // The same account as Settings' sign-out, so it asks the same question first.
+                onSignOut={() => setConfirmSignOut(true)}
                 onRefreshComputers={() => {
                   setAccountBusy(true);
                   void engine
@@ -406,6 +399,31 @@ export function SignInPairModal(props: {
           </div>
         </TabPanel>
       </Tabs>
+      <AlertDialog
+        open={confirmSignOut}
+        onOpenChange={(next) => {
+          if (!next && !accountBusy) setConfirmSignOut(false);
+        }}
+        title={ts("confirm.logoutTitle")}
+        description={ts("confirm.logoutDesc")}
+        cancelLabel={ts("modal.cancel")}
+        confirmLabel={ts("confirm.logoutAction")}
+        destructive
+        loading={accountBusy}
+        onCancel={() => setConfirmSignOut(false)}
+        onConfirm={() => {
+          setAccountBusy(true);
+          void logoutDesktopAccount()
+            .then(() => engine.connectAccount())
+            .catch((err: unknown) =>
+              setAuthError(err instanceof Error ? err.message : String(err)),
+            )
+            .finally(() => {
+              setAccountBusy(false);
+              setConfirmSignOut(false);
+            });
+        }}
+      />
     </Dialog>
   );
 }

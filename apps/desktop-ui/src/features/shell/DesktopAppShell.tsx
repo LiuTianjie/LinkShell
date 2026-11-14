@@ -19,15 +19,24 @@ import {
   isElectronRuntime,
   normalizeDesktopPlatform,
   notifyDesktopPlatformChanged,
+  postDesktopMessage,
   type DesktopPlatform,
 } from "../../bridge/desktop-bridge";
 import {
+  DESKTOP_SHORTCUT_META,
   DESKTOP_SHORTCUTS,
   isEditableTarget,
   isImeComposing,
   keysBelongToRemoteOrPreview,
   matchesShortcut,
+  requestCloseTab,
+  requestComposerFocus,
+  requestGoToFile,
+  useDesktopCommand,
+  type DesktopShortcutId,
+  type ShortcutBinding,
 } from "../../bridge/shortcuts";
+import { registerOverlayOpen } from "../../bridge/top-layer-registry";
 import {
   canUseFusionMode,
   computerNames,
@@ -37,6 +46,7 @@ import {
   routerStore,
   serviceAction,
   sessionTitle,
+  setNavigationConfirmer,
   useI18n,
   useManagement,
   useRouter,
@@ -47,7 +57,10 @@ import {
   Button,
   EmptyState,
   ErrorBoundary,
+  IconButton,
   SplitResizer,
+  StatusDot,
+  useDialogs,
 } from "../../primitives";
 import { AccessUnlockView } from "./AccessUnlockView";
 import { ArchiveView } from "./ArchiveView";
@@ -59,7 +72,14 @@ import {
   folderBasename,
   formatRelativeTimestamp,
   isLocalComputer,
+  isRouteStillValid,
+  openSessionOnComputer,
+  sessionActivity,
+  sessionListState,
+  sessionRecency,
   useConnectionStore,
+  useMinuteTick,
+  visibleSidebarSessions,
   type ShellRenderSlots,
 } from "./shell-helpers";
 import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
@@ -69,6 +89,62 @@ import { WorkspaceTopBar } from "./WorkspaceTopBar";
 
 function RenderSlot({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
+}
+
+const NOTICE_DISMISS_MS = 6_000;
+
+/** The one place failed actions surface; before it, `engine.state.error` was written and never shown. */
+function ShellNoticeHost() {
+  const { t } = useI18n();
+  const error = useStore(engine.state, (s) => s.error);
+  useEffect(() => {
+    if (!error) return undefined;
+    const timer = setTimeout(() => {
+      if (engine.state.getState().error === error) engine.clearError();
+    }, NOTICE_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [error]);
+  if (!error) return null;
+  return (
+    <div className="shell-notice" role="alert">
+      <DesktopIcon name="alert-circle" size="sm" className="shell-notice__icon" />
+      <span className="shell-notice__text">{error}</span>
+      <IconButton
+        icon="close"
+        size="icon-sm"
+        variant="ghost"
+        label={t("desktop.shell.dismiss")}
+        onClick={() => engine.clearError()}
+      />
+    </div>
+  );
+}
+
+/** Lets ⌘W / the menu's Close dismiss the topmost overlay first, the way native windows do. */
+function closeTopOverlay(): boolean {
+  if (typeof document === "undefined") return false;
+  const router = routerStore.getState();
+  if (router.commandCenterOpen) {
+    router.setCommandCenterOpen(false);
+    return true;
+  }
+  if (router.shortcutSheetOpen) {
+    router.setShortcutSheetOpen(false);
+    return true;
+  }
+  const dialogs = Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]"));
+  const top = dialogs[dialogs.length - 1];
+  if (top) {
+    const closable = top as HTMLDialogElement & { requestClose?: () => void };
+    if (typeof closable.requestClose === "function") closable.requestClose();
+    else top.close();
+    return true;
+  }
+  if (router.systemModal.open) {
+    router.closeSystemModal();
+    return true;
+  }
+  return false;
 }
 
 export interface DesktopAppShellProps extends ShellRenderSlots {
@@ -99,10 +175,14 @@ function WorkspaceHomeHub({
   const activeConnection = useStore(engine.state, (s) => s.connection);
   const names = useStore(computerNames.store);
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
+  const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+  const sessionsLoaded = useConnectionStore(activeConnection, (s) => s.sessionsLoaded);
+  useMinuteTick();
 
   const activeComputerKey = activeComputer?.key ?? DESKTOP_LOCAL;
   const compTitle = displayComputerName(activeComputer, names, locale);
   const isLocal = isLocalComputer(activeComputer);
+  const listState = sessionListState(activeComputer, linkStatus, sessionsLoaded);
 
   // Local daemon stopped state: give immediate 1-click Start Service CTA without trapping navigation
   if (isLocal && mgmt.snapshot?.status === "stopped" && !healthy(mgmt)) {
@@ -145,7 +225,7 @@ function WorkspaceHomeHub({
 
   const recentSessions = Object.values(sessionsMap)
     .filter((s) => !s.archived)
-    .sort((a, b) => b.createdAt - a.createdAt)
+    .sort((a, b) => sessionRecency(b) - sessionRecency(a))
     .slice(0, 8);
 
   const electronShell = isElectronRuntime();
@@ -165,13 +245,7 @@ function WorkspaceHomeHub({
         <div className="home-compact-header">
           <div className="shell-page__heading">
             <h1 className="shell-page__title">{compTitle}</h1>
-            <p className="shell-page__subtitle">
-              {locale === "en"
-                ? "Start a new coding session or resume recent work."
-                : locale === "ja"
-                  ? "新しいセッションを開始するか、最近の作業を再開しましょう。"
-                  : "创建新的 Agent 会话，或继续最近工作。"}
-            </p>
+            <p className="shell-page__subtitle">{t("desktop.shell.homeSubtitle")}</p>
           </div>
 
           <div className="shell-page__actions">
@@ -189,12 +263,27 @@ function WorkspaceHomeHub({
             <Button
               variant="primary"
               leadingIcon="plus"
+              disabled={listState === "offline"}
               onClick={() => onRequestNewSession(activeComputerKey)}
             >
               {t("desktop.newSession")}
             </Button>
           </div>
         </div>
+
+        {listState !== "ready" && recentSessions.length === 0 ? (
+          <div className="home-state" data-state={listState}>
+            {listState === "loading" ? <DesktopIcon name="spinner" size="sm" /> : null}
+            <span>
+              {listState === "loading"
+                ? t("desktop.shell.connectingTo", { name: compTitle })
+                : t("desktop.shell.offlineTitle", { name: compTitle })}
+            </span>
+            {listState === "offline" ? (
+              <span className="home-state__hint">{t("desktop.shell.offlineDesc")}</span>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Concise Fusion Mode Quick Row when eligible remote Macs are online */}
         {fusionCandidates.length > 0 ? (
@@ -233,31 +322,41 @@ function WorkspaceHomeHub({
         {recentSessions.length > 0 ? (
           <div className="home-recent-section">
             <h2 className="home-recent-section__heading">
-              {t("desktop.nav.sessions")}
+              {t("desktop.shell.recentSessions")}
             </h2>
             <div className="home-recent-list">
-              {recentSessions.map((session) => (
+              {recentSessions.map((session) => {
+                const activity = sessionActivity(session, locale);
+                return (
                 <button
                   key={session.id}
                   type="button"
                   className="home-recent-row"
                   onClick={() => openSession(activeComputerKey, session.id)}
                 >
-                  <AgentMark agent={session.agent} size={15} />
+                  <span className="home-recent-row__lead" aria-hidden="true">
+                    <AgentMark agent={session.agent} size={15} />
+                    {activity ? (
+                      <StatusDot tone={activity.kind} size="sm" className="tree-session__dot" />
+                    ) : null}
+                  </span>
                   <span className="home-recent-row__title ls-truncate">
                     {sessionTitle(session)}
                   </span>
+                  {activity ? (
+                    <span className={`tree-session__pill tree-session__pill--${activity.kind}`}>
+                      {activity.label}
+                    </span>
+                  ) : null}
                   <span className="home-recent-row__cwd ls-truncate">
                     {folderBasename(session.cwd)}
                   </span>
                   <span className="home-recent-row__time">
-                    {formatRelativeTimestamp(
-                      session.updatedAt ?? session.createdAt,
-                      locale,
-                    )}
+                    {formatRelativeTimestamp(sessionRecency(session), locale)}
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -281,6 +380,7 @@ export function DesktopAppShell({
   onOpenLocalPairingQr,
 }: DesktopAppShellProps) {
   const { t } = useI18n();
+  const dialogs = useDialogs();
   const rootElRef = useRef<HTMLDivElement | null>(null);
   const [runtimePlatform, setRuntimePlatform] = useState<DesktopPlatform>(() =>
     getActiveDesktopPlatform(),
@@ -297,7 +397,6 @@ export function DesktopAppShell({
 
   const openNewSession = useRouter((s) => s.openNewSession);
   const openSystemModal = useRouter((s) => s.openSystemModal);
-  const closeSystemModal = useRouter((s) => s.closeSystemModal);
   const toggleSidebar = useRouter((s) => s.toggleSidebar);
   const setSidebarWidth = useRouter((s) => s.setSidebarWidth);
   const toggleInspector = useRouter((s) => s.toggleInspector);
@@ -313,6 +412,8 @@ export function DesktopAppShell({
 
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
   const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+  const sessionsLoaded = useConnectionStore(activeConnection, (s) => s.sessionsLoaded);
+  const restoredRoute = useRouter((s) => s.restoredRoute);
 
   const [newSessionNonce, setNewSessionNonce] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
@@ -334,6 +435,43 @@ export function DesktopAppShell({
     },
     [activeComputerKey, openNewSession],
   );
+
+  // Leaving the session family unmounts its panels; ask through the app's own dialog, not window.confirm.
+  useEffect(
+    () =>
+      setNavigationConfirmer(() =>
+        dialogs.confirm(t("desktop.shell.leaveSessionConfirm"), {
+          title: t("desktop.shell.leaveSessionTitle"),
+          confirmLabel: t("desktop.shell.leave"),
+          cancelLabel: t("desktop.shell.cancel"),
+          destructive: true,
+        }),
+      ),
+    [dialogs, t],
+  );
+
+  useEffect(() => {
+    const router = routerStore.getState();
+    router.setRouteValidator(isRouteStillValid);
+    return () => router.setRouteValidator(undefined);
+  }, []);
+
+  // A route restored from the last run may name a session deleted since; once the list is in, check.
+  useEffect(() => {
+    if (!restoredRoute) return;
+    const route = activeRoute;
+    if (route.kind !== "session") {
+      routerStore.getState().markRouteVerified();
+      return;
+    }
+    if (!activeConnection || activeConnection.computer.key !== route.computerKey) {
+      if (!isRouteStillValid(route)) routerStore.getState().forgetSession(route.computerKey, route.sessionId);
+      return;
+    }
+    if (!sessionsLoaded) return;
+    if (sessionsMap[route.sessionId]) routerStore.getState().markRouteVerified();
+    else routerStore.getState().forgetSession(route.computerKey, route.sessionId);
+  }, [activeConnection, activeRoute, restoredRoute, sessionsLoaded, sessionsMap, computers]);
 
   const handleToggleSidebar = useCallback(() => {
     const willCollapse = !routerStore.getState().sidebarHidden;
@@ -481,63 +619,136 @@ export function DesktopAppShell({
     }
   }, [sidebarHidden]);
 
+  const handleCloseTab = useCallback(() => {
+    if (closeTopOverlay()) return;
+    if (requestCloseTab()) return;
+    const router = routerStore.getState();
+    if (router.bottomDockOpen && router.activeRoute.kind === "session") {
+      router.toggleBottomDock(false);
+      return;
+    }
+    postDesktopMessage({ action: "closeWindow" });
+  }, []);
+
+  useDesktopCommand((command) => {
+    if (command.command === "close-tab") handleCloseTab();
+    else if (command.command === "composer") requestComposerFocus();
+  });
+
   // Global keyboard shortcuts (honoring remote-screen capture & CJK IME composition guards)
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
 
+    const stepSession = (offset: number | { index: number }) => {
+      const rows = visibleSidebarSessions();
+      if (rows.length === 0) return;
+      const route = routerStore.getState().activeRoute;
+      let target: (typeof rows)[number] | undefined;
+      if (typeof offset === "number") {
+        const current =
+          route.kind === "session"
+            ? rows.findIndex(
+                (row) => row.computerKey === route.computerKey && row.sessionId === route.sessionId,
+              )
+            : -1;
+        const next = current < 0 ? (offset > 0 ? 0 : rows.length - 1) : current + offset;
+        target = rows[Math.max(0, Math.min(rows.length - 1, next))];
+      } else {
+        target = rows[offset.index];
+      }
+      if (target) openSessionOnComputer(target.computerKey, target.sessionId);
+    };
+
+    const run: Record<DesktopShortcutId, () => void> = {
+      palette: () => {
+        const r = routerStore.getState();
+        r.setCommandCenterOpen(!r.commandCenterOpen);
+      },
+      newSession: () => {
+        const r = routerStore.getState();
+        // ⌘N from a session starts in that session's project, like a new tab in the same folder.
+        const route = r.activeRoute;
+        if (route.kind === "session") {
+          const session = engine.state.getState().connection?.store.getState().sessions[route.sessionId];
+          handleRequestNewSession(route.computerKey, session?.cwd || undefined);
+          return;
+        }
+        handleRequestNewSession();
+      },
+      settings: () => openSystemModal("settings"),
+      back: () => back(),
+      forward: () => forward(),
+      previousSession: () => stepSession(-1),
+      nextSession: () => stepSession(1),
+      closeTab: () => handleCloseTab(),
+      toggleSidebar: () => handleToggleSidebar(),
+      terminal: () => {
+        // Closing the terminal hands the keyboard back to the conversation, not to nothing.
+        const wasOpen = routerStore.getState().bottomDockOpen;
+        toggleBottomDock();
+        if (wasOpen) requestComposerFocus();
+      },
+      toggleInspector: () => toggleInspector(),
+      focusComposer: () => requestComposerFocus(),
+      goToFile: () => {
+        toggleInspector(true, "files");
+        requestGoToFile();
+      },
+      findInSession: () => {
+        // The session workspace owns its find bar; route the key there however focus wandered.
+        const workspace = document.querySelector<HTMLElement>(".ls-session-workspace");
+        workspace?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "f",
+            code: "KeyF",
+            metaKey: getActiveDesktopPlatform() !== "windows",
+            ctrlKey: getActiveDesktopPlatform() === "windows",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      },
+    };
+
+    // Keys that edit text where they land: ⌘[ / ⌘] indent in editors, so they stay with the field.
+    const editingKeys = new Set<DesktopShortcutId>(["back", "forward"]);
+
+    // Where Ctrl is the app's modifier it is also the shell's: in a terminal ^K ^L ^W ^B ^N ^P ^F
+    // and ^[ belong to readline and tmux. Only chords that mean nothing to a shell still reach
+    // the app from there (⌘ on a Mac never collides).
+    const shellSafeKeys = new Set<DesktopShortcutId>(["terminal", "settings"]);
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isImeComposing(event)) return;
       if (keysBelongToRemoteOrPreview()) return;
+      const inSession = routerStore.getState().activeRoute.kind === "session";
+      const editable = isEditableTarget(event.target);
+      const inCtrlTerminal =
+        getActiveDesktopPlatform() === "windows" &&
+        event.target instanceof Element &&
+        Boolean(event.target.closest(".xterm"));
 
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.palette)) {
+      for (const id of Object.keys(DESKTOP_SHORTCUTS) as DesktopShortcutId[]) {
+        const binding: ShortcutBinding = DESKTOP_SHORTCUTS[id];
+        if (!matchesShortcut(event, binding)) continue;
+        if (inCtrlTerminal && !shellSafeKeys.has(id) && !binding.shift && !binding.alt) return;
+        if (editable && editingKeys.has(id)) return;
+        if (DESKTOP_SHORTCUT_META[id].scope === "session" && !inSession) return;
+        if (id === "findInSession" && event.target instanceof Node) {
+          // Already inside the workspace: its own handler sees this keydown, don't open the bar twice.
+          const workspace = document.querySelector(".ls-session-workspace");
+          if (workspace?.contains(event.target)) return;
+        }
         event.preventDefault();
-        const r = routerStore.getState();
-        r.setCommandCenterOpen(!r.commandCenterOpen);
+        run[id]();
         return;
       }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.newSession)) {
+
+      // ⌘1…⌘9 jump to the sidebar's Nth visible session.
+      const digit = /^Digit([1-9])$/.exec(event.code)?.[1];
+      if (digit && matchesShortcut(event, { key: digit })) {
         event.preventDefault();
-        handleRequestNewSession();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.settings)) {
-        event.preventDefault();
-        openSystemModal("settings");
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.manageMode)) {
-        event.preventDefault();
-        openSystemModal("overview");
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.workspaceMode)) {
-        event.preventDefault();
-        closeSystemModal();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.toggleSidebar)) {
-        event.preventDefault();
-        handleToggleSidebar();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.toggleInspector)) {
-        event.preventDefault();
-        toggleInspector();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.terminal)) {
-        event.preventDefault();
-        toggleBottomDock();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.back)) {
-        event.preventDefault();
-        back();
-        return;
-      }
-      if (matchesShortcut(event, DESKTOP_SHORTCUTS.forward)) {
-        event.preventDefault();
-        forward();
+        stepSession({ index: Number(digit) - 1 });
         return;
       }
 
@@ -547,7 +758,7 @@ export function DesktopAppShell({
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
-        !isEditableTarget(event.target)
+        !editable
       ) {
         event.preventDefault();
         const r = routerStore.getState();
@@ -559,14 +770,29 @@ export function DesktopAppShell({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     back,
-    closeSystemModal,
     forward,
+    handleCloseTab,
     handleRequestNewSession,
     handleToggleSidebar,
     openSystemModal,
     toggleBottomDock,
     toggleInspector,
   ]);
+
+  // On macOS the native screen layer sits above the page; like dialogs, the drawer must make it yield.
+  useEffect(() => (peekOpen ? registerOverlayOpen("sidebar-peek") : undefined), [peekOpen]);
+
+  // Esc closes the hover drawer, matching every other transient surface.
+  useEffect(() => {
+    if (!peekOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || isImeComposing(event)) return;
+      suppressPeekUntilRef.current = Date.now() + 450;
+      setPeekOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [peekOpen]);
 
   const isTranslucent =
     effectivePlatform === "macos" &&
@@ -826,7 +1052,7 @@ export function DesktopAppShell({
 
           <div className="desktop-main-body">
             <ErrorBoundary
-              fallbackTitle="工作区面板加载异常"
+              fallbackTitle={t("desktop.shell.workspaceCrashed")}
               resetKeys={[activeRoute.kind, activeComputerKey, currentSessionId]}
             >
               <div
@@ -842,7 +1068,7 @@ export function DesktopAppShell({
           {/* BottomTerminalDock owns its own horizontal <SplitResizer> + .desktop-bottom-dock (#31 §3, session-only per #73 C.2) */}
           {showBottomDock && renderBottomTerminal ? (
             <ErrorBoundary
-              fallbackTitle="底部终端加载异常"
+              fallbackTitle={t("desktop.shell.dockCrashed")}
               resetKeys={[activeComputerKey, currentSessionId]}
             >
               <RenderSlot
@@ -866,7 +1092,7 @@ export function DesktopAppShell({
         >
           {showInspector && renderInspector ? (
             <ErrorBoundary
-              fallbackTitle="检查器面板加载异常"
+              fallbackTitle={t("desktop.shell.inspectorCrashed")}
               resetKeys={[activeComputerKey, currentSessionId]}
             >
               <RenderSlot
@@ -890,6 +1116,7 @@ export function DesktopAppShell({
         platformOverride={platformOverride}
       />
       <ShortcutsHelpDialog />
+      <ShellNoticeHost />
     </div>
   );
 }

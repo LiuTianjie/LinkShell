@@ -82,6 +82,21 @@ export function validatePreviewPort(raw: unknown, forbiddenPort?: number): numbe
   return port;
 }
 
+/**
+ * The proxy has no token: a page in the user's browser could still reach it through DNS
+ * rebinding (evil.example → 127.0.0.1), so only requests addressed to the loopback name of
+ * this very port are served.
+ */
+export function isAllowedProxyHost(host: string | undefined, localPort: number): boolean {
+  if (!host) return false;
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === `127.0.0.1:${localPort}` ||
+    normalized === `localhost:${localPort}` ||
+    normalized === `[::1]:${localPort}`
+  );
+}
+
 function rewriteLoopbackLocation(value: string, remotePort: number, localPort: number): string {
   const pattern = new RegExp(`^http://(?:127\\.0\\.0\\.1|localhost):${remotePort}(?=[/?#]|$)`, "i");
   return value.replace(pattern, `http://127.0.0.1:${localPort}`);
@@ -258,6 +273,15 @@ export class RemotePortProxyManager {
         this.handleHttpRequest(entry, req, res);
       });
 
+      // Hot-reload WebSockets would need a streaming channel to the window that this request/reply
+      // bridge doesn't have; refuse clearly instead of leaving the upgrade hanging.
+      server.on("upgrade", (_req, socket) => {
+        const body = "外部浏览器预览暂不支持 WebSocket（热更新），请在 LinkShell 内的预览中使用";
+        socket.end(
+          `HTTP/1.1 501 Not Implemented\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`,
+        );
+      });
+
       server.on("connection", (socket) => {
         sockets.add(socket);
         socket.on("close", () => sockets.delete(socket));
@@ -299,8 +323,12 @@ export class RemotePortProxyManager {
   }
 
   private handleHttpRequest(entry: ProxyEntry, req: IncomingMessage, res: ServerResponse): void {
-    this.touchIdle(entry);
     const method = (req.method ?? "GET").toUpperCase();
+    if (!isAllowedProxyHost(req.headers.host, entry.localPort)) {
+      writePlainError(res, 421, "请求的主机名不被远程端口预览接受", method === "HEAD");
+      return;
+    }
+    this.touchIdle(entry);
     const path = normalizePreviewSubPath(req.url);
 
     const headers: [string, string][] = [];

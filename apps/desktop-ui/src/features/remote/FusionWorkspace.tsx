@@ -10,14 +10,15 @@ import { revealOnDesktop } from "../../bridge/desktop-bridge";
 import {
   evaluateFusionCapability,
   fusionCapabilityMessage,
+  FUSION_MAX_RECONNECTS,
   launchFusionApp,
   loadFusionIcons,
-  pollFusionState,
   quitFusionApp,
   refreshFusionState,
   startComputerFusion,
   stopComputerFusion,
   useFusionState,
+  type FusionAlert,
   type FusionRemoteApp,
 } from "../../core/fusion-store";
 import { useI18n } from "../../core/i18n";
@@ -46,6 +47,7 @@ import { RemoteModeSwitch } from "./FusionControls";
 import {
   getRemoteCopy,
   resolveAppCategory,
+  type FusionAlertCopyKind,
   type FusionCategoryKey,
   type RemoteCopy,
 } from "./remote-copy";
@@ -266,8 +268,81 @@ function FusionRemediationBanner({
   );
 }
 
+const ALERT_KINDS: readonly FusionAlertCopyKind[] = [
+  "accessibility",
+  "recording",
+  "locked",
+  "webrtc",
+  "launch",
+  "stub",
+  "disconnected",
+];
+
+export function fusionAlertKind(kind: string): FusionAlertCopyKind {
+  return (ALERT_KINDS as readonly string[]).includes(kind) ? (kind as FusionAlertCopyKind) : "generic";
+}
+
+/** One line per problem the hub reports, each with the remedy that fixes it. */
+function FusionAlertList({
+  alerts,
+  copy,
+  appName,
+  onOpenFullDesktop,
+  onCheckPermission,
+}: {
+  alerts: readonly FusionAlert[];
+  copy: RemoteCopy;
+  appName: (bundle: string) => string;
+  onOpenFullDesktop: () => void;
+  onCheckPermission?: () => void;
+}) {
+  if (alerts.length === 0) return null;
+  return (
+    <ul aria-label={copy.fusionAlertsLabel} className="ls-fusion-alerts">
+      {alerts.map((alert) => {
+        const kind = fusionAlertKind(alert.kind);
+        const text = copy.fusionAlerts[kind];
+        const bundle = alert.bundle ?? (kind === "launch" || kind === "stub" ? alert.subject : undefined);
+        return (
+          <li
+            key={`${alert.kind}:${alert.subject ?? ""}`}
+            role="alert"
+            data-kind={kind}
+            data-tone={kind === "locked" || kind === "accessibility" || kind === "recording" ? "waiting" : "danger"}
+            className="ls-fusion-alert"
+          >
+            <span className="ls-fusion-alert__icon" aria-hidden="true">
+              <DesktopIcon name={kind === "locked" ? "lock" : kind === "accessibility" || kind === "recording" ? "approval-pending" : "alert-triangle"} size="sm" />
+            </span>
+            <div className="ls-fusion-alert__text">
+              <p className="ls-fusion-alert__title">
+                {text.title}
+                {bundle ? ` · ${appName(bundle)}` : ""}
+              </p>
+              <p className="ls-fusion-alert__remedy">{text.remedy}</p>
+              {alert.message && alert.message !== text.title ? (
+                <p className="ls-fusion-alert__detail">{alert.message}</p>
+              ) : null}
+            </div>
+            {kind === "locked" ? (
+              <Button size="xs" variant="secondary" leadingIcon="remote-screen" onClick={onOpenFullDesktop}>
+                {copy.fusionSwitchToScreen}
+              </Button>
+            ) : (kind === "accessibility" || kind === "recording") && onCheckPermission ? (
+              <Button size="xs" variant="secondary" onClick={onCheckPermission}>
+                {copy.fusionCheckPermissions}
+              </Button>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * First-Class 融合模式 (Fusion Mode Launchpad & Active Window Hub) (`#7` §3.3, `#18`).
+ * Viewing it never starts Fusion: entry points and its own start button do.
  */
 export function FusionWorkspace({
   computerKey,
@@ -295,8 +370,6 @@ export function FusionWorkspace({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FusionCategoryKey>("all");
   const [checkingPermission, setCheckingPermission] = useState(false);
-  const [pausedByUser, setPausedByUser] = useState<Record<string, boolean>>({});
-  const manualPauseRef = useRef<Record<string, boolean>>({});
   const gridRef = useRef<HTMLDivElement | null>(null);
   const requestedIconsRef = useRef<Set<string>>(new Set());
 
@@ -306,9 +379,11 @@ export function FusionWorkspace({
 
   const isConnected =
     fusion.phase === "connected" || (fusion.hubRunning && fusion.connected);
-  const isStarting = fusion.phase === "starting";
+  const isReconnecting = fusion.phase === "reconnecting";
+  const isStarting = fusion.phase === "starting" || isReconnecting;
   const isStopping = fusion.phase === "stopping";
-  const manuallyPaused = Boolean(pausedByUser[computerKey]);
+  const manuallyPaused = Boolean(fusion.paused);
+  const isOff = !isStarting && !isConnected && !fusion.hubRunning && !isStopping;
 
   // Hydrate initial Fusion Hub snapshot / cached catalog on mount.
   useEffect(() => {
@@ -316,13 +391,7 @@ export function FusionWorkspace({
     void refreshFusionState(computerKey, displayName);
   }, [capability.supported, computerKey, displayName]);
 
-  // Poll live window counts & app catalog (`450ms` during handshake, `2000ms` steady-state).
-  useEffect(() => {
-    if (!capability.supported || (!isStarting && !fusion.hubRunning && !isConnected)) {
-      return undefined;
-    }
-    return pollFusionState(computerKey, displayName);
-  }, [capability.supported, computerKey, displayName, fusion.hubRunning, isConnected, isStarting]);
+  // Live state comes from the store's own watcher, which runs whether or not this page is open.
 
   // Batch-load 160x160 badged squircle icons for discovered apps (at most once per bundle/slug).
   useEffect(() => {
@@ -454,10 +523,6 @@ export function FusionWorkspace({
   const handleStartFusion = useCallback(
     async (launchBundle?: string) => {
       if (!connection) return;
-      manualPauseRef.current[computerKey] = false;
-      setPausedByUser((prev) =>
-        prev[computerKey] ? { ...prev, [computerKey]: false } : prev,
-      );
       try {
         await startComputerFusion({
           computerKey,
@@ -474,43 +539,11 @@ export function FusionWorkspace({
   );
 
   const handleDisconnectFusion = useCallback(async () => {
-    manualPauseRef.current[computerKey] = true;
-    setPausedByUser((prev) => ({ ...prev, [computerKey]: true }));
     await stopComputerFusion(computerKey, displayName);
     if (connection) {
       await connection.link.call("fusion.stop", {}).catch(() => undefined);
     }
   }, [computerKey, connection, displayName]);
-
-  // Auto-start headless Fusion on capable online remote Macs so the tab immediately shows the live app grid.
-  useEffect(() => {
-    if (
-      !capability.supported ||
-      !online ||
-      !connection ||
-      manualPauseRef.current[computerKey]
-    ) {
-      return;
-    }
-    if (
-      fusion.phase === "idle" &&
-      !fusion.hubRunning &&
-      !fusion.connected &&
-      !fusion.error
-    ) {
-      void handleStartFusion();
-    }
-  }, [
-    capability.supported,
-    computerKey,
-    connection,
-    fusion.connected,
-    fusion.error,
-    fusion.hubRunning,
-    fusion.phase,
-    handleStartFusion,
-    online,
-  ]);
 
   const handleLaunchOrActivate = useCallback(
     async (app: ExtendedFusionApp) => {
@@ -742,6 +775,32 @@ export function FusionWorkspace({
         </div>
       ) : (
         <div className="ls-fusion-body">
+          {isReconnecting && fusion.reconnectAttempt ? (
+            <div role="status" data-tone="waiting" className="ls-remote-remediation ls-fusion-reconnecting">
+              <div className="ls-remote-remediation__main">
+                <span className="ls-remote-remediation__icon" aria-hidden="true">
+                  <DesktopIcon name="spinner" size="md" />
+                </span>
+                <div>
+                  <p className="ls-remote-remediation__title">
+                    {copy.fusionReconnecting(fusion.reconnectAttempt, FUSION_MAX_RECONNECTS)}
+                  </p>
+                  {fusion.lastExit?.message ? (
+                    <p className="ls-remote-remediation__desc">{fusion.lastExit.message}</p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <FusionAlertList
+            alerts={fusion.alerts ?? []}
+            copy={copy}
+            appName={(bundle) => fusion.apps.find((app) => app.bundle === bundle)?.name ?? bundle}
+            onOpenFullDesktop={() => routerStore.getState().openScreen(computerKey)}
+            onCheckPermission={connection && online ? handleCheckRemotePermission : undefined}
+          />
+
           {fusion.error ? (
             <FusionRemediationBanner
               error={fusion.error}
@@ -897,7 +956,7 @@ export function FusionWorkspace({
                 </Tabs>
                 <span className="ls-fusion-section-meta">
                   {enrichedApps.length === 0
-                    ? isStarting || fusion.hubRunning || (online && !manuallyPaused)
+                    ? isStarting || fusion.hubRunning
                       ? copy.fusionSyncingCatalog
                       : ""
                     : !isConnected
@@ -914,15 +973,12 @@ export function FusionWorkspace({
                     title={copy.screenOfflineTitle}
                     description={copy.screenOfflineDesc}
                   />
-                ) : manuallyPaused &&
-                  !isStarting &&
-                  !fusion.hubRunning &&
-                  !isConnected ? (
+                ) : isOff ? (
                   <EmptyState
                     compact
                     icon="fusion-mode"
-                    title={copy.fusionMode}
-                    description={copy.fusionPausedHint}
+                    title={copy.fusionOffTitle}
+                    description={manuallyPaused ? copy.fusionPausedHint : copy.fusionOffDesc}
                     actions={
                       <Button
                         size="sm"

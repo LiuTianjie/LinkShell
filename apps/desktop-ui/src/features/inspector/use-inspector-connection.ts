@@ -75,6 +75,7 @@ const EMPTY_SUBAGENTS: SubagentInfo[] = [];
 const EMPTY_TASKS: TaskRecords = {};
 const EMPTY_SIDES: SideChat[] = [];
 const EMPTY_AGENTS: AgentInfo[] = [];
+const EMPTY_SESSIONS: Record<string, SessionSummary> = {};
 
 /**
  * Resolves the live `Connection` and optional `SessionView` for `computerKey` + `sessionId`.
@@ -85,21 +86,26 @@ export function useInspectorConnection(params: {
   computerKey: string;
   sessionId?: string;
   cwd?: string;
+  /** Every session summary; only the worktree list needs it, and it changes with any session. */
+  withSessionsMap?: boolean;
 }): ResolvedInspectorConnection {
-  const { computerKey, sessionId, cwd } = params;
-  const engineSnap = useStore(engine.state);
+  const { computerKey, sessionId, cwd, withSessionsMap = false } = params;
+  // Narrow selectors: the whole engine and client stores change on every streamed event.
+  const engineConnection = useStore(engine.state, (s) => s.connection);
+  const engineComputers = useStore(engine.state, (s) => s.computers);
+  const engineLocalComputer = useStore(engine.state, (s) => s.localComputer);
 
   const primaryMatches =
-    engineSnap.connection !== undefined &&
-    (engineSnap.connection.computer.key === computerKey ||
+    engineConnection !== undefined &&
+    (engineConnection.computer.key === computerKey ||
       !computerKey ||
       computerKey === "default");
 
   const targetComputer = useMemo<Computer | undefined>(() => {
-    if (primaryMatches) return engineSnap.connection?.computer;
+    if (primaryMatches) return engineConnection?.computer;
     return engine.computerForKey(computerKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [primaryMatches, engineSnap.connection, engineSnap.computers, engineSnap.localComputer, computerKey]);
+  }, [primaryMatches, engineConnection, engineComputers, engineLocalComputer, computerKey]);
 
   const targetComputerRef = useRef<Computer | undefined>(targetComputer);
   targetComputerRef.current = targetComputer;
@@ -129,35 +135,46 @@ export function useInspectorConnection(params: {
   }, [primaryMatches, targetComputerKey]);
 
   const connection = primaryMatches
-    ? engineSnap.connection
+    ? engineConnection
     : retained?.key === computerKey
       ? retained.conn
       : undefined;
 
   const clientStore = (connection?.store ??
     EMPTY_CLIENT_STORE) as StoreApi<ClientState & ClientActions>;
-  const clientState = useStore(clientStore);
+  const status = useStore(clientStore, (s) => s.status);
+  const machine = useStore(clientStore, (s) => s.machine);
+  const sessionsMap = useStore(clientStore, (s) =>
+    withSessionsMap ? s.sessions : EMPTY_SESSIONS,
+  );
+  const session = useStore(clientStore, (s) =>
+    sessionId ? s.sessions[sessionId] : undefined,
+  );
+  const view = useStore(clientStore, (s) =>
+    sessionId ? s.views[sessionId] : undefined,
+  );
+  const subagentViews = useStore(
+    clientStore,
+    (s) => s.subagentViews ?? EMPTY_SUBAGENT_VIEWS,
+  );
+  const subagents = useStore(clientStore, (s) =>
+    sessionId ? (s.subagents[sessionId] ?? EMPTY_SUBAGENTS) : EMPTY_SUBAGENTS,
+  );
+  const tasksMap = useStore(clientStore, (s) =>
+    sessionId ? (s.tasks[sessionId] ?? EMPTY_TASKS) : EMPTY_TASKS,
+  );
+  const sides = useStore(clientStore, (s) =>
+    sessionId ? (s.sides[sessionId] ?? EMPTY_SIDES) : EMPTY_SIDES,
+  );
 
   useEffect(() => {
     if (!connection || !sessionId) return undefined;
     return connection.sessions.acquire(sessionId);
   }, [connection, sessionId]);
 
-  const session = sessionId ? clientState.sessions[sessionId] : undefined;
-  const view = sessionId ? clientState.views[sessionId] : undefined;
-  const subagents = sessionId
-    ? (clientState.subagents[sessionId] ?? EMPTY_SUBAGENTS)
-    : EMPTY_SUBAGENTS;
-  const tasksMap = sessionId
-    ? (clientState.tasks[sessionId] ?? EMPTY_TASKS)
-    : EMPTY_TASKS;
-  const sides = sessionId
-    ? (clientState.sides[sessionId] ?? EMPTY_SIDES)
-    : EMPTY_SIDES;
-
   const effectiveCwd = cwd ?? session?.cwd;
-  const agents = clientState.machine?.agents ?? EMPTY_AGENTS;
-  const protocol = clientState.machine?.protocol ?? 2;
+  const agents = machine?.agents ?? EMPTY_AGENTS;
+  const protocol = machine?.protocol ?? 2;
 
   const actions = useMemo<InspectorSessionActions | undefined>(() => {
     if (!connection || !sessionId) return undefined;
@@ -196,12 +213,12 @@ export function useInspectorConnection(params: {
   return {
     connection,
     computer: connection?.computer ?? targetComputer,
-    online: Boolean(connection && clientState.status === "online"),
-    machine: clientState.machine,
+    online: Boolean(connection && status === "online"),
+    machine,
     session,
     view,
-    subagentViews: clientState.subagentViews ?? EMPTY_SUBAGENT_VIEWS,
-    sessionsMap: clientState.sessions,
+    subagentViews,
+    sessionsMap,
     subagents,
     tasksMap,
     sides,

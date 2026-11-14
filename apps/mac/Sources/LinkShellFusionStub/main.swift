@@ -26,6 +26,10 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private var dockItems: [[String: Any]] = []
   private var terminatingRemotely = false
   private var quitting = false
+  /// Windows and popups already closed: a frame still in flight on the Mach port (which is not
+  /// ordered against the socket) must not bring them back as ghosts.
+  private var closedIDs = FusionTombstones(capacity: 512)
+  private lazy var menuMirror = StubMenuMirror(owner: self)
 
   init(bundleID: String, appName: String, socketPath: String, computerKey: String, hasRealBundleIcon: Bool) {
     self.bundleID = bundleID
@@ -40,6 +44,14 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     setupMainMenu()
     connectToHub(attempt: 0)
   }
+
+  // The hub needs to know whether any fused app is active here: the remote apps look inactive
+  // otherwise, and the clipboard only crosses while one is.
+  func applicationDidBecomeActive(_ notification: Notification) {
+    send(["t": "active", "on": true])
+    menuMirror.refresh()
+  }
+  func applicationDidResignActive(_ notification: Notification) { send(["t": "active", "on": false]) }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     if flag {
@@ -103,6 +115,14 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard !quitting else { return .terminateNow }
+    // With windows open, the remote app decides: it may answer with a "save changes?" sheet that
+    // must stay visible here. The hub's `app.exited` ends this process once it has really quit.
+    // Logging out or shutting down this Mac is not a request to quit the remote app, and must
+    // never be held up by it.
+    if !terminatingRemotely, fd >= 0, !windows.isEmpty, !Self.systemIsQuitting {
+      send(["t": "quit", "bundle": bundleID])
+      return .terminateCancel
+    }
     quitting = true
     let openWins = Array(windows.values)
     let openPopups = Array(popups.values)
@@ -113,7 +133,10 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     popups.removeAll()
     openPopups.forEach { $0.close() }
     openWins.forEach { $0.close() }
-    if !terminatingRemotely {
+    if Self.systemIsQuitting {
+      // Leaves the remote app running and tells the hub not to bring this stub back.
+      send(["t": "detach"])
+    } else if !terminatingRemotely {
       send(["t": "quit", "bundle": bundleID])
     }
     framePort?.stop()
@@ -121,26 +144,82 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     return .terminateNow
   }
 
+  /// In the system language: the stub is this Mac's app, whatever the remote app is written in.
+  func makeAppMenu() -> NSMenu {
+    let appMenu = NSMenu()
+    appMenu.addItem(withTitle: FusionStubText.hide(appName), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+    let hideOthers = appMenu.addItem(withTitle: FusionStubText.hideOthers, action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+    hideOthers.keyEquivalentModifierMask = [.command, .option]
+    appMenu.addItem(withTitle: FusionStubText.showAll, action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+    appMenu.addItem(.separator())
+    appMenu.addItem(withTitle: FusionStubText.quit(appName), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    return appMenu
+  }
+
+  func makeWindowMenu() -> NSMenu {
+    let winMenu = NSMenu(title: FusionStubText.window)
+    winMenu.addItem(withTitle: FusionStubText.minimize, action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    winMenu.addItem(withTitle: FusionStubText.zoom, action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+    let cycle = winMenu.addItem(withTitle: FusionStubText.cycleWindows, action: #selector(cycleWindowsAction(_:)), keyEquivalent: "`")
+    cycle.target = self
+    let fsItem = winMenu.addItem(withTitle: FusionStubText.enterFullScreen, action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+    fsItem.keyEquivalentModifierMask = [.command, .control]
+    return winMenu
+  }
+
+  @objc private func cycleWindowsAction(_ sender: Any?) { cycleWindows(backward: false) }
+
+  /// ⌘` among this stub's own windows, as any Mac app does.
+  func cycleWindows(backward: Bool) {
+    let list = windows.values.map(\.window).filter { $0.isVisible && !$0.isMiniaturized }.sorted { $0.windowNumber < $1.windowNumber }
+    guard list.count > 1 else { return }
+    let current = list.firstIndex { $0.isKeyWindow } ?? 0
+    let next = (current + (backward ? list.count - 1 : 1)) % list.count
+    list[next].makeKeyAndOrderFront(nil)
+  }
+
+  /// The chords a fused window keeps on this Mac (see `FusionShortcuts`).
+  func handleLocalShortcut(_ event: NSEvent, window: NSWindow) -> Bool {
+    guard let shortcut = FusionShortcuts.local(keyCode: event.keyCode, modifiers: event.modifierFlags) else {
+      if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) { prewarm(id: 0) }
+      return false
+    }
+    switch shortcut {
+    case .hide: NSApp.hide(nil)
+    case .hideOthers: NSApp.hideOtherApplications(nil)
+    case .minimize: if !window.styleMask.contains(.fullScreen) { window.miniaturize(nil) }
+    case .cycleWindows: cycleWindows(backward: false)
+    case .cycleWindowsBackward: cycleWindows(backward: true)
+    }
+    return true
+  }
+
+  private var lastPrewarm = 0.0
+
+  /// A menu may open next: the remote warms its popup stream (throttled, it is only a hint).
+  func prewarm(id: CGWindowID) {
+    let now = CACurrentMediaTime()
+    guard now - lastPrewarm > 0.5 else { return }
+    lastPrewarm = now
+    send(["t": "prewarm", "id": Int(id)])
+  }
+
+  private static var systemIsQuitting: Bool {
+    guard let reason = NSAppleEventManager.shared().currentAppleEvent?
+      .attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue else { return false }
+    let systemReasons: [OSType] = [OSType(kAELogOut), OSType(kAEReallyLogOut), OSType(kAEShowRestartDialog), OSType(kAERestart), OSType(kAEShowShutdownDialog), OSType(kAEShutDown)]
+    return systemReasons.contains(reason)
+  }
+
   private func setupMainMenu() {
     let main = NSMenu()
     let appItem = NSMenuItem()
     main.addItem(appItem)
-    let appMenu = NSMenu()
-    appMenu.addItem(withTitle: "隐藏 \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-    let hideOthers = appMenu.addItem(withTitle: "隐藏其他", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
-    hideOthers.keyEquivalentModifierMask = [.command, .option]
-    appMenu.addItem(withTitle: "全部显示", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
-    appMenu.addItem(.separator())
-    appMenu.addItem(withTitle: "退出 \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    appItem.submenu = appMenu
+    appItem.submenu = makeAppMenu()
 
     let winItem = NSMenuItem()
     main.addItem(winItem)
-    let winMenu = NSMenu(title: "窗口")
-    winMenu.addItem(withTitle: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-    winMenu.addItem(withTitle: "缩放", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
-    let fsItem = winMenu.addItem(withTitle: "进入全屏幕", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
-    fsItem.keyEquivalentModifierMask = [.command, .control]
+    let winMenu = makeWindowMenu()
     winItem.submenu = winMenu
     NSApp.windowsMenu = winMenu
     NSApp.mainMenu = main
@@ -148,13 +227,87 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   // MARK: Hub IPC (Unix domain socket + Mach IOSurface port)
 
+  private var connectingWindow: StubConnectingWindow?
+  private var connectBeganAt = 0.0
+  private var hubOpenedAt = 0.0
+
+  /// Opened from the Dock or Spotlight with no hub running: LinkShell is asked to connect, and a
+  /// small window says so (with the real reason if it fails) instead of the icon bouncing and the
+  /// stub silently giving up.
   private func connectToHub(attempt: Int) {
+    if attempt == 0 { connectBeganAt = CACurrentMediaTime() }
+    if let sock = Self.dial(socketPath) {
+      connectingWindow?.close()
+      connectingWindow = nil
+      fd = sock
+      guard let port = DesktopFramePort(receiver: true) else { exit(1) }
+      framePort = port
+      readLoop(sock)
+      send(["t": "hello", "bundle": bundleID, "pid": Int(getpid()), "port": port.name])
+      if NSApp.isActive { send(["t": "active", "on": true]) }
+      return
+    }
+    if attempt == 0 { openHub() }
+    let elapsed = CACurrentMediaTime() - connectBeganAt
+    if elapsed > 0.6, connectingWindow == nil {
+      let window = StubConnectingWindow(computer: hostName, onRetry: { [weak self] in
+        guard let self else { return }
+        self.connectBeganAt = CACurrentMediaTime()
+        self.openHub()
+        self.connectingWindow?.showConnecting()
+      }, onOpenLinkShell: { [weak self] in
+        self?.openHub(showWindow: true)
+      }, onCancel: {
+        exit(0)
+      })
+      connectingWindow = window
+      window.show()
+    }
+    if elapsed > 25, connectingWindow?.failed == false {
+      connectingWindow?.showFailure(Self.lastHubError(socketPath: socketPath) ?? FusionStubText.failedToConnect)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.connectToHub(attempt: attempt + 1) }
+  }
+
+  private var hostName: String {
+    (Bundle.main.object(forInfoDictionaryKey: "LSFusionHostName") as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Remote"
+  }
+
+  private func openHub(showWindow: Bool = false) {
+    guard let hubApp = Bundle.main.object(forInfoDictionaryKey: "LSFusionHubApp") as? String,
+          FileManager.default.fileExists(atPath: hubApp) else { return }
+    let now = CACurrentMediaTime()
+    guard showWindow || now - hubOpenedAt > 3 else { return }
+    hubOpenedAt = now
+    let cfg = NSWorkspace.OpenConfiguration()
+    cfg.createsNewApplicationInstance = true
+    var arguments = ["--dashboard"]
+    if !computerKey.isEmpty {
+      arguments += ["--fusion-connect", computerKey]
+      if !showWindow { arguments += ["--fusion-launch", bundleID] }
+    }
+    cfg.arguments = arguments
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: hubApp), configuration: cfg, completionHandler: nil)
+  }
+
+  /// The hub writes why it last exited next to its socket; only a recent reason is worth showing.
+  static func lastHubError(socketPath: String) -> String? {
+    let path = socketPath.hasSuffix(".sock") ? String(socketPath.dropLast(5)) + ".status.json" : socketPath + ".status.json"
+    guard let data = FileManager.default.contents(atPath: path),
+          let info = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          let message = info["message"] as? String, !message.isEmpty else { return nil }
+    let at = (info["at"] as? NSNumber)?.doubleValue ?? 0
+    guard Date().timeIntervalSince1970 * 1000 - at < 120_000 else { return nil }
+    return message
+  }
+
+  static func dial(_ path: String) -> Int32? {
     let sock = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-    guard sock >= 0 else { exit(1) }
+    guard sock >= 0 else { return nil }
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(socketPath.utf8CString)
-    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { Darwin.close(sock); exit(1) }
+    let pathBytes = Array(path.utf8CString)
+    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { Darwin.close(sock); return nil }
     withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
       ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
         for i in 0..<pathBytes.count { dst[i] = pathBytes[i] }
@@ -165,28 +318,8 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Darwin.connect(sock, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
     }
-    if connected != 0 {
-      Darwin.close(sock)
-      if attempt == 0, let hubApp = Bundle.main.object(forInfoDictionaryKey: "LSFusionHubApp") as? String,
-         FileManager.default.fileExists(atPath: hubApp) {
-        let cfg = NSWorkspace.OpenConfiguration()
-        cfg.createsNewApplicationInstance = true
-        if !computerKey.isEmpty {
-          cfg.arguments = ["--dashboard", "--fusion-connect", computerKey, "--fusion-launch", bundleID]
-        }
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: hubApp), configuration: cfg, completionHandler: nil)
-      }
-      if attempt < 48 {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.connectToHub(attempt: attempt + 1) }
-        return
-      }
-      exit(0)
-    }
-    fd = sock
-    guard let port = DesktopFramePort(receiver: true) else { exit(1) }
-    framePort = port
-    readLoop(sock)
-    send(["t": "hello", "bundle": bundleID, "pid": Int(getpid()), "port": port.name])
+    guard connected == 0 else { Darwin.close(sock); return nil }
+    return sock
   }
 
   func send(_ message: [String: Any]) {
@@ -234,6 +367,7 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private func handle(_ m: [String: Any]) {
     switch m["t"] as? String {
     case "welcome":
+      if NSApp.isActive { menuMirror.refresh() }
       if let hubPid = DesktopScreenBridge.integer(m["hubPid"]) {
         framePort?.receive(child: pid_t(hubPid)) { [weak self] surface, token, metadata in
           guard let self, let surface else { self?.send(["t": "release", "token": Int(token)]); return }
@@ -243,10 +377,12 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     case "wopen":
       let id = CGWindowID(DesktopScreenBridge.integer(m["id"]) ?? 0)
       guard id != 0 else { return }
+      closedIDs.remove(id)
       let frame = Self.rect(m["frame"])
       let toolbar = m["toolbar"] as? Bool == true
       let radius = (m["r"] as? NSNumber)?.doubleValue ?? (toolbar ? 26.0 : 17.0)
       let win = ensureWindow(id, toolbar: toolbar, radius: radius, title: m["title"] as? String ?? appName)
+      if !win.shownOnce { win.activateOnShow = m["activate"] as? Bool ?? true }
       win.updateChrome(buttons: Self.parseButtons(m["buttons"]), hitrects: Self.parseHitRects(m["hitrects"]))
       if let ack = DesktopScreenBridge.integer(m["ack"]), ack > 0 {
         win.ackedSeq = max(win.ackedSeq, UInt64(ack))
@@ -294,8 +430,15 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
       if let items = m["items"] as? [[String: Any]] {
         dockItems = items
       }
-    case "dragzone":
-      break
+    case "menu":
+      let path = (m["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
+      menuMirror.receive(path: path, items: m["error"] as? Bool == true ? nil : m["items"] as? [[String: Any]])
+    case "hidden":
+      if m["on"] as? Bool == true {
+        if !NSApp.isHidden { NSApp.hide(nil) }
+      } else if NSApp.isHidden {
+        NSApp.unhideWithoutActivation()
+      }
     case "control":
       let key = m["key"] as? String ?? ""
       let enabled = m["enabled"] as? Bool == true
@@ -327,9 +470,11 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
       }
     case "popup.hide":
       let id = CGWindowID(DesktopScreenBridge.integer(m["id"]) ?? 0)
+      closedIDs.insert(id)
       if let p = popups.removeValue(forKey: id) { p.close() }
     case "wclose":
       let id = CGWindowID(DesktopScreenBridge.integer(m["id"]) ?? 0)
+      closedIDs.insert(id)
       if let w = windows.removeValue(forKey: id) {
         winLock.lock()
         fastWindows.removeValue(forKey: id)
@@ -396,13 +541,16 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
           frame.origin = CGPoint(x: pf.minX + relArr[0], y: pf.minY + relArr[1])
         }
         let inRect = (iArr?.count == 4) ? CGRect(x: iArr![0], y: iArr![1], width: iArr![2], height: iArr![3]) : CGRect(origin: .zero, size: frame.size)
+        guard !self.closedIDs.contains(wid), !self.closedIDs.contains(parentID) else { return }
         let popup = self.ensurePopup(wid, parentID: parentID, streamKey: streamKey)
         if self.windows[parentID]?.isDragging != true { popup.place(frame) }
+        if let layer = DesktopScreenBridge.integer(values["layer"]) { popup.setRemoteLayer(layer) }
         popup.crop = CGRect(x: picture.cropX, y: picture.cropY, width: picture.cropWidth, height: picture.cropHeight)
         popup.displayPixels = dispSize ?? CGSize(width: surface.width, height: surface.height)
         popup.show(picture, inRect: inRect)
       } else {
-        let win = self.ensureWindow(wid, toolbar: false, radius: 17.0, title: self.appName)
+        // Windows exist only from `wopen`: a frame alone (late, after `wclose`) never creates one.
+        guard let win = self.windows[wid] else { return }
         let remoteSize = (fArr?.count == 4) ? CGSize(width: fArr![2], height: fArr![3]) : .zero
         let inRect = (iArr?.count == 4) ? CGRect(x: iArr![0], y: iArr![1], width: iArr![2], height: iArr![3]) : nil
         win.show(picture, remoteSize: remoteSize, inRect: inRect, frameScale: frameScale, frameAck: frameAck)
@@ -454,7 +602,7 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
   func windowDidResize(_ notification: Notification) {
     guard let w = notification.object as? FusionNativeWindow, let stub = windows[w.remoteID] else { return }
     stub.updateSurfaceLayout()
-    guard !stub.isApplyingRemoteFrame, stub.shownOnce else { return }
+    guard !stub.isApplyingRemoteFrame, !stub.isSettling, stub.shownOnce else { return }
     if stub.isResizing {
       // Silent background pre-sync only when mouse pauses >= 160ms; visual presentation stays frozen
       // cleanly to the local window until mouse-up (`windowDidEndLiveResize`).
@@ -475,7 +623,7 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   func windowDidMove(_ notification: Notification) {
     guard let w = notification.object as? FusionNativeWindow, let stub = windows[w.remoteID] else { return }
-    guard !stub.isApplyingRemoteFrame, stub.shownOnce else { return }
+    guard !stub.isApplyingRemoteFrame, !stub.isSettling, stub.shownOnce else { return }
     if stub.inFullScreenTransition || stub.isResizing { return }
     if stub.isDragging {
       // Silent background pre-sync only if the user's hand pauses >= 200ms while still holding the
@@ -548,12 +696,108 @@ final class FusionNativeWindow: NSWindow {
   override var canBecomeMain: Bool { styleMask.contains(.titled) || styleMask.contains(.fullScreen) }
 }
 
-final class StubFlippedView: NSView {
-  override var isFlipped: Bool { true }
+/// The stub's only window of its own: shown while LinkShell connects, with the reason if it cannot.
+final class StubConnectingWindow: NSObject {
+  private let panel: NSPanel
+  private let title = NSTextField(labelWithString: "")
+  private let detail = NSTextField(wrappingLabelWithString: "")
+  private let spinner = NSProgressIndicator()
+  private let retry: NSButton
+  private let open: NSButton
+  private let cancel: NSButton
+  private let onRetry: () -> Void
+  private let onOpen: () -> Void
+  private let onCancel: () -> Void
+  private(set) var failed = false
+
+  init(computer: String, onRetry: @escaping () -> Void, onOpenLinkShell: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    self.onRetry = onRetry
+    self.onOpen = onOpenLinkShell
+    self.onCancel = onCancel
+    panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+    retry = NSButton(title: FusionStubText.retry, target: nil, action: nil)
+    open = NSButton(title: FusionStubText.openLinkShell, target: nil, action: nil)
+    cancel = NSButton(title: FusionStubText.cancel, target: nil, action: nil)
+    super.init()
+    panel.title = ""
+    panel.isReleasedWhenClosed = false
+    panel.center()
+    title.stringValue = FusionStubText.connecting(computer)
+    title.font = .systemFont(ofSize: 14, weight: .semibold)
+    detail.stringValue = FusionStubText.stillConnecting
+    detail.textColor = .secondaryLabelColor
+    detail.font = .systemFont(ofSize: 12)
+    spinner.style = .spinning
+    spinner.controlSize = .small
+    spinner.startAnimation(nil)
+    for (button, action) in [(retry, #selector(retryPressed)), (open, #selector(openPressed)), (cancel, #selector(cancelPressed))] {
+      button.target = self
+      button.action = action
+      button.bezelStyle = .rounded
+    }
+    retry.keyEquivalent = "\r"
+    cancel.keyEquivalent = "\u{1b}"
+    retry.isHidden = true
+    let header = NSStackView(views: [spinner, title])
+    header.spacing = 8
+    let buttons = NSStackView(views: [cancel, open, retry])
+    buttons.spacing = 8
+    let stack = NSStackView(views: [header, detail, buttons])
+    stack.orientation = .vertical
+    stack.alignment = .leading
+    stack.spacing = 12
+    stack.edgeInsets = NSEdgeInsets(top: 18, left: 20, bottom: 18, right: 20)
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    let content = NSView()
+    content.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+      stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+      stack.topAnchor.constraint(equalTo: content.topAnchor),
+      stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+      detail.widthAnchor.constraint(equalToConstant: 340),
+    ])
+    panel.contentView = content
+  }
+
+  func show() {
+    NSApp.activate(ignoringOtherApps: true)
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  func showConnecting() {
+    failed = false
+    spinner.isHidden = false
+    spinner.startAnimation(nil)
+    detail.stringValue = FusionStubText.stillConnecting
+    retry.isHidden = true
+  }
+
+  func showFailure(_ message: String) {
+    failed = true
+    spinner.stopAnimation(nil)
+    spinner.isHidden = true
+    detail.stringValue = message
+    retry.isHidden = false
+  }
+
+  func close() { panel.orderOut(nil) }
+
+  @objc private func retryPressed() { onRetry() }
+  @objc private func openPressed() { onOpen() }
+  @objc private func cancelPressed() { onCancel() }
 }
 
-final class PassthroughVisualEffectView: NSVisualEffectView {
-  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+/// Remote menus, tooltips and palettes. Never key, never activating: clicking a menu item must not
+/// take the focus from the window the menu belongs to.
+final class FusionPopupPanel: NSPanel {
+  var remoteID: CGWindowID = 0
+  override var canBecomeKey: Bool { false }
+  override var canBecomeMain: Bool { false }
+}
+
+final class StubFlippedView: NSView {
+  override var isFlipped: Bool { true }
 }
 
 /// A genuine native macOS `.resizable` window representing one remote root window,
@@ -571,13 +815,8 @@ final class StubWindow {
   let id: CGWindowID
   let window: FusionNativeWindow
   let container = StubFlippedView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-  let backdropView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+  let backdropView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
   let surface = DesktopScreenSurface(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-  private let resizeGlassOverlay = PassthroughVisualEffectView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-  private let resizePill = PassthroughVisualEffectView(frame: NSRect(x: 0, y: 0, width: 136, height: 32))
-  private let resizeLabel = NSTextField(labelWithString: "")
-  private let syncBadge = PassthroughVisualEffectView(frame: NSRect(x: 0, y: 0, width: 86, height: 24))
-  private let syncLabel = NSTextField(labelWithString: "同步中…")
   private weak var owner: FusionStubApp?
   var cgFrame: CGRect = .zero
   var isDragging = false
@@ -587,6 +826,8 @@ final class StubWindow {
   var isApplyingRemoteFrame = false
   var closingLocally = false
   var shownOnce = false
+  /// Set from `wopen`: only a window that follows the person's own action takes the focus.
+  var activateOnShow = true
   var localSeq: UInt64 = 0
   var ackedSeq: UInt64 = 0
   private var savedCornerRadius: CGFloat = 17
@@ -599,17 +840,13 @@ final class StubWindow {
   private var lastRemoteFullSize: CGSize = .zero
   private var lastInRect: CGRect = .zero
   private var lastDisplayedScale: Double = 1.0
-  private var frozenResizeSize: CGSize = .zero
-  private var glassSheetActive = false
-  private var glassFadeToken: UInt64 = 0
+  private var resizeThrottle = FusionResizeThrottle(interval: 1.0 / 30)
   private var pendingBufferedFrame: BufferedFrame?
   private var awaitingPostReleaseFrame = false
   private var awaitingScale: Double = 1.0
   private var lastSentCGFrame: CGRect = .zero
   private var lastSentWasResize = false
   private var postAckFrameGraceUntil: Double = 0
-  private var syncStartStamp: Double = 0
-  private var syncBadgeTimer: Timer?
   private var graceSettleTimer: Timer?
   private var preSyncResizeTimer: Timer?
   private var preSyncDragTimer: Timer?
@@ -666,9 +903,10 @@ final class StubWindow {
     container.layer?.masksToBounds = true
     container.layer?.cornerRadius = savedCornerRadius
 
-    backdropView.material = .underWindowBackground
-    backdropView.blendingMode = .behindWindow
-    backdropView.state = .active
+    // While the remote catches up with a resize, the uncovered strip shows the window's own
+    // background colour: an ordinary window being resized, not a frosted "please wait" sheet.
+    backdropView.wantsLayer = true
+    backdropView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     backdropView.autoresizingMask = [.width, .height]
     backdropView.isHidden = true
     container.addSubview(backdropView)
@@ -677,46 +915,6 @@ final class StubWindow {
     surface.controlEnabled = true
     surface.physicalKeys = true
     container.addSubview(surface)
-
-    resizeGlassOverlay.material = .popover
-    resizeGlassOverlay.blendingMode = .withinWindow
-    resizeGlassOverlay.state = .active
-    resizeGlassOverlay.autoresizingMask = [.width, .height]
-    resizeGlassOverlay.wantsLayer = true
-    resizeGlassOverlay.alphaValue = 0
-    resizeGlassOverlay.isHidden = true
-
-    resizePill.material = .hudWindow
-    resizePill.blendingMode = .withinWindow
-    resizePill.state = .active
-    resizePill.wantsLayer = true
-    resizePill.layer?.cornerRadius = 16
-    resizePill.layer?.cornerCurve = .continuous
-    resizePill.layer?.masksToBounds = true
-    resizePill.layer?.borderWidth = 0.5
-    resizePill.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
-    resizeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-    resizeLabel.textColor = .white.withAlphaComponent(0.92)
-    resizeLabel.alignment = .center
-    resizeLabel.frame = NSRect(x: 0, y: 7, width: 136, height: 18)
-    resizePill.addSubview(resizeLabel)
-    resizeGlassOverlay.addSubview(resizePill)
-    container.addSubview(resizeGlassOverlay)
-
-    syncBadge.material = .hudWindow
-    syncBadge.blendingMode = .withinWindow
-    syncBadge.state = .active
-    syncBadge.wantsLayer = true
-    syncBadge.layer?.cornerRadius = 12
-    syncBadge.layer?.cornerCurve = .continuous
-    syncBadge.layer?.masksToBounds = true
-    syncBadge.isHidden = true
-    syncLabel.font = .systemFont(ofSize: 11, weight: .medium)
-    syncLabel.textColor = .secondaryLabelColor
-    syncLabel.alignment = .center
-    syncLabel.frame = NSRect(x: 0, y: 4, width: 86, height: 16)
-    syncBadge.addSubview(syncLabel)
-    container.addSubview(syncBadge)
 
     window.contentView = container
 
@@ -773,6 +971,15 @@ final class StubWindow {
       guard !self.isFullScreen, !self.inFullScreenTransition, !self.window.styleMask.contains(.fullScreen) else { return false }
       let spt = self.surface.convert(downEvent.locationInWindow, from: nil)
       return self.isDraggableChrome(spt)
+    }
+
+    surface.localKeyEquivalent = { [weak self] event in
+      guard let self, let owner = self.owner else { return false }
+      return owner.handleLocalShortcut(event, window: self.window)
+    }
+    surface.onPointerDown = { [weak self] in
+      guard let self else { return }
+      self.owner?.prewarm(id: self.id)
     }
 
     surface.onWindowDragStarted = { [weak self] in
@@ -935,12 +1142,10 @@ final class StubWindow {
   private func syncFastPresentationState() {
     let ready = shownOnce
       && !closingLocally
-      && !isDragging
       && !isResizing
       && !inFullScreenTransition
       && !awaitingPostReleaseFrame
       && ackedSeq >= localSeq
-      && !glassSheetActive
       && window.isVisible
       && !window.isMiniaturized
     let cbSize = container.bounds.size
@@ -981,18 +1186,28 @@ final class StubWindow {
     preSyncResizeTimer?.invalidate()
     preSyncResizeTimer = nil
     pendingBufferedFrame = nil
-    frozenResizeSize = (lastInRect.width >= 10 && lastInRect.height >= 10) ? lastInRect.size : container.bounds.size
+    resizeThrottle.reset()
     bumpLocalSeq()
-    surface.setPresentationFrozen(true)
+    surface.setPresentationFrozen(false)
     updateSurfaceLayout()
   }
 
+  /// During the drag the remote follows at ~30 Hz (latest size wins), so the app relays out live
+  /// instead of after the mouse is released.
   func scheduleSilentResizePreSync() {
     bumpLocalSeq()
-    preSyncResizeTimer?.invalidate()
-    let timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
-      guard let self, self.isResizing else { return }
+    let now = CACurrentMediaTime()
+    if resizeThrottle.offer(currentCGFrame(), now: now) != nil {
+      preSyncResizeTimer?.invalidate()
+      preSyncResizeTimer = nil
+      reportLocalGeometry(resize: true, force: true)
+      return
+    }
+    guard preSyncResizeTimer == nil, let deadline = resizeThrottle.nextDeadline else { return }
+    let timer = Timer.scheduledTimer(withTimeInterval: max(0.001, deadline - now), repeats: false) { [weak self] _ in
+      guard let self else { return }
       self.preSyncResizeTimer = nil
+      guard self.isResizing, self.resizeThrottle.flush(now: CACurrentMediaTime()) != nil else { return }
       self.reportLocalGeometry(resize: true, force: true)
     }
     RunLoop.main.add(timer, forMode: .common)
@@ -1003,22 +1218,10 @@ final class StubWindow {
     preSyncResizeTimer?.invalidate()
     preSyncResizeTimer = nil
     isResizing = false
-    let cur = currentCGFrame()
-    let targetScale = Double(window.backingScaleFactor)
-    if cur != lastSentCGFrame || !lastSentWasResize {
+    resizeThrottle.reset()
+    if currentCGFrame() != lastSentCGFrame || !lastSentWasResize {
       reportLocalGeometry(resize: true, force: true)
     }
-    if let buffered = pendingBufferedFrame,
-       buffered.ack >= localSeq,
-       abs(buffered.scale - targetScale) < 0.25 {
-      let eff = buffered.inRect?.size ?? buffered.remoteSize
-      if abs(eff.width - container.bounds.width) <= 6 && abs(eff.height - container.bounds.height) <= 6 {
-        pendingBufferedFrame = nil
-        commitFrame(buffered, unfreeze: true)
-        return
-      }
-    }
-    armPostReleaseWait(targetScale: targetScale, timeout: 0.42)
     updateSurfaceLayout()
   }
 
@@ -1059,9 +1262,8 @@ final class StubWindow {
     pendingBufferedFrame = nil
     bumpLocalSeq()
     if !backdropView.isHidden { backdropView.isHidden = true }
-    dismissResizeGlass(animated: false)
-    hideSyncBadge()
-    surface.setPresentationFrozen(true)
+    // The picture is cut by the remote window's own frame, so moving this window changes nothing in
+    // it: frames keep flowing while dragging (a playing video keeps playing).
     dragWatchTimer?.invalidate()
     let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
       guard let self else { timer.invalidate(); return }
@@ -1099,15 +1301,13 @@ final class StubWindow {
     if cur != lastSentCGFrame || lastSentWasResize {
       reportLocalGeometry(resize: false, force: true)
     }
-    if let buffered = pendingBufferedFrame,
-       buffered.ack >= localSeq,
-       abs(buffered.scale - targetScale) < 0.25 {
-      pendingBufferedFrame = nil
-      commitFrame(buffered, unfreeze: true)
-      return
+    // Only a move onto a display of another scale needs the remote's re-rendered frame first.
+    if abs(lastDisplayedScale - targetScale) >= 0.25 {
+      surface.setPresentationFrozen(true)
+      armPostReleaseWait(targetScale: targetScale, timeout: 0.40)
+    } else {
+      syncFastPresentationState()
     }
-    let sameScale = abs(lastDisplayedScale - targetScale) < 0.25
-    armPostReleaseWait(targetScale: targetScale, timeout: sameScale ? 0.20 : 0.40)
   }
 
   private func armPostReleaseWait(targetScale: Double, timeout: TimeInterval) {
@@ -1202,15 +1402,34 @@ final class StubWindow {
     // genuinely changed its own size or enforced a hard min/max size constraint.
     let sizeChanged = abs(remote.width - cgFrame.width) >= 3 || abs(remote.height - cgFrame.height) >= 3
     if sizeChanged {
-      placeFromRemote(CGRect(origin: cgFrame.origin, size: remote.size))
+      // The app refused the size (a minimum or maximum): settle to what it accepted, visibly.
+      placeFromRemote(CGRect(origin: cgFrame.origin, size: remote.size), animate: true)
     }
     updateSurfaceLayout()
   }
 
-  func placeFromRemote(_ frame: CGRect) {
+  private var settlingUntil: Double = 0
+  /// A settle animation is running: its resize notifications are ours, not the person's.
+  var isSettling: Bool { CACurrentMediaTime() < settlingUntil }
+
+  func placeFromRemote(_ frame: CGRect, animate: Bool = false) {
     guard frame.width >= 60, frame.height >= 40, frame != cgFrame else { return }
     let primary = NSScreen.screens.first?.frame.height ?? 0
     let ns = NSRect(x: frame.minX, y: primary - frame.maxY, width: frame.width, height: frame.height)
+    if animate, shownOnce, window.isVisible {
+      settlingUntil = CACurrentMediaTime() + 0.3
+      cgFrame = frame
+      NSAnimationContext.runAnimationGroup({ context in
+        context.duration = 0.18
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        self.window.animator().setFrame(ns, display: true)
+      }, completionHandler: { [weak self] in
+        guard let self else { return }
+        self.cgFrame = self.currentCGFrame()
+        self.updateSurfaceLayout()
+      })
+      return
+    }
     isApplyingRemoteFrame = true
     if window.frame != ns {
       window.setFrame(ns, display: shownOnce)
@@ -1219,165 +1438,34 @@ final class StubWindow {
     cgFrame = currentCGFrame()
   }
 
+  /// The picture fills the window once its size matches; until then (a resize the remote has not
+  /// caught up with, or a size the app refuses) it sits at 1:1 from the top-left corner over the
+  /// window's background colour, never stretched.
   func updateSurfaceLayout() {
     let cb = container.bounds
     guard cb.width > 1, cb.height > 1 else { return }
-    if isDragging {
-      if !backdropView.isHidden { backdropView.isHidden = true }
-      dismissResizeGlass(animated: false)
-      hideSyncBadge()
-      syncFastPresentationState()
-      return
-    }
-    syncBadge.frame = NSRect(x: max(12, cb.width - 98), y: max(12, cb.height - 36), width: 86, height: 24)
-
-    let activeSize = isResizing ? frozenResizeSize : lastInRect.size
-    guard activeSize.width >= 10, activeSize.height >= 10 else {
+    let size = lastInRect.size
+    guard size.width >= 10, size.height >= 10 else {
       if surface.frame != cb { surface.frame = cb }
-      surface.alphaValue = 1.0
       if !backdropView.isHidden { backdropView.isHidden = true }
-      dismissResizeGlass(animated: false)
-      hideSyncBadge()
       syncFastPresentationState()
       return
     }
-
-    if isResizing {
-      // Full-window seamless frosted-glass live resize: `surface` fills 100% of `cb` underneath
-      // `resizeGlassOverlay` (`.withinWindow` Gaussian blur) so the entire window becomes one uniform
-      // frosted glass sheet tinted by the app's own colors, with zero L-shaped seam or frame flicker!
-      if backdropView.isHidden { backdropView.isHidden = false }
-      if surface.frame != cb { surface.frame = cb }
-      if abs(surface.alphaValue - 0.58) > 0.02 { surface.alphaValue = 0.58 }
-      showResizeGlass(bounds: cb, text: "\(Int(cb.width.rounded())) × \(Int(cb.height.rounded()))")
-      hideSyncBadge()
-      syncFastPresentationState()
-      return
-    }
-
-    let sizeMatches = abs(lastInRect.width - cb.width) <= 6 && abs(lastInRect.height - cb.height) <= 6
-    let now = CACurrentMediaTime()
-    let isSyncPending = awaitingPostReleaseFrame || inFullScreenTransition || ackedSeq < localSeq || now < postAckFrameGraceUntil
-
+    let sizeMatches = abs(size.width - cb.width) <= 6 && abs(size.height - cb.height) <= 6
+    let target: CGRect
     if sizeMatches {
-      if surface.frame != cb { surface.frame = cb }
-      if surface.alphaValue < 0.99 { surface.alphaValue = 1.0 }
-      if glassSheetActive {
-        dismissResizeGlass(animated: true) { [weak self] in
-          guard let self, !self.isResizing, !self.glassSheetActive else { return }
-          if !self.backdropView.isHidden { self.backdropView.isHidden = true }
-        }
-      } else if !backdropView.isHidden {
-        backdropView.isHidden = true
-      }
-      hideSyncBadge()
-    } else if isSyncPending {
-      if glassSheetActive || lastSentWasResize {
-        // Hold the exact same full-window frosted glass steady after mouse-up until the crisp 1:1
-        // resized frame lands, avoiding any intermediate crop jump before dissolving smoothly!
-        if backdropView.isHidden { backdropView.isHidden = false }
-        if surface.frame != cb { surface.frame = cb }
-        if abs(surface.alphaValue - 0.58) > 0.02 { surface.alphaValue = 0.58 }
-        showResizeGlass(bounds: cb, text: "\(Int(cb.width.rounded())) × \(Int(cb.height.rounded()))")
-        hideSyncBadge()
-      } else {
-        if backdropView.isHidden { backdropView.isHidden = false }
-        let unstretched = CGRect(origin: .zero, size: lastInRect.size)
-        if surface.frame != unstretched { surface.frame = unstretched }
-        if abs(surface.alphaValue - 0.82) > 0.02 { surface.alphaValue = 0.82 }
-        scheduleSyncBadgeIfNeeded()
-      }
+      target = cb
+    } else if (isFullScreen || window.styleMask.contains(.fullScreen)) && !inFullScreenTransition && ackedSeq >= localSeq {
+      // A fixed-size app in full screen: centred, as macOS shows such windows.
+      target = CGRect(x: floor((cb.width - size.width) * 0.5), y: floor((cb.height - size.height) * 0.5), width: size.width, height: size.height)
     } else {
-      // Remote settled at a constrained size (e.g. fixed-size app in Full-Screen).
-      dismissResizeGlass(animated: true)
-      if backdropView.isHidden { backdropView.isHidden = false }
-      let settled: CGRect
-      if isFullScreen || window.styleMask.contains(.fullScreen) {
-        settled = CGRect(
-          x: floor((cb.width - lastInRect.width) * 0.5),
-          y: floor((cb.height - lastInRect.height) * 0.5),
-          width: lastInRect.width,
-          height: lastInRect.height
-        )
-      } else {
-        settled = CGRect(origin: .zero, size: lastInRect.size)
-      }
-      if surface.frame != settled { surface.frame = settled }
-      if surface.alphaValue < 0.99 { surface.alphaValue = 1.0 }
-      hideSyncBadge()
+      target = CGRect(origin: .zero, size: size)
     }
+    if surface.frame != target { surface.frame = target }
+    if surface.alphaValue < 0.99 { surface.alphaValue = 1.0 }
+    let covered = target.minX <= 0.5 && target.minY <= 0.5 && target.width >= cb.width - 0.5 && target.height >= cb.height - 0.5
+    if backdropView.isHidden == covered { backdropView.isHidden = covered }
     syncFastPresentationState()
-  }
-
-  private func showResizeGlass(bounds cb: CGRect, text: String) {
-    glassFadeToken &+= 1
-    glassSheetActive = true
-    if resizeGlassOverlay.frame != cb { resizeGlassOverlay.frame = cb }
-    let pillW: CGFloat = 136
-    let pillH: CGFloat = 32
-    let pillFrame = NSRect(x: floor((cb.width - pillW) * 0.5), y: floor((cb.height - pillH) * 0.5), width: pillW, height: pillH)
-    if resizePill.frame != pillFrame { resizePill.frame = pillFrame }
-    if resizeLabel.stringValue != text { resizeLabel.stringValue = text }
-    if resizeGlassOverlay.isHidden { resizeGlassOverlay.isHidden = false }
-    if resizeGlassOverlay.alphaValue < 0.99 {
-      NSAnimationContext.runAnimationGroup { ctx in
-        ctx.duration = 0
-        resizeGlassOverlay.animator().alphaValue = 1.0
-      }
-      resizeGlassOverlay.alphaValue = 1.0
-    }
-  }
-
-  private func dismissResizeGlass(animated: Bool, completion: (() -> Void)? = nil) {
-    guard glassSheetActive || !resizeGlassOverlay.isHidden else {
-      completion?()
-      return
-    }
-    glassSheetActive = false
-    glassFadeToken &+= 1
-    let tok = glassFadeToken
-    if !animated {
-      resizeGlassOverlay.alphaValue = 0
-      resizeGlassOverlay.isHidden = true
-      completion?()
-      return
-    }
-    NSAnimationContext.runAnimationGroup({ ctx in
-      ctx.duration = 0.12
-      ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-      resizeGlassOverlay.animator().alphaValue = 0
-    }, completionHandler: { [weak self] in
-      guard let self, self.glassFadeToken == tok, !self.glassSheetActive else { return }
-      self.resizeGlassOverlay.isHidden = true
-      self.syncFastPresentationState()
-      completion?()
-    })
-  }
-
-  private func scheduleSyncBadgeIfNeeded() {
-    let now = CACurrentMediaTime()
-    if syncStartStamp == 0 { syncStartStamp = now }
-    if now - syncStartStamp >= 0.15 {
-      syncBadge.isHidden = false
-      return
-    }
-    guard syncBadgeTimer == nil else { return }
-    let timer = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: false) { [weak self] _ in
-      guard let self else { return }
-      self.syncBadgeTimer = nil
-      if self.syncStartStamp > 0 {
-        self.syncBadge.isHidden = false
-      }
-    }
-    RunLoop.main.add(timer, forMode: .common)
-    syncBadgeTimer = timer
-  }
-
-  private func hideSyncBadge() {
-    syncStartStamp = 0
-    syncBadgeTimer?.invalidate()
-    syncBadgeTimer = nil
-    if !syncBadge.isHidden { syncBadge.isHidden = true }
   }
 
   func show(_ picture: DesktopScreenFrame, remoteSize: CGSize, inRect: CGRect?, frameScale: Double, frameAck: UInt64) {
@@ -1385,10 +1473,10 @@ final class StubWindow {
       ackedSeq = frameAck
     }
     let item = BufferedFrame(picture: picture, remoteSize: remoteSize, inRect: inRect, scale: frameScale, ack: frameAck)
-    if (isDragging || isResizing) && shownOnce {
-      // Hold all incoming frames off-screen while the mouse button is held down so local dragging
-      // and live resizing are 100% pure local WindowServer operations with zero flicker!
-      pendingBufferedFrame = item
+    if isResizing && shownOnce {
+      // Live resize: the newest frame is drawn at 1:1 from the top-left corner (never stretched)
+      // as the remote relays out; the strip it does not cover yet shows the window background.
+      commitFrame(item, unfreeze: false)
       return
     }
     if awaitingPostReleaseFrame && shownOnce {
@@ -1428,8 +1516,14 @@ final class StubWindow {
     updateSurfaceLayout()
     if !shownOnce {
       shownOnce = true
-      NSApp.activate(ignoringOtherApps: true)
-      window.makeKeyAndOrderFront(nil)
+      if activateOnShow {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+      } else if NSApp.isActive {
+        window.makeKeyAndOrderFront(nil)
+      } else {
+        window.orderFront(nil)
+      }
       window.makeFirstResponder(surface)
       syncFastPresentationState()
     } else if !window.isVisible && !window.isMiniaturized {
@@ -1449,8 +1543,6 @@ final class StubWindow {
     preSyncDragTimer = nil
     preSyncResizeTimer?.invalidate()
     preSyncResizeTimer = nil
-    syncBadgeTimer?.invalidate()
-    syncBadgeTimer = nil
     graceSettleTimer?.invalidate()
     graceSettleTimer = nil
     programmaticSyncTimer?.invalidate()
@@ -1471,7 +1563,7 @@ final class StubPopup {
   let id: CGWindowID
   let parentID: CGWindowID
   let streamKey: String
-  let window: FusionNativeWindow
+  let window: FusionPopupPanel
   let container = StubFlippedView()
   let surface = DesktopScreenSurface(frame: .zero)
   var crop: CGRect = .zero
@@ -1482,12 +1574,15 @@ final class StubPopup {
     self.id = id
     self.parentID = parentID
     self.streamKey = streamKey
-    window = FusionNativeWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+    window = FusionPopupPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     window.remoteID = id
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = true
     window.level = .popUpMenu
+    window.hidesOnDeactivate = false
+    window.becomesKeyOnlyIfNeeded = true
+    window.acceptsMouseMovedEvents = true
     window.collectionBehavior = [.transient, .ignoresCycle]
     window.isReleasedWhenClosed = false
     container.wantsLayer = true
@@ -1497,6 +1592,7 @@ final class StubPopup {
     surface.fillsBounds = true
     surface.controlEnabled = true
     surface.physicalKeys = true
+    surface.tracksPointerWhenInactive = true
     container.addSubview(surface)
     window.contentView = container
 
@@ -1509,6 +1605,12 @@ final class StubPopup {
       }
       owner.send(["t": "input", "key": self.streamKey, "m": mapped, "r": replaceable])
     }
+  }
+
+  /// Floating palettes float over their app; only real menus sit at menu level.
+  func setRemoteLayer(_ layer: Int) {
+    let level = FusionWindowLevels.local(remoteLayer: layer)
+    if window.level != level { window.level = level }
   }
 
   func place(_ frame: CGRect) {
@@ -1532,6 +1634,132 @@ final class StubPopup {
     window.parent?.removeChildWindow(window)
     window.orderOut(nil)
     surface.stop()
+  }
+}
+
+/// The remote app's menu bar in this stub's menu bar: top-level titles as soon as they arrive,
+/// each submenu fetched (and cached) on demand, clicks pressed on the remote by index path. Any
+/// gap — no answer, an error — leaves today's minimal menu in place.
+final class StubMenuMirror: NSObject, NSMenuDelegate {
+  private weak var owner: FusionStubApp?
+  private var cache: [String: [[String: Any]]] = [:]
+  private var paths: [ObjectIdentifier: [Int]] = [:]
+  private var requested: Set<String> = []
+  private(set) var active = false
+
+  init(owner: FusionStubApp) { self.owner = owner }
+
+  func refresh() {
+    requested.removeAll()
+    fetch([])
+  }
+
+  private func fetch(_ path: [Int]) {
+    let key = FusionMenuModel.pathKey(path)
+    guard !requested.contains(key) else { return }
+    requested.insert(key)
+    owner?.send(["t": "menufetch", "path": path])
+  }
+
+  func receive(path: [Int], items: [[String: Any]]?) {
+    let key = FusionMenuModel.pathKey(path)
+    requested.remove(key)
+    guard let items else { return }
+    // Unchanged menus are left alone: rebuilding an open menu would reset its highlight.
+    let unchanged = cache[key].map { NSArray(array: $0).isEqual(to: items) } ?? false
+    cache[key] = items
+    if unchanged && (!path.isEmpty || active) { return }
+    if path.isEmpty {
+      rebuildBar(items)
+      // Top-level menus are fetched right away, so opening one shows it at once.
+      for (index, _) in items.enumerated() where FusionMenuModel.mirrorsTopLevel(index: index) { fetch([index]) }
+    } else {
+      for (menu, menuPath) in pathsSnapshot() where menuPath == path { fill(menu, items: items, path: path) }
+    }
+  }
+
+  private func pathsSnapshot() -> [(NSMenu, [Int])] {
+    menus.compactMap { ref in ref.menu.map { ($0, paths[ObjectIdentifier($0)] ?? []) } }
+  }
+
+  private struct WeakMenu { weak var menu: NSMenu? }
+  private var menus: [WeakMenu] = []
+
+  private func rebuildBar(_ items: [[String: Any]]) {
+    guard let owner, items.count > 2 else { return }
+    let main = NSMenu()
+    let appItem = NSMenuItem()
+    appItem.submenu = owner.makeAppMenu()
+    main.addItem(appItem)
+    paths.removeAll()
+    menus.removeAll()
+    for (index, entry) in items.enumerated() where FusionMenuModel.mirrorsTopLevel(index: index) {
+      guard let title = entry["title"] as? String, !title.isEmpty else { continue }
+      let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      let submenu = NSMenu(title: title)
+      submenu.delegate = self
+      submenu.autoenablesItems = false
+      register(submenu, path: [index])
+      if let cached = cache[FusionMenuModel.pathKey([index])] { fill(submenu, items: cached, path: [index]) }
+      item.submenu = submenu
+      main.addItem(item)
+    }
+    let windowItem = NSMenuItem()
+    let windowMenu = owner.makeWindowMenu()
+    windowItem.submenu = windowMenu
+    main.addItem(windowItem)
+    NSApp.mainMenu = main
+    NSApp.windowsMenu = windowMenu
+    active = true
+  }
+
+  private func register(_ menu: NSMenu, path: [Int]) {
+    paths[ObjectIdentifier(menu)] = path
+    menus.append(WeakMenu(menu: menu))
+  }
+
+  private func fill(_ menu: NSMenu, items: [[String: Any]], path: [Int]) {
+    menu.removeAllItems()
+    for (index, entry) in items.enumerated() {
+      if entry["sep"] as? Bool == true {
+        if let last = menu.items.last, !last.isSeparatorItem { menu.addItem(.separator()) }
+        continue
+      }
+      let title = entry["title"] as? String ?? ""
+      let item = NSMenuItem(title: title, action: #selector(press(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = path + [index]
+      item.isEnabled = entry["enabled"] as? Bool ?? true
+      item.state = entry["checked"] as? Bool == true ? .on : .off
+      if let key = entry["key"] as? String {
+        // Shown only: the keys themselves already go to the remote app through the window.
+        item.keyEquivalent = FusionMenuModel.keyEquivalent(key)
+        item.keyEquivalentModifierMask = FusionMenuModel.modifiers(entry["mods"] as? Int ?? 0)
+      }
+      if entry["sub"] as? Bool == true {
+        let submenu = NSMenu(title: title)
+        submenu.delegate = self
+        submenu.autoenablesItems = false
+        register(submenu, path: path + [index])
+        if let cached = cache[FusionMenuModel.pathKey(path + [index])] { fill(submenu, items: cached, path: path + [index]) }
+        item.submenu = submenu
+        item.action = nil
+      }
+      menu.addItem(item)
+    }
+    if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.numberOfItems - 1) }
+  }
+
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard let path = paths[ObjectIdentifier(menu)] else { return }
+    // Enabled and checked states change as the app is used: ask again each time it opens.
+    requested.remove(FusionMenuModel.pathKey(path))
+    fetch(path)
+  }
+
+  @objc private func press(_ sender: NSMenuItem) {
+    guard let path = sender.representedObject as? [Int] else { return }
+    owner?.send(["t": "menupress", "path": path])
   }
 }
 

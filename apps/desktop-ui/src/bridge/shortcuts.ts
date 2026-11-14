@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { DesktopI18nKey } from "../core/i18n";
 import {
   DESKTOP_COMMAND_EVENT,
   getActiveDesktopPlatform,
@@ -28,28 +29,60 @@ export function isImeComposing(
   return Boolean(native.isComposing || native.keyCode === 229);
 }
 
+/** Every app-wide binding the shell handles in `DesktopAppShell`; the shortcuts sheet is generated from it. */
 export const DESKTOP_SHORTCUTS = {
   palette: { key: "k" },
   newSession: { key: "n" },
-  focusComposer: { key: "l" },
-  modelPicker: { key: "m", shift: true },
-  modePicker: { key: "a", shift: true },
-  effortPicker: { key: "e", shift: true },
   settings: { key: "," },
-  toggleSidebar: { key: "b" },
-  toggleInspector: { key: "b", alt: true },
-  terminal: { key: "j" },
   back: { key: "[" },
   forward: { key: "]" },
   previousSession: { key: "[", shift: true },
   nextSession: { key: "]", shift: true },
+  closeTab: { key: "w" },
+  toggleSidebar: { key: "b" },
+  terminal: { key: "j" },
+  toggleInspector: { key: "b", alt: true },
+  focusComposer: { key: "l" },
   findInSession: { key: "f" },
-  saveFile: { key: "s" },
-  workspaceMode: { key: "1" },
-  manageMode: { key: "2" },
+  goToFile: { key: "p" },
 } as const satisfies Record<string, ShortcutBinding>;
 
 export type DesktopShortcutId = keyof typeof DESKTOP_SHORTCUTS;
+
+export type ShortcutSectionId = "navigation" | "panes" | "session" | "screen";
+
+/**
+ * `session` shortcuts mean nothing without an open session, so the shell ignores them elsewhere
+ * instead of flipping hidden state that surprises the user later.
+ */
+export const DESKTOP_SHORTCUT_META: Record<
+  DesktopShortcutId,
+  { label: DesktopI18nKey; section: ShortcutSectionId; scope: "global" | "session" }
+> = {
+  palette: { label: "desktop.commandCenter", section: "navigation", scope: "global" },
+  newSession: { label: "desktop.newSession", section: "navigation", scope: "global" },
+  settings: { label: "desktop.shell.openSettings", section: "navigation", scope: "global" },
+  back: { label: "desktop.shell.back", section: "navigation", scope: "global" },
+  forward: { label: "desktop.shell.forward", section: "navigation", scope: "global" },
+  previousSession: { label: "desktop.shell.previousSession", section: "navigation", scope: "global" },
+  nextSession: { label: "desktop.shell.nextSession", section: "navigation", scope: "global" },
+  closeTab: { label: "desktop.shell.closeTab", section: "navigation", scope: "global" },
+  toggleSidebar: { label: "desktop.toggleSidebar", section: "panes", scope: "global" },
+  terminal: { label: "desktop.toggleBottomDock", section: "panes", scope: "session" },
+  toggleInspector: { label: "desktop.toggleInspector", section: "panes", scope: "session" },
+  focusComposer: { label: "desktop.shell.focusComposer", section: "session", scope: "session" },
+  findInSession: { label: "desktop.timeline.searchPlaceholder", section: "session", scope: "session" },
+  goToFile: { label: "desktop.shell.goToFile", section: "session", scope: "session" },
+};
+
+export interface ShortcutSheetExtra {
+  /** Rendered verbatim through `formatShortcut`, or as literal text when no binding fits (⌘1…9). */
+  binding?: ShortcutBinding;
+  text?: string;
+  label: DesktopI18nKey;
+  section: ShortcutSectionId;
+  platforms?: readonly ("macos" | "windows" | "linux")[];
+}
 
 export const SHIFT_TAB_SHORTCUT: ShortcutBinding = {
   key: "tab",
@@ -61,18 +94,73 @@ export const FULLSCREEN_SHORTCUT: ShortcutBinding = isWindowsDesktop
   ? { key: "f11", mod: false }
   : { key: "f", ctrl: true, mod: true };
 
-function displayKeyName(key: string): string {
+/** Bindings owned by features rather than the shell, listed so the sheet only shows what really works. */
+export const SHORTCUT_SHEET_EXTRAS: readonly ShortcutSheetExtra[] = [
+  { text: "1…9", label: "desktop.shell.jumpToSession", section: "navigation" },
+  { binding: { key: "?", mod: false }, label: "desktop.shortcuts", section: "navigation" },
+  { binding: { key: "enter", mod: false }, label: "desktop.composer.send", section: "session" },
+  { binding: { key: "enter", shift: true, mod: false }, label: "desktop.shell.newLine", section: "session" },
+  { binding: SHIFT_TAB_SHORTCUT, label: "desktop.shell.cycleMode", section: "session" },
+  { binding: { key: "s" }, label: "desktop.shell.saveFile", section: "session" },
+  {
+    binding: { key: "f", ctrl: true, mod: true },
+    label: "desktop.screen.fullscreen",
+    section: "screen",
+    platforms: ["macos"],
+  },
+  {
+    binding: { key: "f11", mod: false },
+    label: "desktop.screen.fullscreen",
+    section: "screen",
+    platforms: ["windows", "linux"],
+  },
+];
+
+/** Window event the composer listens to; ⌘L and the menu's composer command both end here. */
+export const FOCUS_COMPOSER_EVENT = "linkshell-focus-composer";
+
+/**
+ * Cancelable window event for ⌘W / the menu's Close item. A feature that closes something on it
+ * calls `preventDefault()`; unclaimed, the shell closes the bottom dock or the window.
+ */
+export const CLOSE_TAB_EVENT = "linkshell-close-tab";
+
+export function requestCloseTab(): boolean {
+  if (typeof window === "undefined") return false;
+  return !window.dispatchEvent(new CustomEvent(CLOSE_TAB_EVENT, { cancelable: true }));
+}
+
+/** ⌘P: the inspector owns the Files tab and its search; the shell only announces the key. */
+export const GO_TO_FILE_EVENT = "linkshell-go-to-file";
+
+export function requestGoToFile(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(GO_TO_FILE_EVENT));
+}
+
+export function requestComposerFocus(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT));
+}
+
+function displayKeyName(key: string, windows: boolean): string {
   if (key === "tab") return "Tab";
-  if (key === "enter") return "↵";
+  if (key === "enter") return windows ? "Enter" : "↵";
   if (key === "escape") return "Esc";
   if (key.startsWith("f") && key.length > 1) return key.toUpperCase();
   return key.length === 1 ? key.toUpperCase() : key;
 }
 
-export function shortcutParts(binding: ShortcutBinding): string[] {
+type ShortcutPlatform = "macos" | "windows" | "linux";
+
+/** Pass the platform from a subscribing hook when rendering, so hints follow platform changes. */
+export function shortcutParts(
+  binding: ShortcutBinding,
+  platform: ShortcutPlatform = getActiveDesktopPlatform(),
+): string[] {
   const usesMod = binding.mod !== false;
-  const key = displayKeyName(binding.key);
-  const win = getActiveDesktopPlatform() === "windows";
+  const win = platform === "windows";
+  const key = displayKeyName(binding.key, win);
   if (win) {
     const parts: string[] = [];
     if (usesMod || binding.ctrl) parts.push("Ctrl");
@@ -90,9 +178,12 @@ export function shortcutParts(binding: ShortcutBinding): string[] {
   return parts;
 }
 
-export function formatShortcut(binding: ShortcutBinding): string {
-  const parts = shortcutParts(binding);
-  return getActiveDesktopPlatform() === "windows" ? parts.join("+") : parts.join("");
+export function formatShortcut(
+  binding: ShortcutBinding,
+  platform: ShortcutPlatform = getActiveDesktopPlatform(),
+): string {
+  const parts = shortcutParts(binding, platform);
+  return platform === "windows" ? parts.join("+") : parts.join("");
 }
 
 function resolvePhysicalKey(event: KeyboardEvent): string {
@@ -147,15 +238,20 @@ export function matchesShortcut(
   return resolvePhysicalKey(event) === binding.key.toLowerCase();
 }
 
-/** True when an active remote screen or focused port preview owns keyboard input. */
+const REMOTE_KEYS_ATTRIBUTE = "data-remote-keys";
+
+/** The remote screen calls this while it captures the keyboard, so app shortcuts step aside. */
+export function setRemoteKeysCaptured(captured: boolean): void {
+  if (typeof document === "undefined") return;
+  if (captured) document.documentElement.setAttribute(REMOTE_KEYS_ATTRIBUTE, "");
+  else document.documentElement.removeAttribute(REMOTE_KEYS_ATTRIBUTE);
+}
+
+/** True when an active remote screen or a fullscreen preview owns keyboard input. */
 export function keysBelongToRemoteOrPreview(): boolean {
   if (typeof document === "undefined") return false;
   return Boolean(
-    document.fullscreenElement ||
-      document.documentElement.hasAttribute("data-remote-keys") ||
-      document.querySelector(
-        "[data-remote-keys-active], .screen-focused, .port-preview-focused, .remote-screen-fullscreen",
-      ),
+    document.fullscreenElement || document.documentElement.hasAttribute(REMOTE_KEYS_ATTRIBUTE),
   );
 }
 
@@ -175,7 +271,7 @@ export type InspectorPanelId =
   | "preview"
   | "settings";
 
-export type ComposerShortcutTarget = "focus" | "model" | "mode" | "effort";
+export type ComposerShortcutTarget = "focus";
 
 export type DesktopCommand =
   | { command: "palette" }
@@ -185,7 +281,9 @@ export type DesktopCommand =
   | { command: "composer"; target: ComposerShortcutTarget }
   | { command: "manage"; page?: string }
   | { command: "workspace" }
-  | { command: "fusion"; computerKey: string; launchBundle?: string };
+  | { command: "fusion"; computerKey: string; launchBundle?: string }
+  | { command: "close-tab" }
+  | { command: "open-session"; computerKey: string; sessionId: string };
 
 const INSPECTOR_PANELS = new Set<string>([
   "changes",
@@ -195,7 +293,7 @@ const INSPECTOR_PANELS = new Set<string>([
   "preview",
   "settings",
 ]);
-const COMPOSER_TARGETS = new Set<string>(["focus", "model", "mode", "effort"]);
+const COMPOSER_TARGETS = new Set<string>(["focus"]);
 
 export function parseDesktopCommand(value: unknown): DesktopCommand | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -204,7 +302,8 @@ export function parseDesktopCommand(value: unknown): DesktopCommand | undefined 
   if (
     command === "palette" ||
     command === "toggle-sidebar" ||
-    command === "workspace"
+    command === "workspace" ||
+    command === "close-tab"
   ) {
     return { command };
   }
@@ -229,6 +328,15 @@ export function parseDesktopCommand(value: unknown): DesktopCommand | undefined 
     COMPOSER_TARGETS.has(raw.target)
   ) {
     return { command, target: raw.target as ComposerShortcutTarget };
+  }
+  if (
+    command === "open-session" &&
+    typeof raw.computerKey === "string" &&
+    raw.computerKey.length > 0 &&
+    typeof raw.sessionId === "string" &&
+    raw.sessionId.length > 0
+  ) {
+    return { command, computerKey: raw.computerKey, sessionId: raw.sessionId };
   }
   if (
     command === "fusion" &&

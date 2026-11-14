@@ -1,4 +1,12 @@
-import { useActiveDesktopPlatform, useI18n, useRouter } from "../../core";
+import {
+  DESKTOP_SHORTCUT_META,
+  DESKTOP_SHORTCUTS,
+  SHORTCUT_SHEET_EXTRAS,
+  formatShortcut,
+  type DesktopShortcutId,
+  type ShortcutSectionId,
+} from "../../bridge/shortcuts";
+import { useActiveDesktopPlatform, useI18n, useRouter, type DesktopI18nKey } from "../../core";
 import {
   Dialog,
   DialogBody,
@@ -7,81 +15,51 @@ import {
   Kbd,
 } from "../../primitives";
 
+const SECTION_ORDER: readonly { id: ShortcutSectionId; title: DesktopI18nKey }[] = [
+  { id: "navigation", title: "desktop.shell.sectionNavigation" },
+  { id: "panes", title: "desktop.shell.sectionPanes" },
+  { id: "session", title: "desktop.shell.sectionSession" },
+  { id: "screen", title: "desktop.shell.sectionScreen" },
+];
+
+export interface ShortcutSheetRow {
+  label: DesktopI18nKey;
+  keys: string;
+}
+
+/**
+ * Built from the binding table plus the features' own bound keys, so the sheet cannot advertise a
+ * shortcut nothing handles (it used to list Esc-to-stop and ⌘⇧F, neither of which existed).
+ */
+export function shortcutSheetSections(
+  platform: "macos" | "windows" | "linux",
+): { id: ShortcutSectionId; title: DesktopI18nKey; rows: ShortcutSheetRow[] }[] {
+  return SECTION_ORDER.map((section) => {
+    const rows: ShortcutSheetRow[] = [];
+    for (const id of Object.keys(DESKTOP_SHORTCUTS) as DesktopShortcutId[]) {
+      const meta = DESKTOP_SHORTCUT_META[id];
+      if (meta.section !== section.id) continue;
+      rows.push({ label: meta.label, keys: formatShortcut(DESKTOP_SHORTCUTS[id], platform) });
+    }
+    for (const extra of SHORTCUT_SHEET_EXTRAS) {
+      if (extra.section !== section.id) continue;
+      if (extra.platforms && !extra.platforms.includes(platform)) continue;
+      const keys = extra.binding
+        ? formatShortcut(extra.binding, platform)
+        : formatShortcut({ key: "#" }, platform).replace("#", extra.text ?? "");
+      rows.push({ label: extra.label, keys });
+    }
+    return { ...section, rows };
+  }).filter((section) => section.rows.length > 0);
+}
+
 export function ShortcutsHelpDialog() {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const activePlatform = useActiveDesktopPlatform();
   const open = useRouter((s) => s.shortcutSheetOpen);
   const setOpen = useRouter((s) => s.setShortcutSheetOpen);
 
-  const inspectorShortcut = activePlatform === "macos" ? "Opt+Mod+B" : "Ctrl+Alt+B";
-
-  const sections = [
-    {
-      title:
-        locale === "en"
-          ? "Navigation & Global"
-          : locale === "ja"
-            ? "ナビゲーション"
-            : "全局与导航",
-      rows: [
-        { label: t("desktop.commandCenter"), shortcut: "Mod+K" },
-        { label: t("desktop.newSession"), shortcut: "Mod+N" },
-        { label: t("desktop.manage.settings"), shortcut: "Mod+," },
-        {
-          label: locale === "en" ? "Back / Forward" : locale === "ja" ? "戻る / 進む" : "后退 / 前进",
-          shortcut: "Mod+[",
-        },
-        { label: t("desktop.shortcuts"), shortcut: "?" },
-      ],
-    },
-    {
-      title:
-        locale === "en"
-          ? "Workbench Panes"
-          : locale === "ja"
-            ? "ワークベンチ"
-            : "工作台分栏与终端",
-      rows: [
-        { label: t("desktop.toggleSidebar"), shortcut: "Mod+B" },
-        { label: t("desktop.toggleBottomDock"), shortcut: "Mod+J" },
-        { label: t("desktop.toggleInspector"), shortcut: inspectorShortcut },
-      ],
-    },
-    {
-      title:
-        locale === "en"
-          ? "Session & Composer"
-          : locale === "ja"
-            ? "セッションと入力"
-            : "会话与消息发送",
-      rows: [
-        { label: t("desktop.composer.send"), shortcut: "Enter" },
-        {
-          label: locale === "en" ? "New line" : locale === "ja" ? "改行" : "换行",
-          shortcut: "Shift+Enter",
-        },
-        { label: t("desktop.timeline.searchPlaceholder"), shortcut: "Mod+F" },
-        { label: t("desktop.composer.stop"), shortcut: "Esc" },
-      ],
-    },
-    {
-      title:
-        locale === "en"
-          ? "Remote Screen & Fusion Mode"
-          : locale === "ja"
-            ? "リモート画面と融合モード"
-            : "远程屏幕与融合模式",
-      rows:
-        activePlatform === "macos"
-          ? [
-              { label: t("desktop.fusion.title"), shortcut: "Mod+Shift+F" },
-              { label: t("desktop.screen.fullscreen"), shortcut: "Ctrl+Shift+F" },
-            ]
-          : [
-              { label: t("desktop.screen.fullscreen"), shortcut: "F11" },
-            ],
-    },
-  ];
+  const sections = shortcutSheetSections(activePlatform);
 
   return (
     <Dialog
@@ -97,12 +75,12 @@ export function ShortcutsHelpDialog() {
       <DialogBody>
         <div className="shortcuts-grid">
           {sections.map((section) => (
-            <div key={section.title} className="shortcuts-section">
-              <div className="shortcuts-section__title">{section.title}</div>
+            <div key={section.id} className="shortcuts-section">
+              <div className="shortcuts-section__title">{t(section.title)}</div>
               {section.rows.map((row) => (
-                <div key={row.label} className="shortcuts-row">
-                  <span>{row.label}</span>
-                  <Kbd shortcut={row.shortcut} />
+                <div key={`${row.label}:${row.keys}`} className="shortcuts-row">
+                  <span>{t(row.label)}</span>
+                  <Kbd>{row.keys}</Kbd>
                 </div>
               ))}
             </div>

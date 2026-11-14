@@ -21,9 +21,13 @@ export function updateFound(previous: string | undefined, name: string, version?
   return previous;
 }
 
-export function updateLabel(found: string | undefined): string {
-  if (found === undefined) return "检查更新…";
-  return found ? `更新到 ${found}…` : "有新版本…";
+export interface UpdateLabels { check: string; to: (version: string) => string; found: string }
+
+const ZH_UPDATE_LABELS: UpdateLabels = { check: "检查更新…", to: (version) => `更新到 ${version}…`, found: "有新版本…" };
+
+export function updateLabel(found: string | undefined, labels: UpdateLabels = ZH_UPDATE_LABELS): string {
+  if (found === undefined) return labels.check;
+  return found ? labels.to(found) : labels.found;
 }
 
 function openMenuBar(bundle: string, socket: string): void {
@@ -115,6 +119,7 @@ export class MenuBar {
   private connected(socket: Socket): void {
     this.sockets.add(socket);
     clearTimeout(this.timer);
+    const connectedAt = Date.now();
     this.send(socket);
     let buffer = "";
     socket.setEncoding("utf8");
@@ -126,8 +131,11 @@ export class MenuBar {
     socket.on("error", () => { /* "close" follows. */ });
     socket.on("close", () => {
       this.sockets.delete(socket);
+      // The give-up limit is for an item that never starts or crashes at once, not for one that
+      // ran for a while: otherwise a few crashes over days would leave no menu bar item at all.
+      if (Date.now() - connectedAt > 60_000) this.starts = 0;
       // Quit from Activity Monitor, or crashed: the item comes back.
-      if (!this.stopped && this.sockets.size === 0) this.retry(1000 * this.starts);
+      if (!this.stopped && this.sockets.size === 0) this.retry(1000 * Math.max(1, this.starts));
     });
   }
 

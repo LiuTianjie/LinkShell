@@ -25,6 +25,7 @@ import type {
   TerminalInfo,
   WorktreeEntry,
 } from "@linkshell/wire";
+import { RpcError } from "@linkshell/wire";
 import { setDesktopLocalePreference, I18nProvider } from "../src/core/i18n";
 import { diffReviewStore } from "../src/core/line-diff";
 import { engine } from "../src/core/engine";
@@ -39,17 +40,30 @@ import {
   openInspectorTab,
   resetInspectorTabsForTests,
 } from "../src/features/inspector";
-import { toRepoRelativePath } from "../src/features/inspector/ChangesPanel";
+import {
+  sessionChangesFromView,
+  toRepoRelativePath,
+} from "../src/features/inspector/ChangesPanel";
+import { appendPreviewError } from "../src/core/port-tabs";
+import { applySetCookie } from "../src/features/inspector/PreviewPanel";
 import {
   buildCompactChangeTree,
   formatCompactStat,
   resolveFileExtBadge,
 } from "../src/features/inspector/file-ext-badge";
 import {
+  findTerminalUrls,
+  getTerminalStageController,
   resetTerminalStagesForTests,
   shellQuotePath,
 } from "../src/features/inspector/terminal-runtime";
-import { openFileTabInInspector } from "../src/features/inspector/inspector-tabs-store";
+import {
+  closeActiveInspectorTab,
+  cycleInspectorTab,
+  getInspectorScopeTabs,
+  openFileTabInInspector,
+  requestCloseInspectorTab,
+} from "../src/features/inspector/inspector-tabs-store";
 import { DialogProvider } from "../src/primitives";
 
 (
@@ -68,6 +82,8 @@ interface MockConnectionRig {
   closeSubagentSpy: ReturnType<typeof vi.fn>;
   removeWorktreeSpy: ReturnType<typeof vi.fn>;
   emitNotification: (method: string, payload: unknown) => void;
+  /** Fires the link's `onOnline` listeners, as a reconnect does. */
+  goOnline: () => void;
 }
 
 function createMockConnectionRig(overrides?: {
@@ -348,8 +364,15 @@ function createMockConnectionRig(overrides?: {
     },
   };
 
+  const onlineListeners = new Set<() => void>();
   const link = {
     call: callSpy,
+    onOnline: (fn: () => void) => {
+      onlineListeners.add(fn);
+      return () => {
+        onlineListeners.delete(fn);
+      };
+    },
     on: (method: string, fn: (payload: unknown) => void) => {
       let set = listeners.get(method);
       if (!set) {
@@ -392,6 +415,9 @@ function createMockConnectionRig(overrides?: {
     openSubagentSpy,
     closeSubagentSpy,
     removeWorktreeSpy,
+    goOnline() {
+      for (const fn of [...onlineListeners]) fn();
+    },
     emitNotification(method, payload) {
       for (const fn of listeners.get(method) ?? []) {
         fn(payload);
@@ -695,7 +721,7 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     ).not.toBeNull();
 
     const collapseBtn = header.querySelector<HTMLButtonElement>(
-      'button[aria-label="显示或隐藏检查器"]',
+      'button[aria-label="显示或隐藏右侧面板"]',
     )!;
     expect(collapseBtn).not.toBeNull();
     await act(async () => {
@@ -896,7 +922,7 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
         method === "fs.read" &&
         params?.path === "/Users/dev/project/error-message.ts"
       ) {
-        throw new Error("ENOENT: no such file or directory");
+        throw RpcError.app("not_found", "找不到文件：/Users/dev/project/error-message.ts");
       }
       if (method === "fs.projectFiles") {
         return {
@@ -1066,7 +1092,8 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     });
     expect(activeFilePanel.querySelector("pre.inspector-source-scroll")).not.toBeNull();
 
-    // Monorepo bare filename fallback (#93 Issue #11 Root Cause 4): `/Users/dev/project/error-message.ts` resolves via `fs.projectFiles`
+    // A stale path is reported as missing; a same-named file is only offered, never opened silently
+    // (the old test expected the silent swap, which was the bug).
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("linkshell-desktop-command", {
@@ -1085,6 +1112,16 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
         query: "error-message.ts",
       }),
     );
+    expect(container.textContent).not.toContain("formatSdkError");
+    expect(container.textContent).toContain("找不到文件");
+    const openOther = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("改为打开 packages/sdk/error-message.ts"),
+    )!;
+    expect(openOther).toBeDefined();
+    await act(async () => {
+      openOther.click();
+    });
+    await flushAsync();
     expect(container.textContent).toContain("formatSdkError");
   });
 
@@ -1916,4 +1953,363 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     expect(menuItemsText.join(" ")).not.toContain("Finder");
     expect(menuItemsText.join(" ")).not.toContain("访达");
   });
+
+  it("merges a file's repeated session edits into one net diff, which is what the Changes badge counts", () => {
+    const tool = (id: string, content: unknown[]) => ({
+      kind: "tool",
+      id,
+      title: id,
+      toolKind: "edit",
+      status: "completed",
+      content,
+      output: "",
+      ts: Date.now(),
+    });
+    const view = {
+      items: [
+        tool("e1", [{ type: "diff", path: "src/a.ts", oldText: "a\n", newText: "b\n" }]),
+        tool("e2", [{ type: "diff", path: "src/a.ts", oldText: "b\n", newText: "b\nc\n" }]),
+        tool("e3", [{ type: "diff", path: "src/new.ts", newText: "x\ny\n" }]),
+        tool("e4", [{ type: "diff", path: "src/same.ts", oldText: "q\n", newText: "r\n" }]),
+        tool("e5", [{ type: "diff", path: "src/same.ts", oldText: "r\n", newText: "q\n" }]),
+      ],
+      state: "idle",
+      pendingPermissions: [],
+      configOptions: [],
+    } as unknown as SessionView;
+
+    const entries = sessionChangesFromView(view, "/Users/dev/project");
+    // src/same.ts was changed and changed back: no net change, no entry.
+    expect(entries.map((e) => e.path).sort()).toEqual(["src/a.ts", "src/new.ts"]);
+    const a = entries.find((e) => e.path === "src/a.ts")!;
+    expect([a.added, a.removed]).toEqual([2, 1]);
+    expect(a.status).toBe("modified");
+    const created = entries.find((e) => e.path === "src/new.ts")!;
+    expect(created.status).toBe("added");
+    expect(created.added).toBe(2);
+  });
+
+  it("re-attaches open terminals after a reconnect, resuming from the last output seq", async () => {
+    const rig = createMockConnectionRig({
+      terminals: [
+        {
+          id: "term-1",
+          cwd: "/Users/dev/project",
+          sessionId: "sess-1",
+          cols: 80,
+          rows: 24,
+          createdAt: Date.now(),
+          activeAt: Date.now(),
+          title: "zsh",
+        },
+      ],
+    });
+    openInspectorTab("comp-local", "sess-1", { id: "terminal", kind: "terminal" });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <DialogProvider>
+            <InspectorWorkbench computerKey="comp-local" sessionId="sess-1" cwd="/Users/dev/project" />
+          </DialogProvider>
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+
+    const attachCalls = () =>
+      rig.callSpy.mock.calls.filter(
+        (c) => c[0] === "terminals.attach" && (c[1] as { terminalId?: string }).terminalId === "term-1",
+      );
+    expect(attachCalls()).toHaveLength(1);
+
+    await act(async () => {
+      rig.emitNotification("terminal.output", { terminalId: "term-1", seq: 7, data: "before-drop\r\n" });
+    });
+    await flushAsync();
+
+    await act(async () => {
+      rig.goOnline();
+    });
+    await flushAsync();
+
+    expect(attachCalls()).toHaveLength(2);
+    expect(attachCalls()[1]![1]).toMatchObject({ terminalId: "term-1", fromSeq: 7 });
+
+    // Output after the re-attach reaches the screen again.
+    await act(async () => {
+      rig.emitNotification("terminal.output", { terminalId: "term-1", seq: 8, data: "after-reconnect" });
+    });
+    await flushAsync();
+    expect(container.querySelector(".inspector-terminal-stage")?.textContent).toContain("after-reconnect");
+
+    // A failed restore offers a retry instead of leaving a blank pane.
+    const original = rig.callSpy.getMockImplementation()!;
+    rig.callSpy.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "terminals.attach") throw new Error("恢复失败示例");
+      return original(method, params as never);
+    });
+    await act(async () => {
+      rig.goOnline();
+    });
+    await flushAsync();
+    const restore = container.querySelector<HTMLElement>(".inspector-terminal-restore");
+    expect(restore?.dataset.state).toBe("failed");
+    expect(restore?.textContent).toContain("恢复失败示例");
+    rig.callSpy.mockImplementation(original);
+    const retryBtn = Array.from(restore!.querySelectorAll("button")).find((b) => b.textContent?.includes("重试"))!;
+    await act(async () => {
+      retryBtn.click();
+    });
+    await flushAsync();
+    expect(container.querySelector(".inspector-terminal-restore")).toBeNull();
+    expect(getTerminalStageController("comp-local").store.getState().restore).toEqual({});
+  });
+
+  it("asks before closing a tab with an unsaved edit and keeps the draft across a session switch", async () => {
+    createMockConnectionRig();
+    openFileTabInInspector("comp-local", "sess-1", "/Users/dev/project/src/index.ts");
+    const renderFor = async (sessionId: string) => {
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <DialogProvider>
+              <InspectorWorkbench computerKey="comp-local" sessionId={sessionId} cwd="/Users/dev/project" />
+            </DialogProvider>
+          </I18nProvider>,
+        );
+      });
+      await flushAsync();
+    };
+    await renderFor("sess-1");
+
+    const editBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "编辑",
+    )!;
+    await act(async () => {
+      editBtn.click();
+    });
+    const editor = container.querySelector<HTMLTextAreaElement>("textarea.inspector-editor-textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(editor, "draft text\n");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(hasUnsavedWork()).toBe(true);
+    const tabId = "file:/Users/dev/project/src/index.ts";
+    expect(container.querySelector(`.ls-inspector-tab[data-tab-id="${tabId}"]`)?.getAttribute("data-dirty")).toBe("true");
+
+    // Switching sessions unmounts the panel; the draft and its guard survive.
+    await renderFor("sess-2");
+    expect(container.querySelector("textarea.inspector-editor-textarea")).toBeNull();
+    expect(hasUnsavedWork()).toBe(true);
+    await renderFor("sess-1");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea.inspector-editor-textarea")?.value).toBe("draft text\n");
+
+    // Cancel keeps the tab.
+    let closed: Promise<boolean> | undefined;
+    await act(async () => {
+      closed = requestCloseInspectorTab("comp-local", "sess-1", tabId);
+    });
+    await flushAsync();
+    const cancelBtn = Array.from(document.querySelectorAll<HTMLButtonElement>("dialog button")).find(
+      (b) => b.textContent?.trim() === "取消",
+    )!;
+    await act(async () => {
+      cancelBtn.click();
+    });
+    expect(await closed).toBe(false);
+    expect(getInspectorScopeTabs("comp-local", "sess-1").tabs.some((t) => t.id === tabId)).toBe(true);
+
+    // Cmd+W goes through the same guard; discarding closes and releases the guard.
+    let handled = false;
+    await act(async () => {
+      handled = closeActiveInspectorTab();
+    });
+    expect(handled).toBe(true);
+    await flushAsync();
+    const discardBtn = Array.from(document.querySelectorAll<HTMLButtonElement>("dialog button")).find(
+      (b) => b.textContent?.trim() === "放弃修改",
+    )!;
+    await act(async () => {
+      discardBtn.click();
+    });
+    await flushAsync();
+    expect(getInspectorScopeTabs("comp-local", "sess-1").tabs.some((t) => t.id === tabId)).toBe(false);
+    expect(hasUnsavedWork()).toBe(false);
+  });
+
+  it("saves through fs.write with the read revision and offers reload or overwrite on conflict", async () => {
+    const rig = createMockConnectionRig();
+    const original = rig.callSpy.getMockImplementation()!;
+    let conflictOnce = true;
+    rig.callSpy.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "fs.read") return { ...(await original(method, params as never)), modifiedAt: 1000 };
+      if (method === "fs.write" && params?.expectedModifiedAt !== undefined && conflictOnce) {
+        conflictOnce = false;
+        throw RpcError.app("conflict", "文件已在电脑上被修改");
+      }
+      if (method === "fs.write") return { path: params?.path, modifiedAt: 2000, size: 6 };
+      return original(method, params as never);
+    });
+    openFileTabInInspector("comp-local", "sess-1", "/Users/dev/project/src/index.ts");
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <DialogProvider>
+            <InspectorWorkbench computerKey="comp-local" sessionId="sess-1" cwd="/Users/dev/project" />
+          </DialogProvider>
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "编辑")!.click();
+    });
+    const editor = container.querySelector<HTMLTextAreaElement>("textarea.inspector-editor-textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(editor, "mine\n");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }));
+    });
+    await flushAsync();
+    expect(rig.callSpy).toHaveBeenCalledWith(
+      "fs.write",
+      expect.objectContaining({ text: "mine\n", expectedModifiedAt: 1000 }),
+    );
+    const overwrite = Array.from(document.querySelectorAll<HTMLButtonElement>("dialog button")).find(
+      (b) => b.textContent?.trim() === "覆盖保存",
+    )!;
+    expect(overwrite).toBeDefined();
+    await act(async () => {
+      overwrite.click();
+    });
+    await flushAsync();
+    const writes = rig.callSpy.mock.calls.filter((c) => c[0] === "fs.write");
+    expect(writes).toHaveLength(2);
+    expect(writes[1]![1]).not.toHaveProperty("expectedModifiedAt");
+    expect(hasUnsavedWork()).toBe(false);
+  });
+
+  it("hides Edit and says to update when the host has no fs.write and no agent can save", async () => {
+    const rig = createMockConnectionRig();
+    const original = rig.callSpy.getMockImplementation()!;
+    rig.callSpy.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "fs.write") throw RpcError.app("host_outdated", "旧", { method });
+      return original(method, params as never);
+    });
+    openFileTabInInspector("comp-local", "sess-1", "/Users/dev/project/src/index.ts");
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <DialogProvider>
+            <InspectorWorkbench computerKey="comp-local" sessionId="sess-1" cwd="/Users/dev/project" />
+          </DialogProvider>
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "编辑")!.click();
+    });
+    const editor = container.querySelector<HTMLTextAreaElement>("textarea.inspector-editor-textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(editor, "x\n");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }));
+    });
+    await flushAsync();
+    // codex is installed but is not an ACP agent: no agents.editor attempt.
+    expect(rig.callSpy.mock.calls.some((c) => c[0] === "agents.editor")).toBe(false);
+    expect(document.querySelector("dialog[open]")?.textContent).toContain("这台电脑的 LinkShell 版本较旧，更新后才能保存");
+  });
+
+  it("keeps the preview frame and its sockets while the address is typed; Enter navigates", async () => {
+    createMockConnectionRig({
+      ports: [{ port: 5173, process: "vite", http: true, title: "Vite", cwd: "/Users/dev/project" }],
+    });
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <DialogProvider>
+            <InspectorWorkbench computerKey="comp-local" sessionId="sess-1" cwd="/Users/dev/project" />
+          </DialogProvider>
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    const { requestOpenPortInInspector } = await import("../src/features/inspector/inspector-tabs-store");
+    await act(async () => {
+      requestOpenPortInInspector("comp-local", "sess-1", 5173, "/docs");
+    });
+    await flushAsync();
+
+    const frame = container.querySelector<HTMLIFrameElement>("iframe.inspector-preview-iframe")!;
+    expect(frame).not.toBeNull();
+    const address = container.querySelector<HTMLInputElement>(".ls-preview-url-input")!;
+    expect(address.value).toBe("/docs");
+
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(address, "/docs/api");
+      address.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flushAsync();
+    expect(removeSpy.mock.calls.filter((c) => c[0] === "message")).toHaveLength(0);
+    expect(container.querySelector("iframe.inspector-preview-iframe")).toBe(frame);
+
+    await act(async () => {
+      address.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await flushAsync();
+    expect(container.querySelector("iframe.inspector-preview-iframe")).not.toBe(frame);
+
+    // "All ports" shows the list without closing the open preview.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".ls-preview-port-trigger")!.click();
+    });
+    await flushAsync();
+    const listBtn = Array.from(document.querySelectorAll<HTMLButtonElement>(".ls-preview-popover__footer button")).find(
+      (b) => b.textContent?.includes("查看全部端口列表"),
+    )!;
+    await act(async () => {
+      listBtn.click();
+    });
+    await flushAsync();
+    expect(container.querySelector(".ls-preview-launcher")).not.toBeNull();
+    expect(container.querySelector("iframe.inspector-preview-iframe")).not.toBeNull();
+
+    // Ctrl+Tab cycles tabs of the visible scope.
+    openInspectorTab("comp-local", "sess-1", { id: "changes", kind: "changes" });
+    await flushAsync();
+    expect(getInspectorScopeTabs("comp-local", "sess-1").activeId).toBe("changes");
+    await act(async () => {
+      cycleInspectorTab(-1);
+    });
+    expect(getInspectorScopeTabs("comp-local", "sess-1").activeId).toBe("ports");
+  });
+
+  it("parses preview cookies with expiry, dedupes repeated preview errors and finds terminal URLs", () => {
+    const jar = new Map<string, string>();
+    applySetCookie(jar, "sid=abc; Path=/; HttpOnly");
+    applySetCookie(jar, "theme=dark=1; Max-Age=3600");
+    expect(Object.fromEntries(jar)).toEqual({ sid: "abc", theme: "dark=1" });
+    applySetCookie(jar, "sid=; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+    applySetCookie(jar, "theme=; Max-Age=0");
+    expect(jar.size).toBe(0);
+
+    const once = appendPreviewError([], { port: 3000, source: "error", message: "boom" });
+    const twice = appendPreviewError(once, { port: 3000, source: "error", message: "boom" });
+    expect(twice).toHaveLength(1);
+    expect(appendPreviewError(twice, { port: 3000, source: "error", message: "other" })).toHaveLength(2);
+
+    expect(findTerminalUrls("  ➜  Local:   http://localhost:5173/, see (https://vitejs.dev).")).toEqual([
+      { start: 15, end: 36, url: "http://localhost:5173/" },
+      { start: 44, end: 61, url: "https://vitejs.dev" },
+    ]);
+  });
+
 });

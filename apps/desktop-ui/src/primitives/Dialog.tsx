@@ -21,6 +21,7 @@ import {
 import { registerOverlayOpen } from "../bridge/top-layer-registry";
 import { Button, IconButton } from "./Button";
 import { cn, isImeComposing, mergeRefs } from "./utils";
+import { getPrimitiveLabels, usePrimitiveLabels } from "./labels";
 
 export type DialogSize = "sm" | "md" | "palette" | "lg" | "system";
 
@@ -41,11 +42,31 @@ export interface DialogProps
   children: ReactNode;
 }
 
+/**
+ * `showModal()` focuses the first focusable element, which is the header's Close button: its
+ * tooltip then opens over the title of a dialog nobody has touched yet. The field to type in is
+ * what the person came for; with none, the dialog itself holds focus and Tab goes on from there.
+ */
+function settleInitialFocus(el: HTMLDialogElement): void {
+  const focused = el.ownerDocument.activeElement;
+  if (!(focused instanceof HTMLElement) || !focused.classList.contains("ls-dialog__close")) return;
+  const field = el.querySelector<HTMLElement>(
+    'input:not([type="hidden"]):not([disabled]), textarea:not([disabled])',
+  );
+  if (field) {
+    field.focus();
+    return;
+  }
+  if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
+  el.focus();
+}
+
 function openModalElement(el: HTMLDialogElement): void {
   if (el.open) return;
   if (typeof el.showModal === "function") {
     try {
       el.showModal();
+      settleInitialFocus(el);
       return;
     } catch {
       // Fallback for non-browser unit-test DOM implementations.
@@ -190,18 +211,19 @@ export interface DialogHeaderProps extends HTMLAttributes<HTMLDivElement> {
 
 export function DialogHeader({
   onClose,
-  closeLabel = "关闭",
+  closeLabel,
   className,
   children,
   ...props
 }: DialogHeaderProps) {
+  const labels = usePrimitiveLabels();
   return (
     <div className={cn("ls-dialog__header", className)} {...props}>
       <div className="ls-dialog__header-main">{children}</div>
       {onClose ? (
         <IconButton
           icon="close"
-          label={closeLabel}
+          label={closeLabel ?? labels.close}
           size="icon-sm"
           variant="ghost"
           className="ls-dialog__close"
@@ -287,8 +309,8 @@ export function AlertDialog({
   onOpenChange,
   title,
   description,
-  cancelLabel = "取消",
-  confirmLabel = "确认",
+  cancelLabel,
+  confirmLabel,
   destructive = false,
   loading = false,
   choices,
@@ -297,6 +319,7 @@ export function AlertDialog({
   onCancel,
   children,
 }: AlertDialogProps) {
+  const labels = usePrimitiveLabels();
   const titleId = useId();
   const descId = useId();
 
@@ -307,7 +330,7 @@ export function AlertDialog({
   };
 
   const renderedChoices: DialogChoice[] = choices ?? [
-    { value: "confirmed", label: confirmLabel, destructive },
+    { value: "confirmed", label: confirmLabel ?? labels.confirm, destructive },
   ];
 
   return (
@@ -338,7 +361,7 @@ export function AlertDialog({
           disabled={loading}
           onClick={handleDismiss}
         >
-          {cancelLabel}
+          {cancelLabel ?? labels.cancel}
         </Button>
         {renderedChoices.map((choice) => (
           <Button
@@ -463,28 +486,28 @@ export function useDialogs(): DialogsController {
       alert: (text, options) =>
         enqueue({
           kind: "alert",
-          title: options?.title ?? "提示",
+          title: options?.title ?? getPrimitiveLabels().notice,
           text,
-          actionLabel: options?.actionLabel ?? "知道了",
+          actionLabel: options?.actionLabel ?? getPrimitiveLabels().gotIt,
         }),
       confirm: (text, options) =>
         enqueue({
           kind: "confirm",
-          title: options?.title ?? "确认操作",
+          title: options?.title ?? getPrimitiveLabels().confirmTitle,
           text,
-          confirmLabel: options?.confirmLabel ?? "确认",
-          cancelLabel: options?.cancelLabel ?? "取消",
+          confirmLabel: options?.confirmLabel ?? getPrimitiveLabels().confirm,
+          cancelLabel: options?.cancelLabel ?? getPrimitiveLabels().cancel,
           destructive: options?.destructive ?? true,
         }).then((result) => result !== null),
       choose: (text, choices, options) =>
         enqueue({
           kind: "choice",
-          title: options?.title ?? "确认操作",
+          title: options?.title ?? getPrimitiveLabels().confirmTitle,
           text,
-          cancelLabel: options?.cancelLabel ?? "取消",
+          cancelLabel: options?.cancelLabel ?? getPrimitiveLabels().cancel,
           choices,
         }),
-      prompt: (text, initialOrOptions, submitLabel = "保存") => {
+      prompt: (text, initialOrOptions, submitLabel = getPrimitiveLabels().save) => {
         if (typeof initialOrOptions === "object" && initialOrOptions !== null) {
           return enqueue({
             kind: "prompt",
@@ -492,8 +515,8 @@ export function useDialogs(): DialogsController {
             description: initialOrOptions.description,
             initial: initialOrOptions.initial ?? "",
             placeholder: initialOrOptions.placeholder,
-            submitLabel: initialOrOptions.submitLabel ?? "保存",
-            cancelLabel: initialOrOptions.cancelLabel ?? "取消",
+            submitLabel: initialOrOptions.submitLabel ?? getPrimitiveLabels().save,
+            cancelLabel: initialOrOptions.cancelLabel ?? getPrimitiveLabels().cancel,
           });
         }
         return enqueue({
@@ -501,7 +524,7 @@ export function useDialogs(): DialogsController {
           title: text,
           initial: initialOrOptions ?? "",
           submitLabel,
-          cancelLabel: "取消",
+          cancelLabel: getPrimitiveLabels().cancel,
         });
       },
     }),
@@ -608,7 +631,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               </DialogDescription>
             ) : (
               <DialogDescription id={descId} className="ls-sr-only">
-                填写后确认，取消不会修改。
+                {getPrimitiveLabels().promptHint}
               </DialogDescription>
             )}
           </DialogHeader>

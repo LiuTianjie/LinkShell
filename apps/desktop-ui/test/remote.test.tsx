@@ -623,7 +623,9 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     expect(remediation?.textContent).toContain("系统设置 → 隐私与安全性 → 屏幕录制");
   });
 
-  it("auto-starts headless Fusion on mount when idle and renders inline skeleton catalog instead of a blocking hero card", async () => {
+  // Replaces the old "auto-starts on mount" case, which asserted the behaviour B16 removes:
+  // merely viewing the page hid the remote Dock and added virtual displays on the remote Mac.
+  it("never starts Fusion just because the page is open; one primary start button does", async () => {
     const remoteMac = makeMockComputer(
       "wss://gateway.itool.tech#headless-autostart",
       "darwin",
@@ -647,7 +649,6 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
         return { mode: "direct", host: "192.168.1.90", port: 9300 };
       }
       if (method === "fusionState") {
-        // Still handshaking: hub socket not bound yet
         return {
           hubRunning: false,
           connected: false,
@@ -669,18 +670,70 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
       await Promise.resolve();
     });
 
-    // Auto-started fusion.start + fusionStart without requiring a manual "开启融合模式" hero click
-    expect(mockConn.link.call).toHaveBeenCalledWith("fusion.start", {});
-    expect(invoked).toContain("fusionStart");
-
-    // Immediate in-tab catalog + inline skeleton grid (zero blocking EmptyState hero card)
-    expect(container.querySelector(".ls-fusion-catalog")).not.toBeNull();
-    expect(container.querySelector('[data-fusion-skeleton="true"]')).not.toBeNull();
-    expect(container.querySelector(".ls-empty-state")).toBeNull();
-    // Search input placeholder has zero trailing ellipsis
+    expect(mockConn.link.call).not.toHaveBeenCalledWith("fusion.start", {});
+    expect(invoked).not.toContain("fusionStart");
+    const offState = container.querySelector(".ls-fusion-catalog .ls-empty-state");
+    expect(offState?.textContent).toContain("融合模式未开启");
     const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]');
     expect(searchInput?.placeholder).toBe("搜索应用名称");
-    expect(searchInput?.placeholder).not.toContain("…");
+
+    const startButton = Array.from(offState?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) =>
+      button.textContent?.includes("开启融合模式"),
+    );
+    expect(startButton).toBeDefined();
+    await act(async () => {
+      startButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockConn.link.call).toHaveBeenCalledWith("fusion.start", {});
+    expect(invoked).toContain("fusionStart");
+  });
+
+  it("renders each hub alert with its own remedy, and the remote lock alert offers Full Desktop", async () => {
+    const remoteMac = makeMockComputer("wss://gateway.itool.tech#alerts", "darwin", "Alert Mac");
+    const mockConn = makeMockConnection(remoteMac);
+    engine.state.setState({ computers: [remoteMac], connection: mockConn });
+    installPreloadBridge("darwin", (method) =>
+      method === "fusionState"
+        ? {
+            hubRunning: true,
+            connected: true,
+            hostSlug: "25b8b967c6e4",
+            apps: [{ name: "Xcode", bundle: "com.apple.dt.Xcode" }],
+            activeBundles: [],
+            windowCounts: {},
+            alerts: [
+              { kind: "accessibility", message: "远程电脑尚未允许控制" },
+              { kind: "locked", message: "远端 Mac 处于锁屏状态" },
+              { kind: "launch", subject: "com.apple.dt.Xcode", message: "远端应用启动失败：not found" },
+              { kind: "something-new", message: "未知问题" },
+            ],
+          }
+        : {},
+    );
+    seedFusionComputer(remoteMac.key, { phase: "connected", connected: true, hubRunning: true });
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <FusionWorkspace computerKey={remoteMac.key} />
+        </DialogProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const rows = Array.from(container.querySelectorAll<HTMLElement>(".ls-fusion-alert"));
+    expect(rows.map((row) => row.dataset.kind)).toEqual(["accessibility", "locked", "launch", "generic"]);
+    expect(rows[0]?.textContent).toContain("辅助功能");
+    expect(rows[2]?.textContent).toContain("Xcode");
+    expect(rows[2]?.textContent).toContain("not found");
+    const lockButton = rows[1]?.querySelector<HTMLButtonElement>("button");
+    expect(lockButton?.textContent).toContain("切换至完整桌面");
+    act(() => {
+      lockButton?.click();
+    });
+    expect(routerStore.getState().activeRoute).toEqual({ kind: "screen", computerKey: remoteMac.key });
   });
 
   it("exposes Codec selector on macOS RemoteScreenWorkspace, keeps Native Metal stage rect live with cutout holes when Popover opens, and sends in-band pacing without restarting", async () => {

@@ -48,6 +48,8 @@ export interface ComposerBoxProps {
   onRemovePastedBlock: (id: string) => void;
   onSubmit: (options?: { steerNow?: boolean }) => void;
   onCycleMode?: () => void;
+  /** Esc with no popup open: stop the running turn (the old web composer's `onCancel`). */
+  onCancel?: () => void;
   leftControls?: ReactNode;
   rightControls: ReactNode;
   autoFocus?: boolean;
@@ -71,6 +73,7 @@ export function ComposerBox({
   onRemovePastedBlock,
   onSubmit,
   onCycleMode,
+  onCancel,
   leftControls,
   rightControls,
   autoFocus = false,
@@ -266,6 +269,12 @@ export function ComposerBox({
       }
     }
 
+    if (event.key === "Escape" && onCancel) {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       onSubmit({ steerNow: event.metaKey || event.ctrlKey });
@@ -283,7 +292,8 @@ export function ComposerBox({
         }
       }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) {
+        // Leaving for a child (the textarea) is not leaving the box; leaving the box from a child is.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           setDragging(false);
         }
       }}

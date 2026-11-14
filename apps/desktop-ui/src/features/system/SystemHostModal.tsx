@@ -55,10 +55,14 @@ const PAGE_ICONS: Record<ManagePage, DesktopIconName> = {
  * xterm terminals, diffs, or Fusion windows.
  */
 export function SystemHostModal(): ReactElement {
-  const { ts, pageTitle, computer } = useSystemI18n();
+  const { ts, tm, pageTitle, computer } = useSystemI18n();
   const { open, page } = useRouter((s) => s.systemModal);
   const state = useManagement();
   const healthy = isHealthy(state);
+  // A hung Host (pid alive, socket silent) is recovered by restarting it; starting would only
+  // spawn a second daemon beside it.
+  const hostProcess = state.snapshot?.status === "running" || state.snapshot?.status === "unreachable";
+  const stopped = state.snapshot?.status === "stopped";
   const newVersion = hasNewVersion(state);
   const titleId = useId();
   const descId = useId();
@@ -281,14 +285,14 @@ export function SystemHostModal(): ReactElement {
                   <MenuSeparator />
                   <MenuItem
                     icon="play"
-                    disabled={healthy}
+                    disabled={hostProcess}
                     onSelect={() => void serviceAction("start")}
                   >
                     {ts("modal.startService")}
                   </MenuItem>
                   <MenuItem
                     icon="refresh"
-                    disabled={!healthy}
+                    disabled={!hostProcess}
                     onSelect={() => setConfirmAction({ kind: "restart" })}
                   >
                     {ts("modal.restartService")}
@@ -296,7 +300,7 @@ export function SystemHostModal(): ReactElement {
                   <MenuItem
                     icon="stop-square"
                     destructive
-                    disabled={!healthy}
+                    disabled={!hostProcess}
                     onSelect={() => setConfirmAction({ kind: "stop" })}
                   >
                     {ts("modal.stopService")}
@@ -321,23 +325,37 @@ export function SystemHostModal(): ReactElement {
                   : "ls-system-scroll"
               }
             >
+              {state.busyNotice ? (
+                <div
+                  className="ls-system-banner ls-system-banner--spaced"
+                  role="status"
+                >
+                  <div className="ls-system-banner__copy">
+                    <DesktopIcon name="spinner" size="sm" />
+                    <span>{tm(state.busyNotice)}</span>
+                  </div>
+                </div>
+              ) : null}
               {state.problem ? (
                 <div
-                  className="ls-system-banner"
+                  className="ls-system-banner ls-system-banner--spaced"
                   data-tone="warning"
                   role="alert"
-                  style={{ marginBlockEnd: 14 }}
                 >
                   <div className="ls-system-banner__copy">
                     <DesktopIcon name="alert-triangle" size="sm" />
                     <span>{state.problem}</span>
                   </div>
+                  {/* A failed start is retried by starting again, not by re-reading the same state. */}
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => void refreshManagement()}
+                    disabled={state.busy}
+                    onClick={() =>
+                      void (stopped ? serviceAction("start") : refreshManagement())
+                    }
                   >
-                    {ts("modal.retry")}
+                    {stopped ? ts("modal.startAgain") : ts("modal.retry")}
                   </Button>
                 </div>
               ) : null}

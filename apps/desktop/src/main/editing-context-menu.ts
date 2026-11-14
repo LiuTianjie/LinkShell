@@ -1,6 +1,10 @@
 import { Menu, type BrowserWindow, type MenuItemConstructorOptions, type WebContents } from "electron";
 
-export function installEditingContextMenu(web: WebContents, getWindow: () => BrowserWindow | undefined, trusted: () => boolean): void {
+export interface EditingLabels { undo: string; redo: string; cut: string; copy: string; paste: string; delete: string; selectAll: string }
+
+const ZH_LABELS: EditingLabels = { undo: "撤销", redo: "重做", cut: "剪切", copy: "复制", paste: "粘贴", delete: "删除", selectAll: "全选" };
+
+export function installEditingContextMenu(web: WebContents, getWindow: () => BrowserWindow | undefined, trusted: () => boolean, labels: () => EditingLabels = () => ZH_LABELS): void {
   web.on("context-menu", (_event, params) => {
     const window = getWindow();
     if (!window || window.isDestroyed() || !trusted() || !params.frame) return;
@@ -9,19 +13,20 @@ export function installEditingContextMenu(web: WebContents, getWindow: () => Bro
     // Rows with their own menus cancel the DOM contextmenu event before it reaches Electron.
     if (!params.isEditable && !params.selectionText) return;
     const flags = params.editFlags;
+    const text = labels();
     const items: MenuItemConstructorOptions[] = [];
     if (params.isEditable) items.push(
-      { label: "撤销", role: "undo", enabled: flags.canUndo },
-      { label: "重做", role: "redo", enabled: flags.canRedo },
+      { label: text.undo, role: "undo", enabled: flags.canUndo },
+      { label: text.redo, role: "redo", enabled: flags.canRedo },
       { type: "separator" },
-      { label: "剪切", role: "cut", enabled: flags.canCut },
+      { label: text.cut, role: "cut", enabled: flags.canCut },
     );
-    items.push({ label: "复制", role: "copy", enabled: flags.canCopy });
+    items.push({ label: text.copy, role: "copy", enabled: flags.canCopy });
     if (params.isEditable) items.push(
-      { label: "粘贴", role: "paste", enabled: flags.canPaste },
-      { label: "删除", role: "delete", enabled: flags.canDelete },
+      { label: text.paste, role: "paste", enabled: flags.canPaste },
+      { label: text.delete, role: "delete", enabled: flags.canDelete },
     );
-    items.push({ type: "separator" }, { label: "全选", role: "selectAll", enabled: flags.canSelectAll });
+    items.push({ type: "separator" }, { label: text.selectAll, role: "selectAll", enabled: flags.canSelectAll });
     Menu.buildFromTemplate(items).popup({ window, frame: params.frame });
   });
 }

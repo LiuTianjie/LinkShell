@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClientState } from "@linkshell/client-core";
 import type { AgentInfo, GitInfo, ProjectSummary } from "@linkshell/wire";
 import {
+  composerDrafts,
   configToCreate,
   creationOptions,
   draftKeyFor,
-  finishComposerSend,
   modelToCreate,
   reportDesktopError,
   routerStore,
@@ -29,13 +29,16 @@ import { ComposerBox } from "./ComposerBox";
 import { DirectoryPickerDialog } from "./DirectoryPickerDialog";
 import {
   NEW_SESSION_COMMANDS,
+  UPLOAD_TIMEOUT_MS,
   attachmentsNeedUpload,
   basenameOfPath,
   buildPromptContentBlocks,
   configCategoryIcon,
   configOptionDisplayLabel,
   configValueDisplayName,
+  describeActionError,
   formatModelOptionLabel,
+  reportOnFailure,
   parseSlashCommandInput,
   revokeAttachmentPreviews,
   shortenHomePath,
@@ -224,12 +227,15 @@ export function NewSessionWorkspace({
 
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
-  useEffect(
-    () => () => {
+  const aliveRef = useRef(true);
+  const uploadCacheRef = useRef(new WeakMap<File, string>());
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
       revokeAttachmentPreviews(attachmentsRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const preSessionInteractions = agentId ? (interactionsMap[agentId] ?? []) : [];
 
@@ -272,14 +278,24 @@ export function NewSessionWorkspace({
       Boolean(submittedText.trim()) ||
       currentAttachments.length > 0 ||
       currentPasted.length > 0;
+    const capabilities = selectedAgent?.capabilities;
+    const callUpload = (dir: string, name: string, data: string) =>
+      connection.link.call("fs.upload", { dir, name, data }, UPLOAD_TIMEOUT_MS);
+    const clearComposer = () => {
+      clearSubmitted(submittedText);
+      revokeAttachmentPreviews(currentAttachments);
+      if (aliveRef.current) {
+        setAttachments([]);
+        setPastedBlocks([]);
+      }
+    };
 
     setCreating(true);
     try {
       const configPayload = configToCreate(listedModels?.config, effectivePickedConfig);
 
-      // Two-step creation when starting in a new git worktree AND non-image attachments need uploading
-      // so uploaded files land inside the newly created worktree rather than polluting the source checkout.
-      if (useWorktree && hasPromptContent && attachmentsNeedUpload(currentAttachments)) {
+      // Files have to land inside the new worktree, so it is created first and the message follows.
+      if (useWorktree && hasPromptContent && attachmentsNeedUpload(currentAttachments, capabilities)) {
         const created = await connection.store.getState().createSession({
           agent: agentId,
           cwd: trimmedCwd,
@@ -287,23 +303,29 @@ export function NewSessionWorkspace({
           model: validatedModel,
           config: configPayload,
         });
-        const uploadDir = `${created.cwd.replace(/[\\/]+$/, "")}/.linkshell/uploads`;
-        const blocks = await buildPromptContentBlocks({
-          text: submittedText,
-          pastedBlocks: currentPasted,
-          attachments: currentAttachments,
-          cwd: created.cwd,
-          uploadFile: ({ name, data }) =>
-            connection.link.call("fs.upload", { dir: uploadDir, name, data }),
-        });
-        if (blocks.length > 0) {
-          const delivery = connection.store.getState().send(created.id, blocks);
-          await finishComposerSend(delivery, () => {
-            clearSubmitted(submittedText);
-            revokeAttachmentPreviews(currentAttachments);
-            setAttachments([]);
-            setPastedBlocks([]);
+        // From here on the session exists: whatever happens to the message, a retry must not
+        // create a second one, so the person is taken to it and the message is handled there.
+        try {
+          const blocks = await buildPromptContentBlocks({
+            text: submittedText,
+            pastedBlocks: currentPasted,
+            attachments: currentAttachments,
+            capabilities,
+            uploadDir: created.cwd,
+            uploadCache: uploadCacheRef.current,
+            callUpload,
           });
+          if (blocks.length > 0) {
+            // A failed delivery stays in the new session's timeline with its own retry.
+            reportOnFailure(connection.store.getState().send(created.id, blocks));
+          }
+          clearComposer();
+        } catch (error) {
+          composerDrafts.getState().update(draftKeyFor(computerKey, created.id), submittedText);
+          clearComposer();
+          reportDesktopError(
+            new Error(copy.firstMessageNotSent(describeActionError(error, copy.actionFailed))),
+          );
         }
         routerStore.getState().openSession(computerKey, created.id);
         return;
@@ -311,14 +333,14 @@ export function NewSessionWorkspace({
 
       let promptBlocks = undefined;
       if (hasPromptContent) {
-        const uploadDir = `${trimmedCwd.replace(/[\\/]+$/, "")}/.linkshell/uploads`;
         const built = await buildPromptContentBlocks({
           text: submittedText,
           pastedBlocks: currentPasted,
           attachments: currentAttachments,
-          cwd: trimmedCwd,
-          uploadFile: ({ name, data }) =>
-            connection.link.call("fs.upload", { dir: uploadDir, name, data }),
+          capabilities,
+          uploadDir: trimmedCwd,
+          uploadCache: uploadCacheRef.current,
+          callUpload,
         });
         if (built.length > 0) promptBlocks = built;
       }
@@ -332,20 +354,13 @@ export function NewSessionWorkspace({
         ...(configPayload ? { config: configPayload } : {}),
       });
 
-      if (hasPromptContent) {
-        clearSubmitted(submittedText);
-        revokeAttachmentPreviews(currentAttachments);
-        setAttachments([]);
-        setPastedBlocks([]);
-      }
+      if (hasPromptContent) clearComposer();
 
       routerStore.getState().openSession(computerKey, created.id);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setCreateError(msg);
-      reportDesktopError(error);
+      if (aliveRef.current) setCreateError(describeActionError(error, copy.actionFailed));
     } finally {
-      setCreating(false);
+      if (aliveRef.current) setCreating(false);
     }
   };
 
@@ -527,6 +542,18 @@ export function NewSessionWorkspace({
                 </span>
               )}
 
+              {listedModels?.error && (
+                <button
+                  type="button"
+                  className="ls-composer-chip"
+                  disabled={creating}
+                  onClick={() => setModelsRevision((v) => v + 1)}
+                >
+                  <DesktopIcon name="refresh" size="xs" />
+                  <span>{copy.retryModels}</span>
+                </button>
+              )}
+
               {listedModels && listedModels.models.length === 0 && !listedModels.error && (
                 <button
                   type="button"
@@ -658,13 +685,13 @@ export function NewSessionWorkspace({
         />
 
         {listedModels?.error && (
-          <div style={{ fontSize: 12, color: "var(--ls-danger)" }} role="alert">
-            {listedModels.error}
+          <div className="ls-composer-send-error" role="alert">
+            {describeActionError(listedModels.error, copy.actionFailed)}
           </div>
         )}
 
         {createError && (
-          <div style={{ fontSize: 12, color: "var(--ls-danger)" }} role="alert">
+          <div className="ls-composer-send-error" role="alert">
             {createError}
           </div>
         )}

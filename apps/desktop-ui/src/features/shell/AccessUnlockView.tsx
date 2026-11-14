@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "zustand";
 import {
   computerNames,
+  describeActionError,
   engine,
   useI18n,
   useRouter,
@@ -19,6 +20,8 @@ export function AccessUnlockView({ connection }: AccessUnlockViewProps) {
   const { locale, t } = useI18n();
   const navigate = useRouter((s) => s.navigate);
   const names = useStore(computerNames.store);
+  const localComputer = useStore(engine.state, (s) => s.localComputer);
+  const canSwitchToLocal = Boolean(localComputer && localComputer.key !== connection.computer.key);
 
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -35,7 +38,7 @@ export function AccessUnlockView({ connection }: AccessUnlockViewProps) {
       await connection.store.getState().unlock(trimmed);
       setPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(describeActionError(err, locale));
     } finally {
       setSubmitting(false);
     }
@@ -48,13 +51,9 @@ export function AccessUnlockView({ connection }: AccessUnlockViewProps) {
           <DesktopIcon name="lock" size="lg" />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 650 }}>
-            {t("desktop.fleet.accessLocked")}
-          </h2>
-          <p style={{ margin: 0, fontSize: "13px", color: "var(--ls-fg-secondary)" }}>
-            {computerTitle}
-          </p>
+        <div className="unlock-card__heading">
+          <h2 className="unlock-card__title">{t("desktop.fleet.accessLocked")}</h2>
+          <p className="unlock-card__subtitle">{computerTitle}</p>
         </div>
 
         <Field
@@ -74,19 +73,19 @@ export function AccessUnlockView({ connection }: AccessUnlockViewProps) {
           />
         </Field>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-end" }}>
+        <div className="unlock-card__actions">
           <Button
             variant="ghost"
             onClick={() => {
-              const local = engine.state.getState().localComputer;
-              if (local && local.key !== connection.computer.key) {
-                engine.select(local);
-              } else {
-                navigate({ kind: "computers" });
-              }
+              if (canSwitchToLocal && localComputer) engine.select(localComputer);
+              else navigate({ kind: "computers" });
             }}
           >
-            {t("desktop.nav.computers")}
+            {canSwitchToLocal
+              ? t("desktop.shell.switchToComputer", {
+                  name: displayComputerName(localComputer, names, locale),
+                })
+              : t("desktop.nav.computers")}
           </Button>
 
           <Button

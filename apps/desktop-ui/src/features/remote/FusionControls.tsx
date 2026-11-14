@@ -40,11 +40,11 @@ export function FusionStatusBadge({
     routerStore.getState().openFusion(computerKey);
   };
 
-  if (fusion.phase === "starting") {
+  if (fusion.phase === "starting" || fusion.phase === "reconnecting") {
     return (
       <button
         type="button"
-        data-phase="starting"
+        data-phase={fusion.phase}
         className="ls-fusion-status-badge no-drag"
         onClick={handleActivate}
       >
@@ -159,7 +159,7 @@ export function FusionQuickTrigger({
 
   const isConnected =
     fusion.phase === "connected" || (fusion.hubRunning && fusion.connected);
-  const isBusy = fusion.phase === "starting" || startingLocal;
+  const isBusy = fusion.phase === "starting" || fusion.phase === "reconnecting" || startingLocal;
 
   const handleClick = () => {
     routerStore.getState().openFusion(computerKey);

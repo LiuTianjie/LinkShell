@@ -11,7 +11,7 @@ const desktop = resolve(app, '../desktop');
 // electron/rcedit's own release binary, pinned: npm marks every version of its wrapper unsupported.
 export const rcedit = { version: '2.0.0', sha256: '3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a' };
 // Chromium's strings for the languages the UI is in.
-const LOCALES = ['en-US.pak', 'zh-CN.pak', 'zh-TW.pak'];
+const LOCALES = ['en-US.pak', 'zh-CN.pak', 'zh-TW.pak', 'ja.pak'];
 // Files of the Electron folder that are not the app's: its sample app and its version note.
 const SKIPPED = new Set(['electron.exe', 'resources', 'locales', 'LICENSE', 'version']);
 

@@ -25,7 +25,7 @@ import {
 } from "@linkshell/wire";
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
-import { downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, searchDirectories, uploadFile } from "../fs.js";
+import { downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, searchDirectories, uploadFile, writeTextFile } from "../fs.js";
 import { gitCommit, gitDiff, gitRevertFile } from "../git-diff.js";
 import { isNamedPipe } from "../local-transport.js";
 import { readClipboard, writeClipboard } from "../clipboard.js";
@@ -561,6 +561,7 @@ export class HostRpcServer {
       "fs.read": (params: P<"fs.read">) => readFile(params),
       "fs.download": (params: P<"fs.download">) => downloadFile(params),
       "fs.upload": (params: P<"fs.upload">) => uploadFile(params),
+      "fs.write": (params: P<"fs.write">) => writeTextFile(params),
       "fs.mkdir": (params: P<"fs.mkdir">) => makeDirectory(params),
       "clipboard.read": () => readClipboard(),
       "clipboard.write": (params: P<"clipboard.write">) => writeClipboard(params.text),

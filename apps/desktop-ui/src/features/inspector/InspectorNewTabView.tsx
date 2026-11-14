@@ -35,6 +35,7 @@ import {
 } from "../../primitives";
 import type { ChangesStatsSummary } from "./ChangesPanel";
 import { FileExtBadge, formatCompactStat } from "./file-ext-badge";
+import { canOpenOnThisComputer } from "./FileViewerTabPanel";
 import { useInspectorI18n } from "./i18n-inspector";
 import {
   openInspectorTab,
@@ -347,6 +348,7 @@ export function InspectorNewTabView({
         if (ok) return;
       }
       if (!connection) return;
+      if (!canOpenOnThisComputer(connection)) return;
       try {
         await connection.link.call("desktop.openPath", {
           path: targetPath,
@@ -646,7 +648,11 @@ export function InspectorNewTabView({
             </MenuItem>
             <MenuItem
               icon="external-link"
-              disabled={!online || !(cwd || machine?.home)}
+              disabled={
+                !online ||
+                !(cwd || machine?.home) ||
+                !canOpenOnThisComputer(connection)
+              }
               onSelect={() => {
                 void handleOpenInEditor("vscode");
               }}

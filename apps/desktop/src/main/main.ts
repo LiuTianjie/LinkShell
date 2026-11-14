@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerSaveBlocker, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, powerSaveBlocker, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -6,8 +6,13 @@ import { createConnection, createServer as createNetServer, type AddressInfo, ty
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
+import { CommandQueue, type PageCommand } from "./command-queue.js";
+import { localizeUpdaterMessage, normalizeMainLocale, translateMain, type MainKey, type MainLocale } from "./locale.js";
+import { badgeCount, parseNotification, shouldNotify } from "./notify.js";
+import { isOpenPathApp, openPathPlan } from "./open-path.js";
+import { restoreWindowBounds } from "./window-bounds.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
-import { pickDirectFusionHost } from "./fusion-probe.js";
+import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "./fusion-probe.js";
 import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
@@ -25,6 +30,9 @@ const management = new Management(runtime);
 const server = new WorkspaceServer(runtime);
 const settings = new Map<string, unknown>();
 const keepAwake = new KeepAwake(powerSaveBlocker);
+/** The page's language, for what the native shell draws itself; the saved one until the page says. */
+let locale: MainLocale = "zh";
+const t = (key: MainKey, params?: Record<string, string | number>) => translateMain(locale, key, params);
 
 // Paseo / T3 Code sculpted 42px chrome: macOS traffic lights sit optically centered at { x: 15, y: 13 }.
 const TOOLBAR = 42;
@@ -52,13 +60,19 @@ app.setName("LinkShell");
 // Hidden or behind other windows, Chromium throttles timers: heartbeats would then come late, and a dead link look alive.
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
+// LINKSHELL_LOCALE fixes the language for the whole app: Chromium's own strings and, through
+// `navigator.language` and `app.getLocale()`, the page's and the native menus' while the person's
+// setting is "follow the system". The packaged-app checks use it so their labels don't depend
+// on the language of the machine they run on. Before `ready`: Chromium reads it once.
+const forcedLanguage = ({ zh: "zh-CN", en: "en-US", ja: "ja" } as Record<string, string>)[process.env.LINKSHELL_LOCALE ?? ""];
+if (forcedLanguage) app.commandLine.appendSwitch("lang", forcedLanguage);
 
 if (!app.requestSingleInstanceLock({ scope: runtime.scope })) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
     const opts = launchOptions(argv);
-    if (opts.checkUpdates) openManagement("更新");
+    if (opts.checkUpdates) { openManagement("updates"); checkUpdates(); }
     if (opts.fusionConnect) {
       command({ command: "fusion", computerKey: opts.fusionConnect, launchBundle: opts.fusionLaunch });
       if (!opts.fusionLaunch) showWindow();
@@ -228,14 +242,14 @@ function setVisible(value: boolean) {
 }
 
 function createWindow() {
-  const state = settings.get("window") as { x?: number; y?: number; width?: number; height?: number } | undefined;
+  const state = restoreWindowBounds(settings.get("window"), screen.getAllDisplays().map((display) => display.workArea), { width: 940, height: 640 }, { width: 1280, height: 820 });
   if (!MAC) surfaceDark = nativeTheme.shouldUseDarkColors;
   window = new BrowserWindow({
     title: "LinkShell",
-    width: state?.width ?? 1280,
-    height: state?.height ?? 820,
-    x: state?.x,
-    y: state?.y,
+    width: state.width,
+    height: state.height,
+    x: state.x,
+    y: state.y,
     minWidth: 940,
     minHeight: 640,
     show: false,
@@ -257,12 +271,14 @@ function createWindow() {
       safeDialogs: true,
     },
   });
+  if (state.maximized) window.maximize();
   window.on("closed", () => { clearPageReadyTimer(); pageReady = false; nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
     // Unhidden after ⌘H the window may not get "show": focus is the sure sign it is on screen again.
     if (!visible && window?.isVisible() && !window.isMinimized()) setVisible(true);
+    if (WINDOWS) window?.flashFrame(false);
     syncImmersivePresentation();
     updateWindowSurface();
   });
@@ -336,25 +352,57 @@ function createWindow() {
     }
   });
   web.on("render-process-gone", () => {
+    clearHungTimer();
     clearPageReadyTimer();
     pageReady = false;
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
-    showProblem("工作台页面意外退出。请重新连接以恢复电脑与会话。");
+    showProblem(t("problem.gone"));
   });
+  // Chromium reports a hang after a few seconds; give the page ten more before offering a reload,
+  // so a long synchronous render doesn't interrupt anyone, but a real hang isn't a frozen window.
+  web.on("unresponsive", () => {
+    if (hungTimer || hungDialog) return;
+    hungTimer = setTimeout(() => { hungTimer = undefined; void offerReload(); }, 10_000);
+  });
+  web.on("responsive", clearHungTimer);
   startServer();
 }
 
 function rememberBounds() {
-  if (!window || isWindowFullScreen() || window.isMinimized()) return;
-  settings.set("window", window.getBounds());
+  if (!window || window.isDestroyed() || isWindowFullScreen() || window.isMinimized()) return;
+  // The normal frame, not the maximized one: restoring a maximized size as a plain window
+  // leaves a window that fills the screen but can't be un-maximized.
+  settings.set("window", { ...window.getNormalBounds(), maximized: window.isMaximized() });
   void saveSettings();
+}
+
+let hungTimer: ReturnType<typeof setTimeout> | undefined;
+let hungDialog = false;
+function clearHungTimer() { clearTimeout(hungTimer); hungTimer = undefined; }
+async function offerReload() {
+  if (!window || window.isDestroyed()) return;
+  hungDialog = true;
+  try {
+    const { response } = await dialog.showMessageBox(window, {
+      type: "warning", message: t("hung.message"), detail: t("hung.detail"),
+      buttons: [t("hung.wait"), t("hung.reload")], defaultId: 0, cancelId: 0,
+    });
+    if (response !== 1 || !window || window.isDestroyed()) return;
+    // The page can't answer the save barrier while it is hung: reload without waiting on it.
+    remotePortProxies.stopAll();
+    server.stop();
+    startServer();
+  } finally { hungDialog = false; }
 }
 
 /** The signed page owns the bridge; preview and screen frames never do. */
 function guard(web: WebContents) {
-  installEditingContextMenu(web, () => window, () => server.policy?.isTrusted(web.getURL()) ?? false);
+  installEditingContextMenu(web, () => window, () => server.policy?.isTrusted(web.getURL()) ?? false, () => ({
+    undo: t("menu.undo"), redo: t("menu.redo"), cut: t("menu.cut"), copy: t("menu.copy"),
+    paste: t("menu.paste"), delete: t("menu.delete"), selectAll: t("menu.selectAll"),
+  }));
   web.setWindowOpenHandler(({ url }) => {
     if (WorkspacePolicy.externalURL(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -381,9 +429,9 @@ function guard(web: WebContents) {
   web.session.on("will-download", (_event, item) => {
     const url = item.getURL();
     if (!server.policy || !(server.policy.isTrusted(url) || server.policy.allowsBlob(url) || url.startsWith("data:"))) { item.cancel(); return; }
-    item.setSaveDialogOptions({ title: "保存", buttonLabel: "保存", defaultPath: item.getFilename() });
+    item.setSaveDialogOptions({ title: t("save.title"), buttonLabel: t("save.button"), defaultPath: item.getFilename() });
     item.once("done", (_done, state) => {
-      if (state === "interrupted" && window) void dialog.showMessageBox(window, { type: "warning", message: "文件未能保存", detail: "下载被中断，请重试。" });
+      if (state === "interrupted" && window) void dialog.showMessageBox(window, { type: "warning", message: t("save.failed"), detail: t("save.failedDetail") });
     });
   });
 }
@@ -394,7 +442,7 @@ function startServer() {
   server.start((url) => {
     if (!window) return;
     void window.loadURL(url.href).catch((error: Error & { code?: string }) => {
-      if (error.code !== "ERR_ABORTED") showProblem(`无法打开工作台：${error.message}`);
+      if (error.code !== "ERR_ABORTED") showProblem(t("problem.open", { message: error.message }));
     });
   }, (message) => showProblem(message));
 }
@@ -402,21 +450,21 @@ function startServer() {
 /** Immediate themed shell shown while the local workspace server cold-starts, preventing a blank 1-3s delay. */
 function showLoading() {
   if (!window) return;
-  const html = `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
+  const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
     body{margin:0;height:100vh;display:grid;place-items:center;background:light-dark(#f2f3f6,#090a0c);color:light-dark(rgb(20 21 24/.62),rgb(236 238 242/.62));-webkit-app-region:drag;user-select:none}
     main{display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
     .spinner{width:14px;height:14px;border-radius:999px;border:1.5px solid light-dark(rgb(20 21 24/.16),rgb(236 238 242/.2));border-top-color:light-dark(#4c5fd5,#5263e8);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     @media (prefers-reduced-motion:reduce){.spinner{animation:none;border-color:light-dark(#4c5fd5,#5263e8)}}
-  </style><main><span class="spinner" aria-hidden="true"></span><span>正在打开工作台…</span></main>`;
+  </style><main><span class="spinner" aria-hidden="true"></span><span>${escapeHtml(t("loading"))}</span></main>`;
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
 }
 
 /** Shown when the page itself cannot be: the native shell has no other way to say it. */
 function showProblem(message: string) {
   if (!window) return;
-  const html = `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
+  const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}
     body{margin:0;height:100vh;display:grid;place-items:center;background:transparent;color:light-dark(#1a1c1f,#dfdfdf);-webkit-app-region:drag}
     main{max-width:420px;text-align:center;padding:24px}h1{font-size:16px;font-weight:600;margin:0 0 8px}
@@ -424,13 +472,17 @@ function showProblem(message: string) {
     /* accentFill and accentHover, copied from brand-colors.json: this page can't load the workspace's styles */
     button{-webkit-app-region:no-drag;height:32px;padding:0 12px;border-radius:6px;border:0;font:inherit;font-size:13px;font-weight:500;background:light-dark(#4c5fd5,#5263e8);color:#fff}
     button:hover{background:light-dark(#4254c7,#4d5fe0)}
-  </style><main><h1>工作台暂时不可用</h1><p></p><button>重新连接</button></main>
+  </style><main><h1>${escapeHtml(t("problem.title"))}</h1><p></p><button>${escapeHtml(t("problem.retry"))}</button></main>
   <script>document.querySelector("p").textContent=${JSON.stringify(message)};document.querySelector("button").onclick=()=>location.href="linkshell-retry:";</script>`;
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
 async function retry() {
-  if (!(await flushOrConfirm("仍然重新连接"))) return;
+  if (!(await flushOrConfirm(t("flush.reconnect")))) return;
   remotePortProxies.stopAll();
   server.stop();
   startServer();
@@ -456,8 +508,8 @@ function cameBack<T>(result: T): T {
   return result;
 }
 
-/** A command for the page; one sent before it has loaded (a second launch, --check-updates) waits for it. */
-let pendingCommand: Record<string, unknown> | undefined;
+/** Commands for the page; those sent before it has loaded (a second launch, --check-updates, a notification click) wait for it. */
+const pendingCommands = new CommandQueue();
 let pageReadyTimer: ReturnType<typeof setTimeout> | undefined;
 function clearPageReadyTimer() {
   if (!pageReadyTimer) return;
@@ -472,17 +524,43 @@ function markPageReady() {
     updateWindowSurface();
     send("linkshell-desktop-window", { fullscreen: isWindowFullScreen() });
   }
-  if (pendingCommand) {
-    send("linkshell-desktop-command", pendingCommand);
-    pendingCommand = undefined;
-  }
+  for (const queued of pendingCommands.drain()) send("linkshell-desktop-command", queued);
 }
-function command(detail: Record<string, unknown>) {
+function command(detail: PageCommand) {
   if (pageReady) send("linkshell-desktop-command", detail);
-  else pendingCommand = detail;
+  else pendingCommands.push(detail);
 }
 
-function openManagement(page?: string) { command({ command: "manage", page }); }
+function openManagement(page?: string) { command({ command: "manage", ...(page ? { page } : {}) }); }
+
+/** ⌘W closes the page's tab; with no page to ask (loading, error page) it closes the window as the red button does. */
+function closeTab() {
+  if (!window || window.isDestroyed()) return;
+  if (pageReady && server.policy?.isTrusted(window.webContents.getURL())) command({ command: "close-tab" });
+  else window.close();
+}
+
+/** One live notification per id: a newer one for the same session replaces the old. */
+const notifications = new Map<string, Notification>();
+function notify(message: Record<string, unknown>) {
+  const request = parseNotification(message);
+  if (!request) return;
+  const focused = !!window && !window.isDestroyed() && window.isFocused();
+  if (!shouldNotify({ supported: Notification.isSupported(), enabled: settings.get("notifications") !== false, focused, visible })) return;
+  notifications.get(request.id)?.close();
+  const shown = new Notification({ title: request.title, body: request.body, silent: false });
+  notifications.set(request.id, shown);
+  const forget = () => { if (notifications.get(request.id) === shown) notifications.delete(request.id); };
+  shown.on("click", () => {
+    forget();
+    showWindow();
+    command({ command: "open-session", computerKey: request.computerKey, sessionId: request.sessionId });
+  });
+  shown.on("close", forget);
+  shown.show();
+  if (MAC) app.dock?.bounce("informational");
+  else if (WINDOWS && window && !window.isDestroyed()) window.flashFrame(true);
+}
 function openWorkspace() { command({ command: "workspace" }); }
 
 // ── The page's messages ───────────────────────────────────────────────────────────────────
@@ -516,6 +594,28 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     case "external":
       if (typeof message.url === "string" && WorkspacePolicy.externalURL(message.url)) void shell.openExternal(message.url);
       return;
+    case "locale": {
+      const next = normalizeMainLocale(message.value);
+      if (!next || next === locale) return;
+      locale = next;
+      settings.set("locale", next);
+      void saveSettings();
+      installMenu();
+      updateTray();
+      return;
+    }
+    case "closeWindow":
+      window.close();
+      return;
+    case "notify":
+      notify(message);
+      return;
+    case "badge": {
+      const count = badgeCount(message.count);
+      // Windows and most Linux desktops have no app badge; Electron answers false there.
+      if (count !== undefined) { try { app.setBadgeCount(count); } catch { /* Unsupported here. */ } }
+      return;
+    }
     // AppKit gives focus to whichever view was clicked; a DOM blur must not steal it back.
     case "contentFocus": return;
     case "screen": {
@@ -690,24 +790,25 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       clipboard.writeText(path);
       return { path };
     }
-    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", keepAwake: normalizeKeepAwakeMode(settings.get("keepAwake")) };
+    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", keepAwake: normalizeKeepAwakeMode(settings.get("keepAwake")), notifications: settings.get("notifications") !== false };
     case "setSetting": {
       const key = String(params.key ?? "");
-      if (!["opaqueWindow", "autoCheck", "updateChannel", "keepAwake"].includes(key)) throw new Error("未知设置");
+      if (!["opaqueWindow", "autoCheck", "updateChannel", "keepAwake", "notifications"].includes(key)) throw new Error("未知设置");
+      if (key === "notifications" && typeof params.value !== "boolean") throw new Error("无效的通知设置");
       if (key === "updateChannel" && !["stable", "beta"].includes(String(params.value))) throw new Error("未知更新通道");
       if (key === "updateChannel" && WINDOWS && (windowsUpdate.checking || windowsUpdate.installing)) throw new Error("更新正在进行，请稍后再切换通道");
       if (key === "keepAwake") {
         if (typeof params.value !== "boolean" && !["smart", "always", "off"].includes(String(params.value))) throw new Error("无效的保持唤醒设置");
-        const normalized = normalizeKeepAwakeMode(params.value);
-        keepAwake.set(normalized);
-        settings.set(key, normalized);
+        // Kept for older pages only: the Host owns keep-awake now (`machine.keepAwake`), so the
+        // window holds no assertion of its own that could contradict the Host's mode.
+        settings.set(key, normalizeKeepAwakeMode(params.value));
       } else {
         settings.set(key, params.value);
       }
       if (key === "updateChannel" && WINDOWS) {
         // Invalidate the old channel before yielding to the settings write or another UI request.
         windowsInstaller = undefined;
-        windowsUpdateEvent({ name: "current", message: "通道已切换，请检查更新" });
+        windowsUpdateEvent({ name: "current", message: t("win.channel") });
       }
       await saveSettings();
       if (key === "opaqueWindow") updateWindowSurface();
@@ -717,10 +818,17 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       return {};
     }
     case "checkUpdates": return checkUpdates();
-    case "updateStatus": return WINDOWS && runtime.standalone ? windowsUpdate : undefined;
+    case "updateStatus":
+      if (WINDOWS && runtime.standalone) return windowsUpdate;
+      // Sparkle keeps no state the page can read back; what it last found is enough after a reload.
+      if (MAC && runtime.standalone && updateAvailable !== undefined) {
+        return { checking: false, installing: false, available: true, ...(updateAvailable ? { version: updateAvailable } : {}), message: updateAvailable ? t("mac.available", { version: updateAvailable }) : t("update.found").replace(/…$/, "") };
+      }
+      return undefined;
     case "installUpdate": if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {};
     case "retry": void retry(); return {};
     case "contextMenu": return contextMenu(params.items, params.at);
+    case "openPath": return openPath(params);
     case "reveal": {
       const path = typeof params.path === "string" ? params.path : "";
       if (!isAbsolute(path) || !existsSync(path)) throw new Error("这个位置已经不在了");
@@ -762,9 +870,9 @@ function flush(): Promise<boolean> {
 async function flushOrConfirm(continuing: string): Promise<boolean> {
   if (await flush()) return true;
   const options = {
-    type: "warning" as const, message: "部分草稿或设置尚未确认保存",
-    detail: "保存请求失败或等待超时。你可以返回工作台重试；继续可能丢失最近的修改。",
-    buttons: ["返回工作台", continuing], defaultId: 0, cancelId: 0,
+    type: "warning" as const, message: t("flush.message"),
+    detail: t("flush.detail"),
+    buttons: [t("flush.back"), continuing], defaultId: 0, cancelId: 0,
   };
   if (window) showWindow();
   const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
@@ -776,7 +884,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (quitting) return;
   quitting = true;
-  void flushOrConfirm("仍然退出").then((confirmed) => {
+  void flushOrConfirm(t("flush.quit")).then((confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
     nativeModule?.setImmersiveFullScreen(false);
@@ -796,6 +904,31 @@ app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });
 app.on("will-quit", () => keepAwake.set(false));
 
 // ── Native pieces ─────────────────────────────────────────────────────────────────────────
+
+/** "Open in…" for a path on this computer: an absolute path that exists, an editor from the allow-list, never a shell. */
+async function openPath(params: Record<string, unknown>): Promise<{ ok: boolean }> {
+  const path = typeof params.path === "string" ? params.path : "";
+  const app = params.app ?? "default";
+  if (!isAbsolute(path) || !existsSync(path)) throw new Error("这个位置已经不在了");
+  if (!isOpenPathApp(app)) throw new Error("不支持的打开方式");
+  const plan = openPathPlan(process.platform, app, path);
+  if (plan.kind === "default") {
+    const failed = await shell.openPath(path);
+    if (failed) throw new Error(failed);
+  } else if (plan.kind === "reveal") shell.showItemInFolder(path);
+  else if (plan.kind === "url") await shell.openExternal(plan.url);
+  else {
+    await new Promise<void>((done, fail) => {
+      const child = spawn(plan.file, plan.args, { stdio: "ignore", shell: false, windowsHide: true });
+      child.once("error", () => fail(new Error("没有找到对应的应用")));
+      // `open -a` returns at once and a non-zero exit means the app isn't installed; a terminal
+      // elsewhere keeps running, so having started is the answer.
+      if (MAC) child.once("exit", (code) => (code === 0 ? done() : fail(new Error("没有找到对应的应用"))));
+      else child.once("spawn", () => { child.unref(); done(); });
+    });
+  }
+  return { ok: true };
+}
 
 function openSetup() {
   if (WINDOWS) throw new Error("Windows 不需要单独授权屏幕录制和控制");
@@ -902,8 +1035,9 @@ async function ensureFusionTunnel(computerKey: string): Promise<FusionTunnelStat
   return state;
 }
 
-function spawnFusionLocal(helper: string, args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, LINKSHELL_HOME: runtime.home };
+/** The token goes in the environment: arguments are readable by every local user through `ps`. */
+function spawnFusionLocal(helper: string, args: string[], token: string) {
+  const env: NodeJS.ProcessEnv = { ...process.env, LINKSHELL_HOME: runtime.home, LINKSHELL_FUSION_TOKEN: token };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_NO_ATTACH_CONSOLE;
   spawn(helper, args, { detached: true, stdio: "ignore", env }).unref();
@@ -929,11 +1063,10 @@ async function startFusionMode(params: Record<string, unknown>) {
       "--fusion-local",
       "--host", directHost,
       "--port", String(port),
-      "--token", token,
       "--name", name,
       "--computer-key", computerKey,
       ...extra,
-    ]);
+    ], token);
     return { mode: "direct" as const, host: directHost, port };
   }
   const tunnel = await ensureFusionTunnel(computerKey);
@@ -941,17 +1074,17 @@ async function startFusionMode(params: Record<string, unknown>) {
     "--fusion-local",
     "--host", "127.0.0.1",
     "--port", String(tunnel.localPort),
-    "--token", token,
     "--name", name,
     "--computer-key", computerKey,
     ...extra,
-  ]);
+  ], token);
   return { mode: "tunnel" as const, tunnelId: tunnel.tunnelId, port: tunnel.localPort };
 }
 
-function toFusionSlug(name: string): string {
-  const slug = name.trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-  return slug || "remote";
+/** The hub's key: from `computerKey`, or an already derived `hostSlug`. Never from a display name. */
+function fusionSlugOf(params: Record<string, unknown>): string | undefined {
+  if (typeof params.computerKey === "string" && params.computerKey) return fusionSlug(params.computerKey);
+  return isFusionSlug(params.hostSlug) ? params.hostSlug : undefined;
 }
 
 function mapFusionCategory(raw: string): string {
@@ -964,10 +1097,9 @@ function mapFusionCategory(raw: string): string {
   return "其他";
 }
 
-function queryFusionSocket(hostSlug: string, payload: Record<string, unknown>, timeoutMs = 450): Promise<Record<string, unknown> | undefined> {
-  if (!MAC) return Promise.resolve(undefined);
-  const safeSlug = toFusionSlug(hostSlug);
-  const sockPath = join(runtime.home, `fusion-${safeSlug}.sock`);
+function queryFusionSocket(hostSlug: string | undefined, payload: Record<string, unknown>, timeoutMs = 450): Promise<Record<string, unknown> | undefined> {
+  if (!MAC || !isFusionSlug(hostSlug)) return Promise.resolve(undefined);
+  const sockPath = join(runtime.home, `fusion-${hostSlug}.sock`);
   if (!existsSync(sockPath)) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     let settled = false;
@@ -1059,11 +1191,23 @@ async function readCachedFusionState(name: string, hostSlug: string, computerKey
   return { appsDir, iconBundles, apps: fallbackApps };
 }
 
+/** Why the last hub exited, written by FusionLocal on its way out. */
+async function readFusionExit(hostSlug: string): Promise<Record<string, unknown> | undefined> {
+  const { readFile } = await import("node:fs/promises");
+  try {
+    const raw = JSON.parse(await readFile(join(runtime.home, `fusion-${hostSlug}.status.json`), "utf8")) as Record<string, unknown>;
+    return raw && typeof raw === "object" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function getFusionState(params: Record<string, unknown>) {
   const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
   const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
-  const hostSlug = toFusionSlug(name);
+  const hostSlug = fusionSlugOf(params) ?? fusionSlug(name);
   const live = await queryFusionSocket(hostSlug, { t: "status" });
+  const lastExit = live ? undefined : await readFusionExit(hostSlug);
   const cached = (!live || !Array.isArray(live.apps) || live.apps.length === 0)
     ? await readCachedFusionState(name, hostSlug, computerKey)
     : undefined;
@@ -1081,13 +1225,16 @@ async function getFusionState(params: Record<string, unknown>) {
     windowCounts: live?.windowCounts && typeof live.windowCounts === "object" ? live.windowCounts : {},
     iconBundles: liveIcons,
     apps: liveApps,
+    alerts: Array.isArray(live?.alerts) ? live.alerts : [],
+    lastExit,
   };
 }
 
 async function getFusionIcons(params: Record<string, unknown>) {
   if (!MAC) return { icons: {} };
   const { readFile } = await import("node:fs/promises");
-  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : "remote");
+  const hostSlug = fusionSlugOf(params);
+  if (!hostSlug) return { icons: {} };
   const bundles = Array.isArray(params.bundles)
     ? params.bundles.filter((b): b is string => typeof b === "string" && b.length > 0).slice(0, 48)
     : [];
@@ -1116,7 +1263,7 @@ async function getFusionIcons(params: Record<string, unknown>) {
 }
 
 async function controlFusionHub(params: Record<string, unknown>, type: "launchApp" | "quitApp") {
-  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : String(params.name ?? "remote"));
+  const hostSlug = fusionSlugOf(params);
   const bundle = typeof params.bundle === "string" ? params.bundle : "";
   if (!bundle) throw new Error("缺少目标应用标识");
   const reply = await queryFusionSocket(hostSlug, { t: type, bundle, force: params.force === true });
@@ -1124,7 +1271,7 @@ async function controlFusionHub(params: Record<string, unknown>, type: "launchAp
 }
 
 async function stopFusionHub(params: Record<string, unknown>) {
-  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : String(params.name ?? "remote"));
+  const hostSlug = fusionSlugOf(params);
   const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
   await queryFusionSocket(hostSlug, { t: "stopHub" });
   const tunnel = computerKey ? fusionTunnels.get(computerKey) : undefined;
@@ -1166,7 +1313,7 @@ function windowsLoginItem(): boolean | undefined {
 }
 
 type WindowsUpdateState = { checking: boolean; installing: boolean; available: boolean; message: string; version?: string; checkedAt?: number };
-let windowsUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "尚未检查更新" };
+let windowsUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "" };
 let windowsInstaller: WindowsRelease | undefined;
 let windowsDownloaded: DownloadedInstaller | undefined;
 let windowsInstallerChild: ChildProcess | undefined;
@@ -1186,14 +1333,14 @@ function windowsUpdateEvent(detail: { name: string; message?: string; version?: 
 
 async function checkWindowsUpdate() {
   if (windowsUpdate.checking || windowsUpdate.installing) return;
-  windowsUpdateEvent({ name: "checking", message: "正在查找 Windows 版本…" });
+  windowsUpdateEvent({ name: "checking", message: t("win.checking") });
   try {
     const release = await checkWindowsRelease((url, init) => net.fetch(url, init), settings.get("updateChannel") === "beta");
     windowsInstaller = release && compareVersions(release.version, app.getVersion()) > 0 ? release : undefined;
-    if (windowsInstaller) windowsUpdateEvent({ name: "available", version: windowsInstaller.version, message: `有新版本 ${windowsInstaller.version}，可在这里下载并安装` });
-    else windowsUpdateEvent({ name: "current", message: release ? "当前已是最新版本" : "尚无可自动安装的 Windows 发布包" });
+    if (windowsInstaller) windowsUpdateEvent({ name: "available", version: windowsInstaller.version, message: t("win.available", { version: windowsInstaller.version }) });
+    else windowsUpdateEvent({ name: "current", message: release ? t("win.current") : t("win.none") });
   } catch (error) {
-    windowsUpdateEvent({ name: "message", message: `检查失败：${error instanceof Error ? error.message : String(error)}` });
+    windowsUpdateEvent({ name: "message", message: t("win.checkFailed", { message: error instanceof Error ? error.message : String(error) }) });
   } finally { windowsUpdateEvent({ name: "finished" }); }
 }
 
@@ -1233,31 +1380,31 @@ function downloadWindowsUpdate() {
   if (windowsInstallerChild?.pid && windowsInstallerChild.exitCode === null) throw new Error("安装程序仍在运行，请先回到安装窗口继续或关闭它");
   if (windowsUpdate.checking || windowsUpdate.installing) return { started: false };
   const release = windowsInstaller;
-  windowsUpdateEvent({ name: "installing", message: "正在下载安装包…" });
+  windowsUpdateEvent({ name: "installing", message: t("win.downloading") });
   void (async () => {
     try {
       if (windowsDownloaded?.version !== release.version) {
         if (windowsDownloaded) await import("node:fs/promises").then(({ rm }) => rm(windowsDownloaded!.directory, { recursive: true, force: true }));
         windowsDownloaded = undefined;
         windowsDownloaded = await downloadWindowsInstaller(release, windowsUpdateCache(), (url, init) => net.fetch(url, init), (received, total) => {
-          windowsUpdateEvent({ name: "message", message: `正在下载安装包… ${Math.floor(received / total * 100)}%（${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB）` });
+          windowsUpdateEvent({ name: "message", message: t("win.progress", { percent: Math.floor(received / total * 100), received: (received / 1048576).toFixed(1), total: (total / 1048576).toFixed(1) }) });
         });
       }
-      windowsUpdateEvent({ name: "message", message: "下载和校验已完成，等待确认重启安装" });
+      windowsUpdateEvent({ name: "message", message: t("win.downloaded") });
       showWindow();
       const options = {
-        type: "question" as const, message: `重启并安装 LinkShell ${release.version}？`,
-        detail: "将自动更新 App、内置 CLI 和 Host，并重新打开 LinkShell。后台服务会短暂重启，正在执行的任务、终端和屏幕连接可能中断。账号、配对和会话历史会保留。",
-        buttons: ["稍后安装", "安装并重启"], defaultId: 1, cancelId: 0,
+        type: "question" as const, message: t("win.installTitle", { version: release.version }),
+        detail: t("win.installDetail"),
+        buttons: [t("win.later"), t("win.install")], defaultId: 1, cancelId: 0,
       };
       const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
-      if (response !== 1 || !(await flushOrConfirm("仍然安装并重启"))) {
-        windowsUpdateEvent({ name: "message", message: "安装包已下载，可稍后继续安装" });
+      if (response !== 1 || !(await flushOrConfirm(t("flush.install")))) {
+        windowsUpdateEvent({ name: "message", message: t("win.postponed") });
         return;
       }
       // A postponed download is checked again: never execute a changed file from the cache.
       await verifyInstaller(windowsDownloaded);
-      windowsUpdateEvent({ name: "message", message: "正在启动安装程序…" });
+      windowsUpdateEvent({ name: "message", message: t("win.launching") });
       await launchWindowsInstaller(windowsDownloaded);
       rememberBounds();
       await saveSettings();
@@ -1273,7 +1420,7 @@ function downloadWindowsUpdate() {
         windowsDownloaded = undefined;
         await import("node:fs/promises").then(({ rm }) => rm(failed.directory, { recursive: true, force: true })).catch(() => undefined);
       }
-      windowsUpdateEvent({ name: "message", message: `更新未完成：${error instanceof Error ? error.message : String(error)}。可点击下载并更新重试。` });
+      windowsUpdateEvent({ name: "message", message: t("win.failed", { message: error instanceof Error ? error.message : String(error) }) });
     } finally { windowsUpdateEvent({ name: "finished" }); }
   })();
   // Native progress events carry long downloads; the renderer's RPC must not wait for the transfer.
@@ -1303,6 +1450,11 @@ function startUpdater() {
     prepare: () => management.action("prepare-update"),
     recover: () => management.action("recover-update"),
     resume: () => nativeModule?.updaterPrepared(),
+    text: {
+      paused: (why) => t("mac.paused", { message: why }),
+      recover: (why) => t("mac.recoverSentence", { message: why }),
+      get retry() { return t("mac.retry"); },
+    },
     failed: (message) => {
       send("linkshell-desktop-update", { name: "message", message });
       send("linkshell-desktop-update", { name: "finished" });
@@ -1317,11 +1469,11 @@ function startUpdater() {
       }
       if (name === "recover") {
         void management.action("recover-update").catch((error: unknown) => {
-          send("linkshell-desktop-update", { name: "message", message: `服务恢复需要处理：${error instanceof Error ? error.message : String(error)}` });
+          send("linkshell-desktop-update", { name: "message", message: t("mac.recover", { message: error instanceof Error ? error.message : String(error) }) });
         });
       }
       noteUpdate(name, detail?.version);
-      send("linkshell-desktop-update", { name, ...detail });
+      send("linkshell-desktop-update", { name, ...detail, ...("message" in detail ? { message: localizeUpdaterMessage(locale, detail.message) } : {}) });
     },
   }, String(settings.get("updateChannel") ?? "stable"));
   setInterval(() => {
@@ -1339,17 +1491,17 @@ function noteUpdate(name: string, version?: unknown) {
 }
 
 const trayItems = (): MenuBarEntry[] => [
-  { id: "open", label: "打开 LinkShell" },
-  { id: "manage", label: "本机管理" },
-  { id: "update", label: updateLabel(updateAvailable) },
+  { id: "open", label: t("tray.open") },
+  { id: "manage", label: t("tray.settings") },
+  { id: "update", label: updateLabel(updateAvailable, { check: t("update.check"), to: (version) => t("update.to", { version }), found: t("update.found") }) },
   { separator: true },
-  { id: "quit", label: "退出 LinkShell 界面" },
+  { id: "quit", label: t("menu.quit") },
 ];
 
 function trayClicked(id: string) {
   if (id === "open") { openWorkspace(); showWindow(); }
-  else if (id === "manage") { openManagement(); showWindow(); }
-  else if (id === "update") { openManagement("更新"); showWindow(); checkUpdates(); }
+  else if (id === "manage") { openManagement("settings"); showWindow(); }
+  else if (id === "update") { openManagement("updates"); showWindow(); checkUpdates(); }
   else if (id === "quit") app.quit();
 }
 
@@ -1375,32 +1527,32 @@ function installMenu() {
   if (!MAC) { Menu.setApplicationMenu(null); return; }
   const template: MenuItemConstructorOptions[] = [
     { label: "LinkShell", submenu: [
-      { label: "关于 LinkShell", role: "about" },
+      { label: t("menu.about"), role: "about" },
       { type: "separator" },
-      { label: "工作台", accelerator: "CmdOrCtrl+1", click: () => { openWorkspace(); showWindow(); } },
-      { label: "设置与本机服务…", accelerator: "CmdOrCtrl+,", click: () => { openManagement(); showWindow(); } },
-      { label: "本机管理", accelerator: "CmdOrCtrl+2", click: () => { openManagement(); showWindow(); } },
-      { label: "检查更新…", click: () => { openManagement("更新"); showWindow(); checkUpdates(); } },
+      { label: t("menu.settings"), accelerator: "CmdOrCtrl+,", click: () => { openManagement("settings"); showWindow(); } },
+      { label: t("menu.checkUpdates"), click: () => { openManagement("updates"); showWindow(); checkUpdates(); } },
       { type: "separator" },
-      { label: "隐藏 LinkShell", role: "hide" },
-      { label: "隐藏其他", role: "hideOthers" },
+      { label: t("menu.hide"), role: "hide" },
+      { label: t("menu.hideOthers"), role: "hideOthers" },
+      { label: t("menu.showAll"), role: "unhide" },
       { type: "separator" },
-      { label: "关闭窗口", accelerator: "CmdOrCtrl+W", role: "close" },
-      { label: "退出 LinkShell 界面", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
+      // The page's tab, not the window: the window closes from its red button or `closeWindow`.
+      { label: t("menu.closeTab"), accelerator: "CmdOrCtrl+W", click: () => closeTab() },
+      { label: t("menu.quit"), accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
     ] },
-    { label: "编辑", submenu: [
-      { label: "撤销", role: "undo" }, { label: "重做", role: "redo" }, { type: "separator" },
-      { label: "剪切", role: "cut" }, { label: "复制", role: "copy" }, { label: "粘贴", role: "paste" },
-      { label: "粘贴并匹配样式", role: "pasteAndMatchStyle" }, { label: "全选", role: "selectAll" },
+    { label: t("menu.edit"), submenu: [
+      { label: t("menu.undo"), role: "undo" }, { label: t("menu.redo"), role: "redo" }, { type: "separator" },
+      { label: t("menu.cut"), role: "cut" }, { label: t("menu.copy"), role: "copy" }, { label: t("menu.paste"), role: "paste" },
+      { label: t("menu.pasteMatch"), role: "pasteAndMatchStyle" }, { label: t("menu.selectAll"), role: "selectAll" },
     ] },
-    { label: "显示", submenu: [
-      { label: "实际大小", role: "resetZoom" }, { label: "放大", role: "zoomIn" }, { label: "缩小", role: "zoomOut" },
+    { label: t("menu.view"), submenu: [
+      { label: t("menu.resetZoom"), role: "resetZoom" }, { label: t("menu.zoomIn"), role: "zoomIn" }, { label: t("menu.zoomOut"), role: "zoomOut" },
       { type: "separator" },
-      { label: "切换全屏", accelerator: "Ctrl+Command+F", click: () => toggleWindowFullScreen() },
-      ...(app.isPackaged ? [] : [{ type: "separator" as const }, { label: "开发者工具", role: "toggleDevTools" as const }]),
+      { label: t("menu.fullScreen"), accelerator: "Ctrl+Command+F", click: () => toggleWindowFullScreen() },
+      ...(app.isPackaged ? [] : [{ type: "separator" as const }, { label: t("menu.devTools"), role: "toggleDevTools" as const }]),
     ] },
-    { label: "窗口", role: "windowMenu", submenu: [
-      { label: "最小化", role: "minimize" }, { label: "缩放", role: "zoom" }, { type: "separator" }, { label: "前置全部窗口", role: "front" },
+    { label: t("menu.window"), role: "windowMenu", submenu: [
+      { label: t("menu.minimize"), role: "minimize" }, { label: t("menu.zoom"), role: "zoom" }, { type: "separator" }, { label: t("menu.front"), role: "front" },
     ] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -1431,7 +1583,9 @@ function saveSettings(): Promise<void> {
 
 async function ready() {
   await loadSettings();
-  keepAwake.set(normalizeKeepAwakeMode(settings.get("keepAwake")));
+  locale = normalizeMainLocale(process.env.LINKSHELL_LOCALE) ?? normalizeMainLocale(settings.get("locale")) ?? (/^ja/i.test(app.getLocale()) ? "ja" : /^zh/i.test(app.getLocale()) ? "zh" : app.getLocale() ? "en" : "zh");
+  // The Host holds the wake assertion (`machine.keepAwake`); a hold left by an older window is released.
+  keepAwake.set("off");
   // Sparkle relaunches with no arguments: keep the chosen state directory, never credentials.
   if (launch.home) { settings.set("home", launch.home); void saveSettings(); }
   else if (typeof settings.get("home") === "string" && runtime.standalone) process.env.LINKSHELL_HOME = settings.get("home") as string;
@@ -1462,6 +1616,6 @@ async function ready() {
   // "Follow the system": the opaque ground and Windows' caption buttons follow it too.
   nativeTheme.on("updated", updateWindowSurface);
   startUpdater();
-  if (launch.checkUpdates) { openManagement("更新"); checkUpdates(); }
+  if (launch.checkUpdates) { openManagement("updates"); checkUpdates(); }
   if (launch.fusionConnect) command({ command: "fusion", computerKey: launch.fusionConnect, launchBundle: launch.fusionLaunch });
 }

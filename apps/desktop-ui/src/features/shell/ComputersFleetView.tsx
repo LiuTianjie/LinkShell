@@ -5,8 +5,10 @@ import {
   canUseFusionMode,
   computerNames,
   connectAndStartComputerFusion,
+  describeActionError,
   engine,
   gatewayLabel,
+  routerStore,
   healthy,
   memoryPercent,
   observeMachineMetrics,
@@ -40,6 +42,7 @@ import {
   formatPlatformLabel,
   formatSessionCountLabel,
   isLocalComputer,
+  reportShellError,
   switchToComputer,
 } from "./shell-helpers";
 
@@ -118,9 +121,7 @@ function FleetComputerRow({
 
   const inlineTelemetry = (() => {
     if (!computer.machine.online && !isLocal) {
-      const offlineText =
-        locale === "en" ? "Offline" : locale === "ja" ? "オフライン" : "离线";
-      return [osLabel, offlineText].filter(Boolean).join(" · ");
+      return [osLabel, t("desktop.shell.offline")].filter(Boolean).join(" · ");
     }
     const parts: string[] = [];
     if (osLabel) parts.push(osLabel);
@@ -157,7 +158,7 @@ function FleetComputerRow({
       setRenameError(
         /method not found|machine\.rename|-32601/i.test(msg)
           ? t("desktop.fleet.renameOutdated")
-          : msg,
+          : describeActionError(error, locale),
       );
     } finally {
       retained.release();
@@ -165,38 +166,23 @@ function FleetComputerRow({
   };
 
   const handleForget = async () => {
-    const confirmed = await dialogs.confirm(
-      locale === "en"
-        ? `Remove paired computer "${displayName}"? You will need to pair again to reconnect.`
-        : locale === "ja"
-          ? `「${displayName}」のペアリングを解除しますか？`
-          : `确定移除电脑「${displayName}」吗？移除后需要重新配对或登录同一账号连接。`,
-      { destructive: true, confirmLabel: t("desktop.fleet.forgetComputer") },
-    );
+    const confirmed = await dialogs.confirm(t("desktop.shell.forgetConfirm", { name: displayName }), {
+      destructive: true,
+      confirmLabel: t("desktop.fleet.forgetComputer"),
+    });
     if (!confirmed) return;
-    await engine.forget(computer);
+    try {
+      await engine.forget(computer);
+      // Back must not lead into a computer that is no longer paired.
+      routerStore.getState().forgetComputer(computer.key);
+    } catch (error) {
+      reportShellError(error, locale);
+    }
   };
 
-  const copyMachineIdLabel =
-    locale === "en"
-      ? "Copy Machine ID"
-      : locale === "ja"
-        ? "Machine ID をコピー"
-        : "复制 Machine ID";
-
-  const localSettingsLabel =
-    locale === "en"
-      ? "Local Settings"
-      : locale === "ja"
-        ? "ローカル設定"
-        : "本机设置";
-
-  const moreActionsLabel =
-    locale === "en"
-      ? `More actions for ${displayName}`
-      : locale === "ja"
-        ? `${displayName} の操作`
-        : `${displayName} 更多操作`;
+  const copyMachineIdLabel = t("desktop.shell.copyMachineId");
+  const localSettingsLabel = t("desktop.localManagement");
+  const moreActionsLabel = t("desktop.shell.computerActions", { name: displayName });
 
   return (
     <div
@@ -234,7 +220,7 @@ function FleetComputerRow({
               }}
             />
             <Button size="sm" variant="primary" onClick={() => void handleSaveRename()}>
-              {locale === "en" ? "Save" : locale === "ja" ? "保存" : "保存"}
+              {t("desktop.shell.save")}
             </Button>
             <Button
               size="sm"
@@ -244,7 +230,7 @@ function FleetComputerRow({
                 setRenameError(undefined);
               }}
             >
-              {locale === "en" ? "Cancel" : locale === "ja" ? "キャンセル" : "取消"}
+              {t("desktop.shell.cancel")}
             </Button>
           </div>
           {renameError ? (
@@ -378,11 +364,7 @@ function FleetComputerRow({
                   navigate({ kind: "terminals", computerKey: computer.key });
                 }}
               >
-                {locale === "en"
-                  ? "Open Terminal"
-                  : locale === "ja"
-                    ? "ターミナルを開く"
-                    : "打开终端"}
+                {t("desktop.shell.openTerminal")}
               </MenuItem>
               <MenuItem
                 icon="file-code"
@@ -391,11 +373,7 @@ function FleetComputerRow({
                   navigate({ kind: "files", computerKey: computer.key });
                 }}
               >
-                {locale === "en"
-                  ? "Browse Files"
-                  : locale === "ja"
-                    ? "ファイルを参照"
-                    : "浏览文件"}
+                {t("desktop.shell.browseFiles")}
               </MenuItem>
               <MenuItem
                 icon="port-preview"
@@ -465,19 +443,21 @@ export function ComputersFleetView({
   const onlineCount = allComputers.filter((c) => c.machine.online).length;
 
   const isLocalHealthy = healthy(mgmt);
-  const gatewayTitle =
-    locale === "en" ? "Gateway" : locale === "ja" ? "ゲートウェイ" : "网关";
-  const subtitle = `${t("desktop.localManagement")} ${serviceLabel(
+  const gatewayTitle = t("desktop.shell.gateway");
+  const subtitle = `${t("desktop.shell.localService")} ${serviceLabel(
     mgmt.snapshot,
     mgmt.problem,
-  )} · ${gatewayTitle} ${gatewayLabel(mgmt.snapshot, isLocalHealthy)} · ${onlineCount}/${
-    allComputers.length
-  } ${locale === "en" ? "online" : locale === "ja" ? "オンライン" : "台在线"}`;
+  )} · ${gatewayTitle} ${gatewayLabel(mgmt.snapshot, isLocalHealthy)} · ${t(
+    "desktop.shell.onlineCount",
+    { online: onlineCount, total: allComputers.length },
+  )}`;
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       await engine.refreshComputers();
+    } catch (error) {
+      reportShellError(error, locale);
     } finally {
       setRefreshing(false);
     }
@@ -500,7 +480,7 @@ export function ComputersFleetView({
               loading={refreshing}
               onClick={() => void handleRefresh()}
             >
-              {locale === "en" ? "Refresh" : locale === "ja" ? "更新" : "刷新"}
+              {t("desktop.shell.refresh")}
             </Button>
 
             {onOpenLocalPairingQr ? (
@@ -541,13 +521,7 @@ export function ComputersFleetView({
           <EmptyState
             icon="computer-pc"
             title={t("desktop.nav.computers")}
-            description={
-              locale === "en"
-                ? "Sign in or pair a remote computer to manage sessions, terminals, and Fusion Mode."
-                : locale === "ja"
-                  ? "サインインまたはペアリングして他のコンピュータを接続します。"
-                  : "登录同一账号或输入 6 位配对码连接远端 Mac / Windows 电脑。"
-            }
+            description={t("desktop.shell.fleetEmpty")}
             actions={
               <Button
                 variant="primary"

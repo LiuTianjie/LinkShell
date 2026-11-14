@@ -690,6 +690,20 @@ const coreMethods = {
     }),
     result: z.object({ path: z.string(), size: z.number().int() }),
   },
+  /**
+   * Replaces a UTF-8 text file (or creates one in an existing directory),
+   * atomically and keeping its mode. With `expectedModifiedAt` (the
+   * `modifiedAt` the editor last read) a file changed on disk since is refused
+   * with `conflict` instead of being overwritten.
+   */
+  "fs.write": {
+    params: z.object({
+      path: z.string().min(1),
+      text: z.string(),
+      expectedModifiedAt: z.number().optional(),
+    }),
+    result: z.object({ path: z.string(), modifiedAt: z.number(), size: z.number().int() }),
+  },
   /** Creates a directory `name` inside `parent`. */
   "fs.mkdir": {
     params: z.object({ parent: z.string().min(1), name: z.string().min(1).max(255) }),

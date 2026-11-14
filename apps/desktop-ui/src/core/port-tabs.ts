@@ -135,6 +135,17 @@ export function appendPreviewError(
   existing: readonly PreviewRuntimeError[],
   incoming: Omit<PreviewRuntimeError, "id" | "timestamp"> & { timestamp?: number },
 ): PreviewRuntimeError[] {
+  // The same error firing repeatedly (a render loop, HMR retries) is one problem, not 25.
+  if (
+    existing.some(
+      (err) =>
+        err.source === incoming.source &&
+        err.message === incoming.message &&
+        err.port === incoming.port,
+    )
+  ) {
+    return existing as PreviewRuntimeError[];
+  }
   const entry: PreviewRuntimeError = {
     ...incoming,
     id: crypto.randomUUID(),

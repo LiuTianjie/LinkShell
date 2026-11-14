@@ -23,6 +23,10 @@ import {
   type Computer,
   type ManagePage,
 } from "../../core";
+import {
+  DESKTOP_SHORTCUTS,
+  formatShortcut,
+} from "../../bridge/shortcuts";
 import { AgentMark, DesktopIcon, type DesktopIconName } from "../../icons";
 import { Dialog, isImeComposing, Kbd } from "../../primitives";
 import { applyDesktopAppearance, type ThemeMode } from "../../theme";
@@ -31,6 +35,7 @@ import {
   currentFusionCapabilityEnv,
   displayComputerName,
   folderBasename,
+  sessionRecency,
   switchToComputer,
   useConnectionStore,
 } from "./shell-helpers";
@@ -93,6 +98,9 @@ export function CommandCenter({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const activeRouteKind = useRouter((s) => s.activeRoute.kind);
+  const inSession = activeRouteKind === "session";
 
   useEffect(() => {
     if (open) {
@@ -119,8 +127,7 @@ export function CommandCenter({
   const allItems = useMemo<CommandActionItem[]>(() => {
     const items: CommandActionItem[] = [];
     const groupFusion = t("desktop.fusion.title");
-    const groupQuick =
-      locale === "en" ? "Workspace" : locale === "ja" ? "ワークスペース" : "工作台与快捷操作";
+    const groupQuick = t("desktop.shell.paletteWorkspace");
     const groupSessions = t("desktop.nav.sessions");
     const groupComputers = t("desktop.nav.computers");
     const groupSystem = t("desktop.localManagement");
@@ -184,7 +191,7 @@ export function CommandCenter({
         subtitle: displayComputerName(activeComputer, names, locale),
         keywords: "new session create 新建 会话 thread agent",
         icon: "plus",
-        shortcut: "Mod+N",
+        shortcut: formatShortcut(DESKTOP_SHORTCUTS.newSession, activePlatform),
         run: () => onRequestNewSession(activeComputerKey),
       },
       {
@@ -192,7 +199,7 @@ export function CommandCenter({
         group: groupQuick,
         title: t("desktop.fleet.connectComputer"),
         keywords: "pair connect login account 连接 配对 登录 扫码",
-        icon: "pair-qr",
+        icon: "gateway-relay",
         run: () => setConnectModalOpen(true),
       },
       ...(onOpenLocalPairingQr
@@ -202,7 +209,7 @@ export function CommandCenter({
               group: groupQuick,
               title: t("desktop.fleet.pairDevice"),
               keywords: "qr phone mobile 配对 手机 二维码",
-              icon: "pair-qr" as const,
+              icon: "phone-device" as const,
               run: () => onOpenLocalPairingQr(),
             },
           ]
@@ -213,31 +220,34 @@ export function CommandCenter({
         title: t("desktop.toggleSidebar"),
         keywords: "sidebar rail 侧栏 折叠",
         icon: "sidebar-toggle",
-        shortcut: "Mod+B",
+        shortcut: formatShortcut(DESKTOP_SHORTCUTS.toggleSidebar, activePlatform),
         run: () => toggleSidebar(),
       },
+    );
+    // Panels belong to an open session; offering them elsewhere toggled hidden state with no visible effect.
+    if (inSession) items.push(
       {
         id: "toggle-terminal",
         group: groupQuick,
         title: t("desktop.toggleBottomDock"),
         keywords: "terminal shell console 终端 底部",
         icon: "bottom-dock",
-        shortcut: "Mod+J",
+        shortcut: formatShortcut(DESKTOP_SHORTCUTS.terminal, activePlatform),
         run: () => toggleBottomDock(),
       },
       {
         id: "toggle-inspector",
         group: groupQuick,
         title: t("desktop.toggleInspector"),
-        keywords: "inspector diff changes files 检查器 改动",
+        keywords: "inspector panel diff changes files 右侧面板 检查器 改动",
         icon: "inspector-toggle",
-        shortcut: activePlatform === "macos" ? "Opt+Mod+B" : "Ctrl+Alt+B",
+        shortcut: formatShortcut(DESKTOP_SHORTCUTS.toggleInspector, activePlatform),
         run: () => toggleInspector(),
       },
       {
         id: "inspector-changes",
         group: groupQuick,
-        title: `${t("desktop.inspector.changes")} (${t("desktop.toggleInspector")})`,
+        title: t("desktop.inspector.changes"),
         keywords: "diff git changes 改动 检查器",
         icon: "diff-changes",
         run: () => {
@@ -270,6 +280,8 @@ export function CommandCenter({
           r.toggleInspector(true);
         },
       },
+    );
+    items.push(
       {
         id: "nav-projects",
         group: groupQuick,
@@ -299,7 +311,7 @@ export function CommandCenter({
     // 3. Active & Recent Sessions on Selected Computer
     const liveSessions = Object.values(sessionsMap)
       .filter((s) => !s.archived)
-      .sort((a, b) => b.createdAt - a.createdAt)
+      .sort((a, b) => sessionRecency(b) - sessionRecency(a))
       .slice(0, 24);
 
     for (const session of liveSessions) {
@@ -324,13 +336,7 @@ export function CommandCenter({
         group: groupComputers,
         title: compName,
         subtitle:
-          computer.key === activeComputerKey
-            ? locale === "en"
-              ? "Selected"
-              : locale === "ja"
-                ? "選択中"
-                : "当前电脑"
-            : undefined,
+          computer.key === activeComputerKey ? t("desktop.shell.selected") : undefined,
         keywords: `computer switch 切换 电脑 ${compName} ${computer.machine.platform ?? ""}`,
         icon: computerPlatformIcon(computer.machine.platform),
         run: () => switchToComputer(computer),
@@ -370,7 +376,7 @@ export function CommandCenter({
         title: `${t("desktop.localManagement")} · ${label}`,
         keywords: `manage host system 本机 管理 服务 ${page} ${label}`,
         icon: MANAGE_PAGE_ICONS[page],
-        shortcut: page === "settings" ? "Mod+," : undefined,
+        shortcut: page === "settings" ? formatShortcut(DESKTOP_SHORTCUTS.settings, activePlatform) : undefined,
         run: () => openSystemModal(page),
       });
     }
@@ -417,6 +423,7 @@ export function CommandCenter({
     activeComputerKey,
     activePlatform,
     computers,
+    inSession,
     fusionByComputer,
     locale,
     names,
@@ -449,6 +456,17 @@ export function CommandCenter({
   useEffect(() => {
     setActiveIndex(0);
   }, [query]);
+
+  const activeOptionId = filteredItems[activeIndex]
+    ? `ls-command-option-${filteredItems[activeIndex].id.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+    : undefined;
+
+  // Arrow keys move the highlight; keep it on screen like any native list.
+  useEffect(() => {
+    if (!open || !activeOptionId) return;
+    const option = listRef.current?.querySelector<HTMLElement>(`#${activeOptionId}`);
+    option?.scrollIntoView?.({ block: "nearest" });
+  }, [activeOptionId, open]);
 
   const groupedFiltered = useMemo(() => {
     const groups: { name: string; entries: { item: CommandActionItem; flatIndex: number }[] }[] = [];
@@ -490,15 +508,10 @@ export function CommandCenter({
             role="combobox"
             aria-expanded="true"
             aria-controls="ls-command-center-results"
+            aria-activedescendant={activeOptionId}
             aria-label={t("desktop.commandCenter")}
             value={query}
-            placeholder={
-              locale === "en"
-                ? "Jump to session, start Fusion Mode, switch computer, or run a command"
-                : locale === "ja"
-                  ? "セッション・融合モード・コンピュータ切替・コマンドを検索"
-                  : "跳转会话、开启融合模式、切换电脑或执行命令"
-            }
+            placeholder={t("desktop.shell.palettePlaceholder")}
             className="command-center__input"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
@@ -526,6 +539,7 @@ export function CommandCenter({
 
         <div
           id="ls-command-center-results"
+          ref={listRef}
           role="listbox"
           aria-label={t("desktop.commandCenter")}
           className="command-center__list"
@@ -539,7 +553,9 @@ export function CommandCenter({
                   return (
                     <button
                       key={item.id}
+                      id={`ls-command-option-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`}
                       type="button"
+                      tabIndex={-1}
                       role="option"
                       aria-selected={isActive}
                       data-active={isActive ? "true" : undefined}
@@ -562,27 +578,14 @@ export function CommandCenter({
                           <span className="command-center__item-sub">{item.subtitle}</span>
                         ) : null}
                       </span>
-                      {item.shortcut ? <Kbd shortcut={item.shortcut} /> : null}
+                      {item.shortcut ? <Kbd>{item.shortcut}</Kbd> : null}
                     </button>
                   );
                 })}
               </div>
             ))
           ) : (
-            <div
-              style={{
-                padding: "32px 16px",
-                textAlign: "center",
-                fontSize: "13px",
-                color: "var(--ls-muted)",
-              }}
-            >
-              {locale === "en"
-                ? "No matching commands or sessions."
-                : locale === "ja"
-                  ? "一致する項目がありません。"
-                  : "未找到匹配的命令、会话或电脑。"}
-            </div>
+            <div className="command-center__empty">{t("desktop.shell.paletteEmpty")}</div>
           )}
         </div>
 
@@ -590,11 +593,11 @@ export function CommandCenter({
           <div className="command-center__hints">
             <span className="command-center__hint">
               <Kbd>↑↓</Kbd>
-              <span>{locale === "en" ? "Navigate" : locale === "ja" ? "移動" : "选择"}</span>
+              <span>{t("desktop.shell.paletteNavigate")}</span>
             </span>
             <span className="command-center__hint">
               <Kbd>↵</Kbd>
-              <span>{locale === "en" ? "Run" : locale === "ja" ? "実行" : "执行"}</span>
+              <span>{t("desktop.shell.paletteRun")}</span>
             </span>
           </div>
           <span>{filteredItems.length}</span>

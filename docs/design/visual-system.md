@@ -1,6 +1,6 @@
 # LinkShell 视觉规范
 
-手机 App（`apps/client`，含 Watch 和 Live Activity）、桌面端（`apps/web` 的 `html[data-desktop]` 和 `apps/mac` 的原生窗口）、网页控制台（`apps/web` 在浏览器里）和官网（`docs/site`）都照这一份做。改视觉先改这里，再三端一起改；不要只改一端。
+手机 App（`apps/client`，含 Watch 和 Live Activity）、桌面端（`apps/desktop-ui` 和 `apps/mac` 的原生窗口）、网页控制台（`apps/web` 在浏览器里）和官网（`docs/site`）都照这一份做。改视觉先改这里，再三端一起改；不要只改一端。
 
 它取代了之前分散的几个方向：`apps/web/AGENTS.md` 里的“参照 Linear”、桌面端注释里的“参照 Codex”、原生窗口的薄荷绿、官网的青绿。Linear、Codex 可以作为克制和精确的参照，但颜色和尺寸只用这里的值。
 
@@ -109,6 +109,15 @@
 ### 空状态
 
 一个系统图标（`secondaryLabel` 色，不加底色方块）、一行标题、一句说明、最多一个按钮。
+
+## 桌面端目前与本规范的出入
+
+`apps/desktop-ui` 重做时参照了 Paseo 和 T3 Code，有两处没有照上面的值，其余（状态色、圆角、字号、审批卡结构）一致：
+
+- **主按钮是黑白的**（`--ls-primary-bg`：浅色下近黑、深色下近白），不是 `accentFill`。品牌靛蓝仍用于链接、选中、焦点环和运行中。
+- **输入框**外框圆角 `16`、发送按钮 `30` 且同样黑白，不是这里写的 `24` / `32` / `accentFill`。
+
+这两处是有意保留的现状，不是新规则：要么把桌面改回上面的值，要么把上面的值改成桌面现在的样子并让网页控制台跟上。定下来之前，不要再往任何一边加第三种样子。
 
 ## 改动时
 

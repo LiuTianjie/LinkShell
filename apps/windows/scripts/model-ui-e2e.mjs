@@ -37,6 +37,8 @@ const env = {
   USERPROFILE: user, APPDATA: join(user, 'AppData/Roaming'), LOCALAPPDATA: join(user, 'AppData/Local'),
   GITHUB_ACTIONS: 'true', RUNNER_OS: 'Windows', CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: join(work, 'empty-claude'),
   LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LINKSHELL_ICE_SERVERS: 'off', LINKSHELL_ENV_FROM_TERMINAL: '1',
+  // The labels and native menu items asserted below are the Chinese ones, whatever language the runner's Windows is in.
+  LINKSHELL_LOCALE: 'zh',
   LINKSHELL_APP_BUNDLE: target, LINKSHELL_WINDOWS_HELPER: join(target, 'LinkShell.Screen.exe'), LINKSHELL_MACHINE_NAME: 'Windows Model QA',
   LINKSHELL_QA_ROOT: work, LINKSHELL_QA_PROFILE: profile, LINKSHELL_QA_TOKEN: token,
 };

@@ -48,9 +48,10 @@ export function SystemOverviewPage({
   onNavigate: (page: ManagePage) => void;
   onRequestConfirm: (action: SystemConfirmAction) => void;
 }) {
-  const { locale, tCore, ts, computer } = useSystemI18n();
+  const { locale, tCore, ts, tm, computer } = useSystemI18n();
   const state = useManagement();
   const healthy = isHealthy(state);
+  const unreachable = state.snapshot?.status === "unreachable";
   const standalone = isStandalone(state);
   const snapshot = state.snapshot;
   const gateway = snapshot?.gateway;
@@ -234,19 +235,20 @@ export function SystemOverviewPage({
                 link={state.signInLink}
                 error={state.signInError}
                 disabled={state.busy && !state.signingIn}
+                // The form stays open after a failed or cancelled sign-in, so its error is seen.
                 onPassword={(email, password) =>
-                  void loginWithPassword(email, password).then(() => {
-                    setSignInExpanded(false);
+                  void loginWithPassword(email, password).then((signedIn) => {
+                    if (signedIn) setSignInExpanded(false);
                   })
                 }
                 onProvider={(provider) =>
-                  void loginWithProvider(provider).then(() => {
-                    setSignInExpanded(false);
+                  void loginWithProvider(provider).then((signedIn) => {
+                    if (signedIn) setSignInExpanded(false);
                   })
                 }
                 onBrowser={() =>
-                  void login().then(() => {
-                    setSignInExpanded(false);
+                  void login().then((signedIn) => {
+                    if (signedIn) setSignInExpanded(false);
                   })
                 }
                 onCancel={() => {
@@ -381,7 +383,7 @@ export function SystemOverviewPage({
 
         {state.accountMessage ? (
           <p className="ls-system-note" role="status">
-            {state.accountMessage}
+            {tm(state.accountMessage)}
           </p>
         ) : null}
       </section>
@@ -401,7 +403,9 @@ export function SystemOverviewPage({
               <span className="ls-system-row__detail">
                 {healthy
                   ? ts("overview.hostReadyDetail")
-                  : ts("overview.hostStoppedDetail")}
+                  : unreachable
+                    ? ts("overview.hostUnreachableDetail")
+                    : ts("overview.hostStoppedDetail")}
               </span>
             </div>
             <div className="ls-system-row__controls">
@@ -425,7 +429,7 @@ export function SystemOverviewPage({
               >
                 {serviceStatusLabel}
               </Badge>
-              {!healthy ? (
+              {!healthy && !unreachable ? (
                 <Button
                   size="sm"
                   variant="primary"
@@ -695,11 +699,11 @@ export function SystemOverviewPage({
           <div className="ls-system-card">
             {recentActivity.map((event) => (
               <div
-                key={`${event.at}:${event.text}`}
+                key={`${event.at}:${tm(event.text)}`}
                 className="ls-system-row"
               >
                 <div className="ls-system-row__copy">
-                  <span className="ls-system-row__detail">{event.text}</span>
+                  <span className="ls-system-row__detail">{tm(event.text)}</span>
                 </div>
                 <div className="ls-system-row__controls">
                   <StatusDot tone="neutral" />

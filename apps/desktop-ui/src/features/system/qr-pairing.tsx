@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import {
+  clearPairedDevice,
   createLocalPairingOffer,
+  pollManagement,
   useManagement,
   type DesktopDevice,
   type PairingOffer,
@@ -18,7 +20,8 @@ import {
 } from "../../primitives";
 import { useSystemI18n } from "./system-i18n";
 
-const EMPTY_DEVICES: DesktopDevice[] = [];
+/** Long enough to read the phone's name before the dialog gets out of the way. */
+const PAIRED_DIALOG_CLOSE_MS = 2_500;
 
 /**
  * Renders `PairingOffer.qr` (`boolean[][]`) as a single crisp SVG path inside a
@@ -147,40 +150,27 @@ export function PairingOfferCard({
 }
 
 /**
- * Inline local Host pairing card for `SystemDevicesPage`: generates a 6-digit code + QR matrix
- * and automatically marks pairing complete as soon as a new device appears in `snapshot.gateway.devices`.
+ * Inline local Host pairing card for `SystemDevicesPage`: generates a 6-digit code + QR matrix.
+ * The store notices the phone that used it (`pairedDevice`) and retires the offer, so closing
+ * and reopening the page neither loses the success nor shows a spent code again.
  */
 export function LocalPairingSection({
-  devices,
   disabled = false,
 }: {
-  devices: DesktopDevice[];
+  devices?: DesktopDevice[];
   disabled?: boolean;
 }) {
   const { ts } = useSystemI18n();
   const offer = useManagement((s) => s.pairingOffer);
   const loading = useManagement((s) => s.pairingLoading);
   const error = useManagement((s) => s.pairingError);
-  const [justPaired, setJustPaired] = useState(false);
-  const baselineDeviceIds = useRef<Set<string> | null>(null);
+  const paired = useManagement((s) => s.pairedDevice);
+  const justPaired = Boolean(paired);
 
   const now = useSecondTicker(Boolean(offer));
   const remaining = offer ? Math.max(0, Math.floor((offer.expiresAt - now) / 1000)) : 0;
 
-  const deviceKey = devices.map((d) => d.id).join("\n");
-  useEffect(() => {
-    if (!offer || !baselineDeviceIds.current) return;
-    const known = baselineDeviceIds.current;
-    const added = devices.some((d) => d.id && !known.has(d.id));
-    if (added) {
-      baselineDeviceIds.current = null;
-      setJustPaired(true);
-    }
-  }, [deviceKey, devices, offer]);
-
   const handleGenerate = async () => {
-    setJustPaired(false);
-    baselineDeviceIds.current = new Set(devices.map((d) => d.id));
     await createLocalPairingOffer();
   };
 
@@ -220,9 +210,9 @@ export function LocalPairingSection({
         ) : null}
       </div>
 
-      {justPaired ? (
+      {paired ? (
         <p className="ls-system-note" data-tone="ok" role="status">
-          {ts("devices.justPaired")}
+          {ts("devices.pairedSuccess", { name: paired.name })}
         </p>
       ) : null}
       {error ? (
@@ -247,20 +237,15 @@ export function LocalPairingQrDialog(props: {
   const offer = useManagement((s) => s.pairingOffer);
   const loading = useManagement((s) => s.pairingLoading);
   const error = useManagement((s) => s.pairingError);
-  const devices = useManagement(
-    (s) => s.snapshot?.gateway?.devices ?? EMPTY_DEVICES,
-  );
-  const baselineIds = useRef<Set<string> | null>(null);
+  const paired = useManagement((s) => s.pairedDevice);
 
   const now = useSecondTicker(open && Boolean(offer));
   const remaining = offer ? Math.max(0, Math.floor((offer.expiresAt - now) / 1000)) : 0;
 
   useEffect(() => {
-    if (!open) {
-      baselineIds.current = null;
-      return;
-    }
-    baselineIds.current = new Set(devices.map((d) => d.id));
+    if (!open) return;
+    // A success shown last time is old news; a spent offer is already gone from the store.
+    clearPairedDevice();
     if (!offer || offer.expiresAt <= Date.now() + 15_000) {
       void createLocalPairingOffer();
     }
@@ -268,14 +253,15 @@ export function LocalPairingQrDialog(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const deviceIdsKey = devices.map((d) => d.id).join("\n");
+  // The phone's arrival shows up in the device list; poll it briskly only while a code is on screen.
+  const waiting = open && Boolean(offer);
+  useEffect(() => (waiting ? pollManagement() : undefined), [waiting]);
+
   useEffect(() => {
-    if (!open || !baselineIds.current) return;
-    const known = baselineIds.current;
-    if (devices.some((d) => d.id && !known.has(d.id))) {
-      onOpenChange(false);
-    }
-  }, [deviceIdsKey, devices, onOpenChange, open]);
+    if (!open || !paired) return undefined;
+    const timer = setTimeout(() => onOpenChange(false), PAIRED_DIALOG_CLOSE_MS);
+    return () => clearTimeout(timer);
+  }, [onOpenChange, open, paired]);
 
   return (
     <Dialog
@@ -294,7 +280,12 @@ export function LocalPairingQrDialog(props: {
         <DialogDescription>{ts("localPairDialog.desc")}</DialogDescription>
       </DialogHeader>
       <DialogBody>
-        {offer ? (
+        {paired ? (
+          <div className="ls-signin-waiting" role="status">
+            <DesktopIcon name="check-circle" size="lg" />
+            <p>{ts("devices.pairedSuccess", { name: paired.name })}</p>
+          </div>
+        ) : offer ? (
           <PairingOfferCard
             offer={offer}
             remainingSeconds={remaining}

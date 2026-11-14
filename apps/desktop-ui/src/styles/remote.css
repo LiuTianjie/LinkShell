@@ -470,6 +470,66 @@
     color: var(--ls-fg);
   }
 
+  /* Fusion hub alerts: one compact row per problem, each with its remedy. */
+  .ls-fusion-alerts {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ls-fusion-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: var(--ls-hairline, 1px) solid color-mix(in oklab, var(--ls-danger) 30%, var(--ls-border));
+    background-color: light-dark(rgb(255 245 245), rgb(28 16 18 / 0.85));
+    color: var(--ls-fg);
+  }
+
+  .ls-fusion-alert[data-tone="waiting"] {
+    border-color: color-mix(in oklab, var(--ls-waiting) 34%, var(--ls-border));
+    background-color: light-dark(rgb(255 250 242), rgb(28 22 14 / 0.85));
+  }
+
+  .ls-fusion-alert__icon {
+    margin-block-start: 1px;
+    flex-shrink: 0;
+    color: var(--ls-danger);
+  }
+
+  .ls-fusion-alert[data-tone="waiting"] .ls-fusion-alert__icon {
+    color: var(--ls-waiting);
+  }
+
+  .ls-fusion-alert__text {
+    flex: 1;
+    min-inline-size: 0;
+  }
+
+  .ls-fusion-alert__title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .ls-fusion-alert__remedy,
+  .ls-fusion-alert__detail {
+    margin: 3px 0 0;
+    font-size: 12px;
+    line-height: 1.48;
+    color: var(--ls-fg-2);
+  }
+
+  .ls-fusion-alert__detail {
+    color: var(--ls-fg-3, var(--ls-fg-2));
+    overflow-wrap: anywhere;
+  }
+
   .ls-remote-remediation[data-tone="waiting"] {
     border-color: color-mix(in oklab, var(--ls-waiting) 34%, var(--ls-border));
     background-color: light-dark(rgb(255 250 242), rgb(28 22 14 / 0.85));

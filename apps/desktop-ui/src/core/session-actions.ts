@@ -3,6 +3,7 @@ import type { SessionSummary } from "@linkshell/wire";
 import { desktopInvoke, isElectronRuntime, showNativeContextMenu } from "../bridge/desktop-bridge";
 import type { Connection } from "./connections";
 import { getDesktopLocale, revealInFilesLabel, translateDesktop, type Locale } from "./i18n";
+import { routerStore } from "./router-store";
 import { sessionTitle } from "./session-tree";
 import { DESKTOP_LOCAL, reportDesktopError } from "./storage";
 
@@ -18,7 +19,7 @@ export interface NativeMenuItem {
 
 export interface SessionActionDialogs {
   confirm(message: string, options?: { destructive?: boolean; confirmLabel?: string }): Promise<boolean>;
-  prompt(title: string, initialValue?: string): Promise<string | null>;
+  prompt(title: string, initialValue?: string, submitLabel?: string): Promise<string | null>;
   choose<T extends string>(
     message: string,
     choices: { value: T; label: string; destructive?: boolean }[],
@@ -49,52 +50,84 @@ export function revealPathOnDesktop(path: string): Promise<unknown> {
 }
 
 /**
+ * Turns an RPC failure into words the user can act on: known host codes get their own copy, anything
+ * else keeps its message behind a localized prefix instead of surfacing raw English.
+ */
+export function describeActionError(error: unknown, locale: Locale = getDesktopLocale()): string {
+  const data = (error as { data?: { code?: unknown } } | undefined)?.data;
+  const appCode = typeof data?.code === "string" ? data.code : undefined;
+  const rpcCode = (error as { code?: unknown } | undefined)?.code;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (appCode === "wrong_password") return translateDesktop(locale, "desktop.shell.errWrongPassword");
+  if (appCode === "busy") return translateDesktop(locale, "desktop.shell.errThrottled");
+  if (appCode === "timeout") return translateDesktop(locale, "desktop.shell.errTimeout");
+  if (appCode === "closed") return translateDesktop(locale, "desktop.shell.errDisconnected");
+  if (rpcCode === -32601 || /method not found|no handler for|-32601/i.test(message)) {
+    return translateDesktop(locale, "desktop.shell.errOutdated");
+  }
+  // Host messages are already Chinese; only foreign text needs the explanatory prefix.
+  if (locale === "zh" && /[\u4e00-\u9fff]/.test(message)) return message;
+  return translateDesktop(locale, "desktop.shell.errGeneric", { message });
+}
+
+export function reportActionError(error: unknown, locale?: Locale): void {
+  reportDesktopError(describeActionError(error, locale));
+}
+
+/**
  * Confirms and deletes a session permanently, inspecting any exclusive dirty/ahead worktree first
- * so uncommitted work or unmerged commits are never lost accidentally.
+ * so uncommitted work or unmerged commits are never lost accidentally. With `computerKey`, history
+ * entries for the session go too, so back never lands on something that no longer exists.
  */
 export async function confirmAndDeleteSession(
   session: SessionSummary,
   actions: ClientActions,
   dialogs: SessionActionDialogs,
   locale: Locale = getDesktopLocale(),
+  computerKey?: string,
 ): Promise<boolean> {
   const title = sessionTitle(session);
+  const tr = (key: Parameters<typeof translateDesktop>[1], params?: Record<string, string | number>) =>
+    translateDesktop(locale, key, params);
+  const confirmLabel = tr("desktop.menu.deletePermanent");
   let worktree: "keep" | "remove" | undefined;
   if (session.worktree) {
     const entries = await actions.listWorktrees();
     const entry = entries.find((candidate) => candidate.sessions.includes(session.id));
     if (entry && entry.sessions.length === 1 && (entry.dirty || entry.ahead > 0)) {
+      const detail = [
+        entry.ahead ? tr("desktop.shell.worktreeAhead", { count: entry.ahead }) : "",
+        entry.dirty ? tr("desktop.shell.worktreeDirty") : "",
+      ]
+        .filter(Boolean)
+        .join(tr("desktop.shell.listJoin"));
       const choice = await dialogs.choose<"keep" | "remove">(
-        `删除「${title}」？Worktree 还有${entry.ahead ? ` ${entry.ahead} 个新提交` : ""}${
-          entry.dirty ? " 未提交改动" : ""
-        }。Agent 原始会话记录也会删除。`,
+        tr("desktop.shell.deleteConfirmWorktreeDirty", { title, detail }),
         [
-          { value: "keep", label: translateDesktop(locale, "desktop.menu.keepWorktree") },
-          {
-            value: "remove",
-            label: translateDesktop(locale, "desktop.menu.removeWorktree"),
-            destructive: true,
-          },
+          { value: "keep", label: tr("desktop.menu.keepWorktree") },
+          { value: "remove", label: tr("desktop.menu.removeWorktree"), destructive: true },
         ],
       );
       if (!choice) return false;
       worktree = choice;
     } else if (
-      !(await dialogs.confirm(
-        `永久删除「${title}」？Agent 原始会话记录和此会话独占的干净 Worktree 会一起删除。`,
-        { destructive: true },
-      ))
+      !(await dialogs.confirm(tr("desktop.shell.deleteConfirmWorktree", { title }), {
+        destructive: true,
+        confirmLabel,
+      }))
     ) {
       return false;
     }
   } else if (
-    !(await dialogs.confirm(`永久删除「${title}」？Agent 原始会话记录也可能被删除。`, {
+    !(await dialogs.confirm(tr("desktop.shell.deleteConfirm", { title }), {
       destructive: true,
+      confirmLabel,
     }))
   ) {
     return false;
   }
   await actions.deleteSession(session.id, worktree);
+  if (computerKey) routerStore.getState().forgetSession(computerKey, session.id);
   return true;
 }
 
@@ -153,14 +186,18 @@ export function buildProjectMenuItems(options: {
   hasLiveSessions: boolean;
   online: boolean;
   local: boolean;
+  /** Generated groups (Codex chats) have no folder of their own to reveal or copy. */
+  generated?: boolean;
   locale?: Locale;
 }): NativeMenuItem[] {
-  const { hasLiveSessions, online, local, locale = getDesktopLocale() } = options;
+  const { hasLiveSessions, online, local, generated = false, locale = getDesktopLocale() } = options;
   return [
     { id: "new", label: translateDesktop(locale, "desktop.menu.newInProject"), enabled: online },
     separator,
-    ...(local ? [{ id: "reveal", label: revealInFilesLabel(locale) }] : []),
-    { id: "copy-path", label: translateDesktop(locale, "desktop.menu.copyPath") },
+    ...(local && !generated ? [{ id: "reveal", label: revealInFilesLabel(locale) }] : []),
+    ...(!generated
+      ? [{ id: "copy-path", label: translateDesktop(locale, "desktop.menu.copyPath") }]
+      : []),
     separator,
     {
       id: "archive-all",
@@ -196,7 +233,6 @@ export async function openSessionContextMenu(
     connection: Connection;
     dialogs: SessionActionDialogs;
     navigateSession: (sessionId: string) => void;
-    navigateHome: () => void;
     at?: { x: number; y: number };
     locale?: Locale;
   },
@@ -218,7 +254,12 @@ export async function openSessionContextMenu(
   try {
     switch (chosen) {
       case "rename": {
-        const nextTitle = await context.dialogs.prompt("会话名称", sessionTitle(session));
+        const locale = context.locale ?? getDesktopLocale();
+        const nextTitle = await context.dialogs.prompt(
+          translateDesktop(locale, "desktop.shell.renameSessionTitle"),
+          sessionTitle(session),
+          translateDesktop(locale, "desktop.shell.save"),
+        );
         if (nextTitle !== null && nextTitle.trim()) {
           await actions.rename(session.id, nextTitle.trim());
         }
@@ -251,19 +292,26 @@ export async function openSessionContextMenu(
         refreshConnectionProjects(context.connection);
         return;
       case "delete":
-        if (await confirmAndDeleteSession(session, actions, context.dialogs, context.locale)) {
+        if (
+          await confirmAndDeleteSession(
+            session,
+            actions,
+            context.dialogs,
+            context.locale,
+            context.connection.computer.key,
+          )
+        ) {
           refreshConnectionProjects(context.connection);
-          context.navigateHome();
         }
         return;
     }
   } catch (error) {
-    reportDesktopError(error);
+    reportActionError(error, context.locale);
   }
 }
 
 export async function openProjectContextMenu(
-  project: { key: string; name: string; sessions: SessionSummary[] },
+  project: { key: string; name: string; cwd?: string; generated?: boolean; sessions: SessionSummary[] },
   context: {
     connection: Connection;
     dialogs: SessionActionDialogs;
@@ -277,29 +325,37 @@ export async function openProjectContextMenu(
   const online = actions.status === "online";
   const local = context.connection.computer.key === DESKTOP_LOCAL;
   const liveSessions = project.sessions.filter((session) => !session.archived);
+  const generated = Boolean(project.generated);
+  const projectPath = project.cwd || project.key;
+  const locale = context.locale ?? getDesktopLocale();
   const items = buildProjectMenuItems({
     hasLiveSessions: liveSessions.length > 0,
     online,
     local,
-    locale: context.locale,
+    generated,
+    locale,
   });
   const chosen = await showNativeContextMenu(items, context.at);
   if (!chosen) return;
   try {
     switch (chosen) {
       case "new":
-        context.openNewSession(project.key);
+        context.openNewSession(generated ? "" : projectPath);
         return;
       case "reveal":
-        await revealPathOnDesktop(project.key);
+        await revealPathOnDesktop(projectPath);
         return;
       case "copy-path":
-        await copyText(project.key);
+        await copyText(projectPath);
         return;
       case "archive-all": {
         if (
           !(await context.dialogs.confirm(
-            `归档「${project.name}」的 ${liveSessions.length} 个会话？之后可在已归档中找回。`,
+            translateDesktop(locale, "desktop.shell.archiveAllConfirm", {
+              name: project.name,
+              count: liveSessions.length,
+            }),
+            { confirmLabel: translateDesktop(locale, "desktop.menu.archiveAll") },
           ))
         ) {
           return;
@@ -312,6 +368,6 @@ export async function openProjectContextMenu(
       }
     }
   } catch (error) {
-    reportDesktopError(error);
+    reportActionError(error, locale);
   }
 }

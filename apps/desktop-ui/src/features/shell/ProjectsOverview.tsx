@@ -9,7 +9,6 @@ import {
   projectScopeStore,
   revealInFilesLabel,
   revealPathOnDesktop,
-  sessionGroup,
   sessionTitle,
   setProjectScope,
   useActiveDesktopPlatform,
@@ -38,8 +37,12 @@ import {
   formatRelativeTimestamp,
   formatSessionCountLabel,
   relativeSubdirLabel,
+  reportShellError,
+  sessionActivity,
+  sessionListState,
   shortenHomePath,
   useConnectionStore,
+  useMinuteTick,
   useRetainedMetadataConnections,
 } from "./shell-helpers";
 
@@ -129,12 +132,7 @@ function ProjectListRow({
     group.sessions.length - INITIAL_PREVIEW_SESSIONS,
   );
 
-  const moreActionsLabel =
-    locale === "en"
-      ? `Actions for ${group.name}`
-      : locale === "ja"
-        ? `${group.name} の操作`
-        : `${group.name} 更多操作`;
+  const moreActionsLabel = t("desktop.shell.projectActions", { name: group.name });
 
   return (
     <div
@@ -227,11 +225,7 @@ function ProjectListRow({
                 });
               }}
             >
-              {locale === "en"
-                ? "Browse Files"
-                : locale === "ja"
-                  ? "ファイルを参照"
-                  : "浏览文件"}
+              {t("desktop.shell.browseFiles")}
             </MenuItem>
             {projectPath ? (
               <MenuItem
@@ -246,7 +240,11 @@ function ProjectListRow({
             {isLocal && projectPath ? (
               <MenuItem
                 icon="external-link"
-                onSelect={() => void revealPathOnDesktop(projectPath)}
+                onSelect={() => {
+                  void revealPathOnDesktop(projectPath).catch((error: unknown) =>
+                    reportShellError(error, locale),
+                  );
+                }}
               >
                 {revealInFilesLabel(locale, activePlatform)}
               </MenuItem>
@@ -263,8 +261,11 @@ function ProjectListRow({
           <div className="ls-collapse-grid__inner" inert={!expanded || undefined}>
             <div className="ls-entity-sublist">
               {visibleSessions.map((session) => {
-                const stateGroup = sessionGroup(session);
-                const subdir = relativeSubdirLabel(projectPath, session.cwd);
+                const activity = sessionActivity(session, locale);
+                // A worktree's folder is a generated id: say what it is, not what it is called.
+                const subdir = session.worktree
+                  ? undefined
+                  : relativeSubdirLabel(projectPath, session.cwd);
                 return (
                   <button
                     key={session.id}
@@ -277,16 +278,26 @@ function ProjectListRow({
                   >
                     <span className="ls-entity-subrow__lead" aria-hidden="true">
                       <AgentMark agent={session.agent} size={14} />
-                      {stateGroup === "running" ? (
-                        <StatusDot tone="running" size="sm" className="ls-entity-subrow__dot" />
-                      ) : stateGroup === "waiting" ? (
-                        <StatusDot tone="waiting" size="sm" className="ls-entity-subrow__dot" />
+                      {activity ? (
+                        <StatusDot tone={activity.kind} size="sm" className="ls-entity-subrow__dot" />
                       ) : null}
                     </span>
 
                     <span className="ls-entity-subrow__title ls-truncate">
                       {sessionTitle(session)}
                     </span>
+
+                    {session.worktree ? (
+                      <span className="tree-session__pill" title={session.cwd}>
+                        <DesktopIcon name="worktree" size="xs" />
+                        <span>{t("desktop.shell.worktreeTag")}</span>
+                      </span>
+                    ) : null}
+                    {activity ? (
+                      <span className={`tree-session__pill tree-session__pill--${activity.kind}`}>
+                        {activity.label}
+                      </span>
+                    ) : null}
 
                     {subdir ? (
                       <span className="ls-entity-subrow__subdir ls-truncate" title={session.cwd}>
@@ -347,7 +358,11 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
 
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
   const projectsList = useConnectionStore(activeConnection, (s) => s.projects);
+  const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+  const sessionsLoaded = useConnectionStore(activeConnection, (s) => s.sessionsLoaded);
+  const listState = sessionListState(activeComputer, linkStatus, sessionsLoaded);
   const retainedMap = useRetainedMetadataConnections(computers, isAllScope);
+  useMinuteTick();
 
   const allTrees = useMemo(() => {
     if (!isAllScope) return null;
@@ -399,14 +414,9 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
     ? filteredComputerSections.length > 0
     : filteredSingleGroups.length > 0;
 
-  const syncingBadgeLabel =
-    locale === "en" ? "Syncing" : locale === "ja" ? "同期中" : "同步中";
-  const syncingRowLabel =
-    locale === "en"
-      ? "Loading projects and sessions"
-      : locale === "ja"
-        ? "プロジェクトとセッションを読み込み中"
-        : "正在同步项目与会话";
+  const syncingBadgeLabel = t("desktop.shell.syncing");
+  const syncingRowLabel = t("desktop.shell.loadingProjects");
+  const activeComputerTitle = displayComputerName(activeComputer, names, locale);
 
   return (
     <div className="shell-page">
@@ -463,13 +473,7 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
                 size="md"
                 leadingIcon="search"
                 value={filter}
-                placeholder={
-                  locale === "en"
-                    ? "Search projects or paths"
-                    : locale === "ja"
-                      ? "プロジェクト名またはパスを検索"
-                      : "搜索项目或路径"
-                }
+                placeholder={t("desktop.shell.searchProjects")}
                 onChange={(e) => setFilter(e.target.value)}
               />
             </div>
@@ -588,17 +592,22 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
               })}
             </div>
           )
+        ) : !isAllScope && listState === "loading" ? (
+          <div className="home-state" data-state="loading">
+            <DesktopIcon name="spinner" size="sm" />
+            <span>{t("desktop.shell.connectingTo", { name: activeComputerTitle })}</span>
+          </div>
+        ) : !isAllScope && listState === "offline" ? (
+          <EmptyState
+            icon="alert-circle"
+            title={t("desktop.shell.offlineTitle", { name: activeComputerTitle })}
+            description={t("desktop.shell.offlineDesc")}
+          />
         ) : (
           <EmptyState
             icon="folder-open"
             title={t("desktop.nav.projects")}
-            description={
-              locale === "en"
-                ? "Start a coding agent session in any directory on your Mac or PC."
-                : locale === "ja"
-                  ? "任意のフォルダでエージェントセッションを開始しましょう。"
-                  : "在任意代码仓库或文件夹中启动会话，项目将自动按创建时间归类。"
-            }
+            description={t("desktop.shell.projectsEmpty")}
             actions={
               <Button
                 variant="primary"

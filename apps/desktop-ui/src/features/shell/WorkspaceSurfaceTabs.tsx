@@ -16,8 +16,10 @@ import {
 import { AgentMark, DesktopIcon } from "../../icons";
 import { StatusDot, Tooltip } from "../../primitives";
 import {
+  currentFusionCapabilityEnv,
   displayComputerName,
   isLocalComputer,
+  sessionRecency,
   useConnectionStore,
 } from "./shell-helpers";
 
@@ -57,6 +59,7 @@ export function WorkspaceSurfaceTabs({
   const fusionCap = evaluateFusionCapability(
     activeComputerKey,
     activeComputer?.machine.platform,
+    currentFusionCapabilityEnv(),
   );
   const fusionDisabledReason = !fusionCap.supported
     ? fusionCapabilityMessage(fusionCap.reason, locale)
@@ -69,7 +72,7 @@ export function WorkspaceSurfaceTabs({
   const latestSession = useMemo(() => {
     const live = Object.values(sessionsMap)
       .filter((s) => !s.archived)
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => sessionRecency(b) - sessionRecency(a));
     return live[0];
   }, [sessionsMap]);
 
@@ -208,7 +211,7 @@ export function WorkspaceSurfaceTabs({
               <button
                 type="button"
                 data-surface="fusion"
-                data-active={fusionState.connected ? "true" : undefined}
+                data-connected={fusionState.connected ? "true" : undefined}
                 disabled={Boolean(fusionDisabledReason)}
                 className="desktop-surface-tab"
                 onClick={() => {

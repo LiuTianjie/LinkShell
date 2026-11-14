@@ -29,7 +29,6 @@ export {
 } from "./ProjectsOverview";
 export {
   computerPlatformIcon,
-  computeProjectMonogram,
   connectionRouteBadge,
   currentFusionCapabilityEnv,
   DefaultFusionQuickTrigger,
@@ -39,15 +38,16 @@ export {
   formatBytesCompact,
   formatRelativeTimestamp,
   isLocalComputer,
-  ProjectMonogram,
+  isRouteStillValid,
+  openSessionOnComputer,
+  visibleSidebarSessions,
   switchToComputer,
   useConnectionStore,
   useRetainedMetadataConnections,
-  type ProjectMonogramPalette,
   type RouteBadgeDescriptor,
   type ShellRenderSlots,
 } from "./shell-helpers";
-export { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
+export { ShortcutsHelpDialog, shortcutSheetSections } from "./ShortcutsHelpDialog";
 export { Sidebar, type SidebarProps } from "./Sidebar";
 export {
   WorkspaceSurfaceTabs,

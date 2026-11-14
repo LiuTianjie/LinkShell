@@ -4,6 +4,7 @@ import CoreVideo
 import Foundation
 import ImageIO
 import LinkShellFusionShim
+import LinkShellScreen
 import Network
 import ScreenCaptureKit
 import UniformTypeIdentifiers
@@ -23,115 +24,187 @@ final class FusionRemote {
   static func run() -> Never {
     Engine.ownEncoder = true
     Engine.report = { Fusion.log($0) }
+    let home = Launch.value(after: "--home") ?? (NSHomeDirectory() + "/.linkshell")
+    try? FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+    Fusion.logPath = home + "/fusion-remote.log"
+    FusionRemoteSession.home = home
+    // An earlier run that died without `end()` left the user's Dock hidden: put it back first.
+    FusionDock.restoreIfMarked(home: home)
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
+    _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), FusionRemoteSession.axTimeout)
     let requestedPort = Launch.value(after: "--port").flatMap(UInt16.init) ?? FusionWire.port
-    let parentSock = Launch.value(after: "--parent-sock")
-    let iceServers = Self.parseICEServers(Launch.value(after: "--ice-servers"))
-    let remote = FusionRemote(
-      token: Launch.value(after: "--token") ?? "",
-      port: requestedPort,
-      parentSocketPath: parentSock,
-      iceServers: iceServers
-    )
-    remote.listen()
+    let remote = FusionRemote(port: requestedPort, parentSocketPath: Launch.value(after: "--parent-sock"))
+    remote.installSignalHandlers()
+    remote.connectParentLifecycleSocket()
     app.run()
     exit(0)
   }
 
-  private static func parseICEServers(_ raw: String?) -> [[String: Any]] {
-    guard let raw, !raw.isEmpty,
-          let data = raw.data(using: .utf8),
-          let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
-      return []
-    }
-    return list
-  }
-
-  private let token: String
   private let requestedPort: UInt16
   private let parentSocketPath: String?
-  private let iceServers: [[String: Any]]
   private var parentFD: Int32 = -1
+  private let parentWriteLock = NSLock()
+  /// Single use: cleared by the `hello` that presents it, so a token seen once (by anyone) opens
+  /// nothing later. The host hands out a fresh one with every `fusion.start`.
+  private var token: String?
+  private var iceServers: [[String: Any]] = []
   private var listener: NWListener?
+  private var listenerGeneration = 0
   private var current: FusionRemoteSession?
   private var pending: [ObjectIdentifier: FusionRemoteSession] = [:]
+  private var signalSources: [DispatchSourceSignal] = []
 
-  init(token: String, port: UInt16, parentSocketPath: String?, iceServers: [[String: Any]]) {
-    self.token = token
+  init(port: UInt16, parentSocketPath: String?) {
     self.requestedPort = port
     self.parentSocketPath = parentSocketPath
-    self.iceServers = iceServers
   }
 
-  func listen() {
-    let endpointPort: NWEndpoint.Port = requestedPort == 0 ? .any : (NWEndpoint.Port(rawValue: requestedPort) ?? NWEndpoint.Port(rawValue: FusionWire.port)!)
-    let listener: NWListener
-    if let exact = try? NWListener(using: FusionWire.parameters(), on: endpointPort) {
-      listener = exact
-    } else if let anyListener = try? NWListener(using: FusionWire.parameters(), on: .any) {
-      listener = anyListener
-    } else {
+  /// Constant time, so the comparison does not tell an attacker how much of a guess was right.
+  static func tokensMatch(_ a: String, _ b: String) -> Bool {
+    let x = Array(a.utf8), y = Array(b.utf8)
+    guard x.count == y.count, !x.isEmpty else { return false }
+    var diff: UInt8 = 0
+    for i in 0..<x.count { diff |= x[i] ^ y[i] }
+    return diff == 0
+  }
+
+  func consume(token candidate: String) -> Bool {
+    guard let token, Self.tokensMatch(token, candidate) else { return false }
+    self.token = nil
+    return true
+  }
+
+  private func installSignalHandlers() {
+    for sig in [SIGTERM, SIGINT, SIGHUP] {
+      signal(sig, SIG_IGN)
+      let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+      source.setEventHandler { [weak self] in
+        Fusion.log("signal \(sig): ending")
+        self?.current?.end()
+        self?.pending.values.forEach { $0.end() }
+        exit(0)
+      }
+      source.resume()
+      signalSources.append(source)
+    }
+  }
+
+  /// Each token gets its own listener, keyed to it: a TLS-PSK listener's key is fixed once started.
+  /// Sessions already accepted keep running on their connections when the old listener goes.
+  private func relisten() {
+    guard let token else { return }
+    listener?.newConnectionHandler = nil
+    listener?.stateUpdateHandler = nil
+    listener?.cancel()
+    listener = nil
+    listenerGeneration += 1
+    let generation = listenerGeneration
+    let parameters = FusionWire.parameters(token: token)
+    let endpointPort: NWEndpoint.Port = requestedPort == 0 ? .any : (NWEndpoint.Port(rawValue: requestedPort) ?? .any)
+    guard let listener = (try? NWListener(using: parameters, on: endpointPort)) ?? (try? NWListener(using: parameters, on: .any)) else {
       Fusion.log("cannot listen on \(requestedPort)")
-      exit(1)
+      writeParent(["t": "error", "message": "远端融合模式无法监听端口"])
+      return
     }
     listener.stateUpdateHandler = { [weak self, weak listener] state in
-      guard let self, let listener else { return }
+      guard let self, let listener, generation == self.listenerGeneration else { return }
       switch state {
       case .ready:
         let actual = listener.port?.rawValue ?? self.requestedPort
         Fusion.log("fusion remote on \(actual): AX \(AXIsProcessTrusted()), capture \(CGPreflightScreenCaptureAccess())")
-        self.connectParentLifecycleSocket(port: actual)
+        self.writeParent(["t": "ready", "ready": true, "port": Int(actual), "pid": Int(getpid())])
       case .failed(let error):
         Fusion.log("fusion listener failed: \(error)")
-        self.current?.end()
-        exit(1)
+        self.writeParent(["t": "error", "message": "远端融合模式监听失败：\(error.localizedDescription)"])
       default:
         break
       }
     }
     listener.newConnectionHandler = { [weak self] connection in
-      DispatchQueue.main.async {
-        guard let self else { return }
-        Fusion.log("connection from \(connection.endpoint)")
-        let wire = FusionWire(connection)
-        let session = FusionRemoteSession(wire: wire, token: self.token, iceServers: self.iceServers)
-        let key = ObjectIdentifier(session)
-        self.pending[key] = session
-        session.onAuthenticated = { [weak self, weak session] in
-          guard let self, let session else { return }
-          self.pending.removeValue(forKey: key)
-          if self.current !== session {
-            self.current?.end()
-            self.current = session
-          }
-        }
-        wire.onMessage = { [weak session] in session?.receive($0) }
-        wire.onClose = { [weak self, weak session] in
-          self?.pending.removeValue(forKey: key)
-          session?.end()
-          if self?.current === session { self?.current = nil }
-        }
-        wire.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self, weak session] in
-          guard let self, let session, self.pending[key] != nil else { return }
-          self.pending.removeValue(forKey: key)
-          session.end()
-        }
-      }
+      DispatchQueue.main.async { self?.accept(connection) }
     }
     listener.start(queue: .main)
     self.listener = listener
   }
 
-  private func connectParentLifecycleSocket(port: UInt16) {
-    guard let path = parentSocketPath, !path.isEmpty, parentFD < 0 else { return }
+  private func accept(_ connection: NWConnection) {
+    Fusion.log("connection from \(connection.endpoint)")
+    let wire = FusionWire(connection)
+    let session = FusionRemoteSession(wire: wire, authorize: { [weak self] in self?.consume(token: $0) == true }, iceServers: iceServers)
+    let key = ObjectIdentifier(session)
+    pending[key] = session
+    session.onAuthenticated = { [weak self, weak session] in
+      guard let self, let session else { return }
+      self.pending.removeValue(forKey: key)
+      if self.current !== session {
+        self.current?.end()
+        self.current = session
+      }
+      // The client pings every 1.5 s: silence means it is gone (asleep, off the network).
+      wire.startWatchdog(timeout: 8)
+    }
+    wire.onMessage = { [weak session] in session?.receive($0) }
+    wire.onClose = { [weak self, weak session] reason in
+      Fusion.log("connection closed: \(reason)")
+      self?.pending.removeValue(forKey: key)
+      session?.end()
+      if self?.current === session { self?.current = nil }
+    }
+    wire.start()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self, weak session] in
+      guard let self, let session, self.pending[key] != nil else { return }
+      self.pending.removeValue(forKey: key)
+      session.end()
+      wire.close(reason: "unauthenticated")
+    }
+  }
+
+  private func handleParent(_ message: [String: Any]) {
+    switch message["t"] as? String {
+    case "token":
+      guard let next = message["token"] as? String, !next.isEmpty else { return }
+      token = next
+      iceServers = (message["ice"] as? [[String: Any]]) ?? []
+      relisten()
+    case "stop":
+      current?.end()
+      current = nil
+    default:
+      break
+    }
+  }
+
+  private func writeParent(_ object: [String: Any]) {
+    guard parentFD >= 0, var payload = try? JSONSerialization.data(withJSONObject: object) else { return }
+    payload.append(10)
+    parentWriteLock.lock()
+    defer { parentWriteLock.unlock() }
+    payload.withUnsafeBytes { raw in
+      guard let base = raw.baseAddress else { return }
+      var offset = 0
+      while offset < raw.count {
+        let n = Darwin.write(parentFD, base.advanced(by: offset), raw.count - offset)
+        if n < 0 && errno == EINTR { continue }
+        if n <= 0 { break }
+        offset += n
+      }
+    }
+  }
+
+  /// The host's unix socket (0600) is the only way in for secrets: a token on the command line
+  /// would be readable by any local process through `ps`.
+  private func connectParentLifecycleSocket() {
+    guard let path = parentSocketPath, !path.isEmpty else {
+      Fusion.log("no parent socket: nothing would ever hand out a token")
+      exit(1)
+    }
     let sock = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-    guard sock >= 0 else { return }
+    guard sock >= 0 else { exit(1) }
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
     let bytes = Array(path.utf8CString)
-    guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { Darwin.close(sock); return }
+    guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { Darwin.close(sock); exit(1) }
     withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
       ptr.withMemoryRebound(to: CChar.self, capacity: bytes.count) { dst in
         for i in 0..<bytes.count { dst[i] = bytes[i] }
@@ -148,24 +221,67 @@ final class FusionRemote {
       exit(1)
     }
     parentFD = sock
-    if var payload = try? JSONSerialization.data(withJSONObject: ["ready": true, "port": Int(port), "pid": Int(getpid())]) {
-      payload.append(10)
-      payload.withUnsafeBytes { raw in
-        if let base = raw.baseAddress { _ = Darwin.write(sock, base, raw.count) }
-      }
-    }
+    writeParent(["t": "hello", "pid": Int(getpid())])
     Thread.detachNewThread { [weak self] in
-      var buf = [UInt8](repeating: 0, count: 256)
+      var buffer = Data()
+      var chunk = [UInt8](repeating: 0, count: 4096)
       while true {
-        let n = Darwin.read(sock, &buf, buf.count)
+        let n = Darwin.read(sock, &chunk, chunk.count)
         if n < 0 && errno == EINTR { continue }
         if n <= 0 { break }
+        buffer.append(chunk, count: n)
+        while let newline = buffer.firstIndex(of: 10) {
+          let line = buffer.subdata(in: buffer.startIndex..<newline)
+          buffer.removeSubrange(buffer.startIndex...newline)
+          guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { continue }
+          DispatchQueue.main.async { self?.handleParent(message) }
+        }
       }
       DispatchQueue.main.async {
         self?.current?.end()
         exit(0)
       }
     }
+  }
+}
+
+/// The remote Dock is hidden while fused (so window zoom matches the local usable frame). The
+/// setting is a persistent preference: a marker file records that we changed it, so a crash or
+/// `kill -9` is repaired by the next run instead of leaving the user without a Dock.
+enum FusionDock {
+  private typealias DockGet = @convention(c) () -> Bool
+  private typealias DockSet = @convention(c) (Bool) -> Void
+  private static let services = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW)
+
+  static func marker(home: String) -> String { home + "/fusion-dock-hidden" }
+
+  static func hidden() -> Bool? {
+    guard let symbol = dlsym(services, "CoreDockGetAutoHideEnabled") else { return nil }
+    return unsafeBitCast(symbol, to: DockGet.self)()
+  }
+
+  static func setHidden(_ hidden: Bool) {
+    guard let symbol = dlsym(services, "CoreDockSetAutoHideEnabled") else { return }
+    unsafeBitCast(symbol, to: DockSet.self)(hidden)
+  }
+
+  /// Hides the Dock if it is shown; returns whether we did (and so must restore it).
+  static func hide(home: String) -> Bool {
+    guard hidden() == false else { return false }
+    FileManager.default.createFile(atPath: marker(home: home), contents: Data("1".utf8))
+    setHidden(true)
+    return true
+  }
+
+  static func restore(home: String) {
+    setHidden(false)
+    try? FileManager.default.removeItem(atPath: marker(home: home))
+  }
+
+  static func restoreIfMarked(home: String) {
+    guard FileManager.default.fileExists(atPath: marker(home: home)) else { return }
+    Fusion.log("restoring the Dock an earlier run left hidden")
+    restore(home: home)
   }
 }
 
@@ -424,7 +540,10 @@ final class FusionRemoteSession: @unchecked Sendable {
   }
 
   private let wire: FusionWire
-  private let token: String
+  private let authorize: (String) -> Bool
+  static var home = NSHomeDirectory() + "/.linkshell"
+  /// A hung remote app must not freeze every fused window: AX calls give up after this.
+  static let axTimeout: Float = 0.15
   private let iceServers: [[String: Any]]
   private var mirrors: [Mirror] = []
   private var pidToBundle: [pid_t: String] = [:]
@@ -451,7 +570,7 @@ final class FusionRemoteSession: @unchecked Sendable {
   private var dockMenuStamps: [String: Double] = [:]
   private var focusedWindowID: CGWindowID = 0
   private var knownRunningPIDs: Set<pid_t> = []
-  private var dockWasHidden: Bool?
+  private var dockHiddenByUs = false
   private var timers: [Timer] = []
   private let sampler = FusionSampler()
   private var ended = false
@@ -463,9 +582,9 @@ final class FusionRemoteSession: @unchecked Sendable {
   private static let appPathsLock = NSLock()
   private static var appPaths: [String: String] = [:]
 
-  init(wire: FusionWire, token: String, iceServers: [[String: Any]] = []) {
+  init(wire: FusionWire, authorize: @escaping (String) -> Bool, iceServers: [[String: Any]] = []) {
     self.wire = wire
-    self.token = token
+    self.authorize = authorize
     self.iceServers = iceServers
     self.sampler.onWindowDisappeared = { [weak self] in
       self?.track()
@@ -490,6 +609,16 @@ final class FusionRemoteSession: @unchecked Sendable {
       }
     case "quit":
       if let bundle = m["bundle"] as? String { quit(bundle, force: m["force"] as? Bool == true) }
+    case "menufetch":
+      if let bundle = m["bundle"] as? String {
+        let path = (m["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
+        sendMenu(bundle: bundle, path: path)
+      }
+    case "menupress":
+      if let bundle = m["bundle"] as? String {
+        let path = (m["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
+        pressMenu(bundle: bundle, path: path)
+      }
     case "dockaction":
       if let bundle = m["bundle"] as? String {
         let path = (m["path"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
@@ -503,6 +632,21 @@ final class FusionRemoteSession: @unchecked Sendable {
     case "close", "wclose.req":
       closeRemoteWindow(CGWindowID(Fusion.number(m["id"])))
     case "ping": wire.send(["t": "pong", "ts": m["ts"] ?? 0])
+    case "clip":
+      if clipboard.armed, let item = FusionClipboardItem(message: m) {
+        clipboard.didWrite(changeCount: item.write(to: NSPasteboard.general))
+      }
+    case "prewarm":
+      if let id = (m["id"] as? NSNumber).map({ CGWindowID($0.uint32Value) }), let s = streams[id] { noteUserAction(pid: s.pid) }
+      prewarmOverlay()
+    case "appactive":
+      // No stub is active on the local Mac: make the remote apps look inactive too, by giving the
+      // remote focus to this (windowless) process. A stub becoming key sends `focus` again.
+      if m["on"] as? Bool == false, !ended { NSApp.activate(ignoringOtherApps: true) }
+    case "displays":
+      if let locals = m["displays"] as? [[String: Any]], !locals.isEmpty {
+        Task { @MainActor in await self.rebuildDisplays(locals) }
+      }
     case "sig": if let key = m["k"] as? String { signal(key, m["m"] as? [String: Any] ?? [:]) }
     default: break
     }
@@ -532,7 +676,11 @@ final class FusionRemoteSession: @unchecked Sendable {
   }
 
   @MainActor private func hello(_ m: [String: Any]) async {
-    guard m["token"] as? String == token else { Fusion.log("wrong token"); wire.close(); return }
+    guard !authenticated, let presented = m["token"] as? String, authorize(presented) else {
+      Fusion.log("wrong or spent token")
+      wire.close(reason: "token")
+      return
+    }
     authenticated = true
     onAuthenticated?()
     // Deliver the remote app catalog immediately (<150ms) before virtual-display setup sleeps (~3.3s),
@@ -541,9 +689,149 @@ final class FusionRemoteSession: @unchecked Sendable {
     wire.send(["t": "apps", "apps": catalog])
     if !AXIsProcessTrusted() { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary) }
     if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
-    dockWasHidden = Self.dockHidden()
-    if dockWasHidden == false { Self.setDockHidden(true) }
+    dockHiddenByUs = FusionDock.hide(home: Self.home)
     let locals = m["displays"] as? [[String: Any]] ?? []
+    await buildMirrors(locals)
+    guard !ended else { return }
+    installCaptureHooks()
+    displayReady = true
+    sendReady(catalog: catalog)
+    let queuedLaunches = pendingRemoteLaunches
+    pendingRemoteLaunches.removeAll()
+    for bundle in queuedLaunches {
+      launch(bundle)
+    }
+    startOverlaySessions()
+    Fusion.log("ready: " + mirrors.map { "\($0.local) -> \($0.remote) @\($0.scale)x" }.joined(separator: "; "))
+    checkHealth()
+    let wsCenter = NSWorkspace.shared.notificationCenter
+    workspaceObservers.append(wsCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+      guard let self, !self.ended else { return }
+      let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+      guard app?.activationPolicy != .prohibited else { return }
+      for s in self.streams.values { s.session.refreshFusionGroupApps() }
+    })
+    workspaceObservers.append(wsCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.track()
+    })
+    timers.append(Timer.scheduledTimer(withTimeInterval: 1.0 / 35, repeats: true) { [weak self] _ in self?.track() })
+    timers.append(Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in self?.rescueOffDesktopWindows() })
+    timers.append(Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.checkHealth() })
+    timers.append(Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.clipboardTick() })
+  }
+
+  private var healthSent: [String: Bool] = [:]
+
+  /// Problems the person at the local Mac cannot see from here: each becomes an alert with a remedy,
+  /// and is cleared again once it is fixed.
+  private func checkHealth() {
+    guard !ended else { return }
+    let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Int == 1
+    report("locked", active: locked, message: "远端 Mac 处于锁屏状态（窗口呈非激活状态且键盘受限），请先解锁远端屏幕")
+    report("accessibility", active: !AXIsProcessTrusted(), message: "远端 Mac 尚未允许 LinkShell 使用辅助功能，融合窗口无法移动、聚焦或接收输入")
+    report("recording", active: !CGPreflightScreenCaptureAccess(), message: "远端 Mac 尚未允许 LinkShell 录制屏幕，融合窗口无法显示")
+  }
+
+  private func report(_ kind: String, active: Bool, message: String) {
+    guard healthSent[kind] != active else { return }
+    healthSent[kind] = active
+    if active {
+      wire.send(["t": "alert", "kind": kind, "message": message])
+    } else {
+      wire.send(["t": "alert", "kind": kind, "clear": true])
+    }
+  }
+
+  private func sendReady(catalog: [[String: String]]) {
+    wire.send([
+      "t": "ready",
+      "displays": mirrors.map { ["index": $0.index, "local": Fusion.dict($0.local), "remote": Fusion.dict($0.remote), "scale": $0.scale] },
+      "apps": catalog,
+    ])
+  }
+
+  private var rebuilding = false
+  private var lastUserAction: [pid_t: Double] = [:]
+  private var clipboard = FusionClipboardGuard()
+
+  /// Remote → local, only while one of the fused apps is frontmost here (the person is using it).
+  private func clipboardTick() {
+    guard !ended, clipboard.armed,
+          let front = NSWorkspace.shared.frontmostApplication?.processIdentifier, fused.contains(front) else { return }
+    let pasteboard = NSPasteboard.general
+    let count = pasteboard.changeCount
+    guard clipboard.isUnseen(changeCount: count) else { return }
+    let types = (pasteboard.types ?? []).map(\.rawValue)
+    let item = FusionClipboardItem.read(pasteboard)
+    guard clipboard.shouldSend(changeCount: count, types: types, bytes: item.bytes) else { return }
+    wire.send(item.message)
+  }
+  private var prewarmUntil: Double = 0
+
+  private func noteUserAction(pid: pid_t) {
+    lastUserAction[pid] = CACurrentMediaTime()
+  }
+
+  /// A window takes the focus on the local Mac only when it follows something the person did in
+  /// that app moments ago (a click, a key, a launch from here), never when it opens on its own.
+  private func followsUserAction(pid: pid_t) -> Bool {
+    guard let at = lastUserAction[pid] else { return false }
+    return CACurrentMediaTime() - at < 3.0
+  }
+
+  /// A mouse-down or menu key in a fused window: a menu may open next, and its first frame should
+  /// not wait for the idle 2 fps overlay to switch up.
+  private func prewarmOverlay() {
+    let until = CACurrentMediaTime() + 2.0
+    let wasWarm = prewarmUntil > CACurrentMediaTime()
+    prewarmUntil = until
+    if !wasWarm { for mirror in mirrors { mirror.session?.setFusionOverlayActive(true) } }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.05) { [weak self] in
+      guard let self, !self.ended, CACurrentMediaTime() >= self.prewarmUntil else { return }
+      for mirror in self.mirrors {
+        let active = self.lastPopupMirrors.contains(mirror.index)
+        mirror.session?.setFusionOverlayActive(active)
+      }
+    }
+  }
+
+  private var lastPopupMirrors: Set<Int> = []
+  private var hiddenBundles: Set<String> = []
+  private var pendingDisplays: [[String: Any]]?
+
+  /// The local Mac's screens changed (plugged, rescaled, woke): every window stream is closed and
+  /// reopened on virtual displays that match again. Windows reappear locally a moment later.
+  @MainActor private func rebuildDisplays(_ locals: [[String: Any]]) async {
+    guard displayReady, !rebuilding else {
+      pendingDisplays = locals
+      return
+    }
+    rebuilding = true
+    displayReady = false
+    Fusion.log("rebuilding virtual displays for \(locals.count) local display(s)")
+    for id in Array(streams.keys) { closeStream(id) }
+    for mirror in mirrors {
+      mirror.session?.close()
+      if mirror.descriptor >= 0 { close(mirror.descriptor) }
+    }
+    mirrors.removeAll()
+    moved.removeAll()
+    lastLayout = ""
+    lastPopups = []
+    sampler.set(mirrors: [])
+    await buildMirrors(locals)
+    rebuilding = false
+    guard !ended else { return }
+    displayReady = true
+    sendReady(catalog: Self.apps())
+    startOverlaySessions()
+    if let next = pendingDisplays {
+      pendingDisplays = nil
+      await rebuildDisplays(next)
+    }
+  }
+
+  @MainActor private func buildMirrors(_ locals: [[String: Any]]) async {
     var menuBar: CGFloat = 30
     // Size each virtual display to `screenBounds.width × ceil4(screenBounds.height + menuBar)` so even
     // below the remote macOS menu bar, 100% of a full-screen window's height fits on the desktop with
@@ -594,7 +882,9 @@ final class FusionRemoteSession: @unchecked Sendable {
     for mirror in mirrors { mirror.remote = CGDisplayBounds(mirror.display.displayID) }
     sampler.set(mirrors: mirrors.map { .init(id: $0.display.displayID, remote: $0.remote, local: $0.local, scale: $0.scale) })
     sampler.start()
+  }
 
+  private func installCaptureHooks() {
     let sampler = self.sampler
     // Display overlay streams carry popup windows (menus, tooltips) plus their parent root windows
     // so rounded popup corners composite against their parent window rather than black.
@@ -616,17 +906,9 @@ final class FusionRemoteSession: @unchecked Sendable {
       if let json = sampler.layout(display: display, at: time) { FusionMetadata.attach(json, to: buffer) }
     }
 
-    displayReady = true
-    wire.send([
-      "t": "ready",
-      "displays": mirrors.map { ["index": $0.index, "local": Fusion.dict($0.local), "remote": Fusion.dict($0.remote), "scale": $0.scale] },
-      "apps": catalog,
-    ])
-    let queuedLaunches = pendingRemoteLaunches
-    pendingRemoteLaunches.removeAll()
-    for bundle in queuedLaunches {
-      launch(bundle)
-    }
+  }
+
+  private func startOverlaySessions() {
     for mirror in mirrors {
       guard let screen = Display.all.firstIndex(where: { $0.id == mirror.display.displayID }) else { continue }
       var pair: [Int32] = [0, 0]
@@ -645,23 +927,6 @@ final class FusionRemoteSession: @unchecked Sendable {
       session.start()
       session.setFusionOverlayActive(false)
     }
-    Fusion.log("ready: " + mirrors.map { "\($0.local) -> \($0.remote) @\($0.scale)x" }.joined(separator: "; "))
-    if (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Int == 1 {
-      Fusion.log("warning: remote macOS session is screen-locked (loginwindow holds focus)")
-      wire.send(["t": "error", "message": "远端 Mac 处于锁屏状态（窗口红绿灯呈非激活灰且键盘受限），请先解锁远端屏幕"])
-    }
-    let wsCenter = NSWorkspace.shared.notificationCenter
-    workspaceObservers.append(wsCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
-      guard let self, !self.ended else { return }
-      let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-      guard app?.activationPolicy != .prohibited else { return }
-      for s in self.streams.values { s.session.refreshFusionGroupApps() }
-    })
-    workspaceObservers.append(wsCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-      self?.track()
-    })
-    timers.append(Timer.scheduledTimer(withTimeInterval: 1.0 / 35, repeats: true) { [weak self] _ in self?.track() })
-    timers.append(Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in self?.rescueOffDesktopWindows() })
   }
 
   private func read(_ descriptor: Int32, key: String) {
@@ -725,6 +990,7 @@ final class FusionRemoteSession: @unchecked Sendable {
     let (buttons, hitrects) = inspectWindowChrome(pid: pid, id: id, frame: remoteFrame)
     wire.send([
       "t": "wopen", "id": id, "pid": pid, "bundle": bundle, "title": resolvedTitle,
+      "activate": followsUserAction(pid: pid),
       "toolbar": hasTB, "frame": Fusion.dict(local), "buttons": buttons, "hitrects": hitrects,
     ])
     wire.send(["t": "sig", "k": key, "m": ["rtc": ["t": "config", "iceServers": iceServers]]])
@@ -739,7 +1005,9 @@ final class FusionRemoteSession: @unchecked Sendable {
       samplerRef?.latestFrame(window: id) ?? remoteFrame
     }
     session.onWindowInteract = { [weak self] in
-      guard let self, self.focusedWindowID != id else { return }
+      guard let self else { return }
+      self.noteUserAction(pid: pid)
+      guard self.focusedWindowID != id else { return }
       self.focus(id)
     }
     streams[id] = WindowStream(session: session, descriptor: pair[1], pid: pid, mirrorIndex: mirror.index, groupIDs: groupIDs, bundle: bundle)
@@ -872,7 +1140,7 @@ final class FusionRemoteSession: @unchecked Sendable {
       ok = true
       let gx = Float(frame.minX + x), gy = Float(frame.minY + y)
       var hit: AXUIElement?
-      if AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(pid), gx, gy, &hit) == .success, var element = hit {
+      if AXUIElementCopyElementAtPosition(FusionRemoteSession.axApp(pid), gx, gy, &hit) == .success, var element = hit {
         let interactive: Set<String> = [
           "AXButton", "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox",
           "AXPopUpButton", "AXMenuButton", "AXRadioButton", "AXCheckBox", "AXTabGroup",
@@ -929,18 +1197,10 @@ final class FusionRemoteSession: @unchecked Sendable {
     }
   }
 
-  // MARK: Dock
-
-  private typealias DockGet = @convention(c) () -> Bool
-  private typealias DockSet = @convention(c) (Bool) -> Void
-  private static let services = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW)
-  static func dockHidden() -> Bool? {
-    guard let symbol = dlsym(services, "CoreDockGetAutoHideEnabled") else { return nil }
-    return unsafeBitCast(symbol, to: DockGet.self)()
-  }
-  static func setDockHidden(_ hidden: Bool) {
-    guard let symbol = dlsym(services, "CoreDockSetAutoHideEnabled") else { return }
-    unsafeBitCast(symbol, to: DockSet.self)(hidden)
+  static func axApp(_ pid: pid_t) -> AXUIElement {
+    let element = AXUIElementCreateApplication(pid)
+    _ = AXUIElementSetMessagingTimeout(element, axTimeout)
+    return element
   }
 
   func end() {
@@ -959,7 +1219,7 @@ final class FusionRemoteSession: @unchecked Sendable {
       if mirror.descriptor >= 0 { close(mirror.descriptor) }
     }
     for id in Array(streams.keys) { closeStream(id) }
-    if dockWasHidden == false { Self.setDockHidden(false) }
+    if dockHiddenByUs { FusionDock.restore(home: Self.home); dockHiddenByUs = false }
     mirrors.removeAll()
     Fusion.log("session ended")
   }
@@ -1033,15 +1293,22 @@ final class FusionRemoteSession: @unchecked Sendable {
 
   private func launch(_ bundle: String) {
     guard let url = Self.resolvedApplicationURL(for: bundle) else {
-      return wire.send(["t": "error", "message": "远端没有 \(bundle)"])
+      return wire.send(["t": "alert", "kind": "launch", "subject": bundle, "message": "远端 Mac 上找不到这个应用（\(bundle)）"])
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
     NSWorkspace.shared.openApplication(at: url, configuration: configuration) { [weak self] app, error in
       DispatchQueue.main.async {
-        guard let self, let app else { return Fusion.log("launch \(bundle) failed: \(error?.localizedDescription ?? "?")") }
+        guard let self else { return }
+        guard let app else {
+          Fusion.log("launch \(bundle) failed: \(error?.localizedDescription ?? "?")")
+          self.wire.send(["t": "alert", "kind": "launch", "subject": bundle, "message": "远端应用启动失败：\(error?.localizedDescription ?? "未知原因")"])
+          return
+        }
+        self.wire.send(["t": "alert", "kind": "launch", "subject": bundle, "clear": true])
         self.pidToBundle[app.processIdentifier] = bundle
         self.fused.insert(app.processIdentifier)
+        self.noteUserAction(pid: app.processIdentifier)
         _ = app.activate(options: [.activateIgnoringOtherApps])
         Fusion.log("fused \(bundle) (\(app.processIdentifier))")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -1129,7 +1396,7 @@ final class FusionRemoteSession: @unchecked Sendable {
   }
 
   private func extractDockMenu(pid: pid_t) -> [[String: Any]] {
-    let axApp = AXUIElementCreateApplication(pid)
+    let axApp = FusionRemoteSession.axApp(pid)
     var mbRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(axApp, kAXMenuBarAttribute as CFString, &mbRef) == .success,
           let mb = mbRef else { return [] }
@@ -1203,6 +1470,77 @@ final class FusionRemoteSession: @unchecked Sendable {
     return recents + actions
   }
 
+  // MARK: Menu bar mirroring (the stub shows the remote app's menus as its own)
+
+  /// The menu at `path` ([] is the bar itself, [i] the i-th bar item's menu, [i, j] item j's
+  /// submenu…), resolved from the app's AX tree. Runs on `axQueue`.
+  static func axMenuChildren(pid: pid_t, path: [Int]) -> [AXUIElement]? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(axApp(pid), kAXMenuBarAttribute as CFString, &ref) == .success, let bar = ref else { return nil }
+    func children(_ element: AXUIElement) -> [AXUIElement] {
+      var childRef: CFTypeRef?
+      guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childRef) == .success else { return [] }
+      return childRef as? [AXUIElement] ?? []
+    }
+    var items = children(bar as! AXUIElement)
+    for index in path {
+      guard index >= 0, index < items.count, let menu = children(items[index]).first else { return nil }
+      items = children(menu)
+    }
+    return items
+  }
+
+  static func describeMenuItem(_ item: AXUIElement) -> [String: Any] {
+    func attr(_ name: String) -> CFTypeRef? {
+      var ref: CFTypeRef?
+      return AXUIElementCopyAttributeValue(item, name as CFString, &ref) == .success ? ref : nil
+    }
+    let title = (attr(kAXTitleAttribute as String) as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    var entry: [String: Any] = ["title": title]
+    if title.isEmpty { entry["sep"] = true; return entry }
+    entry["enabled"] = attr(kAXEnabledAttribute as String) as? Bool ?? true
+    if let mark = attr(kAXMenuItemMarkCharAttribute as String) as? String, !mark.isEmpty { entry["checked"] = true }
+    if let key = attr(kAXMenuItemCmdCharAttribute as String) as? String, !key.isEmpty {
+      entry["key"] = key
+      entry["mods"] = (attr(kAXMenuItemCmdModifiersAttribute as String) as? NSNumber)?.intValue ?? 0
+    }
+    var childRef: CFTypeRef?
+    if AXUIElementCopyAttributeValue(item, kAXChildrenAttribute as CFString, &childRef) == .success,
+       let children = childRef as? [AXUIElement], !children.isEmpty {
+      entry["sub"] = true
+    }
+    return entry
+  }
+
+  private func sendMenu(bundle: String, path: [Int]) {
+    guard let pid = fused.first(where: { pidToBundle[$0] == bundle }) ?? NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.processIdentifier else { return }
+    axQueue.async { [weak self] in
+      // A large menu is cut short: a mirror must answer quickly, and nobody scrolls 200 items here.
+      let items = Self.axMenuChildren(pid: pid, path: path).map { Array($0.prefix(120)).map(Self.describeMenuItem) }
+      DispatchQueue.main.async {
+        guard let self, !self.ended else { return }
+        if let items {
+          self.wire.send(["t": "menu", "bundle": bundle, "path": path, "items": items])
+        } else {
+          self.wire.send(["t": "menu", "bundle": bundle, "path": path, "error": true])
+        }
+      }
+    }
+  }
+
+  private func pressMenu(bundle: String, path: [Int]) {
+    guard path.count >= 2, let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first(where: { !$0.isTerminated }) else { return }
+    let pid = app.processIdentifier
+    noteUserAction(pid: pid)
+    if !app.isActive { _ = app.activate(options: [.activateIgnoringOtherApps]) }
+    let parent = Array(path.dropLast()), index = path[path.count - 1]
+    axQueue.asyncAfter(deadline: .now() + (app.isActive ? 0 : 0.08)) { [weak self] in
+      guard let items = Self.axMenuChildren(pid: pid, path: parent), index >= 0, index < items.count else { return }
+      AXUIElementPerformAction(items[index], kAXPressAction as CFString)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { self?.track() }
+    }
+  }
+
   private func performDockAction(bundle: String, path: [Int]) {
     guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first(where: { !$0.isTerminated }) else {
       launch(bundle)
@@ -1211,9 +1549,10 @@ final class FusionRemoteSession: @unchecked Sendable {
     let pid = app.processIdentifier
     pidToBundle[pid] = bundle
     fused.insert(pid)
+    noteUserAction(pid: pid)
     let wasActive = app.isActive
     _ = app.activate(options: [.activateIgnoringOtherApps])
-    let axApp = AXUIElementCreateApplication(pid)
+    let axApp = FusionRemoteSession.axApp(pid)
     AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
     guard path.count >= 2 else {
       launch(bundle)
@@ -1295,7 +1634,7 @@ final class FusionRemoteSession: @unchecked Sendable {
 
   private func axWindow(pid: pid_t, id: CGWindowID) -> AXUIElement? {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXWindowsAttribute as CFString, &value) == .success,
+    guard AXUIElementCopyAttributeValue(FusionRemoteSession.axApp(pid), kAXWindowsAttribute as CFString, &value) == .success,
           let windows = value as? [AXUIElement] else { return nil }
     return windows.first { var w: CGWindowID = 0; return _AXUIElementGetWindow($0, &w) == .success && w == id }
   }
@@ -1475,9 +1814,11 @@ final class FusionRemoteSession: @unchecked Sendable {
         }
       }
       sampler.set(popups: popups, parents: popupParents)
+      lastPopupMirrors = Set(raw.filter { popups.contains($0.id) }.map(\.mirror.index))
+      let warm = prewarmUntil > CACurrentMediaTime()
       for mirror in mirrors {
-        let activeOnMirror = raw.contains { popups.contains($0.id) && $0.mirror.index == mirror.index }
-        mirror.session?.setFusionOverlayActive(activeOnMirror)
+        let activeOnMirror = lastPopupMirrors.contains(mirror.index)
+        mirror.session?.setFusionOverlayActive(activeOnMirror || warm)
       }
     }
 
@@ -1500,8 +1841,14 @@ final class FusionRemoteSession: @unchecked Sendable {
         openStream(r.id, pid: r.pid, bundle: r.bundle, title: r.title, mirror: r.mirror, groupIDs: group, remoteFrame: r.frame, local: r.local)
       }
     }
+    var hiddenNow: Set<String> = []
     for id in Array(streams.keys) where !rootSet.contains(id) {
       if let rescueUntil = rescuingWindowIDs[id], now < rescueUntil { continue }
+      // A hidden app's windows are hidden, not closed: they come back when it is shown again.
+      if let s = streams[id], fused.contains(s.pid), NSRunningApplication(processIdentifier: s.pid)?.isHidden == true {
+        hiddenNow.insert(s.bundle)
+        continue
+      }
       // Only hold a stream open if the remote window entered Full-Screen Space or Dock Minimization
       // (rescue it back onto the virtual desktop); for any genuine close or orderOut, close at 0ms!
       if let s = streams[id], fused.contains(s.pid), !rawOnScreenIDs.contains(id), let w = axWindow(pid: s.pid, id: id) {
@@ -1516,6 +1863,10 @@ final class FusionRemoteSession: @unchecked Sendable {
       }
       closeStream(id)
     }
+
+    for bundle in hiddenNow.subtracting(hiddenBundles) { wire.send(["t": "apphidden", "bundle": bundle, "on": true]) }
+    for bundle in hiddenBundles.subtracting(hiddenNow) { wire.send(["t": "apphidden", "bundle": bundle, "on": false]) }
+    hiddenBundles = hiddenNow
 
     placeLock.lock()
     let ackSnapshot = appliedSeq
@@ -1549,46 +1900,70 @@ final class FusionRemoteSession: @unchecked Sendable {
   /// Rescues any window that entered a remote macOS Full-Screen Space (`AXFullScreen == true`) or
   /// remote Dock minimization (`kAXMinimizedAttribute == true`) back onto the virtual desktop,
   /// forwarding the intent so the local `NSWindow` performs native local Full-Screen / Minimize instead!
+  private let axQueue = DispatchQueue(label: "com.bd.linkshell.fusion.ax", qos: .userInitiated)
+  private var rescueScanRunning = false
+
+  /// The AX walk runs on `axQueue`: a hung app costs that queue its timeout, never the main thread
+  /// that routes every window's layout and signalling.
   private func rescueOffDesktopWindows() {
-    guard !ended, let main = mirrors.first else { return }
+    guard !ended, let main = mirrors.first, !rescueScanRunning else { return }
     let now = CACurrentMediaTime()
     rescuingWindowIDs = rescuingWindowIDs.filter { $0.value > now }
-    for pid in fused {
-      let axApp = AXUIElementCreateApplication(pid)
-      var winsRef: CFTypeRef?
-      guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &winsRef) == .success,
-            let wins = winsRef as? [AXUIElement] else { continue }
-      for w in wins {
-        var wid: CGWindowID = 0
-        guard _AXUIElementGetWindow(w, &wid) == .success, wid != 0 else { continue }
-        if let until = rescuingWindowIDs[wid], now < until { continue }
-        var fsRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &fsRef) == .success,
-           (fsRef as? Bool) == true {
-          let wasLive = streams[wid] != nil
-          rescuingWindowIDs[wid] = now + 2.2
-          Fusion.log("rescuing window \(wid) (pid \(pid)) out of remote AXFullScreen Space")
-          AXUIElementSetAttributeValue(w, "AXFullScreen" as CFString, kCFBooleanFalse)
-          let remoteRect = main.remote
-          let topInset = min(max(0, main.menuBarHeight), 40)
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
-            guard let self, !self.ended else { return }
-            var pt = CGPoint(x: remoteRect.minX + 60, y: remoteRect.minY + topInset + 40)
-            AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &pt)!)
-            if wasLive {
-              self.wire.send(["t": "fullscreen", "id": wid, "on": true])
-            }
-            self.track()
+    let pids = Array(fused)
+    let skip = Set(rescuingWindowIDs.keys)
+    rescueScanRunning = true
+    axQueue.async { [weak self] in
+      var found: [(pid: pid_t, wid: CGWindowID, element: AXUIElement, fullScreen: Bool)] = []
+      for pid in pids {
+        var winsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(FusionRemoteSession.axApp(pid), kAXWindowsAttribute as CFString, &winsRef) == .success,
+              let wins = winsRef as? [AXUIElement] else { continue }
+        for w in wins {
+          var wid: CGWindowID = 0
+          guard _AXUIElementGetWindow(w, &wid) == .success, wid != 0, !skip.contains(wid) else { continue }
+          var fsRef: CFTypeRef?
+          if AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &fsRef) == .success, (fsRef as? Bool) == true {
+            found.append((pid, wid, w, true))
+            continue
           }
-          continue
+          var minRef: CFTypeRef?
+          if AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success, (minRef as? Bool) == true {
+            found.append((pid, wid, w, false))
+          }
         }
-        var minRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success,
-           (minRef as? Bool) == true {
-          rescuingWindowIDs[wid] = now + 1.5
-          AXUIElementSetAttributeValue(w, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-          if streams[wid] != nil {
-            wire.send(["t": "minimize", "id": wid])
+      }
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.rescueScanRunning = false
+        guard !self.ended else { return }
+        let at = CACurrentMediaTime()
+        for item in found {
+          if let until = self.rescuingWindowIDs[item.wid], at < until { continue }
+          let wid = item.wid, w = item.element
+          if item.fullScreen {
+            let wasLive = self.streams[wid] != nil
+            self.rescuingWindowIDs[wid] = at + 2.2
+            Fusion.log("rescuing window \(wid) (pid \(item.pid)) out of remote AXFullScreen Space")
+            self.axQueue.async { AXUIElementSetAttributeValue(w, "AXFullScreen" as CFString, kCFBooleanFalse) }
+            let remoteRect = main.remote
+            let topInset = min(max(0, main.menuBarHeight), 40)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+              guard let self, !self.ended else { return }
+              self.axQueue.async {
+                var pt = CGPoint(x: remoteRect.minX + 60, y: remoteRect.minY + topInset + 40)
+                AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &pt)!)
+              }
+              if wasLive {
+                self.wire.send(["t": "fullscreen", "id": wid, "on": true])
+              }
+              self.track()
+            }
+          } else {
+            self.rescuingWindowIDs[wid] = at + 1.5
+            self.axQueue.async { AXUIElementSetAttributeValue(w, kAXMinimizedAttribute as CFString, kCFBooleanFalse) }
+            if self.streams[wid] != nil {
+              self.wire.send(["t": "minimize", "id": wid])
+            }
           }
         }
       }
@@ -1745,6 +2120,15 @@ final class FusionRemoteSession: @unchecked Sendable {
   }
 
   private func focus(_ id: CGWindowID) {
+    // Popups (menus, palettes) also become key locally; they are not window streams, and treating
+    // them as focus would drop every real window to its background frame rate mid-menu.
+    guard let stream = streams[id] else { return }
+    noteUserAction(pid: stream.pid)
+    if !clipboard.armed {
+      // What the remote had copied before Fusion began is not pushed over the local clipboard.
+      clipboard.observe(changeCount: NSPasteboard.general.changeCount)
+      clipboard.armed = true
+    }
     focusedWindowID = id
     for (wid, s) in streams { s.session.setFusionFocused(wid == id) }
     let candidatePids = (streams[id].map { [$0.pid] } ?? []) + Array(fused)
@@ -1753,7 +2137,7 @@ final class FusionRemoteSession: @unchecked Sendable {
       if let app = NSRunningApplication(processIdentifier: pid) {
         _ = app.activate(options: [.activateIgnoringOtherApps])
       }
-      AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+      AXUIElementSetAttributeValue(FusionRemoteSession.axApp(pid), kAXFrontmostAttribute as CFString, kCFBooleanTrue)
       AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
       AXUIElementSetAttributeValue(w, kAXFocusedAttribute as CFString, kCFBooleanTrue)
       AXUIElementPerformAction(w, kAXRaiseAction as CFString)

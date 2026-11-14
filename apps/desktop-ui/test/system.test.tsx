@@ -510,7 +510,7 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
       "用量统计",
       "日志",
       "更新",
-      "设置",
+      "通用",
     ]);
 
     const updatesNav = navButtons.find(
@@ -878,7 +878,7 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
       "Usage",
       "Logs",
       "Updates",
-      "Settings",
+      "General",
     ]);
   });
 
@@ -992,7 +992,9 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
     expect(container.querySelector(".ls-qr-chip svg")).not.toBeNull();
     expect(container.textContent).toContain("482910");
 
-    // Simulate newly paired phone appearing in management snapshot -> auto-closes dialog!
+    // Simulate newly paired phone appearing in management snapshot -> the dialog says who paired,
+    // then closes itself (it used to close at once, with no word of success).
+    vi.useFakeTimers();
     act(() => {
       managementStore.setState({
         snapshot: makeBaseSnapshot({
@@ -1009,6 +1011,13 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
     });
     await flushAsync();
 
+    expect(container.textContent).toContain("「iPad Pro」已完成配对");
+    expect(managementStore.getState().pairingOffer).toBeUndefined();
+    expect(onQrOpenChange).not.toHaveBeenCalledWith(false);
+    act(() => {
+      vi.advanceTimersByTime(2_600);
+    });
+    vi.useRealTimers();
     expect(onQrOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -1084,10 +1093,10 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
       expect(updateButtons).toContain("立即检查");
       expect(updateButtons).toContain("下载并更新 App…");
 
-      // Switch to `'设置'` nav item and verify Windows rows + Explorer label (`0` Finder/访达)
+      // The modal is 设置; its preferences page is 通用. Verify Windows rows + Explorer label (`0` Finder/访达)
       const settingsNav = Array.from(
         container.querySelectorAll<HTMLButtonElement>(".management-nav-item"),
-      ).find((el) => el.textContent?.trim() === "设置");
+      ).find((el) => el.textContent?.trim() === "通用");
       expect(settingsNav).toBeDefined();
       act(() => {
         settingsNav!.click();
@@ -1120,5 +1129,164 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
         window.linkshellDesktop.platform = prevBridgePlatform;
       }
     }
+  });
+  it("keeps the sign-in form open with its error after a failed password sign-in", async () => {
+    const base = bridgeSpies.invoke;
+    bridgeSpies.invoke = (method, params) => {
+      if (method === "loginPassword") throw new Error("邮箱或密码不正确");
+      return base(method, params);
+    };
+    act(() => {
+      routerStore.getState().openSystemModal("overview");
+      root.render(
+        <I18nProvider>
+          <SystemHostModal />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+
+    const signInBtn = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".ls-system-pane button"),
+    ).find((btn) => btn.textContent?.trim() === "登录")!;
+    act(() => signInBtn.click());
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
+    const password = container.querySelector<HTMLInputElement>('input[name="password"]')!;
+    act(() => {
+      setter.call(email, "me@example.com");
+      email.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(password, "wrong-password");
+      password.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => {
+      password.closest("form")!.requestSubmit();
+    });
+    await flushAsync(8);
+
+    expect(managementStore.getState().signingIn).toBe(false);
+    expect(container.querySelector('input[name="password"]')).not.toBeNull();
+    expect(container.textContent).toContain("邮箱或密码不正确");
+  });
+
+  it("tells the person when a click lands while another action is still running", async () => {
+    const { serviceAction } = await import("../src/core");
+    let release!: () => void;
+    const base = bridgeSpies.invoke;
+    bridgeSpies.invoke = (method, params) => {
+      if (method === "action" && params.name === "restart") {
+        return new Promise((resolve) => {
+          release = () => resolve(currentSnapshot);
+        });
+      }
+      return base(method, params);
+    };
+    const first = serviceAction("restart");
+    expect(managementStore.getState().busy).toBe(true);
+    const second = await serviceAction("stop");
+    expect(second).toBe(false);
+    expect(managementStore.getState().busyNotice).toEqual({ key: "notice.busy" });
+
+    act(() => {
+      routerStore.getState().openSystemModal("overview");
+      root.render(
+        <I18nProvider>
+          <SystemHostModal />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    expect(container.textContent).toContain("上一个操作仍在进行");
+    release();
+    expect(await first).toBe(true);
+    expect(invokeCalls.filter((c) => c.method === "action" && c.params.name === "stop")).toHaveLength(0);
+  });
+
+  it("keeps the background membership check off the busy lock", async () => {
+    const { refreshAccount, setAccessPassword } = await import("../src/core");
+    managementStore.setState({
+      snapshot: makeBaseSnapshot({ account: { state: "signed-in", userId: "u1", email: "me@example.com" } }),
+    });
+    let finish!: () => void;
+    const base = bridgeSpies.invoke;
+    bridgeSpies.invoke = (method, params) => {
+      if (method === "action" && params.name === "account-refresh") {
+        return new Promise((resolve) => {
+          finish = () => resolve(managementStore.getState().snapshot);
+        });
+      }
+      return base(method, params);
+    };
+    refreshAccount();
+    expect(managementStore.getState().checkingMembership).toBe(true);
+    expect(managementStore.getState().busy).toBe(false);
+    expect(await setAccessPassword("1234")).toBe(true);
+    finish();
+    await flushAsync();
+    expect(managementStore.getState().checkingMembership).toBe(false);
+  });
+
+  it("retires a pairing offer once a phone uses it, including a phone that pairs again", async () => {
+    const { createLocalPairingOffer, deviceThatUsedOffer } = await import("../src/core");
+    await createLocalPairingOffer();
+    const offer = managementStore.getState().pairingOffer!;
+    expect(offer.baseline?.ids).toEqual(["dev-iphone", "dev-pixel"]);
+    expect(deviceThatUsedOffer(offer, currentSnapshot.gateway!.devices)).toBeUndefined();
+
+    // The same iPhone pairing again keeps its id; the Host renews pairedAt.
+    const repaired = currentSnapshot.gateway!.devices.map((device) =>
+      device.id === "dev-iphone" ? { ...device, pairedAt: Date.now() + 1 } : device,
+    );
+    expect(deviceThatUsedOffer(offer, repaired)?.id).toBe("dev-iphone");
+
+    act(() => {
+      managementStore.setState({
+        snapshot: makeBaseSnapshot({
+          gateway: { ...currentSnapshot.gateway!, devices: repaired },
+        }),
+      });
+    });
+    expect(managementStore.getState().pairingOffer).toBeUndefined();
+    expect(managementStore.getState().pairedDevice?.name).toBe("iPhone 16 Pro");
+  });
+
+  it("lands only the newest usage report when ranges are switched quickly", async () => {
+    const { fetchUsageAnalytics } = await import("../src/core");
+    const resolvers: Array<(report: UsageReport) => void> = [];
+    const invoke = (() =>
+      new Promise<UsageReport>((resolve) => resolvers.push(resolve))) as never;
+    const slow = fetchUsageAnalytics(30, "all", invoke);
+    const fast = fetchUsageAnalytics(1, "all", invoke);
+    const newest = { ...makeUsageReport(3), days: 1 } as UsageReport;
+    resolvers[1]!(newest);
+    await fast;
+    resolvers[0]!({ ...makeUsageReport(12), days: 30 } as UsageReport);
+    expect(await slow).toBeUndefined();
+    expect(managementStore.getState().usageReport?.days).toBe(1);
+    expect(managementStore.getState().usageLoading).toBe(false);
+  });
+
+  it("reads and sets keep-awake through the local Host instead of a window-only setting", async () => {
+    const { setKeepAwakeMode } = await import("../src/core");
+    const call = vi.fn(async (method: string, params: { mode?: string }) =>
+      method === "machine.keepAwake" ? { mode: params.mode ?? "smart", active: params.mode === "always" } : {},
+    );
+    expect(await setKeepAwakeMode("always", { localLink: { call } as never })).toBe(true);
+    expect(call).toHaveBeenCalledWith("machine.keepAwake", { mode: "always" });
+    expect(managementStore.getState().keepAwake).toEqual({ mode: "always", active: true });
+    expect(managementStore.getState().settings.keepAwake).toBe("always");
+    expect(invokeCalls.some((c) => c.method === "setSetting" && c.params.key === "keepAwake")).toBe(false);
+  });
+
+  it("words store labels in the current language", async () => {
+    const { serviceLabel, gatewayLabel, managementMessageText } = await import("../src/core");
+    setDesktopLocalePreference("en");
+    expect(serviceLabel(currentSnapshot, undefined)).toBe("Running");
+    expect(gatewayLabel(currentSnapshot, true)).toBe("Connected");
+    expect(managementMessageText({ key: "notice.busy" })).toContain("Another action");
+    setDesktopLocalePreference("ja");
+    expect(serviceLabel(currentSnapshot, undefined)).toBe("実行中");
+    setDesktopLocalePreference("zh");
   });
 });

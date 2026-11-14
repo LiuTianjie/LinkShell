@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
-import type { ClientActions, ClientState } from "@linkshell/client-core";
+import {
+  presentError,
+  proposedPlan,
+  toolCommand,
+  toolLabel,
+  toolLabelText,
+  toolOutput,
+  userMessageView,
+  type ClientActions,
+  type ClientState,
+  type TimelineItem,
+} from "@linkshell/client-core";
 import {
   displayModelName,
+  type AgentInfo,
   type ContentBlock,
   type SessionConfigOption,
 } from "@linkshell/wire";
@@ -12,6 +24,7 @@ import {
   engine,
   fileToBase64,
   formatOptionValueName,
+  reportDesktopError,
   shrinkImage,
   useI18n,
   validateAttachmentSize,
@@ -92,6 +105,8 @@ export interface SessionUiEntry {
   searchQuery: string;
   scrollToItemId?: string;
   scrollNonce: number;
+  /** Bumped when the person sends: the timeline goes back to its newest message, as the old client did on `sentId`. */
+  followNonce: number;
 }
 
 interface SessionUiState {
@@ -100,12 +115,14 @@ interface SessionUiState {
   toggleSearch(key: string): void;
   setSearchQuery(key: string, query: string): void;
   requestScrollToItem(key: string, itemId: string): void;
+  requestFollow(key: string): void;
 }
 
 const DEFAULT_UI_ENTRY: SessionUiEntry = {
   searchOpen: false,
   searchQuery: "",
   scrollNonce: 0,
+  followNonce: 0,
 };
 
 export function sessionKeyOf(computerKey: string, sessionId: string): string {
@@ -167,7 +184,33 @@ export const sessionUiStore = createStore<SessionUiState>((set) => ({
         },
       };
     }),
+  requestFollow: (key) =>
+    set((state) => {
+      const current = state.byKey[key] ?? DEFAULT_UI_ENTRY;
+      return {
+        byKey: {
+          ...state.byKey,
+          [key]: { ...current, followNonce: (current.followNonce ?? 0) + 1 },
+        },
+      };
+    }),
 }));
+
+/** Fire-and-forget actions still owe the person feedback when they fail. */
+export function reportOnFailure(promise: Promise<unknown>): void {
+  void promise.catch((error: unknown) => reportDesktopError(error));
+}
+
+const READABLE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+/**
+ * The host words its own errors for people (in Chinese); transport and library errors come in
+ * English. Those get the caller's localized fallback instead of being shown raw.
+ */
+export function describeActionError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message && READABLE_SCRIPT.test(message) ? message : fallback;
+}
 
 export function useSessionUi(computerKey: string, sessionId: string): SessionUiEntry {
   const key = sessionKeyOf(computerKey, sessionId);
@@ -304,12 +347,37 @@ export interface SessionCopy {
   hideErrorDetails: string;
   copyBranch: string;
   branchCopied: string;
+
+  // Delivery, loading and recovery states
+  loadingHistory: string;
+  turnElapsed: string;
+  sendingPrompt: string;
+  startingTurn: string;
+  sendFailedKept: string;
+  offlineSendBlocked: string;
+  firstMessageNotSent: (detail: string) => string;
+  actionFailed: string;
+  wrapUpAppHint: string;
+  wrapUpSendFailed: string;
+  imageLabel: string;
+  attachedImage: string;
+  subagentFallback: string;
+  dismissNotice: string;
+  sessionCardStates: Record<"starting" | "started" | "proposed" | "failed", string>;
+  openSessionTitle: (title: string) => string;
+  findPrevious: string;
+  findNext: string;
+  noMatches: string;
+  matchPosition: (index: number, total: number) => string;
+  retryModels: string;
+  loadingDirectory: string;
+  directoryLoadFailed: string;
 }
 
 const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
   zh: {
-    newSessionHeading: "开始新任务",
-    newSessionSubheading: "选择智能体与工作目录，直接下达编码任务或空提示词进入交互。",
+    newSessionHeading: "新建会话",
+    newSessionSubheading: "选好智能体和工作目录，写下任务就开始；留空则直接进入会话。",
     taskLabel: "任务描述",
     startSessionLabel: "开始会话",
     selectModelLabel: "选择模型",
@@ -367,7 +435,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     otherOption: "其他（自定义输入）",
     otherPlaceholder: "填写自定义内容",
     answerPlaceholder: "输入你的回答",
-    asyncQuestionBadge: "补充提问（不阻塞当前执行）",
+    asyncQuestionBadge: "可稍后回答",
     replyAction: "发送回答",
     subagentRunning: "子智能体运行中",
     subagentDone: "子智能体已完成",
@@ -399,10 +467,33 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     hideErrorDetails: "收起详情",
     copyBranch: "复制分支名",
     branchCopied: "已复制分支名",
+    loadingHistory: "正在加载会话记录",
+    turnElapsed: "本轮已进行",
+    sendingPrompt: "正在发送",
+    startingTurn: "正在启动智能体",
+    sendFailedKept: "发送失败，输入和附件已保留，可修改后重新发送",
+    offlineSendBlocked: "会话连接正在恢复，输入和附件已保留，请同步完成后重试",
+    firstMessageNotSent: (detail) => `会话已创建，但第一条消息没有发出：${detail}。内容已放回该会话的输入框。`,
+    actionFailed: "操作没有送达电脑，请重试",
+    wrapUpAppHint: "在 Claude App 里操作",
+    wrapUpSendFailed: "消息发送失败，请重试",
+    imageLabel: "图片",
+    attachedImage: "附加的图片",
+    subagentFallback: "子智能体",
+    dismissNotice: "关闭提示",
+    sessionCardStates: { starting: "正在启动", started: "已启动", proposed: "已提议，等你开始", failed: "启动失败" },
+    openSessionTitle: (title) => `打开「${title}」`,
+    findPrevious: "上一个匹配",
+    findNext: "下一个匹配",
+    noMatches: "无匹配",
+    matchPosition: (index, total) => `${index} / ${total}`,
+    retryModels: "重新加载模型",
+    loadingDirectory: "正在读取目录",
+    directoryLoadFailed: "无法读取此目录",
   },
   en: {
-    newSessionHeading: "Start a New Session",
-    newSessionSubheading: "Pick an agent and project directory, then describe the task or launch directly.",
+    newSessionHeading: "New session",
+    newSessionSubheading: "Pick an agent and a folder, then describe the task — or leave it empty to open the session.",
     taskLabel: "任务描述",
     startSessionLabel: "开始会话",
     selectModelLabel: "选择模型",
@@ -460,7 +551,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     otherOption: "Other (custom)",
     otherPlaceholder: "Specify your answer",
     answerPlaceholder: "Type your answer",
-    asyncQuestionBadge: "Follow-up Question (non-blocking)",
+    asyncQuestionBadge: "Answer anytime",
     replyAction: "Send Reply",
     subagentRunning: "Subagent running",
     subagentDone: "Subagent completed",
@@ -492,10 +583,33 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     hideErrorDetails: "Hide details",
     copyBranch: "Copy branch name",
     branchCopied: "Branch copied",
+    loadingHistory: "Loading conversation",
+    turnElapsed: "This turn",
+    sendingPrompt: "Sending",
+    startingTurn: "Starting the agent",
+    sendFailedKept: "Couldn't send. Your text and attachments are kept; edit and send again.",
+    offlineSendBlocked: "Reconnecting to the session. Your text and attachments are kept; send again once it syncs.",
+    firstMessageNotSent: (detail) => `The session was created but its first message wasn't sent: ${detail}. The text is back in that session's composer.`,
+    actionFailed: "The computer didn't receive this. Try again.",
+    wrapUpAppHint: "Done in the Claude app",
+    wrapUpSendFailed: "Couldn't send the message. Try again.",
+    imageLabel: "Image",
+    attachedImage: "Attached image",
+    subagentFallback: "Subagent",
+    dismissNotice: "Dismiss",
+    sessionCardStates: { starting: "Starting", started: "Started", proposed: "Proposed, waiting for you", failed: "Failed to start" },
+    openSessionTitle: (title) => `Open "${title}"`,
+    findPrevious: "Previous match",
+    findNext: "Next match",
+    noMatches: "No matches",
+    matchPosition: (index, total) => `${index} / ${total}`,
+    retryModels: "Reload models",
+    loadingDirectory: "Reading folder",
+    directoryLoadFailed: "Couldn't read this folder",
   },
   ja: {
-    newSessionHeading: "新しいセッションを開始",
-    newSessionSubheading: "エージェントと作業ディレクトリを選択し、タスクを入力して開始します。",
+    newSessionHeading: "新しいセッション",
+    newSessionSubheading: "エージェントと作業フォルダを選び、タスクを書いて開始します。空のままでもセッションを開けます。",
     taskLabel: "任务描述",
     startSessionLabel: "开始会话",
     selectModelLabel: "选择模型",
@@ -553,7 +667,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     otherOption: "その他（自由入力）",
     otherPlaceholder: "内容を入力",
     answerPlaceholder: "回答を入力",
-    asyncQuestionBadge: "追加の質問（実行を止めずに回答可能）",
+    asyncQuestionBadge: "あとで回答可",
     replyAction: "回答する",
     subagentRunning: "サブエージェント実行中",
     subagentDone: "サブエージェント完了",
@@ -585,6 +699,29 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     hideErrorDetails: "詳細を隠す",
     copyBranch: "ブランチ名をコピー",
     branchCopied: "ブランチ名をコピーしました",
+    loadingHistory: "会話を読み込み中",
+    turnElapsed: "このターン",
+    sendingPrompt: "送信中",
+    startingTurn: "エージェントを起動中",
+    sendFailedKept: "送信できませんでした。入力と添付は残しています。修正して再送信してください。",
+    offlineSendBlocked: "セッションに再接続中です。入力と添付は残しています。同期後に再送信してください。",
+    firstMessageNotSent: (detail) => `セッションは作成されましたが、最初のメッセージは送信されませんでした：${detail}。内容はそのセッションの入力欄に戻しました。`,
+    actionFailed: "コンピュータに届きませんでした。再試行してください。",
+    wrapUpAppHint: "Claude アプリで操作",
+    wrapUpSendFailed: "メッセージを送信できませんでした。再試行してください。",
+    imageLabel: "画像",
+    attachedImage: "添付画像",
+    subagentFallback: "サブエージェント",
+    dismissNotice: "閉じる",
+    sessionCardStates: { starting: "起動中", started: "起動済み", proposed: "提案済み（開始待ち）", failed: "起動失敗" },
+    openSessionTitle: (title) => `「${title}」を開く`,
+    findPrevious: "前の一致",
+    findNext: "次の一致",
+    noMatches: "一致なし",
+    matchPosition: (index, total) => `${index} / ${total}`,
+    retryModels: "モデルを再読込",
+    loadingDirectory: "フォルダを読み込み中",
+    directoryLoadFailed: "このフォルダを読み込めません",
   },
 };
 
@@ -792,69 +929,160 @@ export function revokeAttachmentPreviews(attachments: readonly ComposerAttachmen
   }
 }
 
-export function attachmentsNeedUpload(attachments: readonly ComposerAttachment[]): boolean {
-  return attachments.some((item) => !item.isImage);
+/** Relay round trips for a 20 MB file take far longer than the default 30 s RPC timeout. */
+export const UPLOAD_TIMEOUT_MS = 180_000;
+
+const EMBEDDED_LIMIT_BYTES = 5 * 1024 * 1024;
+const NATIVE_IMAGE = /^image\/(png|jpe?g|webp|gif)$/;
+
+type AgentCapabilities = AgentInfo["capabilities"] | undefined;
+
+/** How the agent takes a file, by what it says it can read (ported from the web client). */
+function attachmentRoute(item: ComposerAttachment, capabilities: AgentCapabilities): "image" | "audio" | "resource" | "upload" {
+  if (NATIVE_IMAGE.test(item.mimeType) && capabilities?.images) return "image";
+  if (/^audio\//.test(item.mimeType) && capabilities?.audio && item.size <= EMBEDDED_LIMIT_BYTES) return "audio";
+  if (capabilities?.embeddedContext && item.size <= EMBEDDED_LIMIT_BYTES) return "resource";
+  return "upload";
+}
+
+export function attachmentsNeedUpload(
+  attachments: readonly ComposerAttachment[],
+  capabilities?: AgentCapabilities,
+): boolean {
+  return attachments.some((item) => attachmentRoute(item, capabilities) === "upload");
 }
 
 /**
- * Builds the `ContentBlock[]` payload for `sessions.prompt` / `createSession`, uploading any
- * non-image files into the session's `.linkshell/uploads` folder via `fs.upload` when needed.
+ * Builds the `ContentBlock[]` for `sessions.prompt` / `createSession`. Files the agent can't take
+ * inline are uploaded into `uploadDir` (the session's own directory, which always exists) and
+ * referenced as `resource_link`s; `uploadCache` keeps a retry from writing the same file twice.
  */
 export async function buildPromptContentBlocks(options: {
   text: string;
   pastedBlocks: readonly PastedTextBlock[];
   attachments: readonly ComposerAttachment[];
-  cwd?: string;
-  uploadFile?: (params: { cwd: string; name: string; data: string }) => Promise<{ path: string }>;
+  capabilities?: AgentCapabilities;
+  uploadDir?: string;
+  uploadCache?: WeakMap<File, string>;
+  callUpload?: (dir: string, name: string, data: string) => Promise<{ path: string }>;
 }): Promise<ContentBlock[]> {
-  const { text, pastedBlocks, attachments, cwd, uploadFile } = options;
-  const uploadedPaths: string[] = [];
-  const imageBlocks: ContentBlock[] = [];
-
-  for (const item of attachments) {
-    const data = await fileToBase64(item.file);
-    if (item.isImage) {
-      imageBlocks.push({
-        type: "image",
-        mimeType: item.mimeType || "image/png",
-        data,
-      });
-    } else if (uploadFile && cwd) {
-      const uploaded = await uploadFile({
-        cwd,
-        name: item.name,
-        data,
-      });
-      uploadedPaths.push(uploaded.path);
-    } else {
-      uploadedPaths.push(item.name);
-    }
-  }
-
-  const textSegments: string[] = [];
-  if (uploadedPaths.length > 0) {
-    textSegments.push(
-      `# Files mentioned by the user:\n${uploadedPaths.map((p) => `- ${p}`).join("\n")}`,
-    );
-  }
+  const { text, pastedBlocks, attachments, capabilities, uploadDir, uploadCache, callUpload } = options;
+  const content: ContentBlock[] = [];
+  const trimmed = text.trim();
+  if (trimmed) content.push({ type: "text", text: trimmed });
   for (const block of pastedBlocks) {
-    if (block.text.trim()) textSegments.push(block.text);
+    if (block.text.trim()) content.push({ type: "text", text: block.text });
   }
-  if (text.trim()) {
-    if (uploadedPaths.length > 0 && pastedBlocks.length === 0) {
-      textSegments.push(`## My request:\n${text.trim()}`);
+  for (const item of attachments) {
+    const route = attachmentRoute(item, capabilities);
+    if (route === "upload") {
+      const cached = uploadCache?.get(item.file);
+      let path = cached;
+      if (!path) {
+        if (!callUpload || !uploadDir) throw new Error(`无法上传「${item.name}」：缺少会话目录`);
+        path = (await callUpload(uploadDir, item.name, await fileToBase64(item.file))).path;
+        uploadCache?.set(item.file, path);
+      }
+      content.push({ type: "resource_link", uri: path, name: item.name });
+      continue;
+    }
+    const data = await fileToBase64(item.file);
+    if (route === "image") {
+      content.push({ type: "image", mimeType: item.mimeType, data });
+    } else if (route === "audio") {
+      content.push({ type: "audio", mimeType: item.mimeType, data });
     } else {
-      textSegments.push(text.trim());
+      const textual = /^text\//.test(item.mimeType) || item.mimeType === "application/json";
+      content.push({
+        type: "resource",
+        resource: {
+          uri: `attachment:${encodeURIComponent(item.name)}`,
+          mimeType: item.mimeType || "application/octet-stream",
+          ...(textual ? { text: await item.file.text() } : { blob: data }),
+        },
+      });
     }
   }
+  return content;
+}
 
-  const blocks: ContentBlock[] = [];
-  const combinedText = textSegments.join("\n\n").trim();
-  if (combinedText) {
-    blocks.push({ type: "text", text: combinedText });
+/**
+ * Turns content taken back from the queue into composer attachments again, so editing a queued
+ * message doesn't drop its pictures.
+ */
+export function attachmentsFromBlocks(blocks: readonly ContentBlock[]): ComposerAttachment[] {
+  const restored: ComposerAttachment[] = [];
+  blocks.forEach((block, index) => {
+    if (block.type !== "image" || !block.data) return;
+    const binary = atob(block.data);
+    const bytes = new Uint8Array(binary.length);
+    for (let at = 0; at < binary.length; at += 1) bytes[at] = binary.charCodeAt(at);
+    const mimeType = block.mimeType || "image/png";
+    const extension = mimeType.split("/")[1] ?? "png";
+    const file = new File([bytes], `image-${index + 1}.${extension}`, { type: mimeType });
+    restored.push({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      mimeType,
+      size: file.size,
+      isImage: true,
+      previewUrl:
+        typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+          ? URL.createObjectURL(file)
+          : undefined,
+    });
+  });
+  return restored;
+}
+
+/** Everything a person could be looking for in an item, folded tool output included (ported from the web client). */
+export function timelineItemSearchText(item: TimelineItem): string {
+  switch (item.kind) {
+    case "user":
+      return [
+        userMessageView(item.blocks).text,
+        ...(item.agentMessages?.flatMap((mail) => [mail.sender, mail.summary, mail.body]) ?? []),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    case "agent":
+    case "thought":
+      return item.text;
+    case "error": {
+      const shown = presentError(item);
+      return [item.message, shown.title, shown.hint, shown.detail].filter(Boolean).join("\n");
+    }
+    case "notice":
+      return [item.title, item.detail].filter(Boolean).join("\n");
+    case "plan":
+      return [item.title, item.markdown, ...item.entries.map((entry) => entry.content)]
+        .filter(Boolean)
+        .join("\n");
+    case "permission-result":
+      return [item.title, item.optionName].filter(Boolean).join("\n");
+    case "tool": {
+      const label = toolLabel(item);
+      const changes = item.content.flatMap((entry) => {
+        if (entry.type === "diff") return [entry.path, entry.oldText ?? "", entry.newText];
+        if (entry.type === "patch") return [entry.path, entry.movePath ?? "", entry.diff];
+        if (entry.type === "content" && entry.content.type === "text") return [entry.content.text];
+        return [];
+      });
+      return [
+        item.title,
+        toolLabelText(label, { note: true }),
+        label.action === "command" ? toolCommand(item) : undefined,
+        label.action === "plan" ? proposedPlan(item) : undefined,
+        toolOutput(item),
+        ...changes,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    default:
+      return "";
   }
-  blocks.push(...imageBlocks);
-  return blocks;
 }
 
 /* ============================================================================

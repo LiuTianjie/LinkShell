@@ -143,7 +143,8 @@ export function SubagentTabPanel({
 
   useEffect(() => {
     if (!sessionId || !toolCallId || !actions) return undefined;
-    void actions.openSubagent(toolCallId);
+    // Offline or an older host: the tab still shows what the parent session recorded.
+    actions.openSubagent(toolCallId).catch(() => undefined);
     return () => {
       actions.closeSubagent(toolCallId);
     };

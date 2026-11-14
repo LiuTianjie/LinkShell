@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { downloadFile, listDirectory, makeDirectory, readFile, uploadFile } from "../src/fs.js";
+import { downloadFile, listDirectory, makeDirectory, readFile, uploadFile, writeTextFile } from "../src/fs.js";
 
 describe("fs.list", () => {
   it("downloads original binary bytes in chunks beyond the preview limit", async () => {
@@ -193,5 +193,51 @@ describe("fs.list", () => {
       uploadFile({ dir: root, name: "sym.bin", data: part1.toString("base64"), offset: 4, appendPath: join(root, "sym.bin") }),
     ).rejects.toMatchObject({ appCode: "invalid_params" });
     expect(readFileSync(secret, "utf8")).toBe("keep");
+  });
+
+  it("fs.write saves text atomically, keeps the mode and reports the new revision", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-write-"));
+    const path = join(root, "script.sh");
+    writeFileSync(path, "echo old\n");
+    if (process.platform !== "win32") chmodSync(path, 0o755);
+    const before = await readFile({ path, maxBytes: 1000 });
+    const saved = await writeTextFile({ path, text: "echo 新\n", expectedModifiedAt: before.modifiedAt });
+    expect(readFileSync(path, "utf8")).toBe("echo 新\n");
+    expect(saved).toMatchObject({ path, size: Buffer.byteLength("echo 新\n") });
+    expect(saved.modifiedAt).toBe(statSync(path).mtimeMs);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o755);
+    expect(readdirSync(root)).toEqual(["script.sh"]);
+    // A new file in an existing folder is fine without a revision.
+    await writeTextFile({ path: join(root, "new.txt"), text: "hi" });
+    expect(readFileSync(join(root, "new.txt"), "utf8")).toBe("hi");
+  });
+
+  it("fs.write refuses a file changed on disk since it was read", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-write-"));
+    const path = join(root, "a.txt");
+    writeFileSync(path, "one");
+    const read = await readFile({ path, maxBytes: 100 });
+    writeFileSync(path, "agent edit");
+    const { utimesSync } = await import("node:fs");
+    utimesSync(path, new Date(), new Date(read.modifiedAt + 5000));
+    await expect(writeTextFile({ path, text: "mine", expectedModifiedAt: read.modifiedAt })).rejects.toMatchObject({ appCode: "conflict" });
+    expect(readFileSync(path, "utf8")).toBe("agent edit");
+    await expect(writeTextFile({ path: join(root, "gone.txt"), text: "x", expectedModifiedAt: read.modifiedAt })).rejects.toMatchObject({ appCode: "conflict" });
+  });
+
+  it("fs.write stays out of missing folders, directories, symlinks and relative paths", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-write-"));
+    await expect(writeTextFile({ path: join(root, "missing", "a.txt"), text: "x" })).rejects.toMatchObject({ appCode: "not_found" });
+    expect(() => statSync(join(root, "missing"))).toThrow();
+    mkdirSync(join(root, "dir"));
+    await expect(writeTextFile({ path: join(root, "dir"), text: "x" })).rejects.toMatchObject({ appCode: "invalid_params" });
+    await expect(writeTextFile({ path: "relative.txt", text: "x" })).rejects.toMatchObject({ appCode: "invalid_params" });
+    if (process.platform !== "win32") {
+      const outside = mkdtempSync(join(tmpdir(), "lsh-outside-"));
+      writeFileSync(join(outside, "target.txt"), "keep");
+      symlinkSync(join(outside, "target.txt"), join(root, "link.txt"));
+      await expect(writeTextFile({ path: join(root, "link.txt"), text: "x" })).rejects.toMatchObject({ appCode: "invalid_params" });
+      expect(readFileSync(join(outside, "target.txt"), "utf8")).toBe("keep");
+    }
   });
 });

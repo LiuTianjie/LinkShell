@@ -223,13 +223,13 @@
       min-inline-size: 14px;
       block-size: 14px;
       padding-inline: 3px;
-      font-size: 10px;
+      font-size: 11px;
     }
 
     .inspector-header-tablist:not(.ls-inspector-tabstrip) .inspector-diff-stat-pill {
       gap: 2px;
       padding: 0 3px;
-      font-size: 10px;
+      font-size: 11px;
     }
 
     .inspector-header-actions:not(.ls-inspector-header__actions) {
@@ -531,10 +531,19 @@
     overflow-x: auto;
     overflow-y: clip;
     scrollbar-width: none;
+    container-type: inline-size;
   }
 
   .inspector-paseo-branchbar::-webkit-scrollbar {
     display: none;
+  }
+
+  /* At the panel's default width the totals (already on the tab and on every file) give their
+     room to the branch name, which is shown nowhere else. */
+  @container (max-width: 460px) {
+    .inspector-paseo-branchbar .inspector-change-tree-stat {
+      display: none;
+    }
   }
 
   .inspector-branch-pill {
@@ -550,7 +559,8 @@
     font-family: var(--font-mono);
     font-size: var(--ls-text-xs);
     flex-shrink: 1;
-    min-inline-size: 0;
+    /* Never squeezed down to a letter: the icon and a few characters stay readable. */
+    min-inline-size: 56px;
   }
 
   .inspector-change-tree {
@@ -900,267 +910,6 @@
     gap: 8px;
   }
 
-  /* =========================================================================
-   * 4. T3 Code Floating Context & Lineage Card (.inspector-context-card)
-   * ========================================================================= */
-  .inspector-context-card {
-    border-radius: 12px;
-    border: 1px solid var(--ls-border);
-    background-color: light-dark(#ffffff, #121317);
-    box-shadow:
-      var(
-        --ls-rim-light,
-        inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.045))
-      ),
-      var(
-        --ls-shadow-island,
-        0 8px 24px -4px light-dark(rgba(15, 17, 22, 0.06), rgba(0, 0, 0, 0.32))
-      );
-    overflow: clip;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-
-  .inspector-context-group {
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .inspector-context-divider {
-    block-size: var(--ls-hairline);
-    background-color: var(--ls-border);
-  }
-
-  .inspector-context-row {
-    inline-size: 100%;
-    min-inline-size: 0;
-    block-size: 32px;
-    padding-inline: 10px;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--ls-fg-2);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: var(--ls-text-sm);
-    text-align: left;
-    cursor: pointer;
-    transition:
-      background-color 110ms ease-out,
-      color 110ms ease-out;
-  }
-
-  .inspector-context-row:hover:not(:disabled) {
-    background-color: var(--ls-hover);
-    color: var(--ls-fg);
-  }
-
-  .inspector-context-row:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .inspector-context-row--static {
-    cursor: default;
-    color: var(--ls-fg);
-  }
-
-  .inspector-context-row--static:hover {
-    background: transparent;
-  }
-
-  .inspector-context-row__lead {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    min-inline-size: 0;
-    flex: 1 1 auto;
-  }
-
-  .inspector-context-row__primary {
-    font-weight: 600;
-    color: var(--ls-fg);
-  }
-
-  .inspector-context-row__chevron {
-    color: var(--ls-fg-3);
-    flex-shrink: 0;
-  }
-
-  .inspector-context-tray {
-    margin: 2px 6px 6px;
-    padding: 6px;
-    border-radius: 8px;
-    background-color: var(--ls-inset);
-    border: var(--ls-hairline) solid var(--ls-border-subtle);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  .inspector-context-tray--col {
-    flex-direction: column;
-    flex-wrap: nowrap;
-  }
-
-  .inspector-context-tray--row {
-    flex-wrap: nowrap;
-    align-items: center;
-  }
-
-  .inspector-context-chip {
-    block-size: 24px;
-    padding-inline: 8px;
-    border-radius: 5px;
-    border: 1px solid var(--ls-border);
-    background-color: var(
-      --ls-control-bg,
-      light-dark(#ffffff, #181a20)
-    );
-    color: var(--ls-fg);
-    font-size: var(--ls-text-xs);
-    font-weight: 500;
-    cursor: pointer;
-    box-shadow: var(
-      --ls-rim-light,
-      inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.05))
-    );
-  }
-
-  .inspector-context-chip:hover {
-    background-color: var(--ls-hover);
-    border-color: var(--ls-border-strong);
-  }
-
-  .inspector-context-lineage {
-    padding: 10px 12px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .inspector-context-lineage__head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .inspector-context-lineage__title {
-    font-size: var(--ls-text-xs);
-    font-weight: 500;
-    color: var(--ls-fg-3);
-    letter-spacing: 0.01em;
-  }
-
-  .inspector-context-lineage__list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .inspector-context-subagent {
-    min-block-size: 30px;
-    padding: 4px 6px;
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .inspector-context-subagent:hover {
-    background-color: var(--ls-hover);
-  }
-
-  .inspector-context-subagent__lead {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-inline-size: 0;
-    flex: 1 1 auto;
-  }
-
-  .inspector-context-subagent__name {
-    font-size: var(--ls-text-sm);
-    font-weight: 500;
-    color: var(--ls-fg);
-  }
-
-  .inspector-context-subagent__task {
-    font-size: var(--ls-text-xs);
-    color: var(--ls-fg-3);
-  }
-
-  .inspector-context-subagent__time {
-    font-family: var(--font-mono);
-    font-size: var(--ls-text-xs);
-    color: var(--ls-fg-3);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .inspector-context-empty {
-    font-size: var(--ls-text-xs);
-    color: var(--ls-fg-3);
-    padding-block: 2px;
-  }
-
-  /* =========================================================================
-   * 5. FilesPanel (Resizable Tree, Shiki SourceView, Markdown & FileEditor)
-   * ========================================================================= */
-  .inspector-files-layout {
-    flex: 1 1 auto;
-    min-inline-size: 0;
-    min-block-size: 0;
-    overflow: clip;
-    display: flex;
-    flex-direction: row;
-  }
-
-  .inspector-files-sidebar {
-    min-inline-size: 0;
-    min-block-size: 0;
-    overflow: clip;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--ls-bg);
-    border-inline-end: var(--ls-hairline) solid var(--ls-border);
-    flex-shrink: 0;
-  }
-
-  .inspector-files-toolbar {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px;
-    border-block-end: var(--ls-hairline) solid var(--ls-border);
-    flex-shrink: 0;
-  }
-
-  .inspector-files-pathbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    min-inline-size: 0;
-  }
-
-  .inspector-files-cwd {
-    flex: 1 1 auto;
-    min-inline-size: 0;
-    overflow: clip;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: var(--ls-text-xs);
-    color: var(--ls-fg-2);
-  }
-
   .inspector-files-list {
     flex: 1 1 auto;
     min-inline-size: 0;
@@ -1411,16 +1160,6 @@
     flex-shrink: 0;
   }
 
-  .inspector-file-viewer {
-    flex: 1 1 auto;
-    min-inline-size: 0;
-    min-block-size: 0;
-    overflow: clip;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--ls-plain);
-  }
-
   .inspector-source-scroll {
     flex: 1 1 auto;
     min-inline-size: 0;
@@ -1519,20 +1258,6 @@
 
   /* Stacked layout when inspector pane is narrow (< 520px) */
   @container inspector-pane (max-width: 520px) {
-    .inspector-files-layout {
-      flex-direction: column;
-    }
-
-    .inspector-files-sidebar {
-      inline-size: 100%;
-      max-block-size: 42%;
-      border-inline-end: 0;
-      border-block-end: var(--ls-hairline) solid var(--ls-border);
-    }
-
-    .inspector-files-resizer {
-      display: none;
-    }
   }
 
   /* =========================================================================
@@ -1841,7 +1566,7 @@
   .ls-preview-port-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 1px;
     max-block-size: 320px;
     overflow-y: auto;
     overflow-x: clip;
@@ -1858,30 +1583,41 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-block-size: 38px;
-    padding: 6px 8px;
-    border-radius: 8px;
-    border: var(--ls-hairline) solid var(--ls-border);
-    background-color: var(--ls-surface-2);
-    transition:
-      background-color 110ms ease-out,
-      border-color 110ms ease-out;
+    min-block-size: 36px;
+    padding: 4px 8px;
+    /* A list, not a stack of cards: one row per port, the row itself opens the preview. */
+    border-radius: var(--ls-radius-sm);
+    border: 0;
+    background-color: transparent;
+    transition: background-color 110ms ease-out;
   }
 
-  .ls-preview-port-row:hover {
+  .ls-preview-port-row:hover,
+  .ls-preview-port-row:focus-within {
     background-color: var(--ls-hover);
-    border-color: var(--ls-border-strong);
+  }
+
+  /* The row click already previews; its two buttons only show for the row in hand. */
+  .ls-preview-port-row .ls-preview-port-row__actions {
+    display: none;
+  }
+
+  .ls-preview-port-row:hover .ls-preview-port-row__actions,
+  .ls-preview-port-row:focus-within .ls-preview-port-row__actions {
+    display: inline-flex;
   }
 
   .ls-preview-port-row[data-active="true"] {
     background-color: var(--ls-surface-1);
     border-color: var(--ls-border-strong);
-    box-shadow: var(--ls-rim-light), var(--ls-shadow-xs);
+    box-shadow: var(--ls-rim-light);
   }
 
   .ls-preview-port-row__main {
     flex: 1 1 auto;
     min-inline-size: 0;
+    min-block-size: 28px;
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1929,15 +1665,6 @@
   .ls-tasks-bar::-webkit-scrollbar {
     display: none;
   }
-  .inspector-preview-urlbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border-block-end: var(--ls-hairline) solid var(--ls-border);
-    background-color: var(--ls-sheet);
-    flex-shrink: 0;
-  }
 
   .inspector-preview-frame-wrap {
     position: relative;
@@ -1964,32 +1691,6 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-  }
-
-  .inspector-port-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    block-size: 26px;
-    padding-inline: 9px;
-    border-radius: 6px;
-    border: 1px solid var(--ls-border);
-    background-color: var(
-      --ls-control-bg,
-      light-dark(#ffffff, #17181d)
-    );
-    box-shadow: var(
-      --ls-rim-light,
-      inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.05))
-    );
-    color: var(--ls-fg);
-    font-size: var(--ls-text-sm);
-    cursor: pointer;
-  }
-
-  .inspector-port-chip:hover {
-    background-color: var(--ls-hover);
-    border-color: var(--ls-border-strong);
   }
 
   .inspector-section-card {
@@ -2110,14 +1811,6 @@
     );
   }
 
-  .ls-inspector-header__lead {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 1 1 auto;
-    min-inline-size: 0;
-  }
-
   .ls-inspector-tabstrip,
   .ls-inspector-tabstrip.inspector-header-tablist {
     flex: 0 1 auto;
@@ -2221,7 +1914,7 @@
     color: var(--ls-fg);
     background-color: var(--ls-surface-1);
     border-color: var(--ls-border-strong);
-    box-shadow: var(--ls-rim-light), var(--ls-shadow-xs);
+    box-shadow: var(--ls-rim-light);
     padding-inline: 9px 6px;
     font-weight: 500;
   }
@@ -2236,8 +1929,7 @@
     display: none;
   }
 
-  .ls-inspector-tab__main,
-  .ls-inspector-tab__trigger {
+  .ls-inspector-tab__main {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2250,19 +1942,6 @@
     color: inherit;
     font: inherit;
     cursor: pointer;
-  }
-
-  .ls-inspector-tab__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: var(--ls-fg-3);
-  }
-
-  .ls-inspector-tab[aria-selected="true"] .ls-inspector-tab__icon,
-  .ls-inspector-tab[data-active="true"] .ls-inspector-tab__icon {
-    color: var(--ls-fg-2);
   }
 
   .ls-inspector-tab__label {
@@ -2281,22 +1960,6 @@
     overflow: clip;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .ls-inspector-tab__badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    min-block-size: 16px;
-    padding-inline: 4px;
-    border-radius: 999px;
-    background-color: var(--ls-fill);
-    color: var(--ls-fg-2);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
   }
 
   .ls-inspector-tab__close {
@@ -2329,11 +1992,10 @@
   .ls-inspector-tab__close:hover {
     opacity: 1;
     color: var(--ls-fg);
-    background-color: var(--ls-hover-strong);
+    background-color: var(--ls-fill-strong);
   }
 
-  .ls-inspector-newtab-btn,
-  .ls-inspector-header__new-tab {
+  .ls-inspector-newtab-btn {
     flex-shrink: 0;
   }
 
@@ -2374,8 +2036,7 @@
   }
 
   /* Row 1: Antigravity-style rounded pill search / URL bar */
-  .ls-newtab__search-wrap,
-  .ls-newtab__search-block,
+
   .ls-newtab__search-form {
     position: relative;
     display: flex;
@@ -2395,7 +2056,7 @@
     block-size: 36px;
     min-block-size: 36px;
     padding-inline: 12px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-md);
     border: 1px solid var(--ls-border);
     background-color: var(--ls-surface-2);
     color: var(--ls-fg);
@@ -2411,7 +2072,7 @@
 
   .ls-newtab__search-pill:focus-within {
     background-color: var(--ls-surface-1);
-    border-color: var(--ls-border-focus);
+    border-color: var(--ls-accent);
     box-shadow: 0 0 0 3px var(--ls-accent-soft);
   }
 
@@ -2443,7 +2104,7 @@
     block-size: 36px;
     min-block-size: 36px;
     padding-inline: 14px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-md);
     border: 1px solid var(--ls-border);
     background-color: var(--ls-surface-2);
     color: var(--ls-fg);
@@ -2458,7 +2119,7 @@
 
   input.ls-newtab__search:not(.ls-newtab__search-pill *):focus {
     background-color: var(--ls-surface-1);
-    border-color: var(--ls-border-focus);
+    border-color: var(--ls-accent);
     box-shadow: 0 0 0 3px var(--ls-accent-soft);
   }
 
@@ -2467,8 +2128,7 @@
     color: var(--ls-fg-3);
   }
 
-  .ls-newtab__search-results,
-  .ls-newtab__results {
+  .ls-newtab__search-results {
     border-radius: 10px;
     border: var(--ls-hairline) solid var(--ls-border);
     background-color: var(--ls-surface-2);
@@ -2480,9 +2140,7 @@
     overflow-y: auto;
   }
 
-  .ls-newtab__search-hit,
-  .ls-newtab__result-row,
-  .ls-newtab__search-item {
+  .ls-newtab__search-hit {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2501,9 +2159,7 @@
     cursor: pointer;
   }
 
-  .ls-newtab__search-hit:hover,
-  .ls-newtab__result-row:hover,
-  .ls-newtab__search-item:hover {
+  .ls-newtab__search-hit:hover {
     background-color: var(--ls-hover);
   }
 
@@ -2515,8 +2171,7 @@
     flex-shrink: 0;
   }
 
-  .ls-newtab__section-head,
-  .ls-newtab__section-header {
+  .ls-newtab__section-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2524,11 +2179,9 @@
     min-inline-size: 0;
   }
 
-  .ls-newtab__section-title,
-  .ls-newtab__heading,
-  .ls-newtab__label {
+  .ls-newtab__section-title {
     margin: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     line-height: 16px;
     font-weight: 500;
     color: var(--ls-fg-3);
@@ -2536,23 +2189,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .ls-newtab__count,
-  .ls-newtab__pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-inline-size: 18px;
-    block-size: 18px;
-    padding-inline: 5px;
-    border-radius: 999px;
-    background-color: var(--ls-fill);
-    color: var(--ls-fg-2);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
   }
 
   /* Clean Antigravity-style borderless action rows (.ls-newtab__action when standalone) */
@@ -2651,7 +2287,6 @@
     cursor: not-allowed;
   }
 
-  .ls-newtab__tool-card-lead,
   .ls-newtab__tool-lead {
     display: inline-flex;
     align-items: center;
@@ -2661,16 +2296,6 @@
     overflow: clip;
   }
 
-  .ls-newtab__tool-card-icon,
-  .ls-newtab__tool-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--ls-fg-2);
-    flex-shrink: 0;
-  }
-
-  .ls-newtab__tool-card-label,
   .ls-newtab__tool-label {
     min-inline-size: 0;
     overflow: clip;
@@ -2678,9 +2303,7 @@
     white-space: nowrap;
   }
 
-  .ls-newtab__tool-card-meta,
-  .ls-newtab__tool-meta,
-  .ls-newtab__tool-trailing {
+  .ls-newtab__tool-meta {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -2731,14 +2354,6 @@
     outline-offset: 1px;
   }
 
-  .ls-newtab__subagent-lead {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-inline-size: 0;
-    flex: 1 1 auto;
-  }
-
   .ls-newtab__subagent-body {
     display: flex;
     flex-direction: column;
@@ -2756,7 +2371,6 @@
     color: var(--ls-fg);
   }
 
-  .ls-newtab__subagent-sub,
   .ls-newtab__subagent-task {
     min-inline-size: 0;
     overflow: clip;
@@ -2766,20 +2380,7 @@
     color: var(--ls-fg-3);
   }
 
-  .ls-newtab__subagent-meta,
-  .ls-newtab__subagent-trailing {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-    color: var(--ls-fg-3);
-    font-family: var(--font-mono);
-    font-size: var(--ls-text-xs);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .ls-newtab__more-btn,
-  .ls-newtab__toggle-btn {
+  .ls-newtab__more-btn {
     align-self: flex-start;
     padding: 4px 8px;
     margin-inline-start: -6px;
@@ -2793,15 +2394,13 @@
     cursor: pointer;
   }
 
-  .ls-newtab__more-btn:hover,
-  .ls-newtab__toggle-btn:hover {
+  .ls-newtab__more-btn:hover {
     color: var(--ls-fg);
     background-color: var(--ls-hover);
   }
 
   /* Row 4: Claude Desktop-style Borderless Environment & Context Usage */
-  .ls-newtab__context,
-  .ls-newtab__env {
+  .ls-newtab__context {
     padding-block-start: 14px;
     border-block-start: var(--ls-hairline) solid var(--ls-border);
     display: flex;
@@ -2809,16 +2408,13 @@
     gap: 10px;
   }
 
-  .ls-newtab__context-list,
-  .ls-newtab__env-list,
-  .ls-newtab__env-rows {
+  .ls-newtab__context-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
 
-  .ls-newtab__context-row:not(.ls-newtab__task-row),
-  .ls-newtab__env-row {
+  .ls-newtab__context-row:not(.ls-newtab__task-row) {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2831,7 +2427,6 @@
     font-size: var(--ls-text-sm);
   }
 
-  .ls-newtab__env-lead,
   .ls-newtab__context-lead {
     display: inline-flex;
     align-items: center;
@@ -2841,24 +2436,13 @@
     color: var(--ls-fg-2);
   }
 
-  .ls-newtab__env-value,
-  .ls-newtab__context-value {
-    min-inline-size: 0;
-    overflow: clip;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ls-fg);
-  }
-
-  .ls-newtab__usage,
-  .ls-newtab__context-usage {
+  .ls-newtab__usage {
     display: flex;
     flex-direction: column;
     gap: 6px;
     padding-block-start: 2px;
   }
 
-  .ls-newtab__usage-head,
   .ls-newtab__usage-label {
     display: flex;
     align-items: center;
@@ -2869,9 +2453,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .ls-newtab__usage-track,
-  .ls-newtab__usage-bar,
-  .ls-newtab__progress-track {
+  .ls-newtab__usage-track {
     inline-size: 100%;
     block-size: 4px;
     border-radius: 999px;
@@ -2879,8 +2461,7 @@
     overflow: clip;
   }
 
-  .ls-newtab__usage-fill,
-  .ls-newtab__progress-fill {
+  .ls-newtab__usage-fill {
     block-size: 100%;
     border-radius: 999px;
     background-color: var(--ls-accent);
@@ -2915,8 +2496,7 @@
     flex-shrink: 0;
   }
 
-  .ls-subagent-panel__title-wrap,
-  .ls-subagent-panel__title-lead {
+  .ls-subagent-panel__title-wrap {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -2935,9 +2515,7 @@
     color: var(--ls-fg);
   }
 
-  .ls-subagent-panel__body,
-  .ls-subagent-panel__timeline,
-  .ls-subagent-panel__scroll {
+  .ls-subagent-panel__body {
     flex: 1 1 auto;
     min-inline-size: 0;
     min-block-size: 0;
@@ -3020,19 +2598,6 @@
     color: var(--ls-fg);
   }
 
-  .ls-subagent-tool__output {
-    margin: 0;
-    padding: 8px 10px;
-    max-block-size: 200px;
-    overflow: auto;
-    border-block-start: var(--ls-hairline) solid var(--ls-border-subtle);
-    background-color: var(--ls-code);
-    color: var(--ls-code-fg);
-    font-family: var(--font-mono);
-    font-size: var(--ls-text-xs);
-    line-height: 1.5;
-  }
-
   /* Zero 3px colored left stripe (#73 permanent ban): uniform 1px hairline border */
   .ls-subagent-error {
     display: flex;
@@ -3058,41 +2623,7 @@
     color: var(--ls-fg);
   }
 
-  .ls-sidechat-panel__bar,
-  .ls-sidechat-panel__bar.inspector-subbar {
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: nowrap;
-    gap: 6px;
-    block-size: 38px;
-    min-block-size: 38px;
-    max-block-size: 38px;
-    padding: 0 10px;
-    border-block-end: var(--ls-hairline) solid var(--ls-border-subtle);
-    background-color: var(--ls-bg);
-    flex-shrink: 0;
-  }
-
-  .ls-sidechat-panel__threads {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-inline-size: 0;
-    flex: 1 1 auto;
-    overflow-x: auto;
-    overflow-y: clip;
-    scrollbar-width: none;
-  }
-
-  .ls-sidechat-panel__threads::-webkit-scrollbar {
-    display: none;
-  }
-
-  .ls-sidechat-panel__body,
-  .ls-sidechat-panel__messages,
-  .ls-sidechat-panel__scroll {
+  .ls-sidechat-panel__body {
     flex: 1 1 auto;
     min-inline-size: 0;
     min-block-size: 0;
@@ -3131,8 +2662,7 @@
     align-self: stretch;
   }
 
-  .ls-sidechat-empty,
-  .ls-sidechat-panel__empty {
+  .ls-sidechat-empty {
     margin: auto 0;
     padding: 24px 16px;
     display: flex;
@@ -3144,8 +2674,7 @@
     font-size: var(--ls-text-sm);
   }
 
-  .ls-sidechat-empty p,
-  .ls-sidechat-panel__empty p {
+  .ls-sidechat-empty p {
     margin: 0;
     max-inline-size: 280px;
     line-height: 1.55;
@@ -3168,7 +2697,7 @@
     gap: 5px;
     min-block-size: 28px;
     padding: 4px 11px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-sm);
     border: var(--ls-hairline) solid var(--ls-border);
     background-color: var(--ls-surface-2);
     color: var(--ls-fg-2);
@@ -3209,7 +2738,7 @@
     border: var(--ls-hairline) solid var(--ls-border);
     box-shadow:
       var(--ls-rim-light),
-      var(--ls-shadow-card, var(--ls-shadow-sm));
+      var(--ls-shadow-composer);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -3277,14 +2806,13 @@
     min-inline-size: 28px;
     block-size: 28px;
     padding: 0;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-sm);
     border: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     background-color: var(--ls-primary-bg, light-dark(#141518, #ededf0));
     color: var(--ls-primary-fg, light-dark(#ffffff, #0b0c0e));
-    box-shadow: var(--ls-shadow-control);
     flex-shrink: 0;
     cursor: pointer;
     transition:
@@ -3306,19 +2834,86 @@
     cursor: not-allowed;
   }
 
-  .ls-sidechat-panel__composer,
-  .ls-sidechat-panel__footer {
-    padding: 10px 12px 12px;
-    border-block-start: var(--ls-hairline) solid var(--ls-border);
-    background-color: var(--ls-bg);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .inspector-panel-fill[hidden] {
+    display: none;
   }
 
-  .ls-sidechat-panel__input {
-    flex: 1 1 auto;
+  /* The xterm mount carries no padding so FitAddon measures the box the rows really get. */
+  .inspector-xterm-mount {
+    position: relative;
+    inline-size: 100%;
+    block-size: 100%;
     min-inline-size: 0;
+    min-block-size: 0;
+    overflow: clip;
+  }
+
+  .inspector-terminal-restore {
+    position: absolute;
+    inset-block-end: 10px;
+    inset-inline: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border: var(--ls-hairline) solid var(--ls-border);
+    border-radius: var(--ls-radius-md);
+    background-color: var(--ls-surface-1);
+    color: var(--ls-fg-2);
+    font-size: var(--ls-text-xs);
+    z-index: 1;
+  }
+
+  /* A quick re-attach shouldn't flash a banner; only a slow one shows. */
+  .inspector-terminal-restore[data-state="restoring"] {
+    animation: inspector-restore-appear 1ms 600ms both;
+  }
+
+  .inspector-terminal-restore[data-state="failed"] {
+    color: var(--ls-fg);
+    border-color: var(--ls-border-strong);
+  }
+
+  @keyframes inspector-restore-appear {
+    from {
+      visibility: hidden;
+    }
+    to {
+      visibility: visible;
+    }
+  }
+
+  .ls-inspector-tab:has(.ls-inspector-tab__main:focus-visible) {
+    outline: var(--ls-focus-ring);
+    outline-offset: 1px;
+  }
+
+  .ls-inspector-tab__main:focus-visible {
+    outline: none;
+  }
+
+  .ls-inspector-tab__dirty {
+    inline-size: 6px;
+    block-size: 6px;
+    border-radius: 999px;
+    background-color: var(--ls-fg-2);
+    flex-shrink: 0;
+  }
+
+  .ls-inspector-tab[data-dirty="true"] .ls-inspector-tab__close {
+    opacity: 1;
+  }
+
+  .inspector-file-image {
+    max-inline-size: 100%;
+    border-radius: var(--ls-radius-md);
+  }
+
+  .ls-preview-popover__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
   }
 }

@@ -8,6 +8,11 @@ import {
   FUSION_ICON_BATCH_SIZE,
   STORAGE_KEYS,
   ScreenGate,
+  buildProjectMenuItems,
+  confirmLeavingSession,
+  describeActionError,
+  saveLocal,
+  setNavigationConfirmer,
   SmoothRelease,
   canUseFusionMode,
   clearUnsavedWorkForTests,
@@ -590,6 +595,168 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
       expect(router.getState().openSession(DESKTOP_LOCAL, "sess-1")).toBe(true);
     });
 
+    it("prunes deleted sessions and forgotten computers from history, replacing only an active match with home", () => {
+      const router = createRouterStore({ location: { getHash: () => "", setHash: () => {} } });
+      router.getState().openSession(DESKTOP_LOCAL, "sess-a");
+      router.getState().navigate({ kind: "projects" });
+      router.getState().openSession("gw::mac", "sess-b");
+      router.getState().openScreen("gw::mac");
+      router.getState().back();
+      expect(router.getState().activeRoute).toEqual({
+        kind: "session",
+        computerKey: "gw::mac",
+        sessionId: "sess-b",
+      });
+
+      // Deleting a session that is not on screen keeps the user where they are.
+      router.getState().forgetSession(DESKTOP_LOCAL, "sess-a");
+      expect(router.getState().activeRoute).toEqual({
+        kind: "session",
+        computerKey: "gw::mac",
+        sessionId: "sess-b",
+      });
+      expect(router.getState().history).toEqual([
+        { kind: "home" },
+        { kind: "projects" },
+        { kind: "session", computerKey: "gw::mac", sessionId: "sess-b" },
+        { kind: "screen", computerKey: "gw::mac" },
+      ]);
+
+      // Deleting the open session turns its entry into home in place: back still reaches projects.
+      router.getState().forgetSession("gw::mac", "sess-b");
+      expect(router.getState().activeRoute).toEqual({ kind: "home" });
+      expect(router.getState().canGoForward).toBe(true);
+      router.getState().back();
+      expect(router.getState().activeRoute).toEqual({ kind: "projects" });
+
+      router.getState().forgetComputer("gw::mac");
+      expect(
+        router.getState().history.some((route) => "computerKey" in route && route.computerKey === "gw::mac"),
+      ).toBe(false);
+    });
+
+    it("steps back and forward over entries the route validator rejects", () => {
+      const router = createRouterStore({ location: { getHash: () => "", setHash: () => {} } });
+      router.getState().navigate({ kind: "projects" });
+      router.getState().openSession(DESKTOP_LOCAL, "gone");
+      router.getState().navigate({ kind: "archive" });
+      router.getState().setRouteValidator(
+        (route) => !(route.kind === "session" && route.sessionId === "gone"),
+      );
+      router.getState().back();
+      expect(router.getState().activeRoute).toEqual({ kind: "projects" });
+      router.getState().forward();
+      expect(router.getState().activeRoute).toEqual({ kind: "archive" });
+    });
+
+    it("asks asynchronously only when leaving the session family with unsaved work", async () => {
+      clearUnsavedWorkForTests();
+      let answer: (ok: boolean) => void = () => {};
+      const asked = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      const dispose = setNavigationConfirmer(asked);
+      const router = createRouterStore({
+        location: { getHash: () => "", setHash: () => {} },
+        confirmNavigate: confirmLeavingSession,
+      });
+      router.getState().openSession(DESKTOP_LOCAL, "sess-1");
+      const release = registerUnsavedWork("draft");
+      try {
+        // Session to session is the panels' business: no question.
+        expect(router.getState().openSession(DESKTOP_LOCAL, "sess-2")).toBe(true);
+        expect(asked).not.toHaveBeenCalled();
+
+        expect(router.getState().navigate({ kind: "projects" })).toBe(false);
+        expect(asked).toHaveBeenCalledTimes(1);
+        expect(router.getState().activeRoute.kind).toBe("session");
+        answer(true);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(router.getState().activeRoute).toEqual({ kind: "projects" });
+
+        router.getState().back();
+        expect(router.getState().activeRoute.kind).toBe("session");
+        expect(router.getState().navigate({ kind: "archive" })).toBe(false);
+        answer(false);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(router.getState().activeRoute.kind).toBe("session");
+      } finally {
+        release();
+        dispose();
+      }
+    });
+
+    it("restores the last route on relaunch but never a media route", () => {
+      const view = formatWorkspaceView({
+        kind: "session",
+        computerKey: DESKTOP_LOCAL,
+        sessionId: "sess-restore",
+      });
+      saveLocal(STORAGE_KEYS.lastRoute, view);
+      const restored = createRouterStore({
+        location: { getHash: () => "", setHash: () => {} },
+        persistRoute: true,
+      });
+      expect(restored.getState().activeRoute).toEqual({
+        kind: "session",
+        computerKey: DESKTOP_LOCAL,
+        sessionId: "sess-restore",
+      });
+      expect(restored.getState().restoredRoute).toBe(true);
+
+      // An explicit hash wins over the stored route.
+      const fromHash = createRouterStore({
+        location: { getHash: () => "#view=archive", setHash: () => {} },
+        persistRoute: true,
+      });
+      expect(fromHash.getState().activeRoute).toEqual({ kind: "archive" });
+
+      // Navigating persists; a screen route is remembered but not reopened unasked.
+      restored.getState().openScreen("gw::mac");
+      expect(readLocal<string>(STORAGE_KEYS.lastRoute, "")).toBe(
+        formatWorkspaceView({ kind: "screen", computerKey: "gw::mac" }),
+      );
+      const afterScreen = createRouterStore({
+        location: { getHash: () => "", setHash: () => {} },
+        persistRoute: true,
+      });
+      expect(afterScreen.getState().activeRoute).toEqual({ kind: "home" });
+      saveLocal(STORAGE_KEYS.lastRoute, "");
+    });
+
+    it("hides reveal and copy-path for generated project groups and maps host error codes to copy", () => {
+      const generated = buildProjectMenuItems({
+        hasLiveSessions: true,
+        online: true,
+        local: true,
+        generated: true,
+        locale: "zh",
+      });
+      expect(generated.map((item) => item.id).filter(Boolean)).toEqual(["new", "archive-all"]);
+      const folder = buildProjectMenuItems({
+        hasLiveSessions: true,
+        online: true,
+        local: true,
+        locale: "zh",
+      });
+      expect(folder.map((item) => item.id).filter(Boolean)).toEqual([
+        "new",
+        "reveal",
+        "copy-path",
+        "archive-all",
+      ]);
+
+      const wrong = Object.assign(new Error("访问密码不正确"), { data: { code: "wrong_password" } });
+      expect(describeActionError(wrong, "en")).toBe("The access password is incorrect");
+      expect(describeActionError(new Error("socket hang up"), "zh")).toBe("操作失败：socket hang up");
+      expect(describeActionError(new Error("no handler for machine.rename"), "zh")).toContain("版本较旧");
+    });
+
     it("parses both single-encoded and double-encoded #view= hashes across desktop:local, relay, direct ws, and Windows paths", () => {
       const cases: Array<{
         singleHash: string;
@@ -871,5 +1038,40 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
       );
       expect(blocks).toHaveLength(3);
     });
+  });
+
+  it("coalesces sidecar storage writes per key so typing costs one request per round trip", async () => {
+    // Fresh modules: the capability token is cached per module instance and must not leak to other cases.
+    vi.resetModules();
+    vi.stubGlobal("location", { hash: "#desktop=test-token", pathname: "/", search: "" });
+    const bodies: string[] = [];
+    const releases: (() => void)[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      bodies.push(String((init as RequestInit).body));
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    try {
+      const storage = await import("../src/core/storage");
+      storage.resetDesktopStorageForTests();
+      storage.saveLocal("composer.draft", "a");
+      storage.saveLocal("composer.draft", "ab");
+      storage.saveLocal("composer.draft", "abc");
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0]!)).toEqual({ key: "composer.draft", value: "abc" });
+
+      // While that request is in flight, more typing collapses into one follow-up with the newest text.
+      storage.saveLocal("composer.draft", "abcd");
+      storage.saveLocal("composer.draft", "abcde");
+      releases.shift()!();
+      await vi.waitFor(() => expect(bodies).toHaveLength(2));
+      expect(JSON.parse(bodies[1]!)).toEqual({ key: "composer.draft", value: "abcde" });
+      releases.shift()!();
+      await vi.waitFor(() => expect(storage.pendingStorageWriteCount()).toBe(0));
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
   });
 });

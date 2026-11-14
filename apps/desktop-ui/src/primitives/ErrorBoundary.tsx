@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { DesktopIcon } from "../icons";
 import { Button } from "./Button";
 import { cn } from "./utils";
+import { getPrimitiveLabels } from "./labels";
 
 export interface ErrorBoundaryProps {
   children: ReactNode;
@@ -71,9 +72,9 @@ export class ErrorBoundary extends Component<
     }
 
     const {
-      fallbackTitle = "面板加载出现异常",
+      fallbackTitle = getPrimitiveLabels().panelFailed,
       fallbackDescription,
-      retryLabel = "重试加载",
+      retryLabel = getPrimitiveLabels().retry,
       className,
     } = this.props;
 

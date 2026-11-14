@@ -24,7 +24,9 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     FusionMetadata.enabled = true
     let host = Launch.value(after: "--host") ?? ""
     let port = Launch.value(after: "--port").flatMap(UInt16.init) ?? FusionWire.port
-    let token = Launch.value(after: "--token") ?? ""
+    // From the environment, never argv: any local user can read another process's arguments.
+    let token = ProcessInfo.processInfo.environment["LINKSHELL_FUSION_TOKEN"] ?? ""
+    unsetenv("LINKSHELL_FUSION_TOKEN")
     let computerKey = Launch.value(after: "--computer-key") ?? ""
     let launchArg = Launch.value(after: "--launch") ?? ""
     let local = FusionLocal(host: host, port: port, token: token, computerKey: computerKey, initialLaunch: launchArg)
@@ -73,6 +75,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     var frame: CGRect
     var pdx: Double?
     var pdy: Double?
+    var layer: Int = 101
   }
 
   private var host: String
@@ -83,6 +86,8 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   private var computerKey: String
   private var pendingLaunchBundles: [String]
   private let socketPath: String
+  /// Why the last hub exited (and its alerts), for LinkShell Desktop once this process is gone.
+  private let statusPath: String
   private let appsDir: URL
   private let iconCacheDir: URL
   private var listenFD: Int32 = -1
@@ -115,6 +120,13 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   private var frontWindowID: CGWindowID?
   private var rtt = 0.0
   private var connected = false
+  private var stopping = false
+  /// Structured problems LinkShell Desktop shows with a remedy each, keyed by kind (+ subject).
+  private var alerts: [String: [String: Any]] = [:]
+  private var stubRelaunches: [String: [Double]] = [:]
+  private var displayObservers: [NSObjectProtocol] = []
+  private var lastDisplaysSignature = ""
+  private var displaysTimer: Timer?
 
   // Lock-protected mirrors for off-main-thread 120fps frame & input routing
   fileprivate let frameQueue = DispatchQueue(label: "com.bd.linkshell.fusion.frames", qos: .userInteractive)
@@ -146,10 +158,12 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     self.token = token
     self.computerKey = computerKey
     self.pendingLaunchBundles = initialLaunch.split(separator: ",").map(String.init).filter { !$0.isEmpty }
-    let label = hostName ?? Launch.value(after: "--name") ?? (host == "100.121.94.123" ? "m4" : (host.split(separator: ".").first.map(String.init) ?? "Remote"))
+    let rawLabel = (hostName ?? Launch.value(after: "--name") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let label = rawLabel.isEmpty ? "Remote" : rawLabel.replacingOccurrences(of: "/", with: "-")
     self.hostLabel = label
-    let slug = label.lowercased().filter { $0.isLetter || $0.isNumber }
-    self.hostSlug = slug.isEmpty ? "remote" : slug
+    // Keyed by the computer, not its name: two computers may share a name, and a rename must not
+    // orphan the socket, the icon cache or the stub bundle ids.
+    self.hostSlug = Fusion.slug(computerKey: computerKey.isEmpty ? label : computerKey)
     let resolvedHome = homeDirectory ?? NSHomeDirectory()
     let envLinkshellHome = ProcessInfo.processInfo.environment["LINKSHELL_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
     let lsDir: String
@@ -161,6 +175,8 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       lsDir = resolvedHome + "/.linkshell"
     }
     try? FileManager.default.createDirectory(atPath: lsDir, withIntermediateDirectories: true)
+    self.statusPath = lsDir + "/fusion-\(self.hostSlug).status.json"
+    if homeDirectory == nil { Fusion.logPath = lsDir + "/fusion-local.log" }
     self.socketPath = lsDir + "/fusion-\(self.hostSlug).sock"
     if homeDirectory == nil,
        let envAppsRoot = ProcessInfo.processInfo.environment["LINKSHELL_FUSION_APPS_DIR"],
@@ -287,6 +303,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
         "windowCounts": winCounts,
         "iconBundles": Array(realIconBundles).sorted(),
         "apps": appItems,
+        "alerts": alertList,
       ])
       client.close()
     case "launchApp":
@@ -301,18 +318,17 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       client.close()
     case "quitApp":
       if let bundle = m["bundle"] as? String, !bundle.isEmpty {
-        let force = m["force"] as? Bool == true
-        if let stub = stubs[bundle] {
-          stub.closedByHub = true
-          stub.send(["t": "app.exited"])
-        }
-        quitLocalBundle(bundle, force: force)
+        // The stub stays until the remote app has really exited (`app.exited`): a "save changes?"
+        // sheet must remain visible and answerable.
+        quitLocalBundle(bundle, force: m["force"] as? Bool == true)
       }
       client.send(["t": "ok"])
       client.close()
     case "stopHub":
       client.send(["t": "ok"])
       client.close()
+      stopping = true
+      writeExitStatus(reason: "stopped")
       NSApp.terminate(nil)
     default:
       client.close()
@@ -406,10 +422,15 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     let existing = windows.values.filter { $0.bundle == bundle }
     if existing.isEmpty {
       // Cold launch from Spotlight or Dock: ask remote to launch/activate unless already sent within 4s.
-      let now = CACurrentMediaTime()
-      if now - (launchSentAt[bundle] ?? 0) >= 4.0 {
-        launchSentAt[bundle] = now
-        wire?.send(["t": "launch", "bundle": bundle])
+      // Before `ready` the remote drops anything but `hello`: queue it instead of losing it.
+      if !connected {
+        if !pendingLaunchBundles.contains(bundle) { pendingLaunchBundles.append(bundle) }
+      } else {
+        let now = CACurrentMediaTime()
+        if now - (launchSentAt[bundle] ?? 0) >= 4.0 {
+          launchSentAt[bundle] = now
+          wire?.send(["t": "launch", "bundle": bundle])
+        }
       }
     } else {
       for rec in existing {
@@ -419,6 +440,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
           "t": "wopen", "id": Int(rec.id), "title": rec.title, "toolbar": rec.toolbar, "r": rec.cornerRadius,
           "frame": Fusion.dict(rec.frame), "control": ctrl, "keys": keys,
           "buttons": rec.buttons, "hitrects": rec.hitrects, "ack": rec.ackSeq,
+          "activate": false,
         ])
         if let dz = rec.dragZone {
           client.send(["t": "dragzone", "id": Int(rec.id), "ok": dz])
@@ -475,11 +497,12 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     syncFastState(removedWindowIDs: winIDs)
   }
 
+  /// Asks the remote app to quit and keeps its windows until the remote says they closed or the app
+  /// exited: an app with unsaved changes answers with a sheet the person must be able to see.
   private func quitLocalBundle(_ bundle: String, force: Bool) {
     guard !bundle.isEmpty else { return }
     quittingBundles[bundle] = CACurrentMediaTime() + 6.0
     launchingStubs.remove(bundle)
-    purgeLocalState(forBundle: bundle)
     wire?.send(["t": "quit", "bundle": bundle, "force": force])
     reloadGrid()
     saveCatalogToDisk()
@@ -508,7 +531,12 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       wire?.send(["t": "wclose.req", "id": id])
     case "focus":
       let id = CGWindowID(Fusion.number(m["id"]))
+      clipboardFocused()
       wire?.send(["t": "focus", "id": id])
+    case "prewarm":
+      wire?.send(["t": "prewarm", "id": m["id"] ?? 0])
+    case "active":
+      setStubActive(client.bundle, m["on"] as? Bool == true)
     case "reopen":
       if !client.bundle.isEmpty {
         quittingBundles.removeValue(forKey: client.bundle)
@@ -518,6 +546,12 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
           launchSentAt[client.bundle] = now
           wire?.send(["t": "launch", "bundle": client.bundle])
         }
+      }
+    case "detach":
+      client.closedByHub = true
+    case "menufetch", "menupress":
+      if !client.bundle.isEmpty {
+        wire?.send(["t": m["t"] ?? "", "bundle": client.bundle, "path": m["path"] ?? [Int]()])
       }
     case "dockaction":
       if !client.bundle.isEmpty {
@@ -538,15 +572,93 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     if !client.bundle.isEmpty, stubs[client.bundle] === client {
       stubs.removeValue(forKey: client.bundle)
       stubHadRealIconOnLaunch.remove(client.bundle)
+      setStubActive(client.bundle, false)
       syncFastState()
       if !client.closedByQuit && !client.closedByHub && connected {
-        // Unexpected local exit (e.g. Dock Option+Force Quit or Activity Monitor Kill): force-quit remote app too!
-        quitLocalBundle(client.bundle, force: true)
+        // The stub crashed or was killed. The remote app may hold unsaved work, so it is never
+        // force-quit for that: the stub comes back (a few times) for the windows still open.
+        relaunchStubAfterCrash(client.bundle)
       } else {
         reloadGrid()
         refreshStatus()
       }
     }
+  }
+
+  private func relaunchStubAfterCrash(_ bundle: String) {
+    let now = CACurrentMediaTime()
+    var recent = (stubRelaunches[bundle] ?? []).filter { now - $0 < 60 }
+    guard recent.count < 3 else {
+      setAlert("stub", subject: bundle, message: "本机的融合应用反复退出，已停止自动重新打开；远端应用仍在运行")
+      stubRelaunches[bundle] = recent
+      reloadGrid()
+      refreshStatus()
+      return
+    }
+    recent.append(now)
+    stubRelaunches[bundle] = recent
+    guard windows.values.contains(where: { $0.bundle == bundle }) else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      guard let self, self.connected, self.stubs[bundle] == nil else { return }
+      self.ensureStubRunning(bundle: bundle, activate: false)
+    }
+  }
+
+  // MARK: Focus across stubs (C9) and the clipboard (C3)
+
+  private var activeStubs: Set<String> = []
+  private var appActiveTimer: Timer?
+  private var remoteAppActive = false
+  private var clipboard = FusionClipboardGuard()
+  private var clipboardTimer: Timer?
+
+  /// Debounced: going from one stub to another passes through "none active" for a moment, and the
+  /// remote apps must not flicker inactive for it.
+  private func setStubActive(_ bundle: String, _ on: Bool) {
+    guard !bundle.isEmpty else { return }
+    if on { activeStubs.insert(bundle) } else { activeStubs.remove(bundle) }
+    appActiveTimer?.invalidate()
+    if !activeStubs.isEmpty {
+      remoteAppActive = true
+      clipboardTick()
+      return
+    }
+    appActiveTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: false) { [weak self] _ in
+      guard let self, self.activeStubs.isEmpty, self.remoteAppActive else { return }
+      self.remoteAppActive = false
+      self.wire?.send(["t": "appactive", "on": false])
+    }
+  }
+
+  /// The first focus of a fused window arms the clipboard; what was copied before is not sent.
+  private func clipboardFocused() {
+    // Whatever is on this Mac's clipboard when a fused window gets the focus is what the person
+    // expects ⌘V to paste there, so the first tick after arming sends it.
+    clipboard.armed = true
+    clipboardTick()
+    if clipboardTimer == nil {
+      clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.clipboardTick() }
+    }
+  }
+
+  /// Local → remote, only while a fused app is active here.
+  private func clipboardTick() {
+    guard connected, !activeStubs.isEmpty, clipboard.armed else { return }
+    let pasteboard = NSPasteboard.general
+    let types = (pasteboard.types ?? []).map(\.rawValue)
+    let count = pasteboard.changeCount
+    // Cheap check first: the contents (up to 8 MB) are read only when something changed.
+    guard clipboard.isUnseen(changeCount: count) else { return }
+    let item = FusionClipboardItem.read(pasteboard)
+    guard clipboard.shouldSend(changeCount: count, types: types, bytes: item.bytes) else { return }
+    wire?.send(item.message)
+  }
+
+  /// Remote → local: the remote only sends while one of the fused apps is frontmost there.
+  private func receiveRemoteClipboard(_ m: [String: Any]) {
+    guard clipboard.armed, let item = FusionClipboardItem(message: m) else { return }
+    let count = item.write(to: NSPasteboard.general)
+    clipboard.didWrite(changeCount: count)
   }
 
   // MARK: Remote Connection
@@ -556,24 +668,68 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     wire?.close()
     iconRequested.removeAll()
     let endpointPort = NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: FusionWire.port)!
-    let connection = NWConnection(host: NWEndpoint.Host(host), port: endpointPort, using: FusionWire.parameters())
+    let connection = NWConnection(host: NWEndpoint.Host(host), port: endpointPort, using: FusionWire.parameters(token: token))
     let wire = FusionWire(connection)
     self.wire = wire
-    wire.onReady = { [weak self] in DispatchQueue.main.async { self?.hello() } }
+    wire.onReady = { [weak self] in
+      // The remote answers every 1.5 s ping: 5 s of silence is a dead link, not frozen windows.
+      wire.startWatchdog(timeout: 5)
+      DispatchQueue.main.async { self?.hello() }
+    }
     wire.onMessage = { [weak self] in self?.receive($0) }
-    wire.onClose = { [weak self] in self?.closed() }
+    wire.onClose = { [weak self] reason in self?.closed(reason: reason) }
     wire.start()
     updateStatus("正在连接 \(hostLabel) (\(host):\(port))…")
   }
 
-  private func hello() {
+  static func localDisplays() -> [[String: Any]] {
     let primary = NSScreen.screens.first?.frame.height ?? 0
-    let screens: [[String: Any]] = NSScreen.screens.compactMap { screen in
+    return NSScreen.screens.compactMap { screen in
       guard let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { return nil }
       let v = screen.visibleFrame
       let visible = CGRect(x: v.minX, y: primary - v.maxY, width: v.width, height: v.height)
-      return ["id": id, "frame": Fusion.dict(CGDisplayBounds(id)), "visible": Fusion.dict(visible), "scale": screen.backingScaleFactor, "hz": CGDisplayCopyDisplayMode(id)?.refreshRate ?? 60]
+      // Built-in panels can report 0 Hz; the screen's own maximum is the truth for ProMotion.
+      let modeHz = CGDisplayCopyDisplayMode(id)?.refreshRate ?? 0
+      let hz = max(modeHz, Double(screen.maximumFramesPerSecond), 60)
+      return ["id": id, "frame": Fusion.dict(CGDisplayBounds(id)), "visible": Fusion.dict(visible), "scale": screen.backingScaleFactor, "hz": hz]
     }
+  }
+
+  static func displaysSignature(_ displays: [[String: Any]]) -> String {
+    let parts = displays.map { d -> String in
+      let f = Fusion.rect(d["frame"]), v = Fusion.rect(d["visible"])
+      return "\(f.minX),\(f.minY),\(f.width),\(f.height)|\(v.minY),\(v.height)|\(Fusion.number(d["scale"]))"
+    }
+    return parts.joined(separator: ";")
+  }
+
+  /// Plugging a display, changing a scale or waking re-describes the local screens; the remote
+  /// rebuilds its virtual displays to match, otherwise windows clamp onto stale ones.
+  private func observeDisplays() {
+    guard displayObservers.isEmpty else { return }
+    let schedule: (Notification) -> Void = { [weak self] _ in self?.scheduleDisplaysUpdate() }
+    displayObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: schedule))
+    displayObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: schedule))
+    displayObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main, using: schedule))
+  }
+
+  private func scheduleDisplaysUpdate() {
+    displaysTimer?.invalidate()
+    displaysTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+      guard let self, self.connected else { return }
+      let displays = Self.localDisplays()
+      let signature = Self.displaysSignature(displays)
+      guard signature != self.lastDisplaysSignature else { return }
+      self.lastDisplaysSignature = signature
+      Fusion.log("local displays changed: \(signature)")
+      self.wire?.send(["t": "displays", "displays": displays])
+    }
+  }
+
+  private func hello() {
+    let screens = Self.localDisplays()
+    lastDisplaysSignature = Self.displaysSignature(screens)
+    observeDisplays()
     wire?.send(["t": "hello", "token": token, "displays": screens])
     pingTimer?.invalidate()
     pingTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
@@ -600,6 +756,18 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       if let bundle = windows[id]?.bundle {
         stubs[bundle]?.send(["t": "minimize", "id": Int(id)])
       }
+    case "apphidden":
+      if let bundle = m["bundle"] as? String {
+        stubs[bundle]?.send(["t": "hidden", "on": m["on"] as? Bool == true])
+      }
+    case "clip":
+      receiveRemoteClipboard(m)
+    case "menu":
+      if let bundle = m["bundle"] as? String {
+        var forward = m
+        forward.removeValue(forKey: "bundle")
+        stubs[bundle]?.send(forward)
+      }
     case "dragzone": remoteDragZone(m)
     case "layout": remoteLayout(m["windows"] as? [[String: Any]] ?? [])
     case "icon": remoteIcon(m)
@@ -624,6 +792,14 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       refreshStatus()
     case "error":
       updateStatus("远端提示：\(m["message"] as? String ?? "")")
+    case "alert":
+      let kind = m["kind"] as? String ?? "remote"
+      let subject = m["subject"] as? String ?? ""
+      if m["clear"] as? Bool == true {
+        clearAlert(kind, subject: subject)
+      } else {
+        setAlert(kind, subject: subject, message: m["message"] as? String ?? "")
+      }
     default:
       break
     }
@@ -635,10 +811,21 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     syncFastState()
     receivers[key] = DesktopScreenReceiver(surface: output, preferH264: true, onSignal: { [weak self] message in
       self?.wire?.send(["t": "sig", "k": key, "m": message])
-    }, onStatus: { [weak self] _ in
-      self?.refreshStatus()
+    }, onStatus: { [weak self] status in
+      guard let self else { return }
+      if let error = status["controlError"] as? String, !error.isEmpty {
+        self.setAlert("accessibility", message: error)
+      } else if status["control"] as? Bool == true {
+        self.clearAlert("accessibility")
+      }
+      if status["live"] as? Bool == true { self.clearAlert("webrtc", subject: key) }
+      self.refreshStatus()
     }, onFailure: { [weak self] message in
-      self?.updateStatus("\(key)：\(message)")
+      guard let self else { return }
+      self.updateStatus("\(key)：\(message)")
+      var extra: [String: Any] = ["stream": key]
+      if key.hasPrefix("w"), let id = CGWindowID(key.dropFirst()), let bundle = self.windows[id]?.bundle { extra["bundle"] = bundle }
+      self.setAlert("webrtc", subject: key, message: message, extra: extra)
     })
     receivers[key]?.setControl(true)
   }
@@ -675,8 +862,9 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
 
   private func ensureIcons() {
     // Request icons progressively: prioritize existing Stub `.app` bundles + common apps first.
-    var priority = ["com.anthropic.claudefordesktop", "com.apple.Safari", "com.google.Chrome", "com.apple.Notes", "com.apple.calculator", "com.apple.finder"]
-    for b in existingStubBundles where !priority.contains(b) {
+    // Apps with a stub on disk first: their Dock and Spotlight icons are the ones people see.
+    var priority: [String] = []
+    for b in existingStubBundles.sorted() where !priority.contains(b) {
       priority.append(b)
     }
     let ordered = priority + apps.map(\.bundle).filter { !priority.contains($0) }
@@ -687,12 +875,60 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     }
   }
 
+  /// Stub bundles whose app left the remote are removed, so Spotlight and Launchpad stop offering
+  /// apps that can no longer open. Only our own bundles (marked `LSFusionBundleID`) in this
+  /// computer's folder are touched, and never one whose stub is running.
+  private func pruneStubs(keeping catalog: [AppEntry]) {
+    guard !catalog.isEmpty else { return }
+    let keep = Set(catalog.map(\.bundle)).union(stubs.keys).union(launchingStubs).union(windows.values.map(\.bundle))
+    let dir = appsDir
+    stubQueue.async { [weak self] in
+      let removed = Self.staleStubBundles(in: dir, keeping: keep)
+      for url in removed {
+        Self.unregisterFromLaunchServices(url)
+        try? FileManager.default.removeItem(at: url)
+        Fusion.log("removed stale stub \(url.lastPathComponent)")
+      }
+      guard !removed.isEmpty else { return }
+      DispatchQueue.main.async {
+        guard let self else { return }
+        for (bundle, url) in self.stubURLs where removed.contains(url) {
+          self.stubURLs.removeValue(forKey: bundle)
+          self.existingStubBundles.remove(bundle)
+        }
+      }
+    }
+  }
+
+  static func staleStubBundles(in dir: URL, keeping keep: Set<String>) -> [URL] {
+    let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+    return items.filter { url in
+      guard url.pathExtension == "app",
+            let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) as? [String: Any],
+            let bundle = info["LSFusionBundleID"] as? String, !bundle.isEmpty else { return false }
+      return !keep.contains(bundle)
+    }
+  }
+
+  private static func unregisterFromLaunchServices(_ appURL: URL) {
+    let lsreg = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    guard FileManager.default.isExecutableFile(atPath: lsreg) else { return }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: lsreg)
+    proc.arguments = ["-u", appURL.path]
+    proc.standardOutput = FileHandle.nullDevice
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
+    proc.waitUntilExit()
+  }
+
   private func applyCatalog(_ m: [String: Any]) {
     let parsed = Self.parseApps(m["apps"])
     guard !parsed.isEmpty || m["apps"] != nil else { return }
     if !parsed.isEmpty || apps.isEmpty {
       apps = parsed
     }
+    pruneStubs(keeping: parsed)
     reloadGrid()
     saveCatalogToDisk()
     if connected {
@@ -705,9 +941,17 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
 
   private func ready(_ m: [String: Any]) {
     connected = true
+    let indices = Set((m["displays"] as? [[String: Any]] ?? []).map { Int(Fusion.number($0["index"])) })
+    for index in displays.keys where !indices.contains(index) {
+      displays.removeValue(forKey: index)
+      receivers.removeValue(forKey: "d\(index)")?.stop()
+      outputs.removeValue(forKey: "d\(index)")
+    }
     for d in m["displays"] as? [[String: Any]] ?? [] {
       let index = Int(Fusion.number(d["index"]))
       displays[index] = (Fusion.rect(d["local"]), Int(Fusion.number(d["scale"])))
+      // A display rebuild sends `ready` again: the old overlay peer must not linger beside the new one.
+      receivers.removeValue(forKey: "d\(index)")?.stop()
       receiver("d\(index)") { [weak self] buffer, layout in self?.handleDisplayPicture(index, buffer, layout) }
     }
     syncFastState()
@@ -727,7 +971,8 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func closed() {
+  private func closed(reason: String = "closed") {
+    writeExitStatus(reason: stopping ? "stopped" : reason)
     connected = false
     pingTimer?.invalidate()
     pingTimer = nil
@@ -774,11 +1019,8 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   private func remoteWindowOpened(_ m: [String: Any]) {
     let id = CGWindowID(Fusion.number(m["id"]))
     let bundle = m["bundle"] as? String ?? ""
-    if let quitDeadline = quittingBundles[bundle] {
-      // Ignore pre-quit race within the first 0.6s; allow later windows (such as a Save Changes prompt).
-      if quitDeadline - CACurrentMediaTime() > 5.4 { return }
-      quittingBundles.removeValue(forKey: bundle)
-    }
+    // A window that opens while the app is quitting is usually its "save changes?" prompt: show it.
+    quittingBundles.removeValue(forKey: bundle)
     let title = m["title"] as? String ?? (apps.first(where: { $0.bundle == bundle })?.name ?? "")
     let toolbar = m["toolbar"] as? Bool == true
     let radius = toolbar ? 26.0 : 17.0
@@ -791,16 +1033,20 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     )
 
     let key = "w\(id)"
+    // Only a window that follows something the person did in that app takes the focus here;
+    // windows replayed on reconnect or opened by the app on its own never steal it.
+    let activate = m["activate"] as? Bool == true
     receiver(key) { [weak self] buffer, sei in
       self?.handleWindowPicture(id: id, key: key, buffer: buffer, sei: sei)
     }
-    if !bundle.isEmpty { ensureStubRunning(bundle: bundle) }
+    if !bundle.isEmpty { ensureStubRunning(bundle: bundle, activate: activate) }
     if let stub = stubs[bundle] {
       let (ctrl, keys) = control(of: key)
       stub.send([
         "t": "wopen", "id": Int(id), "title": title, "toolbar": toolbar, "r": radius,
         "frame": Fusion.dict(frame), "control": ctrl, "keys": keys,
         "buttons": buttons, "hitrects": hitrects, "ack": 0,
+        "activate": activate,
       ])
     }
     refreshStatus()
@@ -812,6 +1058,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     receivers.removeValue(forKey: key)?.stop()
     outputs.removeValue(forKey: key)
     lastWindowSEI.removeValue(forKey: id)
+    clearAlert("webrtc", subject: key)
     let rec = windows.removeValue(forKey: id)
     syncFastState(removedWindowIDs: [id])
     if let rec {
@@ -899,7 +1146,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
         let parent = CGWindowID(Fusion.number(entry["parent"]))
         let pdx = (entry["pdx"] as? NSNumber)?.doubleValue
         let pdy = (entry["pdy"] as? NSNumber)?.doubleValue
-        popups[id] = PopupRecord(id: id, bundle: bundle, parentID: parent, frame: frame, pdx: pdx, pdy: pdy)
+        popups[id] = PopupRecord(id: id, bundle: bundle, parentID: parent, frame: frame, pdx: pdx, pdy: pdy, layer: Int(Fusion.number(entry["layer"])))
       }
     }
     if windowsChanged { syncFastState() }
@@ -944,7 +1191,6 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     let now = CACurrentMediaTime()
     fastLock.lock()
     guard let winInfo = fastWindows[id], !winInfo.bundle.isEmpty else { fastLock.unlock(); return }
-    if let quitUntil = fastQuitting[winInfo.bundle], now < quitUntil { fastLock.unlock(); return }
     guard let stub = fastStubs[winInfo.bundle] else { fastLock.unlock(); return }
     var resolved: [Double]?
     if let arr = parsedSEI, arr.count >= 12 {
@@ -1023,7 +1269,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       var metaObj: [String: Any] = [
         "width": Int(crop.width), "height": Int(crop.height), "rotation": 0,
         "x": Int(crop.minX), "y": Int(crop.minY), "w": Int(crop.width), "h": Int(crop.height), "matrix": matrix,
-        "wid": Int(id), "popup": true, "parent": Int(rec.parentID), "key": key,
+        "wid": Int(id), "popup": true, "parent": Int(rec.parentID), "key": key, "layer": rec.layer,
         "disp": [Double(bw), Double(bh)],
         "f": [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)],
         "in": [Double(inWin.minX), Double(inWin.minY), Double(inWin.width), Double(inWin.height)],
@@ -1150,29 +1396,38 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   /// 1) Disk cache (`~/.linkshell/fusion-icons/<host>/<bundle>.png`),
   /// 2) Same-bundle local macOS app (resolving symlinks so Safari never gets an alias arrow!),
   /// 3) Generic `.applicationBundle` fallback (`isReal = false`).
-  private func fallbackBadgedIcon(for bundle: String) -> (image: NSImage, isReal: Bool, hash: String) {
-    if let existing = icons[bundle], realIconBundles.contains(bundle) {
-      return (existing, true, iconHashes[bundle] ?? "cached")
-    }
-    let cacheURL = iconCacheFile(for: bundle)
-    if let data = try? Data(contentsOf: cacheURL), let raw = NSImage(data: data) {
-      let (badged, badgedPNG) = Self.composeBadgedIcon(base: raw, hostLabel: hostLabel)
-      let h = Self.shortSHA256(data)
-      icons[bundle] = badged
-      iconHashes[bundle] = h
-      realIconBundles.insert(bundle)
-      if let badgedPNG { iconPNGs[bundle] = badgedPNG }
-      return (badged, true, h)
+  struct ResolvedIcon {
+    let image: NSImage
+    let isReal: Bool
+    let hash: String
+    let png: String?
+    let fromCache: Bool
+  }
+
+  /// Pure, so it can run on `stubQueue`: the disk cache, then a same-bundle local app (symlinks
+  /// resolved so Safari never gets an alias arrow), then a generic app icon (`isReal = false`).
+  static func resolveFallbackIcon(bundle: String, cacheFile: URL, hostLabel: String) -> ResolvedIcon {
+    if let data = try? Data(contentsOf: cacheFile), let raw = NSImage(data: data) {
+      let (badged, png) = composeBadgedIcon(base: raw, hostLabel: hostLabel)
+      return ResolvedIcon(image: badged, isReal: true, hash: shortSHA256(data), png: png, fromCache: true)
     }
     if let localURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle),
        !localURL.path.contains("/Applications/LinkShell/") {
-      let resolved = localURL.resolvingSymlinksInPath()
-      let raw = NSWorkspace.shared.icon(forFile: resolved.path)
-      let (badged, _) = Self.composeBadgedIcon(base: raw, hostLabel: hostLabel)
-      return (badged, true, "local-\(bundle)")
+      let raw = NSWorkspace.shared.icon(forFile: localURL.resolvingSymlinksInPath().path)
+      let (badged, _) = composeBadgedIcon(base: raw, hostLabel: hostLabel)
+      return ResolvedIcon(image: badged, isReal: true, hash: "local-\(bundle)", png: nil, fromCache: false)
     }
-    let generic = Self.composeBadgedIcon(base: NSWorkspace.shared.icon(for: .applicationBundle), hostLabel: hostLabel).image
-    return (generic, false, "generic")
+    let generic = composeBadgedIcon(base: NSWorkspace.shared.icon(for: .applicationBundle), hostLabel: hostLabel).image
+    return ResolvedIcon(image: generic, isReal: false, hash: "generic", png: nil, fromCache: false)
+  }
+
+  /// Main thread only: records a cache hit so later lookups are free.
+  private func adopt(_ icon: ResolvedIcon, for bundle: String) {
+    guard icon.fromCache else { return }
+    icons[bundle] = icon.image
+    iconHashes[bundle] = icon.hash
+    realIconBundles.insert(bundle)
+    if let png = icon.png { iconPNGs[bundle] = png }
   }
 
   private func requestIconIfNeeded(_ bundle: String) {
@@ -1238,12 +1493,14 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     requestIconIfNeeded(bundle)
     launchSentAt[bundle] = CACurrentMediaTime()
     wire?.send(["t": "launch", "bundle": bundle])
-    ensureStubRunning(bundle: bundle)
+    ensureStubRunning(bundle: bundle, activate: true)
   }
 
-  private func ensureStubRunning(bundle: String) {
+  /// Bundle generation (iconutil, codesign, lsregister) runs on the serial `stubQueue`, never on
+  /// the main thread that routes frames and control messages, and never twice at once for a bundle.
+  private func ensureStubRunning(bundle: String, activate: Bool) {
     if let active = stubs[bundle] {
-      if let running = NSRunningApplication(processIdentifier: active.pid) {
+      if activate, let running = NSRunningApplication(processIdentifier: active.pid) {
         running.activate(options: [.activateIgnoringOtherApps])
       }
       return
@@ -1251,26 +1508,38 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     guard !launchingStubs.contains(bundle) else { return }
     launchingStubs.insert(bundle)
     let entry = apps.first(where: { $0.bundle == bundle }) ?? AppEntry(name: bundle.split(separator: ".").last.map(String.init) ?? bundle, bundle: bundle, rawCategory: "", category: "其他", isSystem: false)
-    let resolved = fallbackBadgedIcon(for: bundle)
-    if resolved.isReal { stubHadRealIconOnLaunch.insert(bundle) }
-    guard let appURL = materializeStubBundle(
-      entry: entry,
-      badgedIcon: resolved.image,
-      isRealIcon: resolved.isReal,
-      iconHash: resolved.hash,
-      preserveRunningBinary: false
-    ) else {
-      launchingStubs.remove(bundle)
-      return
+    let cached: ResolvedIcon? = (realIconBundles.contains(bundle) ? icons[bundle] : nil).map {
+      ResolvedIcon(image: $0, isReal: true, hash: iconHashes[bundle] ?? "cached", png: iconPNGs[bundle], fromCache: false)
     }
-    stubURLs[bundle] = appURL
-    let cfg = NSWorkspace.OpenConfiguration()
-    cfg.activates = true
-    NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { [weak self] _, error in
+    let cacheFile = iconCacheFile(for: bundle)
+    let label = hostLabel
+    stubQueue.async { [weak self] in
+      guard let self else { return }
+      let resolved = cached ?? Self.resolveFallbackIcon(bundle: bundle, cacheFile: cacheFile, hostLabel: label)
+      let appURL = self.materializeStubBundle(
+        entry: entry,
+        badgedIcon: resolved.image,
+        isRealIcon: resolved.isReal,
+        iconHash: resolved.hash,
+        preserveRunningBinary: false
+      )
       DispatchQueue.main.async {
-        if let error {
-          Fusion.log("failed to launch stub \(appURL.path): \(error.localizedDescription)")
-          self?.launchingStubs.remove(bundle)
+        self.adopt(resolved, for: bundle)
+        guard let appURL, self.launchingStubs.contains(bundle) else {
+          self.launchingStubs.remove(bundle)
+          return
+        }
+        if resolved.isReal { self.stubHadRealIconOnLaunch.insert(bundle) }
+        self.stubURLs[bundle] = appURL
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = activate
+        NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { [weak self] _, error in
+          DispatchQueue.main.async {
+            if let error {
+              Fusion.log("failed to launch stub \(appURL.path): \(error.localizedDescription)")
+              self?.launchingStubs.remove(bundle)
+            }
+          }
         }
       }
     }
@@ -1369,10 +1638,14 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
           plist["LSFusionComputerKey"] = computerKey
           plistChanged = true
         }
+        if (plist["LSFusionHostName"] as? String) != self.hostLabel {
+          plist["LSFusionHostName"] = self.hostLabel
+          plistChanged = true
+        }
 
         var iconUpdated = false
         if schema < Self.currentIconSchema || !wasReal {
-          let fallback = self.fallbackBadgedIcon(for: bundle)
+          let fallback = Self.resolveFallbackIcon(bundle: bundle, cacheFile: self.iconCacheFile(for: bundle), hostLabel: self.hostLabel)
           Self.writeICNS(image: fallback.image, to: icnsURL)
           plist["LSFusionIconSchema"] = Self.currentIconSchema
           plist["LSFusionRealIcon"] = fallback.isReal
@@ -1513,6 +1786,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       "LSFusionSocket": socketPath,
       "LSFusionHubApp": hubPath,
       "LSFusionComputerKey": computerKey.isEmpty ? existingCompKey : computerKey,
+      "LSFusionHostName": hostLabel,
       "LSFusionIconSchema": Self.currentIconSchema,
       "LSFusionRealIcon": finalRealIcon,
       "LSFusionIconHash": finalHash,
@@ -1678,6 +1952,50 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   }
 
   private func reloadGrid() {}
+
+  func setAlert(_ kind: String, subject: String = "", message: String, extra: [String: Any] = [:]) {
+    var entry: [String: Any] = ["kind": kind, "message": message, "at": Int(Date().timeIntervalSince1970 * 1000)]
+    if !subject.isEmpty { entry["subject"] = subject }
+    for (k, v) in extra { entry[k] = v }
+    alerts[subject.isEmpty ? kind : "\(kind):\(subject)"] = entry
+    Fusion.log("alert \(kind) \(subject): \(message)")
+  }
+
+  func clearAlert(_ kind: String, subject: String = "") {
+    alerts.removeValue(forKey: subject.isEmpty ? kind : "\(kind):\(subject)")
+  }
+
+  private func clearAlerts(kind: String) {
+    alerts = alerts.filter { ($0.value["kind"] as? String) != kind }
+  }
+
+  private var alertList: [[String: Any]] {
+    alerts.values.sorted { (($0["at"] as? Int) ?? 0) < (($1["at"] as? Int) ?? 0) }
+  }
+
+  /// LinkShell Desktop reads this when the hub is gone, so "disconnected" carries its reason.
+  private func writeExitStatus(reason: String) {
+    let payload: [String: Any] = [
+      "reason": reason,
+      "message": Self.describeClose(reason),
+      "at": Int(Date().timeIntervalSince1970 * 1000),
+      "wasConnected": connected,
+      "alerts": alertList,
+    ]
+    if let data = try? JSONSerialization.data(withJSONObject: payload) {
+      try? data.write(to: URL(fileURLWithPath: statusPath), options: .atomic)
+    }
+  }
+
+  static func describeClose(_ reason: String) -> String {
+    switch reason {
+    case "timeout": return "远端 Mac 已无响应（可能已睡眠或网络中断）"
+    case "tls", "token": return "融合连接的会话凭据已失效，请重新开启融合模式"
+    case "unreachable", "failed": return "无法连接到远端 Mac 的融合服务"
+    case "stopped": return "融合模式已停止"
+    default: return "与远端 Mac 的融合连接已断开"
+    }
+  }
 
   private func updateStatus(_ text: String) {
     lastStatusText = text

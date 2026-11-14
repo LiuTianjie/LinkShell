@@ -10,6 +10,7 @@ import {
   type JSX,
 } from "react";
 import { useStore } from "zustand";
+import { openExternalUrl } from "../../bridge/desktop-bridge";
 import {
   DESKTOP_SHORTCUTS,
   formatShortcut,
@@ -29,8 +30,11 @@ import {
   IconButton,
   SplitResizer,
   Toolbar,
+  useDialogs,
 } from "../../primitives";
+import { canOpenOnThisComputer } from "./FileViewerTabPanel";
 import { useInspectorI18n } from "./i18n-inspector";
+import { requestOpenPortInInspector } from "./inspector-tabs-store";
 import { getTerminalStageController } from "./terminal-runtime";
 import { useInspectorConnection } from "./use-inspector-connection";
 
@@ -43,6 +47,8 @@ export interface TerminalStageHostProps {
   cwd?: string;
   dockPosition: "right" | "bottom" | "standalone";
   active?: boolean;
+  /** Opened by its shortcut: the caret goes into the shell as soon as there is one. */
+  focusOnOpen?: boolean;
   onToggleDock?: () => void;
   onCloseDock?: () => void;
 }
@@ -56,10 +62,12 @@ export function TerminalStageHost({
   cwd,
   dockPosition,
   active = true,
+  focusOnOpen = false,
   onToggleDock,
   onCloseDock,
 }: TerminalStageHostProps) {
   const { t, ti } = useInspectorI18n();
+  const dialogs = useDialogs();
   const slotRef = useRef<HTMLDivElement | null>(null);
 
   const controller = useMemo(
@@ -67,6 +75,44 @@ export function TerminalStageHost({
     [stageKey, computerKey],
   );
   const snap = useStore(controller.store);
+  const activeRestore = snap.activeId ? snap.restore[snap.activeId] : undefined;
+
+  const showError = useCallback(
+    (err: unknown) => {
+      void dialogs.alert(err instanceof Error ? err.message : String(err));
+    },
+    [dialogs],
+  );
+
+  const createTerminal = useCallback(() => {
+    controller.createTerminal({ cwd, sessionId }).catch(showError);
+  }, [controller, cwd, sessionId, showError]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    // A remote computer's localhost is only reachable through the preview tunnel.
+    const remote = !canOpenOnThisComputer(connection);
+    controller.setLinkHandler((url) => {
+      let parsed: URL | undefined;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return;
+      }
+      const loopback = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].includes(parsed.hostname);
+      if (remote && loopback && parsed.port) {
+        requestOpenPortInInspector(
+          computerKey,
+          sessionId,
+          Number(parsed.port),
+          `${parsed.pathname}${parsed.search}${parsed.hash}`,
+        );
+        return;
+      }
+      openExternalUrl(url);
+    });
+    return undefined;
+  }, [active, computerKey, connection, controller, sessionId]);
 
   useEffect(() => {
     controller.bindConnection(connection);
@@ -90,14 +136,47 @@ export function TerminalStageHost({
     return undefined;
   }, [controller, active, dockPosition, snap.terminals.length, snap.activeId]);
 
+  // Once per opening: a shell that is still being created has no surface yet, so this waits for
+  // the active terminal and then leaves focus alone (clicking elsewhere must stick).
+  useEffect(() => {
+    if (!focusOnOpen || !active) return undefined;
+    let frame = 0;
+    let tries = 0;
+    const attempt = () => {
+      const slot = slotRef.current;
+      const focused = document.activeElement;
+      if (!slot || slot.contains(focused)) return;
+      // Focus that went somewhere else on purpose is the person's choice, not ours to take back.
+      if (tries > 0 && focused && focused !== document.body) return;
+      controller.focusActive();
+      if (++tries < 120) frame = requestAnimationFrame(attempt);
+    };
+    frame = requestAnimationFrame(attempt);
+    return () => cancelAnimationFrame(frame);
+  }, [active, controller, focusOnOpen]);
+
+  const uploadFiles = useCallback(
+    async (files: File[]) => {
+      try {
+        const { skipped } = await controller.uploadFilesToActive(files, cwd);
+        for (const name of skipped) {
+          await dialogs.alert(ti("uploadTooLarge", { name }));
+        }
+      } catch (err) {
+        showError(err);
+      }
+    },
+    [controller, cwd, dialogs, showError, ti],
+  );
+
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       const files = Array.from(event.dataTransfer?.files ?? []);
       if (files.length === 0) return;
       event.preventDefault();
-      void controller.uploadFilesToActive(files, cwd);
+      void uploadFiles(files);
     },
-    [controller, cwd],
+    [uploadFiles],
   );
 
   const handlePaste = useCallback(
@@ -105,9 +184,9 @@ export function TerminalStageHost({
       const files = Array.from(event.clipboardData?.files ?? []);
       if (files.length === 0) return;
       event.preventDefault();
-      void controller.uploadFilesToActive(files, cwd);
+      void uploadFiles(files);
     },
-    [controller, cwd],
+    [uploadFiles],
   );
 
   const dockShortcut = formatShortcut(DESKTOP_SHORTCUTS.terminal);
@@ -177,9 +256,7 @@ export function TerminalStageHost({
             label={ti("newTerminal")}
             disabled={!online}
             disabledReason={!online ? ti("offlineTitle") : undefined}
-            onClick={() => {
-              void controller.createTerminal({ cwd, sessionId });
-            }}
+            onClick={createTerminal}
           />
         </div>
 
@@ -232,6 +309,32 @@ export function TerminalStageHost({
 
       <div ref={slotRef} className="inspector-terminal-slot" />
 
+      {activeRestore && snap.activeId ? (
+        <div
+          className="inspector-terminal-restore"
+          data-state={activeRestore.status}
+          role={activeRestore.status === "failed" ? "alert" : "status"}
+        >
+          {activeRestore.status === "restoring" ? (
+            <span>{ti("terminalRestoring")}</span>
+          ) : (
+            <>
+              <span className="ls-truncate" title={activeRestore.error}>
+                {ti("terminalRestoreFailed")}: {activeRestore.error}
+              </span>
+              <Button
+                size="xs"
+                variant="secondary"
+                leadingIcon="refresh"
+                onClick={() => controller.retryRestore(snap.activeId!)}
+              >
+                {ti("retry")}
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {snap.terminals.length === 0 ? (
         <div
           style={{
@@ -254,9 +357,7 @@ export function TerminalStageHost({
                   size="sm"
                   variant="primary"
                   leadingIcon="plus"
-                  onClick={() => {
-                    void controller.createTerminal({ cwd, sessionId });
-                  }}
+                  onClick={createTerminal}
                 >
                   {ti("newTerminal")}
                 </Button>
@@ -394,6 +495,7 @@ export function BottomTerminalDock({
           cwd={cwd}
           dockPosition="bottom"
           active
+          focusOnOpen
           onToggleDock={() => {
             routerStore.getState().toggleBottomDock(false);
             routerStore.getState().toggleInspector(true);

@@ -211,6 +211,16 @@
     cursor: not-allowed;
   }
 
+  /* A filled button that cannot act is a quiet fill, not a greyed-out ink block louder than
+     the enabled controls around it. */
+  .ls-btn[data-variant="primary"]:disabled {
+    opacity: 1;
+    background-color: var(--ls-fill-strong);
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--ls-fg-3);
+  }
+
   .ls-btn[data-loading="true"] {
     opacity: 0.85;
     cursor: progress;
@@ -497,6 +507,11 @@
    *    - MWG `dialog`: NEVER set `display` unconditionally on `dialog`; scope to `dialog[open]`!
    *    - Zero-layout-shift fixed-top anchoring (`#7` §4.2)
    * ========================================================================= */
+  /* The dialog holds focus itself when it has no field to give it to; its frame is not a control. */
+  dialog.ls-dialog:focus-visible {
+    outline: none;
+  }
+
   dialog.ls-dialog {
     padding: 0;
     border: 0;

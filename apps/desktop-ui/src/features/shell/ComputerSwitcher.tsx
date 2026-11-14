@@ -27,6 +27,7 @@ import {
   connectionRouteBadge,
   currentFusionCapabilityEnv,
   displayComputerName,
+  reportShellError,
   switchToComputer,
   useConnectionStore,
 } from "./shell-helpers";
@@ -85,6 +86,8 @@ export function ComputerSwitcher({
     setRefreshing(true);
     try {
       await engine.refreshComputers();
+    } catch (error) {
+      reportShellError(error, locale);
     } finally {
       setRefreshing(false);
     }
@@ -123,7 +126,7 @@ export function ComputerSwitcher({
             <IconButton
               icon="refresh"
               loading={refreshing}
-              label={locale === "en" ? "Refresh computers" : locale === "ja" ? "更新" : "刷新电脑列表"}
+              label={t("desktop.shell.refreshComputers")}
               onClick={() => void handleRefresh()}
             />
           </div>
@@ -195,16 +198,8 @@ export function ComputerSwitcher({
                         <span>·</span>
                         <span>
                           {computer.machine.online
-                            ? locale === "en"
-                              ? "Online"
-                              : locale === "ja"
-                                ? "オンライン"
-                                : "在线"
-                            : locale === "en"
-                              ? "Offline"
-                              : locale === "ja"
-                                ? "オフライン"
-                                : "离线"}
+                            ? t("desktop.shell.online")
+                            : t("desktop.shell.offline")}
                         </span>
                       </span>
                     </span>

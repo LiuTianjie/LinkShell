@@ -11,6 +11,7 @@ import {
   waitingLabel,
   type Computer,
 } from "../../core";
+import { DESKTOP_SHORTCUTS, formatShortcut } from "../../bridge/shortcuts";
 import { AgentMark, DesktopIcon } from "../../icons";
 import { Badge, IconButton, StatusDot } from "../../primitives";
 import {
@@ -74,7 +75,7 @@ export function WorkspaceTopBar({
   const isSessionRoute = activeRoute.kind === "session";
 
   const activePlatform = useActiveDesktopPlatform();
-  const inspectorShortcut = activePlatform === "macos" ? "Opt+Mod+B" : "Ctrl+Alt+B";
+  const inspectorShortcut = formatShortcut(DESKTOP_SHORTCUTS.toggleInspector, activePlatform);
 
   return (
     <header className="chrome-bar desktop-main-header">
@@ -91,7 +92,7 @@ export function WorkspaceTopBar({
           />
         ) : null}
 
-        <nav className="workspace-breadcrumbs" aria-label="Breadcrumb">
+        <nav className="workspace-breadcrumbs" aria-label={t("desktop.workspace")}>
           {isSessionRoute ? (
             <>
               <span className="workspace-title-primary workspace-title-primary--session">
@@ -252,7 +253,7 @@ export function WorkspaceTopBar({
               variant={bottomDockOpen ? "subtle" : "ghost"}
               aria-pressed={bottomDockOpen}
               label={t("desktop.toggleBottomDock")}
-              shortcut="Mod+J"
+              shortcut={formatShortcut(DESKTOP_SHORTCUTS.terminal, activePlatform)}
               onClick={() => toggleBottomDock()}
             />
 

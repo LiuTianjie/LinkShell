@@ -8,6 +8,7 @@ import {
   parseManagePage,
   type ManagePage,
 } from "./management-store";
+import { engine } from "./engine";
 import { STORAGE_KEYS, readLocal, saveLocal, subscribeStorageReady } from "./storage";
 import { hasUnsavedWork } from "./unsaved-work";
 
@@ -318,6 +319,8 @@ export interface RouterState {
   commandCenterOpen: boolean;
   connectModalOpen: boolean;
   shortcutSheetOpen: boolean;
+  /** The active route came from the last run rather than from the user, so it may point at a session deleted since. */
+  restoredRoute: boolean;
 
   navigate(route: WorkspaceRoute, options?: { replace?: boolean }): boolean;
   openSession(computerKey: string, sessionId: string): boolean;
@@ -340,13 +343,37 @@ export interface RouterState {
   setConnectModalOpen(open: boolean): void;
   setShortcutSheetOpen(open: boolean): void;
   hydrateLayout(): void;
+  /** Drops every history entry `shouldDrop` matches; an active match becomes home in place. */
+  pruneRoutes(shouldDrop: (route: WorkspaceRoute) => boolean): void;
+  forgetSession(computerKey: string, sessionId: string): void;
+  forgetComputer(computerKey: string): void;
+  /** Back / forward step over entries this rejects (deleted sessions, forgotten computers). */
+  setRouteValidator(validator: ((route: WorkspaceRoute) => boolean) | undefined): void;
+  markRouteVerified(): void;
 }
 
 export interface CreateRouterStoreOptions {
   location?: RouterLocationAdapter;
   initialRoute?: WorkspaceRoute;
-  /** Optional synchronous or custom unsaved-work guard; returns `false` to abort route change. */
-  confirmNavigate?: (next: WorkspaceRoute, current: WorkspaceRoute) => boolean;
+  /**
+   * Consulted only while unsaved work is registered. A promise defers the change until the user
+   * answers, so `navigate` stays synchronous for every caller.
+   */
+  confirmNavigate?: (
+    next: WorkspaceRoute,
+    current: WorkspaceRoute,
+  ) => boolean | Promise<boolean>;
+  /** Remember the route across launches (the singleton only; tests and secondary stores stay pure). */
+  persistRoute?: boolean;
+}
+
+// Media routes start a stream on mount; reopening one unasked after a relaunch would be a surprise.
+function isRestorableRoute(route: WorkspaceRoute): boolean {
+  return route.kind !== "home" && route.kind !== "screen" && route.kind !== "fusion";
+}
+
+function historyFlags(history: readonly WorkspaceRoute[], index: number) {
+  return { canGoBack: index > 0, canGoForward: index < history.length - 1 };
 }
 
 const MAX_HISTORY_ENTRIES = 64;
@@ -364,8 +391,19 @@ export function createRouterStore(options: CreateRouterStoreOptions = {}) {
   const initialModalPage: ManagePage = initialModalOpen
     ? managePage(initialView)
     : "overview";
+  const readStoredRoute = (): WorkspaceRoute | undefined => {
+    if (!options.persistRoute || options.initialRoute || initialView) return undefined;
+    const stored = parseWorkspaceView(readLocal<string>(STORAGE_KEYS.lastRoute, ""));
+    return stored && isRestorableRoute(stored) ? stored : undefined;
+  };
+  const storedInitialRoute = readStoredRoute();
   const parsedInitialRoute =
-    options.initialRoute ?? parseWorkspaceView(initialView) ?? { kind: "home" };
+    options.initialRoute ??
+    storedInitialRoute ??
+    parseWorkspaceView(initialView) ?? { kind: "home" };
+  // Storage may arrive after the store exists; restore once, and never over a choice the user made.
+  let restoreSettled = Boolean(storedInitialRoute) || !options.persistRoute;
+  let routeValidator: ((route: WorkspaceRoute) => boolean) | undefined;
 
   return createStore<RouterState>((set, get) => {
     const syncUrlHash = (route: WorkspaceRoute, modal: SystemModalState) => {
@@ -373,6 +411,80 @@ export function createRouterStore(options: CreateRouterStoreOptions = {}) {
         ? manageView(modal.page)
         : formatWorkspaceView(route);
       loc.setHash(buildHashWithView(loc.getHash(), targetView));
+      if (options.persistRoute) {
+        restoreSettled = true;
+        saveLocal(STORAGE_KEYS.lastRoute, formatWorkspaceView(route));
+      }
+    };
+
+    const isValid = (route: WorkspaceRoute) => !routeValidator || routeValidator(route);
+
+    /** Runs `commit` now, after the user confirms, or never. */
+    const guard = (
+      next: WorkspaceRoute,
+      current: WorkspaceRoute,
+      commit: () => void,
+    ): boolean => {
+      if (!options.confirmNavigate || !hasUnsavedWork()) {
+        commit();
+        return true;
+      }
+      const verdict = options.confirmNavigate(next, current);
+      if (verdict === true) {
+        commit();
+        return true;
+      }
+      if (verdict !== false) {
+        void verdict.then(
+          (ok) => {
+            // Someone else may have moved on while the question was open; their move wins.
+            if (ok && routesEqual(get().activeRoute, current)) commit();
+          },
+          () => undefined,
+        );
+      }
+      return false;
+    };
+
+    const commitIndex = (index: number) => {
+      const current = get();
+      const route = current.history[index];
+      if (!route) return;
+      set({
+        activeRoute: route,
+        historyIndex: index,
+        restoredRoute: false,
+        ...historyFlags(current.history, index),
+      });
+      syncUrlHash(route, current.systemModal);
+    };
+
+    const commitNavigate = (route: WorkspaceRoute, navOptions?: { replace?: boolean }) => {
+      const current = get();
+      const closingModal: SystemModalState = current.systemModal.open
+        ? { ...current.systemModal, open: false }
+        : current.systemModal;
+      let nextHistory: WorkspaceRoute[];
+      let nextIndex: number;
+      if (navOptions?.replace) {
+        nextHistory = [...current.history];
+        nextHistory[current.historyIndex] = route;
+        nextIndex = current.historyIndex;
+      } else {
+        nextHistory = current.history.slice(0, current.historyIndex + 1);
+        nextHistory.push(route);
+        if (nextHistory.length > MAX_HISTORY_ENTRIES) nextHistory.shift();
+        nextIndex = nextHistory.length - 1;
+      }
+      set({
+        activeRoute: route,
+        history: nextHistory,
+        historyIndex: nextIndex,
+        restoredRoute: false,
+        systemModal: closingModal,
+        ...historyFlags(nextHistory, nextIndex),
+      });
+      syncUrlHash(route, closingModal);
     };
 
     return {
@@ -401,55 +513,19 @@ export function createRouterStore(options: CreateRouterStoreOptions = {}) {
       commandCenterOpen: false,
       connectModalOpen: false,
       shortcutSheetOpen: false,
+      restoredRoute: Boolean(storedInitialRoute),
 
       navigate: (route, navOptions) => {
         const current = get();
-        if (
-          options.confirmNavigate &&
-          hasUnsavedWork() &&
-          !routesEqual(current.activeRoute, route) &&
-          !options.confirmNavigate(route, current.activeRoute)
-        ) {
-          return false;
-        }
-        const closingModal: SystemModalState = current.systemModal.open
-          ? { ...current.systemModal, open: false }
-          : current.systemModal;
-
         if (routesEqual(current.activeRoute, route)) {
           if (current.systemModal.open) {
+            const closingModal: SystemModalState = { ...current.systemModal, open: false };
             set({ systemModal: closingModal });
             syncUrlHash(route, closingModal);
           }
           return true;
         }
-
-        let nextHistory: WorkspaceRoute[];
-        let nextIndex: number;
-        if (navOptions?.replace) {
-          nextHistory = [...current.history];
-          nextHistory[current.historyIndex] = route;
-          nextIndex = current.historyIndex;
-        } else {
-          const head = current.history.slice(0, current.historyIndex + 1);
-          head.push(route);
-          if (head.length > MAX_HISTORY_ENTRIES) {
-            head.shift();
-          }
-          nextHistory = head;
-          nextIndex = nextHistory.length - 1;
-        }
-
-        set({
-          activeRoute: route,
-          history: nextHistory,
-          historyIndex: nextIndex,
-          canGoBack: nextIndex > 0,
-          canGoForward: nextIndex < nextHistory.length - 1,
-          systemModal: closingModal,
-        });
-        syncUrlHash(route, closingModal);
-        return true;
+        return guard(route, current.activeRoute, () => commitNavigate(route, navOptions));
       },
 
       openSession: (computerKey, sessionId) =>
@@ -468,46 +544,20 @@ export function createRouterStore(options: CreateRouterStoreOptions = {}) {
           current.closeSystemModal();
           return true;
         }
-        if (current.historyIndex <= 0) return false;
-        const nextIndex = current.historyIndex - 1;
-        const route = current.history[nextIndex]!;
-        if (
-          options.confirmNavigate &&
-          hasUnsavedWork() &&
-          !options.confirmNavigate(route, current.activeRoute)
-        ) {
-          return false;
-        }
-        set({
-          activeRoute: route,
-          historyIndex: nextIndex,
-          canGoBack: nextIndex > 0,
-          canGoForward: nextIndex < current.history.length - 1,
-        });
-        syncUrlHash(route, current.systemModal);
-        return true;
+        let index = current.historyIndex - 1;
+        while (index >= 0 && !isValid(current.history[index]!)) index -= 1;
+        if (index < 0) return false;
+        const target = index;
+        return guard(current.history[target]!, current.activeRoute, () => commitIndex(target));
       },
 
       forward: () => {
         const current = get();
-        if (current.historyIndex >= current.history.length - 1) return false;
-        const nextIndex = current.historyIndex + 1;
-        const route = current.history[nextIndex]!;
-        if (
-          options.confirmNavigate &&
-          hasUnsavedWork() &&
-          !options.confirmNavigate(route, current.activeRoute)
-        ) {
-          return false;
-        }
-        set({
-          activeRoute: route,
-          historyIndex: nextIndex,
-          canGoBack: nextIndex > 0,
-          canGoForward: nextIndex < current.history.length - 1,
-        });
-        syncUrlHash(route, current.systemModal);
-        return true;
+        let index = current.historyIndex + 1;
+        while (index < current.history.length && !isValid(current.history[index]!)) index += 1;
+        if (index >= current.history.length) return false;
+        const target = index;
+        return guard(current.history[target]!, current.activeRoute, () => commitIndex(target));
       },
 
       openSystemModal: (page) => {
@@ -656,13 +706,123 @@ export function createRouterStore(options: CreateRouterStoreOptions = {}) {
             560,
           ),
         });
+        if (restoreSettled) return;
+        restoreSettled = true;
+        const current = get();
+        if (current.history.length !== 1 || current.activeRoute.kind !== "home") return;
+        const stored = readStoredRoute();
+        if (!stored) return;
+        set({
+          activeRoute: stored,
+          history: [stored],
+          historyIndex: 0,
+          canGoBack: false,
+          canGoForward: false,
+          restoredRoute: true,
+        });
+        loc.setHash(buildHashWithView(loc.getHash(), formatWorkspaceView(stored)));
+      },
+
+      pruneRoutes: (shouldDrop) => {
+        const current = get();
+        const activeDropped = shouldDrop(current.activeRoute);
+        const kept: WorkspaceRoute[] = [];
+        let keptIndex = 0;
+        current.history.forEach((route, index) => {
+          if (index === current.historyIndex) {
+            const replacement: WorkspaceRoute = activeDropped ? { kind: "home" } : route;
+            // Two identical neighbours would make one back press look like it did nothing.
+            const previous = kept[kept.length - 1];
+            if (!previous || !routesEqual(previous, replacement)) kept.push(replacement);
+            keptIndex = kept.length - 1;
+            return;
+          }
+          if (shouldDrop(route)) return;
+          const previous = kept[kept.length - 1];
+          if (previous && routesEqual(previous, route)) return;
+          kept.push(route);
+        });
+        if (kept.length === 0) kept.push({ kind: "home" });
+        const activeRoute = kept[keptIndex]!;
+        const unchanged =
+          kept.length === current.history.length &&
+          kept.every((route, index) => route === current.history[index]);
+        if (unchanged) return;
+        set({
+          activeRoute,
+          history: kept,
+          historyIndex: keptIndex,
+          restoredRoute: activeDropped ? false : current.restoredRoute,
+          ...historyFlags(kept, keptIndex),
+        });
+        if (activeDropped) syncUrlHash(activeRoute, current.systemModal);
+      },
+
+      forgetSession: (computerKey, sessionId) => {
+        get().pruneRoutes(
+          (route) =>
+            route.kind === "session" &&
+            route.computerKey === computerKey &&
+            route.sessionId === sessionId,
+        );
+      },
+
+      forgetComputer: (computerKey) => {
+        get().pruneRoutes((route) => "computerKey" in route && route.computerKey === computerKey);
+      },
+
+      setRouteValidator: (validator) => {
+        routeValidator = validator;
+      },
+
+      markRouteVerified: () => {
+        if (get().restoredRoute) set({ restoredRoute: false });
       },
     };
   });
 }
 
-export const routerStore = createRouterStore();
+let navigationConfirmer:
+  | ((next: WorkspaceRoute, current: WorkspaceRoute) => Promise<boolean>)
+  | undefined;
+
+/**
+ * The shell hands in its dialog-backed confirm; the store itself has no UI. Returns a disposer
+ * that only clears the confirmer it installed.
+ */
+export function setNavigationConfirmer(
+  confirmer: (next: WorkspaceRoute, current: WorkspaceRoute) => Promise<boolean>,
+): () => void {
+  navigationConfirmer = confirmer;
+  return () => {
+    if (navigationConfirmer === confirmer) navigationConfirmer = undefined;
+  };
+}
+
+/**
+ * Unsaved drafts live in session-scoped panels, so only a move out of the session family loses them;
+ * session-to-session moves are the panels' own business.
+ */
+export function confirmLeavingSession(
+  next: WorkspaceRoute,
+  current: WorkspaceRoute,
+): boolean | Promise<boolean> {
+  if (current.kind !== "session" || next.kind === "session") return true;
+  return navigationConfirmer ? navigationConfirmer(next, current) : true;
+}
+
+export const routerStore = createRouterStore({
+  confirmNavigate: confirmLeavingSession,
+  persistRoute: true,
+});
 subscribeStorageReady(() => routerStore.getState().hydrateLayout());
+
+function selectEngineComputer(computerKey: string): void {
+  const computer = engine.computerForKey(computerKey);
+  if (computer && engine.state.getState().connection?.computer.key !== computer.key) {
+    engine.select(computer);
+  }
+}
 
 export function useRouter<T = RouterState>(
   selector: (state: RouterState) => T = (s) => s as unknown as T,
@@ -671,10 +831,13 @@ export function useRouter<T = RouterState>(
 }
 
 /**
- * Wires `window` `hashchange` and Electron menu/tray `linkshell-desktop-command` events
- * (`manage`, `workspace`, `palette`, `new-session`, `toggle-sidebar`, `inspector`) to `routerStore`.
+ * Wires `window` `hashchange` and Electron menu/tray/notification `linkshell-desktop-command` events
+ * to `routerStore`. `selectComputer` is injectable so tests need no live engine.
  */
-export function attachRouterListeners(store = routerStore): () => void {
+export function attachRouterListeners(
+  store = routerStore,
+  selectComputer: (computerKey: string) => void = selectEngineComputer,
+): () => void {
   if (typeof window === "undefined") return () => {};
   const onHashChange = () => store.getState().syncFromHash();
   const onDesktopCommand = (event: Event) => {
@@ -688,7 +851,19 @@ export function attachRouterListeners(store = routerStore): () => void {
       case "new-session":
         router.openNewSession(
           typeof detail.computerKey === "string" ? detail.computerKey : undefined,
+          typeof detail.cwd === "string" && detail.cwd ? detail.cwd : undefined,
         );
+        break;
+      case "open-session":
+        if (
+          typeof detail.computerKey === "string" &&
+          detail.computerKey &&
+          typeof detail.sessionId === "string" &&
+          detail.sessionId
+        ) {
+          selectComputer(detail.computerKey);
+          router.openSession(detail.computerKey, detail.sessionId);
+        }
         break;
       case "toggle-sidebar":
         router.toggleSidebar();

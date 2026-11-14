@@ -17,7 +17,7 @@ export function SystemUpdatesPage({
 }: {
   onRequestConfirm: (action: SystemConfirmAction) => void;
 }) {
-  const { locale, ts } = useSystemI18n();
+  const { locale, ts, tm } = useSystemI18n();
   const state = useManagement();
   const standalone = isStandalone(state);
   const newVersion = hasNewVersion(state);
@@ -184,7 +184,7 @@ export function SystemUpdatesPage({
                 {ts("updates.checkRow")}
               </span>
               <span className="ls-system-row__detail" role="status">
-                {(update.message || ts("updates.notCheckedYet")) + checkedSuffix}
+                {(tm(update.message) || ts("updates.notCheckedYet")) + checkedSuffix}
               </span>
             </div>
             <div className="ls-system-row__controls">

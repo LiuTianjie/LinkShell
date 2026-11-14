@@ -113,6 +113,16 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public var shouldDragWindow: ((NSEvent) -> Bool)?
   public var onWindowDragStarted: (() -> Void)?
   public var onWindowDragEnded: (() -> Void)?
+  /// Fusion only (nil elsewhere): a key chord this Mac keeps (hide, minimize, cycle windows).
+  /// Returning true means it was handled here and is not sent to the remote computer.
+  public var localKeyEquivalent: ((NSEvent) -> Bool)?
+  /// Fusion only: any button pressed in the picture (a menu may follow).
+  public var onPointerDown: (() -> Void)?
+  /// Fusion popups only: hover reaches the remote while this window is not key (menus highlight
+  /// the item under the pointer before any click).
+  public var tracksPointerWhenInactive = false {
+    didSet { updateTrackingAreas() }
+  }
   /// Keys and modifier keys this remote-desktop view has pressed on the remote computer, so each is released.
   private var pressedKeys: Set<UInt16> = []
   private var pressedModifiers: Set<UInt16> = []
@@ -209,7 +219,8 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public override func updateTrackingAreas() {
     super.updateTrackingAreas()
     if let tracking { removeTrackingArea(tracking) }
-    let tracking = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
+    let activity: NSTrackingArea.Options = tracksPointerWhenInactive ? .activeAlways : .activeInKeyWindow
+    let tracking = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, activity, .inVisibleRect], owner: self)
     addTrackingArea(tracking); self.tracking = tracking
   }
   private func surfaceRect() -> CGRect {
@@ -369,7 +380,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     let shouldClamp = bounds.contains(local) || pointerInside
     pointerInside = inPicture
     updateCursorVisibility()
-    guard window?.isKeyWindow == true else { return }
+    guard window?.isKeyWindow == true || tracksPointerWhenInactive else { return }
     _ = move(event, clamp: shouldClamp)
   }
   public override func mouseDragged(with event: NSEvent) {
@@ -441,6 +452,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     onInput?(["t": down ? "down" : "up", "b": name, "n": min(3, max(1, event.clickCount)), "m": DesktopScreenInput.modifiers(event.modifierFlags)], false)
   }
   public override func mouseDown(with event: NSEvent) {
+    onPointerDown?()
     activateWindowIfNeeded()
     if onLocalMouseDown?(event) == true {
       pendingWindowDrag = false
@@ -476,7 +488,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     dragTakenOver = false
     button("left", down: false, event: event)
   }
-  public override func rightMouseDown(with event: NSEvent) { activateWindowIfNeeded(); button("right", down: true, event: event) }
+  public override func rightMouseDown(with event: NSEvent) { onPointerDown?(); activateWindowIfNeeded(); button("right", down: true, event: event) }
   public override func rightMouseUp(with event: NSEvent) { button("right", down: false, event: event) }
   // The middle button only for a helper that knows it: an older one reads any other name as the left.
   public override func otherMouseDown(with event: NSEvent) { if physicalKeys, event.buttonNumber == 2 { activateWindowIfNeeded(); button("middle", down: true, event: event) } }
@@ -545,6 +557,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     return true
   }
   public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if let localKeyEquivalent, window?.firstResponder === self, localKeyEquivalent(event) { return true }
     // ⌃⌘F stays with this Mac so full screen can always be left even while remote keys are captured.
     if Self.isFullScreenShortcut(event) {
       releaseInput()

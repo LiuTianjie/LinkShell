@@ -122,14 +122,37 @@ function canMeasureTerminalHost(hostEl: HTMLElement): boolean {
   );
 }
 
+const IS_MAC_KEYBOARD =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+
+const TERMINAL_URL_PATTERN = /\bhttps?:\/\/[^\s"'<>`]+[^\s"'<>`.,;:!?)\]}]/g;
+
+/** URLs in one buffer line, as xterm link ranges (1-based, inclusive columns). */
+export function findTerminalUrls(
+  lineText: string,
+): Array<{ start: number; end: number; url: string }> {
+  const out: Array<{ start: number; end: number; url: string }> = [];
+  for (const match of lineText.matchAll(TERMINAL_URL_PATTERN)) {
+    const start = (match.index ?? 0) + 1;
+    out.push({ start, end: start + match[0].length - 1, url: match[0] });
+  }
+  return out;
+}
+
 interface MountedTerminalSurface {
   replayTarget: ReplayTerminal;
   getDims: () => { cols: number; rows: number };
   fit: () => { cols: number; rows: number } | null;
   setFontSize: (fontSize: number) => void;
+  setInputEnabled: (enabled: boolean) => void;
   focus: () => void;
   paste: (text: string) => void;
   dispose: () => void;
+}
+
+interface SurfaceHooks {
+  onUserInput: (data: string) => void;
+  onOpenLink: (url: string) => void;
 }
 
 function subscribeTerminalThemeSync(onSync: () => void): () => void {
@@ -167,9 +190,15 @@ function subscribeTerminalThemeSync(onSync: () => void): () => void {
 function mountXtermOrHeadless(
   hostEl: HTMLDivElement,
   initialFontSize: number,
-  onUserInput: (data: string) => void,
+  hooks: SurfaceHooks,
 ): MountedTerminalSurface {
   ensureMatchMediaShim();
+
+  // FitAddon sizes the terminal from its parent's computed box; with border-box that box would
+  // include the host's padding, so xterm opens in an unpadded mount inside the padded host.
+  const mountEl = document.createElement("div");
+  mountEl.className = "inspector-xterm-mount";
+  hostEl.appendChild(mountEl);
 
   if (hasWorkingCanvas2d()) {
     try {
@@ -184,8 +213,54 @@ function mountXtermOrHeadless(
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
-      term.open(hostEl);
-      const dataSub = term.onData(onUserInput);
+      term.open(mountEl);
+      const dataSub = term.onData(hooks.onUserInput);
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.type !== "keydown") return true;
+        const key = event.key.toLowerCase();
+        // Cmd+K clears like Terminal.app; stopping it here keeps the palette shortcut out.
+        if (IS_MAC_KEYBOARD && event.metaKey && !event.shiftKey && !event.altKey && key === "k") {
+          event.preventDefault();
+          event.stopPropagation();
+          term.clear();
+          return false;
+        }
+        if (!IS_MAC_KEYBOARD && event.ctrlKey && !event.altKey) {
+          // With a selection Ctrl+C copies (Windows Terminal semantics); without one it stays ^C.
+          if (key === "c" && (event.shiftKey || term.hasSelection())) {
+            const selection = term.getSelection();
+            if (selection) void navigator.clipboard?.writeText(selection).catch(() => undefined);
+            term.clearSelection();
+            event.preventDefault();
+            return false;
+          }
+          // Let the browser deliver a paste event instead of xterm sending ^V.
+          if (key === "v") return false;
+        }
+        return true;
+      });
+      const linkSub = term.registerLinkProvider({
+        provideLinks(lineNumber, callback) {
+          const line = term.buffer.active.getLine(lineNumber - 1);
+          if (!line) {
+            callback(undefined);
+            return;
+          }
+          const found = findTerminalUrls(line.translateToString(true));
+          callback(
+            found.length === 0
+              ? undefined
+              : found.map((hit) => ({
+                  range: {
+                    start: { x: hit.start, y: lineNumber },
+                    end: { x: hit.end, y: lineNumber },
+                  },
+                  text: hit.url,
+                  activate: () => hooks.onOpenLink(hit.url),
+                })),
+          );
+        },
+      });
       const unsubTheme = subscribeTerminalThemeSync(() => {
         term.options.theme = { ...getTerminalAnsiPalette(getResolvedTheme()) };
         if (term.rows > 0) {
@@ -197,7 +272,7 @@ function mountXtermOrHeadless(
         }
       });
 
-      if (canMeasureTerminalHost(hostEl)) {
+      if (canMeasureTerminalHost(mountEl)) {
         try {
           fitAddon.fit();
         } catch {
@@ -220,7 +295,7 @@ function mountXtermOrHeadless(
           rows: Math.max(4, term.rows || 24),
         }),
         fit: () => {
-          if (!canMeasureTerminalHost(hostEl)) {
+          if (!canMeasureTerminalHost(mountEl)) {
             return null;
           }
           try {
@@ -238,13 +313,17 @@ function mountXtermOrHeadless(
         },
         setFontSize: (size) => {
           term.options.fontSize = size;
-          if (canMeasureTerminalHost(hostEl)) {
+          if (canMeasureTerminalHost(mountEl)) {
             try {
               fitAddon.fit();
             } catch {
               // Ignore when detached or hidden.
             }
           }
+        },
+        setInputEnabled: (enabled) => {
+          term.options.disableStdin = !enabled;
+          term.options.cursorBlink = enabled;
         },
         focus: () => {
           try {
@@ -257,7 +336,9 @@ function mountXtermOrHeadless(
         dispose: () => {
           unsubTheme();
           dataSub.dispose();
+          linkSub.dispose();
           term.dispose();
+          mountEl.remove();
         },
       };
     } catch {
@@ -282,15 +363,17 @@ function mountXtermOrHeadless(
   };
   applyHeadlessTheme();
   const unsubHeadlessTheme = subscribeTerminalThemeSync(applyHeadlessTheme);
-  hostEl.replaceChildren(screenEl);
+  mountEl.replaceChildren(screenEl);
 
   let cols = 80;
   let rows = 24;
+  let inputEnabled = true;
   const onKeyDown = (event: KeyboardEvent) => {
+    if (!inputEnabled) return;
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-      onUserInput(event.key);
+      hooks.onUserInput(event.key);
     } else if (event.key === "Enter") {
-      onUserInput("\r");
+      hooks.onUserInput("\r");
     }
   };
   screenEl.addEventListener("keydown", onKeyDown);
@@ -314,12 +397,18 @@ function mountXtermOrHeadless(
     setFontSize: (size) => {
       screenEl.style.fontSize = `${size}px`;
     },
+    setInputEnabled: (enabled) => {
+      inputEnabled = enabled;
+    },
     focus: () => screenEl.focus(),
-    paste: (text) => onUserInput(text),
+    paste: (text) => {
+      if (inputEnabled) hooks.onUserInput(text);
+    },
     dispose: () => {
       unsubHeadlessTheme();
       screenEl.removeEventListener("keydown", onKeyDown);
       screenEl.remove();
+      mountEl.remove();
     },
   };
 }
@@ -329,14 +418,22 @@ interface WarmTerminalSession {
   hostEl: HTMLDivElement;
   surface: MountedTerminalSurface;
   lastSeq: number;
+  /** Recording frame the screen is current through, so a re-attach replays only what is new. */
+  lastFrame?: number;
   lastSentCols: number;
   lastSentRows: number;
   replaying: boolean;
+  /** Output dropped while replaying: the screen is no base for live chunks, rebuild from a snapshot. */
+  overflowed: boolean;
+  generation: number;
   queuedChunks: Array<{ seq: number; data: string }>;
   queuedBytes: number;
   disposed: boolean;
-  detachListeners: () => void;
 }
+
+export type TerminalRestoreState =
+  | { status: "restoring" }
+  | { status: "failed"; error: string };
 
 export interface TerminalStageSnapshot {
   terminals: TerminalInfo[];
@@ -344,6 +441,18 @@ export interface TerminalStageSnapshot {
   warmIds: string[];
   fontSize: number;
   loading: boolean;
+  restore: Record<string, TerminalRestoreState>;
+}
+
+export interface TerminalUploadResult {
+  /** Files over the upload limit, left out. */
+  skipped: string[];
+}
+
+export const MAX_TERMINAL_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+function terminalEnded(info: TerminalInfo | undefined): boolean {
+  return Boolean(info && (info.exitCode != null || info.interrupted));
 }
 
 export class TerminalStageController {
@@ -359,6 +468,8 @@ export class TerminalStageController {
   private fitRafId = 0;
   private autoOpenedCwds = new Set<string>();
   private refreshInFlight?: Promise<void>;
+  private lastSessionId?: string;
+  private linkHandler?: (url: string) => void;
 
   constructor(stageKey: string, computerKey: string) {
     this.stageKey = stageKey;
@@ -378,6 +489,7 @@ export class TerminalStageController {
       warmIds: [],
       fontSize: readTerminalFontSize(),
       loading: false,
+      restore: {},
     }));
 
     if (typeof ResizeObserver !== "undefined") {
@@ -386,6 +498,11 @@ export class TerminalStageController {
       });
       this.resizeObserver.observe(this.stageEl);
     }
+  }
+
+  /** Where a clicked URL goes; the mounted panel routes loopback URLs to the preview tab. */
+  setLinkHandler(handler: ((url: string) => void) | undefined): void {
+    this.linkHandler = handler;
   }
 
   private scheduleFitActive(): void {
@@ -398,6 +515,21 @@ export class TerminalStageController {
     } else {
       this.fitActive();
     }
+  }
+
+  private setRestore(terminalId: string, state: TerminalRestoreState | undefined): void {
+    const current = this.store.getState().restore;
+    if (!state && !(terminalId in current)) return;
+    const next = { ...current };
+    if (state) next[terminalId] = state;
+    else delete next[terminalId];
+    this.store.setState({ restore: next });
+  }
+
+  private applyEnded(info: TerminalInfo | undefined): void {
+    if (!info) return;
+    const warm = this.warmSessions.get(info.id);
+    warm?.surface.setInputEnabled(!terminalEnded(info));
   }
 
   bindConnection(connection: Connection | undefined): void {
@@ -432,41 +564,63 @@ export class TerminalStageController {
             )
           : [...prev, payload.terminal];
         this.store.setState({ terminals: nextList });
+        this.applyEnded(payload.terminal);
       });
 
       const offOutput = connection.link.on("terminal.output", (payload) => {
         const warm = this.warmSessions.get(payload.terminalId);
         if (!warm || warm.disposed) return;
         if (warm.replaying) {
+          if (warm.overflowed) return;
           const byteLen = payload.data.length;
           warm.queuedChunks.push({ seq: payload.seq, data: payload.data });
           warm.queuedBytes += byteLen;
-          while (
-            warm.queuedBytes > MAX_TERMINAL_QUEUE_BYTES &&
-            warm.queuedChunks.length > 1
-          ) {
-            const dropped = warm.queuedChunks.shift()!;
-            warm.queuedBytes -= dropped.data.length;
+          if (warm.queuedBytes > MAX_TERMINAL_QUEUE_BYTES) {
+            warm.overflowed = true;
+            warm.queuedChunks.length = 0;
+            warm.queuedBytes = 0;
           }
           return;
         }
         if (payload.seq <= warm.lastSeq) return;
         warm.lastSeq = payload.seq;
+        if (typeof payload.frame === "number") warm.lastFrame = payload.frame;
         void writeTerminal(warm.surface.replayTarget, payload.data);
       });
+
+      // The host attaches a terminal to one connection; after a reconnect nothing streams
+      // until each open terminal is attached again (as the web console does).
+      const offOnline =
+        typeof connection.link.onOnline === "function"
+          ? connection.link.onOnline(() => this.reattachAll())
+          : () => undefined;
 
       this.connectionUnsub = () => {
         offChanged();
         offOutput();
+        offOnline();
       };
+
+      if (this.warmSessions.size > 0) this.reattachAll();
     }
   }
 
-  /**
-   * Moves the persistent `stageEl` into `slotEl` via `safeMoveOrAppend` (`Element.prototype.moveBefore()`
-   * when already connected, `appendChild` on initial mount) so switching between Right Inspector
-   * and Bottom Dock never unmounts xterm or throws `DOMException` in Chromium 152!
-   */
+  private reattachAll(): void {
+    for (const warm of this.warmSessions.values()) {
+      if (!warm.disposed) void this.attachAndReplay(warm, false);
+    }
+  }
+
+  /** Retry after a failed restore, from a fresh snapshot. */
+  retryRestore(terminalId: string): void {
+    const warm = this.warmSessions.get(terminalId);
+    if (warm && !warm.disposed) {
+      void this.attachAndReplay(warm, true);
+      return;
+    }
+    this.ensureWarmMounted(terminalId);
+  }
+
   attachToSlot(slotEl: HTMLElement): void {
     safeMoveOrAppend(slotEl, this.stageEl);
     this.syncHostVisibility();
@@ -506,15 +660,24 @@ export class TerminalStageController {
         const res = await conn.link.call("terminals.list", {});
         const list = Array.isArray(res?.terminals) ? res.terminals : [];
         const curActive = this.store.getState().activeId;
+        const sessionChanged =
+          autoOpenOpts?.sessionId !== undefined &&
+          autoOpenOpts.sessionId !== this.lastSessionId;
+        this.lastSessionId = autoOpenOpts?.sessionId;
+        const sessionTerminal = autoOpenOpts?.sessionId
+          ? list.find((t) => t.sessionId === autoOpenOpts.sessionId)?.id
+          : undefined;
+        // Moving to another session shows that session's shell, when it has one.
         const validActive =
-          curActive && list.some((t) => t.id === curActive)
+          (sessionChanged ? sessionTerminal : undefined) ??
+          (curActive && list.some((t) => t.id === curActive)
             ? curActive
             : list.find(
                 (t) =>
                   (autoOpenOpts?.sessionId &&
                     t.sessionId === autoOpenOpts.sessionId) ||
                   (autoOpenOpts?.cwd && t.cwd === autoOpenOpts.cwd),
-              )?.id ?? list[0]?.id;
+              )?.id ?? list[0]?.id);
 
         this.store.setState({
           terminals: list,
@@ -534,7 +697,7 @@ export class TerminalStageController {
             await this.createTerminal({
               cwd: autoOpenOpts.cwd,
               sessionId: autoOpenOpts.sessionId,
-            });
+            }).catch(() => undefined);
           }
         }
       } catch {
@@ -552,6 +715,7 @@ export class TerminalStageController {
     }
   }
 
+  /** Throws the host's error so the caller can show it. */
   async createTerminal(opts?: {
     cwd?: string;
     sessionId?: string;
@@ -654,6 +818,7 @@ export class TerminalStageController {
     if (
       dims &&
       this.connection &&
+      !terminalEnded(this.store.getState().terminals.find((t) => t.id === activeId)) &&
       (dims.cols !== warm.lastSentCols || dims.rows !== warm.lastSentRows)
     ) {
       warm.lastSentCols = dims.cols;
@@ -674,13 +839,15 @@ export class TerminalStageController {
     this.warmSessions.get(activeId)?.surface.focus();
   }
 
+  /** Uploads into the active terminal's folder and types the quoted paths. Throws host errors. */
   async uploadFilesToActive(
     files: readonly File[],
     fallbackDir?: string,
-  ): Promise<void> {
+  ): Promise<TerminalUploadResult> {
     const conn = this.connection;
     const activeId = this.store.getState().activeId;
-    if (!conn || !activeId || files.length === 0) return;
+    const skipped: string[] = [];
+    if (!conn || !activeId || files.length === 0) return { skipped };
 
     const termInfo = this.store
       .getState()
@@ -693,7 +860,10 @@ export class TerminalStageController {
     const uploadedPaths: string[] = [];
 
     for (const file of files) {
-      if (file.size > 20 * 1024 * 1024) continue;
+      if (file.size > MAX_TERMINAL_UPLOAD_BYTES) {
+        skipped.push(file.name);
+        continue;
+      }
       const bytes = new Uint8Array(await file.arrayBuffer());
       const uploaded = await conn.link.call("fs.upload", {
         dir,
@@ -715,6 +885,7 @@ export class TerminalStageController {
         });
       }
     }
+    return { skipped };
   }
 
   private ensureWarmMounted(terminalId: string): void {
@@ -727,11 +898,19 @@ export class TerminalStageController {
     this.stageEl.appendChild(hostEl);
 
     const fontSize = this.store.getState().fontSize;
-    const surface = mountXtermOrHeadless(hostEl, fontSize, (data) => {
-      if (!this.connection) return;
-      void this.connection.link
-        .call("terminals.input", { terminalId, data })
-        .catch(() => undefined);
+    const surface = mountXtermOrHeadless(hostEl, fontSize, {
+      onUserInput: (data) => {
+        if (!this.connection) return;
+        const warm = this.warmSessions.get(terminalId);
+        // Keystrokes typed over a half-restored screen would land in the wrong place.
+        if (warm?.replaying) return;
+        void this.connection.link
+          .call("terminals.input", { terminalId, data })
+          .catch(() => undefined);
+      },
+      onOpenLink: (url) => {
+        if (this.linkHandler) this.linkHandler(url);
+      },
     });
 
     const entry: WarmTerminalSession = {
@@ -742,30 +921,50 @@ export class TerminalStageController {
       lastSentCols: 0,
       lastSentRows: 0,
       replaying: true,
+      overflowed: false,
+      generation: 0,
       queuedChunks: [],
       queuedBytes: 0,
       disposed: false,
-      detachListeners: () => undefined,
     };
 
     this.warmSessions.set(terminalId, entry);
-    void this.attachAndReplay(entry);
+    void this.attachAndReplay(entry, true);
   }
 
-  private async attachAndReplay(entry: WarmTerminalSession): Promise<void> {
+  private async attachAndReplay(
+    entry: WarmTerminalSession,
+    fresh: boolean,
+  ): Promise<void> {
     const conn = this.connection;
-    if (!conn) {
+    if (!conn || entry.disposed) {
       entry.replaying = false;
       return;
     }
+    const generation = ++entry.generation;
+    const current = () =>
+      !entry.disposed &&
+      entry.generation === generation &&
+      this.connection === conn;
+    if (fresh) {
+      entry.lastSeq = 0;
+      entry.lastFrame = undefined;
+    }
+    entry.replaying = true;
+    entry.overflowed = false;
+    entry.queuedChunks.length = 0;
+    entry.queuedBytes = 0;
+    this.setRestore(entry.terminalId, { status: "restoring" });
 
     try {
       const attached = await conn.link.call("terminals.attach", {
         terminalId: entry.terminalId,
         replayFormat: "frames-v1",
         snapshot: true,
+        ...(entry.lastSeq > 0 ? { fromSeq: entry.lastSeq } : {}),
+        ...(entry.lastFrame !== undefined ? { fromFrame: entry.lastFrame } : {}),
       });
-      if (entry.disposed) return;
+      if (!current()) return;
 
       await replayTerminal(
         entry.surface.replayTarget,
@@ -776,7 +975,7 @@ export class TerminalStageController {
             afterFrame,
             throughFrame,
           }),
-        () => !entry.disposed,
+        current,
         {
           loadState: (snapshotId, offset) =>
             conn.link.call("terminals.state", {
@@ -787,9 +986,10 @@ export class TerminalStageController {
         },
       );
 
-      if (entry.disposed) return;
+      if (!current()) return;
       entry.lastSeq = attached.seq;
-      entry.replaying = false;
+      entry.lastFrame =
+        attached.state?.frame ?? attached.recording?.throughFrame ?? entry.lastFrame;
 
       const buffered = entry.queuedChunks.splice(0, entry.queuedChunks.length);
       entry.queuedBytes = 0;
@@ -799,12 +999,28 @@ export class TerminalStageController {
           await writeTerminal(entry.surface.replayTarget, chunk.data);
         }
       }
+      if (!current()) return;
+      if (entry.overflowed) {
+        await this.attachAndReplay(entry, true);
+        return;
+      }
 
-      this.fitActive();
-    } catch {
       entry.replaying = false;
+      this.setRestore(entry.terminalId, undefined);
+      this.applyEnded(attached.terminal);
+      this.fitActive();
+    } catch (error) {
+      if (!current()) return;
+      // A partial replay is not a valid base for live output or the next reconnect.
+      entry.replaying = false;
+      entry.lastSeq = 0;
+      entry.lastFrame = undefined;
       entry.queuedChunks.length = 0;
       entry.queuedBytes = 0;
+      this.setRestore(entry.terminalId, {
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -820,9 +1036,9 @@ export class TerminalStageController {
     if (!warm) return;
     warm.disposed = true;
     this.warmSessions.delete(terminalId);
-    warm.detachListeners();
     warm.surface.dispose();
     warm.hostEl.remove();
+    this.setRestore(terminalId, undefined);
 
     if (detachOnHost && this.connection) {
       void this.connection.link

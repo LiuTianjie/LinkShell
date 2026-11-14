@@ -6,6 +6,7 @@ import {
   resolveTargetPlatform,
   revealInFilesLabel,
   useActiveDesktopPlatform,
+  getDesktopLocale,
   useI18n,
   type Locale,
   type TranslateFn,
@@ -201,6 +202,27 @@ const inspectorZh = {
   statusAhead: "领先 {count}",
   noWorktreesTitle: "暂无 Git Worktree",
   noWorktreesDesc: "在新建会话时开启「在新 Worktree 中启动」，即可隔离并行开发分支。",
+  saveOldHost: "这台电脑的 LinkShell 版本较旧，更新后才能保存",
+  saveConflictTitle: "文件已在电脑上被修改",
+  saveConflictBody: "{path} 在你编辑期间被修改过（可能是 Agent）。重新载入会丢弃你的修改，覆盖会替换电脑上的版本。",
+  saveConflictReload: "重新载入",
+  saveConflictOverwrite: "覆盖保存",
+  reloadFile: "重新载入",
+  loadMoreFile: "继续载入",
+  openOtherFile: "改为打开 {path}",
+  discardDraftTitle: "放弃未保存的修改？",
+  discardDraftBody: "{name} 有未保存的修改，关闭后会丢失。",
+  discardDraftConfirm: "放弃修改",
+  reloadDirtyBody: "重新载入会丢弃 {name} 中未保存的修改。",
+  terminalRestoring: "正在恢复终端…",
+  terminalRestoreFailed: "终端恢复失败",
+  retry: "重试",
+  changesTruncated: "变更内容太多，只显示了一部分；请在编辑器或命令行中查看完整差异。",
+  previewHostUnavailable: "没有连上这台电脑，无法转发预览请求",
+  previewTooManyRequests: "预览请求过多，请稍后重试",
+  noSearchHitsTitle: "没有匹配的文件",
+  dirTruncatedNote: "此文件夹内容太多，只显示前 1000 项。",
+  fileChangedWhileReading: "文件在读取过程中被修改，请重新载入",
 } as const;
 
 export type InspectorCopyKey = keyof typeof inspectorZh;
@@ -388,6 +410,27 @@ const inspectorEn: Record<InspectorCopyKey, string> = {
   statusAhead: "Ahead {count}",
   noWorktreesTitle: "No Git Worktrees",
   noWorktreesDesc: "Enable \"Start in New Worktree\" when creating a session to isolate parallel branches.",
+  saveOldHost: "LinkShell on this computer is too old to save files. Update it first.",
+  saveConflictTitle: "File changed on the computer",
+  saveConflictBody: "{path} was modified while you were editing (perhaps by the agent). Reload discards your edit; Overwrite replaces the version on disk.",
+  saveConflictReload: "Reload",
+  saveConflictOverwrite: "Overwrite",
+  reloadFile: "Reload",
+  loadMoreFile: "Load More",
+  openOtherFile: "Open {path} Instead",
+  discardDraftTitle: "Discard unsaved changes?",
+  discardDraftBody: "{name} has unsaved changes that will be lost.",
+  discardDraftConfirm: "Discard",
+  reloadDirtyBody: "Reloading discards the unsaved changes in {name}.",
+  terminalRestoring: "Restoring terminal…",
+  terminalRestoreFailed: "Couldn't restore the terminal",
+  retry: "Retry",
+  changesTruncated: "The diff is too large and was cut off; view the full diff in an editor or terminal.",
+  previewHostUnavailable: "Not connected to this computer; the preview request could not be forwarded",
+  previewTooManyRequests: "Too many preview requests; try again shortly",
+  noSearchHitsTitle: "No matching files",
+  dirTruncatedNote: "This folder has too many entries; showing the first 1000.",
+  fileChangedWhileReading: "The file changed while it was being read. Reload it.",
 };
 
 const inspectorJa: Record<InspectorCopyKey, string> = {
@@ -573,6 +616,27 @@ const inspectorJa: Record<InspectorCopyKey, string> = {
   statusAhead: "{count} 先行",
   noWorktreesTitle: "Git Worktree はありません",
   noWorktreesDesc: "新規セッション作成時に「新しい Worktree で開始」を選ぶとブランチを分離できます。",
+  saveOldHost: "このコンピュータの LinkShell が古いため保存できません。更新してください。",
+  saveConflictTitle: "ファイルがコンピュータ上で変更されました",
+  saveConflictBody: "{path} は編集中に変更されました（Agent の可能性があります）。再読み込みすると編集内容は破棄され、上書きするとディスク上の内容が置き換わります。",
+  saveConflictReload: "再読み込み",
+  saveConflictOverwrite: "上書き保存",
+  reloadFile: "再読み込み",
+  loadMoreFile: "続きを読み込む",
+  openOtherFile: "代わりに {path} を開く",
+  discardDraftTitle: "未保存の変更を破棄しますか？",
+  discardDraftBody: "{name} には未保存の変更があり、閉じると失われます。",
+  discardDraftConfirm: "破棄",
+  reloadDirtyBody: "再読み込みすると {name} の未保存の変更は破棄されます。",
+  terminalRestoring: "ターミナルを復元しています…",
+  terminalRestoreFailed: "ターミナルを復元できませんでした",
+  retry: "再試行",
+  changesTruncated: "差分が大きすぎるため一部のみ表示しています。エディタやターミナルで全体を確認してください。",
+  previewHostUnavailable: "このコンピュータに接続されていないため、プレビュー要求を転送できません",
+  previewTooManyRequests: "プレビュー要求が多すぎます。しばらくしてから再試行してください",
+  noSearchHitsTitle: "一致するファイルはありません",
+  dirTruncatedNote: "項目が多すぎるため先頭 1000 件のみ表示しています。",
+  fileChangedWhileReading: "読み込み中にファイルが変更されました。再読み込みしてください。",
 };
 
 const INSPECTOR_DICTS: Record<Locale, Record<InspectorCopyKey, string>> = {
@@ -629,4 +693,13 @@ export function useInspectorI18n(targetPlatform?: string): InspectorI18n {
       resolvedPlatform,
     };
   }, [locale, resolvedPlatform, t]);
+}
+
+/** For code outside React (the remote-port responder) that still speaks the user's language. */
+export function inspectorText(
+  key: InspectorCopyKey,
+  params?: Record<string, string | number>,
+): string {
+  const dict = INSPECTOR_DICTS[getDesktopLocale()] ?? inspectorZh;
+  return formatTemplate(dict[key] ?? inspectorZh[key], params);
 }

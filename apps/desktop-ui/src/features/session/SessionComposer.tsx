@@ -14,7 +14,6 @@ import type {
 import {
   diffReviewStore,
   draftKeyFor,
-  finishComposerSend,
   formatDiffReviewPrompt,
   reportDesktopError,
   routerStore,
@@ -37,20 +36,24 @@ import {
 import { ComposerBox } from "./ComposerBox";
 import { openInspectorTab, openSubagentInInspector } from "../inspector";
 import {
+  UPLOAD_TIMEOUT_MS,
+  attachmentsFromBlocks,
   buildPromptContentBlocks,
   buildSessionCommands,
   configCategoryIcon,
   configOptionDisplayLabel,
   configValueDisplayName,
   parseSlashCommandInput,
+  reportOnFailure,
   revokeAttachmentPreviews,
   sessionKeyOf,
+  sessionUiStore,
   useClientSelector,
+  describeActionError,
   useSessionCopy,
   type ComposerAttachment,
 } from "./session-helpers";
 
-const EMPTY_OUTBOX: ClientState["outbox"] = {};
 const EMPTY_SUBAGENTS: NonNullable<ClientState["subagents"][string]> = [];
 
 export interface SessionComposerProps {
@@ -72,6 +75,11 @@ export function SessionComposer({
   const sessionKey = sessionKeyOf(computerKey, session.id);
 
   const online = useClientSelector(connection, (s) => s.status === "online", false);
+  const agentCapabilities = useClientSelector(
+    connection,
+    (s) => s.machine?.agents.find((entry) => entry.id === session.agent)?.capabilities,
+    undefined,
+  );
   const storeView = useClientSelector(
     connection,
     (s) => s.views[session.id],
@@ -84,20 +92,11 @@ export function SessionComposer({
     (s) => s.queueing[session.id],
     undefined,
   );
-  const outboxMap = useClientSelector(connection, (s) => s.outbox, EMPTY_OUTBOX);
   const storeSubagents = useClientSelector(
     connection,
     (s) => s.subagents[session.id] ?? EMPTY_SUBAGENTS,
     EMPTY_SUBAGENTS,
   );
-  const sessionOutbox = useMemo(
-    () =>
-      Object.entries(outboxMap)
-        .filter(([, item]) => item.sessionId === session.id)
-        .map(([clientMessageId, item]) => ({ clientMessageId, ...item })),
-    [outboxMap, session.id],
-  );
-
   // Live running subagents pill (shown only while subagents are actively running)
   const subagentSummary = useMemo(() => {
     let spawnedCount = 0;
@@ -161,13 +160,18 @@ export function SessionComposer({
 
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+  // A send can resolve after this composer is gone (the person switched sessions).
+  const aliveRef = useRef(true);
+  // The same File is uploaded once even when the send is retried.
+  const uploadCacheRef = useRef(new WeakMap<File, string>());
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
       revokeAttachmentPreviews(attachmentsRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const isRunning = session.state === "running" || view.turnActive;
   const driver = view.driver ?? session.driver;
@@ -298,16 +302,17 @@ export function SessionComposer({
     return false;
   };
 
-  const submitMessage = async (options?: { steerNow?: boolean; overrideText?: string }) => {
-    if (!online || sending) return;
+  /** Resolves true once the host has the message; failures are told in the composer itself. */
+  const submitMessage = async (options?: { steerNow?: boolean; overrideText?: string }): Promise<boolean> => {
+    if (sending) return false;
     setSendError(undefined);
 
     if (options?.overrideText === undefined) {
       try {
-        if (await handleLocalSlashCommand()) return;
+        if (await handleLocalSlashCommand()) return true;
       } catch (error) {
         reportDesktopError(error);
-        return;
+        return false;
       }
     }
 
@@ -317,66 +322,89 @@ export function SessionComposer({
     const currentPasted = useOverride ? [] : pastedBlocks;
 
     if (!submittedText.trim() && currentAttachments.length === 0 && currentPasted.length === 0) {
-      return;
+      return false;
+    }
+
+    // Typing stays open while the link recovers; only sending waits for the synced session (as the web client).
+    const current = connection.store.getState();
+    if (current.status !== "online" || !current.ready[session.id]) {
+      setSendError(copy.offlineSendBlocked);
+      return false;
     }
 
     setSending(true);
     try {
-      const uploadDir = `${session.cwd.replace(/[\\/]+$/, "")}/.linkshell/uploads`;
       const blocks = await buildPromptContentBlocks({
         text: submittedText,
         pastedBlocks: currentPasted,
         attachments: currentAttachments,
-        cwd: session.cwd,
-        uploadFile: ({ name, data }) =>
-          connection.link.call("fs.upload", { dir: uploadDir, name, data }),
+        capabilities: agentCapabilities,
+        uploadDir: session.cwd,
+        uploadCache: uploadCacheRef.current,
+        callUpload: (dir, name, data) =>
+          connection.link.call("fs.upload", { dir, name, data }, UPLOAD_TIMEOUT_MS),
       });
 
-      if (blocks.length === 0) return;
+      if (blocks.length === 0) return false;
 
-      const deliveryPromise = connection.store.getState().send(session.id, blocks, {
+      sessionUiStore.getState().requestFollow(sessionKey);
+      const clientMessageId = crypto.randomUUID();
+      const delivery = await connection.store.getState().send(session.id, blocks, {
         now: Boolean(options?.steerNow),
+        clientMessageId,
       });
 
-      /**
-       * Sacred draft preservation rule (`finishComposerSend`):
-       * Draft & attachments clear ONLY when Host confirms delivery; on `"failed"`, user input stays intact!
-       */
-      await finishComposerSend(deliveryPromise, () => {
-        if (!useOverride) {
-          clearSubmitted(submittedText);
-          revokeAttachmentPreviews(currentAttachments);
-          setAttachments([]);
-          setPastedBlocks([]);
+      if (delivery === "failed") {
+        // One owner for a failed send: the composer keeps the text and attachments to edit and
+        // send again, so the store's copy goes, or a second Enter would deliver it twice.
+        connection.store.getState().discard(clientMessageId);
+        if (aliveRef.current) setSendError(copy.sendFailedKept);
+        return false;
+      }
+
+      if (!useOverride) {
+        clearSubmitted(submittedText);
+        revokeAttachmentPreviews(currentAttachments);
+        if (aliveRef.current) {
+          setAttachments((prev) => prev.filter((item) => !currentAttachments.includes(item)));
+          setPastedBlocks((prev) => prev.filter((item) => !currentPasted.includes(item)));
         }
-      });
+      }
+      return true;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setSendError(msg);
-      reportDesktopError(error);
+      if (aliveRef.current) setSendError(describeActionError(error, copy.sendFailedKept));
+      return false;
     } finally {
-      setSending(false);
+      if (aliveRef.current) setSending(false);
     }
   };
 
   const handleSubmitReviews = async () => {
-    if (reviews.length === 0 || !online || sending) return;
+    if (reviews.length === 0 || sending) return;
     const prompt = formatDiffReviewPrompt(reviews);
     if (!prompt) return;
-    await submitMessage({ overrideText: prompt });
-    diffReviewStore.getState().clearSession(sessionKey);
+    if (await submitMessage({ overrideText: prompt })) {
+      diffReviewStore.getState().clearSession(sessionKey);
+    }
   };
 
   const handleEditQueued = async (entry: QueueEntry) => {
     try {
       const taken = await connection.store.getState().takeQueued(session.id, entry.clientMessageId);
       const extracted = taken ? userMessageText(taken) : entry.text;
+      if (!aliveRef.current) return;
       if (extracted) {
         setText((curr) => (curr.trim() ? `${curr}\n\n${extracted}` : extracted));
       }
+      const pictures = taken ? attachmentsFromBlocks(taken) : [];
+      if (pictures.length > 0) setAttachments((prev) => [...prev, ...pictures]);
     } catch (error) {
       reportDesktopError(error);
     }
+  };
+
+  const handleCancel = () => {
+    reportOnFailure(connection.store.getState().cancel(session.id));
   };
 
   const handleMoveQueuedUp = async (index: number) => {
@@ -412,7 +440,7 @@ export function SessionComposer({
                 variant="primary"
                 size="sm"
                 leadingIcon="send-to-agent"
-                disabled={!online || sending}
+                disabled={sending}
                 onClick={() => void handleSubmitReviews()}
               >
                 {t("desktop.composer.send")}
@@ -420,37 +448,6 @@ export function SessionComposer({
             </div>
           </div>
         )}
-
-        {/* Failed outbox quick-retry bar */}
-        {sessionOutbox.map((failed) => (
-          <div
-            key={failed.clientMessageId}
-            className="ls-composer-queue-bar"
-            style={{ borderColor: "color-mix(in srgb, var(--ls-danger) 35%, var(--ls-border-subtle))" }}
-          >
-            <div className="ls-composer-queue-row">
-              <DesktopIcon name="alert-circle" size="xs" />
-              <span className="ls-composer-queue-text">
-                {userMessageText(failed.content) || copy.failedDelivery}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!online}
-                onClick={() => void connection.store.getState().retry(failed.clientMessageId)}
-              >
-                {copy.retryFailed}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => connection.store.getState().discard(failed.clientMessageId)}
-              >
-                {copy.discardFailed}
-              </Button>
-            </div>
-          </div>
-        ))}
 
         {/* Editable queued follow-ups bar (`shownQueue`) */}
         {queueItems.length > 0 && (
@@ -470,9 +467,9 @@ export function SessionComposer({
                         size="sm"
                         disabled={!online}
                         onClick={() =>
-                          void connection.store
+                          reportOnFailure(connection.store
                             .getState()
-                            .sendQueuedNow(session.id, entry.clientMessageId)
+                            .sendQueuedNow(session.id, entry.clientMessageId))
                         }
                       >
                         {t("desktop.composer.sendNow")}
@@ -505,9 +502,9 @@ export function SessionComposer({
                         label={t("desktop.composer.removeQueued")}
                         disabled={!online}
                         onClick={() =>
-                          void connection.store
+                          reportOnFailure(connection.store
                             .getState()
-                            .unqueue(session.id, entry.clientMessageId)
+                            .unqueue(session.id, entry.clientMessageId))
                         }
                       />
                     </Tooltip>
@@ -560,7 +557,7 @@ export function SessionComposer({
               variant="primary"
               size="sm"
               disabled={!online}
-              onClick={() => void connection.store.getState().takeover(session.id)}
+              onClick={() => reportOnFailure(connection.store.getState().takeover(session.id))}
             >
               {t("desktop.composer.takeover")}
             </Button>
@@ -571,7 +568,6 @@ export function SessionComposer({
             onChange={setText}
             placeholder={isRunning ? copy.composerBusyPlaceholder : copy.composerPlaceholder}
             textareaAriaLabel={t("desktop.composer.placeholder")}
-            disabled={!online}
             connection={connection}
             cwd={session.cwd}
             commands={commands}
@@ -595,8 +591,9 @@ export function SessionComposer({
             onRemovePastedBlock={(id) =>
               setPastedBlocks((prev) => prev.filter((b) => b.id !== id))
             }
-            onSubmit={submitMessage}
+            onSubmit={(options) => void submitMessage(options)}
             onCycleMode={modeOption ? handleCycleMode : undefined}
+            onCancel={isRunning && online ? handleCancel : undefined}
             leftControls={
               <>
                 {orderedConfigs.map((option) => (
@@ -622,7 +619,7 @@ export function SessionComposer({
                       data-stop="true"
                       aria-label={t("desktop.composer.stop")}
                       disabled={!online}
-                      onClick={() => void connection.store.getState().cancel(session.id)}
+                      onClick={handleCancel}
                     >
                       <DesktopIcon name="stop-square" size="sm" />
                     </button>
@@ -633,7 +630,7 @@ export function SessionComposer({
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!online || sending}
+                    disabled={sending}
                     onClick={() => void submitMessage({ steerNow: true })}
                   >
                     {t("desktop.composer.steer")}
@@ -651,7 +648,7 @@ export function SessionComposer({
                     aria-label={
                       isRunning ? t("desktop.composer.queue") : t("desktop.composer.send")
                     }
-                    disabled={!online || sending || !hasSendablePayload}
+                    disabled={sending || !hasSendablePayload}
                     onClick={() => void submitMessage({ steerNow: false })}
                   >
                     <DesktopIcon name="arrow-up" size="sm" />
@@ -663,7 +660,7 @@ export function SessionComposer({
         )}
 
         {sendError && (
-          <div style={{ fontSize: 12, color: "var(--ls-danger)", paddingInline: 4 }} role="alert">
+          <div className="ls-composer-send-error" role="alert">
             {sendError}
           </div>
         )}

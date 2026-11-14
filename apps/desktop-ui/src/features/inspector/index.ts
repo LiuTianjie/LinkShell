@@ -17,7 +17,11 @@ export {
 } from "./FileViewerTabPanel";
 export {
   activateInspectorTab,
+  closeActiveInspectorTab,
   closeInspectorTab,
+  cycleInspectorTab,
+  openInspectorGoToFile,
+  requestCloseInspectorTab,
   inspectorTabsStore,
   openFileTabInInspector,
   openInspectorTab,

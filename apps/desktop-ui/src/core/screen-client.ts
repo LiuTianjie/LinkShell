@@ -10,6 +10,7 @@ import {
   setDesktopScreenFullScreen,
   setDesktopScreenKeys,
 } from "../bridge/desktop-bridge";
+import { setRemoteKeysCaptured } from "../bridge/shortcuts";
 import { hasOpenOverlay } from "../bridge/top-layer-registry";
 import { STORAGE_KEYS, readLocal, saveLocal, subscribeStorageReady } from "./storage";
 import { openWebSocket } from "./transport";
@@ -546,6 +547,8 @@ export function postNativeScreen(
 
 export function setScreenKeysCaptured(captured: boolean): void {
   setDesktopScreenKeys(captured);
+  // The page's own shortcuts step aside together with the native menu's.
+  setRemoteKeysCaptured(captured);
 }
 
 export function requestScreenFullScreen(

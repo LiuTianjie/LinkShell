@@ -155,9 +155,10 @@
     align-items: center;
     gap: 6px;
     min-block-size: 28px;
-    max-inline-size: 320px;
+    max-inline-size: min(100%, 520px);
+    min-inline-size: 0;
     padding-inline: 10px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-sm);
     border: 1px solid var(--ls-border);
     background: var(--ls-control-bg, var(--ls-card));
     box-shadow:
@@ -202,7 +203,10 @@
 
   .ls-target-pill-path {
     font-family: var(--font-mono);
-    font-size: var(--ls-text-xs);
+    font-size: var(--ls-text-sm);
+    /* Shrinks inside the chip: a long path ends in an ellipsis instead of running past it. */
+    flex: 0 1 auto;
+    min-inline-size: 0;
     overflow: clip;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -310,6 +314,24 @@
     box-shadow: var(--ls-focus-ring);
   }
 
+  .ls-dir-empty {
+    padding: 20px;
+    text-align: center;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-dir-entry-path {
+    margin-inline-start: auto;
+    max-inline-size: 220px;
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-3);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: clip;
+  }
+
   /* ==========================================================================
    * 2. Session Header Actions & In-Session Find Bar
    * ========================================================================== */
@@ -328,7 +350,7 @@
     max-inline-size: 190px;
     min-block-size: 24px;
     padding-inline: 8px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-xs);
     border: 1px solid var(--ls-border-subtle);
     background: var(--ls-fill);
     color: var(--ls-fg-2);
@@ -450,6 +472,8 @@
     scrollbar-gutter: stable;
     padding-inline: 24px;
     padding-block: 20px 16px;
+    /* Lines leave under the composer instead of being cut in half at its edge. */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
   }
 
   .ls-timeline-track {
@@ -467,41 +491,44 @@
     contain-intrinsic-size: auto 72px;
   }
 
-  /* Floating Jump-to-bottom pill driven by scroll-state container query + JS state */
+  /*
+   * Jump-to-bottom pill: sticky at the end of the scroller, so it always sits just above the
+   * composer whatever the composer's height. JS decides when the reader has scrolled away; the
+   * scroll-state query hides it when there is nothing below to jump to (content shrank).
+   */
+  .ls-jump-bottom-anchor {
+    position: sticky;
+    inset-block-end: 12px;
+    block-size: 0;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 8;
+  }
+
   .ls-jump-bottom-btn {
-    position: absolute;
-    inset-inline-start: 50%;
-    inset-block-end: 124px;
-    transform: translate(-50%, 6px);
+    position: relative;
+    transform: translateY(calc(-100% + 6px));
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-block-size: 30px;
+    min-block-size: 28px;
     padding-inline: 12px;
     border-radius: 999px;
     border: 1px solid var(--ls-border-strong);
     background: var(--ls-popover);
     color: var(--ls-fg);
-    box-shadow:
-      var(
-        --ls-rim-island,
-        light-dark(
-          inset 0 1px 0 rgba(255, 255, 255, 0.9),
-          inset 0 1px 0 rgba(255, 255, 255, 0.06)
-        )
-      ),
-      var(--ls-shadow-popover);
-    font-size: var(--ls-text-xs);
+    box-shadow: var(--ls-shadow-popover);
+    font-size: var(--ls-text-sm);
     font-weight: 500;
     cursor: pointer;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    z-index: 8;
     transition:
-      opacity 150ms ease,
-      transform 150ms ease,
-      visibility 150ms ease;
+      opacity 150ms ease-out,
+      transform 150ms ease-out,
+      visibility 150ms ease-out;
   }
 
   .ls-jump-bottom-btn[data-visible="false"] {
@@ -510,17 +537,16 @@
 
   .ls-jump-bottom-btn[data-visible="true"] {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(-100%);
     visibility: visible;
     pointer-events: auto;
   }
 
-  @container timeline-scroll scroll-state(scrollable: bottom) {
-    .ls-jump-bottom-btn {
-      opacity: 1;
-      transform: translate(-50%, 0);
-      visibility: visible;
-      pointer-events: auto;
+  @container timeline-scroll not scroll-state(scrollable: bottom) {
+    .ls-jump-bottom-btn[data-visible="true"] {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
     }
   }
 
@@ -574,6 +600,11 @@
     color: var(--ls-fg-3);
     opacity: 0;
     transition: opacity 120ms ease;
+    /* The row is invisible until hover: it sits in the gap to the next item instead of adding
+       its own height to it, so messages keep one rhythm. */
+    position: relative;
+    z-index: 1;
+    margin-block-end: -18px;
   }
 
   .ls-turn-user:hover .ls-turn-user-meta,
@@ -612,6 +643,9 @@
     gap: 4px;
     margin-block-start: -2px;
     margin-inline-start: -6px;
+    position: relative;
+    z-index: 1;
+    margin-block-end: -14px;
   }
 
   .ls-turn-agent:hover .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn,
@@ -682,6 +716,31 @@
     margin-block-start: 4px;
   }
 
+  /* A task list is its own marker: the box replaces the bullet, drawn like every other
+     checkbox here (4px, accent when done) instead of the system's disabled grey square. */
+  .ls-markdown ul.contains-task-list,
+  .ls-markdown ul:has(> li > input[type="checkbox"]) {
+    list-style: none;
+    padding-inline-start: 2px;
+  }
+
+  .ls-markdown li > input[type="checkbox"] {
+    appearance: none;
+    inline-size: 14px;
+    block-size: 14px;
+    margin: 0 8px 0 0;
+    vertical-align: -2px;
+    border: 1px solid var(--ls-border-strong);
+    border-radius: var(--ls-radius-xs);
+    background: transparent center / 10px 10px no-repeat;
+  }
+
+  .ls-markdown li > input[type="checkbox"]:checked {
+    border-color: var(--ls-accent-fill);
+    background-color: var(--ls-accent-fill);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='white' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 5.2 4.2 7.4 8 3'/%3E%3C/svg%3E");
+  }
+
   .ls-markdown blockquote {
     margin-inline: 0;
     margin-block: 0 10px;
@@ -698,7 +757,7 @@
 
   .ls-markdown :not(pre) > code {
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     padding-inline: 5px;
     padding-block: 1.5px;
     border-radius: var(--ls-radius-xs);
@@ -748,7 +807,7 @@
     padding: 12px;
     overflow-x: auto;
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     line-height: 19px;
     color: var(--ls-code-fg);
     tab-size: 2;
@@ -1396,6 +1455,11 @@
     color: var(--ls-fg-2);
   }
 
+  /* Only the turn's clock: what runs is already shown as live in the row above. */
+  .ls-live-row[data-quiet="true"] .ls-live-label {
+    color: var(--ls-fg-3);
+  }
+
   .ls-live-label {
     color: var(--ls-fg-2);
   }
@@ -1664,7 +1728,7 @@
     align-items: center;
     block-size: 18px;
     padding-inline: 6px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-xs);
     border: 1px solid var(--ls-border);
     background: var(--ls-inset);
     color: var(--ls-fg-2);
@@ -1712,7 +1776,7 @@
     gap: 6px;
     min-block-size: 26px;
     padding-inline: 10px;
-    border-radius: 999px;
+    border-radius: var(--ls-radius-xs);
     border: 1px solid var(--ls-border);
     background: var(--ls-control-bg, var(--ls-card));
     box-shadow:
@@ -1796,7 +1860,7 @@
   }
 
   .ls-composer-box:focus-within {
-    border-color: light-dark(rgba(20, 22, 26, 0.24), rgba(255, 255, 255, 0.17));
+    border-color: var(--ls-accent);
   }
 
   .ls-composer-box[data-dragging="true"] {
@@ -1865,7 +1929,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--ls-fg);
   }
@@ -1896,7 +1960,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--ls-fg);
   }
 
@@ -2181,5 +2245,126 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--ls-fg-2);
+  }
+
+  /* ==========================================================================
+   * Session states and cards added with the timeline fixes
+   * ========================================================================== */
+  .ls-timeline-earlier {
+    display: flex;
+    justify-content: center;
+    padding-block: 4px;
+  }
+
+  .ls-timeline-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 48px 16px;
+    text-align: center;
+    font-size: var(--ls-text-base);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-lightbox-frame {
+    display: flex;
+    justify-content: center;
+  }
+
+  .ls-lightbox-frame > img {
+    max-inline-size: 100%;
+    max-block-size: 72vh;
+    border-radius: var(--ls-radius-md);
+  }
+
+  .ls-composer-send-error {
+    padding-inline: 4px;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-danger);
+  }
+
+  .ls-wrap-up-label {
+    font-size: var(--ls-text-base);
+    font-weight: 600;
+  }
+
+  .ls-wrap-up-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  .ls-wrap-up-ask {
+    font-size: var(--ls-text-base);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-wrap-up-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ls-wrap-up-chip {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 28px;
+    padding-inline: 12px;
+    border: 1px solid var(--ls-border);
+    border-radius: var(--ls-radius-sm);
+    font-size: var(--ls-text-base);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-wrap-up-chip[data-sent="true"] {
+    color: var(--ls-fg);
+    border-color: var(--ls-border-strong);
+  }
+
+  .ls-started-session {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    inline-size: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--ls-border);
+    border-radius: var(--ls-radius-md);
+    background: var(--ls-card);
+    color: var(--ls-fg);
+    text-align: start;
+    font: inherit;
+  }
+
+  button.ls-started-session {
+    cursor: pointer;
+  }
+
+  button.ls-started-session:hover {
+    background: var(--ls-hover);
+  }
+
+  button.ls-started-session:focus-visible {
+    outline: none;
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  .ls-started-session-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-inline-size: 0;
+  }
+
+  .ls-started-session-text > strong {
+    font-size: var(--ls-text-base);
+    font-weight: 500;
+  }
+
+  .ls-started-session-text > small {
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-3);
   }
 }

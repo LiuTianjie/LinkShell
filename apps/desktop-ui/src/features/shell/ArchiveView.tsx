@@ -5,8 +5,10 @@ import { DESKTOP_LOCAL } from "../../bridge/desktop-bridge";
 import {
   computerNames,
   confirmAndDeleteSession,
+  describeActionError,
   engine,
   projectScopeStore,
+  refreshConnectionProjects,
   sessionTitle,
   setProjectScope,
   useI18n,
@@ -31,8 +33,10 @@ import {
   displayComputerName,
   formatRelativeTimestamp,
   formatSessionCountLabel,
+  reportShellError,
   shortenHomePath,
   useConnectionStore,
+  useMinuteTick,
   useRetainedMetadataConnections,
 } from "./shell-helpers";
 
@@ -46,6 +50,13 @@ interface ArchivedComputerBucket {
   sessions: SessionSummary[];
   nextBefore?: number;
   nextBeforeId?: string;
+}
+
+function dropKey(record: Record<string, string>, key: string): Record<string, string> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
 }
 
 function filterAndSortArchived(
@@ -91,6 +102,10 @@ export function ArchiveView() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [loadingByKey, setLoadingByKey] = useState<Record<string, boolean>>({});
   const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null);
+  // A failed first load used to look exactly like "nothing archived"; keep the failure visible.
+  const [errorByKey, setErrorByKey] = useState<Record<string, string>>({});
+  const [retryNonce, setRetryNonce] = useState(0);
+  useMinuteTick();
 
   const loadedOnlineSetRef = useRef<WeakSet<Connection>>(new WeakSet());
   const mountedRef = useRef(true);
@@ -138,8 +153,14 @@ export function ArchiveView() {
     const key = activeConnection.computer.key;
     setLoadingByKey((prev) => ({ ...prev, [key]: true }));
     void Promise.resolve(loadFn())
-      .catch(() => {
+      .then(() => {
+        if (mountedRef.current) setErrorByKey((prev) => dropKey(prev, key));
+      })
+      .catch((error: unknown) => {
         loadedOnlineSetRef.current.delete(activeConnection);
+        if (mountedRef.current) {
+          setErrorByKey((prev) => ({ ...prev, [key]: describeActionError(error, locale) }));
+        }
       })
       .finally(() => {
         if (!mountedRef.current) return;
@@ -150,7 +171,7 @@ export function ArchiveView() {
           return next;
         });
       });
-  }, [activeConnection, activeStatus]);
+  }, [activeConnection, activeStatus, locale, retryNonce]);
 
   // Trigger initial loadArchived() across retained online connections when "All Computers" is selected
   useEffect(() => {
@@ -174,8 +195,14 @@ export function ArchiveView() {
       const key = comp.key;
       setLoadingByKey((prev) => ({ ...prev, [key]: true }));
       void Promise.resolve(loadFn())
-        .catch(() => {
+        .then(() => {
+          if (mountedRef.current) setErrorByKey((prev) => dropKey(prev, key));
+        })
+        .catch((error: unknown) => {
           loadedOnlineSetRef.current.delete(conn);
+          if (mountedRef.current) {
+            setErrorByKey((prev) => ({ ...prev, [key]: describeActionError(error, locale) }));
+          }
         })
         .finally(() => {
           if (!mountedRef.current) return;
@@ -187,7 +214,7 @@ export function ArchiveView() {
           });
         });
     }
-  }, [isAllScope, allComputers, activeConnection, retainedMap]);
+  }, [isAllScope, allComputers, activeConnection, retainedMap, locale, retryNonce]);
 
   const singleArchivedSessions = useMemo(
     () => filterAndSortArchived(activeSessionsMap, query),
@@ -258,22 +285,34 @@ export function ArchiveView() {
     totalDisplayedCount === 0 &&
     allBuckets.some((b) => b.syncing);
 
-  const loadingText =
-    locale === "en"
-      ? "Loading archived sessions"
-      : locale === "ja"
-        ? "アーカイブ済みセッションを読み込み中"
-        : "正在加载已归档会话";
+  const loadingText = t("desktop.shell.archiveLoading");
+  const loadMoreLabel = t("desktop.shell.archiveLoadMore");
+  const syncingBadgeLabel = t("desktop.shell.syncing");
 
-  const loadMoreLabel =
-    locale === "en"
-      ? "Load more"
-      : locale === "ja"
-        ? "さらに読み込む"
-        : "加载更多";
+  const failedMessages = isAllScope
+    ? Object.values(errorByKey)
+    : errorByKey[activeComputerKey]
+      ? [errorByKey[activeComputerKey]!]
+      : [];
 
-  const syncingBadgeLabel =
-    locale === "en" ? "Syncing" : locale === "ja" ? "同期中" : "同步中";
+  const retryFailedLoads = () => {
+    setErrorByKey({});
+    setRetryNonce((value) => value + 1);
+  };
+
+  const loadErrorNode =
+    failedMessages.length > 0 ? (
+      <div className="archive-load-error" role="alert">
+        <DesktopIcon name="alert-circle" size="sm" />
+        <span className="archive-load-error__text">
+          <strong>{t("desktop.shell.archiveLoadFailed")}</strong>
+          <span>{failedMessages[0]}</span>
+        </span>
+        <Button size="sm" variant="secondary" leadingIcon="refresh" onClick={retryFailedLoads}>
+          {t("desktop.shell.retry")}
+        </Button>
+      </div>
+    ) : null;
 
   const handleOpenArchived = (computerKey: string, sessionId: string) => {
     const comp = engine.computerForKey(computerKey);
@@ -293,6 +332,9 @@ export function ArchiveView() {
     setBusyKey(opKey);
     try {
       await conn.store.getState().archive(session.id, false);
+      refreshConnectionProjects(conn);
+    } catch (error) {
+      reportShellError(error, locale);
     } finally {
       if (mountedRef.current) setBusyKey(null);
     }
@@ -312,7 +354,10 @@ export function ArchiveView() {
         conn.store.getState(),
         asSessionActionDialogs(dialogs),
         locale,
+        computerKey,
       );
+    } catch (error) {
+      reportShellError(error, locale);
     } finally {
       if (mountedRef.current) setBusyKey(null);
     }
@@ -330,6 +375,8 @@ export function ArchiveView() {
     setLoadingMoreKey(computerKey);
     try {
       await loadFn(before, beforeId);
+    } catch (error) {
+      reportShellError(error, locale);
     } finally {
       if (mountedRef.current) setLoadingMoreKey(null);
     }
@@ -455,17 +502,13 @@ export function ArchiveView() {
               size="md"
               leadingIcon="search"
               value={query}
-              placeholder={
-                locale === "en"
-                  ? "Search archived sessions"
-                  : locale === "ja"
-                    ? "アーカイブ済みセッションを検索"
-                    : "搜索已归档的会话"
-              }
+              placeholder={t("desktop.shell.archiveSearch")}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
         </div>
+
+        {loadErrorNode}
 
         {!isAllScope ? (
           isSingleInitialLoading ? (
@@ -483,17 +526,11 @@ export function ArchiveView() {
               activeNextBefore,
               activeNextBeforeId,
             )
-          ) : (
+          ) : failedMessages.length > 0 ? null : (
             <EmptyState
               icon="archive"
               title={t("desktop.nav.archive")}
-              description={
-                locale === "en"
-                  ? "Archived sessions appear here and can be restored anytime."
-                  : locale === "ja"
-                    ? "アーカイブされたセッションはここに表示され、いつでも復元できます。"
-                    : "归档后的会话不会出现在左侧树中，随时可以在这里恢复或清理。"
-              }
+              description={t("desktop.shell.archiveEmpty")}
             />
           )
         ) : visibleAllBuckets.length > 0 ? (
@@ -561,13 +598,7 @@ export function ArchiveView() {
           <EmptyState
             icon="archive"
             title={t("desktop.nav.archive")}
-            description={
-              locale === "en"
-                ? "Archived sessions appear here and can be restored anytime."
-                : locale === "ja"
-                  ? "アーカイブされたセッションはここに表示され、いつでも復元できます。"
-                  : "归档后的会话不会出现在左侧树中，随时可以在这里恢复或清理。"
-            }
+            description={t("desktop.shell.archiveEmpty")}
           />
         )}
       </div>

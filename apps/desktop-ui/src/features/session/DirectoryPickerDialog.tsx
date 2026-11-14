@@ -13,7 +13,7 @@ import {
   isImeComposing,
   useDialogs,
 } from "@/primitives";
-import { parentOfPath, useSessionCopy } from "./session-helpers";
+import { describeActionError, parentOfPath, useSessionCopy } from "./session-helpers";
 
 export interface DirectoryPickerDialogProps {
   open: boolean;
@@ -38,11 +38,15 @@ export function DirectoryPickerDialog({
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | undefined>();
+  // The highlighted row: a single click picks it, a double click goes into it.
+  const [selectedPath, setSelectedPath] = useState<string | undefined>();
 
   const loadDirectory = useCallback(
     async (targetPath?: string) => {
       if (!connection) return;
       setLoading(true);
+      setLoadError(undefined);
       try {
         const res = await connection.link.call("fs.list", {
           path: targetPath?.trim() || undefined,
@@ -52,14 +56,17 @@ export function DirectoryPickerDialog({
         setCurrentPath(res.path);
         setParentPath(res.parent);
         setEntries((res.entries ?? []).filter((item) => !item.file));
+        setSelectedPath(undefined);
         setSearchQuery("");
       } catch (error) {
-        reportDesktopError(error);
+        // A stale listing of the previous folder would read as this one's contents.
+        setEntries([]);
+        setLoadError(describeActionError(error, copy.directoryLoadFailed));
       } finally {
         setLoading(false);
       }
     },
-    [connection],
+    [connection, copy.directoryLoadFailed],
   );
 
   useEffect(() => {
@@ -163,8 +170,8 @@ export function DirectoryPickerDialog({
 
           <div className="ls-dir-list" role="listbox" aria-label={copy.selectDirectory}>
             {displayedEntries.length === 0 ? (
-              <div style={{ padding: 20, textAlign: "center", fontSize: 12.5, color: "var(--ls-fg-3)" }}>
-                {loading ? copy.loadingModels : copy.emptyDirectory}
+              <div className="ls-dir-empty" role={loadError ? "alert" : "status"}>
+                {loading ? copy.loadingDirectory : loadError ?? copy.emptyDirectory}
               </div>
             ) : (
               displayedEntries.map((entry) => (
@@ -172,16 +179,19 @@ export function DirectoryPickerDialog({
                   key={entry.path}
                   type="button"
                   role="option"
-                  aria-selected={entry.path === currentPath}
+                  aria-selected={entry.path === selectedPath}
                   className="ls-dir-entry"
-                  onClick={() => {
-                    setSearchQuery("");
+                  onClick={() => setSelectedPath(entry.path)}
+                  onDoubleClick={() => {
                     setRemoteMatches(null);
                     void loadDirectory(entry.path);
                   }}
-                  onDoubleClick={() => {
-                    onSelect(entry.path);
-                    onOpenChange(false);
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !isImeComposing(e)) {
+                      e.preventDefault();
+                      setRemoteMatches(null);
+                      void loadDirectory(entry.path);
+                    }
                   }}
                 >
                   <DesktopIcon
@@ -190,18 +200,7 @@ export function DirectoryPickerDialog({
                   />
                   <span style={{ fontWeight: entry.project ? 500 : 400 }}>{entry.name}</span>
                   {remoteMatches && (
-                    <span
-                      style={{
-                        marginInlineStart: "auto",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        color: "var(--ls-fg-3)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        maxWidth: 220,
-                      }}
-                    >
+                    <span className="ls-dir-entry-path">
                       {entry.path}
                     </span>
                   )}
@@ -217,9 +216,9 @@ export function DirectoryPickerDialog({
         </Button>
         <Button
           variant="primary"
-          disabled={!currentPath.trim()}
+          disabled={!(selectedPath ?? currentPath).trim()}
           onClick={() => {
-            onSelect(currentPath.trim());
+            onSelect((selectedPath ?? currentPath).trim());
             onOpenChange(false);
           }}
         >

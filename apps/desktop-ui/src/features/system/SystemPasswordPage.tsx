@@ -15,7 +15,7 @@ export function SystemPasswordPage({
 }: {
   onRequestConfirm: (action: SystemConfirmAction) => void;
 }) {
-  const { ts, computer } = useSystemI18n();
+  const { ts, tm, computer } = useSystemI18n();
   const state = useManagement();
   const enabled = state.snapshot?.access?.password ?? false;
   const fieldId = useId();
@@ -220,7 +220,7 @@ export function SystemPasswordPage({
             data-tone={state.passwordIsError ? "danger" : "ok"}
             role="status"
           >
-            {state.passwordMessage}
+            {tm(state.passwordMessage)}
           </p>
         ) : null}
         <p className="ls-system-note">{ts("password.footNote")}</p>

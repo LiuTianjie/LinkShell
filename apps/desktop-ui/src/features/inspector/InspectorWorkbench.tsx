@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -21,6 +22,7 @@ import {
   ErrorBoundary,
   IconButton,
   SplitResizer,
+  useDialogs,
 } from "../../primitives";
 import {
   ChangesPanel,
@@ -34,11 +36,16 @@ import { useInspectorI18n } from "./i18n-inspector";
 import { InspectorNewTabView } from "./InspectorNewTabView";
 import {
   activateInspectorTab,
-  closeInspectorTab,
+  cycleInspectorTab,
+  inspectorScopeKey,
   openFileTabInInspector,
   openInspectorTab,
+  requestCloseInspectorTab,
   routerTabToTabItem,
+  setActiveInspectorScope,
+  setInspectorDiscardConfirm,
   useInspectorTabs,
+  useIsTabDirty,
   type InspectorTabItem,
   type InspectorTabKind,
 } from "./inspector-tabs-store";
@@ -230,25 +237,65 @@ export function InspectorWorkbench({
     [computerKey, mcpDiscovery.apps, sessionId],
   );
 
-  // Sync explicit routerStore.inspectorTab changes into dynamic tab strip.
+  // Only an explicit request (the router bumps its seq) opens a tab; switching sessions must
+  // not replay the last session's tab into this one.
+  const restoredOnMountRef = useRef(false);
   useEffect(() => {
     const prev = lastRouterSyncRef.current;
-    const changed = prev.tab !== routerTab || prev.seq !== routerTabSeq;
     lastRouterSyncRef.current = { tab: routerTab, seq: routerTabSeq };
-
-    if (routerTab !== "new-tab") {
-      const alreadyActive =
-        activeTabItem.kind === routerTab ||
-        (routerTab === "files" && activeTabItem.kind === "file") ||
-        (routerTab === "mcp" && activeTabItem.kind === "mcp");
-      if (!alreadyActive) {
+    // At start-up the remembered tab comes back, once, into an untouched scope.
+    if (!restoredOnMountRef.current) {
+      restoredOnMountRef.current = true;
+      const untouched =
+        scopeTabs.tabs.length === 1 && scopeTabs.tabs[0]?.id === "new-tab";
+      if (prev.seq === routerTabSeq && untouched && routerTab !== "new-tab") {
         openRouterTab(routerTab);
+        return;
       }
-    } else if (changed && prev.seq !== routerTabSeq) {
-      openRouterTab("new-tab");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- React only when routerTab or request seq updates.
-  }, [routerTab, routerTabSeq, computerKey, sessionId]);
+    if (prev.seq === routerTabSeq) return;
+    if (routerTab === "new-tab") {
+      openRouterTab("new-tab");
+      return;
+    }
+    const alreadyActive =
+      activeTabItem.kind === routerTab ||
+      (routerTab === "files" && activeTabItem.kind === "file") ||
+      (routerTab === "mcp" && activeTabItem.kind === "mcp");
+    if (!alreadyActive) openRouterTab(routerTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- React only to a new request seq.
+  }, [routerTab, routerTabSeq]);
+
+  const scopeKey = inspectorScopeKey(computerKey, sessionId);
+  const dialogs = useDialogs();
+
+  useEffect(() => {
+    setActiveInspectorScope({ computerKey, sessionId });
+    return () => setActiveInspectorScope(undefined);
+  }, [computerKey, sessionId]);
+
+  useEffect(
+    () =>
+      setInspectorDiscardConfirm((tab) =>
+        dialogs.confirm(
+          ti("discardDraftBody", { name: tab.title || tab.path || tab.id }),
+          {
+            title: ti("discardDraftTitle"),
+            confirmLabel: ti("discardDraftConfirm"),
+            cancelLabel: ti("cancel"),
+            destructive: true,
+          },
+        ),
+      ),
+    [dialogs, ti],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      void requestCloseInspectorTab(computerKey, sessionId, tabId);
+    },
+    [computerKey, sessionId],
+  );
 
   // Keep active tab pill scrolled into view inside horizontal tab strip.
   useEffect(() => {
@@ -273,6 +320,24 @@ export function InspectorWorkbench({
     },
     [computerKey, sessionId],
   );
+
+  const openFileInTab = useCallback(
+    (spec: string) => handleOpenFileInTab(spec, false),
+    [handleOpenFileInTab],
+  );
+  const openFileReplacingNewTab = useCallback(
+    (spec: string) => handleOpenFileInTab(spec, true),
+    [handleOpenFileInTab],
+  );
+  const selectTasksTab = useCallback(
+    (nextTab: "changes" | "files" | "terminal" | "ports" | "side") =>
+      openInspectorTab(computerKey, sessionId, { id: nextTab, kind: nextTab }),
+    [computerKey, sessionId],
+  );
+  const refreshMcpApps = mcpDiscovery.refresh;
+  const refreshMcp = useCallback(() => {
+    void refreshMcpApps();
+  }, [refreshMcpApps]);
 
   useDesktopCommand((cmd) => {
     if (cmd.command === "inspector" && cmd.panel) {
@@ -358,7 +423,11 @@ export function InspectorWorkbench({
         computerKey || "default",
         computerKey || "default",
       );
-      void controller.createTerminal({ cwd: dir, sessionId });
+      // The controller only learns its connection from a mounted terminal panel; this may be first.
+      controller.bindConnection(connection);
+      controller.createTerminal({ cwd: dir, sessionId }).catch((err: unknown) => {
+        void dialogs.alert(err instanceof Error ? err.message : String(err));
+      });
       if (!routerStore.getState().bottomDockOpen) {
         openInspectorTab(computerKey, sessionId, {
           id: "terminal",
@@ -366,7 +435,7 @@ export function InspectorWorkbench({
         });
       }
     },
-    [computerKey, sessionId],
+    [computerKey, connection, dialogs, sessionId],
   );
 
   const labelForTab = (tab: InspectorTabItem): string => {
@@ -405,6 +474,18 @@ export function InspectorWorkbench({
     event: ReactKeyboardEvent<HTMLButtonElement>,
     index: number,
   ) => {
+    if (
+      (event.key === "Delete" || event.key === "Backspace") &&
+      !event.metaKey &&
+      !event.ctrlKey
+    ) {
+      const target = scopeTabs.tabs[index];
+      if (target) {
+        event.preventDefault();
+        closeTab(target.id);
+      }
+      return;
+    }
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
     event.preventDefault();
     const count = scopeTabs.tabs.length;
@@ -421,6 +502,15 @@ export function InspectorWorkbench({
     buttons?.[nextIdx]?.focus();
   };
 
+  // Ctrl+Tab while focus is in the inspector; the app-wide binding calls the same function.
+  const handleWorkbenchKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
+    if (cycleInspectorTab(event.shiftKey ? -1 : 1)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
   const isWide = inspectorWidth >= 520;
 
   return (
@@ -429,6 +519,7 @@ export function InspectorWorkbench({
       className="inspector-workbench"
       data-active-tab={activeTabItem.kind}
       data-testid="inspector-workbench"
+      onKeyDown={handleWorkbenchKeyDown}
     >
       <SplitResizer
         orientation="vertical"
@@ -460,91 +551,29 @@ export function InspectorWorkbench({
             focusgroup="tablist nomemory"
             className="ls-inspector-tabstrip inspector-header-tablist no-drag"
           >
-            {scopeTabs.tabs.map((tab, idx) => {
-              const isSelected = tab.id === activeTabItem.id;
-              const title = labelForTab(tab);
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  aria-label={title}
-                  title={tab.kind === "file" ? (tab.path || title) : title}
-                  tabIndex={isSelected ? 0 : -1}
-                  data-tab-id={tab.id}
-                  data-tab-value={tab.kind}
-                  className="ls-inspector-tab ls-tab"
-                  onClick={() => {
-                    if (
-                      tab.kind === "terminal" &&
-                      routerStore.getState().bottomDockOpen
-                    ) {
-                      routerStore.getState().toggleBottomDock(false);
-                    }
-                    activateInspectorTab(computerKey, sessionId, tab.id);
-                  }}
-                  onKeyDown={(e) => handleTabKeyDown(e, idx)}
-                  onAuxClick={(e) => {
-                    if (e.button === 1) {
-                      e.preventDefault();
-                      closeInspectorTab(computerKey, sessionId, tab.id);
-                    }
-                  }}
-                >
-                  {tab.kind === "subagent" ? (
-                    <SubagentGlyph
-                      sessionId={sessionId}
-                      toolCallId={tab.toolCallId ?? tab.id}
-                      size="sm"
-                    />
-                  ) : tab.kind === "file" ? (
-                    <FileExtBadge path={tab.path ?? tab.title ?? ""} />
-                  ) : (
-                    <DesktopIcon name={iconForTabKind(tab.kind)} size="xs" />
-                  )}
-
-                  <span className="ls-inspector-tab__label ls-tab__label">
-                    <span className="inspector-tab-title">{title}</span>
-                    {tab.kind === "changes" &&
-                    (effectiveDiffStats.added > 0 ||
-                      effectiveDiffStats.removed > 0) ? (
-                      <span className="inspector-diff-stat-pill" data-tabular="">
-                        <span className="inspector-diff-stat-add">
-                          +{formatCompactStat(effectiveDiffStats.added)}
-                        </span>
-                        <span className="inspector-diff-stat-del">
-                          -{formatCompactStat(effectiveDiffStats.removed)}
-                        </span>
-                      </span>
-                    ) : null}
-                    {tab.kind === "ports" && portCount > 0 ? (
-                      <Badge variant="count" tone="neutral">
-                        {portCount}
-                      </Badge>
-                    ) : null}
-                    {tab.kind === "tasks" && runningTasksCount > 0 ? (
-                      <Badge variant="count" tone="neutral">
-                        {runningTasksCount}
-                      </Badge>
-                    ) : null}
-                  </span>
-
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    aria-label={`${ti("closeTab")} ${title}`}
-                    className="ls-inspector-tab__close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeInspectorTab(computerKey, sessionId, tab.id);
-                    }}
-                  >
-                    <DesktopIcon name="close" size={11} />
-                  </span>
-                </button>
-              );
-            })}
+            {scopeTabs.tabs.map((tab, idx) => (
+              <InspectorTabButton
+                key={tab.id}
+                tab={tab}
+                index={idx}
+                computerKey={computerKey}
+                sessionId={sessionId}
+                selected={tab.id === activeTabItem.id}
+                title={labelForTab(tab)}
+                closeLabel={ti("closeTab")}
+                dirtyLabel={ti("unsavedBadge")}
+                diffStats={tab.kind === "changes" ? effectiveDiffStats : undefined}
+                count={
+                  tab.kind === "ports"
+                    ? portCount
+                    : tab.kind === "tasks"
+                      ? runningTasksCount
+                      : 0
+                }
+                onKeyDown={handleTabKeyDown}
+                onClose={closeTab}
+              />
+            ))}
           </div>
 
           <IconButton
@@ -595,8 +624,10 @@ export function InspectorWorkbench({
           {scopeTabs.tabs.map((tab) => {
             const isSelected = tab.id === activeTabItem.id;
             return (
+              // Keyed per scope: a tab id like "changes" exists in every session, and sharing
+              // one component instance would carry drafts and commit messages across sessions.
               <div
-                key={tab.id}
+                key={`${scopeKey}:${tab.id}`}
                 role="tabpanel"
                 data-tab-id={tab.id}
                 data-tab-kind={tab.kind}
@@ -606,7 +637,7 @@ export function InspectorWorkbench({
               >
                 <ErrorBoundary resetKeys={[computerKey, sessionId, tab.id]}>
                   {tab.kind === "new-tab" ? (
-                    <InspectorNewTabView
+                    <MemoNewTabView
                       computerKey={computerKey}
                       sessionId={sessionId}
                       connection={connection}
@@ -622,43 +653,47 @@ export function InspectorWorkbench({
                       tasksMap={tasksMap}
                       sides={sides}
                       mcpApps={mcpDiscovery.apps}
-                      onOpenFile={(path) => handleOpenFileInTab(path, true)}
+                      onOpenFile={openFileReplacingNewTab}
                     />
                   ) : tab.kind === "changes" ? (
-                    <ChangesPanel
+                    <MemoChangesPanel
                       connection={connection}
                       online={online}
+                      active={isSelected}
                       sessionId={sessionId}
+                      session={session}
                       cwd={cwd}
                       view={view}
                       actions={actions}
                       onStatsChange={setPanelStats}
                       onBranchChange={setGitBranch}
-                      onOpenFile={(spec) => handleOpenFileInTab(spec, false)}
+                      onOpenFile={openFileInTab}
                     />
                   ) : tab.kind === "files" ? (
-                    <FilesPanel
+                    <MemoFilesPanel
                       connection={connection}
                       online={online}
                       cwd={cwd}
                       agents={agents}
-                      onOpenFile={(spec) => handleOpenFileInTab(spec, false)}
+                      onOpenFile={openFileInTab}
                       onOpenTerminalAt={handleOpenTerminalAt}
                     />
                   ) : tab.kind === "file" ? (
-                    <FileViewerTabPanel
+                    <MemoFileViewer
                       computerKey={computerKey}
                       sessionId={sessionId}
+                      tabId={tab.id}
                       connection={connection}
                       online={online}
                       cwd={cwd}
                       agents={agents}
                       filePath={tab.path ?? ""}
                       lineSpec={tab.lineSpec}
+                      reloadNonce={tab.reloadNonce}
                       onOpenTerminalAt={handleOpenTerminalAt}
                     />
                   ) : tab.kind === "terminal" ? (
-                    <TerminalPanel
+                    <MemoTerminalPanel
                       computerKey={computerKey}
                       connection={connection}
                       online={online}
@@ -666,16 +701,19 @@ export function InspectorWorkbench({
                       cwd={cwd}
                     />
                   ) : tab.kind === "ports" ? (
-                    <PreviewPanel
+                    <MemoPreviewPanel
                       computerKey={computerKey}
                       connection={connection}
                       online={online}
                       cwd={cwd}
                       actions={actions}
+                      requestedPort={tab.port}
+                      requestedPath={tab.path}
+                      requestNonce={tab.portRequestNonce}
                       onPortCountChange={setPortCount}
                     />
                   ) : tab.kind === "side" ? (
-                    <SideChatTabPanel
+                    <MemoSideChat
                       computerKey={computerKey}
                       online={online}
                       sessionId={sessionId}
@@ -684,7 +722,7 @@ export function InspectorWorkbench({
                       actions={actions}
                     />
                   ) : tab.kind === "tasks" ? (
-                    <TasksPanel
+                    <MemoTasksPanel
                       computerKey={computerKey}
                       computer={computer}
                       machine={machine}
@@ -697,16 +735,11 @@ export function InspectorWorkbench({
                       subagents={subagents}
                       tasksMap={tasksMap}
                       actions={actions}
-                      onSelectTab={(nextTab) =>
-                        openInspectorTab(computerKey, sessionId, {
-                          id: nextTab,
-                          kind: nextTab,
-                        })
-                      }
+                      onSelectTab={selectTasksTab}
                       onOpenTerminalAt={handleOpenTerminalAt}
                     />
                   ) : tab.kind === "subagent" ? (
-                    <SubagentTabPanel
+                    <MemoSubagentPanel
                       computerKey={computerKey}
                       sessionId={sessionId}
                       cwd={cwd}
@@ -718,15 +751,13 @@ export function InspectorWorkbench({
                       actions={actions}
                     />
                   ) : (
-                    <McpAppPanel
+                    <MemoMcpAppPanel
                       connection={connection}
                       online={online}
                       sessionId={sessionId}
                       apps={mcpDiscovery.apps}
                       loading={mcpDiscovery.loading}
-                      onRefresh={() => {
-                        void mcpDiscovery.refresh();
-                      }}
+                      onRefresh={refreshMcp}
                       actions={actions}
                       initialAppKey={tab.appId}
                     />
@@ -738,5 +769,129 @@ export function InspectorWorkbench({
         </div>
       </div>
     </aside>
+  );
+}
+
+// Streaming agent output re-renders the workbench per event; panels whose props did not
+// change (an open file, the terminal, a preview) skip that work.
+const MemoNewTabView = memo(InspectorNewTabView);
+const MemoChangesPanel = memo(ChangesPanel);
+const MemoFilesPanel = memo(FilesPanel);
+const MemoFileViewer = memo(FileViewerTabPanel);
+const MemoTerminalPanel = memo(TerminalPanel);
+const MemoPreviewPanel = memo(PreviewPanel);
+const MemoSideChat = memo(SideChatTabPanel);
+const MemoTasksPanel = memo(TasksPanel);
+const MemoSubagentPanel = memo(SubagentTabPanel);
+const MemoMcpAppPanel = memo(McpAppPanel);
+
+interface InspectorTabButtonProps {
+  tab: InspectorTabItem;
+  index: number;
+  computerKey: string;
+  sessionId?: string;
+  selected: boolean;
+  title: string;
+  closeLabel: string;
+  dirtyLabel: string;
+  diffStats?: ChangesStatsSummary;
+  count: number;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => void;
+  onClose: (tabId: string) => void;
+}
+
+function InspectorTabButton({
+  tab,
+  index,
+  computerKey,
+  sessionId,
+  selected,
+  title,
+  closeLabel,
+  dirtyLabel,
+  diffStats,
+  count,
+  onKeyDown,
+  onClose,
+}: InspectorTabButtonProps): JSX.Element {
+  const dirty = useIsTabDirty(computerKey, sessionId, tab.id);
+  return (
+    <div
+      className="ls-inspector-tab"
+      data-active={selected ? "true" : undefined}
+      data-tab-id={tab.id}
+      data-tab-value={tab.kind}
+      data-dirty={dirty ? "true" : undefined}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          onClose(tab.id);
+        }
+      }}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selected}
+        aria-label={dirty ? `${title} · ${dirtyLabel}` : title}
+        title={tab.kind === "file" ? tab.path || title : title}
+        tabIndex={selected ? 0 : -1}
+        data-tab-id={tab.id}
+        data-tab-value={tab.kind}
+        className="ls-inspector-tab__main"
+        onClick={() => {
+          if (tab.kind === "terminal" && routerStore.getState().bottomDockOpen) {
+            routerStore.getState().toggleBottomDock(false);
+          }
+          activateInspectorTab(computerKey, sessionId, tab.id);
+        }}
+        onKeyDown={(e) => onKeyDown(e, index)}
+      >
+        {tab.kind === "subagent" ? (
+          <SubagentGlyph
+            sessionId={sessionId}
+            toolCallId={tab.toolCallId ?? tab.id}
+            size="sm"
+          />
+        ) : tab.kind === "file" ? (
+          <FileExtBadge path={tab.path ?? tab.title ?? ""} />
+        ) : (
+          <DesktopIcon name={iconForTabKind(tab.kind)} size="xs" />
+        )}
+
+        <span className="ls-inspector-tab__label">
+          <span className="inspector-tab-title">{title}</span>
+          {diffStats && (diffStats.added > 0 || diffStats.removed > 0) ? (
+            <span className="inspector-diff-stat-pill" data-tabular="">
+              <span className="inspector-diff-stat-add">
+                +{formatCompactStat(diffStats.added)}
+              </span>
+              <span className="inspector-diff-stat-del">
+                -{formatCompactStat(diffStats.removed)}
+              </span>
+            </span>
+          ) : null}
+          {count > 0 ? (
+            <Badge variant="count" tone="neutral">
+              {count}
+            </Badge>
+          ) : null}
+        </span>
+        {dirty ? <span className="ls-inspector-tab__dirty" aria-hidden="true" /> : null}
+      </button>
+
+      <button
+        type="button"
+        aria-label={`${closeLabel} ${title}`}
+        title={closeLabel}
+        className="ls-inspector-tab__close"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose(tab.id);
+        }}
+      >
+        <DesktopIcon name="close" size={11} />
+      </button>
+    </div>
   );
 }

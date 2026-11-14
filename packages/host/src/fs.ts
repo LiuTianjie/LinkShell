@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { constants as fsConstants, existsSync } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type DirectoryEntry } from "@linkshell/wire";
 
@@ -339,6 +339,44 @@ export async function uploadFile(input: {
     }
   }
   throw RpcError.app("busy", "同名文件太多了，请换个名字");
+}
+
+/**
+ * Saves the viewer's edit. Same reach as `readFile` (any path this user can
+ * write), but never through a symlink, never into a missing directory, and
+ * never over a revision the editor didn't see.
+ */
+export async function writeTextFile(input: { path: string; text: string; expectedModifiedAt?: number }) {
+  if (!input.path.startsWith("~") && !isAbsolute(input.path)) throw RpcError.app("invalid_params", "需要文件的完整路径");
+  const path = expand(input.path);
+  const bytes = Buffer.from(input.text, "utf8");
+  if (bytes.length > MAX_TEXT_FILE) throw RpcError.app("too_large", `文件太大（${megabytes(bytes.length)}），无法保存`);
+  const dir = dirname(path);
+  const dirInfo = await stat(dir).catch(() => undefined);
+  if (!dirInfo?.isDirectory()) throw RpcError.app("not_found", `找不到文件夹：${dir}`);
+  const existing = await lstat(path).catch(() => undefined);
+  if (existing && (existing.isSymbolicLink() || !existing.isFile())) {
+    throw RpcError.app("invalid_params", `这不是普通文件，不能在这里保存：${path}`);
+  }
+  if (input.expectedModifiedAt !== undefined) {
+    // A file that appeared, vanished or changed since the editor read it is someone else's work.
+    if (!existing || existing.mtimeMs !== input.expectedModifiedAt) {
+      throw RpcError.app("conflict", "文件已在电脑上被修改，请重新载入或选择覆盖");
+    }
+  }
+  const temp = join(dir, `.${basename(path)}.linkshell-${process.pid}-${Date.now().toString(36)}.tmp`);
+  try {
+    await writeFile(temp, bytes, { flag: "wx", mode: existing ? existing.mode & 0o7777 : 0o644 });
+    if (existing) await chmod(temp, existing.mode & 0o7777);
+    await rename(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") throw RpcError.app("forbidden", `没有权限写入：${path}`);
+    throw error;
+  }
+  const info = await stat(path);
+  return { path, modifiedAt: info.mtimeMs, size: info.size };
 }
 
 export async function makeDirectory(input: { parent: string; name: string }) {

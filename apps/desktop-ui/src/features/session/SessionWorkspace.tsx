@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { emptyView, userMessageText } from "@linkshell/client-core";
+import { emptyView } from "@linkshell/client-core";
 import type { SessionNotice, SessionSummary } from "@linkshell/wire";
+import { DESKTOP_SHORTCUTS, FOCUS_COMPOSER_EVENT, matchesShortcut } from "@/bridge";
 import { useT } from "@/core";
 import { DesktopIcon } from "@/icons";
 import { ErrorBoundary, IconButton, Input, isImeComposing } from "@/primitives";
@@ -9,6 +10,7 @@ import { TimelineView } from "./TimelineView";
 import {
   sessionKeyOf,
   sessionUiStore,
+  timelineItemSearchText,
   useClientSelector,
   useSessionConnection,
   useSessionCopy,
@@ -40,6 +42,17 @@ export function SessionWorkspace({
     setSystemNote(undefined);
     return connection.sessions.acquire(sessionId);
   }, [connection, sessionId]);
+
+  // ⌘L (and the menu's composer command) land in this session's message box.
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const focusComposer = () =>
+      workspaceRef.current
+        ?.querySelector<HTMLTextAreaElement>(".ls-composer-box textarea")
+        ?.focus();
+    window.addEventListener(FOCUS_COMPOSER_EVENT, focusComposer);
+    return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focusComposer);
+  }, []);
 
   // Focus search input when Find bar opens.
   useEffect(() => {
@@ -89,29 +102,37 @@ export function SessionWorkspace({
     };
   }, [sessionId, storedSession, view.lastSeq, view.permissions.length, view.state]);
 
-  // Count matching items when in-session search query is non-empty.
-  const matchCount = useMemo(() => {
+  // Matches in order, for Enter / Shift+Enter and the arrows (ported from the web client's find bar).
+  const searchMatches = useMemo(() => {
     const q = ui.searchOpen ? ui.searchQuery.trim().toLowerCase() : "";
-    if (!q) return 0;
-    let count = 0;
-    for (const item of view.items) {
-      if (item.kind === "user") {
-        if (userMessageText(item.blocks).toLowerCase().includes(q)) count++;
-      } else if (item.kind === "agent" || item.kind === "thought") {
-        if (item.text.toLowerCase().includes(q)) count++;
-      } else if (item.kind === "tool") {
-        if (
-          item.title.toLowerCase().includes(q) ||
-          item.output.toLowerCase().includes(q)
-        ) {
-          count++;
-        }
-      } else if (item.kind === "error") {
-        if (item.message.toLowerCase().includes(q)) count++;
-      }
-    }
-    return count;
+    if (!q) return [] as string[];
+    return view.items
+      .filter((item) => timelineItemSearchText(item).toLowerCase().includes(q))
+      .map((item) => item.id);
   }, [ui.searchOpen, ui.searchQuery, view.items]);
+  const [searchIndex, setSearchIndex] = useState(0);
+
+  const firstMatchId = searchMatches[0];
+  useEffect(() => {
+    setSearchIndex(0);
+    if (firstMatchId) sessionUiStore.getState().requestScrollToItem(sessionKey, firstMatchId);
+  }, [firstMatchId, sessionKey, ui.searchQuery]);
+
+  const stepMatch = (delta: number) => {
+    if (searchMatches.length === 0) return;
+    const next = (searchIndex + delta + searchMatches.length) % searchMatches.length;
+    setSearchIndex(next);
+    const target = searchMatches[next];
+    if (target) sessionUiStore.getState().requestScrollToItem(sessionKey, target);
+  };
+
+  const closeFind = () => {
+    sessionUiStore.getState().setSearchOpen(sessionKey, false);
+    // Back to typing, where the person was before searching.
+    queueMicrotask(() =>
+      document.querySelector<HTMLTextAreaElement>(".ls-session-workspace .ls-composer-textarea")?.focus(),
+    );
+  };
 
   if (!connection || !fallbackSession) {
     return (
@@ -129,14 +150,10 @@ export function SessionWorkspace({
 
   return (
     <div
+      ref={workspaceRef}
       className="ls-session-workspace"
       onKeyDown={(event) => {
-        if (
-          (event.metaKey || event.ctrlKey) &&
-          event.key.toLowerCase() === "f" &&
-          !event.shiftKey &&
-          !event.altKey
-        ) {
+        if (matchesShortcut(event.nativeEvent, DESKTOP_SHORTCUTS.findInSession)) {
           event.preventDefault();
           sessionUiStore.getState().setSearchOpen(sessionKey, true);
           queueMicrotask(() => searchInputRef.current?.select());
@@ -156,24 +173,42 @@ export function SessionWorkspace({
               sessionUiStore.getState().setSearchQuery(sessionKey, e.target.value)
             }
             onKeyDown={(e) => {
-              if (e.key === "Escape" && !isImeComposing(e)) {
+              if (isImeComposing(e)) return;
+              if (e.key === "Escape") {
                 e.preventDefault();
-                sessionUiStore.getState().setSearchOpen(sessionKey, false);
+                closeFind();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                stepMatch(e.shiftKey ? -1 : 1);
               }
             }}
           />
           {ui.searchQuery.trim() && (
-            <span className="ls-session-find-count">
-              {copy.matchesCount(matchCount)}
+            <span className="ls-session-find-count" aria-live="polite">
+              {searchMatches.length > 0
+                ? copy.matchPosition(Math.min(searchIndex, searchMatches.length - 1) + 1, searchMatches.length)
+                : copy.noMatches}
             </span>
           )}
+          <IconButton
+            icon="chevron-up"
+            size="icon-sm"
+            label={copy.findPrevious}
+            disabled={searchMatches.length === 0}
+            onClick={() => stepMatch(-1)}
+          />
+          <IconButton
+            icon="chevron-down"
+            size="icon-sm"
+            label={copy.findNext}
+            disabled={searchMatches.length === 0}
+            onClick={() => stepMatch(1)}
+          />
           <IconButton
             icon="close"
             size="icon-sm"
             label={copy.closeFind}
-            onClick={() =>
-              sessionUiStore.getState().setSearchOpen(sessionKey, false)
-            }
+            onClick={closeFind}
           />
         </div>
       )}
@@ -204,7 +239,7 @@ export function SessionWorkspace({
           <IconButton
             icon="close"
             size="icon-sm"
-            label={copy.closeFind}
+            label={copy.dismissNotice}
             onClick={() =>
               connection.store.getState().dismissNotice(sessionId, notice.id)
             }

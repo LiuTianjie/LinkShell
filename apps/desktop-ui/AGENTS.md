@@ -22,3 +22,9 @@ Dedicated frontend package for the LinkShell Desktop client on **macOS** and **W
    - On macOS, `LinkShellNative.node` mounts an AppKit `CAMetalLayer` view above `WebContents`. Any open `<dialog>` or `[popover="auto" | "manual"]` tracked in `src/bridge/top-layer-registry.ts` MUST collapse the reported native screen layout rect to `0×0` until closed.
 4. **First-Class 融合模式 (Fusion Mode)**:
    - `FusionLocal` runs as a headless `.accessory` media hub on macOS; its App Catalog, badged icons, and window controls live inside LinkShell Desktop (`fusion.start` / `fusion.stop` Host RPC + `fusionStart`, `fusionState`, `fusionIcons`, `fusionLaunchApp`, `fusionQuitApp`, `fusionStop` Electron IPC + app-lifetime `linkshell-fusion-tunnel` bridge).
+   - Opening the Fusion page never starts Fusion: entry points start it, Disconnect sticks (`fusion-store`), and an unexpected drop reconnects with backoff from the store, page open or not.
+5. **State belongs to what it describes**:
+   - `SessionWorkspace` is keyed by `computerKey:sessionId`, and each inspector panel by its scope: attachments, drafts and scroll position never carry from one session into the next.
+   - Unsaved file drafts live in `inspector-tabs-store`, so a session switch keeps them and closing a dirty tab asks first.
+6. **Shortcuts come from one table**: `bridge/shortcuts.ts` (`DESKTOP_SHORTCUTS`) is what the shell binds and what the shortcuts sheet lists. A feature claims ⌘W through the cancelable `CLOSE_TAB_EVENT`; add a binding to the table, never as a stray `keydown` handler.
+7. **Every string goes through a dictionary** in all three languages (`core/i18n.tsx`, `features/*/…i18n…`, `primitives/labels.ts` for the primitives' fallbacks, `apps/desktop/src/main/locale.ts` for native menus and dialogs). No hard-coded Chinese or English in TSX.

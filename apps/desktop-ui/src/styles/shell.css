@@ -1,66 +1,5 @@
 @layer components {
   /* =========================================================================
-   * 0. Colored 2-Letter Project Monogram Badges (T3 Code / Paseo Jewel System)
-   * ========================================================================= */
-  .project-monogram {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    inline-size: 16px;
-    block-size: 16px;
-    border-radius: 4px;
-    font-family: var(--font-sans);
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    flex-shrink: 0;
-    user-select: none;
-    border: var(--ls-hairline) solid light-dark(rgba(17, 19, 24, 0.08), rgba(255, 255, 255, 0.10));
-    background-color: light-dark(rgba(76, 95, 213, 0.12), rgba(141, 155, 255, 0.16));
-    color: light-dark(#3b4bc0, #a6b2ff);
-  }
-
-  .project-monogram[data-size="xs"] {
-    inline-size: 14px;
-    block-size: 14px;
-    border-radius: 3.5px;
-    font-size: 8.5px;
-  }
-
-  .project-monogram[data-size="md"] {
-    inline-size: 20px;
-    block-size: 20px;
-    border-radius: 5px;
-    font-size: 10.5px;
-  }
-
-  .project-monogram[data-tone="1"] {
-    background-color: light-dark(rgba(26, 127, 55, 0.12), rgba(63, 185, 80, 0.16));
-    color: light-dark(#1a7f37, #56d364);
-  }
-
-  .project-monogram[data-tone="2"] {
-    background-color: light-dark(rgba(173, 82, 0, 0.12), rgba(255, 173, 92, 0.16));
-    color: light-dark(#9a4700, #ffb86c);
-  }
-
-  .project-monogram[data-tone="3"] {
-    background-color: light-dark(rgba(14, 116, 144, 0.12), rgba(56, 189, 248, 0.16));
-    color: light-dark(#0e7490, #67e8f9);
-  }
-
-  .project-monogram[data-tone="4"] {
-    background-color: light-dark(rgba(126, 34, 206, 0.11), rgba(192, 132, 252, 0.16));
-    color: light-dark(#7e22ce, #d8b4fe);
-  }
-
-  .project-monogram[data-tone="5"] {
-    background-color: light-dark(rgba(190, 24, 93, 0.11), rgba(244, 114, 182, 0.16));
-    color: light-dark(#be185d, #f9a8d4);
-  }
-
-  /* =========================================================================
    * 1. Left-Edge Hover Peek Drawer (when Sidebar is collapsed)
    * ========================================================================= */
   .desktop-sidebar-edge-sensor {
@@ -138,7 +77,7 @@
   }
 
   .desktop-sidebar-wordmark {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: -0.015em;
     color: var(--ls-fg-2);
@@ -166,7 +105,7 @@
     background-color: var(--ls-control-bg);
     box-shadow: var(--ls-shadow-control);
     color: var(--ls-fg);
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     text-align: start;
     cursor: pointer;
@@ -222,7 +161,7 @@
 
   .computer-switcher-trigger__route {
     flex-shrink: 0;
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--ls-fg-3);
     padding: 1px 5px;
@@ -259,7 +198,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 4px 8px 2px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     letter-spacing: 0.02em;
@@ -335,7 +274,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--ls-fg-3);
     font-variant-numeric: tabular-nums;
   }
@@ -373,7 +312,7 @@
     border-radius: 6px;
     background: transparent;
     color: var(--ls-fg-2);
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 500;
     text-align: start;
     cursor: pointer;
@@ -443,70 +382,6 @@
     align-items: center;
     gap: 8px;
     min-inline-size: 0;
-  }
-
-  /* Twin Remote Computer Strip: [远程屏幕] | [融合模式] */
-  .sidebar-remote-strip {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-block-start: 4px;
-  }
-
-  .sidebar-remote-twin {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
-  }
-
-  .sidebar-remote-btn {
-    inline-size: 100%;
-    block-size: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding-inline: 6px;
-    border-radius: 6px;
-    border: var(--ls-hairline) solid var(--ls-border);
-    background-color: var(--ls-control-bg);
-    box-shadow: var(--ls-shadow-control);
-    color: var(--ls-fg-2);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition:
-      background-color 90ms ease-out,
-      color 90ms ease-out,
-      border-color 90ms ease-out;
-  }
-
-  .sidebar-remote-btn:hover:not(:disabled) {
-    background-color: var(--ls-control-hover);
-    color: var(--ls-fg);
-    border-color: var(--ls-border-strong);
-  }
-
-  .sidebar-remote-btn[data-active="true"] {
-    background-color: var(--ls-selection);
-    color: var(--ls-fg);
-    border-color: color-mix(in srgb, var(--ls-accent) 42%, var(--ls-border));
-    font-weight: 600;
-  }
-
-  .sidebar-remote-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .sidebar-remote-btn:focus-visible {
-    outline: 2px solid var(--ls-accent);
-    outline-offset: -2px;
-  }
-
-  .sidebar-remote-strip .ls-tooltip-disabled-anchor {
-    display: flex;
-    inline-size: 100%;
   }
 
   /* Navigation Places (.desktop-places .desktop-place — E2E invariant!) */
@@ -617,7 +492,7 @@
   }
 
   .sidebar-sessions-scope-bar__label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     letter-spacing: 0.01em;
@@ -661,17 +536,11 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     letter-spacing: 0.01em;
     user-select: none;
-  }
-
-  .sidebar-section__tools {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
   }
 
   .sidebar-section__cards {
@@ -702,7 +571,7 @@
     border-radius: 4px;
     background: transparent;
     color: var(--ls-fg-3);
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 500;
     cursor: pointer;
   }
@@ -801,7 +670,7 @@
 
   .tree-computer__sync {
     flex-shrink: 0;
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--ls-fg-3);
   }
@@ -836,7 +705,7 @@
     gap: 6px;
     min-inline-size: 0;
     padding: 5px 8px;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
@@ -874,7 +743,7 @@
     border-radius: 6px;
     background: transparent;
     color: var(--ls-fg-2);
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     text-align: start;
     cursor: pointer;
@@ -994,7 +863,7 @@
     border-radius: 8px;
     background: transparent;
     color: var(--ls-fg-2);
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 500;
     text-align: start;
     cursor: pointer;
@@ -1065,8 +934,8 @@
 
   .tree-session__meta {
     flex-shrink: 0;
-    font-size: 11px;
-    font-weight: 450;
+    font-size: 12px;
+    font-weight: 400;
     color: var(--ls-fg-3);
     font-variant-numeric: tabular-nums;
   }
@@ -1078,7 +947,7 @@
     gap: 6px;
     padding-inline-start: 21px;
     min-inline-size: 0;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
@@ -1102,9 +971,12 @@
     gap: 3px;
     padding: 0.5px 5px;
     border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
+    /* A state reads as one word: it never wraps or gives way to the title beside it. */
+    white-space: nowrap;
+    flex-shrink: 0;
     background-color: var(--ls-hover);
     color: var(--ls-fg-3);
   }
@@ -1115,8 +987,13 @@
   }
 
   .tree-session__pill--running {
-    background-color: var(--ls-ok-soft);
-    color: var(--ls-ok);
+    background-color: var(--ls-running-soft);
+    color: var(--ls-running);
+  }
+
+  .tree-session__pill--danger {
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
   }
 
   .tree-show-more {
@@ -1129,7 +1006,7 @@
     border-radius: 5px;
     background: transparent;
     color: var(--ls-fg-3);
-    font-size: 11.5px;
+    font-size: 12px;
     cursor: pointer;
   }
 
@@ -1203,7 +1080,7 @@
     gap: 5px;
     flex-shrink: 0;
     min-inline-size: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--ls-fg-3);
   }
@@ -1221,7 +1098,7 @@
   }
 
   .local-host-capsule__update-dot {
-    color: var(--ls-ok);
+    color: var(--ls-accent);
     display: inline-flex;
   }
 
@@ -1261,7 +1138,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     letter-spacing: -0.008em;
     color: var(--ls-fg);
@@ -1333,7 +1210,7 @@
     border-radius: 5px;
     background-color: var(--ls-bg);
     color: var(--ls-fg-2);
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
     cursor: pointer;
     transition: background-color 90ms ease-out, color 90ms ease-out, border-color 90ms ease-out;
@@ -1351,7 +1228,7 @@
   }
 
   .workspace-computer-chip__tag {
-    font-size: 10.5px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
@@ -1393,64 +1270,6 @@
     .workspace-topbar__right {
       gap: 4px;
     }
-  }
-
-  /* Paseo Sculpted Tactile Header Keycap Pills */
-  .topbar-keycap {
-    block-size: 27px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding-inline: 9px;
-    border-radius: 6px;
-    border: var(--ls-hairline) solid var(--ls-border);
-    background-color: var(--ls-control-bg);
-    box-shadow: var(--ls-shadow-control);
-    color: var(--ls-fg-2);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    -webkit-app-region: no-drag;
-    transition:
-      background-color 90ms ease-out,
-      color 90ms ease-out,
-      border-color 90ms ease-out;
-  }
-
-  .topbar-keycap:hover:not(:disabled) {
-    background-color: var(--ls-control-hover);
-    border-color: var(--ls-border-strong);
-    color: var(--ls-fg);
-  }
-
-  .topbar-keycap[data-active="true"] {
-    background-color: var(--ls-card-raised);
-    border-color: var(--ls-border-strong);
-    color: var(--ls-fg);
-    font-weight: 600;
-  }
-
-  .topbar-keycap:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .topbar-keycap:focus-visible {
-    outline: 2px solid var(--ls-accent);
-    outline-offset: -2px;
-  }
-
-  @container main-canvas (max-width: 720px) {
-    .topbar-keycap__label {
-      display: none;
-    }
-  }
-
-  .workspace-topbar__divider {
-    inline-size: 1px;
-    block-size: 16px;
-    background-color: var(--ls-border);
-    margin-inline: 2px;
   }
 
   /* Paseo 34px Workspace Surface Tab Strip */
@@ -1559,7 +1378,7 @@
     background-color: var(--ls-control-bg);
     box-shadow: var(--ls-shadow-control);
     color: var(--ls-fg-2);
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     cursor: pointer;
@@ -1637,7 +1456,7 @@
 
   .command-center__group-label {
     padding: 4px 10px 3px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     letter-spacing: 0.02em;
@@ -1715,7 +1534,7 @@
     padding-inline: 12px;
     border-block-start: var(--ls-hairline) solid var(--ls-border);
     background-color: var(--ls-inset);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
@@ -1774,7 +1593,7 @@
   .shell-page__title {
     margin: 0;
     font-size: 18px;
-    font-weight: 650;
+    font-weight: 600;
     letter-spacing: -0.015em;
     color: var(--ls-fg);
   }
@@ -1880,7 +1699,7 @@
   .home-recent-section__heading {
     margin: 0;
     padding-inline: 2px;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     letter-spacing: 0.02em;
@@ -1935,13 +1754,13 @@
     flex: 0 2 auto;
     max-inline-size: 180px;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
   .home-recent-row__time {
     flex-shrink: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--ls-fg-3);
     font-variant-numeric: tabular-nums;
   }
@@ -2072,7 +1891,7 @@
     flex: 0 1 auto;
     min-inline-size: 48px;
     max-inline-size: 280px;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--ls-fg);
   }
@@ -2144,7 +1963,7 @@
     border-radius: 6px;
     background: transparent;
     color: var(--ls-fg-2);
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 500;
     text-align: start;
     cursor: pointer;
@@ -2190,13 +2009,13 @@
     border-radius: 4px;
     background-color: var(--ls-hover);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--ls-fg-3);
   }
 
   .ls-entity-subrow__time {
     flex-shrink: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--ls-fg-3);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -2214,7 +2033,7 @@
     border-radius: 5px;
     background: transparent;
     color: var(--ls-fg-3);
-    font-size: 11.5px;
+    font-size: 12px;
     cursor: pointer;
   }
 
@@ -2276,7 +2095,7 @@
     margin: 0;
     flex: 0 1 auto;
     min-inline-size: 0;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--ls-fg);
   }
@@ -2303,7 +2122,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 14px;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--ls-fg-3);
   }
 
@@ -2378,7 +2197,7 @@
   }
 
   .shortcuts-section__title {
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--ls-fg-3);
     padding-block-end: 4px;
@@ -2391,7 +2210,7 @@
     justify-content: space-between;
     gap: 10px;
     min-block-size: 26px;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--ls-fg-2);
   }
 
@@ -2406,5 +2225,129 @@
 
   .desktop-col-sash--sidebar {
     inset-inline-start: var(--sidebar-col, var(--sidebar-w, 256px));
+  }
+
+  /* Shell notice host: failed actions surface here instead of vanishing */
+  .shell-notice {
+    position: fixed;
+    inset-block-end: 16px;
+    inset-inline-end: 16px;
+    z-index: 60;
+    max-inline-size: min(420px, calc(100vw - 32px));
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 8px 10px 12px;
+    border-radius: var(--ls-radius-xl);
+    border: var(--ls-hairline) solid color-mix(in srgb, var(--ls-danger) 36%, var(--ls-border));
+    background-color: var(--ls-popover);
+    box-shadow: var(--ls-shadow-popover);
+    color: var(--ls-fg);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .shell-notice__icon {
+    flex-shrink: 0;
+    margin-block-start: 2px;
+    color: var(--ls-danger);
+  }
+
+  .shell-notice__text {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* Loading / offline state for the selected computer (home hub, projects) */
+  .home-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 12px;
+    font-size: 13px;
+    color: var(--ls-fg-2);
+  }
+
+  .home-state__hint {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--ls-fg-3);
+  }
+
+  .home-recent-row__lead {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .home-recent-row__lead .tree-session__dot {
+    box-shadow: 0 0 0 1.5px var(--ls-bg);
+  }
+
+  .sidebar-empty-hint[data-state="loading"] {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .command-center__empty {
+    padding: 32px 16px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--ls-fg-3);
+  }
+
+  .archive-load-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-block-end: 12px;
+    padding: 10px 12px;
+    border-radius: var(--ls-radius-xl);
+    border: var(--ls-hairline) solid color-mix(in srgb, var(--ls-danger) 32%, var(--ls-border));
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
+    font-size: 13px;
+  }
+
+  .archive-load-error__text {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .archive-load-error__text > span {
+    font-size: 12px;
+    color: var(--ls-fg-2);
+    overflow-wrap: anywhere;
+  }
+
+  .unlock-card__heading {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .unlock-card__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .unlock-card__subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ls-fg-2);
+  }
+
+  .unlock-card__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
   }
 }

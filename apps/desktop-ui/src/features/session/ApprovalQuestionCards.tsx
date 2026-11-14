@@ -20,7 +20,12 @@ import { DesktopIcon } from "@/icons";
 import { Badge, Button, Input, isImeComposing, useDialogs } from "@/primitives";
 import { DiffBlock } from "./DiffBlock";
 import { MarkdownView } from "./MarkdownView";
-import { useClientSelector, useSessionCopy } from "./session-helpers";
+import {
+  describeActionError,
+  reportOnFailure,
+  useClientSelector,
+  useSessionCopy,
+} from "./session-helpers";
 
 type QuestionOption = NonNullable<Question["options"]>[number];
 
@@ -153,9 +158,7 @@ export function ApprovalCard({
       }
       setSubmitted(true);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setErrorMsg(msg);
-      reportDesktopError(error);
+      setErrorMsg(describeActionError(error, copy.actionFailed));
     } finally {
       setBusy(false);
     }
@@ -187,9 +190,7 @@ export function ApprovalCard({
       }
       setSubmitted(true);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setErrorMsg(msg);
-      reportDesktopError(error);
+      setErrorMsg(describeActionError(error, copy.actionFailed));
     } finally {
       setBusy(false);
     }
@@ -350,7 +351,7 @@ export function ApprovalCard({
               variant="secondary"
               size="sm"
               leadingIcon="external-link"
-              onClick={() => void handleConsentUrlClick()}
+              onClick={() => reportOnFailure(handleConsentUrlClick())}
             >
               {copy.openConsentUrl}
             </Button>
@@ -430,7 +431,7 @@ export function ApprovalCard({
           ))}
 
         {errorMsg && (
-          <div style={{ fontSize: 12, color: "var(--ls-danger)" }} role="alert">
+          <div className="ls-composer-send-error" role="alert">
             {errorMsg}
           </div>
         )}
@@ -443,7 +444,6 @@ export function ApprovalCard({
               <Button
                 key={choice.option.optionId}
                 variant="secondary"
-                size="sm"
                 disabled={disabled}
                 onClick={() => void invokeOption(choice.option.optionId)}
               >
@@ -452,7 +452,6 @@ export function ApprovalCard({
             ))}
             <Button
               variant="primary"
-              size="sm"
               loading={busy}
               disabled={disabled || Boolean(validationError)}
               onClick={() => void submitQuestionAnswers()}
@@ -462,17 +461,12 @@ export function ApprovalCard({
           </>
         ) : (
           choices.map((choice) => {
-            const variant =
-              choice.role === "allow"
-                ? "primary"
-                : choice.role === "always"
-                  ? "secondary"
-                  : "ghost";
+            // 审批卡: only 允许 is the filled primary; 拒绝, 始终允许 and 停止 are all secondary.
+            const variant = choice.role === "allow" ? "primary" : "secondary";
             return (
               <Button
                 key={choice.option.optionId}
                 variant={variant}
-                size="sm"
                 disabled={disabled}
                 onClick={() => void invokeOption(choice.option.optionId)}
               >

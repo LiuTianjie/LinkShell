@@ -43,6 +43,8 @@ const shortcut = join(shortcuts, 'LinkShell.lnk');
 let fixture, connection, fixtureMode = 'corrupt', badInstaller, goodInstaller;
 let sequence = 0;
 const env = { ...process.env, LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LINKSHELL_ICE_SERVERS: 'off', LINKSHELL_ENV_FROM_TERMINAL: '1',
+  // The labels and native dialogs asserted below are the Chinese ones, whatever language the runner's Windows is in.
+  LINKSHELL_LOCALE: 'zh',
   CODEX_HOME: join(work, 'agent-codex'), CLAUDE_CONFIG_DIR: join(work, 'agent-claude'),
   LINKSHELL_QA_ROOT: work, LINKSHELL_QA_PROFILE: profile, LINKSHELL_QA_TOKEN: token,
   LINKSHELL_APP_BUNDLE: target, LINKSHELL_WINDOWS_HELPER: join(target, 'LinkShell.Screen.exe'), LINKSHELL_MACHINE_NAME: 'Windows Update QA' };

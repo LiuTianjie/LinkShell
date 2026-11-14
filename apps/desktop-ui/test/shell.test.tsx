@@ -7,12 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "zustand/vanilla";
 import type { ClientStore } from "@linkshell/client-core";
 import type { SessionSummary } from "@linkshell/wire";
-import { DESKTOP_LOCAL } from "../src/bridge/desktop-bridge";
+import { DESKTOP_COMMAND_EVENT, DESKTOP_LOCAL } from "../src/bridge/desktop-bridge";
 import {
+  CLOSE_TAB_EVENT,
+  DESKTOP_SHORTCUTS,
+  dispatchDesktopCommand,
+  formatShortcut,
+} from "../src/bridge/shortcuts";
+import {
+  attachRouterListeners,
+  createRouterStore,
   engine,
   fusionStore,
   I18nProvider,
   management,
+  openProjectContextMenu,
+  openSessionContextMenu,
   routerStore,
   setDesktopLocalePreference,
   setProjectScope,
@@ -21,7 +31,32 @@ import {
 } from "../src/core";
 import { App } from "../src/App";
 import { openFileInInspector } from "../src/features/session";
-import { DesktopAppShell, switchToComputer } from "../src/features/shell";
+import {
+  DesktopAppShell,
+  shortcutSheetSections,
+  switchToComputer,
+} from "../src/features/shell";
+
+const bridgeMock = vi.hoisted(() => ({
+  nativeMenuChoice: null as string | null,
+  posted: [] as Record<string, unknown>[],
+}));
+
+// Native menus and window messages go to Electron's main process; the tests stand in for it.
+vi.mock("../src/bridge/desktop-bridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/bridge/desktop-bridge")>();
+  return {
+    ...actual,
+    showNativeContextMenu: vi.fn(
+      async (...args: Parameters<typeof actual.showNativeContextMenu>) =>
+        bridgeMock.nativeMenuChoice ?? actual.showNativeContextMenu(...args),
+    ),
+    postDesktopMessage: vi.fn((message: Record<string, unknown>) => {
+      bridgeMock.posted.push(message);
+      return actual.postDesktopMessage(message);
+    }),
+  };
+});
 import { DialogProvider } from "../src/primitives";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -570,7 +605,7 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
     ).map((el) => el.textContent?.trim());
     expect(manageNavLabels).toContain("总览");
     expect(manageNavLabels).toContain("更新");
-    expect(manageNavLabels).toContain("设置");
+    expect(manageNavLabels).toContain("通用");
 
     act(() => {
       routerStore.getState().closeSystemModal();
@@ -774,12 +809,12 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
 
     // 3. Sidebar Active + By Project UX overhaul:
     //    - Zero duplicate search IconButton in .sidebar-section__header
-    //    - Active section (`section[aria-label="Active"]`) pins waiting + running + <6h recent (2-line with .tree-session__sub)
+    //    - Active section (`section[data-section="active"]`) pins waiting + running + <6h recent (2-line with .tree-session__sub)
     //    - By Project (`按项目`) session rows are single-line (no .tree-session__sub repeating project monogram)
     expect(
       host.querySelector('.sidebar-section__header [aria-label="搜索与命令"]'),
     ).toBeNull();
-    const activeSection = host.querySelector('section[aria-label="Active"]');
+    const activeSection = host.querySelector('section[data-section="active"]');
     expect(activeSection).not.toBeNull();
     expect(activeSection?.textContent).toContain("活跃会话");
     expect(
@@ -1076,14 +1111,14 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
       />,
     );
 
-    // 1. Default scope ("computer"): flat single-computer project tree (1 project on 本机), no .tree-computer, zero .project-monogram, and .sidebar-sessions-scope-bar precedes section[aria-label="Active"]!
+    // 1. Default scope ("computer"): flat single-computer project tree (1 project on 本机), no .tree-computer, zero .project-monogram, and .sidebar-sessions-scope-bar precedes section[data-section="active"]!
     expect(host.querySelector(".tree-computer")).toBeNull();
     expect(host.querySelectorAll(".desktop-sidebar .project-monogram").length).toBe(0);
     expect(host.querySelector(".desktop-sidebar .tree-project__icon")).not.toBeNull();
 
     const scopeBar = host.querySelector(".desktop-sidebar .sidebar-sessions-scope-bar") as HTMLElement;
     const activeSectionBefore = host.querySelector(
-      '.desktop-sidebar section[aria-label="Active"]',
+      '.desktop-sidebar section[data-section="active"]',
     ) as HTMLElement;
     expect(scopeBar).not.toBeNull();
     expect(activeSectionBefore).not.toBeNull();
@@ -1675,5 +1710,275 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
       });
       window.linkshellDesktop = prevDesktop;
     }
+  });
+
+  const sessionFixture = (id: string, overrides: Partial<SessionSummary> = {}): SessionSummary => ({
+    id,
+    agent: "codex",
+    nativeId: `native-${id}`,
+    cwd: "/Users/dev/repo-alpha",
+    title: `Session ${id}`,
+    state: "idle",
+    pendingPermissions: 0,
+    lastSeq: 0,
+    archived: false,
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    ...overrides,
+  });
+
+  const fakeDialogs = () => ({
+    confirm: vi.fn().mockResolvedValue(true),
+    prompt: vi.fn().mockResolvedValue(null),
+    choose: vi.fn().mockResolvedValue(null),
+  });
+
+  const pressKey = (init: KeyboardEventInit, target: EventTarget = window) => {
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+    });
+  };
+
+  it("opens the session named by an open-session desktop command and keeps cwd on new-session", () => {
+    const router = createRouterStore({ location: { getHash: () => "", setHash: () => {} } });
+    const selectComputer = vi.fn();
+    const detach = attachRouterListeners(router, selectComputer);
+    try {
+      window.dispatchEvent(
+        new CustomEvent(DESKTOP_COMMAND_EVENT, {
+          detail: { command: "open-session", computerKey: remoteMac.key, sessionId: "sess-n" },
+        }),
+      );
+      expect(selectComputer).toHaveBeenCalledWith(remoteMac.key);
+      expect(router.getState().activeRoute).toEqual({
+        kind: "session",
+        computerKey: remoteMac.key,
+        sessionId: "sess-n",
+      });
+      window.dispatchEvent(
+        new CustomEvent(DESKTOP_COMMAND_EVENT, {
+          detail: { command: "new-session", computerKey: DESKTOP_LOCAL, cwd: "/Users/dev/repo" },
+        }),
+      );
+      expect(router.getState().activeRoute).toEqual({
+        kind: "new-session",
+        computerKey: DESKTOP_LOCAL,
+        cwd: "/Users/dev/repo",
+      });
+    } finally {
+      detach();
+    }
+  });
+
+  it("deletes from the session menu without leaving the open session, and replaces the route only when it is the active one", async () => {
+    const prevDesktop = window.linkshellDesktop;
+    window.linkshellDesktop = { shell: "electron", platform: "darwin", postMessage: vi.fn() };
+    const open = sessionFixture("sess-open");
+    const other = sessionFixture("sess-other");
+    const conn = makeMockConnection(localMac, { sessions: [open, other] });
+    try {
+      routerStore.getState().navigate({ kind: "projects" });
+      routerStore.getState().openSession(DESKTOP_LOCAL, "sess-other");
+      routerStore.getState().openSession(DESKTOP_LOCAL, "sess-open");
+      bridgeMock.nativeMenuChoice = "delete";
+
+      await openSessionContextMenu(other, {
+        connection: conn,
+        dialogs: fakeDialogs(),
+        navigateSession: vi.fn(),
+        locale: "zh",
+      });
+      expect(conn.store.getState().deleteSession).toHaveBeenCalledWith("sess-other", undefined);
+      expect(routerStore.getState().activeRoute).toEqual({
+        kind: "session",
+        computerKey: DESKTOP_LOCAL,
+        sessionId: "sess-open",
+      });
+      expect(
+        routerStore
+          .getState()
+          .history.some((route) => route.kind === "session" && route.sessionId === "sess-other"),
+      ).toBe(false);
+
+      await openSessionContextMenu(open, {
+        connection: conn,
+        dialogs: fakeDialogs(),
+        navigateSession: vi.fn(),
+        locale: "zh",
+      });
+      expect(routerStore.getState().activeRoute).toEqual({ kind: "home" });
+      act(() => {
+        routerStore.getState().back();
+      });
+      expect(routerStore.getState().activeRoute).toEqual({ kind: "projects" });
+    } finally {
+      bridgeMock.nativeMenuChoice = null;
+      window.linkshellDesktop = prevDesktop;
+    }
+  });
+
+  it("starts a generated project's new session without a fake cwd and hides reveal / copy path", async () => {
+    const prevDesktop = window.linkshellDesktop;
+    window.linkshellDesktop = { shell: "electron", platform: "darwin", postMessage: vi.fn() };
+    const conn = makeMockConnection(localMac);
+    const openNewSession = vi.fn();
+    try {
+      bridgeMock.nativeMenuChoice = "new";
+      await openProjectContextMenu(
+        {
+          key: "codex-chats:2026-11",
+          cwd: "/Users/dev/.codex/chats",
+          name: "Codex Chats",
+          generated: true,
+          sessions: [],
+        },
+        { connection: conn, dialogs: fakeDialogs(), openNewSession, locale: "zh" },
+      );
+      expect(openNewSession).toHaveBeenCalledWith("");
+
+      await openProjectContextMenu(
+        { key: "/Users/dev/repo-alpha", cwd: "/Users/dev/repo-alpha", name: "repo-alpha", sessions: [] },
+        { connection: conn, dialogs: fakeDialogs(), openNewSession, locale: "zh" },
+      );
+      expect(openNewSession).toHaveBeenLastCalledWith("/Users/dev/repo-alpha");
+    } finally {
+      bridgeMock.nativeMenuChoice = null;
+      window.linkshellDesktop = prevDesktop;
+    }
+  });
+
+  it("builds the shortcuts sheet from the binding table and lists only keys something handles", () => {
+    const mac = shortcutSheetSections("macos");
+    const macKeys = mac.flatMap((section) => section.rows.map((row) => row.keys));
+    for (const binding of Object.values(DESKTOP_SHORTCUTS)) {
+      expect(macKeys).toContain(formatShortcut(binding, "macos"));
+    }
+    expect(macKeys).toContain("⌃⌘F");
+    expect(macKeys).not.toContain("⇧⌘F");
+    expect(macKeys).not.toContain("Esc");
+    expect(macKeys).toContain("⌘1…9");
+
+    const win = shortcutSheetSections("windows").flatMap((section) =>
+      section.rows.map((row) => row.keys),
+    );
+    expect(win).toContain("F11");
+    expect(win).toContain("Ctrl+Shift+]");
+    expect(win.join(" ")).not.toContain("⌘");
+  });
+
+  it("routes ⌘W and the menu's close-tab through overlays, feature claims, the bottom dock, then the window", () => {
+    const conn = makeMockConnection(localMac, { sessions: [sessionFixture("sess-w")] });
+    engine.state.setState({ computers: [localMac], localComputer: localMac, connection: conn, locked: false });
+    routerStore.getState().openSession(DESKTOP_LOCAL, "sess-w");
+    mount(
+      <DesktopAppShell
+        platformOverride="macos"
+        renderSessionWorkspace={() => <div>session</div>}
+        renderBottomTerminal={() => <div data-testid="dock">dock</div>}
+      />,
+    );
+    const cmdW = { key: "w", code: "KeyW", metaKey: true };
+
+    act(() => {
+      routerStore.getState().setCommandCenterOpen(true);
+      routerStore.getState().toggleBottomDock(true);
+    });
+    pressKey(cmdW);
+    expect(routerStore.getState().commandCenterOpen).toBe(false);
+    expect(routerStore.getState().bottomDockOpen).toBe(true);
+
+    const claim = vi.fn((event: Event) => event.preventDefault());
+    window.addEventListener(CLOSE_TAB_EVENT, claim);
+    pressKey(cmdW);
+    window.removeEventListener(CLOSE_TAB_EVENT, claim);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(routerStore.getState().bottomDockOpen).toBe(true);
+
+    act(() => {
+      dispatchDesktopCommand({ command: "close-tab" });
+    });
+    expect(routerStore.getState().bottomDockOpen).toBe(false);
+
+    bridgeMock.posted.length = 0;
+    pressKey(cmdW);
+    expect(bridgeMock.posted).toContainEqual({ action: "closeWindow" });
+  });
+
+  it("walks the sidebar's visible order with ⌘1…9 and ⇧⌘[ / ⇧⌘], and leaves ⌘[ to text fields", () => {
+    const first = sessionFixture("sess-first", { updatedAt: 9_000 });
+    const second = sessionFixture("sess-second", { updatedAt: 8_000 });
+    const conn = makeMockConnection(localMac, { sessions: [first, second] });
+    engine.state.setState({ computers: [localMac], localComputer: localMac, connection: conn, locked: false });
+    mount(
+      <DesktopAppShell
+        platformOverride="macos"
+        renderSessionWorkspace={({ sessionId }) => <textarea data-testid="composer" defaultValue={sessionId} />}
+      />,
+    );
+
+    pressKey({ key: "1", code: "Digit1", metaKey: true });
+    expect(routerStore.getState().activeRoute).toMatchObject({ sessionId: "sess-first" });
+    pressKey({ key: "]", code: "BracketRight", metaKey: true, shiftKey: true });
+    expect(routerStore.getState().activeRoute).toMatchObject({ sessionId: "sess-second" });
+    pressKey({ key: "[", code: "BracketLeft", metaKey: true, shiftKey: true });
+    expect(routerStore.getState().activeRoute).toMatchObject({ sessionId: "sess-first" });
+
+    const composer = host.querySelector('[data-testid="composer"]') as HTMLTextAreaElement;
+    pressKey({ key: "[", code: "BracketLeft", metaKey: true }, composer);
+    expect(routerStore.getState().activeRoute).toMatchObject({ sessionId: "sess-first" });
+    pressKey({ key: "[", code: "BracketLeft", metaKey: true });
+    expect(routerStore.getState().activeRoute).toMatchObject({ sessionId: "sess-second" });
+  });
+
+  it("leaves the shell's Ctrl keys to a focused terminal on Windows, keeping only the terminal toggle", () => {
+    const conn = makeMockConnection(localMac, { sessions: [sessionFixture("sess-term")] });
+    engine.state.setState({ computers: [localMac], localComputer: localMac, connection: conn, locked: false });
+    routerStore.getState().openSession(DESKTOP_LOCAL, "sess-term");
+    mount(
+      <DesktopAppShell
+        platformOverride="windows"
+        renderSessionWorkspace={() => (
+          <div className="xterm">
+            <textarea data-testid="shell-input" />
+          </div>
+        )}
+      />,
+    );
+    const shellInput = host.querySelector('[data-testid="shell-input"]') as HTMLTextAreaElement;
+
+    // ^K kills to end of line and ^W deletes a word in readline: neither is the app's there.
+    pressKey({ key: "k", code: "KeyK", ctrlKey: true }, shellInput);
+    expect(routerStore.getState().commandCenterOpen).toBe(false);
+    bridgeMock.posted.length = 0;
+    pressKey({ key: "w", code: "KeyW", ctrlKey: true }, shellInput);
+    expect(bridgeMock.posted).not.toContainEqual({ action: "closeWindow" });
+
+    // The way out of the terminal still works, and the same keys work everywhere else.
+    pressKey({ key: "j", code: "KeyJ", ctrlKey: true }, shellInput);
+    expect(routerStore.getState().bottomDockOpen).toBe(true);
+    pressKey({ key: "k", code: "KeyK", ctrlKey: true });
+    expect(routerStore.getState().commandCenterOpen).toBe(true);
+  });
+
+  it("falls back home when a restored route names a session that no longer exists, and shows failed actions", () => {
+    const conn = makeMockConnection(localMac, { sessions: [sessionFixture("sess-alive")] });
+    engine.state.setState({ computers: [localMac], localComputer: localMac, connection: conn, locked: false });
+    routerStore.setState({
+      activeRoute: { kind: "session", computerKey: DESKTOP_LOCAL, sessionId: "sess-deleted" },
+      history: [{ kind: "session", computerKey: DESKTOP_LOCAL, sessionId: "sess-deleted" }],
+      historyIndex: 0,
+      restoredRoute: true,
+    });
+    mount(<DesktopAppShell platformOverride="macos" renderSessionWorkspace={() => <div>session</div>} />);
+    expect(routerStore.getState().activeRoute).toEqual({ kind: "home" });
+
+    act(() => {
+      engine.report("访问密码不正确");
+    });
+    expect(host.querySelector(".shell-notice")?.textContent).toContain("访问密码不正确");
+    act(() => {
+      (host.querySelector(".shell-notice button") as HTMLButtonElement).click();
+    });
+    expect(host.querySelector(".shell-notice")).toBeNull();
   });
 });

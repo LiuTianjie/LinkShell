@@ -32,6 +32,7 @@ export const STORAGE_KEYS = {
   terminalFontSize: "terminalFontSize",
   computerNames: "computer-names",
   activeSessionsOpen: "desktopActiveSessionsOpen",
+  lastRoute: "desktopLastRoute",
   screenPreferences: "screen:linkshell.screen.v2",
   selectedTerminal: (computerKey: string) => `selectedTerminal.${computerKey}`,
   openPortTabs: (computerKey: string) => `openPortTabs.${computerKey}`,
@@ -116,15 +117,29 @@ function cloneJsonValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function queueStorageWrite(key: string, write: StorageWrite): void {
+// Keys with a write already waiting in the chain: later saves only replace the value in `unsaved`,
+// so typing in the composer costs one request per round trip instead of one per keystroke.
+const queuedKeys = new Set<string>();
+// One failure report per outage, not one per save while the sidecar is away.
+let reportedStorageFailure = false;
+
+function queueStorageWrite(key: string): void {
+  if (queuedKeys.has(key)) return;
+  queuedKeys.add(key);
   storageWrites = storageWrites.then(async () => {
+    queuedKeys.delete(key);
+    const latest = unsaved.get(key);
+    if (!latest) return;
     try {
       await desktopFetch("/desktop/storage", {
         method: "PUT",
-        body: JSON.stringify({ key, value: write.value }),
+        body: JSON.stringify({ key, value: latest.value }),
       });
-      if (unsaved.get(key) === write) unsaved.delete(key);
+      if (unsaved.get(key) === latest) unsaved.delete(key);
+      reportedStorageFailure = false;
     } catch (error) {
+      if (reportedStorageFailure) return;
+      reportedStorageFailure = true;
       const detail = error instanceof Error ? error.message : String(error);
       reportDesktopError(new Error(`工作台设置尚未保存：${detail}。请重试连接。`));
     }
@@ -220,7 +235,7 @@ export function saveLocal(key: string, value: unknown): void {
     bootstrapState.storage[key] = snapshot;
     const write: StorageWrite = { value: snapshot };
     unsaved.set(key, write);
-    queueStorageWrite(key, write);
+    queueStorageWrite(key);
     return;
   }
 
@@ -242,7 +257,7 @@ export function saveLocal(key: string, value: unknown): void {
 
 export function retryDesktopStorage(): Promise<void> {
   if (!hasSidecarCapability()) return Promise.resolve();
-  for (const [key, write] of unsaved) queueStorageWrite(key, write);
+  for (const key of unsaved.keys()) queueStorageWrite(key);
   return storageWrites;
 }
 
@@ -343,6 +358,8 @@ export function resetDesktopStorageForTests(initialStorage: Record<string, unkno
   fallbackMemory.clear();
   for (const [k, v] of Object.entries(initialStorage)) fallbackMemory.set(k, cloneJsonValue(v));
   unsaved.clear();
+  queuedKeys.clear();
+  reportedStorageFailure = false;
   cachedAccount = {};
   accountRequest = undefined;
   accountGeneration = 0;

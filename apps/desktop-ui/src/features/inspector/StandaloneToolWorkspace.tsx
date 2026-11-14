@@ -356,7 +356,7 @@ export function StandaloneToolWorkspace({
   const { t } = useInspectorI18n();
   const activeRoute = useRouter((s) => s.activeRoute);
   const { connection, online, machine, sessionsMap, agents } =
-    useInspectorConnection({ computerKey });
+    useInspectorConnection({ computerKey, withSessionsMap: true });
 
   const sectionLabel = useMemo(() => {
     switch (mode) {

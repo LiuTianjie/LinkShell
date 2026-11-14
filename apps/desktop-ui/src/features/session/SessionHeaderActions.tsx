@@ -29,6 +29,7 @@ import {
 } from "@/primitives";
 import {
   isLocalDesktopConnection,
+  reportOnFailure,
   sessionKeyOf,
   sessionUiStore,
   useClientSelector,
@@ -211,15 +212,15 @@ export function SessionHeaderActions({
       ) => dialogs.choose(message, choices) as Promise<T | null>,
     };
     try {
-      const deleted = await confirmAndDeleteSession(
+      // With the computer named, the action drops the session from history itself: the open
+      // page becomes home in place, so Back never returns to what was just deleted.
+      await confirmAndDeleteSession(
         session,
         connection.store.getState(),
         actionDialogs,
         locale,
+        computerKey,
       );
-      if (deleted) {
-        routerStore.getState().navigate({ kind: "home" });
-      }
     } catch (error) {
       reportDesktopError(error);
     }
@@ -233,7 +234,7 @@ export function SessionHeaderActions({
           variant="secondary"
           size="sm"
           disabled={!online}
-          onClick={() => void connection.store.getState().takeover(session.id)}
+          onClick={() => reportOnFailure(connection.store.getState().takeover(session.id))}
         >
           {t("desktop.composer.takeover")}
         </Button>
@@ -310,7 +311,7 @@ export function SessionHeaderActions({
             <MenuItem
               icon="terminal"
               disabled={!online}
-              onSelect={() => void connection.store.getState().release(session.id)}
+              onSelect={() => reportOnFailure(connection.store.getState().release(session.id))}
             >
               {t("desktop.composer.releaseToDesktop")}
             </MenuItem>
@@ -350,26 +351,26 @@ export function SessionHeaderActions({
         {branchName && (
           <MenuItem
             icon={session.worktree ? "worktree" : "git-branch"}
-            onSelect={() => void copyClipboard(branchName)}
+            onSelect={() => reportOnFailure(copyClipboard(branchName))}
           >
             {copy.copyBranch}
           </MenuItem>
         )}
         <MenuItem
           icon="copy"
-          onSelect={() => void copyClipboard(sessionTitle(session))}
+          onSelect={() => reportOnFailure(copyClipboard(sessionTitle(session)))}
         >
           {t("desktop.menu.copyTitle")}
         </MenuItem>
         <MenuItem
           icon="copy"
-          onSelect={() => void copyClipboard(session.cwd)}
+          onSelect={() => reportOnFailure(copyClipboard(session.cwd))}
         >
           {t("desktop.menu.copyCwd")}
         </MenuItem>
         <MenuItem
           icon="copy"
-          onSelect={() => void copyClipboard(session.id)}
+          onSelect={() => reportOnFailure(copyClipboard(session.id))}
         >
           {t("desktop.menu.copyId")}
         </MenuItem>
@@ -378,9 +379,7 @@ export function SessionHeaderActions({
           icon={session.archived ? "archive-restore" : "archive"}
           disabled={!online}
           onSelect={() =>
-            void connection.store
-              .getState()
-              .archive(session.id, !session.archived)
+            reportOnFailure(connection.store.getState().archive(session.id, !session.archived))
           }
         >
           {t(session.archived ? "desktop.menu.unarchive" : "desktop.menu.archive")}

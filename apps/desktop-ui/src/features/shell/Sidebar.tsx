@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
 import { DESKTOP_LOCAL, isElectronDesktop } from "../../bridge/desktop-bridge";
@@ -14,18 +21,20 @@ import {
   openProjectContextMenu,
   openSessionContextMenu,
   projectScopeStore,
+  readLocal,
   refreshConnectionProjects,
   revealInFilesLabel,
   revealPathOnDesktop,
+  saveLocal,
   sessionFamilies,
   sessionGroup,
   sessionTitle,
   setProjectScope,
+  STORAGE_KEYS,
   useActiveDesktopPlatform,
   useFusionState,
   useI18n,
   useRouter,
-  waitingLabel,
   type Computer,
   type ComputerSessionTree,
   type Connection,
@@ -40,6 +49,7 @@ import {
   MenuSeparator,
   StatusDot,
   Tooltip,
+  isImeComposing,
   useDialogs,
 } from "../../primitives";
 import { ComputerSwitcher } from "./ComputerSwitcher";
@@ -53,9 +63,51 @@ import {
   folderBasename,
   formatRelativeTimestamp,
   isLocalComputer,
+  reportShellError,
+  sessionActivity,
+  sessionListState,
   useConnectionStore,
+  useMinuteTick,
   useRetainedMetadataConnections,
 } from "./shell-helpers";
+
+const ROW_SELECTOR =
+  ".tree-session, .tree-project__toggle, .tree-computer__toggle, .tree-show-more";
+
+/** Opens the row's context menu from the keyboard by replaying the event the mouse would send. */
+function openRowContextMenu(row: HTMLElement): void {
+  const rect = row.getBoundingClientRect();
+  row.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: Math.round(rect.left + Math.min(24, rect.width / 2)),
+      clientY: Math.round(rect.bottom),
+    }),
+  );
+}
+
+/** A collapse choice the user made, remembered per computer so reloads and the hover drawer keep it. */
+function usePersistedFold(
+  computerKey: string,
+  groupKey: string,
+  initial: () => boolean,
+): [boolean, (next: boolean) => void] {
+  const storageKey = STORAGE_KEYS.treeFolded(computerKey);
+  const [collapsed, setCollapsedState] = useState(() => {
+    const stored = readLocal<Record<string, boolean>>(storageKey, {});
+    return typeof stored[groupKey] === "boolean" ? stored[groupKey]! : initial();
+  });
+  const setCollapsed = useCallback(
+    (next: boolean) => {
+      setCollapsedState(next);
+      const stored = readLocal<Record<string, boolean>>(storageKey, {});
+      saveLocal(storageKey, { ...stored, [groupKey]: next });
+    },
+    [groupKey, storageKey],
+  );
+  return [collapsed, setCollapsed];
+}
 
 const INITIAL_VISIBLE_SESSIONS = 8;
 
@@ -79,7 +131,6 @@ interface SessionRowProps {
   isActiveRoute: boolean;
   computerBadge?: string;
   onOpen: (computerKey: string, sessionId: string) => void;
-  onNavigateHome: () => void;
 }
 
 /**
@@ -96,21 +147,30 @@ function SidebarSessionRow({
   isActiveRoute,
   computerBadge,
   onOpen,
-  onNavigateHome,
 }: SessionRowProps) {
   const { locale, t } = useI18n();
   const activePlatform = useActiveDesktopPlatform();
   const dialogs = useDialogs();
-  const group = sessionGroup(session);
+  const activity = sessionActivity(session, locale);
   const title = sessionTitle(session);
   const isLocal = computerKey === DESKTOP_LOCAL;
-  const online = connection?.store.getState().status === "online";
+  const status = useConnectionStore(connection, (s) => s.status);
+  const online = status === "online";
   const repoSlug = folderBasename(session.cwd);
   const showSubline = Boolean(isPinnedSection || computerBadge);
+  const actionDialogs = asSessionActionDialogs(dialogs);
+
+  const run = (action: () => Promise<unknown>) => {
+    void action().catch((error: unknown) => reportShellError(error, locale));
+  };
 
   const handleRename = async () => {
     if (!connection) return;
-    const next = await dialogs.prompt("会话名称", title);
+    const next = await dialogs.prompt(
+      t("desktop.shell.renameSessionTitle"),
+      title,
+      t("desktop.shell.save"),
+    );
     if (next !== null && next.trim()) {
       await connection.store.getState().rename(session.id, next.trim());
     }
@@ -118,10 +178,7 @@ function SidebarSessionRow({
 
   const handleFork = async (worktree: boolean) => {
     if (!connection) return;
-    const created = await connection
-      .store
-      .getState()
-      .forkSession(session.id, { worktree });
+    const created = await connection.store.getState().forkSession(session.id, { worktree });
     onOpen(computerKey, created.id);
   };
 
@@ -136,35 +193,23 @@ function SidebarSessionRow({
     const deleted = await confirmAndDeleteSession(
       session,
       connection.store.getState(),
-      asSessionActionDialogs(dialogs),
+      actionDialogs,
       locale,
+      computerKey,
     );
-    if (deleted) {
-      refreshConnectionProjects(connection);
-      if (isActiveRoute) {
-        onNavigateHome();
-      }
-    }
+    if (deleted) refreshConnectionProjects(connection);
   };
 
   const fallbackMenu = (
     <>
-      <MenuItem icon="edit" disabled={!online} onSelect={() => void handleRename()}>
+      <MenuItem icon="edit" disabled={!online} onSelect={() => run(handleRename)}>
         {t("desktop.menu.rename")}
       </MenuItem>
-      <MenuItem
-        icon="session-fork"
-        disabled={!online}
-        onSelect={() => void handleFork(false)}
-      >
+      <MenuItem icon="session-fork" disabled={!online} onSelect={() => run(() => handleFork(false))}>
         {session.worktree ? t("desktop.menu.forkSameWorktree") : t("desktop.menu.forkHere")}
       </MenuItem>
       {!session.worktree ? (
-        <MenuItem
-          icon="worktree"
-          disabled={!online}
-          onSelect={() => void handleFork(true)}
-        >
+        <MenuItem icon="worktree" disabled={!online} onSelect={() => run(() => handleFork(true))}>
           {t("desktop.menu.forkNewWorktree")}
         </MenuItem>
       ) : null}
@@ -186,10 +231,7 @@ function SidebarSessionRow({
         {t("desktop.menu.copyCwd")}
       </MenuItem>
       {isLocal ? (
-        <MenuItem
-          icon="external-link"
-          onSelect={() => void revealPathOnDesktop(session.cwd)}
-        >
+        <MenuItem icon="external-link" onSelect={() => run(() => revealPathOnDesktop(session.cwd))}>
           {revealInFilesLabel(locale, activePlatform)}
         </MenuItem>
       ) : null}
@@ -197,7 +239,7 @@ function SidebarSessionRow({
       <MenuItem
         icon={session.archived ? "archive-restore" : "archive"}
         disabled={!online}
-        onSelect={() => void handleArchiveToggle()}
+        onSelect={() => run(handleArchiveToggle)}
       >
         {session.archived ? t("desktop.menu.unarchive") : t("desktop.menu.archive")}
       </MenuItem>
@@ -205,32 +247,46 @@ function SidebarSessionRow({
         icon="trash"
         destructive
         disabled={!online || session.state === "running"}
-        onSelect={() => void handleDelete()}
+        onSelect={() => run(handleDelete)}
       >
         {t("desktop.menu.deletePermanent")}
       </MenuItem>
     </>
   );
 
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (isImeComposing(event) || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === "F2" && online) {
+      event.preventDefault();
+      run(handleRename);
+    } else if ((event.key === "Delete" || event.key === "Backspace") && online) {
+      if (session.state === "running") return;
+      event.preventDefault();
+      run(handleDelete);
+    }
+  };
+
   const buttonNode = (
     <button
       type="button"
       data-session-id={isPinnedSection ? undefined : session.id}
       data-pinned-session-id={isPinnedSection ? session.id : undefined}
+      data-row-session-id={session.id}
+      data-computer-key={computerKey}
       data-single-line={!showSubline ? "true" : undefined}
       data-active={isActiveRoute ? "true" : undefined}
       aria-current={isActiveRoute ? "page" : undefined}
       className="tree-session"
       onClick={() => onOpen(computerKey, session.id)}
+      onKeyDown={handleKeyDown}
       onContextMenu={
         isElectronDesktop && connection
           ? (event) => {
               event.preventDefault();
               void openSessionContextMenu(session, {
                 connection,
-                dialogs: asSessionActionDialogs(dialogs),
+                dialogs: actionDialogs,
                 navigateSession: (nextId) => onOpen(computerKey, nextId),
-                navigateHome: onNavigateHome,
                 at: { x: event.clientX, y: event.clientY },
                 locale,
               });
@@ -247,10 +303,8 @@ function SidebarSessionRow({
           ) : (
             <AgentMark agent={session.agent} size={15} />
           )}
-          {group === "running" ? (
-            <StatusDot tone="running" size="sm" className="tree-session__dot" />
-          ) : group === "waiting" ? (
-            <StatusDot tone="waiting" size="sm" className="tree-session__dot" />
+          {activity ? (
+            <StatusDot tone={activity.kind} size="sm" className="tree-session__dot" />
           ) : null}
         </span>
 
@@ -259,7 +313,7 @@ function SidebarSessionRow({
         {!showSubline && session.worktree ? (
           <span className="tree-session__pill">
             <DesktopIcon name="worktree" size="xs" />
-            <span>wt</span>
+            <span>{t("desktop.shell.worktreeTag")}</span>
           </span>
         ) : null}
 
@@ -280,17 +334,13 @@ function SidebarSessionRow({
             {session.worktree ? (
               <span className="tree-session__pill">
                 <DesktopIcon name="worktree" size="xs" />
-                <span>wt</span>
+                <span>{t("desktop.shell.worktreeTag")}</span>
               </span>
             ) : null}
 
-            {group === "waiting" ? (
-              <span className="tree-session__pill tree-session__pill--waiting">
-                {waitingLabel(session, locale)}
-              </span>
-            ) : group === "running" ? (
-              <span className="tree-session__pill tree-session__pill--running">
-                {locale === "en" ? "Working" : locale === "ja" ? "実行中" : "运行中"}
+            {activity ? (
+              <span className={`tree-session__pill tree-session__pill--${activity.kind}`}>
+                {activity.label}
               </span>
             ) : null}
           </span>
@@ -322,7 +372,6 @@ interface ProjectTreeBlockProps {
   activeComputerKey?: string;
   onOpenSession: (computerKey: string, sessionId: string) => void;
   onNewInProject: (computerKey: string, cwd: string) => void;
-  onNavigateHome: () => void;
 }
 
 function ProjectTreeBlock({
@@ -335,7 +384,6 @@ function ProjectTreeBlock({
   activeComputerKey,
   onOpenSession,
   onNewInProject,
-  onNavigateHome,
 }: ProjectTreeBlockProps) {
   const { locale, t } = useI18n();
   const activePlatform = useActiveDesktopPlatform();
@@ -345,7 +393,7 @@ function ProjectTreeBlock({
       activeComputerKey === computerKey &&
       group.sessions.some((s) => s.id === activeSessionId),
   );
-  const [collapsed, setCollapsed] = useState(() => {
+  const [collapsed, setCollapsed] = usePersistedFold(computerKey, group.key, () => {
     if (group.running > 0 || groupContainsActiveRoute) return false;
     if (groupIndex < 3) return false;
     return (
@@ -356,30 +404,36 @@ function ProjectTreeBlock({
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    if (groupContainsActiveRoute) {
-      setCollapsed(false);
-    }
-  }, [groupContainsActiveRoute]);
+    if (groupContainsActiveRoute && collapsed) setCollapsed(false);
+  }, [collapsed, groupContainsActiveRoute, setCollapsed]);
 
   const families = useMemo(() => sessionFamilies(group.sessions), [group.sessions]);
   const visibleFamilies = showAll ? families : families.slice(0, INITIAL_VISIBLE_SESSIONS);
   const hiddenCount = Math.max(0, families.length - INITIAL_VISIBLE_SESSIONS);
   const isLocal = computerKey === DESKTOP_LOCAL;
-  const online = connection?.store.getState().status === "online";
+  const status = useConnectionStore(connection, (s) => s.status);
+  const online = status === "online";
   const projectPath = group.cwd || group.key;
+  const newSessionCwd = group.generated ? "" : projectPath;
 
   const handleArchiveAll = async () => {
     if (!connection) return;
     const live = group.sessions.filter((s) => !s.archived);
     if (live.length === 0) return;
     const ok = await dialogs.confirm(
-      `归档「${group.name}」的 ${live.length} 个会话？之后可在已归档中找回。`,
+      t("desktop.shell.archiveAllConfirm", { name: group.name, count: live.length }),
+      { confirmLabel: t("desktop.menu.archiveAll") },
     );
     if (!ok) return;
-    for (const s of live) {
-      await connection.store.getState().archive(s.id, true);
+    try {
+      for (const s of live) {
+        await connection.store.getState().archive(s.id, true);
+      }
+    } catch (error) {
+      reportShellError(error, locale);
+    } finally {
+      refreshConnectionProjects(connection);
     }
-    refreshConnectionProjects(connection);
   };
 
   const projectFallbackMenu = (
@@ -387,7 +441,7 @@ function ProjectTreeBlock({
       <MenuItem
         icon="plus"
         disabled={!online}
-        onSelect={() => onNewInProject(computerKey, projectPath)}
+        onSelect={() => onNewInProject(computerKey, newSessionCwd)}
       >
         {t("desktop.menu.newInProject")}
       </MenuItem>
@@ -395,7 +449,11 @@ function ProjectTreeBlock({
       {isLocal && !group.generated ? (
         <MenuItem
           icon="external-link"
-          onSelect={() => void revealPathOnDesktop(projectPath)}
+          onSelect={() => {
+            void revealPathOnDesktop(projectPath).catch((error: unknown) =>
+              reportShellError(error, locale),
+            );
+          }}
         >
           {revealInFilesLabel(locale, activePlatform)}
         </MenuItem>
@@ -426,7 +484,7 @@ function ProjectTreeBlock({
       type="button"
       aria-expanded={!collapsed}
       className="tree-project__toggle"
-      onClick={() => setCollapsed((prev) => !prev)}
+      onClick={() => setCollapsed(!collapsed)}
       onContextMenu={
         isElectronDesktop && connection
           ? (event) => {
@@ -471,7 +529,7 @@ function ProjectTreeBlock({
             icon="plus"
             label={`${t("desktop.menu.newInProject")}: ${group.name}`}
             tooltip={t("desktop.menu.newInProject")}
-            onClick={() => onNewInProject(computerKey, group.generated ? "" : projectPath)}
+            onClick={() => onNewInProject(computerKey, newSessionCwd)}
           />
         </div>
       </div>
@@ -490,7 +548,6 @@ function ProjectTreeBlock({
                     activeComputerKey === computerKey
                   }
                   onOpen={onOpenSession}
-                  onNavigateHome={onNavigateHome}
                 />
                 {family.children.map((child) => (
                   <SidebarSessionRow
@@ -504,7 +561,6 @@ function ProjectTreeBlock({
                       activeComputerKey === computerKey
                     }
                     onOpen={onOpenSession}
-                    onNavigateHome={onNavigateHome}
                   />
                 ))}
               </div>
@@ -541,7 +597,6 @@ interface ComputerTreeBlockProps {
   onOpenSession: (computerKey: string, sessionId: string) => void;
   onNewInProject: (computerKey: string, cwd: string) => void;
   onNewOnComputer: (computerKey: string) => void;
-  onNavigateHome: () => void;
 }
 
 /**
@@ -558,10 +613,9 @@ function ComputerTreeBlock({
   onOpenSession,
   onNewInProject,
   onNewOnComputer,
-  onNavigateHome,
 }: ComputerTreeBlockProps) {
-  const { locale } = useI18n();
-  const [collapsed, setCollapsed] = useState(false);
+  const { t } = useI18n();
+  const [collapsed, setCollapsed] = usePersistedFold(compTree.key, "__computer__", () => false);
 
   const visibleCompGroups = useMemo(
     () => compTree.groups.filter((g) => g.sessions.length > 0),
@@ -576,22 +630,9 @@ function ComputerTreeBlock({
     return null;
   }
 
-  const newOnComputerLabel =
-    locale === "en"
-      ? "New session on this computer"
-      : locale === "ja"
-        ? "このコンピュータで新規セッション"
-        : "在此电脑新建会话";
-
-  const syncingBadgeLabel =
-    locale === "en" ? "Syncing" : locale === "ja" ? "同期中" : "同步中";
-
-  const syncingRowLabel =
-    locale === "en"
-      ? "Loading sessions"
-      : locale === "ja"
-        ? "セッションを読み込み中"
-        : "正在同步会话";
+  const newOnComputerLabel = t("desktop.shell.newOnComputer");
+  const syncingBadgeLabel = t("desktop.shell.syncing");
+  const syncingRowLabel = t("desktop.shell.loadingSessions");
 
   return (
     <div
@@ -604,7 +645,7 @@ function ComputerTreeBlock({
           type="button"
           aria-expanded={!collapsed}
           className="tree-computer__toggle"
-          onClick={() => setCollapsed((prev) => !prev)}
+          onClick={() => setCollapsed(!collapsed)}
         >
           <span className="tree-computer__chevron" aria-hidden="true">
             <DesktopIcon name="chevron-right" size="xs" />
@@ -655,7 +696,6 @@ function ComputerTreeBlock({
                   activeComputerKey={activeComputerKey}
                   onOpenSession={onOpenSession}
                   onNewInProject={onNewInProject}
-                  onNavigateHome={onNavigateHome}
                 />
               ))
             )}
@@ -673,6 +713,7 @@ export function Sidebar({
   onRequestNewSession,
 }: SidebarProps) {
   const { locale, t } = useI18n();
+  useMinuteTick();
   const activeRoute = useRouter((s) => s.activeRoute);
   const sidebarHidden = useRouter((s) => s.sidebarHidden);
   const routerToggleSidebar = useRouter((s) => s.toggleSidebar);
@@ -696,6 +737,10 @@ export function Sidebar({
 
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
   const projectsList = useConnectionStore(activeConnection, (s) => s.projects);
+  const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+  const sessionsLoaded = useConnectionStore(activeConnection, (s) => s.sessionsLoaded);
+  const listState = sessionListState(activeComputer, linkStatus, sessionsLoaded);
+  const activeComputerTitle = displayComputerName(activeComputer, names, locale);
 
   const sessions = useMemo(() => Object.values(sessionsMap), [sessionsMap]);
   const archivedCount = useMemo(
@@ -797,18 +842,52 @@ export function Sidebar({
     onNavigateDone?.();
   };
 
-  const handleNavigateHome = () => {
-    navigate({ kind: "home" });
-    onNavigateDone?.();
+  const onlineComputersCount = computers.filter((c) => c.machine.online).length;
+
+  // Rows are plain buttons in tab order; arrows move between the visible ones like a native list.
+  const handleTreeKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (isImeComposing(event) || !target.matches?.(ROW_SELECTOR)) return;
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      openRowContextMenu(target);
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const rows = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(ROW_SELECTOR),
+    ).filter((row) => !row.closest("[inert]"));
+    const index = rows.indexOf(target);
+    let next: HTMLElement | undefined;
+    if (event.key === "ArrowDown") next = rows[index + 1];
+    else if (event.key === "ArrowUp") next = index > 0 ? rows[index - 1] : undefined;
+    else if (event.key === "Home") next = rows[0];
+    else if (event.key === "End") next = rows[rows.length - 1];
+    else return;
+    event.preventDefault();
+    next?.focus();
   };
 
-  const onlineComputersCount = computers.filter((c) => c.machine.online).length;
+  const emptyHint =
+    listState === "loading" ? (
+      <div className="sidebar-empty-hint" data-state="loading">
+        <DesktopIcon name="spinner" size="xs" />
+        <span>{t("desktop.shell.connectingTo", { name: activeComputerTitle })}</span>
+      </div>
+    ) : listState === "offline" ? (
+      <div className="sidebar-empty-hint" data-state="offline">
+        {t("desktop.shell.offlineTitle", { name: activeComputerTitle })}
+      </div>
+    ) : (
+      <div className="sidebar-empty-hint">{t("desktop.shell.noSessions")}</div>
+    );
 
   return (
     <aside
       aria-label={t("desktop.workspace")}
       className={isPeekDrawer ? "desktop-sidebar-peek" : "desktop-sidebar"}
       data-open={isPeekDrawer ? "true" : undefined}
+      onKeyDown={handleTreeKeyDown}
     >
       {isPeekDrawer ? (
         <div className="desktop-sidebar-peek-header">
@@ -1000,22 +1079,12 @@ export function Sidebar({
         {showScopeSwitch ? (
           <div className="sidebar-sessions-scope-bar">
             <span className="sidebar-sessions-scope-bar__label">
-              {locale === "en"
-                ? "Sessions"
-                : locale === "ja"
-                  ? "セッション"
-                  : "会话"}
+              {t("desktop.nav.sessions")}
             </span>
             <div
               className="sidebar-scope-switch"
               role="group"
-              aria-label={
-                locale === "en"
-                  ? "Sessions"
-                  : locale === "ja"
-                    ? "セッション"
-                    : "会话"
-              }
+              aria-label={t("desktop.nav.sessions")}
             >
               <button
                 type="button"
@@ -1039,7 +1108,11 @@ export function Sidebar({
 
         {/* Paseo Status Section 1: Active Working Set (waiting -> running -> <6h recent) */}
         {activeEntries.length > 0 ? (
-          <section className="sidebar-section" aria-label="Active">
+          <section
+            className="sidebar-section"
+            data-section="active"
+            aria-label={t("desktop.nav.activeSessions")}
+          >
             <div className="sidebar-section__header">
               <span className="sidebar-section__title">
                 {activeEntries.some(({ session }) => sessionGroup(session) === "waiting") ? (
@@ -1048,12 +1121,7 @@ export function Sidebar({
                   <StatusDot tone="running" size="sm" />
                 ) : null}
                 <span>
-                  {locale === "en"
-                    ? "Active"
-                    : locale === "ja"
-                      ? "アクティブ"
-                      : "活跃会话"}{" "}
-                  ({activeEntries.length})
+                  {t("desktop.nav.activeSessions")} ({activeEntries.length})
                 </span>
               </span>
             </div>
@@ -1080,7 +1148,6 @@ export function Sidebar({
                       activeSessionComputer === entryCompKey
                     }
                     onOpen={handleOpenSession}
-                    onNavigateHome={handleNavigateHome}
                   />
                 );
               })}
@@ -1092,13 +1159,7 @@ export function Sidebar({
         <section className="sidebar-section" aria-label={t("desktop.nav.projects")}>
           <div className="sidebar-section__header">
             <span className="sidebar-section__title">
-              <span>
-                {locale === "en"
-                  ? "By project"
-                  : locale === "ja"
-                    ? "プロジェクト別"
-                    : "按项目"}
-              </span>
+              <span>{t("desktop.shell.byProject")}</span>
             </span>
           </div>
 
@@ -1123,18 +1184,11 @@ export function Sidebar({
                     onOpenSession={handleOpenSession}
                     onNewInProject={handleNewInProject}
                     onNewOnComputer={handleNewOnComputer}
-                    onNavigateHome={handleNavigateHome}
                   />
                 );
               })
             ) : (
-              <div className="sidebar-empty-hint">
-                {locale === "en"
-                  ? "No sessions yet. Start a new session above."
-                  : locale === "ja"
-                    ? "セッションはまだありません。"
-                    : "暂无会话记录，点击上方「新建会话」开始。"}
-              </div>
+              <div className="sidebar-empty-hint">{t("desktop.shell.noSessions")}</div>
             )
           ) : visibleGroups.length > 0 ? (
             visibleGroups.map((group, idx) => (
@@ -1148,17 +1202,10 @@ export function Sidebar({
                 activeComputerKey={activeSessionComputer}
                 onOpenSession={handleOpenSession}
                 onNewInProject={handleNewInProject}
-                onNavigateHome={handleNavigateHome}
               />
             ))
           ) : (
-            <div className="sidebar-empty-hint">
-              {locale === "en"
-                ? "No sessions yet. Start a new session above."
-                : locale === "ja"
-                  ? "セッションはまだありません。"
-                  : "暂无会话记录，点击上方「新建会话」开始。"}
-            </div>
+            emptyHint
           )}
         </section>
       </div>

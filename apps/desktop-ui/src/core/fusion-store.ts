@@ -98,6 +98,30 @@ export interface FusionIconEntry {
   badged: boolean;
 }
 
+/** A problem the hub reports with a specific remedy (see `FusionAlertBanner`). */
+export interface FusionAlert {
+  kind:
+    | "accessibility"
+    | "recording"
+    | "locked"
+    | "webrtc"
+    | "launch"
+    | "stub"
+    | "disconnected"
+    | (string & {});
+  message: string;
+  subject?: string;
+  bundle?: string;
+  at?: number;
+}
+
+export interface FusionExitInfo {
+  reason?: string;
+  message?: string;
+  at?: number;
+  wasConnected?: boolean;
+}
+
 export interface FusionHubSnapshot {
   hubRunning: boolean;
   connected: boolean;
@@ -110,10 +134,12 @@ export interface FusionHubSnapshot {
   windowCounts: Record<string, number>;
   iconBundles: string[];
   apps: FusionRemoteApp[];
+  alerts?: FusionAlert[];
+  lastExit?: FusionExitInfo;
 }
 
 export interface FusionComputerState {
-  phase: "idle" | "starting" | "connected" | "stopping" | "error";
+  phase: "idle" | "starting" | "connected" | "reconnecting" | "stopping" | "error";
   mode?: "direct" | "tunnel";
   tunnelId?: string;
   remoteHost?: string;
@@ -132,6 +158,13 @@ export interface FusionComputerState {
   busyBundles: Record<string, boolean>;
   error?: string;
   updatedAt?: number;
+  /** The user pressed Disconnect: nothing restarts Fusion until they start it again. */
+  paused?: boolean;
+  alerts?: FusionAlert[];
+  lastExit?: FusionExitInfo;
+  /** Automatic reconnects since the hub last dropped (resets once connected). */
+  reconnectAttempt?: number;
+  reconnectAt?: number;
 }
 
 export interface FusionStoreState {
@@ -151,6 +184,13 @@ const EMPTY_FUSION_STATE: FusionComputerState = {
   icons: {},
   busyBundles: {},
 };
+
+export const FUSION_MAX_RECONNECTS = 5;
+
+/** 1 s, 2 s, 4 s, 8 s, 16 s: a blip recovers fast, a dead remote does not spin. */
+export function fusionReconnectDelay(attempt: number): number {
+  return 1_000 * 2 ** Math.max(0, Math.min(attempt - 1, 4));
+}
 
 interface TunnelEventDetail {
   tunnelId?: string;
@@ -176,6 +216,11 @@ export function decodeFusionBase64(text: string): Uint8Array {
   return bytes;
 }
 
+export interface FusionRetained {
+  streams: Pick<HostStreams, "open">;
+  release(): void;
+}
+
 export interface FusionControllerDeps {
   invoke?<T = unknown>(
     method: string,
@@ -184,6 +229,13 @@ export interface FusionControllerDeps {
   ): Promise<T>;
   postMessage?(message: Record<string, unknown>): boolean;
   eventTarget?: Pick<EventTarget, "addEventListener" | "removeEventListener">;
+  /** Holds the computer's connection open for as long as a tunnel runs through it. */
+  retain?(computerKey: string): FusionRetained | undefined;
+  /** Starts Fusion again after the hub dropped (default: `connectAndStartComputerFusion`). */
+  restart?(computerKey: string): Promise<void>;
+  setTimeout?(fn: () => void, ms: number): unknown;
+  clearTimeout?(handle: unknown): void;
+  now?(): number;
 }
 
 export interface StartFusionOptions {
@@ -193,18 +245,35 @@ export interface StartFusionOptions {
   streams: Pick<HostStreams, "open">;
   launchBundle?: string;
   releaseConnection?: () => void;
+  /** Set by automatic reconnects, so their failures count toward the retry limit. */
+  reconnect?: boolean;
 }
 
 /**
- * App-lifetime Fusion Mode controller & Zustand state store (`#11` Slice 2A-4).
- * Keeps active tunnel bridges alive across workspace route transitions and handles
- * headless `--fusion-connect` / `--fusion-launch` Dock stub invocations even when `document.hidden === true`.
+ * App-lifetime Fusion Mode controller & Zustand state store.
+ * Keeps tunnel bridges alive across route transitions, watches running hubs (so a drop is noticed
+ * with no Fusion page open) and reconnects with backoff unless the user disconnected.
  */
 export function createFusionController(deps: FusionControllerDeps = {}) {
   const invoke = deps.invoke ?? desktopInvoke;
   const postMessage = deps.postMessage ?? postDesktopMessage;
   const getTarget = (): Pick<EventTarget, "addEventListener" | "removeEventListener"> | undefined =>
     deps.eventTarget ?? (typeof window !== "undefined" ? window : undefined);
+  const schedule = deps.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const unschedule = deps.clearTimeout ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  const now = deps.now ?? (() => Date.now());
+  const retain =
+    deps.retain ??
+    ((computerKey: string): FusionRetained | undefined => {
+      try {
+        const computer = engine.computerForKey(computerKey);
+        if (!computer) return undefined;
+        const retained = engine.retainComputer(computer);
+        return { streams: retained.connection.streams, release: retained.release };
+      } catch {
+        return undefined;
+      }
+    });
 
   const store = createStore<FusionStoreState>(() => ({ byComputer: {} }));
   const activeTunnelBridges = new Map<string, { computerKey: string; dispose(): void }>();
@@ -212,6 +281,10 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
   const loadingIcons = new Set<string>();
   const startingUntil = new Map<string, number>();
   const inFlightStarts = new Map<string, Promise<FusionStartReply>>();
+  /** Computers with a hub expected to be running: their drops trigger a reconnect. */
+  const expected = new Map<string, string>();
+  const watchers = new Map<string, () => void>();
+  const reconnectTimers = new Map<string, unknown>();
 
   const stateOf = (computerKey: string): FusionComputerState =>
     store.getState().byComputer[computerKey] ?? EMPTY_FUSION_STATE;
@@ -250,6 +323,12 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     streams: Pick<HostStreams, "open">,
     releaseConnection?: () => void,
   ): void {
+    // The same tunnel again (Electron reuses a listening one): its connections are live, keep them.
+    const existing = activeTunnelBridges.get(tunnelId);
+    if (existing && existing.computerKey === computerKey && computerTunnels.get(computerKey) === tunnelId) {
+      releaseConnection?.();
+      return;
+    }
     disposeComputerTunnel(computerKey);
     activeTunnelBridges.get(tunnelId)?.dispose();
 
@@ -260,6 +339,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     };
     const conns = new Map<string, ConnEntry>();
     const target = getTarget();
+    const postClose = (connId: string) =>
+      postMessage({ action: "fusionTunnel", tunnelId, connId, type: "close" });
 
     const listener = (raw: Event) => {
       const detail = ((raw as CustomEvent<TunnelEventDetail>).detail ?? {});
@@ -284,12 +365,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
               if (entry.closed) return;
               entry.closed = true;
               conns.delete(connId);
-              postMessage({
-                action: "fusionTunnel",
-                tunnelId,
-                connId,
-                type: "close",
-              });
+              postClose(connId);
             },
           })
           .then((stream) => {
@@ -305,18 +381,19 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
             if (entry.closed) return;
             entry.closed = true;
             conns.delete(connId);
-            postMessage({
-              action: "fusionTunnel",
-              tunnelId,
-              connId,
-              type: "close",
-            });
+            postClose(connId);
           });
         return;
       }
 
       const entry = conns.get(connId);
-      if (!entry || entry.closed) return;
+      if (!entry) {
+        // Bytes for a connection this bridge never opened: tell main, so FusionLocal sees a close
+        // instead of writing into a void forever.
+        if (detail.type === "data") postClose(connId);
+        return;
+      }
+      if (entry.closed) return;
       if (detail.type === "data" && typeof detail.data === "string") {
         const bytes = decodeFusionBase64(detail.data);
         if (entry.stream) entry.stream.write(bytes);
@@ -337,9 +414,11 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       computerKey,
       dispose() {
         target?.removeEventListener(DESKTOP_FUSION_TUNNEL_EVENT, listener);
-        for (const entry of conns.values()) {
+        for (const [connId, entry] of conns) {
+          if (entry.closed) continue;
           entry.closed = true;
           entry.stream?.close();
+          postClose(connId);
         }
         conns.clear();
         if (!released) {
@@ -350,6 +429,69 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     });
   }
 
+  function cancelReconnect(computerKey: string): void {
+    const timer = reconnectTimers.get(computerKey);
+    if (timer !== undefined) {
+      unschedule(timer);
+      reconnectTimers.delete(computerKey);
+    }
+  }
+
+  function exitMessage(state: FusionComputerState, fallback?: string): string {
+    // An exit note from an earlier session says nothing about this one.
+    const fresh = state.lastExit?.at === undefined || now() - state.lastExit.at < 10 * 60_000;
+    return (fresh ? state.lastExit?.message : undefined) || fallback || "与远端 Mac 的融合连接已断开";
+  }
+
+  /** The hub dropped (or a start failed) while Fusion was meant to be on. */
+  function handleDrop(computerKey: string, reason?: string): void {
+    const current = stateOf(computerKey);
+    if (current.paused || !expected.has(computerKey)) return;
+    const attempt = (current.reconnectAttempt ?? 0) + 1;
+    if (attempt > FUSION_MAX_RECONNECTS) {
+      expected.delete(computerKey);
+      stopWatch(computerKey);
+      updateComputer(computerKey, {
+        phase: "error",
+        hubRunning: false,
+        connected: false,
+        reconnectAt: undefined,
+        error: `融合模式多次重连失败：${exitMessage(current, reason)}`,
+      });
+      return;
+    }
+    const delay = fusionReconnectDelay(attempt);
+    updateComputer(computerKey, {
+      phase: "reconnecting",
+      connected: false,
+      reconnectAttempt: attempt,
+      reconnectAt: now() + delay,
+    });
+    cancelReconnect(computerKey);
+    reconnectTimers.set(
+      computerKey,
+      schedule(() => {
+        reconnectTimers.delete(computerKey);
+        if (stateOf(computerKey).paused || !expected.has(computerKey)) return;
+        const restart = deps.restart ?? ((key: string) => connectAndStartComputerFusion(key, undefined, { reconnect: true }));
+        void restart(computerKey).catch((error: unknown) =>
+          handleDrop(computerKey, error instanceof Error ? error.message : String(error)),
+        );
+      }, delay),
+    );
+  }
+
+  function stopWatch(computerKey: string): void {
+    watchers.get(computerKey)?.();
+    watchers.delete(computerKey);
+  }
+
+  /** One poller per computer while a hub is expected, independent of any page being open. */
+  function ensureWatch(computerKey: string, name: string): void {
+    if (watchers.has(computerKey)) return;
+    watchers.set(computerKey, pollFusionState(computerKey, name));
+  }
+
   async function startFusion({
     computerKey,
     name,
@@ -357,6 +499,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     streams,
     launchBundle,
     releaseConnection,
+    reconnect = false,
   }: StartFusionOptions): Promise<FusionStartReply> {
     if (!launchBundle) {
       const existing = inFlightStarts.get(computerKey);
@@ -367,11 +510,15 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     }
 
     const run = (async (): Promise<FusionStartReply> => {
-      startingUntil.set(computerKey, Date.now() + FUSION_START_GRACE_MS);
+      startingUntil.set(computerKey, now() + FUSION_START_GRACE_MS);
+      expected.set(computerKey, name);
+      cancelReconnect(computerKey);
       updateComputer(computerKey, (prev) => ({
-        phase: "starting",
+        phase: reconnect ? "reconnecting" : "starting",
         hubRunning: true,
         error: undefined,
+        paused: false,
+        reconnectAttempt: reconnect ? prev.reconnectAttempt : 0,
         hostLabel: name || prev.hostLabel,
       }));
 
@@ -390,11 +537,12 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
           : error instanceof Error
             ? error
             : new Error(rawMessage);
+        if (!reconnect) expected.delete(computerKey);
         updateComputer(computerKey, {
-          phase: "error",
+          phase: reconnect ? "reconnecting" : "error",
           hubRunning: false,
           connected: false,
-          error: translated.message,
+          error: reconnect ? undefined : translated.message,
         });
         throw translated;
       }
@@ -412,17 +560,22 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
           },
           20_000,
         );
-        startingUntil.set(computerKey, Date.now() + FUSION_START_GRACE_MS);
+        startingUntil.set(computerKey, now() + FUSION_START_GRACE_MS);
         if (reply?.mode === "tunnel") {
-          attachTunnelBridge(
-            computerKey,
-            reply.tunnelId,
-            started.port,
-            streams,
-            releaseConnection,
-          );
+          // The tunnel runs through this computer's connection: hold it for the tunnel's lifetime,
+          // whichever page (or none) started Fusion.
+          let bridgeStreams = streams;
+          let release = releaseConnection;
+          if (!release) {
+            const held = retain(computerKey);
+            if (held) {
+              bridgeStreams = held.streams;
+              release = held.release;
+            }
+          }
+          attachTunnelBridge(computerKey, reply.tunnelId, started.port, bridgeStreams, release);
           updateComputer(computerKey, (prev) => ({
-            phase: prev.connected ? "connected" : "starting",
+            phase: prev.connected ? "connected" : prev.phase === "reconnecting" ? "reconnecting" : "starting",
             mode: "tunnel",
             tunnelId: reply.tunnelId,
             remoteHost: undefined,
@@ -434,7 +587,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
           disposeComputerTunnel(computerKey);
           releaseConnection?.();
           updateComputer(computerKey, (prev) => ({
-            phase: prev.connected ? "connected" : "starting",
+            phase: prev.connected ? "connected" : prev.phase === "reconnecting" ? "reconnecting" : "starting",
             mode: "direct",
             tunnelId: undefined,
             remoteHost: reply?.host,
@@ -443,17 +596,19 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
             error: undefined,
           }));
         }
+        ensureWatch(computerKey, name);
         void refreshFusionState(computerKey, name).catch(() => undefined);
         return reply;
       } catch (error) {
         startingUntil.delete(computerKey);
         releaseConnection?.();
         const message = error instanceof Error ? error.message : String(error);
+        if (!reconnect) expected.delete(computerKey);
         updateComputer(computerKey, {
-          phase: "error",
+          phase: reconnect ? "reconnecting" : "error",
           hubRunning: false,
           connected: false,
-          error: message,
+          error: reconnect ? undefined : message,
         });
         throw error;
       }
@@ -492,7 +647,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       try {
         const reply = await invoke<{ icons?: Record<string, FusionIconEntry> }>(
           "fusionIcons",
-          { hostSlug, bundles: batch },
+          { computerKey, hostSlug, bundles: batch },
           20_000,
         );
         if (reply?.icons) {
@@ -519,13 +674,24 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       { name, computerKey },
       15_000,
     );
-    const inGrace = Date.now() < (startingUntil.get(computerKey) ?? 0);
+    const inGrace = now() < (startingUntil.get(computerKey) ?? 0);
     const snapshotHubRunning = Boolean(snapshot?.hubRunning ?? snapshot?.running);
     const snapshotConnected = snapshot?.connected === true;
     const incomingApps = Array.isArray(snapshot?.apps) ? snapshot.apps : [];
-    if (snapshotConnected && incomingApps.length > 0) {
+    if (snapshotConnected) {
       startingUntil.delete(computerKey);
+      // A hub found running (e.g. LinkShell restarted while it stayed up) is watched like one we started.
+      if (!expected.has(computerKey) && !stateOf(computerKey).paused) expected.set(computerKey, name);
     }
+    const before = stateOf(computerKey);
+    const dropped =
+      expected.has(computerKey) &&
+      !before.paused &&
+      before.phase !== "stopping" &&
+      !snapshotHubRunning &&
+      !snapshotConnected &&
+      !inGrace &&
+      (before.phase === "connected" || before.phase === "starting" || (before.phase === "reconnecting" && !reconnectTimers.has(computerKey)));
 
     updateComputer(computerKey, (prev) => {
       if (prev.phase === "stopping" && !snapshotConnected) {
@@ -535,10 +701,16 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       const nextPhase: FusionComputerState["phase"] = snapshotConnected
         ? "connected"
         : inGrace
-          ? "starting"
-          : prev.phase === "error" && !snapshotHubRunning
-            ? "error"
-            : "idle";
+          ? prev.phase === "reconnecting"
+            ? "reconnecting"
+            : "starting"
+          : prev.phase === "reconnecting"
+            ? "reconnecting"
+            : prev.phase === "error" && !snapshotHubRunning
+              ? "error"
+              : snapshotHubRunning
+                ? "starting"
+                : "idle";
       return {
         phase: nextPhase,
         hubRunning: effectiveHubRunning,
@@ -554,8 +726,14 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
             ? snapshot.windowCounts
             : {},
         apps: incomingApps.length > 0 ? incomingApps : prev.apps,
+        alerts: Array.isArray(snapshot?.alerts) ? snapshot.alerts : snapshotHubRunning ? [] : prev.alerts,
+        lastExit: snapshot?.lastExit ?? (snapshotHubRunning ? undefined : prev.lastExit),
+        ...(snapshotConnected ? { error: undefined, reconnectAttempt: 0, reconnectAt: undefined } : {}),
       };
     });
+
+    if (snapshotHubRunning || snapshotConnected) ensureWatch(computerKey, name);
+    if (dropped) handleDrop(computerKey);
 
     const iconCandidates = [
       ...(Array.isArray(snapshot?.iconBundles) ? snapshot.iconBundles : []),
@@ -576,14 +754,14 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     overrideIntervalMs?: number,
   ): () => void {
     let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: unknown;
 
     const resolveDelay = (): number => {
       if (typeof overrideIntervalMs === "number" && overrideIntervalMs > 0) {
         return overrideIntervalMs;
       }
       const cur = stateOf(computerKey);
-      const inGrace = Date.now() < (startingUntil.get(computerKey) ?? 0);
+      const inGrace = now() < (startingUntil.get(computerKey) ?? 0);
       if (
         inGrace ||
         cur.phase === "starting" ||
@@ -598,7 +776,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       if (disposed) return;
       await refreshFusionState(computerKey, name).catch(() => undefined);
       if (disposed) return;
-      timer = setTimeout(() => {
+      timer = schedule(() => {
         void tick();
       }, resolveDelay());
     };
@@ -606,7 +784,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     void tick();
     return () => {
       disposed = true;
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) unschedule(timer);
     };
   }
 
@@ -616,7 +794,6 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     options?: { hostSlug?: string; name?: string; force?: boolean },
   ): Promise<void> {
     const current = stateOf(computerKey);
-    const hostSlug = options?.hostSlug ?? current.hostSlug;
     updateComputer(computerKey, (prev) => ({
       busyBundles: { ...prev.busyBundles, [bundle]: true },
       error: undefined,
@@ -625,7 +802,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       await invoke(
         "fusionLaunchApp",
         {
-          hostSlug,
+          computerKey,
+          ...(options?.hostSlug ? { hostSlug: options.hostSlug } : {}),
           ...(options?.name ? { name: options.name } : {}),
           bundle,
           ...(options?.force ? { force: true } : {}),
@@ -652,7 +830,6 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     options?: { hostSlug?: string; name?: string; force?: boolean },
   ): Promise<void> {
     const current = stateOf(computerKey);
-    const hostSlug = options?.hostSlug ?? current.hostSlug;
     updateComputer(computerKey, (prev) => ({
       busyBundles: { ...prev.busyBundles, [bundle]: true },
       error: undefined,
@@ -661,7 +838,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       await invoke(
         "fusionQuitApp",
         {
-          hostSlug,
+          computerKey,
+          ...(options?.hostSlug ? { hostSlug: options.hostSlug } : {}),
           ...(options?.name ? { name: options.name } : {}),
           bundle,
           ...(options?.force ? { force: true } : {}),
@@ -682,19 +860,23 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     }
   }
 
+  /** The user's Disconnect: sticky until they start Fusion again. */
   async function stopFusion(computerKey: string, name?: string): Promise<void> {
     const current = stateOf(computerKey);
     startingUntil.delete(computerKey);
     inFlightStarts.delete(computerKey);
-    updateComputer(computerKey, { phase: "stopping", error: undefined });
+    expected.delete(computerKey);
+    cancelReconnect(computerKey);
+    stopWatch(computerKey);
+    updateComputer(computerKey, { phase: "stopping", error: undefined, paused: true });
     disposeComputerTunnel(computerKey);
     try {
       await invoke(
         "fusionStop",
         {
-          hostSlug: current.hostSlug,
-          ...(name ?? current.hostLabel ? { name: name ?? current.hostLabel } : {}),
           computerKey,
+          ...(current.hostSlug ? { hostSlug: current.hostSlug } : {}),
+          ...(name ?? current.hostLabel ? { name: name ?? current.hostLabel } : {}),
         },
         20_000,
       );
@@ -708,6 +890,10 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         connected: false,
         activeBundles: [],
         windowCounts: {},
+        alerts: [],
+        reconnectAttempt: 0,
+        reconnectAt: undefined,
+        paused: true,
       });
     }
   }
@@ -715,6 +901,9 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
   function disposeAll(): void {
     startingUntil.clear();
     inFlightStarts.clear();
+    expected.clear();
+    for (const key of [...reconnectTimers.keys()]) cancelReconnect(key);
+    for (const key of [...watchers.keys()]) stopWatch(key);
     for (const key of [...computerTunnels.keys()]) {
       disposeComputerTunnel(key);
     }
@@ -735,6 +924,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     quitFusionApp,
     stopFusion,
     disposeAll,
+    isPaused: (computerKey: string) => stateOf(computerKey).paused === true,
   };
 }
 
@@ -748,6 +938,7 @@ export const loadFusionIcons = fusionController.loadFusionIcons;
 export const launchFusionApp = fusionController.launchFusionApp;
 export const quitFusionApp = fusionController.quitFusionApp;
 export const stopComputerFusion = fusionController.stopFusion;
+export const isFusionPaused = fusionController.isPaused;
 
 export function useFusionState(computerKey: string | undefined): FusionComputerState {
   return useStore(fusionStore, (state) =>
@@ -826,7 +1017,11 @@ function waitForConnectionOnline(
 export async function connectAndStartComputerFusion(
   computerKey: string,
   launchBundle?: string,
+  options: { explicit?: boolean; reconnect?: boolean } = {},
 ): Promise<void> {
+  // After Disconnect, entry points (sidebar, command center, Dock stubs) do not undo it: only the
+  // Fusion page's own start button (`explicit`) or opening a fused app does.
+  if (fusionController.isPaused(computerKey) && !options.explicit && !launchBundle) return;
   try {
     await engine.start();
     const computer = await waitForOnlineComputer(computerKey);
@@ -845,8 +1040,10 @@ export async function connectAndStartComputerFusion(
       streams: retained.connection.streams,
       launchBundle,
       releaseConnection: retained.release,
+      reconnect: options.reconnect,
     });
   } catch (error) {
+    if (options.reconnect) throw error;
     reportDesktopError(error);
   }
 }

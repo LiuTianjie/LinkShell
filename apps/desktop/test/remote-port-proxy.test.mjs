@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 import {
+  isAllowedProxyHost,
   normalizePreviewSubPath,
   RemotePortProxyManager,
   validatePreviewPort,
@@ -163,4 +166,56 @@ test("RemotePortProxyManager handles unavailable window, upstream errors, timeou
   await new Promise((resolve) => setTimeout(resolve, 180));
   assert.equal(manager.activeProxyCount, 0);
   await assert.rejects(() => fetch(`http://127.0.0.1:${localPort}/after-idle`));
+});
+
+test("RemotePortProxyManager refuses foreign Host headers (DNS rebinding) and WebSocket upgrades", async (t) => {
+  const seen = [];
+  const manager = new RemotePortProxyManager({
+    dispatch(payload) {
+      seen.push(payload);
+      queueMicrotask(() => manager.reply({ reqId: payload.reqId, status: 200, headers: [], bodyBase64: "" }));
+      return true;
+    },
+  });
+  t.after(() => manager.stopAll());
+  const port = await manager.ensureProxy("machine:alpha", 3000);
+
+  assert.equal(isAllowedProxyHost(`127.0.0.1:${port}`, port), true);
+  assert.equal(isAllowedProxyHost(`LOCALHOST:${port}`, port), true);
+  assert.equal(isAllowedProxyHost(`evil.example:${port}`, port), false);
+  assert.equal(isAllowedProxyHost(`127.0.0.1:${port + 1}`, port), false);
+  assert.equal(isAllowedProxyHost(undefined, port), false);
+
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: "127.0.0.1", port, path: "/", headers: { host: `rebind.example:${port}` } },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(status, 421);
+  assert.equal(seen.length, 0);
+
+  const ok = await fetch(`http://localhost:${port}/`);
+  assert.equal(ok.status, 200);
+  assert.equal(seen.length, 1);
+
+  const upgradeReply = await new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1", () => {
+      socket.write(
+        `GET /hmr HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+      );
+    });
+    let text = "";
+    socket.on("data", (chunk) => {
+      text += chunk.toString("utf8");
+    });
+    socket.on("end", () => resolve(text));
+    socket.on("error", reject);
+  });
+  assert.match(upgradeReply, /^HTTP\/1\.1 501/);
 });

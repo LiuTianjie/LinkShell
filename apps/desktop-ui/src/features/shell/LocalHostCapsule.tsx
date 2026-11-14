@@ -1,7 +1,6 @@
 import {
   healthy,
   newVersion,
-  serviceLabel,
   useI18n,
   useManagement,
   useRouter,
@@ -14,7 +13,7 @@ export interface LocalHostCapsuleProps {
 }
 
 export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const mgmt = useManagement();
   const openSystemModal = useRouter((s) => s.openSystemModal);
 
@@ -33,14 +32,11 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
             ? "danger"
             : "neutral";
 
-  const statusWord =
-    locale === "zh"
-      ? serviceLabel(mgmt.snapshot, mgmt.problem)
-      : isHealthy
-        ? t("desktop.manage.serviceRunning")
-        : mgmt.snapshot?.status === "stopped"
-          ? t("desktop.manage.serviceStopped")
-          : t("desktop.manage.serviceUnreachable");
+  const statusWord = isHealthy
+    ? t("desktop.manage.serviceRunning")
+    : mgmt.snapshot?.status === "stopped"
+      ? t("desktop.manage.serviceStopped")
+      : t("desktop.manage.serviceUnreachable");
 
   return (
     <footer className="desktop-sidebar-footer">
@@ -58,7 +54,7 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
             <DesktopIcon name="settings" size="sm" />
           </span>
           <span className="sidebar-footer-settings-btn__label ls-truncate">
-            {t("desktop.manage.settings")}
+            {t("desktop.localManagement")}
           </span>
         </span>
 

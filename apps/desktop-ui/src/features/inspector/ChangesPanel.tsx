@@ -7,7 +7,12 @@ import {
   type ReactNode,
 } from "react";
 import type { SessionView } from "@linkshell/client-core";
-import type { GitDiffFile, GitDiffFileStatus, ToolCallContent } from "@linkshell/wire";
+import type {
+  GitDiffFile,
+  GitDiffFileStatus,
+  SessionSummary,
+  ToolCallContent,
+} from "@linkshell/wire";
 import { DesktopIcon } from "../../icons";
 import {
   AutoGrowTextarea,
@@ -23,7 +28,6 @@ import {
 import type { Connection } from "../../core/connections";
 import {
   changeLines,
-  changeStat,
   diffLines,
   diffReviewStore,
   diffStat,
@@ -56,7 +60,7 @@ export interface ChangesStatsSummary {
   removed: number;
 }
 
-interface UnifiedChangeEntry {
+export interface UnifiedChangeEntry {
   key: string;
   /** Raw path as reported by session tool call or git.diff (preserved for git.revertFile / open-file RPCs). */
   rawPath: string;
@@ -117,47 +121,79 @@ function splitDisplayPath(displayPath: string): {
 
 type DiffChangeContent = Extract<ToolCallContent, { type: "diff" | "patch" }>;
 
-function extractSessionChanges(
-  view: SessionView | undefined,
-  cwd?: string,
-): UnifiedChangeEntry[] {
-  if (!view) return [];
-  const byPath = new Map<
-    string,
-    { path: string; chunks: DiffChangeContent[] }
-  >();
+export interface SessionDiffPart {
+  path: string;
+  change: DiffChangeContent;
+}
 
+/** The diff/patch parts of a session's tool calls, in order. Cheap: no line diffing. */
+function sessionDiffParts(view: SessionView | undefined): SessionDiffPart[] {
+  if (!view) return [];
+  const parts: SessionDiffPart[] = [];
   for (const item of view.items) {
     if (item.kind !== "tool") continue;
-    const contents = item.content ?? [];
-    for (const part of contents) {
+    for (const part of item.content ?? []) {
       if (part.type !== "diff" && part.type !== "patch") continue;
-      const filePath = part.path || "patch";
-      const existing = byPath.get(filePath);
-      if (existing) {
-        existing.chunks.push(part);
-      } else {
-        byPath.set(filePath, { path: filePath, chunks: [part] });
-      }
+      const path =
+        (part.type === "patch" && part.movePath) || part.path || "patch";
+      parts.push({ path, change: part });
     }
+  }
+  return parts;
+}
+
+/** Changes only when a diff part is added or replaced, not on every streamed token. */
+function sessionDiffSignature(parts: readonly SessionDiffPart[]): string {
+  let sig = "";
+  for (const { path, change } of parts) {
+    const size =
+      change.type === "diff"
+        ? (change.oldText?.length ?? -1) + ":" + change.newText.length
+        : String(JSON.stringify(change).length);
+    sig += `${path}|${size};`;
+  }
+  return sig;
+}
+
+/**
+ * One entry per file with its net change: a file edited several times shows the first old text
+ * against the last new text, as the web console does, instead of every intermediate hunk.
+ */
+export function mergeSessionChanges(
+  parts: readonly SessionDiffPart[],
+  cwd?: string,
+): UnifiedChangeEntry[] {
+  const byPath = new Map<
+    string,
+    { first?: string; last?: string; created: boolean; patches: DiffLine[][] }
+  >();
+  for (const { path, change } of parts) {
+    const entry =
+      byPath.get(path) ?? { created: false, patches: [] as DiffLine[][] };
+    if (change.type === "diff") {
+      if (entry.first === undefined && entry.last === undefined) {
+        entry.first = change.oldText ?? "";
+        entry.created = change.oldText == null;
+      }
+      entry.last = change.newText;
+    } else {
+      entry.patches.push(changeLines(change));
+    }
+    byPath.set(path, entry);
   }
 
   const out: UnifiedChangeEntry[] = [];
-  for (const [rawPath, group] of byPath) {
-    const mergedLines: DiffLine[] = [];
-    let added = 0;
-    let removed = 0;
-    for (const chunk of group.chunks) {
-      const chunkLines = changeLines(chunk);
-      const stat = changeStat(chunk);
-      mergedLines.push(...chunkLines);
-      added += stat.added;
-      removed += stat.removed;
-    }
+  for (const [rawPath, entry] of byPath) {
+    const lines =
+      entry.last !== undefined
+        ? diffLines(entry.first ?? "", entry.last)
+        : entry.patches.flat();
+    const stat = diffStat(lines);
+    if (lines.length > 0 && stat.added === 0 && stat.removed === 0) continue;
     const status: GitDiffFileStatus =
-      removed === 0 && added > 0
+      entry.created || (stat.removed === 0 && stat.added > 0 && !entry.first)
         ? "added"
-        : added === 0 && removed > 0
+        : entry.last === "" && stat.added === 0
           ? "deleted"
           : "modified";
     out.push({
@@ -165,20 +201,43 @@ function extractSessionChanges(
       rawPath,
       path: toRepoRelativePath(rawPath, cwd),
       status,
-      lines: mergedLines,
-      added,
-      removed,
+      lines,
+      added: stat.added,
+      removed: stat.removed,
       canRevert: false,
     });
   }
   return out;
 }
 
+/** Net per-file session changes for a view (what the Changes tab and its badge count). */
+export function sessionChangesFromView(
+  view: SessionView | undefined,
+  cwd?: string,
+): UnifiedChangeEntry[] {
+  return mergeSessionChanges(sessionDiffParts(view), cwd);
+}
+
+function useSessionChangeEntries(
+  view: SessionView | undefined,
+  cwd?: string,
+): UnifiedChangeEntry[] {
+  const parts = sessionDiffParts(view);
+  const signature = sessionDiffSignature(parts);
+  // Keyed by content, not identity: every streamed event rebuilds `parts`,
+  // but the merged diff only changes when a file's diff does.
+  const cache = useRef<{ signature: string; cwd?: string; entries: UnifiedChangeEntry[] }>(undefined);
+  if (!cache.current || cache.current.signature !== signature || cache.current.cwd !== cwd) {
+    cache.current = { signature, cwd, entries: mergeSessionChanges(parts, cwd) };
+  }
+  return cache.current.entries;
+}
+
 export function useSessionChangesSummary(
   view: SessionView | undefined,
 ): ChangesStatsSummary {
+  const entries = useSessionChangeEntries(view);
   return useMemo(() => {
-    const entries = extractSessionChanges(view);
     let added = 0;
     let removed = 0;
     for (const entry of entries) {
@@ -186,7 +245,7 @@ export function useSessionChangesSummary(
       removed += entry.removed;
     }
     return { files: entries.length, added, removed };
-  }, [view]);
+  }, [entries]);
 }
 
 function mapGitDiffFiles(
@@ -832,7 +891,10 @@ function DiffFileCard({
 export interface ChangesPanelProps {
   connection?: Connection;
   online: boolean;
+  /** The tab is visible: coming back to it re-reads git. */
+  active?: boolean;
   sessionId?: string;
+  session?: SessionSummary;
   cwd?: string;
   view?: SessionView;
   actions?: InspectorSessionActions;
@@ -844,7 +906,9 @@ export interface ChangesPanelProps {
 export function ChangesPanel({
   connection,
   online,
+  active = true,
   sessionId,
+  session,
   cwd,
   view,
   actions,
@@ -855,15 +919,13 @@ export function ChangesPanel({
   const { t, ti } = useInspectorI18n();
   const dialogs = useDialogs();
 
-  const sessionEntries = useMemo(
-    () => extractSessionChanges(view, cwd),
-    [view, cwd],
-  );
+  const sessionEntries = useSessionChangeEntries(view, cwd);
   const [sourceMode, setSourceMode] = useState<ChangesSourceMode>(() =>
     sessionId ? "session" : "git",
   );
   const [layoutMode, setLayoutMode] = useState<DiffLayoutMode>("unified");
   const [gitFiles, setGitFiles] = useState<GitDiffFile[]>([]);
+  const [gitTruncated, setGitTruncated] = useState(false);
   const [gitBranch, setGitBranch] = useState<string | undefined>(undefined);
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
@@ -880,25 +942,41 @@ export function ChangesPanel({
   );
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const autoSwitchedRef = useRef<string | undefined>(undefined);
+  const userPickedModeRef = useRef(false);
+  const loadSeqRef = useRef(0);
 
   const reviewKey = sessionId ?? (cwd ? `cwd:${cwd}` : "inspector");
   const comments = useDiffReviews(reviewKey);
+  // A worktree session is compared with the branch it started from, so committed work shows too.
+  const worktreeBase = (
+    session?.worktree as { branch: string; source: string; base?: string } | undefined
+  )?.base;
+
+  const sessionCountRef = useRef(sessionEntries.length);
+  sessionCountRef.current = sessionEntries.length;
+  const onBranchChangeRef = useRef(onBranchChange);
+  onBranchChangeRef.current = onBranchChange;
 
   const loadGitDiff = useCallback(async () => {
     if (!connection || !online || !cwd) return;
+    const seq = ++loadSeqRef.current;
     setGitLoading(true);
     setGitError(null);
     try {
       const res = await connection.link.call("git.diff", {
         cwd,
+        ...(worktreeBase ? { base: worktreeBase } : {}),
         includeUntracked: true,
       });
+      if (seq !== loadSeqRef.current) return;
       const nextFiles = Array.isArray(res?.files) ? res.files : [];
       setGitFiles(nextFiles);
+      setGitTruncated(Boolean(res?.truncated));
       setGitBranch(res?.branch);
-      onBranchChange?.(res?.branch);
+      onBranchChangeRef.current?.(res?.branch);
       if (
-        sessionEntries.length === 0 &&
+        !userPickedModeRef.current &&
+        sessionCountRef.current === 0 &&
         nextFiles.length > 0 &&
         autoSwitchedRef.current !== cwd
       ) {
@@ -906,16 +984,52 @@ export function ChangesPanel({
         setSourceMode("git");
       }
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
       setGitFiles([]);
+      setGitTruncated(false);
       setGitError(err instanceof Error ? err.message : ti("notGitRepo"));
     } finally {
-      setGitLoading(false);
+      if (seq === loadSeqRef.current) setGitLoading(false);
     }
-  }, [connection, online, cwd, sessionEntries.length, ti, onBranchChange]);
+  }, [connection, online, cwd, worktreeBase, ti]);
+
+  // A new folder: nothing from the old one's diff may linger while the new one loads.
+  useEffect(() => {
+    loadSeqRef.current += 1;
+    setGitFiles([]);
+    setGitTruncated(false);
+    setGitError(null);
+    setSelectedFileKey(null);
+    setOpenOverrides({});
+  }, [cwd]);
 
   useEffect(() => {
-    void loadGitDiff();
-  }, [loadGitDiff]);
+    if (active) void loadGitDiff();
+  }, [active, loadGitDiff]);
+
+  // The working tree changes during a turn; re-read once the agent stops (and when its set of
+  // edited files grows), rather than polling.
+  const sessionState = session?.state;
+  const prevSessionStateRef = useRef(sessionState);
+  useEffect(() => {
+    const prev = prevSessionStateRef.current;
+    prevSessionStateRef.current = sessionState;
+    if (prev === "running" && sessionState !== "running" && active) {
+      void loadGitDiff();
+    }
+  }, [sessionState, active, loadGitDiff]);
+  const prevSessionCountRef = useRef(sessionEntries.length);
+  useEffect(() => {
+    const prev = prevSessionCountRef.current;
+    prevSessionCountRef.current = sessionEntries.length;
+    if (active && sessionEntries.length > prev) void loadGitDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only when the edited-file count grows.
+  }, [sessionEntries.length]);
+
+  const pickSourceMode = useCallback((mode: ChangesSourceMode) => {
+    userPickedModeRef.current = true;
+    setSourceMode(mode);
+  }, []);
 
   const gitEntries = useMemo(
     () => mapGitDiffFiles(gitFiles, cwd),
@@ -1069,7 +1183,7 @@ export function ChangesPanel({
                 aria-pressed={sourceMode === "session"}
                 aria-label={t("desktop.inspector.sessionChanges")}
                 title={t("desktop.inspector.sessionChanges")}
-                onClick={() => setSourceMode("session")}
+                onClick={() => pickSourceMode("session")}
               >
                 <span>{ti("scopeSessionShort")}</span>
               </button>
@@ -1079,7 +1193,7 @@ export function ChangesPanel({
                 aria-pressed={sourceMode === "git"}
                 aria-label={t("desktop.inspector.gitWorkspace")}
                 title={t("desktop.inspector.gitWorkspace")}
-                onClick={() => setSourceMode("git")}
+                onClick={() => pickSourceMode("git")}
               >
                 <span>{ti("scopeGitShort")}</span>
               </button>
@@ -1261,6 +1375,12 @@ export function ChangesPanel({
           </div>
         ) : null}
 
+        {gitTruncated && sourceMode === "git" && !gitError ? (
+          <div className="inspector-banner" role="status">
+            <span>{ti("changesTruncated")}</span>
+          </div>
+        ) : null}
+
         {gitError && sourceMode === "git" ? (
           <EmptyState
             compact
@@ -1288,7 +1408,7 @@ export function ChangesPanel({
                   size="sm"
                   variant="secondary"
                   leadingIcon="git-branch"
-                  onClick={() => setSourceMode("git")}
+                  onClick={() => pickSourceMode("git")}
                 >
                   {t("desktop.inspector.gitWorkspace")}
                 </Button>
@@ -1297,19 +1417,22 @@ export function ChangesPanel({
           />
         ) : (
           <>
-            {/* Paseo Hierarchical Indented Directory & File Tree */}
-            <ChangesDirectoryTree
-              nodes={compactTree}
-              selectedKey={selectedFileKey}
-              onSelectFile={handleSelectTreeFile}
-              onRevertFile={
-                sourceMode === "git"
-                  ? (p) => {
-                      void handleRevertFile(p);
-                    }
-                  : undefined
-              }
-            />
+            {/* The tree is a table of contents and says where files live: a single file at the
+                project root gains nothing from it, its card below already says everything. */}
+            {activeEntries.length > 1 || compactTree.some((node) => node.kind === "folder") ? (
+              <ChangesDirectoryTree
+                nodes={compactTree}
+                selectedKey={selectedFileKey}
+                onSelectFile={handleSelectTreeFile}
+                onRevertFile={
+                  sourceMode === "git"
+                    ? (p) => {
+                        void handleRevertFile(p);
+                      }
+                    : undefined
+                }
+              />
+            ) : null}
 
             {/* Crisp Shiki Diff Cards */}
             {activeEntries.map((entry, idx) => {

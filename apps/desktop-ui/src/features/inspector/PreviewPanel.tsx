@@ -39,12 +39,12 @@ import {
   StatusDot,
   useDialogs,
 } from "../../primitives";
-import { useInspectorI18n } from "./i18n-inspector";
+import { inspectorText, useInspectorI18n } from "./i18n-inspector";
 import { parsePortOrUrlInput } from "./InspectorNewTabView";
-import { INSPECTOR_OPEN_PORT_EVENT } from "./inspector-tabs-store";
 import type { InspectorSessionActions } from "./use-inspector-connection";
 
 const REMOTE_PORT_REQ_EVENT = "linkshell-desktop-remote-port-req";
+const REMOTE_PROXY_RENDERER_TIMEOUT_MS = 55_000;
 const livePreviewConnections = new Map<string, Connection>();
 let responderWindow: Window | null = null;
 
@@ -164,7 +164,7 @@ export function ensureRemotePortProxyResponder(): void {
 
     const { connection, release } = resolveConnectionForProxy(computerKey);
     if (!connection) {
-      const errMsg = "Remote host connection is unavailable";
+      const errMsg = inspectorText("previewHostUnavailable");
       void desktopInvoke("remotePortReply", {
         reqId,
         status: 502,
@@ -195,7 +195,8 @@ export function ensureRemotePortProxyResponder(): void {
           method,
           safeHeaders,
           bodyBytes,
-          AbortSignal.timeout(15_000),
+          // Answer before the main-process proxy gives up on the request (60 s).
+          AbortSignal.timeout(REMOTE_PROXY_RENDERER_TIMEOUT_MS),
         );
         const chunks: Uint8Array[] = [];
         let total = 0;
@@ -349,34 +350,7 @@ export function previewSocketBootstrap(channel: string): void {
 
   window.WebSocket = BridgeWebSocket as unknown as typeof WebSocket;
 
-  window.addEventListener("error", (event) => {
-    window.parent.postMessage(
-      {
-        channel,
-        type: "preview-runtime-error",
-        source: "error",
-        url: event.filename || window.location.href,
-        message: event.message || "Uncaught runtime error",
-        stack: event.error instanceof Error ? event.error.stack : undefined,
-      },
-      "*",
-    );
-  });
-
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason;
-    window.parent.postMessage(
-      {
-        channel,
-        type: "preview-runtime-error",
-        source: "unhandledrejection",
-        url: window.location.href,
-        message: reason instanceof Error ? reason.message : String(reason),
-        stack: reason instanceof Error ? reason.stack : undefined,
-      },
-      "*",
-    );
-  });
+  // Runtime errors are reported once, by the worker's injected error script.
 
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent || event.data?.channel !== channel) {
@@ -413,10 +387,37 @@ export function resolveSafePreviewOrigin(): string | undefined {
   return parsed.origin;
 }
 
+/** A preview's cookies, kept per port so reloading or editing the address keeps a login. */
+export type PreviewCookieJar = Map<string, string>;
+
+/** Applies one Set-Cookie header (name=value plus expiry attributes) to the jar. */
+export function applySetCookie(jar: PreviewCookieJar, header: string): void {
+  const [pair = "", ...attrs] = header.split(";");
+  const eqIdx = pair.indexOf("=");
+  if (eqIdx <= 0) return;
+  const name = pair.slice(0, eqIdx).trim();
+  const value = pair.slice(eqIdx + 1).trim();
+  let expired = false;
+  for (const attr of attrs) {
+    const [rawKey = "", ...rest] = attr.split("=");
+    const key = rawKey.trim().toLowerCase();
+    const val = rest.join("=").trim();
+    if (key === "max-age" && Number(val) <= 0) expired = true;
+    if (key === "expires") {
+      const at = Date.parse(val);
+      if (Number.isFinite(at) && at <= Date.now()) expired = true;
+    }
+  }
+  if (expired) jar.delete(name);
+  else jar.set(name, value);
+}
+
 interface SandboxedPortFrameProps {
   port: number;
   revision: number;
+  /** Where the frame starts; read once at mount, so editing the address bar changes nothing live. */
   subPath: string;
+  cookies: PreviewCookieJar;
   connection?: Connection;
   onOpenExternal: () => void;
   onRuntimeError: (
@@ -428,6 +429,7 @@ function SandboxedPortFrame({
   port,
   revision,
   subPath,
+  cookies,
   connection,
   onOpenExternal,
   onRuntimeError,
@@ -435,6 +437,7 @@ function SandboxedPortFrame({
   const { ti } = useInspectorI18n();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [channel] = useState(() => `${crypto.randomUUID()}-${revision}`);
+  const [initialPath] = useState(subPath);
   const origin = resolveSafePreviewOrigin();
 
   const onRuntimeErrorRef = useRef(onRuntimeError);
@@ -445,7 +448,6 @@ function SandboxedPortFrame({
 
     let alive = true;
     let inFlightCount = 0;
-    const cookies = new Map<string, string>();
     const httpAborts = new Map<string, AbortController>();
     const sockets = new Map<
       string,
@@ -512,7 +514,7 @@ function SandboxedPortFrame({
         postToBridge({
           type: "preview-init",
           bootstrap: previewSocketBootstrap.toString(),
-          initialPath: subPath,
+          initialPath,
         });
         return;
       }
@@ -529,7 +531,7 @@ function SandboxedPortFrame({
           postToBridge({
             type: "http-error",
             id: reqId,
-            error: "Too many concurrent preview requests",
+            error: inspectorText("previewTooManyRequests"),
           });
           return;
         }
@@ -549,10 +551,7 @@ function SandboxedPortFrame({
         const abort = new AbortController();
         httpAborts.set(reqId, abort);
 
-        const requestPath =
-          msg.path === "/" && subPath && subPath.startsWith("/")
-            ? subPath
-            : (msg.path ?? "/");
+        const requestPath = msg.path ?? "/";
 
         void httpStreamRequest(
           connection.streams,
@@ -565,15 +564,7 @@ function SandboxedPortFrame({
         )
           .then(async (response) => {
             for (const [k, v] of response.headers) {
-              if (k === "set-cookie") {
-                const pair = v.split(";")[0] ?? "";
-                const eqIdx = pair.indexOf("=");
-                if (eqIdx > 0) {
-                  const cookieName = pair.slice(0, eqIdx);
-                  if (/max-age=0/i.test(v)) cookies.delete(cookieName);
-                  else cookies.set(cookieName, pair.slice(eqIdx + 1));
-                }
-              }
+              if (k === "set-cookie") applySetCookie(cookies, v);
             }
 
             let streamBody = response.body;
@@ -709,7 +700,7 @@ function SandboxedPortFrame({
       for (const sock of sockets.values()) sock.close();
       sockets.clear();
     };
-  }, [origin, connection, port, channel, subPath]);
+  }, [origin, connection, port, channel, initialPath, cookies]);
 
   if (!origin) {
     return (
@@ -750,6 +741,10 @@ export interface PreviewPanelProps {
   online: boolean;
   cwd?: string;
   actions?: InspectorSessionActions;
+  /** A port (and path) asked for from elsewhere, applied each time `requestNonce` changes. */
+  requestedPort?: number;
+  requestedPath?: string;
+  requestNonce?: number;
   onPortCountChange?: (count: number) => void;
 }
 
@@ -759,6 +754,9 @@ export function PreviewPanel({
   online,
   cwd,
   actions,
+  requestedPort,
+  requestedPath,
+  requestNonce,
   onPortCountChange,
 }: PreviewPanelProps) {
   const { t, ti } = useInspectorI18n();
@@ -775,7 +773,20 @@ export function PreviewPanel({
   const [loadingPorts, setLoadingPorts] = useState(false);
   const [customPortInput, setCustomPortInput] = useState("");
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // What the address bar shows, and what the frame was last told to open: typing must not
+  // touch a live page until Enter or reload.
+  const [addressByPort, setAddressByPort] = useState<Record<number, string>>({});
   const [pathByPort, setPathByPort] = useState<Record<number, string>>({});
+  const [listOpen, setListOpen] = useState(false);
+  const cookieJarsRef = useRef(new Map<number, PreviewCookieJar>());
+  const cookieJarFor = useCallback((port: number): PreviewCookieJar => {
+    let jar = cookieJarsRef.current.get(port);
+    if (!jar) {
+      jar = new Map();
+      cookieJarsRef.current.set(port, jar);
+    }
+    return jar;
+  }, []);
   const [errorsByPort, setErrorsByPort] = useState<
     Record<number, PreviewRuntimeError[]>
   >({});
@@ -838,6 +849,9 @@ export function PreviewPanel({
 
   const activePort = activeTab?.port;
   const activePath = activePort ? (pathByPort[activePort] ?? "/") : "/";
+  const activeAddress = activePort
+    ? (addressByPort[activePort] ?? activePath)
+    : "/";
   const activeErrors = useMemo(
     () => (activePort ? (errorsByPort[activePort] ?? []) : []),
     [activePort, errorsByPort],
@@ -846,18 +860,37 @@ export function PreviewPanel({
   const handleOpenPort = useCallback(
     (portNum: number, initialPath?: string) => {
       if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) return;
-      dispatchTabs({ type: "open", port: portNum, multiple: true });
+      setListOpen(false);
       if (initialPath && initialPath !== "/") {
-        setPathByPort((prev) => ({
-          ...prev,
-          [portNum]: initialPath.startsWith("/")
-            ? initialPath
-            : `/${initialPath}`,
-        }));
+        const normalized = initialPath.startsWith("/")
+          ? initialPath
+          : `/${initialPath}`;
+        setPathByPort((prev) => ({ ...prev, [portNum]: normalized }));
+        setAddressByPort((prev) => ({ ...prev, [portNum]: normalized }));
+        // A new path for an open tab needs a fresh frame to start there.
+        dispatchTabs({ type: "open", port: portNum, multiple: true });
+        dispatchTabs({ type: "refresh", port: portNum });
+        return;
       }
+      dispatchTabs({ type: "open", port: portNum, multiple: true });
     },
     [],
   );
+
+  const navigateActive = useCallback(() => {
+    if (activePort === undefined) return;
+    const target = addressByPort[activePort] ?? activePath;
+    setPathByPort((prev) => ({ ...prev, [activePort]: target }));
+    dispatchTabs({ type: "refresh", port: activePort });
+  }, [activePath, activePort, addressByPort]);
+
+  // Requests from chat links or the New Tab view, also when they arrived before this mounted.
+  const appliedNonceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (requestNonce === undefined || appliedNonceRef.current === requestNonce) return;
+    appliedNonceRef.current = requestNonce;
+    if (requestedPort !== undefined) handleOpenPort(requestedPort, requestedPath);
+  }, [handleOpenPort, requestNonce, requestedPath, requestedPort]);
 
   const openPortExternally = useCallback(
     async (portNum: number, subPath = "/") => {
@@ -890,32 +923,6 @@ export function PreviewPanel({
     [effectiveComputerKey, dialogs],
   );
 
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const onOpenPort = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{
-          computerKey?: string;
-          port?: number;
-          path?: string;
-        }>
-      ).detail;
-      if (!detail || typeof detail.port !== "number") return;
-      if (
-        detail.computerKey &&
-        computerKey &&
-        detail.computerKey !== computerKey
-      ) {
-        return;
-      }
-      handleOpenPort(detail.port, detail.path);
-    };
-    window.addEventListener(INSPECTOR_OPEN_PORT_EVENT, onOpenPort);
-    return () => {
-      window.removeEventListener(INSPECTOR_OPEN_PORT_EVENT, onOpenPort);
-    };
-  }, [computerKey, handleOpenPort]);
-
   const parsedCustom = useMemo(
     () => parsePortOrUrlInput(customPortInput),
     [customPortInput],
@@ -935,12 +942,11 @@ export function PreviewPanel({
     setSwitcherOpen(false);
   }, [parsedCustom, openPortExternally]);
 
-  const handleCloseAllPreviews = useCallback(() => {
-    for (const tab of tabsState.tabs) {
-      dispatchTabs({ type: "close", port: tab.port });
-    }
+  // Showing the list keeps the open previews (and their pages and logins) alive behind it.
+  const handleShowPortList = useCallback(() => {
+    setListOpen(true);
     setSwitcherOpen(false);
-  }, [tabsState.tabs]);
+  }, []);
 
   const handleSendErrorsToAgent = useCallback(async () => {
     if (!actions || !activePort || activeErrors.length === 0) return;
@@ -960,7 +966,7 @@ export function PreviewPanel({
       data-testid="preview-panel"
     >
       {activeTab && activePort !== undefined ? (
-        <>
+        <div className="inspector-panel-fill" hidden={listOpen}>
           <div className="ls-preview-bar">
             <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
               <PopoverTrigger>
@@ -1067,19 +1073,11 @@ export function PreviewPanel({
                   </div>
                 ) : null}
 
-                <div
-                  className="ls-preview-popover__footer"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 6,
-                  }}
-                >
+                <div className="ls-preview-popover__footer">
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={handleCloseAllPreviews}
+                    onClick={handleShowPortList}
                   >
                     {ti("viewAllPortsList")}
                   </Button>
@@ -1101,21 +1099,21 @@ export function PreviewPanel({
               <input
                 type="text"
                 className="ls-preview-url-input"
-                value={activePath}
+                value={activeAddress}
                 placeholder={ti("urlPathPlaceholder")}
                 aria-label={ti("urlPathPlaceholder")}
                 onChange={(e) => {
                   const raw = e.target.value;
                   const normalized = raw.startsWith("/") ? raw : `/${raw}`;
-                  setPathByPort((prev) => ({
+                  setAddressByPort((prev) => ({
                     ...prev,
                     [activePort]: normalized,
                   }));
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    dispatchTabs({ type: "refresh", port: activePort });
+                    navigateActive();
                   }
                 }}
               />
@@ -1123,9 +1121,7 @@ export function PreviewPanel({
                 icon="refresh"
                 size="icon-sm"
                 label={ti("reloadPreview")}
-                onClick={() =>
-                  dispatchTabs({ type: "refresh", port: activePort })
-                }
+                onClick={navigateActive}
               />
               <IconButton
                 icon="close"
@@ -1143,7 +1139,7 @@ export function PreviewPanel({
               leadingIcon="external-link"
               className="ls-preview-external-btn"
               onClick={() => {
-                void openPortExternally(activePort, activePath);
+                void openPortExternally(activePort, activeAddress);
               }}
             >
               {ti("openExternalShort")}
@@ -1217,6 +1213,7 @@ export function PreviewPanel({
                     port={tab.port}
                     revision={tab.revision}
                     subPath={tabPath}
+                    cookies={cookieJarFor(tab.port)}
                     connection={connection}
                     onOpenExternal={() => {
                       void openPortExternally(tab.port, tabPath);
@@ -1235,8 +1232,9 @@ export function PreviewPanel({
               );
             })}
           </div>
-        </>
-      ) : (
+        </div>
+      ) : null}
+      {!activeTab || listOpen ? (
         <div className="ls-preview-launcher inspector-panel-scroll">
           <div className="ls-preview-custom-bar">
             <Input
@@ -1328,7 +1326,7 @@ export function PreviewPanel({
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import {
+  CLOSE_TAB_EVENT,
   DESKTOP_APPEARANCE_EVENT,
   DESKTOP_COMMAND_EVENT,
   getDesktopCapability,
   getShellAppearance,
+  GO_TO_FILE_EVENT,
+  postDesktopMessage,
   reportDesktopRendererReady,
   type DesktopAppearance,
 } from "./bridge";
@@ -12,17 +15,22 @@ import {
   attachRouterListeners,
   engine,
   I18nProvider,
-  pollManagement,
+  localeStore,
+  pollManagementInBackground,
   readLocal,
   routerStore,
   startManagement,
+  startSessionAttention,
   STORAGE_KEYS,
   subscribeStorageReady,
   useRouter,
 } from "./core";
 import {
   BottomTerminalDock,
+  closeActiveInspectorTab,
+  cycleInspectorTab,
   InspectorWorkbench,
+  openInspectorGoToFile,
   StandaloneToolWorkspace,
 } from "./features/inspector";
 import {
@@ -43,11 +51,15 @@ import {
   SignInPairModal,
   SystemHostModal,
 } from "./features/system";
-import { DialogProvider, ErrorBoundary } from "./primitives";
+import { DialogProvider, ErrorBoundary, setPrimitiveLocale } from "./primitives";
 import { applyDesktopAppearance, type ThemeMode } from "./theme";
 
 // Capture `#desktop=<capability>` immediately before any route navigation mutates `location.hash`.
 getDesktopCapability();
+
+// The primitives carry their own fallback words (a dialog's Close, a confirm's answers).
+setPrimitiveLocale(localeStore.getState().locale);
+localeStore.subscribe((state) => setPrimitiveLocale(state.locale));
 
 export function resolveStoredAppearance(): ThemeMode {
   const shellAppearance = getShellAppearance();
@@ -73,9 +85,34 @@ function DesktopWorkspaceRoot() {
 
     void engine.start();
     startManagement();
-    const stopManagementPoll = pollManagement();
+    const stopManagementPoll = pollManagementInBackground();
+    // The menu bar, tray and native dialogs are drawn by the main process: it follows the page's language.
+    const sendLocale = () =>
+      postDesktopMessage({ action: "locale", value: localeStore.getState().locale });
+    sendLocale();
+
+    // ⌘W closes the inspector's tab when it has one; unclaimed, the shell closes the dock or window.
+    const onCloseTab = (event: Event) => {
+      if (closeActiveInspectorTab()) event.preventDefault();
+    };
+    const onGoToFile = () => {
+      openInspectorGoToFile();
+    };
+    // ⌃Tab walks the inspector's tabs from anywhere in the window, as in an editor.
+    const onTabCycle = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.defaultPrevented) return;
+      if (cycleInspectorTab(event.shiftKey ? -1 : 1)) event.preventDefault();
+    };
+    window.addEventListener(CLOSE_TAB_EVENT, onCloseTab);
+    window.addEventListener(GO_TO_FILE_EVENT, onGoToFile);
+    window.addEventListener("keydown", onTabCycle);
+    const detachLocale = localeStore.subscribe((state, previous) => {
+      if (state.locale !== previous.locale) sendLocale();
+    });
     const detachRouter = attachRouterListeners();
     const detachFusion = attachFusionCommandListener();
+    const stopAttention = startSessionAttention();
     const detachStorageTheme = subscribeStorageReady(() => {
       applyDesktopAppearance(resolveStoredAppearance());
     });
@@ -156,6 +193,11 @@ function DesktopWorkspaceRoot() {
       );
       window.removeEventListener(DESKTOP_APPEARANCE_EVENT, onShellAppearance);
       detachStorageTheme();
+      stopAttention();
+      detachLocale();
+      window.removeEventListener(CLOSE_TAB_EVENT, onCloseTab);
+      window.removeEventListener(GO_TO_FILE_EVENT, onGoToFile);
+      window.removeEventListener("keydown", onTabCycle);
       detachFusion();
       detachRouter();
       stopManagementPoll();
@@ -166,7 +208,13 @@ function DesktopWorkspaceRoot() {
     <>
       <DesktopAppShell
         renderSessionWorkspace={({ computerKey, sessionId }) => (
-          <SessionWorkspace computerKey={computerKey} sessionId={sessionId} />
+          // Attachments, send state and scroll position belong to one session: without the key
+          // React reuses the instance and the next session inherits (and sends) them.
+          <SessionWorkspace
+            key={`${computerKey}:${sessionId}`}
+            computerKey={computerKey}
+            sessionId={sessionId}
+          />
         )}
         renderNewSessionWorkspace={({ computerKey, initialCwd }) => (
           <NewSessionWorkspace
@@ -213,16 +261,16 @@ function DesktopWorkspaceRoot() {
       />
 
       {/* Non-unmounting Top-Layer System, Account Sign-In & Pairing Modals */}
-      <ErrorBoundary fallbackTitle="本机管理面板加载异常">
+      <ErrorBoundary>
         <SystemHostModal />
       </ErrorBoundary>
-      <ErrorBoundary fallbackTitle="账号与配对面板加载异常">
+      <ErrorBoundary>
         <SignInPairModal
           open={connectModalOpen}
           onOpenChange={setConnectModalOpen}
         />
       </ErrorBoundary>
-      <ErrorBoundary fallbackTitle="配对二维码面板加载异常">
+      <ErrorBoundary>
         <LocalPairingQrDialog
           open={localPairQrOpen}
           onOpenChange={setLocalPairQrOpen}
@@ -236,7 +284,7 @@ export function App() {
   return (
     <I18nProvider>
       <DialogProvider>
-        <ErrorBoundary fallbackTitle="LinkShell 桌面端渲染异常">
+        <ErrorBoundary>
           <DesktopWorkspaceRoot />
         </ErrorBoundary>
       </DialogProvider>

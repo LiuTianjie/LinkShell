@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import { pickDirectFusionHost } from "../dist/main/fusion-probe.js";
+import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "../dist/main/fusion-probe.js";
 
 function fakeSocket(behavior) {
   const emitter = new EventEmitter();
@@ -50,4 +50,13 @@ test("pickDirectFusionHost bounds multi-host unreachable probe to single paralle
   });
   assert.equal(winner, undefined);
   assert.ok(Date.now() - started < 250);
+});
+
+test("fusionSlug matches the Swift side's shared vector and never derives from a display name", () => {
+  // Same vector as apps/mac/Tests/LinkShellTests/FusionWireTests.swift (`sharedVector`).
+  assert.equal(fusionSlug("wss://gateway.example#machine-1"), "25b8b967c6e4");
+  assert.notEqual(fusionSlug("a"), fusionSlug("b"));
+  assert.ok(isFusionSlug(fusionSlug("anything")));
+  assert.equal(isFusionSlug("../etc"), false);
+  assert.equal(isFusionSlug("m4"), false);
 });

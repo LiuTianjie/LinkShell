@@ -19,11 +19,14 @@ import {
   foldStepRuns,
   isQuietTool,
   liveActivity,
+  openWrapUp,
   presentError,
   proposedPlan,
   questionReplies,
   reconnectLabel,
   reconnectOf,
+  startedSession,
+  t as translateCore,
   tallySteps,
   toolAction,
   toolCommand,
@@ -46,6 +49,8 @@ import {
   changeStat,
   reportDesktopError,
   routerStore,
+  sessionTitle,
+  useI18n,
   useT,
   type Connection,
 } from "@/core";
@@ -68,8 +73,11 @@ import { DiffBlock, DiffStatBadge } from "./DiffBlock";
 import { MarkdownView } from "./MarkdownView";
 import { openSubagentInInspector, useInspectorTabs } from "../inspector";
 import {
+  describeActionError,
   openFileInInspector,
+  reportOnFailure,
   sessionKeyOf,
+  timelineItemSearchText,
   useClientSelector,
   useSessionCopy,
   useSessionUi,
@@ -93,6 +101,27 @@ export interface TimelineViewProps {
   systemNote?: string;
 }
 
+const FOLLOW_DISTANCE_PX = 72;
+
+/** The first row whose bottom is below the top of the view (rows stack, so a binary search finds it). */
+function firstVisibleRow(track: HTMLElement, viewTop: number): Element | null {
+  const rows = track.children;
+  let low = 0;
+  let high = rows.length - 1;
+  let found: Element | null = null;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const row = rows[middle]!;
+    if (row.getBoundingClientRect().bottom > viewTop) {
+      found = row;
+      high = middle - 1;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return found;
+}
+
 export function TimelineView({
   connection,
   session,
@@ -112,18 +141,36 @@ export function TimelineView({
     false,
   );
   const online = useClientSelector(connection, (s) => s.status === "online", false);
+  const ready = useClientSelector(connection, (s) => Boolean(s.ready[session.id]), false);
+  const promptPhase = useClientSelector(
+    connection,
+    (s) => s.promptProgress?.[session.id]?.phase,
+    undefined,
+  );
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  // Whether the newest message stays in view: only the person's own scrolling changes it.
+  const followRef = useRef(true);
+  // The scrollTop this component last wrote, so its own scroll events aren't read as the person's.
+  const expectedTopRef = useRef<number | null>(null);
+  // Reading back, the row at the top keeps its place when anything above it changes height
+  // (a page of earlier history, an image loading, steps opening). Ported from the web client.
+  const anchorRef = useRef<{ node: Element; offset: number; fromBottom: number } | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const prependAnchorRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(
-    null,
-  );
+  const isAtBottomRef = useRef(true);
+  const pendingJumpRef = useRef<string | null>(null);
 
   const [openStepKeys, setOpenStepKeys] = useState<Set<string>>(() => new Set());
   const [lightboxImage, setLightboxImage] = useState<{ src: string; alt: string } | null>(
     null,
   );
+
+  const markAtBottom = useCallback((value: boolean) => {
+    if (isAtBottomRef.current === value) return;
+    isAtBottomRef.current = value;
+    setIsAtBottom(value);
+  }, []);
 
   const toggleStepRun = useCallback((key: string) => {
     setOpenStepKeys((prev) => {
@@ -134,92 +181,175 @@ export function TimelineView({
     });
   }, []);
 
+  const openImage = useCallback((src: string, alt: string) => setLightboxImage({ src, alt }), []);
+
   const orderedItems = useMemo(
     () => cardsAtTurnEnd(view.items, view.turnBreaks),
     [view.items, view.turnBreaks],
   );
 
+  // A search opens the folded step runs that hold a match, as the web client does.
+  const effectiveOpenSteps = useMemo(() => {
+    const needle = searchQuery.toLowerCase();
+    if (!needle) return openStepKeys;
+    let expanded: Set<string> | undefined;
+    for (const row of foldStepRuns(orderedItems, openStepKeys)) {
+      if (
+        row.type === "steps" &&
+        !openStepKeys.has(row.key) &&
+        row.steps.some((step) => timelineItemSearchText(step).toLowerCase().includes(needle))
+      ) {
+        expanded ??= new Set(openStepKeys);
+        expanded.add(row.key);
+      }
+    }
+    return expanded ?? openStepKeys;
+  }, [openStepKeys, orderedItems, searchQuery]);
+
   const rows = useMemo(
-    () => foldStepRuns(orderedItems, openStepKeys),
-    [openStepKeys, orderedItems],
+    () => foldStepRuns(orderedItems, effectiveOpenSteps),
+    [effectiveOpenSteps, orderedItems],
   );
+
+  const openWrapUpId = useMemo(() => openWrapUp(view.items), [view.items]);
+  const showItemQuestions = session.asyncQuestions === undefined;
+  const turnActive = view.turnActive || session.state === "running";
+
+  const noteAnchor = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+    const viewTop = scroller.getBoundingClientRect().top;
+    const node = firstVisibleRow(track, viewTop);
+    anchorRef.current = node
+      ? {
+          node,
+          offset: node.getBoundingClientRect().top - viewTop,
+          fromBottom: scroller.scrollHeight - scroller.scrollTop,
+        }
+      : null;
+  }, []);
+
+  const writeScrollTop = useCallback((scroller: HTMLDivElement, top: number) => {
+    scroller.scrollTop = top;
+    expectedTopRef.current = scroller.scrollTop;
+  }, []);
+
+  /** After any change of height: back to the newest message, or the top row where it was. */
+  const settle = useCallback(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    if (followRef.current) {
+      writeScrollTop(scroller, scroller.scrollHeight);
+    } else {
+      const anchor = anchorRef.current;
+      if (anchor) {
+        const viewTop = scroller.getBoundingClientRect().top;
+        const moved = anchor.node.isConnected
+          ? anchor.node.getBoundingClientRect().top - viewTop - anchor.offset
+          : // The row was replaced (a folded run regrouped): hold the distance from the end.
+            scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom;
+        if (Math.abs(moved) >= 0.5) writeScrollTop(scroller, scroller.scrollTop + moved);
+      }
+    }
+    noteAnchor();
+  }, [noteAnchor, writeScrollTop]);
+
+  // Text released by the streaming smoother, images and highlighting all change height without a
+  // new render here; the observer sees every one of them before paint.
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => settle());
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [settle]);
+
+  useLayoutEffect(() => {
+    settle();
+  }, [rows, view.permissions.length, turnActive, promptPhase, ready, settle]);
+
+  // Sending goes back to the newest message even after reading back (the web client's `sentId`).
+  useLayoutEffect(() => {
+    if (!ui.followNonce) return;
+    followRef.current = true;
+    markAtBottom(true);
+    settle();
+  }, [markAtBottom, settle, ui.followNonce]);
 
   const triggerLoadEarlier = useCallback(async () => {
     if (loadingEarlier || view.startSeq <= 0 || !online) return;
-    const scroller = scrollerRef.current;
-    if (scroller) {
-      prependAnchorRef.current = {
-        prevScrollHeight: scroller.scrollHeight,
-        prevScrollTop: scroller.scrollTop,
-      };
-    }
     try {
+      // The anchor keeps the reader's place when the page lands; nothing to restore on failure.
       await connection.store.getState().loadEarlier(session.id);
     } catch (error) {
-      prependAnchorRef.current = null;
       reportDesktopError(error);
     }
   }, [connection.store, loadingEarlier, online, session.id, view.startSeq]);
 
-  // Preserve viewport position when earlier history prepends above current scrollTop.
-  useLayoutEffect(() => {
-    const anchor = prependAnchorRef.current;
-    const scroller = scrollerRef.current;
-    if (!anchor || !scroller) return;
-    const delta = scroller.scrollHeight - anchor.prevScrollHeight;
-    if (delta > 0) {
-      scroller.scrollTop = anchor.prevScrollTop + delta;
-    }
-    prependAnchorRef.current = null;
-  }, [rows.length, view.startSeq]);
-
-  // Smart stick-to-bottom on live updates unless the reader scrolled up.
-  useLayoutEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller || !stickToBottomRef.current || prependAnchorRef.current) return;
-    scroller.scrollTop = scroller.scrollHeight;
-  }, [rows, view.permissions.length, view.turnActive]);
-
-  // Handle Turn Outline jump requests from `SessionHeaderActions`.
+  // Turn Outline and Find jumps: a target folded into a step run is opened first.
   useEffect(() => {
-    if (!ui.scrollToItemId || !scrollerRef.current) return;
-    const target = scrollerRef.current.querySelector<HTMLElement>(
-      `[data-turn-item-id="${CSS.escape(ui.scrollToItemId)}"]`,
-    );
-    if (target && typeof target.scrollIntoView === "function") {
-      stickToBottomRef.current = false;
-      setIsAtBottom(false);
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    if (ui.scrollToItemId) pendingJumpRef.current = ui.scrollToItemId;
   }, [ui.scrollNonce, ui.scrollToItemId]);
+
+  useEffect(() => {
+    const itemId = pendingJumpRef.current;
+    const scroller = scrollerRef.current;
+    if (!itemId || !scroller) return;
+    const folded = rows.find(
+      (row) => row.type === "steps" && row.steps.some((step) => step.id === itemId),
+    );
+    if (folded?.type === "steps" && !effectiveOpenSteps.has(folded.key)) {
+      setOpenStepKeys((prev) => new Set(prev).add(folded.key));
+      return;
+    }
+    const target = scroller.querySelector<HTMLElement>(
+      `[data-turn-item-id="${CSS.escape(itemId)}"]`,
+    );
+    if (!target) return;
+    pendingJumpRef.current = null;
+    followRef.current = false;
+    markAtBottom(false);
+    if (typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "center" });
+    }
+    noteAnchor();
+  }, [effectiveOpenSteps, markAtBottom, noteAnchor, rows, ui.scrollNonce]);
 
   const handleScroll = () => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
+    const expected = expectedTopRef.current;
+    expectedTopRef.current = null;
+    if (expected !== null && Math.abs(scroller.scrollTop - expected) <= 1) return;
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    const nearBottom = distance < 72;
-    stickToBottomRef.current = nearBottom;
-    if (nearBottom !== isAtBottom) {
-      setIsAtBottom(nearBottom);
-    }
+    const nearBottom = distance < FOLLOW_DISTANCE_PX;
+    followRef.current = nearBottom;
+    markAtBottom(nearBottom);
+    noteAnchor();
     if (scroller.scrollTop < 64 && view.startSeq > 0 && !loadingEarlier) {
       void triggerLoadEarlier();
     }
   };
 
+  // Reading back starts with the wheel, a key or the scrollbar, before the scroll event lands;
+  // stop following right away or a streamed chunk would pull the view back down first.
+  const stopFollowing = () => {
+    followRef.current = false;
+  };
+
   const scrollToBottom = () => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    stickToBottomRef.current = true;
-    setIsAtBottom(true);
-    if (typeof scroller.scrollTo === "function") {
-      scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-    } else {
-      scroller.scrollTop = scroller.scrollHeight;
-    }
+    followRef.current = true;
+    markAtBottom(true);
+    // Instant: a smooth scroll's own intermediate events would read as reading back.
+    writeScrollTop(scroller, scroller.scrollHeight);
+    noteAnchor();
   };
 
   const historicalCutoff = Math.max(0, rows.length - 12);
+  const showLiveRow = turnActive || promptPhase !== undefined;
 
   return (
     <>
@@ -227,14 +357,23 @@ export function TimelineView({
         ref={scrollerRef}
         className="ls-timeline-scroller"
         onScroll={handleScroll}
+        onWheel={(event) => {
+          if (event.deltaY < 0) stopFollowing();
+        }}
+        onKeyDown={(event) => {
+          if (["ArrowUp", "PageUp", "Home"].includes(event.key)) stopFollowing();
+        }}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) stopFollowing();
+        }}
         role="log"
         aria-live="polite"
         aria-relevant="additions"
       >
-        <div className="ls-timeline-track">
+        <div ref={trackRef} className="ls-timeline-track">
           {/* Top pagination control */}
           {view.startSeq > 0 && (
-            <div style={{ display: "flex", justifyContent: "center", paddingBlock: 4 }}>
+            <div className="ls-timeline-earlier">
               <Button
                 variant="secondary"
                 size="sm"
@@ -248,15 +387,15 @@ export function TimelineView({
           )}
 
           {rows.length === 0 && view.permissions.length === 0 && (
-            <div
-              style={{
-                padding: "48px 16px",
-                textAlign: "center",
-                fontSize: 13.5,
-                color: "var(--ls-fg-3)",
-              }}
-            >
-              {copy.emptyTimeline}
+            <div className="ls-timeline-empty" role="status">
+              {ready ? (
+                copy.emptyTimeline
+              ) : (
+                <>
+                  <DesktopIcon name="spinner" size="sm" />
+                  <span>{copy.loadingHistory}</span>
+                </>
+              )}
             </div>
           )}
 
@@ -268,7 +407,7 @@ export function TimelineView({
                   key={row.key}
                   stepKey={row.key}
                   steps={row.steps}
-                  open={openStepKeys.has(row.key)}
+                  open={effectiveOpenSteps.has(row.key)}
                   historical={isHistorical}
                   onToggle={toggleStepRun}
                 />
@@ -280,11 +419,14 @@ export function TimelineView({
                 item={row.item}
                 historical={isHistorical}
                 connection={connection}
-                session={session}
+                sessionId={session.id}
+                cwd={session.cwd}
                 sessionKey={sessionKey}
                 searchQuery={searchQuery}
-                isTurnActive={view.turnActive || session.state === "running"}
-                onOpenImage={(src, alt) => setLightboxImage({ src, alt })}
+                isTurnActive={turnActive}
+                showItemQuestions={showItemQuestions}
+                wrapUpOpen={row.item.id === openWrapUpId}
+                onOpenImage={openImage}
               />
             );
           })}
@@ -302,7 +444,7 @@ export function TimelineView({
             </div>
           ))}
 
-          {/*Session-level non-blocking async questions */}
+          {/* Session-level non-blocking async questions (newer hosts; older ones carry them on the agent's message) */}
           {session.asyncQuestions && session.asyncQuestions.length > 0 && (
             <AsyncQuestionsBar
               questions={session.asyncQuestions}
@@ -311,13 +453,21 @@ export function TimelineView({
             />
           )}
 
-          {/* Live running turn indicator & elapsed clock */}
-          {(view.turnActive || session.state === "running") && (
+          {/* Live running turn indicator & elapsed clock; before the turn starts, what this send is doing */}
+          {showLiveRow && (
             <LiveTurnRow
               view={view}
+              asking={Boolean(session.asyncQuestions?.length)}
+              pendingLabel={
+                turnActive
+                  ? undefined
+                  : promptPhase === "sending"
+                    ? copy.sendingPrompt
+                    : copy.startingTurn
+              }
               onCancel={
-                online
-                  ? () => void connection.store.getState().cancel(session.id)
+                online && turnActive
+                  ? () => reportOnFailure(connection.store.getState().cancel(session.id))
                   : undefined
               }
             />
@@ -330,18 +480,21 @@ export function TimelineView({
             </div>
           )}
         </div>
-      </div>
 
-      {/* Floating jump-to-bottom pill */}
-      <button
-        type="button"
-        className="ls-jump-bottom-btn"
-        data-visible={!isAtBottom}
-        onClick={scrollToBottom}
-      >
-        <DesktopIcon name="arrow-down" size="xs" />
-        <span>{t("desktop.timeline.jumpToBottom")}</span>
-      </button>
+        {/* Sticky inside the scroller: it sits just above the composer whatever its height. */}
+        <div className="ls-jump-bottom-anchor">
+          <button
+            type="button"
+            className="ls-jump-bottom-btn"
+            data-visible={!isAtBottom}
+            tabIndex={isAtBottom ? -1 : undefined}
+            onClick={scrollToBottom}
+          >
+            <DesktopIcon name="arrow-down" size="xs" />
+            <span>{t("desktop.timeline.jumpToBottom")}</span>
+          </button>
+        </div>
+      </div>
 
       {/* Lightbox dialog for message / tool images */}
       <Dialog
@@ -352,16 +505,12 @@ export function TimelineView({
         size="lg"
       >
         <DialogHeader>
-          <DialogTitle>{lightboxImage?.alt || "Image"}</DialogTitle>
+          <DialogTitle>{lightboxImage?.alt || copy.imageLabel}</DialogTitle>
         </DialogHeader>
         <DialogBody>
           {lightboxImage && (
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <img
-                src={lightboxImage.src}
-                alt={lightboxImage.alt}
-                style={{ maxWidth: "100%", maxHeight: "72vh", borderRadius: 8 }}
-              />
+            <div className="ls-lightbox-frame">
+              <img src={lightboxImage.src} alt={lightboxImage.alt} />
             </div>
           )}
         </DialogBody>
@@ -435,10 +584,15 @@ interface TimelineItemRowProps {
   item: TimelineItem;
   historical: boolean;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   sessionKey: string;
   searchQuery: string;
   isTurnActive: boolean;
+  /** Older hosts carry async questions only on the agent's message; newer ones on the session. */
+  showItemQuestions: boolean;
+  /** Only the newest wrap-up, with nothing said since, still takes a reply. */
+  wrapUpOpen: boolean;
   onOpenImage: (src: string, alt: string) => void;
 }
 
@@ -446,10 +600,13 @@ const TimelineItemRow = memo(function TimelineItemRow({
   item,
   historical,
   connection,
-  session,
+  sessionId,
+  cwd,
   sessionKey,
   searchQuery,
   isTurnActive,
+  showItemQuestions,
+  wrapUpOpen,
   onOpenImage,
 }: TimelineItemRowProps) {
   return (
@@ -462,7 +619,8 @@ const TimelineItemRow = memo(function TimelineItemRow({
         <UserTurnRow
           item={item}
           connection={connection}
-          session={session}
+          sessionId={sessionId}
+          cwd={cwd}
           searchQuery={searchQuery}
           onOpenImage={onOpenImage}
         />
@@ -471,8 +629,10 @@ const TimelineItemRow = memo(function TimelineItemRow({
         <AgentTurnRow
           item={item}
           connection={connection}
-          session={session}
+          sessionId={sessionId}
+          cwd={cwd}
           searchQuery={searchQuery}
+          showQuestions={showItemQuestions}
           onOpenImage={onOpenImage}
         />
       )}
@@ -483,9 +643,11 @@ const TimelineItemRow = memo(function TimelineItemRow({
         <ToolCallRow
           item={item}
           connection={connection}
-          session={session}
+          sessionId={sessionId}
+          cwd={cwd}
           sessionKey={sessionKey}
           searchQuery={searchQuery}
+          wrapUpOpen={wrapUpOpen}
           onOpenImage={onOpenImage}
         />
       )}
@@ -493,7 +655,8 @@ const TimelineItemRow = memo(function TimelineItemRow({
         <PlanTurnCard
           item={item}
           connection={connection}
-          session={session}
+          sessionId={sessionId}
+          cwd={cwd}
           searchQuery={searchQuery}
         />
       )}
@@ -514,13 +677,15 @@ const TimelineItemRow = memo(function TimelineItemRow({
 function UserTurnRow({
   item,
   connection,
-  session,
+  sessionId,
+  cwd,
   searchQuery,
   onOpenImage,
 }: {
   item: Extract<TimelineItem, { kind: "user" }>;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   searchQuery: string;
   onOpenImage: (src: string, alt: string) => void;
 }) {
@@ -556,7 +721,7 @@ function UserTurnRow({
   const handleForkHere = async () => {
     if (!online) return;
     try {
-      const forked = await connection.store.getState().forkSession(session.id, {
+      const forked = await connection.store.getState().forkSession(sessionId, {
         itemId: item.id,
       });
       routerStore.getState().openSession(connection.computer.key, forked.id);
@@ -571,7 +736,7 @@ function UserTurnRow({
         {item.agentMessages && item.agentMessages.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: parsedView.text ? 8 : 0 }}>
             {item.agentMessages.map((mail, idx) => (
-              <div key={idx} style={{ fontSize: 12.5, color: "var(--ls-fg-2)" }}>
+              <div key={idx} style={{ fontSize: 12, color: "var(--ls-fg-2)" }}>
                 <strong style={{ color: "var(--ls-fg)" }}>{mail.sender}: </strong>
                 {mail.summary || mail.body}
               </div>
@@ -593,8 +758,8 @@ function UserTurnRow({
             <MarkdownView
               text={parsedView.text}
               computerKey={connection.computer.key}
-              sessionId={session.id}
-              cwd={session.cwd}
+              sessionId={sessionId}
+              cwd={cwd}
               searchQuery={searchQuery}
             />
           )
@@ -607,7 +772,7 @@ function UserTurnRow({
                 key={idx}
                 block={img}
                 connection={connection}
-                sessionId={session.id}
+                sessionId={sessionId}
                 onOpen={onOpenImage}
               />
             ))}
@@ -624,7 +789,7 @@ function UserTurnRow({
               variant="secondary"
               size="sm"
               disabled={!online}
-              onClick={() => void connection.store.getState().retry(localClientId)}
+              onClick={() => reportOnFailure(connection.store.getState().retry(localClientId))}
             >
               {copy.retryFailed}
             </Button>
@@ -667,6 +832,7 @@ function SessionImageThumb({
   sessionId: string;
   onOpen: (src: string, alt: string) => void;
 }) {
+  const copy = useSessionCopy();
   const inlineSrc = block.data
     ? `data:${block.mimeType || "image/png"};base64,${block.data}`
     : undefined;
@@ -716,9 +882,9 @@ function SessionImageThumb({
   return (
     <img
       src={resolvedSrc}
-      alt="Attached image"
+      alt={copy.attachedImage}
       className="ls-user-image-thumb"
-      onClick={() => onOpen(resolvedSrc, "Attached image")}
+      onClick={() => onOpen(resolvedSrc, copy.attachedImage)}
     />
   );
 }
@@ -730,14 +896,18 @@ function SessionImageThumb({
 function AgentTurnRow({
   item,
   connection,
-  session,
+  sessionId,
+  cwd,
   searchQuery,
+  showQuestions,
   onOpenImage,
 }: {
   item: Extract<TimelineItem, { kind: "agent" }>;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   searchQuery: string;
+  showQuestions: boolean;
   onOpenImage: (src: string, alt: string) => void;
 }) {
   const cleaned = useMemo(() => cleanAgentHeartbeatText(item.text), [item.text]);
@@ -756,8 +926,8 @@ function AgentTurnRow({
           text={cleaned.text}
           streaming={item.streaming}
           computerKey={connection.computer.key}
-          sessionId={session.id}
-          cwd={session.cwd}
+          sessionId={sessionId}
+          cwd={cwd}
           searchQuery={searchQuery}
         />
       )}
@@ -769,18 +939,18 @@ function AgentTurnRow({
               key={idx}
               block={img}
               connection={connection}
-              sessionId={session.id}
+              sessionId={sessionId}
               onOpen={onOpenImage}
             />
           ))}
         </div>
       )}
 
-      {item.questions && item.questions.length > 0 && (
+      {showQuestions && !item.streaming && item.questions && item.questions.length > 0 && (
         <AsyncQuestionsBar
           questions={item.questions}
           connection={connection}
-          sessionId={session.id}
+          sessionId={sessionId}
         />
       )}
 
@@ -824,16 +994,20 @@ function ThoughtTurnRow({
 function ToolCallRow({
   item,
   connection,
-  session,
+  sessionId,
+  cwd,
   sessionKey,
   searchQuery,
+  wrapUpOpen,
   onOpenImage,
 }: {
   item: ToolItem;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   sessionKey: string;
   searchQuery: string;
+  wrapUpOpen: boolean;
   onOpenImage: (src: string, alt: string) => void;
 }) {
   const action = toolAction(item);
@@ -844,10 +1018,17 @@ function ToolCallRow({
       <WrapUpTurnCard
         item={item}
         connection={connection}
-        session={session}
+        sessionId={sessionId}
+        cwd={cwd}
         searchQuery={searchQuery}
+        open={wrapUpOpen}
       />
     );
+  }
+
+  // A session the Claude app started from this one
+  if (action === "start_session") {
+    return <StartedSessionCard item={item} connection={connection} />;
   }
 
   // Subagent spawn card
@@ -856,7 +1037,7 @@ function ToolCallRow({
       <SubagentSpawnCard
         item={item}
         connection={connection}
-        session={session}
+        sessionId={sessionId}
       />
     );
   }
@@ -922,7 +1103,7 @@ function ToolCallRow({
             path
               ? (e) => {
                   e.stopPropagation();
-                  openFileInInspector(connection.computer.key, session.id, path);
+                  openFileInInspector(connection.computer.key, sessionId, path);
                 }
               : undefined
           }
@@ -953,8 +1134,8 @@ function ToolCallRow({
           <MarkdownView
             text={planMarkdown}
             computerKey={connection.computer.key}
-            sessionId={session.id}
-            cwd={session.cwd}
+            sessionId={sessionId}
+            cwd={cwd}
             searchQuery={searchQuery}
           />
         )}
@@ -964,7 +1145,7 @@ function ToolCallRow({
             key={idx}
             change={change}
             computerKey={connection.computer.key}
-            sessionId={session.id}
+            sessionId={sessionId}
             sessionKey={sessionKey}
           />
         ))}
@@ -987,7 +1168,7 @@ function ToolCallRow({
               key={idx}
               block={entry.content}
               connection={connection}
-              sessionId={session.id}
+              sessionId={sessionId}
               onOpen={onOpenImage}
             />
           ) : null,
@@ -1006,17 +1187,17 @@ function ToolCallRow({
 function SubagentSpawnCard({
   item,
   connection,
-  session,
+  sessionId,
 }: {
   item: ToolItem;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
 }) {
   const t = useT();
   const copy = useSessionCopy();
   const online = useClientSelector(connection, (s) => s.status === "online", false);
   const inspectorOpen = useStore(routerStore, (s) => s.inspectorOpen);
-  const inspectorTabs = useInspectorTabs(connection.computer.key, session.id);
+  const inspectorTabs = useInspectorTabs(connection.computer.key, sessionId);
   const [cancelling, setCancelling] = useState(false);
 
   const detail = item.detail?.type === "subagent" ? item.detail : undefined;
@@ -1026,11 +1207,11 @@ function SubagentSpawnCard({
     (!subState && (item.status === "in_progress" || item.status === "pending"));
   const isFailed = subState === "failed" || item.status === "failed";
   const canCancel = Boolean(isRunning && detail?.canCancel && detail?.nativeSessionId);
-  const subagentTitle = detail?.name || detail?.agentType || "Subagent";
+  const subagentTitle = detail?.name || detail?.agentType || copy.subagentFallback;
   const isTabOpen = inspectorOpen && inspectorTabs.activeId === `subagent:${item.id}`;
 
   const handleOpenSubagentTab = () => {
-    openSubagentInInspector(connection.computer.key, session.id, {
+    openSubagentInInspector(connection.computer.key, sessionId, {
       toolCallId: item.id,
       title: subagentTitle,
       agent: detail?.agentType,
@@ -1042,7 +1223,7 @@ function SubagentSpawnCard({
     setCancelling(true);
     try {
       await connection.link.call("sessions.cancelSubagent", {
-        sessionId: session.id,
+        sessionId: sessionId,
         nativeSessionId: detail.nativeSessionId,
       });
     } catch (error) {
@@ -1072,7 +1253,7 @@ function SubagentSpawnCard({
         }}
       >
         <SubagentGlyph
-          sessionId={session.id}
+          sessionId={sessionId}
           toolCallId={item.id}
           size="md"
         />
@@ -1092,7 +1273,7 @@ function SubagentSpawnCard({
           {detail?.task && (
             <div
               style={{
-                fontSize: 12.5,
+                fontSize: 12,
                 color: "var(--ls-fg-2)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -1133,12 +1314,14 @@ function SubagentSpawnCard({
 function PlanTurnCard({
   item,
   connection,
-  session,
+  sessionId,
+  cwd,
   searchQuery,
 }: {
   item: Extract<TimelineItem, { kind: "plan" }>;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   searchQuery: string;
 }) {
   const copy = useSessionCopy();
@@ -1183,8 +1366,8 @@ function PlanTurnCard({
           <MarkdownView
             text={item.markdown}
             computerKey={connection.computer.key}
-            sessionId={session.id}
-            cwd={session.cwd}
+            sessionId={sessionId}
+            cwd={cwd}
             searchQuery={searchQuery}
           />
         </div>
@@ -1193,62 +1376,144 @@ function PlanTurnCard({
   );
 }
 
+/** The Claude app's end-of-turn box (ported from the web client): a reply sends its message once; the app's own actions are done there. */
 function WrapUpTurnCard({
   item,
   connection,
-  session,
+  sessionId,
+  cwd,
   searchQuery,
+  open,
 }: {
   item: ToolItem;
   connection: Connection;
-  session: SessionSummary;
+  sessionId: string;
+  cwd: string;
   searchQuery: string;
+  open: boolean;
 }) {
   const copy = useSessionCopy();
   const online = useClientSelector(connection, (s) => s.status === "online", false);
   const wrap = useMemo(() => wrapUpOf(item), [item]);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<number>();
+  const [error, setError] = useState<string>();
+
+  const reply = async (index: number, message: string) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const delivery = await connection.store
+        .getState()
+        .send(sessionId, [{ type: "text", text: message }]);
+      if (delivery === "failed") setError(copy.wrapUpSendFailed);
+      else setSent(index);
+    } catch (failure) {
+      setError(describeActionError(failure, copy.wrapUpSendFailed));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="ls-plan-card">
       <div className="ls-plan-header">
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{copy.wrapUpLabel}</span>
+        <span className="ls-wrap-up-label">{copy.wrapUpLabel}</span>
       </div>
-      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="ls-wrap-up-body">
         {wrap.recap && (
           <MarkdownView
             text={wrap.recap}
             computerKey={connection.computer.key}
-            sessionId={session.id}
-            cwd={session.cwd}
+            sessionId={sessionId}
+            cwd={cwd}
             searchQuery={searchQuery}
           />
         )}
-        {wrap.ask && (
-          <div style={{ fontSize: 13, color: "var(--ls-fg-2)" }}>{wrap.ask}</div>
-        )}
+        {wrap.ask && <div className="ls-wrap-up-ask">{wrap.ask}</div>}
         {wrap.actions.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {wrap.actions.map((act, idx) => (
-              <Button
-                key={idx}
-                variant="secondary"
-                size="sm"
-                disabled={!online || Boolean(act.app)}
-                onClick={() => {
-                  if (act.message) {
-                    void connection.store
-                      .getState()
-                      .send(session.id, [{ type: "text", text: act.message }]);
-                  }
-                }}
-              >
-                {act.label}
-              </Button>
-            ))}
+          <div className="ls-wrap-up-actions">
+            {wrap.actions.map((act, idx) =>
+              open && act.message !== undefined ? (
+                <Button
+                  key={idx}
+                  variant={idx === 0 ? "primary" : "secondary"}
+                  size="sm"
+                  title={act.message}
+                  loading={busy && sent === undefined}
+                  disabled={!online || busy || sent !== undefined}
+                  onClick={() => void reply(idx, act.message!)}
+                >
+                  {act.label}
+                </Button>
+              ) : (
+                <span
+                  key={idx}
+                  className="ls-wrap-up-chip"
+                  data-sent={sent === idx || undefined}
+                  title={act.app ? copy.wrapUpAppHint : undefined}
+                >
+                  {act.label}
+                </span>
+              ),
+            )}
+          </div>
+        )}
+        {error && (
+          <div className="ls-composer-send-error" role="alert">
+            {error}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/** A session the Claude app started from this one: opens it when this computer has it (ported from the web client). */
+function StartedSessionCard({ item, connection }: { item: ToolItem; connection: Connection }) {
+  const copy = useSessionCopy();
+  const started = useMemo(() => startedSession(item), [item]);
+  const target = useClientSelector(
+    connection,
+    (s) => {
+      if (!started.appId) return undefined;
+      const found = Object.values(s.sessions).find((candidate) => candidate.appId === started.appId);
+      return found?.id;
+    },
+    undefined,
+  );
+  const targetTitle = useClientSelector(
+    connection,
+    (s) => (target && s.sessions[target] ? sessionTitle(s.sessions[target]) : undefined),
+    undefined,
+  );
+  const body = (
+    <>
+      <DesktopIcon name={started.state === "starting" ? "spinner" : "session-fork"} size="sm" />
+      <span className="ls-started-session-text">
+        <strong>{started.title}</strong>
+        <small>{copy.sessionCardStates[started.state]}</small>
+      </span>
+    </>
+  );
+  if (!target) {
+    return (
+      <div className="ls-started-session" data-state={started.state}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ls-started-session"
+      data-state={started.state}
+      title={copy.openSessionTitle(targetTitle ?? started.title)}
+      onClick={() => routerStore.getState().openSession(connection.computer.key, target)}
+    >
+      {body}
+      <DesktopIcon name="chevron-right" size="sm" />
+    </button>
   );
 }
 
@@ -1380,14 +1645,36 @@ function DriverChangeRow({
 
 function LiveTurnRow({
   view,
+  pendingLabel,
+  asking = false,
   onCancel,
 }: {
   view: SessionView;
+  /** Before the turn starts: what this device's send is doing (`promptProgress`). */
+  pendingLabel?: string;
+  /** The agent asked something it does not wait for: the person's answer is what is pending. */
+  asking?: boolean;
   onCancel?: () => void;
 }) {
-  const t = useT();
+  const { locale, t } = useI18n();
+  const copy = useSessionCopy();
   const activity = useMemo(() => liveActivity(view), [view]);
   const [now, setNow] = useState(() => Date.now());
+  // The shared activity model words its three fixed states in Chinese; a tool's own running
+  // text passes through as the agent reported it.
+  const waiting = !pendingLabel && (activity.waiting || asking);
+  // The running call, the reply or the thought already shows itself as live in the timeline
+  // above: saying it again here reads as two things running, so only the turn's time is left.
+  const quiet = !pendingLabel && Boolean(activity.echo) && !waiting;
+  const activityLabel = activity.waiting
+    ? t("desktop.timeline.waitingConfirm")
+    : asking
+      ? t("desktop.timeline.waitingAnswer")
+      : quiet
+        ? copy.turnElapsed
+        : activity.label === "思考中…"
+          ? translateCore(locale, "session.thinking")
+          : activity.label;
 
   useEffect(() => {
     if (!activity.startedAt) return;
@@ -1398,10 +1685,10 @@ function LiveTurnRow({
   const elapsedMs = activity.startedAt ? Math.max(0, now - activity.startedAt) : 0;
 
   return (
-    <div className="ls-live-row" role="status">
-      <StatusDot tone={activity.waiting ? "waiting" : "running"} />
-      <span className="ls-live-label">{activity.label}</span>
-      {elapsedMs >= ELAPSED_FROM && (
+    <div className="ls-live-row" role="status" data-quiet={quiet ? "true" : undefined}>
+      {quiet ? null : <StatusDot tone={waiting ? "waiting" : "running"} />}
+      <span className="ls-live-label">{pendingLabel ?? activityLabel}</span>
+      {!pendingLabel && elapsedMs >= ELAPSED_FROM && (
         <span className="ls-live-elapsed">{formatDurationMs(elapsedMs)}</span>
       )}
       {onCancel && (

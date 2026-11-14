@@ -33,6 +33,12 @@ export function SideChatTabPanel({
 }: SideChatTabPanelProps): JSX.Element {
   const { t, ti } = useInspectorI18n();
   const dialogs = useDialogs();
+  const showError = useCallback(
+    (err: unknown) => {
+      void dialogs.alert(err instanceof Error ? err.message : String(err));
+    },
+    [dialogs],
+  );
   const [selectedSideId, setSelectedSideId] = useState<string | undefined>(
     undefined,
   );
@@ -256,7 +262,7 @@ export function SideChatTabPanel({
                   icon="trash"
                   destructive
                   onSelect={() => {
-                    void actions.closeSide(activeSide.sideId);
+                    actions.closeSide(activeSide.sideId).catch(showError);
                     setSelectedSideId(undefined);
                   }}
                 >
@@ -278,7 +284,7 @@ export function SideChatTabPanel({
               aria-label={t("desktop.composer.stop")}
               title={t("desktop.composer.stop")}
               onClick={() => {
-                void actions.cancelSide(activeSide.sideId);
+                actions.cancelSide(activeSide.sideId).catch(showError);
               }}
             >
               <DesktopIcon name="stop-square" size="xs" />

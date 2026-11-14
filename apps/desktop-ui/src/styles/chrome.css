@@ -98,11 +98,6 @@
     padding-inline-start: 84px;
   }
 
-  /* Dedicated macOS traffic-light clearance utility (80px pure drag zone) */
-  .desktop-root[data-platform="macos"]:not([data-fullscreen="true"]) .macos-traffic-safe {
-    padding-inline-start: 80px;
-  }
-
   /* Collapsed Sidebar Left Clearance: 84px on macOS (clears traffic lights cleanly with no dead gap) */
   .desktop-root[data-platform="macos"][data-sidebar-collapsed="true"]:not([data-fullscreen="true"]) {
     --titlebar-left-inset: 84px;
@@ -150,13 +145,6 @@
 
   .desktop-root[data-platform="windows"]:not([data-fullscreen="true"])[data-inspector-open="true"]
     :is(.desktop-inspector-header, .ls-inspector-header) {
-    padding-inline-end: max(
-      calc(12px + var(--ls-win-caption-w, 138px)),
-      var(--caption-inset, calc(12px + var(--ls-win-caption-w, 138px)))
-    );
-  }
-
-  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) .caption-safe-right {
     padding-inline-end: max(
       calc(12px + var(--ls-win-caption-w, 138px)),
       var(--caption-inset, calc(12px + var(--ls-win-caption-w, 138px)))
@@ -353,33 +341,6 @@
     flex-direction: column;
   }
 
-  /* Compositor-driven scroll-state timeline container (Chromium 133+) */
-  .desktop-timeline-scroll {
-    flex: 1 1 auto;
-    min-inline-size: 0;
-    min-block-size: 0;
-    overflow-y: auto;
-    overflow-x: clip;
-    scrollbar-gutter: stable;
-    container-name: timeline-scroll;
-    container-type: scroll-state;
-  }
-
-  .desktop-scroll-to-bottom {
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(6px);
-    transition: opacity 140ms ease-out, transform 140ms ease-out;
-  }
-
-  @container timeline-scroll scroll-state(scrollable: bottom) {
-    .desktop-scroll-to-bottom {
-      opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0);
-    }
-  }
-
   /* Dockable Bottom Terminal Drawer inside L2 */
   .desktop-bottom-dock {
     min-inline-size: 0;
@@ -422,10 +383,6 @@
     white-space: nowrap;
   }
 
-  .ls-chrome-noselect {
-    user-select: none;
-  }
-
   /* Theme-paired inline SVG marks (AgentMark & SubagentGlyph) */
   .ls-theme-light {
     display: inline-flex;
@@ -444,13 +401,11 @@
     }
   }
 
-  :root[data-theme="dark"] .ls-theme-light,
-  .ls-dark-well .ls-theme-light {
+  :root[data-theme="dark"] .ls-theme-light {
     display: none;
   }
 
-  :root[data-theme="dark"] .ls-theme-dark,
-  .ls-dark-well .ls-theme-dark {
+  :root[data-theme="dark"] .ls-theme-dark {
     display: inline-flex;
   }
 

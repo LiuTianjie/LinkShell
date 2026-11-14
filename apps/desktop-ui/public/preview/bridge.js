@@ -6,6 +6,7 @@ const requests = new Map();
 let parentOrigin;
 let worker;
 let bootstrap;
+let initialPath = "";
 window.addEventListener("message", async (event) => {
   const message = event.data;
   if (!message || message.channel !== channel) return;
@@ -20,6 +21,9 @@ window.addEventListener("message", async (event) => {
     }
     parentOrigin = event.origin;
     bootstrap = message.bootstrap;
+    // Only the first navigation starts at the requested path; later requests for "/" stay "/".
+    if (typeof message.initialPath === "string" && message.initialPath.startsWith("/"))
+      initialPath = message.initialPath.replace(/^\/+/, "");
     try {
       const registration = await navigator.serviceWorker.register(
         "/preview/worker.js?v=4",
@@ -43,7 +47,7 @@ window.addEventListener("message", async (event) => {
       worker = registration.active;
       const ready = new MessageChannel();
       ready.port1.onmessage = () => {
-        page.src = `/preview/view/${channel}/`;
+        page.src = `/preview/view/${channel}/${initialPath}`;
         page.style.display = "block";
         note.remove();
       };

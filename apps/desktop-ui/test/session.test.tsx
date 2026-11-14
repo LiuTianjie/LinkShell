@@ -530,10 +530,11 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
       ],
     };
 
-    const { spies } = createMockConnection({
+    const { spies, store } = createMockConnection({
       state: {
         sessions: { [sessionId]: sessionSummary },
         views: { [sessionId]: view },
+        ready: { [sessionId]: true },
       },
     });
 
@@ -613,6 +614,12 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
     expect(spies.sendSpy).toHaveBeenCalledTimes(1);
     // Draft MUST still be preserved!
     expect(composerDrafts.getState().read(draftKey)).toBe("修复登录状态");
+    // ...and it is the only copy: the store's failed entry is discarded so a second Enter can't deliver twice,
+    // and no outbox "发送失败" bar competes with the composer.
+    const failedId = spies.sendSpy.mock.calls[0]![2]?.clientMessageId;
+    expect(failedId).toEqual(expect.any(String));
+    expect(store.getState().discard).toHaveBeenCalledWith(failedId);
+    expect(container.querySelector(".ls-composer-send-error")?.textContent).toMatch(/输入和附件已保留|text and attachments are kept/);
 
     // 4. Busy steer button (`now: true`) clears draft when delivery succeeds
     spies.sendSpy.mockResolvedValueOnce("steered");
@@ -629,7 +636,7 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
     expect(spies.sendSpy).toHaveBeenLastCalledWith(
       sessionId,
       [{ type: "text", text: "修复登录状态" }],
-      { now: true },
+      { now: true, clientMessageId: expect.any(String) },
     );
     expect(composerDrafts.getState().read(draftKey)).toBe("");
 
@@ -741,6 +748,7 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
       state: {
         sessions: { [sessionId]: sessionSummary },
         views: { [sessionId]: view },
+        ready: { [sessionId]: true },
       },
     });
 
@@ -1294,6 +1302,307 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
     );
 
     resetInspectorTabsForTests();
+  });
+
+  function runningSession(id: string, overrides?: Partial<SessionSummary>): SessionSummary {
+    return {
+      id,
+      agent: "codex",
+      nativeId: id.split(":")[1] ?? id,
+      cwd: "/Users/dev/linkshell",
+      state: "running",
+      pendingPermissions: 0,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+      lastSeq: 3,
+      archived: false,
+      ...overrides,
+    };
+  }
+
+  it("shows async questions once: on the session for newer hosts, on the agent's message only for older ones", async () => {
+    const sessionId = "codex:async-1";
+    const question = { id: "q-1", title: "Which database?", options: ["Postgres", "SQLite"] };
+    const view: SessionView = {
+      ...emptyView(sessionId),
+      items: [
+        { kind: "agent", id: "msg-q", text: "Working on it", questions: [question], streaming: false, ts: 1 },
+      ],
+    };
+    const { store } = createMockConnection({
+      state: {
+        sessions: { [sessionId]: runningSession(sessionId, { asyncQuestions: [question] }) },
+        views: { [sessionId]: view },
+        ready: { [sessionId]: true },
+      },
+    });
+
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+    expect(container.querySelectorAll(".ls-async-question-card")).toHaveLength(1);
+
+    // An older host (no `asyncQuestions` on the summary): the message carries it, still once.
+    await act(async () => {
+      store.setState({ sessions: { [sessionId]: runningSession(sessionId) } });
+    });
+    await flushAsync();
+    expect(container.querySelectorAll(".ls-async-question-card")).toHaveLength(1);
+  });
+
+  it("shows a loading state until the history snapshot is ready, then the empty state", async () => {
+    const sessionId = "codex:loading-1";
+    const { store } = createMockConnection({
+      state: {
+        sessions: { [sessionId]: runningSession(sessionId, { state: "idle" }) },
+        views: { [sessionId]: emptyView(sessionId) },
+      },
+    });
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+    const empty = () => container.querySelector(".ls-timeline-empty")?.textContent ?? "";
+    expect(empty()).toMatch(/正在加载会话记录|Loading conversation/);
+
+    await act(async () => {
+      store.setState({ ready: { [sessionId]: true }, promptProgress: { [sessionId]: { clientMessageId: "c", phase: "starting", afterSeq: 0 } } });
+    });
+    await flushAsync();
+    expect(empty()).toMatch(/会话已就绪|Session ready/);
+    expect(container.querySelector(".ls-live-label")?.textContent).toMatch(/正在启动智能体|Starting the agent/);
+  });
+
+  it("keeps the textarea usable offline, gates only sending with a message, and stops the turn on Esc (never while composing)", async () => {
+    const sessionId = "codex:offline-1";
+    const { spies, store } = createMockConnection({
+      state: {
+        status: "offline",
+        sessions: { [sessionId]: runningSession(sessionId) },
+        views: { [sessionId]: { ...emptyView(sessionId), turnActive: true, state: "running" } },
+        ready: { [sessionId]: true },
+      },
+    });
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+
+    const textarea = container.querySelector<HTMLTextAreaElement>(".ls-composer-textarea")!;
+    expect(textarea.disabled).toBe(false);
+    act(() => {
+      composerDrafts.getState().update(draftKeyFor(DESKTOP_LOCAL, sessionId), "继续");
+    });
+    await flushAsync();
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await flushAsync();
+    expect(spies.sendSpy).not.toHaveBeenCalled();
+    expect(container.querySelector(".ls-composer-send-error")?.textContent).toMatch(/会话连接正在恢复|Reconnecting/);
+    expect(composerDrafts.getState().read(draftKeyFor(DESKTOP_LOCAL, sessionId))).toBe("继续");
+
+    await act(async () => {
+      store.setState({ status: "online" });
+    });
+    await flushAsync();
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true }),
+      );
+    });
+    expect(spies.cancelSpy).not.toHaveBeenCalled();
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(spies.cancelSpy).toHaveBeenCalledWith(sessionId);
+  });
+
+  it("uploads files the agent can't take inline into the session directory as resource links, once per file, with a long timeout", async () => {
+    const sessionId = "codex:attach-1";
+    const { spies } = createMockConnection({
+      state: {
+        sessions: { [sessionId]: runningSession(sessionId, { state: "idle" }) },
+        views: { [sessionId]: emptyView(sessionId) },
+        ready: { [sessionId]: true },
+      },
+      rpcCall: async (method, params) => {
+        if (method === "fs.upload") {
+          const { dir, name } = params as { dir: string; name: string };
+          return { path: `${dir}/${name}`, size: 5 };
+        }
+        return { ok: true };
+      },
+    });
+    spies.sendSpy.mockResolvedValueOnce("failed").mockResolvedValueOnce("started");
+
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+
+    const input = container.querySelector<HTMLInputElement>('.ls-composer-box input[type="file"]')!;
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    // jsdom's File has no arrayBuffer(); Chromium's does.
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("notes").buffer,
+    });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flushAsync();
+    expect(container.querySelector(".ls-attachment-pill")?.textContent).toContain("notes.txt");
+
+    const sendButton = () =>
+      [...container.querySelectorAll<HTMLButtonElement>(".ls-composer-send-btn")].at(-1)!;
+    await act(async () => {
+      sendButton().click();
+    });
+    await flushAsync();
+    // The failed send keeps the attachment; sending again must not upload the same file twice.
+    expect(container.querySelector(".ls-attachment-pill")).not.toBeNull();
+    await act(async () => {
+      sendButton().click();
+    });
+    await flushAsync();
+
+    const uploads = spies.linkCallSpy.mock.calls.filter(([method]) => method === "fs.upload");
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]![1]).toMatchObject({ dir: "/Users/dev/linkshell", name: "notes.txt" });
+    expect((uploads[0] as unknown[])[2]).toBe(180_000);
+    expect(spies.sendSpy).toHaveBeenLastCalledWith(
+      sessionId,
+      [{ type: "resource_link", uri: "/Users/dev/linkshell/notes.txt", name: "notes.txt" }],
+      { now: false, clientMessageId: expect.any(String) },
+    );
+    expect(container.querySelector(".ls-attachment-pill")).toBeNull();
+  });
+
+  it("follows the newest message again when the person sends after reading back", async () => {
+    const sessionId = "codex:follow-1";
+    const view: SessionView = {
+      ...emptyView(sessionId),
+      items: [{ kind: "agent", id: "msg-1", text: "Earlier answer", streaming: false, ts: 1 }],
+    };
+    const { spies } = createMockConnection({
+      state: {
+        sessions: { [sessionId]: runningSession(sessionId, { state: "idle" }) },
+        views: { [sessionId]: view },
+        ready: { [sessionId]: true },
+      },
+    });
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+
+    const scroller = container.querySelector<HTMLDivElement>(".ls-timeline-scroller")!;
+    let top = 0;
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => 2000 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => 500 });
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = Math.min(value, 1500);
+      },
+    });
+
+    // The person scrolls up: the jump pill appears and new content no longer pulls the view down.
+    await act(async () => {
+      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true }));
+      top = 300;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    expect(container.querySelector(".ls-jump-bottom-btn")?.getAttribute("data-visible")).toBe("true");
+
+    act(() => {
+      composerDrafts.getState().update(draftKeyFor(DESKTOP_LOCAL, sessionId), "下一步");
+    });
+    await flushAsync();
+    const textarea = container.querySelector<HTMLTextAreaElement>(".ls-composer-textarea")!;
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await flushAsync();
+
+    expect(spies.sendSpy).toHaveBeenCalledTimes(1);
+    expect(top).toBe(1500);
+    expect(container.querySelector(".ls-jump-bottom-btn")?.getAttribute("data-visible")).toBe("false");
+  });
+
+  it("keeps only the newest wrap-up's replies active, sends once, and shows app actions as chips", async () => {
+    const sessionId = "claude:wrap-1";
+    const wrapItem = (id: string) => ({
+      kind: "tool" as const,
+      id,
+      title: "wrap_up",
+      name: "mcp__ccd_session__wrap_up",
+      status: "completed" as const,
+      detail: { type: "mcp" as const, server: "ccd_session", tool: "wrap_up" },
+      rawInput: {
+        recap: "Done",
+        actions: [{ label: "Ship it", message: "Please ship" }, { action: "commit" }],
+      },
+      content: [],
+      output: "",
+      ts: 1,
+    });
+    const view: SessionView = {
+      ...emptyView(sessionId),
+      items: [
+        wrapItem("wrap-old"),
+        { kind: "user", id: "u-1", blocks: [{ type: "text", text: "thanks" }], ts: 2 },
+        wrapItem("wrap-new"),
+      ],
+    };
+    const { spies } = createMockConnection({
+      state: {
+        sessions: { [sessionId]: runningSession(sessionId, { agent: "claude", state: "idle" }) },
+        views: { [sessionId]: view },
+        ready: { [sessionId]: true },
+      },
+    });
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <SessionWorkspace computerKey={DESKTOP_LOCAL} sessionId={sessionId} />
+        </DialogProvider>,
+      );
+    });
+    await flushAsync();
+
+    const replyButtons = [...container.querySelectorAll<HTMLButtonElement>(".ls-wrap-up-actions button")];
+    expect(replyButtons).toHaveLength(1);
+    expect(container.querySelectorAll(".ls-wrap-up-chip").length).toBe(3);
+    await act(async () => {
+      replyButtons[0]!.click();
+    });
+    await flushAsync();
+    expect(spies.sendSpy).toHaveBeenCalledWith(sessionId, [{ type: "text", text: "Please ship" }]);
+    expect(replyButtons[0]!.disabled).toBe(true);
   });
 
   it("resolves Windows file:// (2-slash & 3-slash), vscode://file, backslash relative paths, and extensionless scripts in resolveFileHrefTarget", () => {

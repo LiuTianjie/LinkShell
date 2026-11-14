@@ -213,6 +213,14 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
     connection?.statistics { [weak self] report in
       DispatchQueue.main.async {
         guard let self, !self.closed else { return }
+        self.emit(report, sorted: sorted, invalid: invalid, longest: longest)
+      }
+    }
+  }
+
+  // A method of its own: inside the statistics closure the message is past Swift 6.2's type-checking budget.
+  private func emit(_ report: RTCStatisticsReport, sorted: [Int], invalid: Int, longest: Double) {
+      do {
         let reader = StatsReader(report: report)
         let inbound = reader.first("inbound-rtp", kind: "video")
         let codec = reader.linked(inbound, "codecId")
@@ -253,14 +261,15 @@ final class Loopback: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegat
         ]
         if self.readClock {
           message["invalid"] = invalid
-          message["latency"] = sorted.isEmpty
+          // Typed: a mixed literal inferred as `Any` is past Swift 6.2's type-checking budget.
+          let latency: [String: Any] = sorted.isEmpty
             ? ["n": 0]
             : ["n": sorted.count, "min": sorted[0], "p50": sorted[sorted.count / 2], "p95": sorted[min(sorted.count - 1, sorted.count * 95 / 100)], "max": sorted[sorted.count - 1]]
+          message["latency"] = latency
         }
         if MediaStageProbe.enabled { message["encodeInputToDecode"] = MediaStageProbe.shared.take() }
         if FrameTrace.enabled { message["trace"] = FrameTrace.take() }
         self.link.emit(message)
       }
-    }
   }
 }

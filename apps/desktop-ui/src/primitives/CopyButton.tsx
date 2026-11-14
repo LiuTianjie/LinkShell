@@ -7,6 +7,7 @@ import {
 } from "react";
 import { DesktopIcon } from "../icons";
 import { cn } from "./utils";
+import { usePrimitiveLabels } from "./labels";
 
 export interface CopyButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "value" | "onCopy"> {
@@ -25,8 +26,8 @@ export interface CopyButtonProps
 
 export function CopyButton({
   value,
-  label = "复制",
-  copiedLabel = "已复制",
+  label: labelProp,
+  copiedLabel: copiedLabelProp,
   revealOnHover = false,
   showText = false,
   size = "sm",
@@ -36,6 +37,9 @@ export function CopyButton({
   onCopied,
   ...props
 }: CopyButtonProps) {
+  const labels = usePrimitiveLabels();
+  const label = labelProp ?? labels.copy;
+  const copiedLabel = copiedLabelProp ?? labels.copied;
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

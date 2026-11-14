@@ -1,4 +1,19 @@
+import { createHash } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
+
+/**
+ * The Fusion hub's socket, icon cache and stub bundle ids are keyed by the computer, not its name:
+ * two computers may share a name, and a rename must not orphan anything. Must equal
+ * `Fusion.slug(computerKey:)` in apps/mac (shared test vector in both suites).
+ */
+export function fusionSlug(computerKey: string): string {
+  return createHash("sha256").update(`linkshell-fusion:${computerKey}`).digest("hex").slice(0, 12);
+}
+
+export function isFusionSlug(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{12}$/.test(value);
+}
+
 
 /**
  * Probes candidate direct fusion hosts in parallel while preserving preference order:

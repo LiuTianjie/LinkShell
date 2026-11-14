@@ -9,7 +9,9 @@ import {
 import {
   STORAGE_KEYS,
   copyCommandPath,
+  healthy as isHealthy,
   installCommand,
+  refreshKeepAwake,
   openLoginItems,
   openSetup,
   readLocal,
@@ -17,6 +19,7 @@ import {
   saveLocal,
   serviceAction,
   setDesktopSetting,
+  setKeepAwakeMode,
   setLaunchAtLogin,
   setScreenSharing,
   splitPath,
@@ -49,7 +52,7 @@ function MiddleTruncatedPath({ path }: { path: string }) {
 }
 
 export function SystemSettingsPage() {
-  const { preference, setPreference, tCore, ts, revealInFiles } = useSystemI18n();
+  const { preference, setPreference, tCore, ts, tm, revealInFiles } = useSystemI18n();
   const activePlatform = useActiveDesktopPlatform();
   const isWin = activePlatform === "windows";
   const state = useManagement();
@@ -59,6 +62,11 @@ export function SystemSettingsPage() {
   const revealable = /^(?:\/|[A-Za-z]:[\\/])/.test(homePath);
 
   const [themeMode, setThemeMode] = useState<ThemeMode>(readAppearanceMode);
+  const hostRunning = isHealthy(state);
+
+  useEffect(() => {
+    if (hostRunning) void refreshKeepAwake();
+  }, [hostRunning]);
 
   useEffect(() => {
     const syncAppearance = () => setThemeMode(readAppearanceMode());
@@ -73,12 +81,9 @@ export function SystemSettingsPage() {
     setAppearanceBridge(next);
   };
 
-  const keepAwakeMode: "smart" | "always" | "off" =
-    state.settings.keepAwake === "always" || state.settings.keepAwake === true
-      ? "always"
-      : state.settings.keepAwake === "off" || state.settings.keepAwake === false
-        ? "off"
-        : "smart";
+  // The Host's own mode; until it has answered, nothing is selected rather than a guess.
+  const keepAwakeMode: "smart" | "always" | "off" | "" =
+    state.keepAwake?.mode ?? "";
 
   return (
     <div className="ls-system-stack">
@@ -209,10 +214,30 @@ export function SystemSettingsPage() {
               </div>
             </div>
           ) : null}
+
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__title">
+                {ts("settings.notifications")}
+              </span>
+              <span className="ls-system-row__detail">
+                {ts("settings.notificationsDesc")}
+              </span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Switch
+                checked={state.settings.notifications}
+                aria-label={ts("settings.notifications")}
+                onCheckedChange={(checked) =>
+                  void setDesktopSetting("notifications", checked)
+                }
+              />
+            </div>
+          </div>
         </div>
         {state.loginItemMessage ? (
           <p className="ls-system-note" data-tone="warning">
-            {state.loginItemMessage}
+            {tm(state.loginItemMessage)}
           </p>
         ) : null}
         <p className="ls-system-note">{ts("settings.trayFoot")}</p>
@@ -239,32 +264,58 @@ export function SystemSettingsPage() {
                 {tCore("power.keepAwake")}
               </span>
               <span className="ls-system-row__detail">
-                {keepAwakeMode === "smart"
-                  ? tCore("power.keepAwakeSmartDesc")
-                  : keepAwakeMode === "always"
-                    ? tCore("power.keepAwakeAlwaysDesc")
-                    : tCore("power.keepAwakeOffDesc")}
+                {!hostRunning
+                  ? ts("settings.keepAwakeNeedsHost")
+                  : keepAwakeMode === "smart"
+                    ? tCore("power.keepAwakeSmartDesc")
+                    : keepAwakeMode === "always"
+                      ? tCore("power.keepAwakeAlwaysDesc")
+                      : keepAwakeMode === "off"
+                        ? tCore("power.keepAwakeOffDesc")
+                        : ts("status.connecting")}
               </span>
             </div>
             <div className="ls-system-row__controls">
+              {hostRunning && state.keepAwake ? (
+                <Badge
+                  tone={state.keepAwake.active ? "ok" : "neutral"}
+                  dot={state.keepAwake.active ? "ok" : "offline"}
+                >
+                  {state.keepAwake.active
+                    ? ts("settings.keepAwakeActive")
+                    : ts("settings.keepAwakeIdle")}
+                </Badge>
+              ) : null}
               <Tabs
                 value={keepAwakeMode}
                 variant="segmented"
                 onValueChange={(next) => {
                   const resolved =
                     next === "always" || next === "off" ? next : "smart";
-                  void setDesktopSetting("keepAwake", resolved);
+                  void setKeepAwakeMode(resolved);
                 }}
               >
                 <TabList label={tCore("power.keepAwake")}>
-                  <Tab value="smart">{tCore("power.keepAwakeSmart")}</Tab>
-                  <Tab value="always">{tCore("power.keepAwakeAlways")}</Tab>
-                  <Tab value="off">{tCore("power.keepAwakeOff")}</Tab>
+                  <Tab value="smart" disabled={!hostRunning}>
+                    {tCore("power.keepAwakeSmart")}
+                  </Tab>
+                  <Tab value="always" disabled={!hostRunning}>
+                    {tCore("power.keepAwakeAlways")}
+                  </Tab>
+                  <Tab value="off" disabled={!hostRunning}>
+                    {tCore("power.keepAwakeOff")}
+                  </Tab>
                 </TabList>
               </Tabs>
             </div>
           </div>
         </div>
+        {state.keepAwakeError ? (
+          <p className="ls-system-note" data-tone="danger" role="alert">
+            {tm(state.keepAwakeError)}
+          </p>
+        ) : null}
+        <p className="ls-system-note">{ts("settings.keepAwakeNote")}</p>
       </section>
 
       {/* 3. Screen Capture & Input Permissions */}
@@ -333,6 +384,7 @@ export function SystemSettingsPage() {
             </>
           )}
         </div>
+        {isWin ? <p className="ls-system-note">{ts("settings.winSharingNote")}</p> : null}
       </section>
 
       {/* 4. Data Directory & Bundled CLI */}
@@ -421,7 +473,7 @@ export function SystemSettingsPage() {
         </div>
         {state.commandMessage ? (
           <p className="ls-system-note" role="status">
-            {state.commandMessage}
+            {tm(state.commandMessage)}
           </p>
         ) : null}
       </section>
