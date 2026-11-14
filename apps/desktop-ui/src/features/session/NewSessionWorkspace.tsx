@@ -28,7 +28,7 @@ import { ApprovalCard } from "./ApprovalQuestionCards";
 import { ComposerBox } from "./ComposerBox";
 import { DirectoryPickerDialog } from "./DirectoryPickerDialog";
 import {
-  NEW_SESSION_COMMANDS,
+  newSessionCommands,
   UPLOAD_TIMEOUT_MS,
   attachmentsNeedUpload,
   basenameOfPath,
@@ -71,6 +71,7 @@ export function NewSessionWorkspace({
 }: NewSessionWorkspaceProps) {
   const t = useT();
   const copy = useSessionCopy();
+  const newSessionCommandItems = useMemo(() => newSessionCommands(copy), [copy]);
   const connection = useSessionConnection(computerKey);
 
   const online = useClientSelector(connection, (s) => s.status === "online", false);
@@ -507,7 +508,7 @@ export function NewSessionWorkspace({
           disabled={!online || !usable || creating}
           connection={connection}
           cwd={cwd}
-          commands={NEW_SESSION_COMMANDS}
+          commands={newSessionCommandItems}
           attachments={attachments}
           onAddAttachments={(added) => setAttachments((prev) => [...prev, ...added])}
           onRemoveAttachment={(id) =>

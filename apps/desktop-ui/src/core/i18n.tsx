@@ -677,7 +677,7 @@ const desktopEn: Record<DesktopI18nKey, string> = {
   "desktop.shell.routeDirect": "Direct",
   "desktop.shell.routeRelay": "Relay",
   "desktop.shell.paletteWorkspace": "Workspace",
-  "desktop.shell.palettePlaceholder": "Jump to a session, start Fusion Mode, switch computer or run a command",
+  "desktop.shell.palettePlaceholder": "Search sessions, computers and commands",
   "desktop.shell.paletteEmpty": "No matching commands, sessions or computers",
   "desktop.shell.paletteNavigate": "Navigate",
   "desktop.shell.paletteRun": "Run",

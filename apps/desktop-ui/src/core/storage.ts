@@ -38,6 +38,7 @@ export const STORAGE_KEYS = {
   openPortTabs: (computerKey: string) => `openPortTabs.${computerKey}`,
   newSessionPrefs: (machineId: string) => `linkshell.new-session.v1:${machineId}`,
   composerDraft: (computerKey: string, sessionId: string) => `draft.${computerKey}.${sessionId}`,
+  sideDraft: (computerKey: string, sessionId: string) => `sideDraft.${computerKey}.${sessionId}`,
   outbox: (computerKey: string) => `outbox.${computerKey}`,
   accessToken: (computerKey: string) => `accessToken.${computerKey}`,
   treeOpen: (computerKey: string) => `desktopTree.${computerKey}`,

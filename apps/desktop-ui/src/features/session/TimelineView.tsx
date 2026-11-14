@@ -72,6 +72,7 @@ import { ApprovalCard, AsyncQuestionsBar } from "./ApprovalQuestionCards";
 import { DiffBlock, DiffStatBadge } from "./DiffBlock";
 import { MarkdownView } from "./MarkdownView";
 import { openSubagentInInspector, useInspectorTabs } from "../inspector";
+import { SelectionActions } from "./SelectionActions";
 import {
   describeActionError,
   openFileInInspector,
@@ -142,6 +143,11 @@ export function TimelineView({
   );
   const online = useClientSelector(connection, (s) => s.status === "online", false);
   const ready = useClientSelector(connection, (s) => Boolean(s.ready[session.id]), false);
+  const sideSupported = useClientSelector(
+    connection,
+    (s) => Boolean(s.machine?.agents?.find((agent) => agent.id === session.agent)?.capabilities?.side),
+    false,
+  );
   const promptPhase = useClientSelector(
     connection,
     (s) => s.promptProgress?.[session.id]?.phase,
@@ -495,6 +501,14 @@ export function TimelineView({
           </button>
         </div>
       </div>
+
+      <SelectionActions
+        scrollerRef={scrollerRef}
+        trackRef={trackRef}
+        computerKey={computerKey}
+        sessionId={session.id}
+        sideSupported={sideSupported}
+      />
 
       {/* Lightbox dialog for message / tool images */}
       <Dialog

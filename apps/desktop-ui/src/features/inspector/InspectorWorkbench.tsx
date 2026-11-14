@@ -52,6 +52,7 @@ import {
 import { McpAppPanel, useMcpAppsDiscovery } from "./McpAppPanel";
 import { PreviewPanel } from "./PreviewPanel";
 import { SideChatTabPanel } from "./SideChatTabPanel";
+import { agentHasSide, sideCommandName } from "./side-chat-store";
 import { SubagentTabPanel } from "./SubagentTabPanel";
 import { countRunningTasksAndSubagents, TasksPanel } from "./TasksPanel";
 import { TerminalPanel } from "./TerminalPanel";
@@ -152,6 +153,10 @@ export function InspectorWorkbench({
     cwd: cwdProp,
   });
 
+  const sessionAgent = session?.agent;
+  const agentInfo = sessionAgent ? agents.find((agent) => agent.id === sessionAgent) : undefined;
+  // Unknown until the machine's agent list arrives: don't hide the side chat on a guess.
+  const sideSupported = agentInfo ? agentHasSide(agents, sessionAgent) : undefined;
   const sessionSummaryStats = useSessionChangesSummary(view);
   const [panelStats, setPanelStats] = useState<ChangesStatsSummary | null>(
     null,
@@ -652,6 +657,8 @@ export function InspectorWorkbench({
                       subagents={subagents}
                       tasksMap={tasksMap}
                       sides={sides}
+                      sideSupported={sideSupported}
+                      sideCommand={sideCommandName(sessionAgent)}
                       mcpApps={mcpDiscovery.apps}
                       onOpenFile={openFileReplacingNewTab}
                     />
@@ -720,6 +727,8 @@ export function InspectorWorkbench({
                       cwd={cwd}
                       sides={sides}
                       actions={actions}
+                      supported={sideSupported}
+                      agentLabel={agentInfo?.label}
                     />
                   ) : tab.kind === "tasks" ? (
                     <MemoTasksPanel

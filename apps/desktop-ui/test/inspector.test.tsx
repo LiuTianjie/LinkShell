@@ -104,6 +104,7 @@ function createMockConnectionRig(overrides?: {
   mcpApps?: McpApp[];
   worktrees?: WorktreeEntry[];
   goal?: SessionGoal | null;
+  agents?: unknown[];
 }): MockConnectionRig {
   const computerKey = overrides?.computerKey ?? "comp-local";
   const sessionId = overrides?.sessionId ?? "sess-1";
@@ -324,7 +325,9 @@ function createMockConnectionRig(overrides?: {
       hostVersion: "2.0.0",
       protocol: 3,
       home: overrides?.platform === "win32" ? "C:\\Users\\dev" : "/Users/dev",
-      agents: [{ id: "codex", name: "Codex", installed: true }],
+      agents: overrides?.agents ?? [
+        { id: "codex", label: "Codex", installed: true, capabilities: { side: true } },
+      ],
     },
     sessions: { [sessionId]: sessionSummary },
     views: { [sessionId]: defaultView },
@@ -547,6 +550,38 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
       expect(src).not.toContain("@floating-ui/");
       expect(src).not.toContain("dangerouslySetInnerHTML");
     }
+  });
+
+  it("offers side questions only for an agent that has them, and says why when it doesn't", async () => {
+    createMockConnectionRig({
+      agents: [{ id: "codex", label: "Gemini", installed: true, capabilities: { side: false } }],
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <DialogProvider>
+            <InspectorWorkbench computerKey="comp-local" sessionId="sess-1" cwd="/Users/dev/project" />
+          </DialogProvider>
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+
+    const newTabView = container.querySelector<HTMLElement>('[data-testid="inspector-new-tab"]')!;
+    const toolLabels = Array.from(newTabView.querySelectorAll(".ls-newtab__tool-card")).map((card) => card.textContent);
+    expect(toolLabels).toHaveLength(5);
+    expect(toolLabels.join(" ")).not.toContain("侧边问答");
+
+    // A side tab left open from before shows what's missing instead of a box that can only fail.
+    await act(async () => {
+      openInspectorTab("comp-local", "sess-1", { id: "side", kind: "side" });
+    });
+    await flushAsync();
+    const sidePanel = container.querySelector<HTMLElement>(".ls-sidechat-panel")!;
+    expect(sidePanel.dataset.unsupported).toBe("true");
+    expect(sidePanel.textContent).toContain("Gemini 没有侧边问答");
+    expect(sidePanel.querySelector("textarea")).toBeNull();
   });
 
   it("renders Antigravity/Codex browser-style .ls-inspector-header, InspectorNewTabView 2x3 tools grid + port shortcut + environment strip, keepMounted tabs, width toggle, and tab close", async () => {

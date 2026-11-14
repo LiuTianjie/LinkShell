@@ -140,6 +140,9 @@ export interface InspectorNewTabViewProps {
   subagents: readonly SubagentInfo[];
   tasksMap: TaskRecords;
   sides: readonly SideChat[];
+  /** False when the session's agent has no side conversation: the tool isn't offered. */
+  sideSupported?: boolean;
+  sideCommand: string;
   mcpApps: readonly McpApp[];
   onOpenFile: (path: string) => void;
 }
@@ -159,6 +162,8 @@ export function InspectorNewTabView({
   subagents,
   tasksMap,
   sides,
+  sideSupported,
+  sideCommand,
   mcpApps,
   onOpenFile,
 }: InspectorNewTabViewProps): JSX.Element {
@@ -523,6 +528,7 @@ export function InspectorNewTabView({
             <Kbd shortcut="Mod+P" />
           </button>
 
+          {sideSupported !== false || sides.length > 0 ? (
           <button
             type="button"
             className="ls-newtab__tool-card ls-newtab__action"
@@ -544,9 +550,10 @@ export function InspectorNewTabView({
                 {sides.length}
               </Badge>
             ) : (
-              <span className="ls-newtab__tool-meta">/side</span>
+              <span className="ls-newtab__tool-meta">/{sideCommand}</span>
             )}
           </button>
+          ) : null}
 
           <button
             type="button"

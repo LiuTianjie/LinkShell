@@ -2658,6 +2658,21 @@
     word-break: break-word;
   }
 
+  .ls-sidechat-msg__quote {
+    margin: 0 0 6px;
+    padding: 0 0 0 8px;
+    border-inline-start: 2px solid var(--ls-border-strong);
+    color: var(--ls-fg-3);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: clip;
+  }
+
+  .ls-sidechat-msg__quote:only-child {
+    margin-block-end: 0;
+  }
+
   .ls-sidechat-msg--assistant {
     align-self: stretch;
   }
@@ -2672,6 +2687,24 @@
     text-align: center;
     color: var(--ls-fg-2);
     font-size: var(--ls-text-sm);
+  }
+
+  .ls-sidechat-empty__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: 10px;
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-surface-2);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-sidechat-empty__title {
+    font-size: var(--ls-text-base);
+    font-weight: 600;
+    color: var(--ls-fg);
   }
 
   .ls-sidechat-empty p {

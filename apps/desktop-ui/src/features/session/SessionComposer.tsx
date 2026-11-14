@@ -35,6 +35,7 @@ import {
 } from "@/primitives";
 import { ComposerBox } from "./ComposerBox";
 import { openInspectorTab, openSubagentInInspector } from "../inspector";
+import { sideCommandName } from "../inspector/side-chat-store";
 import {
   UPLOAD_TIMEOUT_MS,
   attachmentsFromBlocks,
@@ -75,11 +76,12 @@ export function SessionComposer({
   const sessionKey = sessionKeyOf(computerKey, session.id);
 
   const online = useClientSelector(connection, (s) => s.status === "online", false);
-  const agentCapabilities = useClientSelector(
+  const agentInfo = useClientSelector(
     connection,
-    (s) => s.machine?.agents.find((entry) => entry.id === session.agent)?.capabilities,
+    (s) => s.machine?.agents.find((entry) => entry.id === session.agent),
     undefined,
   );
+  const agentCapabilities = agentInfo?.capabilities;
   const storeView = useClientSelector(
     connection,
     (s) => s.views[session.id],
@@ -176,10 +178,16 @@ export function SessionComposer({
   const isRunning = session.state === "running" || view.turnActive;
   const driver = view.driver ?? session.driver;
   const desktopDriven = driver === "desktop";
+  // While the computer's own terminal drives a handoff session, a message there can only stop
+  // the turn; elsewhere the agent's capabilities say whether it can be taken into the turn.
+  const canSteer = Boolean(
+    agentCapabilities?.steer && !(agentInfo?.tier === "handoff" && desktopDriven),
+  );
+  const sideCommand = agentCapabilities?.side ? sideCommandName(session.agent) : undefined;
 
   const commands = useMemo(
-    () => buildSessionCommands(session.agent, view.commands),
-    [session.agent, view.commands],
+    () => buildSessionCommands(session.agent, view.commands, copy, { sideCommand }),
+    [copy, session.agent, sideCommand, view.commands],
   );
 
   // Order config options cleanly: model -> mode -> effort -> other
@@ -232,6 +240,14 @@ export function SessionComposer({
     if (!parsed) return false;
 
     const actions = connection.store.getState();
+
+    if (sideCommand && parsed.name === sideCommand) {
+      // Asked at once in a new side conversation; the tab opens to show the answer coming.
+      if (parsed.rest) await actions.askSide(session.id, parsed.rest);
+      clearSubmitted(text);
+      openInspectorTab(computerKey, session.id, { id: "side", kind: "side" });
+      return true;
+    }
 
     if (parsed.name === "new" || parsed.name === "reset" || parsed.name === "clear") {
       clearSubmitted(text);
@@ -566,7 +582,13 @@ export function SessionComposer({
           <ComposerBox
             value={text}
             onChange={setText}
-            placeholder={isRunning ? copy.composerBusyPlaceholder : copy.composerPlaceholder}
+            placeholder={
+              isRunning
+                ? canSteer
+                  ? copy.composerBusyPlaceholder
+                  : copy.composerInterruptPlaceholder
+                : copy.composerPlaceholder
+            }
             textareaAriaLabel={t("desktop.composer.placeholder")}
             connection={connection}
             cwd={session.cwd}
@@ -633,7 +655,7 @@ export function SessionComposer({
                     disabled={sending}
                     onClick={() => void submitMessage({ steerNow: true })}
                   >
-                    {t("desktop.composer.steer")}
+                    {canSteer ? t("desktop.composer.steer") : copy.interruptSendLabel}
                   </Button>
                 )}
 

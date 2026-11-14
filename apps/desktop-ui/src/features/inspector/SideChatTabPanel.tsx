@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { SideChat } from "@linkshell/wire";
 import { DesktopIcon } from "../../icons";
 import {
@@ -12,6 +12,11 @@ import {
 } from "../../primitives";
 import { MarkdownView } from "../session/MarkdownView";
 import { useInspectorI18n } from "./i18n-inspector";
+import {
+  consumeSideChatRequest,
+  usePendingSideChatRequest,
+  useSideChatDraft,
+} from "./side-chat-store";
 import type { InspectorSessionActions } from "./use-inspector-connection";
 
 export interface SideChatTabPanelProps {
@@ -21,6 +26,9 @@ export interface SideChatTabPanelProps {
   cwd?: string;
   sides: readonly SideChat[];
   actions?: InspectorSessionActions;
+  /** The session's agent answers side questions itself; undefined while that isn't known. */
+  supported?: boolean;
+  agentLabel?: string;
 }
 
 export function SideChatTabPanel({
@@ -30,6 +38,8 @@ export function SideChatTabPanel({
   cwd,
   sides,
   actions,
+  supported,
+  agentLabel,
 }: SideChatTabPanelProps): JSX.Element {
   const { t, ti } = useInspectorI18n();
   const dialogs = useDialogs();
@@ -42,8 +52,39 @@ export function SideChatTabPanel({
   const [selectedSideId, setSelectedSideId] = useState<string | undefined>(
     undefined,
   );
-  const [draft, setDraft] = useState("");
+  const { draft, setDraft, clearSubmitted } = useSideChatDraft(computerKey, sessionId);
   const [asking, setAsking] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusFrameRef = useRef(0);
+  const pendingRequest = usePendingSideChatRequest(computerKey, sessionId);
+
+  // "Ask in side chat" from a selection: a new conversation, the quote in the draft, the
+  // caret after it for the question.
+  useEffect(() => {
+    if (pendingRequest === undefined) return;
+    consumeSideChatRequest(computerKey, sessionId);
+    setSelectedSideId("__new__");
+    // The inspector may still be opening (hidden, or the tab not yet shown): keep trying for a
+    // few frames until the box can take focus.
+    let tries = 0;
+    const focusDraft = () => {
+      const area = textareaRef.current;
+      if (area && !area.disabled) {
+        area.focus();
+        if (document.activeElement === area) {
+          const end = area.value.length;
+          area.setSelectionRange(end, end);
+          area.scrollTop = area.scrollHeight;
+          return;
+        }
+      }
+      if (++tries < 30) focusFrameRef.current = requestAnimationFrame(focusDraft);
+    };
+    cancelAnimationFrame(focusFrameRef.current);
+    focusFrameRef.current = requestAnimationFrame(focusDraft);
+  }, [computerKey, pendingRequest, sessionId]);
+  // Consuming the request re-runs the effect above, so only leaving cancels the focusing.
+  useEffect(() => () => cancelAnimationFrame(focusFrameRef.current), []);
 
   useEffect(() => {
     if (!online || !sessionId || !actions) return;
@@ -68,10 +109,8 @@ export function SideChatTabPanel({
     if (!activeSide || activeThreadIndex < 0) {
       return ti("sideNewThread");
     }
-    const firstMsg = activeSide.messages[0]?.text?.trim();
-    if (firstMsg) {
-      return firstMsg.slice(0, 18);
-    }
+    const title = sideThreadTitle(activeSide.messages[0]?.text, 18);
+    if (title) return title;
     return ti("sideThreadLabel", { index: activeThreadIndex + 1 });
   }, [activeSide, activeThreadIndex, ti]);
 
@@ -83,14 +122,14 @@ export function SideChatTabPanel({
       try {
         const created = await actions.askSide(trimmed, activeSide?.sideId);
         setSelectedSideId(created.sideId);
-        setDraft("");
+        clearSubmitted(rawText);
       } catch (err) {
         await dialogs.alert(err instanceof Error ? err.message : String(err));
       } finally {
         setAsking(false);
       }
     },
-    [actions, activeSide?.sideId, asking, dialogs, online, sessionId],
+    [actions, activeSide?.sideId, asking, clearSubmitted, dialogs, online, sessionId],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -102,7 +141,29 @@ export function SideChatTabPanel({
     [ti],
   );
 
-  const canInteract = Boolean(online && sessionId && actions && !asking);
+  const canInteract = Boolean(online && sessionId && actions && !asking && supported !== false);
+
+  if (supported === false && sides.length === 0) {
+    return (
+      <div
+        className="ls-sidechat-panel inspector-panel-fill"
+        data-testid="sidechat-tab-panel"
+        data-unsupported="true"
+      >
+        <div className="ls-sidechat-panel__body inspector-panel-scroll">
+          <div className="ls-sidechat-empty">
+            <span className="ls-sidechat-empty__badge">
+              <DesktopIcon name="sparkles" size="sm" />
+            </span>
+            <strong className="ls-sidechat-empty__title">
+              {ti("sideUnsupportedTitle", { agent: agentLabel || "Agent" })}
+            </strong>
+            <p>{ti("sideUnsupportedHint")}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -120,7 +181,7 @@ export function SideChatTabPanel({
                   className={`ls-sidechat-msg ls-sidechat-msg--${msg.role}`}
                 >
                   {msg.role === "user" ? (
-                    <div className="ls-sidechat-msg__user">{msg.text}</div>
+                    <SideUserMessage text={msg.text} />
                   ) : (
                     <div className="ls-sidechat-msg__assistant">
                       <MarkdownView
@@ -145,29 +206,10 @@ export function SideChatTabPanel({
           </div>
         ) : (
           <div className="ls-sidechat-empty">
-            <span
-              className="ls-sidechat-empty__badge"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                inlineSize: 36,
-                blockSize: 36,
-                borderRadius: 10,
-                border: "var(--ls-hairline) solid var(--ls-border)",
-                backgroundColor: "var(--ls-surface-2)",
-                color: "var(--ls-fg-2)",
-              }}
-            >
+            <span className="ls-sidechat-empty__badge">
               <DesktopIcon name="sparkles" size="sm" />
             </span>
-            <strong
-              style={{
-                fontSize: "var(--ls-text-base)",
-                fontWeight: 600,
-                color: "var(--ls-fg)",
-              }}
-            >
+            <strong className="ls-sidechat-empty__title">
               {ti("sideEmptyTitle")}
             </strong>
             <p>{ti("sideEmptyHint")}</p>
@@ -203,6 +245,7 @@ export function SideChatTabPanel({
         }}
       >
         <textarea
+          ref={textareaRef}
           rows={2}
           className="ls-sidechat-textarea"
           value={draft}
@@ -236,9 +279,9 @@ export function SideChatTabPanel({
               }
             >
               {sides.map((side, index) => {
-                const firstMsg = side.messages[0]?.text?.trim();
-                const label = firstMsg
-                  ? firstMsg.slice(0, 24)
+                const title = sideThreadTitle(side.messages[0]?.text, 24);
+                const label = title
+                  ? title
                   : ti("sideThreadLabel", { index: index + 1 });
                 return (
                   <MenuItem
@@ -302,6 +345,35 @@ export function SideChatTabPanel({
           )}
         </div>
       </form>
+    </div>
+  );
+}
+
+/** The question's leading `>` lines (a quoted selection) apart from what was asked about them. */
+export function splitSideQuote(text: string): { quote: string; question: string } {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  let index = 0;
+  while (index < lines.length && /^>/.test(lines[index]!)) index += 1;
+  return {
+    quote: lines.slice(0, index).map((line) => line.replace(/^> ?/, "")).join("\n").trim(),
+    question: lines.slice(index).join("\n").trim(),
+  };
+}
+
+/** A thread's name: the question asked, else the passage it quotes. */
+export function sideThreadTitle(text: string | undefined, max: number): string {
+  if (!text) return "";
+  const { quote, question } = splitSideQuote(text);
+  const title = (question || quote).replace(/\s+/g, " ").trim();
+  return title.length > max ? `${title.slice(0, max - 1)}…` : title;
+}
+
+function SideUserMessage({ text }: { text: string }) {
+  const { quote, question } = splitSideQuote(text);
+  return (
+    <div className="ls-sidechat-msg__user">
+      {quote ? <blockquote className="ls-sidechat-msg__quote">{quote}</blockquote> : null}
+      {question ? <span>{question}</span> : null}
     </div>
   );
 }

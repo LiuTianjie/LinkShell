@@ -279,6 +279,28 @@ export interface SessionCopy {
   // Composer
   composerPlaceholder: string;
   composerBusyPlaceholder: string;
+  composerInterruptPlaceholder: string;
+  interruptSendLabel: string;
+  selectionActions: string;
+  selectionAskSide: string;
+  selectionQuote: string;
+  cmdNew: string;
+  cmdStop: string;
+  cmdModel: string;
+  cmdModelHint: string;
+  cmdMode: string;
+  cmdModeHint: string;
+  cmdStatus: string;
+  cmdSide: string;
+  cmdSideHint: string;
+  cmdClaudeCompact: string;
+  cmdClaudeCompactHint: string;
+  cmdClaudeInit: string;
+  cmdReview: string;
+  cmdPrComments: string;
+  cmdCodexCompact: string;
+  cmdCodexReview: string;
+  cmdClearDraft: string;
   desktopDrivenBanner: string;
   dropFilesHint: string;
   commandsHeading: string;
@@ -402,6 +424,28 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
 
     composerPlaceholder: "输入任务、@引用文件、粘贴图片，或输入 / 执行命令",
     composerBusyPlaceholder: "继续补充说明：回车加入发送队列，或点击「插话」立即送达",
+    composerInterruptPlaceholder: "继续补充说明：回车加入发送队列，或点击「中断并发送」先停下这一轮",
+    interruptSendLabel: "中断并发送",
+    selectionActions: "所选文字",
+    selectionAskSide: "在侧边问答中提问",
+    selectionQuote: "引用到回复",
+    cmdNew: "在同一项目目录开启新会话",
+    cmdStop: "停止当前正在运行的回合",
+    cmdModel: "查看或切换模型",
+    cmdModelHint: "[模型名]",
+    cmdMode: "查看或切换权限模式",
+    cmdModeHint: "[模式]",
+    cmdStatus: "查看会话目录、模型与上下文状态",
+    cmdSide: "侧边问答：问一个问题，不打断这一轮，也不进入会话",
+    cmdSideHint: "问题",
+    cmdClaudeCompact: "压缩上下文历史以释放窗口空间",
+    cmdClaudeCompactHint: "[保留重点]",
+    cmdClaudeInit: "分析代码库并生成 CLAUDE.md",
+    cmdReview: "审查当前代码改动",
+    cmdPrComments: "读取并处理当前 PR 评论",
+    cmdCodexCompact: "压缩当前对话上下文",
+    cmdCodexReview: "对当前分支或未提交改动执行代码审查",
+    cmdClearDraft: "清空当前已输入的草稿",
     desktopDrivenBanner: "此会话当前在电脑终端中操作，接管后即可在此继续对话。",
     dropFilesHint: "松开以添加附件（单文件上限 20 MB）",
     commandsHeading: "斜杠命令",
@@ -518,6 +562,28 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
 
     composerPlaceholder: "Ask anything, @mention files, paste images, or type / for commands",
     composerBusyPlaceholder: "Add follow-up instructions: Enter queues, or click Steer to interrupt",
+    composerInterruptPlaceholder: "Add follow-up instructions: Enter queues, or click Interrupt & Send to stop this turn first",
+    interruptSendLabel: "Interrupt & Send",
+    selectionActions: "Selected text",
+    selectionAskSide: "Ask in Side Chat",
+    selectionQuote: "Quote in Reply",
+    cmdNew: "Start a new session in the same project",
+    cmdStop: "Stop the running turn",
+    cmdModel: "Show or switch the model",
+    cmdModelHint: "[model]",
+    cmdMode: "Show or switch the permission mode",
+    cmdModeHint: "[mode]",
+    cmdStatus: "Show the session's folder, model and context use",
+    cmdSide: "Side question: ask without interrupting this turn or adding to the session",
+    cmdSideHint: "question",
+    cmdClaudeCompact: "Compact the conversation history to free up context",
+    cmdClaudeCompactHint: "[what to keep]",
+    cmdClaudeInit: "Analyze the codebase and write CLAUDE.md",
+    cmdReview: "Review the current changes",
+    cmdPrComments: "Read and address the current PR's comments",
+    cmdCodexCompact: "Compact the current conversation",
+    cmdCodexReview: "Review the current branch or uncommitted changes",
+    cmdClearDraft: "Clear what you've typed",
     desktopDrivenBanner: "This session is currently controlled in the local terminal. Take over to reply here.",
     dropFilesHint: "Drop files to attach (up to 20 MB each)",
     commandsHeading: "Slash Commands",
@@ -634,6 +700,28 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
 
     composerPlaceholder: "指示を入力、@でファイル参照、画像貼付、または / でコマンド",
     composerBusyPlaceholder: "追記を入力：Enter でキュー追加、「割り込み送信」で即時送信",
+    composerInterruptPlaceholder: "追記を入力：Enter でキュー追加、「中断して送信」で今のターンを止めて送信",
+    interruptSendLabel: "中断して送信",
+    selectionActions: "選択したテキスト",
+    selectionAskSide: "サイド質問で聞く",
+    selectionQuote: "返信に引用",
+    cmdNew: "同じプロジェクトで新しいセッションを開始",
+    cmdStop: "実行中のターンを停止",
+    cmdModel: "モデルを表示または切り替え",
+    cmdModelHint: "[モデル名]",
+    cmdMode: "権限モードを表示または切り替え",
+    cmdModeHint: "[モード]",
+    cmdStatus: "セッションのフォルダ、モデル、コンテキスト使用量を表示",
+    cmdSide: "サイド質問：このターンを止めず、セッションにも残さずに質問",
+    cmdSideHint: "質問",
+    cmdClaudeCompact: "会話履歴を圧縮してコンテキストを空ける",
+    cmdClaudeCompactHint: "[残す要点]",
+    cmdClaudeInit: "コードベースを分析して CLAUDE.md を作成",
+    cmdReview: "現在の変更をレビュー",
+    cmdPrComments: "現在の PR のコメントを読んで対応",
+    cmdCodexCompact: "現在の会話を圧縮",
+    cmdCodexReview: "現在のブランチまたは未コミットの変更をレビュー",
+    cmdClearDraft: "入力中の下書きを消去",
     desktopDrivenBanner: "現在ターミナル側で操作中です。引き継ぐとここから返信できます。",
     dropFilesHint: "ドロップして添付（1ファイル上限 20 MB）",
     commandsHeading: "スラッシュコマンド",
@@ -746,80 +834,59 @@ export interface SlashCommandItem {
   source: "local" | "agent" | "session";
 }
 
-export const NEW_SESSION_COMMANDS: readonly SlashCommandItem[] = [
-  {
-    name: "clear",
-    aliases: ["reset", "new"],
-    description: "清空当前已输入的草稿",
-    source: "local",
-  },
-];
+/** Commands the new-session composer handles itself. */
+export function newSessionCommands(copy: SessionCopy): SlashCommandItem[] {
+  return [{ name: "clear", aliases: ["reset", "new"], description: copy.cmdClearDraft, source: "local" }];
+}
 
-const SESSION_LOCAL_COMMANDS: readonly SlashCommandItem[] = [
-  {
-    name: "new",
-    aliases: ["reset", "clear"],
-    description: "在同一项目目录开启新会话",
-    source: "local",
-  },
-  {
-    name: "stop",
-    aliases: ["cancel"],
-    description: "停止当前正在运行的回合",
-    source: "local",
-  },
-  {
-    name: "model",
-    description: "查看或切换模型",
-    hint: "[模型名]",
-    source: "local",
-  },
-  {
-    name: "mode",
-    aliases: ["permissions"],
-    description: "查看或切换权限模式",
-    hint: "[模式]",
-    source: "local",
-  },
-  {
-    name: "status",
-    description: "查看会话目录、模型与上下文状态",
-    source: "local",
-  },
-];
+/** Commands the agent is known to have before it advertises its own list (which then wins). */
+function agentBuiltinCommands(agent: string, copy: SessionCopy): SlashCommandItem[] {
+  if (agent === "claude") {
+    return [
+      { name: "compact", description: copy.cmdClaudeCompact, hint: copy.cmdClaudeCompactHint, source: "agent" },
+      { name: "init", description: copy.cmdClaudeInit, source: "agent" },
+      { name: "review", description: copy.cmdReview, source: "agent" },
+      { name: "pr-comments", description: copy.cmdPrComments, source: "agent" },
+    ];
+  }
+  if (agent === "codex") {
+    return [
+      { name: "compact", description: copy.cmdCodexCompact, source: "agent" },
+      { name: "review", description: copy.cmdCodexReview, source: "agent" },
+    ];
+  }
+  return [];
+}
 
-const AGENT_BUILTIN_COMMANDS: Record<string, readonly SlashCommandItem[]> = {
-  claude: [
-    { name: "compact", description: "压缩上下文历史以释放窗口空间", hint: "[保留重点]", source: "agent" },
-    { name: "init", description: "分析代码库并生成 CLAUDE.md", source: "agent" },
-    { name: "review", description: "审查当前代码改动", source: "agent" },
-    { name: "pr-comments", description: "读取并处理当前 PR 评论", source: "agent" },
-  ],
-  codex: [
-    { name: "compact", description: "压缩当前对话上下文", source: "agent" },
-    { name: "review", description: "对当前分支或未提交改动执行代码审查", source: "agent" },
-  ],
-};
-
+/**
+ * The composer's `/` menu: LinkShell's own controls, then what the agent advertises.
+ * `sideCommand`: the agent's name for its side conversation (`side`, `btw`) when it has one.
+ */
 export function buildSessionCommands(
   agent: string,
   advertised: readonly { name: string; description: string; hint?: string }[] = [],
+  copy: SessionCopy = COPY_BY_LOCALE.zh,
+  options: { sideCommand?: string } = {},
 ): SlashCommandItem[] {
   const byName = new Map<string, SlashCommandItem>();
-  for (const item of SESSION_LOCAL_COMMANDS) {
-    byName.set(item.name, item);
-  }
-  const agentKey = agent.toLowerCase();
-  for (const [prefix, list] of Object.entries(AGENT_BUILTIN_COMMANDS)) {
-    if (agentKey.includes(prefix)) {
-      for (const item of list) {
-        if (!byName.has(item.name)) byName.set(item.name, item);
-      }
-    }
+  const local: SlashCommandItem[] = [
+    ...(options.sideCommand
+      ? [{ name: options.sideCommand, description: copy.cmdSide, hint: copy.cmdSideHint, source: "local" as const }]
+      : []),
+    { name: "new", aliases: ["reset", "clear"], description: copy.cmdNew, source: "local" },
+    { name: "stop", aliases: ["cancel"], description: copy.cmdStop, source: "local" },
+    { name: "model", description: copy.cmdModel, hint: copy.cmdModelHint, source: "local" },
+    { name: "mode", aliases: ["permissions"], description: copy.cmdMode, hint: copy.cmdModeHint, source: "local" },
+    { name: "status", description: copy.cmdStatus, source: "local" },
+  ];
+  for (const item of local) byName.set(item.name, item);
+  for (const item of agentBuiltinCommands(agent.toLowerCase(), copy)) {
+    if (!byName.has(item.name)) byName.set(item.name, item);
   }
   for (const item of advertised) {
     const clean = item.name.replace(/^\/+/, "").trim();
-    if (!clean) continue;
+    // The side command is answered here, not sent into the turn as text.
+    if (!clean || clean === options.sideCommand) continue;
     byName.set(clean, {
       name: clean,
       description: item.description,

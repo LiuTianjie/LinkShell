@@ -1244,6 +1244,11 @@
     -webkit-app-region: no-drag;
   }
 
+  /* The open inspector carries its own toggle at the same window edge; one is enough. */
+  .desktop-root:has(.ls-inspector-header) .workspace-topbar__inspector-toggle {
+    display: none;
+  }
+
   @container main-canvas (max-width: 640px) {
     .workspace-project-slug,
     .workspace-computer-chip {

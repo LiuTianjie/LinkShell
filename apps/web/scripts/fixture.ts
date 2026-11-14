@@ -18,6 +18,8 @@ import { startHost } from "../../../packages/host/src/host.js";
 import type {
   AgentDriver,
   DriverHost,
+  SideOutput,
+  SideRequest,
   DiscoveredSession,
   HistoryItem,
 } from "../../../packages/host/src/drivers/types.js";
@@ -391,8 +393,19 @@ class Fixture implements AgentDriver {
     fork: true,
     models: true,
     modes: true,
+    side: true,
   };
   host!: DriverHost;
+  /** A side answer written a few words at a time, so the panel shows one arriving. */
+  async sideAsk(_id: string, request: SideRequest, out: SideOutput, signal: AbortSignal) {
+    out.activity("读取会话上下文");
+    const words = `关于「${request.question.split("\n").find((line) => !line.startsWith(">"))?.trim() || request.question.slice(0, 40)}」：这是隔离联调里的侧边回答，不会进入主会话。`.split("");
+    for (const word of words) {
+      if (signal.aborted) return;
+      out.text(word);
+      await new Promise((resolve) => setTimeout(resolve, 12));
+    }
+  }
   goals = new Map<string, SessionGoal>();
   sessions: DiscoveredSession[] = seedSessions.map((session) => ({
     ...session,

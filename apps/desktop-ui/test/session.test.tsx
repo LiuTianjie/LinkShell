@@ -147,10 +147,10 @@ function createMockConnection(overrides?: {
         {
           id: "codex",
           label: "Codex",
-          tier: "handoff",
+          tier: "multi_client",
           installed: true,
           version: "0.99.0",
-          capabilities: { models: true, modes: true },
+          capabilities: { models: true, modes: true, interrupt: true, steer: true, side: true },
         },
         {
           id: "claude",

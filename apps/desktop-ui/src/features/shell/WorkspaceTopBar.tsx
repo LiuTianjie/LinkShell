@@ -259,6 +259,7 @@ export function WorkspaceTopBar({
 
             <IconButton
               icon="inspector-toggle"
+              className="workspace-topbar__inspector-toggle"
               variant={inspectorOpen ? "subtle" : "ghost"}
               aria-pressed={inspectorOpen}
               label={t("desktop.toggleInspector")}

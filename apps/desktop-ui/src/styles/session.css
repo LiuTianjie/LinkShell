@@ -2368,3 +2368,64 @@
     color: var(--ls-fg-3);
   }
 }
+
+@layer components {
+  /* Actions on selected timeline text (SelectionActions) */
+  .ls-selection-actions {
+    position: fixed;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 10px;
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-popover);
+    box-shadow: var(--ls-shadow-popover);
+    transform: translate(-50%, -100%);
+    animation: ls-selection-actions-in 120ms ease-out;
+    user-select: none;
+  }
+
+  .ls-selection-actions[data-below="true"] {
+    transform: translate(-50%, 0);
+  }
+
+  .ls-selection-actions__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    block-size: 26px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-xs);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .ls-selection-actions__btn:hover {
+    background-color: var(--ls-hover);
+  }
+
+  .ls-selection-actions__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  @keyframes ls-selection-actions-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ls-selection-actions {
+      animation: none;
+    }
+  }
+}
