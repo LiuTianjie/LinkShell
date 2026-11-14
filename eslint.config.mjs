@@ -44,7 +44,7 @@ export default tseslint.config(
   {
     // The rules that need types: the ones that find real bugs in asynchronous code.
     // Sources only: tests and scripts are outside the packages' tsconfig projects.
-    files: ["packages/*/src/**/*.ts", "apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}"],
+    files: ["packages/*/src/**/*.ts", "apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}", "apps/desktop-ui/src/**/*.{ts,tsx}"],
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     rules: {
       "@typescript-eslint/no-floating-promises": "error",
@@ -53,7 +53,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}"],
+    files: ["apps/client/src/**/*.{ts,tsx}", "apps/web/src/**/*.{ts,tsx}", "apps/desktop-ui/src/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
@@ -63,7 +63,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/web/**/*.{ts,tsx,js}"],
+    files: ["apps/web/**/*.{ts,tsx,js}", "apps/desktop-ui/**/*.{ts,tsx,js}"],
     languageOptions: { globals: globals.browser },
   },
   {

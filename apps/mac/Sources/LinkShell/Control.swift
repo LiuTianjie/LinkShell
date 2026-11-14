@@ -65,6 +65,8 @@ final class Control {
 
   private func point(_ command: [String: Any]) -> CGPoint? {
     guard let x = command["x"] as? Double, let y = command["y"] as? Double else { return nil }
+    bounds = boundsNow()
+    guard bounds.width > 1, bounds.height > 1 else { return nil }
     // Just inside the far edges: a point on the edge itself belongs to the next display.
     return CGPoint(
       x: bounds.minX + min(max(x, 0), 1) * (bounds.width - 1),
@@ -217,9 +219,23 @@ final class Control {
       let clicks = Int64(min(max((command["n"] as? Int) ?? 1, 1), 3))
       button(name, down: kind == "down", clicks: clicks, with: (command["m"] as? [String]) ?? [])
     case "scroll":
-      let dx = Int32(max(min((command["dx"] as? Double) ?? 0, 2000), -2000))
-      let dy = Int32(max(min((command["dy"] as? Double) ?? 0, 2000), -2000))
+      let rawDx = max(min((command["dx"] as? Double) ?? 0, 2000), -2000)
+      let rawDy = max(min((command["dy"] as? Double) ?? 0, 2000), -2000)
+      let continuous = command["c"] as? Bool
+      let phase = (command["p"] as? Int).map(Int64.init) ?? 0
+      let momentum = (command["mp"] as? Int).map(Int64.init) ?? 0
+      let dx = Int32(rawDx.rounded())
+      let dy = Int32(rawDy.rounded())
       let event = CGEvent(scrollWheelEvent2Source: Control.source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
+      if continuous == true {
+        event?.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event?.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: rawDy)
+        event?.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: rawDx)
+        event?.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: rawDy)
+        event?.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: rawDx)
+        if phase != 0 { event?.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase) }
+        if momentum != 0 { event?.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum) }
+      }
       event?.flags = Keys.flags(command["m"]).union(heldFlags)
       post(event, ["kind": "scroll", "dx": Int(dx), "dy": Int(dy)])
     case "key":

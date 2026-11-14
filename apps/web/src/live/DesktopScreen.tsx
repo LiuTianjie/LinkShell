@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDownLeft, Expand, LoaderCircle, Maximize, Minimize, Monitor, RotateCw, SlidersHorizontal, Square } from "lucide-react";
+import { AppWindowMac, ArrowDownLeft, Expand, LoaderCircle, Maximize, Minimize, Monitor, RotateCw, SlidersHorizontal, Square } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
-import { ErrorNotice, LoadState, messageOf, useConnection, useJob, useLoad } from "./common";
+import { ErrorNotice, LoadState, messageOf, useClient, useConnection, useJob, useLoad } from "./common";
 import { DESKTOP_FULLSCREEN_EVENT, isElectronDesktop, readDesktopStorage, saveDesktopStorage, setDesktopScreenFullScreen } from "./desktop";
+import { canUseFusionMode, startComputerFusion } from "./fusion";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { NATIVE_SCREEN_EVENT, leaveScreenFullscreen, nativeScreenQuery, postNativeScreen, screenSignal, windowFullscreenChanged, type NativeScreenEvent, type NativeScreenStatus, type ScreenFullscreen } from "./desktop-screen";
 import { RemoteScreen } from "./RemoteScreen";
@@ -30,9 +31,12 @@ const DESKTOP_WINDOW_EVENT = "linkshell-desktop-window";
 
 /** The DOM owns chrome and authenticated signalling; AppKit owns the video surface and input. */
 export function DesktopScreen({ title = "电脑屏幕", embedded = false, primaryAction = false, onOpen, autoStart = false, active = true, onFallback }: ScreenProps & { onFallback?: (reason: string) => void }) {
-  const { link, streams } = useConnection();
+  const { computer, link, streams } = useConnection();
+  const remotePlatform = useClient((state) => state.machine?.platform);
+  const fusionAvailable = canUseFusionMode(computer.key, remotePlatform);
   const visible = useDesktopVisibility();
   const job = useJob();
+  const fusionJob = useJob();
   const access = useLoad(() => link.call("screen.access", {}), [link]);
   const [started, setStarted] = useState(autoStart);
   const [focused, setFocused] = useState(false);
@@ -375,10 +379,11 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
     setStatus((current) => ({ ...current, controlError: undefined }));
   }
   const checkPermissions = () => void job.run(async () => { await link.call("screen.access", { ask: true }); access.reload(); });
+  const openFusion = () => void fusionJob.run(() => startComputerFusion({ computerKey: computer.key, name: title, link, streams }));
   if (compact) {
     const ready = Boolean(access.value?.supported && access.value.recording !== false);
     const needsPermission = access.value?.recording === false;
-    const problem = job.error ?? access.error;
+    const problem = fusionJob.error ?? job.error ?? access.error;
     const loading = access.loading && !access.value && !problem;
     const statusLabel = problem
       ? "检查失败"
@@ -397,6 +402,12 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
         <span className="screen-idle-label">{statusLabel}</span>
       </div>
       <div className="screen-idle-actions">
+        {fusionAvailable && ready && !problem && (
+          <Button size="sm" variant="outline" aria-label={`融合模式 · ${title}`} disabled={fusionJob.busy} onClick={openFusion}>
+            <AppWindowMac data-icon="inline-start" aria-hidden="true" />
+            {fusionJob.busy ? "正在启动…" : "融合模式"}
+          </Button>
+        )}
         <Button size="sm" variant={primaryAction ? "default" : "outline"} disabled={(!access.value?.supported && !problem) || job.busy} onClick={() => problem ? access.reload() : needsPermission ? checkPermissions() : onOpen ? onOpen() : setStarted(true)}>{problem ? "重新检查" : needsPermission ? (job.busy ? "正在请求…" : "检查权限") : "打开桌面"}</Button>
       </div>
     </section>;
@@ -405,6 +416,12 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
     <div className="screen-toolbar">
       <strong className="screen-view-title"><Monitor size={17} /><span>{title}</span></strong>
       <div className="screen-actions">
+        {fusionAvailable && (
+          <Button variant="outline" size="sm" disabled={access.value?.recording === false || fusionJob.busy} onClick={openFusion}>
+            <AppWindowMac data-icon="inline-start" aria-hidden="true" />
+            {fusionJob.busy ? "正在启动…" : "融合模式"}
+          </Button>
+        )}
         <Button variant="ghost" size="icon" aria-label="画质设置" aria-expanded={settings} onClick={() => setSettings(!settings)}><SlidersHorizontal /></Button>
         {started && <><ScreenToolsMenu /><Button variant={controlling ? "secondary" : "outline"} disabled={!status.live || access.value?.control === false} aria-pressed={controlling} onClick={control}>{controlling ? "停止控制" : controlRequested ? "取消控制请求" : "控制电脑"}</Button><Button variant="ghost" size="icon" aria-label="重新连接" onClick={retry}><RotateCw /></Button></>}
         {!fullscreen && <Button variant="outline" onClick={() => setFocused(!focused)}>{focused ? <ArrowDownLeft data-icon="inline-start" /> : <Expand data-icon="inline-start" />}{focused ? "退出铺满" : "铺满窗口"}</Button>}
@@ -418,9 +435,9 @@ export function DesktopScreen({ title = "电脑屏幕", embedded = false, primar
       <div role="group" aria-label="帧率上限"><span>帧率上限</span>{["30", "60", "120"].map((value) => <Button key={value} size="sm" variant={preferences.maxFps === value ? "secondary" : "ghost"} onClick={() => choose("maxFps", value)}>{value} 帧</Button>)}{displayFps !== undefined && maxFps !== preferences.maxFps && <span title="超出本机显示器刷新率的帧不会被看到">本机显示 {maxFps} 帧</span>}</div>
       <div role="group" aria-label="画面节奏"><span>画面节奏</span>{[[false, "延迟优先"], [true, "流畅优先"]].map(([value, label]) => <Button key={String(value)} size="sm" variant={smooth === value ? "secondary" : "ghost"} title={value ? "画面更均匀；Wi-Fi 下延迟约多 50 毫秒，适合只观看" : "最跟手；网络抖动会表现为短暂停顿"} onClick={() => choosePacing(value as boolean)}>{label as string}</Button>)}</div>
     </div>}
-    {status.controlError && <ErrorNotice error={status.controlError} />}
+    {(fusionJob.error || status.controlError) && <ErrorNotice error={fusionJob.error ?? status.controlError} />}
     <div ref={stage} className="screen-stage" aria-label="原生远程桌面画面">
-      {!started ? <div className="screen-start"><Monitor size={32} /><LoadState {...access} /><ErrorNotice error={job.error} /><h3>{access.value?.recording === false ? "需要屏幕录制权限" : access.value?.supported ? "可以连接桌面" : "此电脑暂不支持屏幕共享"}</h3><p>{access.value?.problem ?? "打开画面，继续电脑上的工作。"}</p><div className="screen-start-actions"><Button disabled={!access.value?.supported || access.value?.recording === false} onClick={() => setStarted(true)}>打开桌面</Button>{access.value?.supported && (!access.value.recording || !access.value.control) && <Button variant="outline" disabled={job.busy} onClick={checkPermissions}>在电脑上检查权限</Button>}<Button variant="ghost" onClick={access.reload}>刷新状态</Button></div></div>
+      {!started ? <div className="screen-start"><Monitor size={32} /><LoadState {...access} /><ErrorNotice error={job.error} /><h3>{access.value?.recording === false ? "需要屏幕录制权限" : access.value?.supported ? "可以连接桌面" : "此电脑暂不支持屏幕共享"}</h3><p>{access.value?.problem ?? "打开画面，继续电脑上的工作。"}</p><div className="screen-start-actions"><Button disabled={!access.value?.supported || access.value?.recording === false} onClick={() => setStarted(true)}>打开桌面</Button>{fusionAvailable && access.value?.supported && access.value?.recording !== false && <Button variant="outline" disabled={fusionJob.busy} onClick={openFusion}><AppWindowMac data-icon="inline-start" aria-hidden="true" />{fusionJob.busy ? "正在启动…" : "融合模式"}</Button>}{access.value?.supported && (!access.value.recording || !access.value.control) && <Button variant="outline" disabled={job.busy} onClick={checkPermissions}>在电脑上检查权限</Button>}<Button variant="ghost" onClick={access.reload}>刷新状态</Button></div></div>
         : (!status.live || error) && <div className="screen-start" role="status">{error ? <Monitor size={32} /> : <LoaderCircle className="animate-spin" size={32} />}<h3>{error ? "暂时无法打开画面" : retrying ? "正在重新连接屏幕" : "正在连接屏幕"}</h3>{error ? <><ErrorNotice error={error} /><Button variant="outline" onClick={retry}>重新连接</Button></> : <p>正在建立原生视频连接</p>}</div>}
     </div>
     <div className="screen-caption"><span>{status.live && status.hardware ? `原生画面 · ${status.codec || "H.264"} 硬件解码 · Metal` : error ? "连接失败，可重试" : started ? "正在接收画面" : "尚未开始观看"}</span><span>{controlling ? "点击画面操作电脑；停止控制可释放输入" : "仅观看 · 点击“控制电脑”启用操作"}</span></div>

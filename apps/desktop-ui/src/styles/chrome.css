@@ -1,0 +1,565 @@
+@layer components {
+  /* =========================================================================
+   * 1. Root Desktop Frame & Platform Material Adaptation
+   *    Preserves .desktop-root[data-shell="electron"][data-platform="windows"|"macos"|"linux"]
+   *    invariants verified by apps/windows/scripts/smoke.mjs.
+   * ========================================================================= */
+  .desktop-root {
+    position: relative;
+    inline-size: 100vw;
+    block-size: 100vh;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ls-ground);
+    color: var(--ls-fg);
+  }
+
+  .desktop-root[data-platform="windows"] {
+    --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Microsoft YaHei UI", ui-monospace,
+      monospace;
+    /* Crisp 1px hairlines across 100%, 125%, 150%, 175% Windows fractional DPI */
+    --ls-hairline: 1px;
+  }
+
+  @media (min-resolution: 2dppx) {
+    .desktop-root[data-platform="windows"] {
+      --ls-hairline: 0.5px;
+    }
+  }
+
+  /* macOS vibrancy: L0/L1 allow native window vibrancy through ONLY when focused, <4K,
+     opaqueWindow=false, and native Metal screen is not active; L2 main canvas stays 100% opaque. */
+  .desktop-root[data-platform="macos"][data-translucent="true"] {
+    background-color: transparent;
+    --ls-sidebar: var(--ls-sidebar-translucent);
+  }
+
+  /* =========================================================================
+   * 2. Cross-Platform Window Chrome & Drag / Safe-Zone Geometry (42px)
+   *    - macOS traffic lights sit in pure empty drag space (x: 0..80px, zero buttons)
+   *    - Sidebar toggle [◧] sits right-aligned in .desktop-sidebar-header when expanded,
+   *      and right-aligned in .workspace-topbar__right when collapsed.
+   * ========================================================================= */
+  .chrome-bar {
+    box-sizing: border-box;
+    position: relative;
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    block-size: var(--chrome-h);
+    min-block-size: var(--chrome-h);
+    max-block-size: var(--chrome-h);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-inline: 12px;
+    border-block-end: var(--ls-hairline) solid var(--ls-border-subtle);
+    -webkit-app-region: drag;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .chrome-bar :is(
+      button,
+      a,
+      input,
+      select,
+      textarea,
+      label,
+      summary,
+      [role="button"],
+      [role="tab"],
+      [role="menuitem"],
+      [role="combobox"],
+      [role="switch"],
+      .no-drag
+    ) {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Expanded Sidebar Top Header: clears macOS traffic lights (84px) with LinkShell left + [◧] right */
+  .desktop-sidebar-header {
+    padding-inline-start: 14px;
+    padding-inline-end: 8px;
+    border-block-end-color: transparent;
+  }
+
+  .desktop-root[data-platform="macos"]:not([data-fullscreen="true"]) .desktop-sidebar-header {
+    padding-inline-start: 84px;
+  }
+
+  /* Dedicated macOS traffic-light clearance utility (80px pure drag zone) */
+  .desktop-root[data-platform="macos"]:not([data-fullscreen="true"]) .macos-traffic-safe {
+    padding-inline-start: 80px;
+  }
+
+  /* Collapsed Sidebar Left Clearance: 84px on macOS (clears traffic lights cleanly with no dead gap) */
+  .desktop-root[data-platform="macos"][data-sidebar-collapsed="true"]:not([data-fullscreen="true"]) {
+    --titlebar-left-inset: 84px;
+  }
+
+  .desktop-root[data-platform="macos"][data-sidebar-collapsed="true"][data-fullscreen="true"],
+  .desktop-root:not([data-platform="macos"])[data-sidebar-collapsed="true"] {
+    --titlebar-left-inset: 12px;
+  }
+
+  .desktop-root[data-sidebar-collapsed="true"]:not([data-screen-fullscreen="true"])
+    :is(
+      .desktop-main-header,
+      .ls-remote-subbar[data-standalone-chrome="true"],
+      .desktop-main > .chrome-bar,
+      .desktop-main:not(:has(> .desktop-main-header)) .desktop-main-body > * > .chrome-bar,
+      .desktop-main:not(:has(> .desktop-main-header)) .desktop-stage-enter > * > .chrome-bar
+    ) {
+    padding-inline-start: var(--titlebar-left-inset);
+  }
+
+  /* Windows titleBarOverlay Safe Zone (~138px caption buttons + 12px breathing room) */
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) {
+    --ls-win-caption-w: 138px;
+    --caption-inset: max(
+      calc(12px + var(--ls-win-caption-w, 138px)),
+      calc(
+        100vw - env(titlebar-area-x, 0px) -
+          env(titlebar-area-width, calc(100vw - var(--ls-win-caption-w, 138px))) + 12px
+      )
+    );
+  }
+
+  /* Dynamic Rightmost Column Rule (#75 §3, #110 §2.2):
+     - Inspector CLOSED: .desktop-main-header & standalone .ls-remote-subbar[data-standalone-chrome="true"] touch top-right -> reserve caption safe zone
+     - Inspector OPEN: .ls-inspector-header / .desktop-inspector-header touch top-right -> reserve caption safe zone,
+       while .desktop-main-header (now in the middle column) keeps normal 12px right padding! */
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]):not([data-inspector-open="true"])
+    :is(.desktop-main-header, .ls-remote-subbar[data-standalone-chrome="true"]) {
+    padding-inline-end: max(
+      calc(12px + var(--ls-win-caption-w, 138px)),
+      var(--caption-inset, calc(12px + var(--ls-win-caption-w, 138px)))
+    );
+  }
+
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"])[data-inspector-open="true"]
+    :is(.desktop-inspector-header, .ls-inspector-header) {
+    padding-inline-end: max(
+      calc(12px + var(--ls-win-caption-w, 138px)),
+      var(--caption-inset, calc(12px + var(--ls-win-caption-w, 138px)))
+    );
+  }
+
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) .caption-safe-right {
+    padding-inline-end: max(
+      calc(12px + var(--ls-win-caption-w, 138px)),
+      var(--caption-inset, calc(12px + var(--ls-win-caption-w, 138px)))
+    );
+  }
+
+  /* Top-layer modal window drag strip: keeps window draggable & OS caption controls reachable */
+  .modal-window-drag-strip {
+    position: fixed;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
+    block-size: var(--chrome-h);
+    -webkit-app-region: drag;
+    user-select: none;
+    pointer-events: auto;
+    z-index: 1;
+  }
+
+  dialog:not([open]) .modal-window-drag-strip {
+    display: none;
+    pointer-events: none;
+  }
+
+  .desktop-root[data-platform="macos"]:not([data-fullscreen="true"]) .modal-window-drag-strip,
+  :root[data-platform="macos"]:not([data-fullscreen="true"]) .modal-window-drag-strip {
+    inset-inline-start: 80px;
+  }
+
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) .modal-window-drag-strip,
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) .modal-window-drag-strip {
+    inset-inline-end: 148px;
+  }
+
+  /* =========================================================================
+   * 3. Unified 3-Column Sculpted Island Workbench (Paseo + T3 Code Framing)
+   * ========================================================================= */
+  .desktop-workbench {
+    --sidebar-col: var(--sidebar-w, 256px);
+    --inspector-col: 0px;
+    position: relative;
+    flex: 1 1 auto;
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: clip;
+    display: grid;
+    grid-template-columns: var(--sidebar-col) minmax(0, 1fr) var(--inspector-col);
+  }
+
+  .desktop-root[data-sidebar-collapsed="true"] .desktop-workbench {
+    --sidebar-col: 0px;
+  }
+
+  .desktop-root[data-inspector-open="true"] .desktop-workbench {
+    --inspector-col: var(--inspector-w, 380px);
+  }
+
+  /* Fullscreen Remote Screen Stage: collapse workbench chrome so stage fills (0, 0, 100vw, 100vh) */
+  .desktop-root[data-screen-fullscreen="true"]
+    :is(
+      .desktop-sidebar-edge-sensor,
+      .desktop-sidebar-peek,
+      .desktop-col-sash,
+      .desktop-sidebar,
+      .desktop-main-header,
+      .desktop-surface-tabs,
+      .desktop-bottom-dock,
+      .desktop-inspector
+    ) {
+    display: none;
+  }
+
+  .desktop-root[data-screen-fullscreen="true"] .desktop-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    transition: none;
+  }
+
+  .desktop-root[data-screen-fullscreen="true"] .desktop-main {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* L1 Deep Carbon Left Navigation Rail */
+  .desktop-sidebar {
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ls-sidebar);
+    contain: layout style;
+  }
+
+  .desktop-root[data-sidebar-collapsed="true"] .desktop-sidebar {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .desktop-sidebar-scroll {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    overflow-x: clip;
+    padding: 4px 8px 10px;
+  }
+
+  .desktop-sidebar-footer {
+    block-size: var(--sidebar-footer-h);
+    min-block-size: var(--sidebar-footer-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    padding-inline: 8px;
+    border-block-start: var(--ls-hairline) solid var(--ls-border-subtle);
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  /* L2 Sculpted Workspace Island Canvas (100% opaque + container query root) */
+  .desktop-main {
+    box-sizing: border-box;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 0;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ls-plain);
+    contain: layout style;
+    container-name: main-canvas;
+    container-type: inline-size;
+  }
+
+  /* Sculpted Island Edge when Sidebar is expanded:
+     - macOS / Linux: crisp inset card island on deep #090a0c ground (T3 Code / Paseo style)
+     - Windows: crisp left border + rounded top-left corner while keeping y=0 aligned with titleBarOverlay */
+  .desktop-root:not([data-sidebar-collapsed="true"]):not([data-fullscreen="true"]):not([data-platform="windows"])
+    :is(.desktop-main) {
+    margin-block: 5px;
+    margin-inline-end: 5px;
+    border-radius: var(--ls-radius-lg);
+    border: var(--ls-hairline) solid var(--ls-border);
+    box-shadow: var(--ls-shadow-island);
+  }
+
+  .desktop-root[data-inspector-open="true"]:not([data-sidebar-collapsed="true"]):not([data-fullscreen="true"]):not([data-platform="windows"])
+    .desktop-main {
+    margin-inline-end: 0;
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+    border-inline-end: 0;
+  }
+
+  .desktop-root[data-inspector-open="true"]:not([data-sidebar-collapsed="true"]):not([data-fullscreen="true"]):not([data-platform="windows"])
+    .desktop-inspector {
+    margin-block: 5px;
+    margin-inline-end: 5px;
+    border-start-end-radius: var(--ls-radius-lg);
+    border-end-end-radius: var(--ls-radius-lg);
+    border-block: var(--ls-hairline) solid var(--ls-border);
+    border-inline-end: var(--ls-hairline) solid var(--ls-border);
+    box-shadow: var(--ls-rim-island);
+  }
+
+  .desktop-root[data-platform="windows"]:not([data-sidebar-collapsed="true"]) .desktop-main {
+    border-inline-start: var(--ls-hairline) solid var(--ls-border);
+    box-shadow: var(--ls-rim-island);
+  }
+
+  .desktop-main-body {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 0;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Keyed Route / Tab Stage Wrapper: NEVER carries a resting transform so position: fixed descendants stay anchored */
+  .desktop-stage-enter {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Compositor-driven scroll-state timeline container (Chromium 133+) */
+  .desktop-timeline-scroll {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    overflow-x: clip;
+    scrollbar-gutter: stable;
+    container-name: timeline-scroll;
+    container-type: scroll-state;
+  }
+
+  .desktop-scroll-to-bottom {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+    transition: opacity 140ms ease-out, transform 140ms ease-out;
+  }
+
+  @container timeline-scroll scroll-state(scrollable: bottom) {
+    .desktop-scroll-to-bottom {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+  }
+
+  /* Dockable Bottom Terminal Drawer inside L2 */
+  .desktop-bottom-dock {
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ls-terminal-bg);
+    color: var(--ls-terminal-fg);
+    border-block-start: var(--ls-hairline) solid var(--ls-border-strong);
+  }
+
+  /* L3 Right Inspector Workbench (inline-size container query root) */
+  .desktop-inspector {
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: clip;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ls-bg);
+    border-inline-start: var(--ls-hairline) solid var(--ls-border);
+    contain: layout style;
+    container-name: inspector-pane;
+    container-type: inline-size;
+  }
+
+  .desktop-root:not([data-inspector-open="true"]) .desktop-inspector {
+    border-inline-start: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* =========================================================================
+   * 4. Shared Layout, Truncation & Dual-Theme Mark Utilities
+   * ========================================================================= */
+  .ls-truncate {
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-chrome-noselect {
+    user-select: none;
+  }
+
+  /* Theme-paired inline SVG marks (AgentMark & SubagentGlyph) */
+  .ls-theme-light {
+    display: inline-flex;
+  }
+
+  .ls-theme-dark {
+    display: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .ls-theme-light {
+      display: none;
+    }
+    :root:not([data-theme="light"]) .ls-theme-dark {
+      display: inline-flex;
+    }
+  }
+
+  :root[data-theme="dark"] .ls-theme-light,
+  .ls-dark-well .ls-theme-light {
+    display: none;
+  }
+
+  :root[data-theme="dark"] .ls-theme-dark,
+  .ls-dark-well .ls-theme-dark {
+    display: inline-flex;
+  }
+
+  @keyframes ls-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .ls-icon-spin {
+    animation: ls-spin 0.75s linear infinite;
+  }
+
+  /* =========================================================================
+   * 5. 60/120fps Desktop Workbench & Stage Motion System
+   *    - Panel collapse/expand eased at 220ms cubic-bezier(0.22, 1, 0.36, 1),
+   *      instantly disabled during SplitResizer pointer drag (data-resizing).
+   *    - Keyed stage entrance (170ms) ending at transform: none.
+   * ========================================================================= */
+  @keyframes ls-stage-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes ls-stage-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes ls-dock-enter {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .desktop-workbench {
+      transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    :root[data-resizing] .desktop-workbench,
+    .desktop-workbench[data-resizing="true"] {
+      transition: none;
+    }
+
+    .desktop-sidebar {
+      opacity: 1;
+      transform: translateX(0);
+      transition-property: opacity, transform, visibility;
+      transition-duration: 200ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      transition-behavior: allow-discrete;
+    }
+
+    .desktop-root[data-sidebar-collapsed="true"] .desktop-sidebar {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+
+    .desktop-inspector {
+      opacity: 1;
+      transform: translateX(0);
+      transition-property: opacity, transform, visibility;
+      transition-duration: 200ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      transition-behavior: allow-discrete;
+    }
+
+    .desktop-root:not([data-inspector-open="true"]) .desktop-inspector {
+      opacity: 0;
+      transform: translateX(8px);
+    }
+
+    .desktop-stage-enter:not([data-stage-kind="screen"]) {
+      animation: ls-stage-enter 170ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .desktop-stage-enter[data-stage-kind="screen"] {
+      animation: ls-stage-fade 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .desktop-bottom-dock {
+      animation: ls-dock-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .desktop-workbench,
+    .desktop-sidebar,
+    .desktop-inspector,
+    .desktop-stage-enter,
+    .desktop-bottom-dock {
+      transition-duration: 0.01ms;
+      animation-duration: 0.01ms;
+    }
+  }
+}

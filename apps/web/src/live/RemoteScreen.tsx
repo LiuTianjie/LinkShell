@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  AppWindowMac,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -29,7 +30,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { cn } from "../lib/utils";
 import { ErrorNotice, useClient, useConnection, useJob, useLoad } from "./common";
-import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
+import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, reportDesktopError, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
+import { canUseFusionMode, startComputerFusion } from "./fusion";
 import { useDesktopVisibility } from "./desktop-visibility";
 import { readLocal, saveLocal } from "./storage";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
@@ -98,9 +100,11 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const { link, streams, computer } = useConnection();
   const machine = useClient((state) => state.machine);
   const remote = screenPlatform(machine?.platform);
+  const fusionAvailable = canUseFusionMode(computer.key, machine?.platform);
   const visible = useDesktopVisibility();
   const access = useLoad(() => link.call("screen.access", {}), [link]);
   const job = useJob();
+  const fusionJob = useJob();
   const [preferences, setPreferences] = useState(readPreferences);
   const [display, setDisplay] = useState(() => readLocal<number>("remoteScreenDisplay", 0));
   const [revision, setRevision] = useState(0);
@@ -460,6 +464,17 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
         {live && <span className="remote-screen-path" data-path={stats?.path}>{pathLabel}{stats?.fps !== undefined ? ` · ${Math.round(stats.fps)} 帧` : ""}</span>}
       </div>
       <div className="remote-screen-actions">
+        {fusionAvailable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={access.value?.recording === false || fusionJob.busy}
+            onClick={() => void fusionJob.run(() => startComputerFusion({ computerKey: computer.key, name: title, link, streams }).catch((err) => { reportDesktopError(err); throw err; }))}
+          >
+            <AppWindowMac data-icon="inline-start" aria-hidden="true" />
+            {fusionJob.busy ? "正在启动…" : "融合模式"}
+          </Button>
+        )}
         {(state?.displays.length ?? 0) > 1 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

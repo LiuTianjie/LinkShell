@@ -203,7 +203,11 @@ final class Callback {
 /// Mac's menu bar and titlebar over it. Never combined with an AppKit `.fullScreen` Space window.
 @MainActor private final class ImmersivePresentation {
   static let shared = ImmersivePresentation()
+  // AppKit requires `.hideDock` whenever `.hideMenuBar` is set; `[.autoHideDock, .hideMenuBar]` (0x9)
+  // throws `NSInvalidArgumentException` and terminates Electron on macOS.
+  private static let immersiveOptions: NSApplication.PresentationOptions = [.hideDock, .hideMenuBar]
   private var wanted = false
+  private var applied = false
 
   private init() {
     let center = NotificationCenter.default
@@ -220,12 +224,18 @@ final class Callback {
   }
 
   func sync() {
-    let active = wanted
-      && NSApp.isActive
-      && !NSApp.windows.contains { $0.styleMask.contains(.fullScreen) }
-    let options: NSApplication.PresentationOptions = active ? [.autoHideDock, .hideMenuBar] : []
-    if NSApp.presentationOptions != options {
-      NSApp.presentationOptions = options
+    let hasFullScreenSpace = NSApp.windows.contains { $0.styleMask.contains(.fullScreen) }
+    let active = wanted && NSApp.isActive && !hasFullScreenSpace
+    if active {
+      if NSApp.presentationOptions != Self.immersiveOptions {
+        NSApp.presentationOptions = Self.immersiveOptions
+      }
+      applied = true
+    } else if applied {
+      applied = false
+      if !hasFullScreenSpace && !NSApp.presentationOptions.isEmpty {
+        NSApp.presentationOptions = []
+      }
     }
   }
 }
@@ -300,6 +310,8 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
         helper: helper,
         id: id,
         rect: rect,
+        holes: DesktopScreenBridge.holes(message["holes"]) ?? [],
+        overlayOpen: DesktopScreenBridge.boolean(message["overlayOpen"]) == true,
         smooth: DesktopScreenBridge.boolean(message["smooth"]) == true,
         fullScreen: DesktopScreenBridge.boolean(message["fullscreen"]) == true,
         callback: callback

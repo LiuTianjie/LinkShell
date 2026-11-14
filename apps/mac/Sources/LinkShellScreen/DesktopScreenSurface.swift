@@ -81,11 +81,12 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public var onInput: (([String: Any], Bool) -> Void)?
   public var onFirstFrame: (() -> Void)?
   public var onFailure: ((String) -> Void)?
+  public var onExitFullScreen: (() -> Void)?
   public var controlEnabled = false {
     didSet {
       if !controlEnabled {
         releaseInput()
-        if window?.firstResponder === self { window?.makeFirstResponder(nil) }
+        if !fullScreen, window?.firstResponder === self { window?.makeFirstResponder(nil) }
       }
       updateCursorVisibility()
     }
@@ -93,7 +94,25 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   /// The remote computer's helper accepts held keys and the middle button (`keys` capability).
   public var physicalKeys = false
   /// Enables Fitts's-law top-bezel snapping when a full-screen picture has a narrow top letterbox.
-  public var fullScreen = false
+  public var fullScreen = false {
+    didSet {
+      if !fullScreen, !controlEnabled, window?.firstResponder === self {
+        window?.makeFirstResponder(nil)
+      }
+    }
+  }
+  /// Fusion window mode: fills the surface bounds edge-to-edge without black letterbox bars during live resize.
+  public var fillsBounds = false {
+    didSet {
+      renderer.setFillsBounds(fillsBounds)
+      positionOverlays()
+    }
+  }
+  /// Fusion window mode: decides whether a left-drag starting at `mouseDown` should invoke native `window.performDrag`.
+  public var onLocalMouseDown: ((NSEvent) -> Bool)?
+  public var shouldDragWindow: ((NSEvent) -> Bool)?
+  public var onWindowDragStarted: (() -> Void)?
+  public var onWindowDragEnded: (() -> Void)?
   /// Keys and modifier keys this remote-desktop view has pressed on the remote computer, so each is released.
   private var pressedKeys: Set<UInt16> = []
   private var pressedModifiers: Set<UInt16> = []
@@ -102,6 +121,13 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private var renderer: DesktopScreenMetalRenderer!
   private var pictureSize = CGSize.zero
   private var heldButtons: Set<String> = []
+  private var downEvent: NSEvent?
+  private var downPoint = CGPoint.zero
+  private var pendingWindowDrag = false
+  private var dragTakenOver = false
+  private var dragMonitor: Any?
+  private var dragReleaseTimer: Timer?
+  private var presentationFrozen = false
   private var tracking: NSTrackingArea?
   private var windowObserver: NSObjectProtocol?
   private var screenObserver: NSObjectProtocol?
@@ -117,10 +143,11 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private var cursorShapes: [String: (NSImage, CGSize, CGPoint)] = [:]
   private var pointerInside = false
   private var localCursor = NSCursor.arrow
+  private var lastScrollMovePoint = CGPoint(x: -1, y: -1)
 
   public override var isFlipped: Bool { true }
   public override var isOpaque: Bool { false }
-  public override var acceptsFirstResponder: Bool { controlEnabled && active && !stopped }
+  public override var acceptsFirstResponder: Bool { (controlEnabled || fullScreen) && active && !stopped }
   public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   public override init(frame: NSRect) {
@@ -134,7 +161,10 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
       picture: { [weak self] size in self?.pictureSize = size; self?.positionOverlays() },
       firstFrame: { [weak self] in self?.onFirstFrame?() },
       failure: { [weak self] message in self?.onFailure?(message) })
-    metalView.onDrawableSize = { [weak self] in self?.renderer.drawableSizeChanged() }
+    metalView.onDrawableSize = { [weak self] in
+      self?.renderer.drawableSizeChanged()
+      self?.renderer.drawNow()
+    }
     cursorView.image = NSCursor.arrow.image
     cursorView.imageScaling = .scaleAxesIndependently
     cursorSize = NSCursor.arrow.image.size
@@ -155,6 +185,8 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   }
   public required init?(coder: NSCoder) { nil }
   deinit {
+    if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+    dragReleaseTimer?.invalidate()
     if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
     if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
   }
@@ -180,12 +212,28 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     let tracking = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
     addTrackingArea(tracking); self.tracking = tracking
   }
+  private func surfaceRect() -> CGRect {
+    if fillsBounds {
+      return bounds.width > 0 && bounds.height > 0 && pictureSize.width > 0 && pictureSize.height > 0 ? bounds : .zero
+    }
+    return DesktopScreenGeometry.fittedRect(picture: pictureSize, in: bounds)
+  }
+  private func surfacePoint(_ point: CGPoint, clamp: Bool = false) -> CGPoint? {
+    if fillsBounds {
+      guard bounds.width > 0, bounds.height > 0, pictureSize.width > 0, pictureSize.height > 0,
+            point.x.isFinite, point.y.isFinite else { return nil }
+      let x = (point.x - bounds.minX) / bounds.width, y = (point.y - bounds.minY) / bounds.height
+      guard clamp || ((0...1).contains(x) && (0...1).contains(y)) else { return nil }
+      return CGPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
+    }
+    return DesktopScreenGeometry.stagePoint(point, picture: pictureSize, bounds: bounds, clamp: clamp, topEdgeSnap: fullScreen)
+  }
   public override func resetCursorRects() {
-    let rect = DesktopScreenGeometry.fittedRect(picture: pictureSize, in: bounds)
+    let rect = surfaceRect()
     if !rect.isEmpty { addCursorRect(rect, cursor: controlEnabled ? localCursor : .arrow) }
   }
   public override func cursorUpdate(with event: NSEvent) {
-    let inPicture = DesktopScreenGeometry.normalizedPoint(convert(event.locationInWindow, from: nil), picture: pictureSize, bounds: bounds) != nil
+    let inPicture = surfacePoint(convert(event.locationInWindow, from: nil)) != nil
     (canControl && inPicture ? localCursor : .arrow).set()
   }
   public override func mouseEntered(with event: NSEvent) { pointerInside = true; updateCursorVisibility() }
@@ -201,6 +249,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     updateCursorVisibility()
   }
   public func stop() {
+    cancelWindowDragReleaseTracking()
     releaseInput()
     stopped = true; active = false
     renderer.stop()
@@ -212,6 +261,31 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     updateCursorVisibility()
   }
   public func receive(_ picture: DesktopScreenFrame) { renderer.receive(picture) }
+  /// Low-latency steady-state path: may be called from any thread (e.g. Mach frame receiver) to
+  /// enqueue into the single-slot mailbox and immediately submit a Metal draw when the GPU is free.
+  public func receiveImmediate(_ picture: DesktopScreenFrame) { renderer.receiveImmediate(picture) }
+
+  /// Freezes Metal drawable presentation and `CAMetalLayer.drawableSize` while the user holds the
+  /// mouse button during a local window drag or resize, then flushes the final frame atomically on release.
+  public func setPresentationFrozen(_ frozen: Bool, flushPicture: DesktopScreenFrame? = nil) {
+    if frozen {
+      guard !presentationFrozen else { return }
+      presentationFrozen = true
+      metalView.drawableSizeFrozen = true
+      renderer.setFrozen(true)
+    } else {
+      let wasFrozen = presentationFrozen
+      presentationFrozen = false
+      metalView.drawableSizeFrozen = false
+      if let flushPicture { renderer.receive(flushPicture) }
+      renderer.setFrozen(false)
+      let resizedDrawable = metalView.syncDrawableSizeNow()
+      if (wasFrozen || flushPicture != nil) && !resizedDrawable {
+        renderer.drawNow()
+      }
+      if wasFrozen { updateRunning() }
+    }
+  }
 
   /// Cursor messages are tiny metadata, independent of the decoded video frames.
   public func updateCursor(_ message: [String: Any]) {
@@ -252,11 +326,12 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   }
   /// The display link draws only while the picture is on screen, synced to the screen the window is on.
   private func updateRunning() {
+    guard !presentationFrozen else { return }
     let number = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
     renderer.setRunning(window != nil && active && !stopped, display: number.map { CGDirectDisplayID($0.uint32Value) })
   }
   private func cursorPoint() -> CGPoint {
-    let rect = DesktopScreenGeometry.fittedRect(picture: pictureSize, in: bounds)
+    let rect = surfaceRect()
     return CGPoint(x: rect.minX + cursorPosition.x * rect.width, y: rect.minY + cursorPosition.y * rect.height)
   }
   private func placeCursor() {
@@ -274,26 +349,86 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     inputContext?.invalidateCharacterCoordinates()
     window?.invalidateCursorRects(for: self)
   }
-  private func updateCursorVisibility() { cursorView.isHidden = !active || stopped || pictureSize == .zero || (canControl && pointerInside) }
-  private var canControl: Bool { controlEnabled && active && !stopped && window?.isKeyWindow == true }
+  private func updateCursorVisibility() { cursorView.isHidden = fillsBounds || !active || stopped || pictureSize == .zero || (canControl && pointerInside) }
+  private var canControl: Bool { controlEnabled && active && !stopped && (window?.isKeyWindow == true || fillsBounds) }
+  private func activateWindowIfNeeded() {
+    guard fillsBounds, controlEnabled, active, !stopped, let window else { return }
+    if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+    if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+    if window.firstResponder !== self { window.makeFirstResponder(self) }
+  }
   private func move(_ event: NSEvent, clamp: Bool = false, replaceable: Bool = true) -> Bool {
-    guard canControl, let point = DesktopScreenGeometry.stagePoint(convert(event.locationInWindow, from: nil), picture: pictureSize, bounds: bounds, clamp: clamp, topEdgeSnap: fullScreen) else { return false }
+    guard canControl, let point = surfacePoint(convert(event.locationInWindow, from: nil), clamp: clamp) else { return false }
     cursorPosition = point
     onInput?(["t": "move", "x": Double(point.x), "y": Double(point.y)], replaceable && heldButtons.isEmpty)
     return true
   }
   public override func mouseMoved(with event: NSEvent) {
     let local = convert(event.locationInWindow, from: nil)
-    let inPicture = DesktopScreenGeometry.normalizedPoint(local, picture: pictureSize, bounds: bounds) != nil
+    let inPicture = surfacePoint(local) != nil
     let shouldClamp = bounds.contains(local) || pointerInside
     pointerInside = inPicture
     updateCursorVisibility()
+    guard window?.isKeyWindow == true else { return }
     _ = move(event, clamp: shouldClamp)
   }
-  public override func mouseDragged(with event: NSEvent) { if heldButtons.contains("left") { _ = move(event, clamp: true) } }
+  public override func mouseDragged(with event: NSEvent) {
+    if pendingWindowDrag, let savedDown = downEvent {
+      let local = convert(event.locationInWindow, from: nil)
+      if hypot(local.x - downPoint.x, local.y - downPoint.y) >= 2.0 {
+        pendingWindowDrag = false
+        dragTakenOver = true
+        downEvent = nil
+        // `NSWindow.performDrag(with:)` hands window movement to WindowServer (`SkyLight`) and
+        // returns immediately while the mouse button is STILL held down! Track real mouse-button
+        // release so `onWindowDragEnded` never fires until the user actually lets go.
+        beginWindowDragReleaseTracking()
+        onWindowDragStarted?()
+        window?.performDrag(with: savedDown)
+      }
+      return
+    }
+    guard heldButtons.contains("left") else { return }
+    _ = move(event, clamp: true)
+  }
+
+  private func beginWindowDragReleaseTracking() {
+    cancelWindowDragReleaseTracking()
+    dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] ev in
+      self?.finishWindowDragIfActive()
+      return ev
+    }
+    let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      if NSEvent.pressedMouseButtons & 1 == 0 {
+        self.finishWindowDragIfActive()
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    dragReleaseTimer = timer
+  }
+
+  private func finishWindowDragIfActive() {
+    let wasDragging = dragTakenOver || dragReleaseTimer != nil || dragMonitor != nil
+    cancelWindowDragReleaseTracking()
+    dragTakenOver = false
+    if wasDragging {
+      onWindowDragEnded?()
+    }
+  }
+
+  private func cancelWindowDragReleaseTracking() {
+    if let dragMonitor {
+      NSEvent.removeMonitor(dragMonitor)
+      self.dragMonitor = nil
+    }
+    dragReleaseTimer?.invalidate()
+    dragReleaseTimer = nil
+  }
   public override func rightMouseDragged(with event: NSEvent) { if heldButtons.contains("right") { _ = move(event, clamp: true) } }
   private func button(_ name: String, down: Bool, event: NSEvent) {
     if down {
+      activateWindowIfNeeded()
       // Placement must share the reliable lane with the click. Separate data channels have
       // no cross-channel ordering, even when this callback sends the move first.
       guard move(event, replaceable: false) else { return }
@@ -305,18 +440,88 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     }
     onInput?(["t": down ? "down" : "up", "b": name, "n": min(3, max(1, event.clickCount)), "m": DesktopScreenInput.modifiers(event.modifierFlags)], false)
   }
-  public override func mouseDown(with event: NSEvent) { button("left", down: true, event: event) }
-  public override func mouseUp(with event: NSEvent) { button("left", down: false, event: event) }
-  public override func rightMouseDown(with event: NSEvent) { button("right", down: true, event: event) }
+  public override func mouseDown(with event: NSEvent) {
+    activateWindowIfNeeded()
+    if onLocalMouseDown?(event) == true {
+      pendingWindowDrag = false
+      downEvent = nil
+      dragTakenOver = false
+      return
+    }
+    downEvent = event
+    downPoint = convert(event.locationInWindow, from: nil)
+    dragTakenOver = false
+    if event.clickCount == 1, shouldDragWindow?(event) == true {
+      pendingWindowDrag = true
+      return
+    }
+    pendingWindowDrag = false
+    if fullScreen, !controlEnabled, active, !stopped {
+      window?.makeFirstResponder(self)
+      return
+    }
+    button("left", down: true, event: event)
+  }
+  public override func mouseUp(with event: NSEvent) {
+    if pendingWindowDrag, let savedDown = downEvent {
+      pendingWindowDrag = false
+      downEvent = nil
+      dragTakenOver = false
+      button("left", down: true, event: savedDown)
+      button("left", down: false, event: event)
+      return
+    }
+    pendingWindowDrag = false
+    downEvent = nil
+    dragTakenOver = false
+    button("left", down: false, event: event)
+  }
+  public override func rightMouseDown(with event: NSEvent) { activateWindowIfNeeded(); button("right", down: true, event: event) }
   public override func rightMouseUp(with event: NSEvent) { button("right", down: false, event: event) }
   // The middle button only for a helper that knows it: an older one reads any other name as the left.
-  public override func otherMouseDown(with event: NSEvent) { if physicalKeys, event.buttonNumber == 2 { button("middle", down: true, event: event) } }
+  public override func otherMouseDown(with event: NSEvent) { if physicalKeys, event.buttonNumber == 2 { activateWindowIfNeeded(); button("middle", down: true, event: event) } }
   public override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { button("middle", down: false, event: event) } }
   public override func otherMouseDragged(with event: NSEvent) { if heldButtons.contains("middle") { _ = move(event, clamp: true) } }
   public override func scrollWheel(with event: NSEvent) {
-    guard move(event, replaceable: false) else { return }
-    let scale = event.hasPreciseScrollingDeltas ? 1.0 : 12.0
-    onInput?(["t": "scroll", "dx": Double(event.scrollingDeltaX) * scale, "dy": Double(event.scrollingDeltaY) * scale, "m": DesktopScreenInput.modifiers(event.modifierFlags)], false)
+    guard canControl, let point = surfacePoint(convert(event.locationInWindow, from: nil), clamp: true) else { return }
+    let continuous = event.hasPreciseScrollingDeltas
+    let cg = event.cgEvent
+    let phase: Int = cg.map { Int($0.getIntegerValueField(.scrollWheelEventScrollPhase)) } ?? {
+      if event.phase.contains(.began) { return 1 }
+      if event.phase.contains(.changed) { return 2 }
+      if event.phase.contains(.ended) { return 4 }
+      if event.phase.contains(.cancelled) { return 8 }
+      if event.phase.contains(.mayBegin) { return 128 }
+      return 0
+    }()
+    let momentum: Int = cg.map { Int($0.getIntegerValueField(.scrollWheelEventMomentumPhase)) } ?? {
+      if event.momentumPhase.contains(.began) { return 1 }
+      if event.momentumPhase.contains(.changed) { return 2 }
+      if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) { return 3 }
+      return 0
+    }()
+    let isMidStream = continuous && ((event.phase == .changed && event.momentumPhase.isEmpty) || (event.phase.isEmpty && event.momentumPhase == .changed))
+    if hypot(point.x - lastScrollMovePoint.x, point.y - lastScrollMovePoint.y) > 0.0004 || !isMidStream {
+      lastScrollMovePoint = point
+      cursorPosition = point
+      onInput?(["t": "move", "x": Double(point.x), "y": Double(point.y)], isMidStream && heldButtons.isEmpty)
+    }
+    let scale = continuous ? 1.0 : 12.0
+    let dx = Double(event.scrollingDeltaX) * scale
+    let dy = Double(event.scrollingDeltaY) * scale
+    if abs(dx) < 0.0001 && abs(dy) < 0.0001 && phase == 0 && momentum == 0 { return }
+    onInput?([
+      "t": "scroll",
+      "dx": dx,
+      "dy": dy,
+      "c": continuous,
+      "p": phase,
+      "mp": momentum,
+      "m": DesktopScreenInput.modifiers(event.modifierFlags),
+    ], isMidStream)
+  }
+  public func releaseHeldInputs() {
+    releaseInput()
   }
   private func releaseInput() {
     for button in heldButtons.sorted() { onInput?(["t": "up", "b": button, "n": 1, "m": [String]()], false) }
@@ -327,6 +532,12 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     pressedKeys.removeAll(); pressedModifiers.removeAll()
     inputContext?.discardMarkedText(); unmarkText()
   }
+  private static func isFullScreenShortcut(_ event: NSEvent) -> Bool {
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    return flags.contains([.command, .control])
+      && !flags.contains(.option)
+      && (event.keyCode == 3 || event.charactersIgnoringModifiers?.lowercased() == "f")
+  }
   private func sendKey(_ event: NSEvent) -> Bool {
     if physicalKeys { return sendHeldKey(event, releaseNow: false) }
     guard canControl, let key = DesktopScreenInput.key(code: event.keyCode, characters: event.charactersIgnoringModifiers) else { return false }
@@ -334,20 +545,48 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     return true
   }
   public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-    // ⌃⌘F stays with this Mac, so full screen can always be left while controlling the other one.
-    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    if flags.contains([.command, .control]), event.charactersIgnoringModifiers?.lowercased() == "f" { return super.performKeyEquivalent(with: event) }
+    // ⌃⌘F stays with this Mac so full screen can always be left even while remote keys are captured.
+    if Self.isFullScreenShortcut(event) {
+      releaseInput()
+      if let onExitFullScreen, fullScreen || window == nil || window?.styleMask.contains(.fullScreen) == true {
+        onExitFullScreen()
+        return true
+      }
+      return super.performKeyEquivalent(with: event)
+    }
+    if fullScreen, !controlEnabled, event.keyCode == 53, let onExitFullScreen {
+      onExitFullScreen()
+      return true
+    }
     if window?.firstResponder === self, canControl, !hasMarkedText(), event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
       return physicalKeys ? sendHeldKey(event, releaseNow: true) : sendKey(event)
     }
     return super.performKeyEquivalent(with: event)
   }
   public override func keyDown(with event: NSEvent) {
+    if Self.isFullScreenShortcut(event) {
+      releaseInput()
+      if let onExitFullScreen, fullScreen || window == nil || window?.styleMask.contains(.fullScreen) == true {
+        onExitFullScreen()
+      }
+      return
+    }
+    if fullScreen, !controlEnabled, event.keyCode == 53 {
+      onExitFullScreen?()
+      return
+    }
     guard canControl else { return }
     if !hasMarkedText(), DesktopScreenInput.isNamedKey(event.keyCode) || event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) || (physicalKeys && event.keyCode == 49) {
       if sendKey(event) { return }
     }
     interpretKeyEvents([event])
+  }
+  public override func cancelOperation(_ sender: Any?) {
+    if fullScreen, !controlEnabled {
+      onExitFullScreen?()
+      return
+    }
+    super.cancelOperation(sender)
   }
   /// A key held down on the remote computer by its position (W3C code), until its keyUp here.
   /// `releaseNow`: AppKit may send no keyUp for a ⌘ or ⌃ shortcut, so that key goes down and up at
@@ -414,22 +653,28 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
 /// Layer-backed so the renderer can draw into its CAMetalLayer from the display link's thread.
 private final class DesktopScreenMetalView: NSView {
   let metalLayer = CAMetalLayer()
+  var drawableSizeFrozen = false
   var onDrawableSize: (() -> Void)?
   override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true }
   required init?(coder: NSCoder) { nil }
   override func makeBackingLayer() -> CALayer { metalLayer }
   override var isOpaque: Bool { false }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
-  override func layout() { super.layout(); updateDrawableSize() }
-  override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); updateDrawableSize() }
-  override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); updateDrawableSize() }
-  private func updateDrawableSize() {
+  override func layout() { super.layout(); _ = updateDrawableSize() }
+  override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); _ = updateDrawableSize() }
+  override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); _ = updateDrawableSize() }
+  @discardableResult
+  func syncDrawableSizeNow() -> Bool { updateDrawableSize() }
+  @discardableResult
+  private func updateDrawableSize() -> Bool {
+    guard !drawableSizeFrozen else { return false }
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-    metalLayer.contentsScale = scale
     let size = CGSize(width: max(1, (bounds.width * scale).rounded()), height: max(1, (bounds.height * scale).rounded()))
-    guard metalLayer.drawableSize != size else { return }
+    guard metalLayer.drawableSize != size || metalLayer.contentsScale != scale else { return false }
+    metalLayer.contentsScale = scale
     metalLayer.drawableSize = size
     onDrawableSize?()
+    return true
   }
 }
 private final class DesktopScreenCursorView: NSImageView {
@@ -464,6 +709,8 @@ private final class DesktopScreenMetalRenderer {
   private var reportedSize = CGSize.zero
   private var reportedFirst = false
   private var failureReported = false
+  private var fillsBounds = false
+  private var frozen = false
   private let inFlight = DispatchSemaphore(value: 1)
   private var link: CVDisplayLink?
   private var queue: MTLCommandQueue?
@@ -476,7 +723,7 @@ private final class DesktopScreenMetalRenderer {
     layer.device = MTLCreateSystemDefaultDevice()
     layer.pixelFormat = .bgra8Unorm
     layer.framebufferOnly = true
-    layer.maximumDrawableCount = 2
+    layer.maximumDrawableCount = 3
     layer.presentsWithTransaction = false
     layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
     layer.isOpaque = false
@@ -504,6 +751,13 @@ private final class DesktopScreenMetalRenderer {
     if accepting && !stopped { pending = picture; received &+= 1 }
     lock.unlock()
   }
+  func receiveImmediate(_ picture: DesktopScreenFrame) {
+    lock.lock()
+    let ready = accepting && !stopped && running && !frozen
+    if accepting && !stopped { pending = picture; received &+= 1 }
+    lock.unlock()
+    if ready { draw() }
+  }
   /// Draws only while the surface is on screen; `display` follows the window to its current screen.
   func setRunning(_ value: Bool, display: CGDirectDisplayID?) {
     guard let link else { return }
@@ -514,6 +768,17 @@ private final class DesktopScreenMetalRenderer {
     if now && !was { CVDisplayLinkStart(link) } else if !now && was { CVDisplayLinkStop(link) }
   }
   func drawableSizeChanged() { lock.lock(); changes &+= 1; lock.unlock() }
+  func setFillsBounds(_ value: Bool) { lock.lock(); fillsBounds = value; changes &+= 1; lock.unlock() }
+  func setFrozen(_ value: Bool) {
+    lock.lock()
+    let was = frozen
+    frozen = value
+    if !value && was { changes &+= 1 }
+    lock.unlock()
+  }
+  func drawNow() {
+    draw(waitTimeout: .now() + .milliseconds(8))
+  }
   func setActive(_ value: Bool) {
     lock.lock()
     accepting = value && !stopped; if !accepting { pending = nil }
@@ -535,15 +800,15 @@ private final class DesktopScreenMetalRenderer {
     if let cache { CVMetalTextureCacheFlush(cache, 0) }
   }
 
-  private func draw() {
+  private func draw(waitTimeout: DispatchTime = .now()) {
     lock.lock()
-    guard !stopped, accepting, running else { lock.unlock(); return }
+    guard !stopped, accepting, running, !frozen else { lock.unlock(); return }
     if let next = pending { current = next; pending = nil; changes &+= 1 }
-    let picture = current, mark = changes, ticket = generation
+    let picture = current, mark = changes, ticket = generation, stretch = fillsBounds
     let clear = clearRequested && picture == nil
     let needed = clear || (picture != nil && mark != drawn)
     lock.unlock()
-    guard needed, inFlight.wait(timeout: .now()) == .success else { return }
+    guard needed, inFlight.wait(timeout: waitTimeout) == .success else { return }
     var committed = false
     defer { if !committed { inFlight.signal() } }
     guard let queue, let command = queue.makeCommandBuffer(), let drawable = layer.nextDrawable() else { return }
@@ -576,7 +841,8 @@ private final class DesktopScreenMetalRenderer {
     let rotation = Int(picture.rotation)
     let turned = rotation == 90 || rotation == 270
     let size = CGSize(width: Int(turned ? picture.height : picture.width), height: Int(turned ? picture.width : picture.height))
-    let rect = DesktopScreenGeometry.fittedRect(picture: size, in: CGRect(x: 0, y: 0, width: drawable.texture.width, height: drawable.texture.height))
+    let drawableRect = CGRect(x: 0, y: 0, width: drawable.texture.width, height: drawable.texture.height)
+    let rect = stretch ? drawableRect : DesktopScreenGeometry.fittedRect(picture: size, in: drawableRect)
     encoder.setViewport(MTLViewport(originX: rect.minX, originY: rect.minY, width: rect.width, height: rect.height, znear: 0, zfar: 1))
     encoder.setRenderPipelineState(pipeline)
     encoder.setFragmentTexture(y, index: 0); encoder.setFragmentTexture(uv, index: 1)

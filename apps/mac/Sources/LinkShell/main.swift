@@ -59,12 +59,15 @@ if Launch.has("--status") {
   exit(0)
 }
 if Launch.has("--desktop-media") { DesktopMedia.run() }
+// Fusion lab (experimental): see FusionRemote / FusionLocal.
+if Launch.has("--fusion-remote") { FusionRemote.run() }
+if Launch.has("--fusion-local") { FusionLocal.run() }
 // Opened with nothing by the system (launchd is its parent), not started by a host as its child.
 if Launch.has("--setup") {
   Setup.run()
 }
 
-if Launch.has("--dashboard") || Launch.has("--dashboard-preview") || (Launch.arguments.isEmpty && getppid() == 1) {
+if Launch.has("--dashboard") || Launch.has("--dashboard-preview") || Launch.has("--fusion-connect") || (Launch.arguments.isEmpty && getppid() == 1) {
   // The window is Electron's, in this same bundle (same id, same signature): this process becomes it.
   if !Launch.has("--dashboard-preview") { DesktopShell.exec() }
   MainActor.assumeIsolated { Desktop.run() }

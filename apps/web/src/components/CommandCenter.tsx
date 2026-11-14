@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
 import { LOCALE_LABELS, groupProjects, type I18nKey } from "@linkshell/client-core";
 import {
+  AppWindowMac,
   Archive,
   Cpu,
   Layers3,
@@ -31,7 +32,8 @@ import {
 import { engine, type Computer, type Connection } from "../live/engine";
 import { AgentMark, baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import { isDesktop, isElectronDesktop, isWindowsDesktop, openDesktopManagement } from "../live/desktop";
+import { DESKTOP_LOCAL, isDesktop, isElectronDesktop, isWindowsDesktop, openDesktopManagement } from "../live/desktop";
+import { connectAndStartComputerFusion } from "../live/fusion";
 import {
   desktopModeShortcuts,
   desktopShortcuts,
@@ -245,6 +247,11 @@ export function CommandCenter({
               {isDesktop && (
                 <CommandItem value="侧栏 sidebar" onSelect={() => run(() => sendDesktopCommand({ command: "toggle-sidebar" }))}>
                   <PanelLeft />显示或隐藏侧栏<Shortcut shortcut={desktopShortcuts.toggleSidebar} />
+                </CommandItem>
+              )}
+              {isElectronDesktop && !isWindowsDesktop && connection && connection.computer.key !== DESKTOP_LOCAL && (
+                <CommandItem value="融合模式 fusion mode 应用窗口" onSelect={() => run(() => void connectAndStartComputerFusion(connection.computer.key))}>
+                  <AppWindowMac />开启融合模式
                 </CommandItem>
               )}
               <CommandItem value="刷新 reload refresh" disabled={!connection} onSelect={() => run(() => { void connection?.store.getState().refresh().catch(engine.report); })}>

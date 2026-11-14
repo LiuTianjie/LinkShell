@@ -14,12 +14,27 @@ export interface LaunchOptions {
   checkUpdates: boolean;
   /** Started at sign-in (Windows' Run entry): stay in the tray until asked for. */
   hidden: boolean;
+  /** Cold launch requested by a fused Stub `.app` in the Dock or Spotlight (`--fusion-connect`). */
+  fusionConnect?: string;
+  fusionLaunch?: string;
 }
 
 export function launchOptions(argv: string[]): LaunchOptions {
   const value = (key: string) => { const index = argv.indexOf(key); return index >= 0 ? argv[index + 1] : undefined; };
   const values = (key: string) => argv.flatMap((arg, index) => arg === key && argv[index + 1] !== undefined ? [argv[index + 1]!] : []);
-  return { home: value("--home"), cliNode: value("--cli-node"), cliScript: value("--cli-script"), cliArgs: values("--cli-arg"), cliPath: value("--cli-path"), checkUpdates: argv.includes("--check-updates"), hidden: argv.includes("--hidden") };
+  const fusionConnect = value("--fusion-connect");
+  const fusionLaunch = value("--fusion-launch");
+  return {
+    home: value("--home"),
+    cliNode: value("--cli-node"),
+    cliScript: value("--cli-script"),
+    cliArgs: values("--cli-arg"),
+    cliPath: value("--cli-path"),
+    checkUpdates: argv.includes("--check-updates"),
+    hidden: argv.includes("--hidden"),
+    ...(fusionConnect !== undefined ? { fusionConnect } : {}),
+    ...(fusionLaunch !== undefined ? { fusionLaunch } : {}),
+  };
 }
 
 /**
@@ -48,7 +63,7 @@ export class Runtime {
     else if (this.folder) this.workspaceAssets = join(this.folder, "workspace");
     else {
       this.checkout = resolve(appPath, "../..");
-      this.workspaceAssets = process.env.LINKSHELL_WORKSPACE_ASSETS ?? join(this.checkout, "apps/web/dist");
+      this.workspaceAssets = process.env.LINKSHELL_WORKSPACE_ASSETS ?? join(this.checkout, "apps/desktop-ui/dist");
     }
   }
 

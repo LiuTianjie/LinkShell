@@ -1,0 +1,1344 @@
+@layer components {
+  /* =========================================================================
+   * Paseo + T3 Code Deep Carbon-Obsidian Sculpted Instrument Tokens
+   * Scoped to SystemHostModal (960×680), SignInPairModal (420px) & LocalPairingQrDialog (420px)
+   * Automatic light-dark() resolution across Dark & Light themes.
+   * ========================================================================= */
+  dialog.ls-dialog.ls-system-dialog,
+  dialog.ls-dialog.ls-signin-pair-dialog,
+  dialog.ls-dialog.ls-local-pair-dialog {
+    --sys-rail-bg: light-dark(#f2f3f6, #0b0c0f);
+    --sys-canvas-bg: light-dark(#f7f8fa, #0e0f12);
+    --sys-card-bg: light-dark(#ffffff, #111216);
+    --sys-card-raised: light-dark(#ffffff, #16181d);
+    --sys-control-bg: var(--ls-control-bg, light-dark(#ffffff, #17181c));
+    --sys-control-hover: var(--ls-control-hover, light-dark(#f4f5f8, #1d1f25));
+    --sys-well-bg: light-dark(#eef0f4, #090a0c);
+    --sys-panel-bg: light-dark(#f5f6f9, #0c0d11);
+
+    --sys-border-subtle: light-dark(rgba(15, 17, 22, 0.06), rgba(255, 255, 255, 0.055));
+    --sys-border: light-dark(rgba(15, 17, 22, 0.09), rgba(255, 255, 255, 0.075));
+    --sys-border-strong: light-dark(rgba(15, 17, 22, 0.16), rgba(255, 255, 255, 0.13));
+
+    --sys-rim-top: var(
+      --ls-rim-light,
+      light-dark(
+        inset 0 1px 0 rgba(255, 255, 255, 0.92),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05)
+      )
+    );
+    --sys-card-shadow: var(
+      --ls-shadow-island,
+      light-dark(
+        0 1px 3px rgba(15, 17, 22, 0.05),
+        0 10px 28px -10px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.05)
+      )
+    );
+    --sys-control-shadow: var(
+      --ls-shadow-control,
+      light-dark(
+        0 1px 2px rgba(15, 17, 22, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 1px 2px rgba(0, 0, 0, 0.42)
+      )
+    );
+    --sys-well-shadow: light-dark(
+      inset 0 1px 2px rgba(15, 17, 22, 0.05),
+      inset 0 1px 2px rgba(0, 0, 0, 0.52)
+    );
+
+    --sys-keycap-bg: var(--ls-primary-bg, light-dark(#141518, #ededf0));
+    --sys-keycap-fg: var(--ls-primary-fg, light-dark(#ffffff, #0b0c0e));
+    --sys-keycap-hover: var(--ls-primary-hover, light-dark(#24262c, #ffffff));
+
+    --sys-emerald: light-dark(#1a7f37, #3fb950);
+    --sys-emerald-soft: light-dark(rgba(26, 127, 55, 0.10), rgba(63, 185, 80, 0.14));
+    --sys-coral: light-dark(#cf222e, #f85149);
+    --sys-coral-soft: light-dark(rgba(207, 34, 46, 0.09), rgba(248, 81, 73, 0.14));
+  }
+
+  dialog.ls-dialog.ls-system-dialog > .ls-dialog__surface,
+  dialog.ls-dialog.ls-signin-pair-dialog > .ls-dialog__surface,
+  dialog.ls-dialog.ls-local-pair-dialog > .ls-dialog__surface {
+    background-color: var(--sys-canvas-bg);
+    border-radius: 14px;
+    border: 1px solid light-dark(rgba(15, 17, 22, 0.12), rgba(255, 255, 255, 0.09));
+    box-shadow: light-dark(
+      0 24px 60px -12px rgba(15, 17, 22, 0.22),
+      0 32px 72px -12px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 255, 255, 0.06)
+    );
+  }
+
+  /* =========================================================================
+   * Tactile Keycaps, Segmented Controls, Inputs & Emerald Status Indicators
+   * ========================================================================= */
+  dialog.ls-dialog.ls-system-dialog .ls-btn[data-variant="primary"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-btn[data-variant="primary"],
+  dialog.ls-dialog.ls-local-pair-dialog .ls-btn[data-variant="primary"] {
+    background-color: var(--sys-keycap-bg);
+    color: var(--sys-keycap-fg);
+    border-color: transparent;
+    box-shadow: light-dark(
+      0 1px 2px rgba(15, 17, 22, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 3px rgba(0, 0, 0, 0.48)
+    );
+    font-weight: 600;
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-btn[data-variant="primary"]:hover:not(:disabled),
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-btn[data-variant="primary"]:hover:not(:disabled),
+  dialog.ls-dialog.ls-local-pair-dialog .ls-btn[data-variant="primary"]:hover:not(:disabled) {
+    background-color: var(--sys-keycap-hover);
+    color: var(--sys-keycap-fg);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-btn[data-variant="secondary"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-btn[data-variant="secondary"],
+  dialog.ls-dialog.ls-local-pair-dialog .ls-btn[data-variant="secondary"] {
+    background-color: var(--sys-control-bg);
+    color: var(--ls-fg);
+    border: 1px solid var(--sys-border-strong);
+    box-shadow: var(--sys-control-shadow);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-btn[data-variant="secondary"]:hover:not(:disabled),
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-btn[data-variant="secondary"]:hover:not(:disabled),
+  dialog.ls-dialog.ls-local-pair-dialog .ls-btn[data-variant="secondary"]:hover:not(:disabled) {
+    background-color: var(--sys-control-hover);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-tab-list[data-variant="segmented"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-tab-list[data-variant="segmented"] {
+    padding: 3px;
+    border-radius: 9px;
+    background-color: var(--sys-well-bg);
+    border: 1px solid var(--sys-border);
+    box-shadow: var(--sys-well-shadow);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-tab-list[data-variant="segmented"] .ls-tab[aria-selected="true"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-tab-list[data-variant="segmented"] .ls-tab[aria-selected="true"] {
+    border-radius: 6px;
+    background-color: var(--sys-control-bg);
+    color: var(--ls-fg);
+    border: 1px solid var(--sys-border-strong);
+    box-shadow: var(--sys-control-shadow);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-input,
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-input {
+    background-color: var(--sys-well-bg);
+    border: 1px solid var(--sys-border-strong);
+    box-shadow: var(--sys-well-shadow);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-input:focus-visible,
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-input:focus-visible {
+    border-color: light-dark(rgba(15, 17, 22, 0.36), rgba(255, 255, 255, 0.28));
+    box-shadow: 0 0 0 2px light-dark(rgba(15, 17, 22, 0.08), rgba(255, 255, 255, 0.09));
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-badge[data-tone="ok"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-badge[data-tone="ok"] {
+    background-color: var(--sys-emerald-soft);
+    color: var(--sys-emerald);
+    border: 1px solid color-mix(in oklab, var(--sys-emerald) 28%, transparent);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-badge[data-tone="neutral"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-badge[data-tone="neutral"] {
+    background-color: light-dark(rgba(15, 17, 22, 0.045), rgba(255, 255, 255, 0.05));
+    color: var(--ls-fg-2);
+    border: 1px solid var(--sys-border);
+  }
+
+  dialog.ls-dialog.ls-system-dialog .ls-status-dot[data-tone="ok"],
+  dialog.ls-dialog.ls-signin-pair-dialog .ls-status-dot[data-tone="ok"] {
+    background-color: var(--sys-emerald);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--sys-emerald) 18%, transparent);
+  }
+
+  /* =========================================================================
+   * 1. Unified System & Host Control Modal (`960×680`, `#7` §3.2)
+   *    - Non-unmounting top-layer `<dialog data-size="system">`
+   *    - 2-column frame: `224px` recessed `#0b0c0f` rail + `1fr` `#0e0f12` canvas
+   * ========================================================================= */
+  .ls-system-modal-shell {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    inline-size: 100%;
+    block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+  }
+
+  @media (max-width: 720px) {
+    .ls-system-modal-shell {
+      grid-template-columns: 180px minmax(0, 1fr);
+    }
+  }
+
+  .ls-system-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px 10px 12px;
+    background-color: var(--sys-rail-bg);
+    border-inline-end: 1px solid var(--sys-border);
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    user-select: none;
+  }
+
+  .ls-system-machine-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    background-color: var(--sys-card-bg);
+    border: 1px solid var(--sys-border);
+    box-shadow: var(--sys-card-shadow);
+    min-inline-size: 0;
+  }
+
+  .ls-system-machine-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-inline-size: 0;
+  }
+
+  .ls-system-machine-copy strong {
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-sm);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ls-fg);
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-system-machine-copy span {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-system-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+
+  .ls-system-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    inline-size: 100%;
+    min-block-size: 34px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background-color: transparent;
+    color: var(--ls-fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    text-align: start;
+    cursor: pointer;
+    transition:
+      background-color 80ms ease-out,
+      border-color 80ms ease-out,
+      color 80ms ease-out,
+      box-shadow 80ms ease-out;
+  }
+
+  .ls-system-nav-item[data-gap="true"] {
+    margin-block-start: 12px;
+  }
+
+  .ls-system-nav-item[data-gap="true"]::before {
+    content: "";
+    position: absolute;
+    inset-inline: 8px;
+    inset-block-start: -7px;
+    block-size: 1px;
+    background-color: var(--sys-border-subtle);
+    pointer-events: none;
+  }
+
+  .ls-system-nav-item:hover:not(:disabled) {
+    background-color: light-dark(rgba(15, 17, 22, 0.045), rgba(255, 255, 255, 0.045));
+    color: var(--ls-fg);
+  }
+
+  .ls-system-nav-item[data-active="true"] {
+    background-color: var(--sys-control-bg);
+    border-color: var(--sys-border);
+    box-shadow: var(--sys-control-shadow);
+    color: var(--ls-fg);
+    font-weight: 600;
+  }
+
+  .ls-system-nav-item:focus-visible {
+    outline: none;
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  .ls-system-nav-label {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Purely visual emerald update dot so `.management-nav-item` textContent stays exact `"更新"` for E2E */
+  .ls-system-nav-dot {
+    inline-size: 7px;
+    block-size: 7px;
+    border-radius: 999px;
+    background-color: var(--sys-emerald);
+    box-shadow: 0 0 0 3px var(--sys-emerald-soft);
+    flex-shrink: 0;
+  }
+
+  /* Right Pane */
+  .ls-system-pane {
+    display: flex;
+    flex-direction: column;
+    min-inline-size: 0;
+    min-block-size: 0;
+    background-color: var(--sys-canvas-bg);
+  }
+
+  .ls-system-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-block-size: 52px;
+    padding: 10px 22px;
+    border-block-end: 1px solid var(--sys-border);
+    background-color: var(--sys-canvas-bg);
+    flex-shrink: 0;
+  }
+
+  .ls-system-header__titles {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-inline-size: 0;
+    flex-wrap: wrap;
+  }
+
+  .ls-system-header__title {
+    margin: 0;
+    font-size: 15px;
+    line-height: 22px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--ls-fg);
+  }
+
+  .ls-system-header__subtitle {
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-system-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .ls-system-scroll {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: 20px 24px 28px;
+  }
+
+  .ls-system-scroll--flush {
+    display: flex;
+    flex-direction: column;
+    overflow: clip;
+    padding: 14px 22px 18px;
+  }
+
+  .ls-system-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-inline-size: 688px;
+  }
+
+  /* =========================================================================
+   * 2. Sculpted `#111216` Grouped Cards, Rows, Banners & Inline Sub-Panels
+   * ========================================================================= */
+  .ls-system-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg);
+  }
+
+  .ls-system-banner[data-tone="warning"] {
+    border-color: color-mix(in oklab, var(--ls-waiting) 38%, var(--sys-border));
+    background-color: var(--ls-waiting-soft);
+  }
+
+  .ls-system-banner[data-tone="danger"] {
+    border-color: color-mix(in oklab, var(--sys-coral) 38%, var(--sys-border));
+    background-color: var(--sys-coral-soft);
+  }
+
+  .ls-system-banner__copy {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .ls-system-group {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-inline-size: 0;
+  }
+
+  .ls-system-group__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding-inline: 2px;
+  }
+
+  .ls-system-group__title {
+    margin: 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-system-group__meta {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-system-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+    overflow: clip;
+  }
+
+  .ls-system-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-block-size: 52px;
+    padding: 12px 15px;
+    background-color: transparent;
+    border: 0;
+    inline-size: 100%;
+    text-align: start;
+    font-family: var(--font-sans);
+    color: var(--ls-fg);
+  }
+
+  .ls-system-row + .ls-system-row,
+  .ls-system-row + .ls-system-inline-panel,
+  .ls-system-inline-panel + .ls-system-row {
+    border-block-start: 1px solid var(--sys-border-subtle);
+  }
+
+  button.ls-system-row {
+    cursor: pointer;
+    transition: background-color 80ms ease-out;
+  }
+
+  button.ls-system-row:hover:not(:disabled) {
+    background-color: light-dark(rgba(15, 17, 22, 0.03), rgba(255, 255, 255, 0.035));
+  }
+
+  button.ls-system-row:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ls-accent-soft);
+  }
+
+  .ls-system-row__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .ls-system-row__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    color: var(--ls-fg);
+  }
+
+  .ls-system-row__detail {
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-3);
+    word-break: break-word;
+  }
+
+  .ls-system-row__controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .ls-system-value {
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-system-note {
+    margin: 2px 2px 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-system-note[data-tone="warning"] {
+    color: var(--ls-waiting);
+  }
+
+  .ls-system-note[data-tone="danger"] {
+    color: var(--sys-coral);
+  }
+
+  .ls-system-note[data-tone="ok"] {
+    color: var(--sys-emerald);
+  }
+
+  .ls-system-path {
+    display: inline-flex;
+    max-inline-size: 360px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background-color: var(--sys-well-bg);
+    border: 1px solid var(--sys-border-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-2);
+    vertical-align: bottom;
+  }
+
+  .ls-system-path__head {
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-system-path__tail {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Inline Expandable Editor (eliminates modal-on-modal stacking!) */
+  .ls-system-inline-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px 16px;
+    background-color: var(--sys-panel-bg);
+    box-shadow: inset 0 1px 3px light-dark(rgba(15, 17, 22, 0.03), rgba(0, 0, 0, 0.35));
+  }
+
+  .ls-system-radio-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .ls-system-radio-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    cursor: pointer;
+    transition:
+      border-color 80ms ease-out,
+      background-color 80ms ease-out,
+      box-shadow 80ms ease-out;
+  }
+
+  .ls-system-radio-card:hover:not([data-disabled="true"]) {
+    border-color: var(--sys-border-strong);
+  }
+
+  .ls-system-radio-card[data-checked="true"] {
+    border-color: light-dark(rgba(15, 17, 22, 0.28), rgba(255, 255, 255, 0.22));
+    background-color: var(--sys-card-raised);
+    box-shadow: var(--sys-control-shadow);
+  }
+
+  .ls-system-radio-card[data-disabled="true"] {
+    opacity: 0.48;
+    cursor: not-allowed;
+  }
+
+  .ls-system-radio-card input[type="radio"] {
+    margin-block-start: 3px;
+    accent-color: var(--sys-keycap-bg);
+  }
+
+  .ls-system-radio-card__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+
+  .ls-system-radio-card__copy strong {
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-sm);
+    font-weight: 500;
+    color: var(--ls-fg);
+  }
+
+  .ls-system-radio-card__copy small {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-system-inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Referral Card */
+  .ls-referral-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  .ls-referral-card__top,
+  .ls-referral-card__bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .ls-referral-card__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--ls-text-sm);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-referral-card__desc {
+    margin: 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-referral-card__stats {
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* =========================================================================
+   * 3. High-Contrast Light-Chip QR Pairing Surface & Countdown (`#7` §3.2)
+   *    - `#ffffff` chip + 4-module quiet zone even in Dark mode for phone cameras!
+   * ========================================================================= */
+  .ls-qr-offer {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 15px 16px;
+    background-color: var(--sys-panel-bg);
+    border-block-start: 1px solid var(--sys-border-subtle);
+  }
+
+  .ls-qr-offer--dialog {
+    border-block-start: 0;
+    border-radius: 12px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  .ls-qr-chip {
+    display: grid;
+    place-items: center;
+    inline-size: 148px;
+    block-size: 148px;
+    padding: 6px;
+    border-radius: 10px;
+    background-color: #ffffff;
+    color: #0b0c0e;
+    border: 1px solid rgba(15, 17, 22, 0.14);
+    box-shadow:
+      0 4px 14px rgba(0, 0, 0, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    flex-shrink: 0;
+  }
+
+  .ls-qr-chip svg {
+    inline-size: 100%;
+    block-size: 100%;
+    display: block;
+    fill: #0b0c0e;
+  }
+
+  .ls-qr-chip--expired {
+    background-color: var(--sys-well-bg);
+    color: var(--ls-fg-3);
+    border-color: var(--sys-border);
+    box-shadow: var(--sys-well-shadow);
+    font-size: var(--ls-text-sm);
+    font-weight: 500;
+    text-align: center;
+    padding: 12px;
+  }
+
+  .ls-qr-offer__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .ls-qr-offer__title {
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-sm);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-qr-offer__code-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ls-qr-offer__code {
+    display: inline-block;
+    padding: 5px 11px;
+    border-radius: 8px;
+    background-color: var(--sys-well-bg);
+    border: 1px solid var(--sys-border-strong);
+    box-shadow: var(--sys-well-shadow);
+    font-family: var(--font-mono);
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ls-fg);
+  }
+
+  .ls-qr-offer__timer {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* =========================================================================
+   * 4. Usage Analytics: 5 Sculpted KPI Cards, Pure SVG Bar Chart & Model Table
+   * ========================================================================= */
+  .ls-usage-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .ls-usage-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  @media (max-width: 860px) {
+    .ls-usage-kpis {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .ls-usage-kpi {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+    min-inline-size: 0;
+  }
+
+  .ls-usage-kpi__label {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-usage-kpi__value {
+    font-size: var(--ls-text-lg);
+    line-height: var(--ls-leading-lg);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--ls-fg);
+    font-variant-numeric: tabular-nums;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-usage-kpi__unit {
+    margin-inline-start: 3px;
+    font-size: var(--ls-text-xs);
+    font-weight: 400;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-usage-roi {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  .ls-usage-roi__title {
+    margin: 0;
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    font-weight: 500;
+    color: var(--ls-fg);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-usage-roi__note {
+    margin: 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-usage-chart-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 13px 15px;
+    border-radius: 12px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  .ls-usage-chart-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .ls-usage-chart-readout {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-usage-chart-readout strong {
+    font-size: var(--ls-text-md);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-usage-svg-wrap {
+    inline-size: 100%;
+    block-size: 156px;
+  }
+
+  .ls-usage-svg {
+    inline-size: 100%;
+    block-size: 100%;
+    display: block;
+    overflow: visible;
+  }
+
+  .ls-usage-bar {
+    fill: light-dark(#9da4b2, #383d49);
+    transition: fill 80ms ease-out;
+    cursor: pointer;
+  }
+
+  .ls-usage-bar[data-active="true"],
+  .ls-usage-bar:hover {
+    fill: var(--sys-emerald);
+  }
+
+  .ls-usage-axis-label {
+    fill: var(--ls-fg-3);
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-usage-agent-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+
+  /* =========================================================================
+   * 5. Deep Carbon Recessed Monospace Host Log Viewer (`#090a0c`)
+   * ========================================================================= */
+  .ls-log-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+  }
+
+  .ls-log-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  .ls-log-filter-input {
+    inline-size: 220px;
+  }
+
+  .ls-log-well {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-well-bg);
+    box-shadow: var(--sys-well-shadow);
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-xs);
+    line-height: 18px;
+    color: var(--ls-code-fg);
+  }
+
+  .ls-log-day {
+    margin: 8px 0 4px;
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-xs);
+    font-weight: 600;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-log-entry:first-child .ls-log-day {
+    margin-block-start: 0;
+  }
+
+  .ls-log-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding-block: 1.5px;
+  }
+
+  .ls-log-time {
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  .ls-log-tag {
+    color: var(--sys-emerald);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .ls-log-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-inline-size: 0;
+  }
+
+  .ls-log-jump {
+    position: absolute;
+    inset-inline-end: 20px;
+    inset-block-end: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    block-size: 28px;
+    padding-inline: 11px;
+    border-radius: 999px;
+    border: 1px solid var(--sys-border-strong);
+    background-color: var(--sys-control-bg);
+    color: var(--ls-fg);
+    box-shadow: var(--sys-control-shadow);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-xs);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* =========================================================================
+   * 6. Zero-Jump Sign-In & Pairing Modal (`420px` top-anchored, `#7` §4.2)
+   *    - Locked `min-block-size: 386px` across `账号登录` and `扫码与配对` tabs!
+   * ========================================================================= */
+  dialog.ls-dialog.ls-signin-pair-dialog > .ls-dialog__surface {
+    overflow-y: auto;
+  }
+
+  .ls-signin-pair-tabs-bar {
+    padding: 0 18px 12px;
+    flex-shrink: 0;
+  }
+
+  .ls-signin-pair-tabs-bar .ls-tab-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    inline-size: 100%;
+  }
+
+  .ls-signin-pair-panel-frame {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-block-size: 386px;
+    padding: 4px 18px 18px;
+  }
+
+  .ls-signin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ls-signin-providers {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ls-signin-provider-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    block-size: 36px;
+    padding-inline: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--sys-border-strong);
+    background-color: var(--sys-control-bg);
+    box-shadow: var(--sys-control-shadow);
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 80ms ease-out, border-color 80ms ease-out;
+  }
+
+  .ls-signin-provider-btn:hover:not(:disabled) {
+    background-color: var(--sys-control-hover);
+  }
+
+  .ls-signin-provider-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .ls-signin-provider-btn svg {
+    inline-size: 15px;
+    block-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .ls-signin-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ls-fg-3);
+    font-size: var(--ls-text-xs);
+  }
+
+  .ls-signin-divider::before,
+  .ls-signin-divider::after {
+    content: "";
+    flex: 1 1 auto;
+    block-size: 1px;
+    background-color: var(--sys-border);
+  }
+
+  .ls-signin-label-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .ls-signin-link {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--ls-fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-xs);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: var(--sys-border-strong);
+    text-underline-offset: 2px;
+    cursor: pointer;
+    transition: color 80ms ease-out, text-decoration-color 80ms ease-out;
+  }
+
+  .ls-signin-link:hover:not(:disabled) {
+    color: var(--ls-fg);
+    text-decoration-color: currentColor;
+  }
+
+  .ls-signin-footer-links {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-signin-local-note {
+    margin: 8px 0 0;
+    padding-block-start: 10px;
+    border-block-start: 1px solid var(--sys-border-subtle);
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-3);
+    text-align: center;
+  }
+
+  /* 5m PKCE Waiting State */
+  .ls-signin-waiting {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+    min-block-size: 260px;
+    padding: 16px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-card-bg);
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  .ls-signin-waiting h3 {
+    margin: 0;
+    font-size: var(--ls-text-md);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-signin-waiting p {
+    margin: 0;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-2);
+    max-inline-size: 320px;
+  }
+
+  .ls-signin-waiting__actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-block-start: 6px;
+  }
+
+  /* Fixed-Height QR Scan Dropzone Well (`SignInPairModal` Pair Tab) */
+  .ls-pair-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ls-qr-dropwell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-block-size: 84px;
+    padding: 10px 13px;
+    border-radius: 10px;
+    border: 1px dashed var(--sys-border-strong);
+    background-color: var(--sys-well-bg);
+    box-shadow: var(--sys-well-shadow);
+    cursor: pointer;
+    transition: border-color 80ms ease-out, background-color 80ms ease-out;
+  }
+
+  .ls-qr-dropwell:hover {
+    border-color: light-dark(rgba(15, 17, 22, 0.28), rgba(255, 255, 255, 0.22));
+  }
+
+  .ls-qr-dropwell[data-dragging="true"] {
+    border-style: solid;
+    border-color: var(--sys-emerald);
+    background-color: var(--sys-emerald-soft);
+  }
+
+  .ls-qr-dropwell[data-tone="ok"] {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--sys-emerald) 45%, var(--sys-border));
+    background-color: var(--sys-emerald-soft);
+  }
+
+  .ls-qr-dropwell[data-tone="danger"] {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--sys-coral) 45%, var(--sys-border));
+    background-color: var(--sys-coral-soft);
+  }
+
+  .ls-qr-dropwell__main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .ls-qr-dropwell__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+
+  .ls-qr-dropwell__copy strong {
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-qr-dropwell__copy span {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-qr-camera-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid var(--sys-border);
+    background-color: var(--sys-well-bg);
+  }
+
+  .ls-qr-camera-box video {
+    inline-size: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: 6px;
+    background-color: #090a0c;
+    object-fit: cover;
+  }
+
+  .ls-sr-only-file {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ls-system-full-btn {
+    inline-size: 100%;
+    justify-content: center;
+  }
+}

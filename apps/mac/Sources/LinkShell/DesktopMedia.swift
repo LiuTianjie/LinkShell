@@ -36,6 +36,7 @@ final class DesktopMedia {
         output?.onInput?(value, message["replaceable"] as? Bool == true)
       }
     case "control": receiver?.setControl(message["enabled"] as? Bool == true)
+    case "pacing": receiver?.setSmooth(message["smooth"] as? Bool == true)
     case "visible":
       let visible = message["enabled"] as? Bool == true
       output?.setVisible(visible); receiver?.setPresentationVisible(visible)

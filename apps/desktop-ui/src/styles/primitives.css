@@ -1,0 +1,2359 @@
+@layer primitives {
+  /* =========================================================================
+   * 0. Screen-Reader & Forced-Colors Primitives Foundation
+   * ========================================================================= */
+  .ls-sr-only {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: clip;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* =========================================================================
+   * 1. Buttons & IconButtons (`.ls-btn`)
+   *    - Zero `scale()` bounce on `:active` (`#7` §5.1)
+   *    - Width-locked loading spinner (`[data-hidden-keep-width="true"]`)
+   *    - `999px` pill allowed strictly on `composer-action`
+   * ========================================================================= */
+  .ls-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    block-size: 32px;
+    padding-inline: 12px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid transparent;
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    -webkit-app-region: no-drag;
+    flex-shrink: 0;
+    transition:
+      background-color 80ms ease-out,
+      color 80ms ease-out,
+      border-color 80ms ease-out,
+      transform 90ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .ls-btn:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+  }
+
+  .ls-btn[data-size="xs"] {
+    block-size: 24px;
+    padding-inline: 8px;
+    border-radius: var(--ls-radius-xs);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+  }
+
+  .ls-btn[data-size="sm"] {
+    block-size: 28px;
+    padding-inline: 10px;
+    border-radius: var(--ls-radius-sm);
+  }
+
+  .ls-btn[data-size="lg"] {
+    block-size: 36px;
+    padding-inline: 14px;
+    border-radius: var(--ls-radius-md);
+  }
+
+  .ls-btn[data-size="icon-sm"] {
+    inline-size: 28px;
+    block-size: 28px;
+    padding-inline: 0;
+    border-radius: var(--ls-radius-sm);
+  }
+
+  .ls-btn[data-size="icon"] {
+    inline-size: 32px;
+    block-size: 32px;
+    padding-inline: 0;
+    border-radius: var(--ls-radius-sm);
+  }
+
+  .ls-btn[data-size="composer-action"] {
+    inline-size: 32px;
+    block-size: 32px;
+    padding-inline: 0;
+    border-radius: 999px;
+  }
+
+  .ls-btn[data-variant="primary"] {
+    background-color: var(--ls-primary-bg, light-dark(#141518, #ededf0));
+    color: var(--ls-primary-fg, light-dark(#ffffff, #0b0c0e));
+    border-color: transparent;
+    box-shadow: var(
+      --ls-shadow-control,
+      light-dark(0 1px 2px rgba(15, 17, 22, 0.14), 0 1px 3px rgba(0, 0, 0, 0.48))
+    );
+  }
+
+  .ls-btn[data-variant="primary"]:hover:not(:disabled) {
+    background-color: var(--ls-primary-hover, light-dark(#24262c, #ffffff));
+  }
+
+  .ls-btn[data-variant="primary"]:active:not(:disabled) {
+    background-color: color-mix(
+      in oklab,
+      var(--ls-primary-bg, light-dark(#141518, #ededf0)) 88%,
+      #808088
+    );
+  }
+
+  .ls-btn[data-variant="secondary"] {
+    background-color: var(--ls-control-bg, var(--ls-card));
+    color: var(--ls-fg);
+    border-color: var(--ls-border-strong);
+    box-shadow:
+      var(
+        --ls-rim-light,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.8),
+          inset 0 1px 0 rgba(255, 255, 255, 0.055)
+        )
+      ),
+      var(
+        --ls-shadow-control,
+        light-dark(0 1px 2px rgba(15, 17, 22, 0.06), 0 1px 2px rgba(0, 0, 0, 0.38))
+      );
+  }
+
+  .ls-btn[data-variant="secondary"]:hover:not(:disabled) {
+    background-color: var(--ls-control-hover, var(--ls-hover));
+    border-color: color-mix(in oklab, var(--ls-border-strong) 84%, var(--ls-fg) 16%);
+  }
+
+  .ls-btn[data-variant="secondary"]:active:not(:disabled) {
+    background-color: var(--ls-active);
+  }
+
+  .ls-btn[data-variant="ghost"] {
+    background-color: transparent;
+    color: var(--ls-fg-2);
+    border-color: transparent;
+  }
+
+  .ls-btn[data-variant="ghost"]:hover:not(:disabled) {
+    background-color: var(--ls-hover);
+    color: var(--ls-fg);
+  }
+
+  .ls-btn[data-variant="ghost"]:active:not(:disabled) {
+    background-color: var(--ls-active);
+    color: var(--ls-fg);
+  }
+
+  .ls-btn[data-variant="subtle"] {
+    background-color: var(--ls-inset);
+    color: var(--ls-fg);
+    border-color: var(--ls-border);
+    box-shadow: var(
+      --ls-rim-light,
+      light-dark(
+        inset 0 1px 0 rgba(255, 255, 255, 0.65),
+        inset 0 1px 0 rgba(255, 255, 255, 0.035)
+      )
+    );
+  }
+
+  .ls-btn[data-variant="subtle"]:hover:not(:disabled) {
+    background-color: var(--ls-fill-strong);
+  }
+
+  .ls-btn[data-variant="subtle"]:active:not(:disabled) {
+    background-color: var(--ls-active);
+  }
+
+  .ls-btn[data-variant="danger"] {
+    background-color: var(--ls-danger-fill);
+    color: #ffffff;
+    border-color: transparent;
+  }
+
+  .ls-btn[data-variant="danger"]:hover:not(:disabled) {
+    background-color: color-mix(in oklab, var(--ls-danger-fill) 90%, black);
+  }
+
+  .ls-btn[data-variant="danger"]:active:not(:disabled) {
+    background-color: color-mix(in oklab, var(--ls-danger-fill) 82%, black);
+  }
+
+  /* Neutral at rest, danger tint on hover/focus (`#7` §5.1) */
+  .ls-btn[data-variant="danger-ghost"] {
+    background-color: transparent;
+    color: var(--ls-fg-2);
+    border-color: transparent;
+  }
+
+  .ls-btn[data-variant="danger-ghost"]:hover:not(:disabled),
+  .ls-btn[data-variant="danger-ghost"]:focus-visible:not(:disabled) {
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
+  }
+
+  .ls-btn:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-btn[data-loading="true"] {
+    opacity: 0.85;
+    cursor: progress;
+  }
+
+  .ls-btn__body {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-inline-size: 0;
+  }
+
+  .ls-btn__body[data-hidden-keep-width="true"] {
+    visibility: hidden;
+  }
+
+  .ls-btn__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .ls-btn__spinner-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  .ls-btn__spinner {
+    inline-size: 14px;
+    block-size: 14px;
+    border-radius: 999px;
+    border: 1.75px solid currentColor;
+    border-inline-end-color: transparent;
+    animation: ls-spin 0.72s linear infinite;
+  }
+
+  /* =========================================================================
+   * 2. Badges, Status Dots, `<kbd>` & Empty States
+   * ========================================================================= */
+  .ls-status-dot {
+    display: inline-block;
+    inline-size: 6px;
+    block-size: 6px;
+    border-radius: 999px;
+    background-color: var(--ls-fg-4);
+    flex-shrink: 0;
+  }
+
+  .ls-status-dot[data-size="md"] {
+    inline-size: 8px;
+    block-size: 8px;
+  }
+
+  .ls-status-dot[data-tone="ok"] {
+    background-color: var(--ls-ok);
+  }
+
+  .ls-status-dot[data-tone="running"] {
+    background-color: var(--ls-running);
+  }
+
+  .ls-status-dot[data-tone="waiting"] {
+    background-color: var(--ls-waiting);
+  }
+
+  .ls-status-dot[data-tone="danger"] {
+    background-color: var(--ls-danger);
+  }
+
+  .ls-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    block-size: 20px;
+    padding-inline: 6px;
+    border-radius: var(--ls-radius-xs);
+    border: var(--ls-hairline) solid var(--ls-border-subtle);
+    background-color: var(--ls-inset);
+    color: var(--ls-fg-2);
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .ls-badge[data-variant="count"] {
+    block-size: 18px;
+    min-inline-size: 18px;
+    justify-content: center;
+    padding-inline: 5px;
+    border-radius: 999px;
+  }
+
+  .ls-badge[data-tone="accent"],
+  .ls-badge[data-tone="running"] {
+    background-color: var(--ls-accent-soft);
+    color: var(--ls-accent);
+    border-color: transparent;
+  }
+
+  .ls-badge[data-tone="waiting"] {
+    background-color: var(--ls-waiting-soft);
+    color: var(--ls-waiting);
+    border-color: transparent;
+  }
+
+  .ls-badge[data-tone="ok"] {
+    background-color: var(--ls-ok-soft);
+    color: var(--ls-ok);
+    border-color: transparent;
+  }
+
+  .ls-badge[data-tone="danger"] {
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
+    border-color: transparent;
+  }
+
+  .ls-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 18px;
+    block-size: 18px;
+    padding-inline: 4.5px;
+    border-radius: var(--ls-radius-xs);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-inset);
+    box-shadow: var(
+      --ls-rim-light,
+      light-dark(
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04)
+      )
+    );
+    color: var(--ls-fg-3);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .ls-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 36px 24px;
+    max-inline-size: 440px;
+    margin-inline: auto;
+    gap: 8px;
+  }
+
+  .ls-empty-state[data-compact="true"] {
+    padding: 20px 16px;
+  }
+
+  .ls-empty-state__icon {
+    inline-size: 44px;
+    block-size: 44px;
+    border-radius: var(--ls-radius-lg);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-inset);
+    color: var(--ls-fg-2);
+    display: grid;
+    place-items: center;
+    margin-block-end: 4px;
+  }
+
+  .ls-empty-state__title {
+    margin: 0;
+    font-size: var(--ls-text-lg);
+    line-height: var(--ls-leading-lg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ls-fg);
+  }
+
+  .ls-empty-state__description {
+    margin: 0;
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-empty-state__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-block-start: 8px;
+  }
+
+  .ls-empty-state__hint {
+    margin-block-start: 4px;
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-3);
+  }
+
+  /* =========================================================================
+   * 3. Hint Tooltips (`popover="hint"` + `interestfor` + `container-type: anchored`)
+   *    - Logical `position-area` keywords ONLY (`viewport-aware-dropdowns`)
+   *    - Separate `transition-behavior: allow-discrete` (`animate-to-from-top-layer`)
+   * ========================================================================= */
+  button[interestfor],
+  a[interestfor] {
+    interest-delay: 0.32s 0.08s;
+  }
+
+  .ls-tooltip-disabled-anchor {
+    display: inline-flex;
+    align-items: center;
+    cursor: not-allowed;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-tooltip {
+    margin: 6px;
+    padding: 5px 9px;
+    max-inline-size: 280px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-popover);
+    color: var(--ls-fg);
+    box-shadow:
+      var(
+        --ls-rim-island,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.9),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06)
+        )
+      ),
+      var(--ls-shadow-popover);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    pointer-events: none;
+    container-type: anchored;
+    position-area: block-end;
+    position-try-fallbacks: flip-block;
+  }
+
+  .ls-tooltip:popover-open,
+  .ls-tooltip[data-open="true"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .ls-tooltip[data-placement="top"] {
+    position-area: block-start;
+    position-try-fallbacks: flip-block;
+  }
+
+  .ls-tooltip[data-placement="bottom"] {
+    position-area: block-end;
+    position-try-fallbacks: flip-block;
+  }
+
+  .ls-tooltip[data-placement="right"] {
+    position-area: inline-end;
+    position-try-fallbacks: flip-inline;
+  }
+
+  .ls-tooltip[data-placement="left"] {
+    position-area: inline-start;
+    position-try-fallbacks: flip-inline;
+  }
+
+  /* =========================================================================
+   * 4. Modal `<dialog>` (`.ls-dialog`)
+   *    - MWG `dialog`: NEVER set `display` unconditionally on `dialog`; scope to `dialog[open]`!
+   *    - Zero-layout-shift fixed-top anchoring (`#7` §4.2)
+   * ========================================================================= */
+  dialog.ls-dialog {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ls-fg);
+    max-inline-size: none;
+    max-block-size: none;
+    margin-inline: auto;
+    overflow: visible;
+  }
+
+  dialog.ls-dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  dialog.ls-dialog:modal {
+    overscroll-behavior: contain;
+  }
+
+  dialog.ls-dialog[data-size="sm"] {
+    inline-size: min(420px, calc(100vw - 32px));
+    margin-block-start: 18vh;
+    margin-block-end: auto;
+  }
+
+  dialog.ls-dialog[data-size="md"] {
+    inline-size: min(520px, calc(100vw - 32px));
+    margin-block-start: 16vh;
+    margin-block-end: auto;
+  }
+
+  /* Command Center: locked at 14vh so filtering 12 -> 1 rows never jumps the search box */
+  dialog.ls-dialog[data-size="palette"] {
+    inline-size: min(560px, calc(100vw - 32px));
+    margin-block-start: 14vh;
+    margin-block-end: auto;
+  }
+
+  dialog.ls-dialog[data-size="lg"] {
+    inline-size: min(720px, calc(100vw - 40px));
+    margin-block-start: 12vh;
+    margin-block-end: auto;
+  }
+
+  /* Unified System & Host Control Modal (`960×680`, `#7` §3.2) */
+  dialog.ls-dialog[data-size="system"] {
+    inline-size: min(960px, calc(100vw - 48px));
+    block-size: min(680px, calc(100vh - 64px));
+    margin-block: auto;
+  }
+
+  /* Windows titleBarOverlay (`138px × 42px`) modal clearance (`#110` §2.1):
+     guarantees `surfaceRect.top >= 48px` across all window heights (`>= 700px`). */
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="system"],
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="system"] {
+    block-size: min(680px, calc(100dvh - 96px));
+  }
+
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="sm"],
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="sm"] {
+    margin-block-start: max(48px, 18dvh);
+  }
+
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="md"],
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="md"] {
+    margin-block-start: max(48px, 16dvh);
+  }
+
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="palette"],
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="palette"] {
+    margin-block-start: max(48px, 14dvh);
+  }
+
+  :root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="lg"],
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"]) dialog.ls-dialog[data-size="lg"] {
+    margin-block-start: max(48px, 12dvh);
+  }
+
+  :root[data-platform="windows"]:not([data-fullscreen="true"])
+    dialog.ls-dialog:is([data-size="sm"], [data-size="md"], [data-size="palette"], [data-size="lg"])
+    > .ls-dialog__surface,
+  .desktop-root[data-platform="windows"]:not([data-fullscreen="true"])
+    dialog.ls-dialog:is([data-size="sm"], [data-size="md"], [data-size="palette"], [data-size="lg"])
+    > .ls-dialog__surface {
+    max-block-size: calc(100dvh - 96px);
+  }
+
+  dialog.ls-dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background-color: light-dark(rgba(12, 14, 18, 0.28), rgba(0, 0, 0, 0.58));
+    backdrop-filter: blur(4px);
+  }
+
+  .ls-dialog__surface {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    inline-size: 100%;
+    block-size: 100%;
+    max-block-size: calc(100vh - 64px);
+    overflow: clip;
+    border-radius: var(--ls-radius-xl);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-popover);
+    box-shadow:
+      var(
+        --ls-rim-island,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.9),
+          inset 0 1px 0 rgba(255, 255, 255, 0.065)
+        )
+      ),
+      var(--ls-shadow-modal);
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-dialog__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 12px;
+    flex-shrink: 0;
+  }
+
+  .ls-dialog__header-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-inline-size: 0;
+  }
+
+  .ls-dialog__title {
+    margin: 0;
+    font-size: var(--ls-text-lg);
+    line-height: var(--ls-leading-lg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ls-fg);
+  }
+
+  .ls-dialog__description {
+    margin: 0;
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-dialog__body {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    padding: 4px 18px 16px;
+  }
+
+  .ls-dialog__footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px 16px;
+    border-block-start: var(--ls-hairline) solid var(--ls-border-subtle);
+    flex-shrink: 0;
+  }
+
+  /* =========================================================================
+   * 5. Anchored Popovers, Menus & Toolbars (`popover="auto"`, `focusgroup`)
+   *    - Logical `position-area` keywords ONLY (`viewport-aware-dropdowns`)
+   * ========================================================================= */
+  .ls-popover {
+    margin: 6px 0;
+    padding: 6px;
+    min-inline-size: 180px;
+    max-inline-size: min(400px, calc(100vw - 24px));
+    max-block-size: min(440px, calc(100vh - 32px));
+    overflow-y: auto;
+    overflow-x: clip;
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-popover);
+    color: var(--ls-fg);
+    box-shadow:
+      var(
+        --ls-rim-island,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.9),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06)
+        )
+      ),
+      var(--ls-shadow-popover);
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-popover[data-match-width="true"] {
+    min-inline-size: anchor-size(inline);
+  }
+
+  .ls-popover[data-placement="bottom-start"] {
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+
+  .ls-popover[data-placement="bottom"] {
+    position-area: block-end;
+    position-try-fallbacks: flip-block;
+  }
+
+  .ls-popover[data-placement="bottom-end"] {
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+
+  .ls-popover[data-placement="top-start"] {
+    position-area: block-start span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+
+  .ls-popover[data-placement="top"] {
+    position-area: block-start;
+    position-try-fallbacks: flip-block;
+  }
+
+  .ls-popover[data-placement="top-end"] {
+    position-area: block-start span-inline-start;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+
+  .ls-popover[data-placement="right-start"] {
+    margin: 0 6px;
+    position-area: inline-end span-block-end;
+    position-try-fallbacks: flip-inline, flip-block;
+  }
+
+  .ls-popover[data-placement="left-start"] {
+    margin: 0 6px;
+    position-area: inline-start span-block-end;
+    position-try-fallbacks: flip-inline, flip-block;
+  }
+
+  /* Zero-size fixed placeholder for pointer-coordinate context menus (`menu` MWG guide) */
+  .ls-menu-point-anchor {
+    position: fixed;
+    inline-size: 0;
+    block-size: 0;
+    pointer-events: none;
+  }
+
+  .ls-menu-popover {
+    padding: 4px;
+    min-inline-size: 196px;
+  }
+
+  .ls-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    outline: none;
+  }
+
+  .ls-menu__group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .ls-menu__label {
+    padding: 6px 8px 4px;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    font-weight: 500;
+    color: var(--ls-fg-3);
+    user-select: none;
+  }
+
+  .ls-menu__separator {
+    block-size: var(--ls-hairline);
+    margin: 4px 6px;
+    background-color: var(--ls-border);
+  }
+
+  .ls-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    inline-size: 100%;
+    min-block-size: 28px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--ls-radius-xs);
+    background-color: transparent;
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 400;
+    text-align: start;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .ls-menu__item:hover:not(:disabled),
+  .ls-menu__item:focus-visible:not(:disabled) {
+    background-color: var(--ls-hover);
+    outline: none;
+  }
+
+  .ls-menu__item[data-destructive="true"] {
+    color: var(--ls-fg-2);
+  }
+
+  .ls-menu__item[data-destructive="true"]:hover:not(:disabled),
+  .ls-menu__item[data-destructive="true"]:focus-visible:not(:disabled) {
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
+  }
+
+  .ls-menu__item:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-menu__check {
+    inline-size: 14px;
+    block-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ls-accent);
+    flex-shrink: 0;
+  }
+
+  .ls-menu__icon {
+    inline-size: 16px;
+    block-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ls-fg-2);
+    flex-shrink: 0;
+  }
+
+  .ls-menu__item[data-destructive="true"]:hover .ls-menu__icon,
+  .ls-menu__item[data-destructive="true"]:focus-visible .ls-menu__icon {
+    color: inherit;
+  }
+
+  .ls-menu__item-label {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-menu__badge {
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-menu__kbd {
+    margin-inline-start: auto;
+  }
+
+  .ls-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-inline-size: 0;
+    -webkit-app-region: no-drag;
+  }
+
+  /* =========================================================================
+   * 6. Customizable `<select>` (`appearance: base-select`) & Combobox
+   *    - Opt-in BOTH `select` and `::picker(select)` (`rich-media-picker`)
+   *    - Explicit width constraints prevent layout shift (`branded-select-styling`)
+   *    - NEVER `overflow: hidden` on `::picker(select)` (`animated-select-picker`)
+   * ========================================================================= */
+  .ls-select-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-inline-size: 120px;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-select-wrap[data-size="chip"] {
+    min-inline-size: 88px;
+  }
+
+  .ls-select-wrap[data-full-width="true"] {
+    inline-size: 100%;
+  }
+
+  .ls-select-wrap__leading {
+    position: absolute;
+    inset-inline-start: 9px;
+    display: inline-flex;
+    align-items: center;
+    color: var(--ls-fg-2);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .ls-select-wrap__caret {
+    position: absolute;
+    inset-inline-end: 8px;
+    display: inline-flex;
+    align-items: center;
+    color: var(--ls-fg-3);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  select.ls-select,
+  select.ls-select::picker(select) {
+    appearance: base-select;
+  }
+
+  select.ls-select {
+    display: inline-flex;
+    align-items: center;
+    inline-size: 100%;
+    min-inline-size: 120px;
+    block-size: 32px;
+    padding-inline: 10px 26px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-control-bg, var(--ls-card));
+    box-shadow:
+      var(
+        --ls-rim-light,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.8),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05)
+        )
+      ),
+      var(
+        --ls-shadow-control,
+        light-dark(0 1px 2px rgba(15, 17, 22, 0.05), 0 1px 2px rgba(0, 0, 0, 0.34))
+      );
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+
+  select.ls-select[data-has-leading="true"] {
+    padding-inline-start: 30px;
+  }
+
+  select.ls-select[data-full-width="true"] {
+    inline-size: 100%;
+  }
+
+  select.ls-select[data-size="sm"] {
+    block-size: 28px;
+    padding-inline: 8px 26px;
+  }
+
+  select.ls-select[data-size="sm"][data-has-leading="true"] {
+    padding-inline-start: 28px;
+  }
+
+  select.ls-select[data-size="chip"] {
+    min-inline-size: 88px;
+    block-size: 28px;
+    padding-inline: 8px 26px;
+    border-color: var(--ls-border);
+    background-color: var(--ls-inset);
+  }
+
+  select.ls-select[data-size="chip"][data-has-leading="true"] {
+    padding-inline-start: 28px;
+  }
+
+  select.ls-select:hover:not(:disabled) {
+    background-color: var(--ls-hover);
+  }
+
+  select.ls-select:focus-visible {
+    outline: none;
+    border-color: var(--ls-accent);
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  select.ls-select:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  select.ls-select::picker-icon {
+    display: none;
+  }
+
+  select.ls-select::picker(select) {
+    margin-block: 6px;
+    padding: 4px;
+    min-inline-size: anchor-size(inline);
+    max-block-size: min(320px, calc(100vh - 32px));
+    overflow-y: auto;
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-popover);
+    color: var(--ls-fg);
+    box-shadow: var(--ls-shadow-popover);
+  }
+
+  .ls-select__option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-block-size: 28px;
+    padding: 5px 8px;
+    border-radius: var(--ls-radius-xs);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    cursor: pointer;
+  }
+
+  .ls-select__option:hover,
+  .ls-select__option:focus-visible {
+    background-color: var(--ls-hover);
+    outline: none;
+  }
+
+  .ls-select__option::checkmark {
+    color: var(--ls-accent);
+    font-weight: 600;
+  }
+
+  .ls-select__option-text {
+    display: flex;
+    flex-direction: column;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .ls-select__option-desc {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-select__option-badge {
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Combobox */
+  .ls-combobox-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-inline-size: 120px;
+    block-size: 32px;
+    padding-inline: 10px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-control-bg, var(--ls-card));
+    box-shadow:
+      var(
+        --ls-rim-light,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.8),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05)
+        )
+      ),
+      var(
+        --ls-shadow-control,
+        light-dark(0 1px 2px rgba(15, 17, 22, 0.05), 0 1px 2px rgba(0, 0, 0, 0.34))
+      );
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-combobox-trigger[data-size="sm"] {
+    block-size: 28px;
+    padding-inline: 8px;
+  }
+
+  .ls-combobox-trigger[data-size="chip"] {
+    min-inline-size: 88px;
+    block-size: 28px;
+    padding-inline: 8px;
+    border-color: var(--ls-border);
+    background-color: var(--ls-inset);
+  }
+
+  .ls-combobox-trigger:hover:not(:disabled) {
+    background-color: var(--ls-hover);
+  }
+
+  .ls-combobox-trigger:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-combobox-trigger__icon,
+  .ls-combobox__option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ls-fg-2);
+    flex-shrink: 0;
+  }
+
+  .ls-combobox-trigger__label {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: start;
+  }
+
+  .ls-combobox-trigger__label[data-placeholder="true"] {
+    color: var(--ls-fg-3);
+  }
+
+  .ls-combobox-trigger__caret {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ls-fg-3);
+    margin-inline-start: auto;
+    flex-shrink: 0;
+  }
+
+  .ls-combobox-popover {
+    padding: 0;
+    min-inline-size: 240px;
+    overflow: clip;
+  }
+
+  .ls-combobox-popover:popover-open,
+  .ls-combobox-popover[data-state="open"] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ls-combobox__search-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-block-end: var(--ls-hairline) solid var(--ls-border);
+    flex-shrink: 0;
+  }
+
+  .ls-combobox__search-icon {
+    display: inline-flex;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-combobox__input {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    block-size: 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    outline: none;
+  }
+
+  .ls-combobox__list {
+    max-block-size: 280px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .ls-combobox__empty {
+    padding: 16px 12px;
+    text-align: center;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-combobox__group-label {
+    padding: 6px 8px 3px;
+    font-size: var(--ls-text-xs);
+    font-weight: 500;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-combobox__option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-block-size: 28px;
+    padding: 4px 8px;
+    border-radius: var(--ls-radius-xs);
+    font-size: var(--ls-text-base);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .ls-combobox__option[data-active="true"] {
+    background-color: var(--ls-hover);
+  }
+
+  .ls-combobox__option[aria-disabled="true"] {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-combobox__check {
+    inline-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ls-accent);
+    flex-shrink: 0;
+  }
+
+  .ls-combobox__option-body {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ls-combobox__option-label {
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-combobox__option-desc {
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-combobox__option-badge {
+    margin-inline-start: auto;
+    flex-shrink: 0;
+    font-size: var(--ls-text-xs);
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* =========================================================================
+   * 7. Tabs (`role="tablist"` + zero-jitter underline + cached `content-visibility: hidden`)
+   *    - MWG `tabs`: NEVER change padding, border, margin, font-size, or font-weight on active tab!
+   *    - MWG `tabs`: NO padding/border/margin on `.ls-tab-panel` itself (`[hidden="until-found"]` safe)!
+   * ========================================================================= */
+  .ls-tabs {
+    display: flex;
+    flex-direction: column;
+    min-inline-size: 0;
+    min-block-size: 0;
+  }
+
+  .ls-tabs[data-orientation="vertical"] {
+    flex-direction: row;
+  }
+
+  .ls-tab-list {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-inline-size: 0;
+    border-block-end: var(--ls-hairline) solid var(--ls-border);
+    padding-inline: 8px;
+    user-select: none;
+    -webkit-app-region: no-drag;
+    flex-shrink: 0;
+  }
+
+  .ls-tab-list[data-variant="segmented"] {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    border-block-end: 0;
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-inset);
+    box-shadow: light-dark(
+      inset 0 1px 2px rgba(15, 17, 22, 0.04),
+      inset 0 1px 2px rgba(0, 0, 0, 0.35)
+    );
+  }
+
+  .ls-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    block-size: 36px;
+    padding-inline: 10px;
+    border: 0;
+    background: transparent;
+    color: var(--ls-fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 80ms ease-out, background-color 80ms ease-out;
+  }
+
+  .ls-tab:hover:not(:disabled) {
+    color: var(--ls-fg);
+  }
+
+  .ls-tab[aria-selected="true"] {
+    color: var(--ls-fg);
+  }
+
+  .ls-tab-list[data-variant="underline"] .ls-tab::after {
+    content: "";
+    position: absolute;
+    inset-inline: 8px;
+    inset-block-end: 0;
+    block-size: 2px;
+    border-radius: 1px;
+    background-color: var(--ls-accent);
+    opacity: 0;
+    transition: opacity 100ms ease-out;
+  }
+
+  .ls-tab-list[data-variant="underline"] .ls-tab[aria-selected="true"]::after {
+    opacity: 1;
+  }
+
+  .ls-tab-list[data-variant="segmented"] .ls-tab {
+    block-size: 26px;
+    padding-inline: 10px;
+    border-radius: var(--ls-radius-sm);
+  }
+
+  .ls-tab-list[data-variant="segmented"] .ls-tab[aria-selected="true"] {
+    background-color: var(--ls-control-bg, var(--ls-card-raised));
+    box-shadow:
+      var(
+        --ls-rim-light,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.85),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06)
+        )
+      ),
+      var(
+        --ls-shadow-control,
+        light-dark(0 1px 2px rgba(15, 17, 22, 0.08), 0 1px 3px rgba(0, 0, 0, 0.42))
+      );
+  }
+
+  .ls-tab:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-tab-panel {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    outline: none;
+  }
+
+  /* MWG `faster-spa-view-transitions`: keeps layout/WebGL state cached in memory while skipping paint */
+  .ls-tab-panel[data-inactive="true"] {
+    content-visibility: hidden;
+    block-size: 0;
+    overflow: clip;
+    pointer-events: none;
+    flex: 0 0 0;
+  }
+
+  .ls-tab-panel__inner {
+    inline-size: 100%;
+    block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+  }
+
+  /* =========================================================================
+   * 8. Disclosure (`<details>` + `::details-content`) & Searchable `CollapsibleLog`
+   *    - MWG `accordion`: animates `::details-content` with `interpolate-size: allow-keywords`
+   *    - MWG `search-hidden-content`: NO `display: none` or `visibility: hidden` on `[hidden="until-found"]`!
+   * ========================================================================= */
+  .ls-disclosure {
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-card);
+    overflow: clip;
+  }
+
+  .ls-disclosure__summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-block-size: 32px;
+    padding: 6px 10px;
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    color: var(--ls-fg);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .ls-disclosure__summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .ls-disclosure__summary:hover {
+    background-color: var(--ls-hover);
+  }
+
+  .ls-disclosure__chevron {
+    display: inline-flex;
+    color: var(--ls-fg-3);
+    transition: transform 140ms ease-out;
+    flex-shrink: 0;
+  }
+
+  .ls-disclosure[open] > .ls-disclosure__summary .ls-disclosure__chevron {
+    transform: rotate(90deg);
+  }
+
+  .ls-disclosure__title {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-disclosure__meta {
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-2);
+    font-variant-numeric: tabular-nums;
+    margin-inline-start: auto;
+  }
+
+  .ls-disclosure::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition-property: block-size, content-visibility;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+    transition-behavior: allow-discrete;
+  }
+
+  .ls-disclosure[open]::details-content {
+    block-size: auto;
+  }
+
+  .ls-disclosure__content {
+    padding: 8px 12px 10px;
+    border-block-start: var(--ls-hairline) solid var(--ls-border-subtle);
+  }
+
+  /* CollapsibleLog (`hidden="until-found"`) */
+  .ls-collapsible-log {
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-inset);
+    overflow: clip;
+  }
+
+  .ls-collapsible-log__header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-inline-end: 6px;
+  }
+
+  .ls-collapsible-log__trigger {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 30px;
+    padding: 4px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--ls-fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    font-weight: 500;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .ls-collapsible-log__trigger:hover {
+    color: var(--ls-fg);
+  }
+
+  .ls-collapsible-log__chevron {
+    display: inline-flex;
+    color: var(--ls-fg-3);
+    transition: transform 140ms ease-out;
+    flex-shrink: 0;
+  }
+
+  .ls-collapsible-log[data-open="true"] .ls-collapsible-log__chevron {
+    transform: rotate(90deg);
+  }
+
+  .ls-collapsible-log__title {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-collapsible-log__meta {
+    color: var(--ls-fg-3);
+    font-variant-numeric: tabular-nums;
+    margin-inline-start: auto;
+  }
+
+  .ls-collapsible-log__inner {
+    border-block-start: var(--ls-hairline) solid var(--ls-border-subtle);
+    padding: 8px 10px;
+  }
+
+  .ls-collapsible-log__pre {
+    margin: 0;
+    max-block-size: 320px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-code-fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* =========================================================================
+   * 9. Switch (`<input type="checkbox" role="switch">`), CopyButton & Form Controls
+   * ========================================================================= */
+  .ls-switch {
+    appearance: none;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    inline-size: 34px;
+    block-size: 20px;
+    margin: 0;
+    padding: 2px;
+    border-radius: 999px;
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-fill-strong);
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  }
+
+  .ls-switch[data-size="sm"] {
+    inline-size: 28px;
+    block-size: 16px;
+  }
+
+  .ls-switch::before {
+    content: "";
+    display: block;
+    inline-size: 14px;
+    block-size: 14px;
+    border-radius: 999px;
+    background-color: #ffffff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: transform 120ms ease-out;
+  }
+
+  .ls-switch[data-size="sm"]::before {
+    inline-size: 10px;
+    block-size: 10px;
+  }
+
+  .ls-switch:checked {
+    background-color: var(--ls-accent-fill);
+    border-color: transparent;
+  }
+
+  .ls-switch:checked::before {
+    transform: translateX(14px);
+  }
+
+  .ls-switch[data-size="sm"]:checked::before {
+    transform: translateX(12px);
+  }
+
+  .ls-switch:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .ls-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .ls-switch-row__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+
+  .ls-switch-row__label {
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 500;
+    color: var(--ls-fg);
+    cursor: pointer;
+  }
+
+  .ls-switch-row__desc {
+    margin: 0;
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-2);
+  }
+
+  /* CopyButton (`copy-button` + `natural-interactions`: opacity-only hide, external live status) */
+  .ls-copy-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    block-size: 26px;
+    padding-inline: 7px;
+    border-radius: var(--ls-radius-xs);
+    border: var(--ls-hairline) solid transparent;
+    background: transparent;
+    color: var(--ls-fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 100ms ease-out, background-color 80ms ease-out, color 80ms ease-out;
+  }
+
+  .ls-copy-btn[data-icon-only="true"] {
+    inline-size: 26px;
+    padding-inline: 0;
+  }
+
+  .ls-copy-btn:hover:not(:disabled),
+  .ls-copy-btn:focus-visible:not(:disabled) {
+    background-color: var(--ls-hover);
+    color: var(--ls-fg);
+  }
+
+  .ls-copy-btn[data-copied="true"] {
+    color: var(--ls-ok);
+  }
+
+  .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn {
+    opacity: 0;
+  }
+
+  :hover > .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn,
+  :focus-within > .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn,
+  .ls-collapsible-log:hover .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn,
+  .ls-collapsible-log:focus-within .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn,
+  .ls-copy-wrap[data-reveal="hover"]:hover .ls-copy-btn,
+  .ls-copy-wrap[data-reveal="hover"]:focus-within .ls-copy-btn,
+  .ls-copy-wrap[data-reveal="hover"] .ls-copy-btn[data-copied="true"] {
+    opacity: 1;
+  }
+
+  .ls-copy-status {
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-ok);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .ls-copy-status:empty {
+    display: none;
+  }
+
+  /* Form Controls (`field-sizing: content`, `:user-invalid`, single 6-digit pairing input) */
+  .ls-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-inline-size: 0;
+  }
+
+  .ls-field[data-full-width="true"] {
+    inline-size: 100%;
+  }
+
+  .ls-field__label {
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    font-weight: 500;
+    color: var(--ls-fg);
+  }
+
+  .ls-field__desc {
+    margin: 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-fg-3);
+  }
+
+  .ls-field__error {
+    margin: 0;
+    font-size: var(--ls-text-xs);
+    line-height: var(--ls-leading-xs);
+    color: var(--ls-danger);
+  }
+
+  .ls-input {
+    box-sizing: border-box;
+    inline-size: 100%;
+    min-inline-size: 0;
+    block-size: 32px;
+    padding-inline: 10px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-inset);
+    box-shadow: light-dark(
+      inset 0 1px 2px rgba(15, 17, 22, 0.04),
+      inset 0 1px 2px rgba(0, 0, 0, 0.32)
+    );
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    transition: border-color 80ms ease-out, box-shadow 80ms ease-out, background-color 80ms ease-out;
+  }
+
+  .ls-input[data-size="sm"] {
+    block-size: 28px;
+    padding-inline: 8px;
+  }
+
+  .ls-input[data-size="lg"] {
+    block-size: 36px;
+    padding-inline: 12px;
+    border-radius: var(--ls-radius-md);
+  }
+
+  /* Strip Chromium UA searchfield cancel/decoration chrome so custom trailing clear buttons never duplicate */
+  input[type="search"],
+  .ls-input[type="search"],
+  .ls-combobox__input[type="search"] {
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  input[type="search"]::-webkit-search-decoration,
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-results-button,
+  input[type="search"]::-webkit-search-results-decoration {
+    -webkit-appearance: none;
+    display: none;
+  }
+
+  .ls-input::placeholder {
+    color: var(--ls-placeholder);
+  }
+
+  .ls-input:focus-visible {
+    outline: none;
+    border-color: var(--ls-accent);
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  .ls-input:user-invalid {
+    border-color: var(--ls-danger);
+  }
+
+  .ls-input:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+  }
+
+  /* True Flex Input Shell (#89 §1.1):
+     Leading icon, <input>, and trailing action sit side-by-side in normal flex flow
+     so icon-text overlap is mathematically impossible across all sizes & zoom levels. */
+  .ls-input-wrap {
+    box-sizing: border-box;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    inline-size: 100%;
+    min-inline-size: 0;
+    block-size: 32px;
+    padding-inline: 10px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--sys-border-strong, var(--ls-border-strong));
+    background-color: var(--sys-well-bg, var(--ls-inset));
+    box-shadow: var(
+      --sys-well-shadow,
+      light-dark(
+        inset 0 1px 2px rgba(15, 17, 22, 0.04),
+        inset 0 1px 2px rgba(0, 0, 0, 0.32)
+      )
+    );
+    cursor: text;
+    -webkit-app-region: no-drag;
+    transition: border-color 80ms ease-out, box-shadow 80ms ease-out, background-color 80ms ease-out;
+  }
+
+  .ls-input-wrap[data-size="sm"] {
+    block-size: 28px;
+    padding-inline: 8px;
+    gap: 6px;
+  }
+
+  .ls-input-wrap[data-size="lg"] {
+    block-size: 36px;
+    padding-inline: 12px;
+    gap: 8px;
+    border-radius: var(--ls-radius-md);
+  }
+
+  .ls-input-wrap:focus-within {
+    border-color: var(--ls-accent);
+    box-shadow: var(--ls-focus-ring);
+  }
+
+  .ls-input-wrap:has(> .ls-input:user-invalid) {
+    border-color: var(--ls-danger);
+  }
+
+  .ls-input-wrap[data-disabled="true"],
+  .ls-input-wrap:has(> .ls-input:disabled) {
+    opacity: 0.48;
+    cursor: not-allowed;
+  }
+
+  .ls-input-wrap > .ls-input {
+    flex: 1 1 0%;
+    inline-size: auto;
+    min-inline-size: 0;
+    block-size: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    outline: none;
+  }
+
+  .ls-input-wrap > .ls-input:disabled {
+    opacity: 1;
+  }
+
+  .ls-input-wrap__leading {
+    position: static;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ls-fg-3);
+    pointer-events: none;
+  }
+
+  .ls-input-wrap__trailing {
+    position: static;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-inline-end: -4px;
+  }
+
+  .ls-input-wrap__trailing .ls-btn[data-size="icon-sm"] {
+    inline-size: 22px;
+    block-size: 22px;
+    border-radius: 5px;
+  }
+
+  .ls-input-wrap[data-size="lg"] .ls-input-wrap__trailing .ls-btn[data-size="icon-sm"] {
+    inline-size: 26px;
+    block-size: 26px;
+  }
+
+  /* MWG `form-fields-automatically-fit-contents`: explicit `width: 100%` + `field-sizing: content` */
+  .ls-autogrow-textarea {
+    field-sizing: content;
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 44px;
+    max-block-size: 220px;
+    overflow-y: auto;
+    resize: none;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-md);
+    line-height: var(--ls-leading-md);
+    outline: none;
+  }
+
+  .ls-autogrow-textarea::placeholder {
+    color: var(--ls-placeholder);
+  }
+
+  .ls-pairing-code-input {
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-lg);
+    font-weight: 600;
+    letter-spacing: 0.28em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* =========================================================================
+   * 10. Responsive & Sortable Data Table (`.ls-table-*`)
+   * ========================================================================= */
+  .ls-table-container {
+    inline-size: 100%;
+    overflow-x: auto;
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-card);
+  }
+
+  .ls-table {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+  }
+
+  .ls-table__th {
+    padding: 8px 12px;
+    border-block-end: var(--ls-hairline) solid var(--ls-border);
+    background-color: var(--ls-bg);
+    color: var(--ls-fg-2);
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    font-weight: 500;
+    text-align: start;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .ls-table__th[data-align="right"],
+  .ls-table__td[data-align="right"] {
+    text-align: end;
+  }
+
+  .ls-table__th[data-align="center"],
+  .ls-table__td[data-align="center"] {
+    text-align: center;
+  }
+
+  .ls-table__sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    border: 0;
+    border-radius: var(--ls-radius-xs);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .ls-table__sort-btn:hover {
+    background-color: var(--ls-hover);
+    color: var(--ls-fg);
+  }
+
+  .ls-table__sort-icon {
+    display: inline-flex;
+    color: var(--ls-fg-3);
+  }
+
+  .ls-table__sort-icon[data-active="true"] {
+    color: var(--ls-accent);
+  }
+
+  .ls-table__td {
+    padding: 9px 12px;
+    border-block-end: var(--ls-hairline) solid var(--ls-border-subtle);
+    color: var(--ls-fg);
+  }
+
+  .ls-table-container[data-compact="true"] .ls-table__td,
+  .ls-table-container[data-compact="true"] .ls-table__th {
+    padding: 6px 10px;
+  }
+
+  .ls-table__row:last-child .ls-table__td {
+    border-block-end: 0;
+  }
+
+  .ls-table__row[data-clickable="true"] {
+    cursor: pointer;
+  }
+
+  .ls-table__row[data-clickable="true"]:hover {
+    background-color: var(--ls-hover);
+  }
+
+  .ls-table__empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--ls-fg-3);
+    font-size: var(--ls-text-sm);
+  }
+
+  /* =========================================================================
+   * 11. Split Resizer Sash (`.ls-split-resizer`)
+   *     - 4px hit target + 2px accent line after 120ms hover (`#7` §5.1)
+   * ========================================================================= */
+  .ls-split-resizer {
+    position: relative;
+    z-index: 15;
+    flex-shrink: 0;
+    user-select: none;
+    touch-action: none;
+    -webkit-app-region: no-drag;
+  }
+
+  .ls-split-resizer[data-orientation="vertical"] {
+    inline-size: 4px;
+    block-size: 100%;
+    margin-inline: -2px;
+    cursor: col-resize;
+  }
+
+  .ls-split-resizer[data-orientation="horizontal"] {
+    inline-size: 100%;
+    block-size: 4px;
+    margin-block: -2px;
+    cursor: row-resize;
+  }
+
+  .ls-split-resizer::after {
+    content: "";
+    position: absolute;
+    background-color: var(--ls-accent);
+    opacity: 0;
+    transition: opacity 80ms ease-out 0ms;
+  }
+
+  .ls-split-resizer[data-orientation="vertical"]::after {
+    inset-block: 0;
+    inset-inline-start: 1px;
+    inline-size: 2px;
+  }
+
+  .ls-split-resizer[data-orientation="horizontal"]::after {
+    inset-inline: 0;
+    inset-block-start: 1px;
+    block-size: 2px;
+  }
+
+  .ls-split-resizer:hover::after {
+    opacity: 1;
+    transition-delay: 120ms;
+  }
+
+  .ls-split-resizer[data-dragging="true"]::after,
+  .ls-split-resizer:focus-visible::after {
+    opacity: 1;
+    transition-delay: 0ms;
+  }
+
+  /* =========================================================================
+   * 12. Top-Layer Entry/Exit Motion (`@starting-style`, `overlay`, `allow-discrete`)
+   *     - MWG `animate-to-from-top-layer`: NEVER put `allow-discrete` in `transition` shorthand!
+   *     - MWG `motion`: Gated on `prefers-reduced-motion: no-preference`.
+   * ========================================================================= */
+  @media (prefers-reduced-motion: no-preference) {
+    /* CRITICAL: NEVER set `transform` on `dialog.ls-dialog` itself — CSS Transform turns `<dialog>` into a
+     * fixed-positioning containing block and traps `.modal-window-drag-strip` (`position: fixed; top: 0`)
+     * at the dialog's top margin instead of OS window `y = 0`! Animate `opacity` on `<dialog>` and `transform`
+     * strictly on `dialog.ls-dialog > .ls-dialog__surface`. */
+    dialog.ls-dialog {
+      opacity: 0;
+      transition-property: opacity, overlay, display;
+      transition-duration: 180ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      transition-behavior: allow-discrete;
+    }
+
+    dialog.ls-dialog[open] {
+      opacity: 1;
+    }
+
+    dialog.ls-dialog > .ls-dialog__surface {
+      transform: scale(0.97) translateY(4px);
+      transition-property: transform;
+      transition-duration: 180ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    dialog.ls-dialog[open] > .ls-dialog__surface {
+      transform: none;
+    }
+
+    .ls-popover,
+    .ls-tooltip,
+    select.ls-select::picker(select) {
+      opacity: 0;
+      transform: scale(0.98) translateY(3px);
+      transition-property: opacity, transform, overlay, display;
+      transition-duration: 140ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      transition-behavior: allow-discrete;
+    }
+
+    .ls-popover:popover-open,
+    .ls-popover[data-state="open"],
+    .ls-tooltip:popover-open,
+    .ls-tooltip[data-open="true"],
+    select.ls-select:open::picker(select) {
+      opacity: 1;
+      transform: none;
+    }
+
+    @starting-style {
+      dialog.ls-dialog[open] {
+        opacity: 0;
+      }
+
+      dialog.ls-dialog[open] > .ls-dialog__surface {
+        transform: scale(0.97) translateY(4px);
+      }
+
+      .ls-popover:popover-open,
+      .ls-tooltip:popover-open,
+      select.ls-select:open::picker(select) {
+        opacity: 0;
+        transform: scale(0.98) translateY(3px);
+      }
+    }
+
+    dialog.ls-dialog::backdrop {
+      opacity: 0;
+      transition-property: opacity, overlay, display;
+      transition-duration: 180ms;
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+      transition-behavior: allow-discrete;
+    }
+
+    dialog.ls-dialog[open]::backdrop {
+      opacity: 1;
+    }
+
+    @starting-style {
+      dialog.ls-dialog[open]::backdrop {
+        opacity: 0;
+      }
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ls-btn,
+    .ls-popover,
+    .ls-dialog__surface,
+    .ls-switch,
+    .ls-badge {
+      border: 1px solid CanvasText;
+    }
+
+    .ls-switch:checked {
+      background-color: Highlight;
+      border-color: Highlight;
+    }
+  }
+
+  /* =========================================================================
+   * 13. Pane ErrorBoundary Recovery Surface (`.ls-error-boundary`)
+   * ========================================================================= */
+  .ls-error-boundary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 160px;
+    padding: 24px;
+    color: var(--ls-fg);
+  }
+
+  .ls-error-boundary__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 10px;
+    inline-size: min(440px, 100%);
+    padding: 22px 24px;
+    border-radius: var(--ls-radius-xl);
+    border: var(--ls-hairline) solid var(--ls-border-strong);
+    background-color: var(--ls-card);
+    box-shadow:
+      var(
+        --ls-rim-island,
+        light-dark(
+          inset 0 1px 0 rgba(255, 255, 255, 0.85),
+          inset 0 1px 0 rgba(255, 255, 255, 0.055)
+        )
+      ),
+      var(--ls-shadow-card);
+  }
+
+  .ls-error-boundary__icon {
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: var(--ls-radius-md);
+    border: var(--ls-hairline) solid color-mix(in oklab, var(--ls-danger) 30%, var(--ls-border));
+    background-color: var(--ls-danger-soft);
+    color: var(--ls-danger);
+    display: grid;
+    place-items: center;
+  }
+
+  .ls-error-boundary__title {
+    margin: 0;
+    font-size: var(--ls-text-md);
+    line-height: var(--ls-leading-md);
+    font-weight: 600;
+    color: var(--ls-fg);
+  }
+
+  .ls-error-boundary__desc {
+    margin: 0;
+    font-size: var(--ls-text-sm);
+    line-height: var(--ls-leading-sm);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-error-boundary__detail {
+    margin: 0;
+    inline-size: 100%;
+    max-block-size: 140px;
+    overflow: auto;
+    padding: 8px 10px;
+    border-radius: var(--ls-radius-sm);
+    border: var(--ls-hairline) solid var(--ls-border-subtle);
+    background-color: var(--ls-code);
+    color: var(--ls-fg-2);
+    font-family: var(--font-mono);
+    font-size: var(--ls-text-xs);
+    line-height: 16px;
+    text-align: start;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ls-error-boundary__actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-block-start: 4px;
+  }
+}
+
+@layer utilities {
+  /* =========================================================================
+   * Top-Layer Hit-Test Guard (Phase 5 Critical Invariant)
+   * Guarantees closed `[popover]` and `<dialog>` elements NEVER override UA
+   * `display: none` or intercept pointer hit-testing over underlying chrome.
+   * ========================================================================= */
+  [popover]:not(:popover-open) {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  dialog:not([open]) {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  .ls-popover[data-state="closed"],
+  .ls-tooltip[data-state="closed"] {
+    pointer-events: none !important;
+  }
+
+  /* Inner <input> inside .ls-input-wrap never receives a duplicate nested border/padding/shadow from @layer components */
+  .ls-input-wrap > .ls-input {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  /* Real-time 60-120fps SplitResizer drag lock (#86 §1.1):
+     Suppresses pane transitions and iframe pointer capture across the entire viewport during active sash drag. */
+  html[data-resizing]
+    :is(
+      .desktop-workbench,
+      .desktop-sidebar,
+      .desktop-main,
+      .desktop-inspector,
+      .inspector-workbench,
+      .desktop-bottom-dock,
+      .inspector-bottom-dock,
+      .inspector-files-sidebar
+    ) {
+    transition: none !important;
+  }
+
+  html[data-resizing] :is(iframe, webview) {
+    pointer-events: none !important;
+  }
+
+  html[data-resizing="vertical"],
+  html[data-resizing="vertical"] * {
+    cursor: col-resize !important;
+    user-select: none !important;
+  }
+
+  html[data-resizing="horizontal"],
+  html[data-resizing="horizontal"] * {
+    cursor: row-resize !important;
+    user-select: none !important;
+  }
+}

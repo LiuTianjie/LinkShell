@@ -33,6 +33,7 @@ import type { KeepAwakeManager } from "../keep-awake.js";
 import { createLsaService, type LsaService } from "../lsa/index.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
+import { FusionShare } from "../fusion.js";
 import { DirectPeer } from "../direct.js";
 import { ComputerPreviewServer } from "../computer-preview.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
@@ -278,6 +279,7 @@ export class HostRpcServer {
   private gateway?: GatewayLink;
   private refreshGateway?: () => GatewayStatus;
   private readonly screen: ScreenShare;
+  private readonly fusion: FusionShare;
   private readonly computerPreview: ComputerPreviewServer;
   private readonly metrics: MachineMetricsSampler;
   private readonly lsa: LsaService;
@@ -297,6 +299,12 @@ export class HostRpcServer {
       options.onLockScreen,
     );
     this.screen.onViewersChanged(() => this.notifyDemandChanged());
+    this.fusion = new FusionShare(
+      options.log,
+      this.screen,
+      () => options.machineInfo().direct?.iceServers ?? [],
+      () => (options.machineInfo().direct && process.env.LINKSHELL_TURN !== "off" ? this.gateway?.turn() : undefined),
+    );
     const hub = options.hub;
     this.ownsLsa = !options.lsa;
     this.lsa =
@@ -591,6 +599,11 @@ export class HostRpcServer {
       "screen.start": () => this.screen.start(),
       "screen.access": (params: P<"screen.access">) => this.screen.access(params.ask === true),
       "screen.privacy": (params: P<"screen.privacy">) => this.screen.privacy(params),
+      "fusion.start": () => this.fusion.start(),
+      "fusion.stop": () => {
+        this.fusion.stop();
+        return {};
+      },
       "proxy.open": async (params: P<"proxy.open">, context) => context.proxy.open(params.port, params.direct),
       "direct.offer": async (params: P<"direct.offer">, context) => ({ sdp: await context.direct.answer(params.sdp) }),
       "proxy.write": (params: P<"proxy.write">, context) => {
@@ -696,6 +709,7 @@ export class HostRpcServer {
       this.heartbeatTimer = undefined;
     }
     this.metrics.stop();
+    this.fusion.stop();
     this.screen.stop();
     this.computerPreview.stop();
     if (this.ownsLsa) this.lsa.close();

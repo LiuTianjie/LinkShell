@@ -9,6 +9,7 @@ let package = Package(
   platforms: [.macOS(.v13)],
   products: [
     .executable(name: "LinkShell", targets: ["LinkShell"]),
+    .executable(name: "LinkShellFusionStub", targets: ["LinkShellFusionStub"]),
     // The window's native half (apps/desktop loads it into Electron): permissions, the login
     // item, Sparkle and the Metal screen surface. Never WebRTC: Chromium's own libwebrtc shares its class names.
     .library(name: "LinkShellNative", type: .dynamic, targets: ["LinkShellNative"]),
@@ -16,13 +17,21 @@ let package = Package(
   targets: [
     .executableTarget(
       name: "LinkShell",
-      dependencies: ["WebRTC", "Sparkle", "LinkShellScreen"],
+      dependencies: ["WebRTC", "Sparkle", "LinkShellScreen", "LinkShellFusionShim"],
       path: "Sources/LinkShell",
       linkerSettings: [
         // Where the framework is inside the app: Contents/Frameworks.
         .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
       ]
     ),
+    // Fusion per-app stub process: pure AppKit + Metal surface + Mach IOSurface IPC, zero WebRTC.
+    .executableTarget(
+      name: "LinkShellFusionStub",
+      dependencies: ["LinkShellScreen"],
+      path: "Sources/LinkShellFusionStub"
+    ),
+    // Fusion (experimental): declarations of CoreGraphics' virtual display SPI.
+    .target(name: "LinkShellFusionShim", path: "Sources/LinkShellFusionShim"),
     .target(name: "LinkShellScreenShim", path: "Sources/LinkShellScreenShim", linkerSettings: [.linkedLibrary("bsm")]),
     .target(name: "LinkShellScreen", dependencies: ["LinkShellScreenShim"], path: "Sources/LinkShellScreen"),
     .target(name: "LinkShellNativeShim", path: "Sources/LinkShellNativeShim"),

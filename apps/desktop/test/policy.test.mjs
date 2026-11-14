@@ -56,4 +56,8 @@ test("reads what the Swift launcher and `linkshell app` pass on", () => {
   assert.equal(launchOptions(["x"]).checkUpdates, false);
   // Windows starts it at sign-in with --hidden (the Run entry): no window until it is asked for.
   assert.equal(launchOptions(["LinkShell.exe", "--hidden"]).hidden, true);
+  assert.deepEqual(
+    launchOptions(["LinkShell Desktop", "--dashboard", "--fusion-connect", "m4-key", "--fusion-launch", "com.anthropic.claudefordesktop"]),
+    { home: undefined, cliNode: undefined, cliScript: undefined, cliArgs: [], cliPath: undefined, checkUpdates: false, hidden: false, fusionConnect: "m4-key", fusionLaunch: "com.anthropic.claudefordesktop" },
+  );
 });

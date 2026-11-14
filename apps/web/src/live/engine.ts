@@ -120,11 +120,11 @@ export class BrowserEngine {
   private readonly connections = new ComputerConnections((computer) => this.openComputer(computer));
   private releaseSelected?: () => void;
   private readonly channel =
-    typeof BroadcastChannel !== "undefined"
+    typeof window !== "undefined" && typeof BroadcastChannel !== "undefined"
       ? new BroadcastChannel("linkshell.web.owner")
       : undefined;
   constructor() {
-    if (isDesktop) {
+    if (isDesktop && typeof window !== "undefined") {
       window.addEventListener(DESKTOP_ERROR_EVENT, (event) => this.report((event as CustomEvent<string>).detail));
       window.addEventListener(DESKTOP_ACCOUNT_EVENT, (event) => this.applyAccount((event as CustomEvent<DesktopAccount>).detail));
       window.addEventListener(DESKTOP_HOST_EVENT, () => this.onDesktopHostChanged());
@@ -138,14 +138,18 @@ export class BrowserEngine {
         this.state.setState({ locked: true });
       }
     });
-    window.addEventListener("pagehide", () => this.stop());
-    window.addEventListener("pageshow", () => {
-      void this.start();
-    });
-    window.addEventListener("online", () => this.reconnect());
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) this.reconnect();
-    });
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", () => this.stop());
+      window.addEventListener("pageshow", () => {
+        void this.start();
+      });
+      window.addEventListener("online", () => this.reconnect());
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) this.reconnect();
+      });
+    }
   }
   report(error: unknown) {
     this.state.setState({

@@ -15,7 +15,7 @@ final class Link {
     output = descriptor
   }
 
-  private init(input: Int32, output: Int32) {
+  init(input: Int32, output: Int32) {
     self.input = input
     self.output = output
   }

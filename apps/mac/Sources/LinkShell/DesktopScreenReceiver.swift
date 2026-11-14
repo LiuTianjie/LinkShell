@@ -32,13 +32,14 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var startedAt = CACurrentMediaTime()
   private var disconnectedAt: Double?
   private var timer: DispatchSourceTimer?
-  /// Even pacing over the lowest latency (`ScreenPacing`): chosen by the viewer, per session.
-  private let smooth: Bool
+  /// Even pacing over the lowest latency (`ScreenPacing`): chosen by the viewer, adjustable in-band.
+  private var smooth: Bool
+  private let preferH264: Bool
 
   /// Create on the main thread, where the surface lives. All supplied callbacks return there.
-  init(surface: DesktopScreenOutput, smooth: Bool = false, onSignal: @escaping ([String: Any]) -> Void,
+  init(surface: DesktopScreenOutput, smooth: Bool = false, preferH264: Bool = false, onSignal: @escaping ([String: Any]) -> Void,
        onStatus: @escaping ([String: Any]) -> Void, onFailure: @escaping (String) -> Void) {
-    self.surface = surface; self.smooth = smooth; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
+    self.surface = surface; self.smooth = smooth; self.preferH264 = preferH264; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
     super.init()
     surface.onInput = { [weak self] message, replaceable in self?.input(message, replaceable: replaceable) }
     surface.onFirstFrame = { [weak self] in self?.pictureArrived() }
@@ -82,10 +83,23 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       guard !self.closed, self.presentationVisible != visible else { return }
       if !visible { self.releaseButtons() }
       self.presentationVisible = visible
-      self.receivedPicture = false
-      if visible { self.startedAt = CACurrentMediaTime() }
-      self.status(["live": false])
+      // Once a picture has arrived on an active peer, transient visibility toggles must never
+      // reset `receivedPicture` or flash `live: false` ("正在建立远程画面连接").
+      if !(self.receivedPicture && self.peer != nil) {
+        self.receivedPicture = false
+        if visible { self.startedAt = CACurrentMediaTime() }
+        self.status(["live": false])
+      }
       self.updateControl()
+    }
+  }
+
+  func setSmooth(_ enabled: Bool) {
+    queue.async {
+      guard !self.closed else { return }
+      self.smooth = enabled
+      let declined = ScreenPacing.declinePlayoutDelay(on: self.peer, enabled: enabled)
+      self.status(["pacing": (enabled && declined) ? "smooth" : "immediate"])
     }
   }
 
@@ -220,7 +234,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     #if arch(x86_64)
     let preferred = "H264"
     #else
-    let preferred = "H265"
+    let preferred = preferH264 ? "H264" : "H265"
     #endif
     let codecs = available.filter { $0.name.uppercased() == preferred } + available.filter { $0.name.uppercased() != preferred }
     guard codecs.contains(where: { ["H264", "H265"].contains($0.name.uppercased()) }) else { return }

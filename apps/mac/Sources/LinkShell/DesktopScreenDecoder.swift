@@ -198,6 +198,7 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
     guard let session, let sample = Self.sample(access.body, format: described) else { return -1 }
 
     let timestamp = Int32(bitPattern: image.timeStamp)
+    let fusion = FusionMetadata.enabled ? FusionMetadata.layout(in: image.buffer) : nil
     let rotation = image.rotation
     let captured = image.captureTimeMs * 1_000_000
     var output: RTCVideoFrame?
@@ -207,6 +208,7 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
     let status = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], infoFlagsOut: nil) { status, flags, buffer, _, _ in
       outputStatus = status
       guard status == noErr, !flags.contains(.frameDropped), let buffer else { return }
+      if let fusion { FusionMetadata.attach(fusion, to: buffer) }
       let frame = RTCVideoFrame(buffer: RTCCVPixelBuffer(pixelBuffer: buffer), rotation: rotation, timeStampNs: captured)
       frame.timeStamp = timestamp
       output = frame

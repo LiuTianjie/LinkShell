@@ -29,7 +29,7 @@ const run = (command, args, cwd = root) => {
 const pnpm = process.env.npm_execpath;
 if (!pnpm || !/pnpm\.(?:c?js)$/.test(pnpm)) throw new Error('Run through pnpm: pnpm --filter @linkshell/windows build:standalone');
 run(process.execPath, [join(app, 'scripts/build.mjs')]);
-run(process.execPath, [pnpm, '--filter', '@linkshell/web', 'build']);
+run(process.execPath, [pnpm, '--filter', '@linkshell/desktop-ui', 'build']);
 run(process.execPath, [pnpm, '--filter', '@linkshell/desktop', 'exec', 'tsc', '-p', 'tsconfig.json']);
 mkdirSync(runtime, { recursive: true });
 // Deploy the locked production graph. The portable copy replaces junctions with real files.
@@ -112,7 +112,7 @@ signWindowsBinaries([join(bundle, 'LinkShell.exe'), join(bundle, 'LinkShell.Scre
 // Delete only the owned staged assets so an upgrade never carries stale web bundles.
 const workspaceAssets = join(bundle, 'workspace');
 rmSync(workspaceAssets, { recursive: true, force: true });
-cpSync(join(root, 'apps/web/dist'), workspaceAssets, { recursive: true });
+cpSync(join(root, 'apps/desktop-ui/dist'), workspaceAssets, { recursive: true });
 cpSync(await ensureMedia(), join(bundle, 'media'), { recursive: true });
 cpSync(join(root, 'LICENSE'), join(bundle, 'LICENSE'));
 writeFileSync(join(bundle, 'standalone.json'), JSON.stringify({ version, nodeVersion: process.versions.node, platform: 'win32', arch: 'x64' }, null, 2));

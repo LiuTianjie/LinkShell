@@ -13,11 +13,15 @@ declare global {
   }
 }
 
-const settings = window.__LINKSHELL_CONFIG__;
+const settings =
+  typeof window !== "undefined" ? window.__LINKSHELL_CONFIG__ : undefined;
 export const deployment: Source =
   settings?.deployment === "self-hosted" ? "self-hosted" : "official";
 export const officialGateway = "wss://gateway.itool.tech";
-const sameOriginGateway = window.location.origin.replace(/^http/, "ws");
+const sameOriginGateway =
+  typeof window !== "undefined"
+    ? window.location.origin.replace(/^http/, "ws")
+    : officialGateway;
 export const initialGateway =
   deployment === "self-hosted" ? (settings?.gatewayUrl || sameOriginGateway) : officialGateway;
 
@@ -36,7 +40,7 @@ export function validateGateway(value: string): string {
     throw new Error("请输入网关根地址，不需要附加路径");
   if (
     url.protocol === "ws:" &&
-    (window.location.protocol === "https:" ||
+    ((typeof window !== "undefined" && window.location.protocol === "https:") ||
       !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
   ) {
     throw new Error("请使用 wss:// 安全连接；ws:// 仅限本地 HTTP 开发环境");

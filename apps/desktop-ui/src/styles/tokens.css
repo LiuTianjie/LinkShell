@@ -1,0 +1,317 @@
+@layer theme {
+  :root {
+    color-scheme: light dark;
+    interpolate-size: allow-keywords;
+    accent-color: var(--ls-accent-fill);
+
+    /* -----------------------------------------------------------------------
+     * 1. Canonical Brand & Semantic Status Tokens (brand-colors.json locked)
+     *    Kept as unregistered live light-dark() properties so scoped dark
+     *    wells (e.g. terminal chrome) re-resolve descendants automatically.
+     * ----------------------------------------------------------------------- */
+    --ls-accent: light-dark(#4c5fd5, #8d9bff);
+    --ls-accent-fill: light-dark(#4c5fd5, #5263e8);
+    --ls-accent-hover: light-dark(#4254c7, #4d5fe0);
+    --ls-accent-soft: light-dark(rgba(76, 95, 213, 0.10), rgba(141, 155, 255, 0.16));
+    --ls-on-accent: #ffffff;
+
+    --ls-running: light-dark(#4c5fd5, #8d9bff);
+    --ls-running-soft: light-dark(rgba(76, 95, 213, 0.10), rgba(141, 155, 255, 0.16));
+
+    --ls-waiting: light-dark(#ad5200, #ffad5c);
+    --ls-waiting-fill: light-dark(#ad5200, #b25600);
+    --ls-waiting-soft: light-dark(rgba(173, 82, 0, 0.10), rgba(255, 173, 92, 0.14));
+
+    --ls-ok: light-dark(#187a4a, #4cc38a);
+    --ls-ok-soft: light-dark(rgba(24, 122, 74, 0.10), rgba(76, 195, 138, 0.14));
+
+    --ls-danger: light-dark(#c8322f, #ff7b72);
+    --ls-danger-fill: light-dark(#c8322f, #d63a36);
+    --ls-danger-soft: light-dark(rgba(200, 50, 47, 0.09), rgba(255, 123, 114, 0.14));
+
+    /* -----------------------------------------------------------------------
+     * 2. 7-Tier Carbon-Obsidian & Alabaster Surface System (Paseo + T3 Code)
+     * ----------------------------------------------------------------------- */
+    --ls-ground: light-dark(#f2f3f6, #090a0c);
+    --ls-sidebar: light-dark(#f2f3f6, #090a0c);
+    --ls-sidebar-translucent: light-dark(rgba(242, 243, 246, 0.82), rgba(9, 10, 12, 0.84));
+    --ls-sidebar-accent: light-dark(rgba(17, 19, 24, 0.06), rgba(255, 255, 255, 0.075));
+
+    --ls-plain: light-dark(#ffffff, #0e0f12);
+    --ls-bg: light-dark(#f7f8fa, #0b0c0f);
+    --ls-sheet: light-dark(#f7f8fa, #111216);
+
+    --ls-inset: light-dark(#eff1f5, #090a0d);
+    --ls-code: light-dark(#eff1f5, #090a0d);
+
+    --ls-card: light-dark(#ffffff, #141519);
+    --ls-card-raised: light-dark(#f6f7f9, #181a20);
+    --ls-composer-surface: light-dark(#ffffff, #141519);
+    --ls-composer-toolbar: light-dark(#f7f8fa, #111216);
+    --ls-user-bubble: light-dark(#eef0f4, #181a20);
+
+    --ls-popover: light-dark(#ffffff, #1d1f26);
+    --ls-sheet-card: light-dark(#ffffff, #1d1f26);
+    --ls-elevated: var(--ls-popover);
+
+    /* Monochrome High-Contrast Primary Keycaps (Paseo / T3 Code primary actions) */
+    --ls-primary-bg: light-dark(#141518, #ededf0);
+    --ls-primary-fg: light-dark(#ffffff, #0b0c0e);
+    --ls-primary-hover: light-dark(#26282e, #ffffff);
+
+    /* Sculpted Tactile Control Keycaps (Header pills, Switchers, Segmented pills) */
+    --ls-control-bg: light-dark(#ffffff, #17181c);
+    --ls-control-hover: light-dark(#f6f7f9, #1d1f25);
+
+    --ls-terminal-bg: light-dark(#fbfcfd, #090a0d);
+    --ls-terminal-fg: light-dark(#181b22, #e6e9f0);
+    --ls-terminal-chrome: light-dark(#f3f5f8, #0d0f13);
+
+    /* -----------------------------------------------------------------------
+     * 3. AA-Verified Ink Hierarchy (>= 4.89:1 across L0–L6 in Light & Dark)
+     * ----------------------------------------------------------------------- */
+    --ls-fg: light-dark(#111318, #f0f2f5);
+    --ls-fg-2: light-dark(#434852, #b4bac6);
+    --ls-fg-3: light-dark(#606672, #8b92a0);
+    --ls-fg-4: light-dark(#8a909c, #59606d);
+    --ls-placeholder: light-dark(#606672, #8b92a0);
+    --ls-code-fg: light-dark(#181b22, #e6e9f0);
+    --ls-idle: var(--ls-fg-3);
+
+    /* -----------------------------------------------------------------------
+     * 4. Hairlines, Specular Rim-Lighting, Shadows & Interactive Fills
+     * ----------------------------------------------------------------------- */
+    --ls-hairline: 1px;
+    --ls-border-subtle: light-dark(rgba(17, 19, 24, 0.06), rgba(255, 255, 255, 0.055));
+    --ls-border: light-dark(rgba(17, 19, 24, 0.095), rgba(255, 255, 255, 0.075));
+    --ls-border-strong: light-dark(rgba(17, 19, 24, 0.16), rgba(255, 255, 255, 0.13));
+
+    --ls-hover: light-dark(rgba(17, 19, 24, 0.045), rgba(255, 255, 255, 0.055));
+    --ls-active: light-dark(rgba(17, 19, 24, 0.08), rgba(255, 255, 255, 0.09));
+    --ls-selection: light-dark(#ffffff, #18191e);
+    --ls-fill: light-dark(rgba(17, 19, 24, 0.05), rgba(255, 255, 255, 0.065));
+    --ls-fill-strong: light-dark(rgba(17, 19, 24, 0.10), rgba(255, 255, 255, 0.12));
+
+    --ls-rim-light: light-dark(
+      inset 0 1px 0 rgba(255, 255, 255, 0.88),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05)
+    );
+    --ls-rim-island: light-dark(
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      inset 0 1px 0 rgba(255, 255, 255, 0.045)
+    );
+
+    --ls-focus-ring: 0 0 0 2px var(--ls-accent-soft);
+    --ls-backdrop: light-dark(rgba(12, 14, 18, 0.36), rgba(0, 0, 0, 0.64));
+
+    --ls-shadow-control: light-dark(
+      0 1px 2px rgba(15, 17, 22, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.45)
+    );
+    --ls-shadow-card: light-dark(
+      0 1px 2px rgba(15, 17, 22, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 6px rgba(0, 0, 0, 0.32)
+    );
+    --ls-shadow-island: light-dark(
+      0 1px 3px rgba(15, 17, 22, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px rgba(0, 0, 0, 0.36)
+    );
+    --ls-shadow-composer: light-dark(
+      0 10px 28px -6px rgba(15, 17, 22, 0.09),
+      inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 14px 36px -6px rgba(0, 0, 0, 0.52)
+    );
+    --ls-shadow-popover: light-dark(
+      0 12px 32px -4px rgba(15, 17, 22, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 40px -4px rgba(0, 0, 0, 0.62)
+    );
+    --ls-shadow-modal: light-dark(
+      0 22px 52px -8px rgba(15, 17, 22, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 28px 64px -8px rgba(0, 0, 0, 0.74)
+    );
+
+    --ls-scrollbar-thumb: light-dark(#7d8390, #6b7280);
+    --ls-scrollbar-thumb-hover: light-dark(#606672, #8b92a0);
+
+    /* -----------------------------------------------------------------------
+     * 5. Crisp Emerald & Coral Diff + Shiki Syntax Highlighting Tokens
+     * ----------------------------------------------------------------------- */
+    --ls-diff-add: light-dark(rgba(26, 127, 55, 0.11), rgba(63, 185, 80, 0.15));
+    --ls-diff-del: light-dark(rgba(207, 34, 46, 0.10), rgba(248, 81, 73, 0.15));
+    --ls-diff-add-fg: light-dark(#1a7f37, #3fb950);
+    --ls-diff-del-fg: light-dark(#cf222e, #f85149);
+
+    --code-foreground: currentColor;
+    --code-background: transparent;
+    --code-token-keyword: light-dark(#a63d6f, #f69ec4);
+    --code-token-string: light-dark(#257230, #83d498);
+    --code-token-string-expression: light-dark(#257230, #83d498);
+    --code-token-function: light-dark(#1c4d96, #6eb0ff);
+    --code-token-constant: light-dark(#a3461b, #f4a578);
+    --code-token-parameter: light-dark(#5d36a8, #bfa0f8);
+    --code-token-comment: var(--ls-fg-3);
+    --code-token-punctuation: currentColor;
+    --code-token-link: light-dark(#1c4d96, #6eb0ff);
+    --code-token-inserted: var(--ls-diff-add-fg);
+    --code-token-deleted: var(--ls-diff-del-fg);
+    --code-token-changed: var(--ls-waiting);
+
+    /* -----------------------------------------------------------------------
+     * 6. Spatial Geometry, Radii & Typography Scale
+     * ----------------------------------------------------------------------- */
+    --chrome-h: 42px;
+    --surface-tabs-h: 34px;
+    --sidebar-footer-h: 44px;
+    --sidebar-w: 256px;
+    --inspector-w: 380px;
+    --ls-win-caption-w: 138px;
+    --titlebar-left-inset: 16px;
+    --caption-inset: 12px;
+
+    --ls-radius-xs: 4px;
+    --ls-radius-sm: 6px;
+    --ls-radius-md: 8px;
+    --ls-radius-lg: 10px;
+    --ls-radius-xl: 12px;
+    --ls-radius-composer: 16px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+      system-ui, sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, "PingFang SC",
+      "Microsoft YaHei UI", ui-monospace, monospace;
+
+    --ls-text-xs: 11px;
+    --ls-leading-xs: 16px;
+    --ls-text-sm: 12px;
+    --ls-leading-sm: 18px;
+    --ls-text-base: 13px;
+    --ls-leading-base: 20px;
+    --ls-text-md: 14px;
+    --ls-leading-md: 22px;
+    --ls-text-lg: 16px;
+    --ls-leading-lg: 22px;
+    --ls-text-xl: 20px;
+    --ls-leading-xl: 26px;
+
+    /* Semantic surface/text aliases for cross-module ergonomics */
+    --ls-surface-1: var(--ls-plain);
+    --ls-surface-2: var(--ls-bg);
+    --ls-surface-ground: var(--ls-ground);
+    --ls-surface-sidebar: var(--ls-sidebar);
+    --ls-surface-plain: var(--ls-plain);
+    --ls-surface-bg: var(--ls-bg);
+    --ls-surface-inset: var(--ls-inset);
+    --ls-surface-card: var(--ls-card);
+    --ls-surface-popover: var(--ls-popover);
+    --ls-text: var(--ls-fg);
+    --ls-text-secondary: var(--ls-fg-2);
+    --ls-text-tertiary: var(--ls-fg-3);
+    --ls-text-muted: var(--ls-fg-3);
+    --ls-fg-secondary: var(--ls-fg-2);
+    --ls-fg-muted: var(--ls-fg-3);
+    --ls-muted: var(--ls-fg-3);
+    --ls-separator: var(--ls-border);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  /* Scoped dark wells (remote video stage) re-resolve unregistered light-dark() tokens automatically */
+  .ls-dark-well {
+    color-scheme: dark;
+  }
+
+  @media (min-resolution: 2dppx) {
+    :root {
+      --ls-hairline: 0.5px;
+    }
+  }
+
+  @media (prefers-contrast: more) {
+    :root {
+      --ls-fg-2: light-dark(#2c3038, #d4d9e3);
+      --ls-fg-3: light-dark(#454a54, #b0b6c3);
+      --ls-border-subtle: light-dark(rgba(20, 22, 26, 0.18), rgba(255, 255, 255, 0.18));
+      --ls-border: light-dark(rgba(20, 22, 26, 0.28), rgba(255, 255, 255, 0.28));
+      --ls-border-strong: light-dark(rgba(20, 22, 26, 0.44), rgba(255, 255, 255, 0.44));
+      --ls-scrollbar-thumb: light-dark(#565b66, #9097a6);
+      --ls-scrollbar-thumb-hover: light-dark(#373b44, #bac0ce);
+    }
+  }
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    margin: 0;
+    padding: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    overflow: clip;
+    background-color: var(--ls-ground);
+    color: var(--ls-fg);
+    font-family: var(--font-sans);
+    font-size: var(--ls-text-base);
+    line-height: var(--ls-leading-base);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Thin AA-compliant scrollbars; never animate scrollbar-color */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ls-scrollbar-thumb) transparent;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+  }
+
+  /* Mandatory tabular alignment for metrics, timestamps, ports, diffs, and counters */
+  time,
+  kbd,
+  td[data-numeric],
+  th[data-numeric],
+  [data-tabular],
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Crisp keyboard-only focus indicator */
+  :focus-visible {
+    outline: 2px solid var(--ls-accent);
+    outline-offset: 1px;
+  }
+
+  /* Pure-CSS modal scroll lock (Chromium 144+) */
+  dialog:modal {
+    overscroll-behavior: contain;
+  }
+
+  dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background-color: var(--ls-backdrop);
+  }
+
+  /* Syntax highlight spans preserve author token colors in Forced Colors */
+  .shiki span,
+  [data-syntax-token] {
+    forced-color-adjust: none;
+  }
+}

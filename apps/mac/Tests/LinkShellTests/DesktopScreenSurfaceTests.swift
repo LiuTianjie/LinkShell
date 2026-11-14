@@ -1,4 +1,7 @@
 import AppKit
+import LinkShellScreen
+import Metal
+import QuartzCore
 import XCTest
 @testable import LinkShell
 
@@ -150,10 +153,153 @@ final class DesktopScreenSurfaceTests: XCTestCase {
     XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 220, y: 12), in: bounds, barFrame: barFrame, barShown: false))
     XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 1360, y: 0), in: bounds, barFrame: barFrame, barShown: false))
     XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 1480, y: 14), in: bounds, barFrame: barFrame, barShown: false))
-    // Deliberate touch in the narrow top-center pull zone reveals it, and hovering the visible bar retains it.
+    // Deliberate touch in the top-center pull zone (360x22pt) reveals it, and hovering the visible bar retains it.
     XCTAssertTrue(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 2), in: bounds, barFrame: barFrame, barShown: false))
-    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 18), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertTrue(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 18), in: bounds, barFrame: barFrame, barShown: false))
+    XCTAssertFalse(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 28), in: bounds, barFrame: barFrame, barShown: false))
     XCTAssertTrue(DesktopFullScreenBar.shouldReveal(point: CGPoint(x: 756, y: 24), in: bounds, barFrame: barFrame, barShown: true))
+  }
+
+  @MainActor
+  func testFullScreenOverlayAutoRevealsAndShowsPersistentHandleWhenCollapsed() {
+    let container = DesktopScreenClipView(frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
+    var exited = 0
+    let overlay = DesktopFullScreenOverlay { exited += 1 }
+    overlay.attach(to: container)
+    defer { overlay.detach() }
+
+    XCTAssertTrue(overlay.bar.isRevealed, "Auto-reveals exit bar on full-screen entry")
+    XCTAssertTrue(overlay.handle.isHidden, "Persistent handle hides while exit bar is revealed")
+
+    overlay.bar.reveal(false)
+    XCTAssertFalse(overlay.bar.isRevealed)
+    XCTAssertFalse(overlay.handle.isHidden, "Persistent handle pill appears when exit bar collapses")
+    XCTAssertEqual(overlay.handle.alphaValue, 0.48, accuracy: 0.001)
+    XCTAssertEqual(overlay.handle.frame, CGRect(x: 732, y: 6, width: 48, height: 5))
+
+    overlay.triggerHandle()
+    XCTAssertTrue(overlay.bar.isRevealed, "Hovering or clicking the handle reveals the exit bar")
+    XCTAssertTrue(overlay.handle.isHidden)
+    overlay.bar.onExit?()
+    XCTAssertEqual(exited, 1)
+  }
+
+  func testSurfaceAlwaysInterceptsCtrlCmdFAndWatchOnlyEscapeWithoutForwardingToRemote() throws {
+    let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 1280, height: 800))
+    defer { surface.stop() }
+    var forwarded: [[String: Any]] = []
+    var exitCount = 0
+    surface.onInput = { command, _ in forwarded.append(command) }
+    surface.onExitFullScreen = { exitCount += 1 }
+    surface.fullScreen = true
+    surface.controlEnabled = true
+
+    let ctrlCmdF = try XCTUnwrap(NSEvent.keyEvent(
+      with: .keyDown,
+      location: .zero,
+      modifierFlags: [.command, .control],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      characters: "\u{06}",
+      charactersIgnoringModifiers: "f",
+      isARepeat: false,
+      keyCode: 3
+    ))
+    XCTAssertTrue(surface.performKeyEquivalent(with: ctrlCmdF))
+    surface.keyDown(with: ctrlCmdF)
+    XCTAssertEqual(exitCount, 2, "⌃⌘F exits full screen from both performKeyEquivalent and keyDown even while controlling remote Mac")
+    XCTAssertTrue(forwarded.isEmpty, "⌃⌘F must never be sent to the remote Mac")
+
+    let escape = try XCTUnwrap(NSEvent.keyEvent(
+      with: .keyDown,
+      location: .zero,
+      modifierFlags: [],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      characters: "\u{1b}",
+      charactersIgnoringModifiers: "\u{1b}",
+      isARepeat: false,
+      keyCode: 53
+    ))
+    surface.controlEnabled = false
+    XCTAssertTrue(surface.acceptsFirstResponder, "Full-screen stage stays focusable when remote control is off")
+    XCTAssertTrue(surface.performKeyEquivalent(with: escape))
+    surface.keyDown(with: escape)
+    surface.cancelOperation(nil)
+    XCTAssertEqual(exitCount, 5, "Escape exits full screen whenever remote control is disabled")
+    XCTAssertTrue(forwarded.isEmpty)
+  }
+
+  @MainActor
+  func testClipViewCutoutsPunchTopAlignedHolesAndPassPointerEventsToChromium() {
+    final class FlippedHostView: NSView { override var isFlipped: Bool { true } }
+    for host in [NSView(frame: CGRect(x: 0, y: 0, width: 1200, height: 800)), FlippedHostView(frame: CGRect(x: 0, y: 0, width: 1200, height: 800))] {
+      let cssStage = CGRect(x: 240, y: 42, width: 960, height: 758)
+      let stageInHost = CGRect(
+        x: cssStage.minX,
+        y: host.isFlipped ? cssStage.minY : host.bounds.height - cssStage.maxY,
+        width: cssStage.width,
+        height: cssStage.height
+      )
+      let clip = DesktopScreenClipView(frame: stageInHost)
+      let surface = DesktopScreenSurface(frame: clip.bounds)
+      defer { surface.stop() }
+      clip.addSubview(surface)
+      host.addSubview(clip)
+
+      // Hole at CSS (700, 48, 220, 260) -> 6pt from top of stage (y = 6..266 in 758pt-tall clip).
+      let holeCSS = DesktopScreenHole(rect: CGRect(x: 700, y: 48, width: 220, height: 260), radius: 12)
+      clip.applyCutouts([holeCSS], in: host)
+      XCTAssertEqual(clip.holesInBounds, [DesktopScreenHole(rect: CGRect(x: 460, y: 6, width: 220, height: 260), radius: 12)])
+      XCTAssertNotNil(clip.layer?.mask as? CAShapeLayer)
+
+      // Verify actual Core Animation composited pixel alpha inside a real NSWindow so vertical flip can never invert the cutout.
+      let window = NSWindow(
+        contentRect: host.bounds,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+      )
+      window.contentView = host
+      clip.layer?.backgroundColor = NSColor.white.cgColor
+      host.layoutSubtreeIfNeeded()
+      if let rep = clip.bitmapImageRepForCachingDisplay(in: clip.bounds) {
+        clip.cacheDisplay(in: clip.bounds, to: rep)
+        // NSBitmapImageRep(colorAtX:y:) uses top-down pixel coordinates (y = 0 at top).
+        let topCutoutAlpha = rep.colorAt(x: 560, y: 80)?.alphaComponent ?? 1
+        let bottomSolidAlpha = rep.colorAt(x: 560, y: 650)?.alphaComponent ?? 0
+        XCTAssertLessThan(topCutoutAlpha, 0.05, "Top popover hole (y=80 from top) must be masked transparent (host.isFlipped=\(host.isFlipped))")
+        XCTAssertGreaterThan(bottomSolidAlpha, 0.95, "Bottom stage outside hole (y=650 from top) must stay opaque (host.isFlipped=\(host.isFlipped))")
+      }
+
+      let hostPoint = { (cssX: CGFloat, cssY: CGFloat) -> CGPoint in
+        CGPoint(x: cssX, y: host.isFlipped ? cssY : host.bounds.height - cssY)
+      }
+
+      // Inside cutout hole -> nil (falls through to Chromium). Outside hole -> hits DesktopScreenSurface.
+      XCTAssertNil(clip.hitTest(hostPoint(800, 100)))
+      XCTAssertTrue(clip.hitTest(hostPoint(400, 300)) === surface)
+
+      // While an overlay is open, outside clicks ALSO fall through to Chromium for Popover light-dismiss.
+      clip.overlayOpen = true
+      XCTAssertNil(clip.hitTest(hostPoint(400, 300)))
+
+      // Native fullscreen handle/exit bar remains clickable even while overlayOpen is true.
+      let overlay = DesktopFullScreenOverlay {}
+      overlay.attach(to: clip)
+      overlay.bar.reveal(false)
+      let handlePointInHost = hostPoint(240 + 480, 42 + 8)
+      XCTAssertTrue(clip.hitTest(handlePointInHost) === overlay.handle)
+      overlay.detach()
+
+      // Clearing cutouts removes the mask cleanly.
+      clip.overlayOpen = false
+      clip.applyCutouts([], in: host)
+      XCTAssertNil(clip.layer?.mask)
+      XCTAssertTrue(clip.hitTest(hostPoint(800, 100)) === surface)
+    }
   }
 
   func testControlMouseDeltaPreservesTopEdgeUpwardPressure() {

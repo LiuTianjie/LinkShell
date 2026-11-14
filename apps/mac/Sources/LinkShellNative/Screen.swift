@@ -4,17 +4,13 @@ import Foundation
 import IOSurface
 import LinkShellScreen
 
-private final class ScreenClip: NSView {
-  override var isFlipped: Bool { true }
-}
-
 /// A real NSView in Electron's window, not a floating window or Chromium video surface.
 /// Only signalling/status reaches Node. Mach IPC delivers IOSurfaces directly to the Metal mailbox.
 final class NativeScreen: NSObject {
   static var current: NativeScreen?
   let id: String
   private let host: NSView
-  private let clip = ScreenClip()
+  private let clip = DesktopScreenClipView(frame: .zero)
   private let surface = DesktopScreenSurface(frame: .zero)
   private let port: DesktopFramePort
   private let process = Process()
@@ -28,22 +24,43 @@ final class NativeScreen: NSObject {
   private var ready = false
   private var pending: [[String: Any]] = []
   private var rect: CGRect
+  private var holes: [DesktopScreenHole]
+  private var overlayOpen: Bool
   private var visible = true
+  private var lastSentVisible: Bool?
   private var fullScreen = false
   private var fullScreenOverlay: DesktopFullScreenOverlay?
   private var wantedControl = false
+  private var wantedSmooth: Bool
   private var startup: DispatchWorkItem?
 
-  init(host: NSView, helper: String, id: String, rect: CGRect, smooth: Bool = false, fullScreen: Bool = false, callback: Callback) throws {
+  init(
+    host: NSView,
+    helper: String,
+    id: String,
+    rect: CGRect,
+    holes: [DesktopScreenHole] = [],
+    overlayOpen: Bool = false,
+    smooth: Bool = false,
+    fullScreen: Bool = false,
+    callback: Callback
+  ) throws {
     guard let port = DesktopFramePort(receiver: true) else {
       throw NSError(domain: "LinkShellScreen", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法创建原生画面通道"])
     }
     self.port = port
     pipe = DesktopMediaPipe(output: input.fileHandleForWriting)
-    self.host = host; self.id = id; self.rect = rect; self.fullScreen = fullScreen; self.callback = callback
+    self.host = host
+    self.id = id
+    self.rect = rect
+    self.holes = holes
+    self.overlayOpen = overlayOpen
+    self.wantedSmooth = smooth
+    self.fullScreen = fullScreen
+    self.callback = callback
     super.init()
     surface.fullScreen = fullScreen
-    clip.wantsLayer = true; clip.layer?.masksToBounds = true
+    clip.overlayOpen = overlayOpen
     clip.addSubview(surface)
     host.addSubview(clip, positioned: .above, relativeTo: nil)
     surface.onInput = { [weak self] message, replaceable in
@@ -52,6 +69,10 @@ final class NativeScreen: NSObject {
     }
     surface.onFirstFrame = { [weak self] in self?.pipe.send(["type": "presented"]) }
     surface.onFailure = { [weak self] error in self?.fail(error) }
+    surface.onExitFullScreen = { [weak self] in
+      guard let self, !self.closed else { return }
+      self.callback.call(["id": self.id, "type": "status", "status": ["exitFullScreen": true]])
+    }
     process.executableURL = URL(fileURLWithPath: helper)
     process.arguments = ["--desktop-media"]
     process.standardInput = input
@@ -105,8 +126,11 @@ final class NativeScreen: NSObject {
       switch value["type"] as? String {
       case "ready":
         self.ready = true; self.startup?.cancel(); self.startup = nil
-        self.pipe.send(["type": "visible", "enabled": self.visible && !self.clip.isHidden])
+        let showing = self.visible && !self.clip.isHidden
+        self.lastSentVisible = showing
+        self.pipe.send(["type": "visible", "enabled": showing])
         self.pipe.send(["type": "control", "enabled": self.wantedControl])
+        self.pipe.send(["type": "pacing", "smooth": self.wantedSmooth])
         for message in self.pending { self.pipe.send(message) }
         self.pending.removeAll()
       case "surfaceControl": self.surface.controlEnabled = value["enabled"] as? Bool == true
@@ -134,7 +158,25 @@ final class NativeScreen: NSObject {
     guard !closed, value["id"] as? String == id else { return }
     switch value["type"] as? String {
     case "stop": stop()
-    case "layout": if let rect = DesktopScreenBridge.rect(value["rect"]) { self.rect = rect; layout() }
+    case "layout":
+      var changed = false
+      if let rect = DesktopScreenBridge.rect(value["rect"]) {
+        self.rect = rect
+        changed = true
+      }
+      if let holes = DesktopScreenBridge.holes(value["holes"]) {
+        self.holes = holes
+        changed = true
+      }
+      if let open = DesktopScreenBridge.boolean(value["overlayOpen"]) {
+        if !self.overlayOpen && open {
+          surface.releaseHeldInputs()
+        }
+        self.overlayOpen = open
+        clip.overlayOpen = open
+        changed = true
+      }
+      if changed { layout() }
     case "fullscreen":
       if let enabled = DesktopScreenBridge.boolean(value["enabled"]) {
         fullScreen = enabled
@@ -143,6 +185,11 @@ final class NativeScreen: NSObject {
       }
     case "control":
       if let enabled = DesktopScreenBridge.boolean(value["enabled"]) { wantedControl = enabled; if ready { pipe.send(["type": "control", "enabled": enabled]) } }
+    case "pacing":
+      if let smooth = DesktopScreenBridge.boolean(value["smooth"]) {
+        wantedSmooth = smooth
+        if ready { pipe.send(["type": "pacing", "smooth": smooth]) }
+      }
     case "signal":
       guard let message = value["message"] as? [String: Any], DesktopMediaIPC.data(message) != nil else { return }
       let command: [String: Any] = ["type": "signal", "message": message]
@@ -160,12 +207,18 @@ final class NativeScreen: NSObject {
     let showing = visible && !clipped.isEmpty && !clipped.isNull
     clip.isHidden = !showing
     surface.setActive(showing)
-    if ready { pipe.send(["type": "visible", "enabled": showing]) }
+    if ready, lastSentVisible != showing {
+      lastSentVisible = showing
+      pipe.send(["type": "visible", "enabled": showing])
+    }
     guard showing else {
+      clip.applyCutouts([], in: host)
       MainActor.assumeIsolated { syncFullScreenOverlay() }
       return
     }
     clip.frame = clipped
+    clip.overlayOpen = overlayOpen
+    clip.applyCutouts(holes, in: host)
     surface.frame = CGRect(x: requested.minX - clipped.minX,
       y: host.isFlipped ? requested.minY - clipped.minY : clipped.maxY - requested.maxY,
       width: requested.width, height: requested.height)

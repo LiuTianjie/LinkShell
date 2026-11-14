@@ -17,9 +17,12 @@ struct ScreenRequest {
   let maxFps: Int
   let codec: String
   let relayKbps: Int?
+  /// Fusion (experimental): one window instead of a display (`FusionRemote`).
+  let window: CGWindowID?
 
   init(viewer: String, _ message: [String: Any]) {
     self.viewer = viewer
+    window = (message["window"] as? Int).map { CGWindowID($0) }
     iceServers = ((message["iceServers"] as? [[String: Any]]) ?? []).compactMap { server in
       let urls = (server["urls"] as? [String]) ?? (server["urls"] as? String).map { [$0] } ?? []
       guard !urls.isEmpty else { return nil }
@@ -157,6 +160,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard Permissions.recording() else { return fail(Permissions.notRecording) }
     guard let display = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
     self.display = display
+    if let window = request.window { return startWindow(window) }
     appliedConfiguration = ScreenConfiguration(requestId: 0, screen: request.screen, maxWidth: request.maxWidth, maxFps: request.maxFps, paused: false)
     awake = Awake()
     size = display.pictureSize(maxWidth: request.maxWidth)
@@ -271,6 +275,200 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     startTimers()
   }
 
+  /// Fusion: initial window-group IDs, focus/bitrate policy, fast cached bounds, and live callbacks.
+  var fusionMode = false
+  var fusionBitrateCap: Int?
+  var fusionWindowIDs: Set<CGWindowID> = []
+  var fusionWindowBounds: (() -> CGRect)?
+  var onWindowHover: ((Double, Double) -> Void)?
+  var onWindowInteract: (() -> Void)?
+  private var fusionFocused = true
+  private var fusionBoostTimer: DispatchSourceTimer?
+
+  private static func effectiveRefreshRate(_ display: Display) -> Int {
+    let cgHz = Int((CGDisplayCopyDisplayMode(display.id)?.refreshRate ?? 0).rounded())
+    let nsHz = display.screen?.maximumFramesPerSecond ?? 60
+    return max(cgHz, nsHz, 60)
+  }
+
+  private static func fusionCap(isRetina: Bool, fps: Int, active: Bool) -> Int {
+    if !active { return isRetina ? 6_000_000 : 4_000_000 }
+    if fps >= 90 { return isRetina ? 28_000_000 : 16_000_000 }
+    return isRetina ? 20_000_000 : 12_000_000
+  }
+
+  func updateFusionWindowGroup(_ windowIDs: Set<CGWindowID>) {
+    fusionWindowIDs = windowIDs
+    capturer?.updateFusionWindowGroup(windowIDs)
+  }
+
+  func switchFusionDisplay(_ target: Display, windowIDs: Set<CGWindowID>) {
+    display = target
+    fusionWindowIDs = windowIDs
+    let nextSize = target.pictureSize(maxWidth: min(target.pixelWidth, 5120))
+    size = nextSize
+    let fullFps = Tuning.fullRate(viewer: 120, display: Self.effectiveRefreshRate(target))
+    let active = fusionFocused || fusionBoostTimer != nil
+    let nextFps = active ? fullFps : 30
+    frameRate = nextFps
+    if fusionBitrateCap != nil {
+      fusionBitrateCap = Self.fusionCap(isRetina: nextSize.width > 2800, fps: nextFps, active: active)
+    }
+    eased = nil
+    setParameters()
+    capturer?.switchFusionDisplay(display: target, windowIDs: windowIDs, width: nextSize.width, height: nextSize.height)
+    capturer?.setRate(nextFps) { _ in }
+  }
+
+  func refreshFusionFilter(idle: Bool = false) {
+    capturer?.refreshDisplayFilterNow(idle: idle)
+  }
+
+  func refreshFusionGroupApps() {
+    capturer?.refreshFusionGroupApps()
+  }
+
+  func setFusionFocused(_ focused: Bool) {
+    fusionFocused = focused
+    if focused {
+      fusionBoostTimer?.cancel()
+      fusionBoostTimer = nil
+    }
+    applyFusionRateState(active: focused || fusionBoostTimer != nil)
+  }
+
+  private func boostFusionActivity() {
+    guard fusionMode, request.window != nil, !fusionFocused else { return }
+    let hadBoost = fusionBoostTimer != nil
+    fusionBoostTimer?.cancel()
+    let timer = DispatchSource.makeTimerSource(queue: .main)
+    timer.schedule(deadline: .now() + 3.5)
+    timer.setEventHandler { [weak self] in
+      guard let self else { return }
+      self.fusionBoostTimer?.cancel()
+      self.fusionBoostTimer = nil
+      if !self.fusionFocused {
+        self.applyFusionRateState(active: false)
+      }
+    }
+    timer.resume()
+    fusionBoostTimer = timer
+    if !hadBoost {
+      applyFusionRateState(active: true)
+    }
+  }
+
+  private func applyFusionRateState(active: Bool) {
+    let isRetina = max(size.width, display.pixelWidth) > 2800
+    let fullFps = Tuning.fullRate(viewer: request.maxFps, display: Self.effectiveRefreshRate(display))
+    let targetFps = active ? fullFps : 30
+    let targetCap = Self.fusionCap(isRetina: isRetina, fps: targetFps, active: active)
+    guard frameRate != targetFps || fusionBitrateCap != targetCap else { return }
+    frameRate = targetFps
+    fusionBitrateCap = targetCap
+    eased = nil
+    setParameters()
+    capturer?.setRate(targetFps) { _ in }
+  }
+
+  func setFusionOverlayActive(_ active: Bool) {
+    fusionMode = true
+    steps = nil
+    let targetFps = active ? 60 : 2
+    let targetCap = active ? 6_000_000 : 400_000
+    frameRate = targetFps
+    fusionBitrateCap = targetCap
+    eased = nil
+    setParameters()
+    capturer?.setRate(targetFps) { _ in }
+    capturer?.refreshDisplayFilterNow(idle: !active)
+  }
+
+  private static func windowFrame(_ id: CGWindowID) -> CGRect? {
+    guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?.first,
+          let bounds = info[kCGWindowBounds as String] as? [String: Any] else { return nil }
+    return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+  }
+
+  private func startWindow(_ window: CGWindowID) {
+    let display = self.display
+    guard let frame = Self.windowFrame(window) else { return fail("there is no window \(window)") }
+    fusionMode = true
+    appliedConfiguration = ScreenConfiguration(requestId: 0, screen: request.screen, maxWidth: request.maxWidth, maxFps: request.maxFps, paused: false)
+    awake = Awake()
+    size = display.pictureSize(maxWidth: min(display.pixelWidth, 5120))
+    frameRate = Tuning.fullRate(viewer: request.maxFps, display: Self.effectiveRefreshRate(display))
+    steps = nil
+    let isRetina = size.width > 2800
+    if fusionBitrateCap == nil { fusionBitrateCap = Self.fusionCap(isRetina: isRetina, fps: frameRate, active: true) }
+    let fastBounds = fusionWindowBounds
+    control = Control(id: viewer, link: link, bounds: { fastBounds?() ?? Self.windowFrame(window) ?? frame }, everyPosition: { [weak self] x, y in
+      self?.sendCursor(x, y)
+      self?.onWindowHover?(x, y)
+    })
+    let factory = Engine.screenFactory(maximumFrameRate: Tuning.fpsRange.upperBound)
+    peerFactory = factory
+    virtualAddresses = Networks.virtualAddresses()
+    let configuration = RTCConfiguration()
+    configuration.sdpSemantics = .unifiedPlan
+    configuration.iceServers = request.iceServers
+    configuration.bundlePolicy = .maxBundle
+    configuration.rtcpMuxPolicy = .require
+    configuration.continualGatheringPolicy = .gatherContinually
+    configuration.disableLinkLocalNetworks = true
+    configuration.enableDscp = true
+    guard let connection = factory.peerConnection(with: configuration, constraints: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil), delegate: self) else {
+      return fail("the peer connection could not be made")
+    }
+    self.connection = connection
+    let source = factory.videoSource(forScreenCast: true)
+    self.source = source
+    let capturer = ScreenCapturer(delegate: source)
+    self.capturer = capturer
+    let track = factory.videoTrack(with: source, trackId: "screen")
+    let encoding = RTCRtpEncodingParameters()
+    apply(to: encoding)
+    let sending = RTCRtpTransceiverInit()
+    sending.direction = .sendOnly
+    sending.streamIds = ["screen"]
+    sending.sendEncodings = [encoding]
+    guard let transceiver = connection.addTransceiver(with: track, init: sending) else { return fail("the video could not be added") }
+    self.transceiver = transceiver
+    let preferred = Codecs.preferences(request.codec, from: factory.rtpSenderCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs)
+    try? transceiver.setCodecPreferences(preferred.codecs, error: ())
+    setParameters { $0.degradationPreference = NSNumber(value: RTCDegradationPreference.maintainResolution.rawValue) }
+    let startBps = isRetina ? 10_000_000 : 6_000_000
+    _ = connection.setBweMinBitrateBps(nil, currentBitrateBps: NSNumber(value: startBps), maxBitrateBps: nil)
+    let reliable = RTCDataChannelConfiguration()
+    let lossy = RTCDataChannelConfiguration()
+    lossy.isOrdered = false
+    lossy.maxRetransmits = 0
+    for (label, delivery) in [("input", reliable), ("pointer", lossy), ("cursor", lossy), ("shape", reliable)] {
+      guard let channel = connection.dataChannel(forLabel: label, configuration: delivery) else { continue }
+      channel.delegate = self
+      channels.append(channel)
+      if label == "cursor" { cursor = channel }
+      if label == "shape" { shape = channel }
+    }
+    capturer.onStop = { [weak self, weak capturer] reason in
+      DispatchQueue.main.async {
+        guard let self, let capturer, self.capturer === capturer else { return }
+        self.fail("the capture stopped: \(reason)")
+      }
+    }
+    let initialGroup = fusionWindowIDs.isEmpty ? Set([window]) : fusionWindowIDs
+    capturer.start(fusionDisplay: display, rootWindow: window, windowIDs: initialGroup, width: size.width, height: size.height, fps: frameRate) { [weak self] error in
+      DispatchQueue.main.async {
+        guard let self, !self.closed, self.capturer === capturer else { return }
+        if let error { return self.fail("the window group could not be captured: \(error)") }
+        self.captureReady = true
+        self.link.log("capturing window group \(window) on display \(display.id) as \(self.size.width)×\(self.size.height)")
+      }
+    }
+    offer()
+    startTimers()
+  }
+
   func close() {
     guard !closed else { return }
     closed = true
@@ -281,6 +479,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     statsTimer?.cancel()
     cursorTimer?.cancel()
     shapeTimer?.cancel()
+    fusionBoostTimer?.cancel()
+    fusionBoostTimer = nil
     restartTimer?.cancel()
     restartTimer = nil
     // The viewer left: nothing stays pressed.
@@ -532,7 +732,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// The most the track may send now: the frame rate's ceiling (or the eased one), and no more than
   /// the relay's share while it goes through one.
   private var ceiling: Int {
-    let own = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
+    let base = eased ?? Tuning.maxBitrate(width: size.width, height: size.height, fps: frameRate)
+    let own = fusionBitrateCap.map { min(base, $0) } ?? base
     return relayed ? min(own, (request.relayKbps ?? Tuning.relayKbps) * 1000) : own
   }
 
@@ -704,6 +905,11 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     if let number = event.number {
       if replaceable, event.kind == "move", number < newestEvent { return }
       newestEvent = max(newestEvent, number)
+    }
+    if event.kind == "scroll" {
+      boostFusionActivity()
+    } else if event.kind != "move" {
+      onWindowInteract?()
     }
     control?.handle(event.command)
   }
@@ -895,6 +1101,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
         setParameters()
       }
     }
+    guard !fusionMode else { return }
     let second = LanFloor.Second(local: near, remote: far,
                                  rttMs: rttMs, fractionLost: StatsReader.number(remote, "fractionLost"), sendDelayMs: sendDelayMs)
     switch lanFloor.judge(second, ceiling: ceiling) {

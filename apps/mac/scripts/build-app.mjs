@@ -83,9 +83,13 @@ const warnings = said.split("\n").filter((line) => line.includes("warning:"));
 if (warnings.length) console.log(`[build-app] the compiler warns:\n${warnings.join("\n")}`);
 // Xcode 27's SwiftPM writes to out/Products/Release; older toolchains use the target triple.
 // Asking the toolchain prevents a successful new build from silently packaging an old binary.
-const program = join(run("/usr/bin/swift", [...buildArgs, "--show-bin-path"]).trim(), "LinkShell");
+const binDir = run("/usr/bin/swift", [...buildArgs, "--show-bin-path"]).trim();
+const program = join(binDir, "LinkShell");
 if (!existsSync(program)) fail(`the built program is missing: ${program}`);
 requireUniversal(program);
+const stubProgram = join(binDir, "LinkShellFusionStub");
+if (!existsSync(stubProgram)) fail(`the built fusion stub is missing: ${stubProgram}`);
+requireUniversal(stubProgram);
 console.log(`[build-app] program: ${program}`);
 
 // The framework as SwiftPM unpacked it: the macOS slice of the xcframework.
@@ -126,21 +130,25 @@ try {
   mkdirSync(join(staged, "Contents/Resources"), { recursive: true });
   mkdirSync(join(staged, "Contents/Frameworks"), { recursive: true });
   // Ship the matching workspace inside the signed bundle, including offline startup assets.
-  // Building straight into staging cannot accidentally pick up an older web dist directory.
-  const web = resolve(root, "../web");
+  // Building straight into staging cannot accidentally pick up an older desktop-ui dist directory.
+  const desktopUI = resolve(root, "../desktop-ui");
   console.log("[build-app] building the desktop workspace");
-  run("pnpm", ["exec", "tsc", "--noEmit"], { cwd: web, stdio: "inherit" });
-  run("pnpm", ["exec", "vite", "build", "--outDir", join(staged, "Contents/Resources/Workspace")], { cwd: web, stdio: "inherit" });
+  run("pnpm", ["exec", "tsc", "--noEmit"], { cwd: desktopUI, stdio: "inherit" });
+  run("pnpm", ["exec", "vite", "build", "--outDir", join(staged, "Contents/Resources/Workspace")], { cwd: desktopUI, stdio: "inherit" });
   for (const required of ["index.html", "preview/bridge.html", "preview/worker.js"]) {
     if (!existsSync(join(staged, "Contents/Resources/Workspace", required))) throw new Error(`Missing desktop workspace asset: ${required}`);
   }
   const executable = join(staged, "Contents/MacOS/LinkShell");
   cpSync(program, executable);
-  // Remove build-only search paths from the packaged copy, leaving SwiftPM's output intact.
+  const stubExecutable = join(staged, "Contents/MacOS/LinkShellFusionStub");
+  cpSync(stubProgram, stubExecutable);
+  // Remove build-only search paths from the packaged copies, leaving SwiftPM's output intact.
   // otool lists each slice: each shared rpath must only be removed once from the fat binary.
-  const rpaths = new Set([...run("/usr/bin/otool", ["-l", executable]).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset \d+\)/g)].map((match) => match[1]));
-  for (const path of rpaths) {
-    if (path !== RPATH && path !== "/usr/lib/swift") run("/usr/bin/install_name_tool", ["-delete_rpath", path, executable]);
+  for (const bin of [executable, stubExecutable]) {
+    const rpaths = new Set([...run("/usr/bin/otool", ["-l", bin]).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset \d+\)/g)].map((match) => match[1]));
+    for (const path of rpaths) {
+      if (path !== RPATH && path !== "/usr/lib/swift") run("/usr/bin/install_name_tool", ["-delete_rpath", path, bin]);
+    }
   }
 
   // Keep both architectures and the framework's links, without what only a compiler reads.
@@ -213,6 +221,7 @@ try {
   }
   run("/usr/bin/codesign", [...sign, sparkleRoot]);
   run("/usr/bin/codesign", [...sign, embedded]);
+  run("/usr/bin/codesign", [...sign, stubExecutable]);
   run("/usr/bin/codesign", [...sign, "--identifier", BUNDLE_ID, staged]);
 
   rmSync(app, { recursive: true, force: true });
@@ -250,6 +259,7 @@ try {
   const problems = [];
   if (!lstatSync(join(copy, "Contents/Frameworks/WebRTC.framework/WebRTC")).isSymbolicLink()) problems.push("the framework's links did not survive");
   if (!(statSync(join(copy, "Contents/MacOS/LinkShell")).mode & 0o111)) problems.push("the program lost its permission to run");
+  if (!(statSync(join(copy, "Contents/MacOS/LinkShellFusionStub")).mode & 0o111)) problems.push("LinkShellFusionStub lost its permission to run");
   const intact = verify(copy);
   if (!intact.ok) problems.push(`the signature does not verify:\n${intact.said}`);
   if (problems.length) fail(`LinkShell.app.tar.gz does not unpack into the app it was made from: ${problems.join("; ")}`);

@@ -31,4 +31,19 @@ enum ScreenPacing {
     do { try transceiver.setHeaderExtensionsToNegotiate(extensions) } catch { return false }
     return true
   }
+
+  /// Updates playout-delay negotiation on a peer connection's video transceiver (`enabled == true`
+  /// declines the 0/0 playout-delay extension for smooth pacing; `false` restores low-latency playout).
+  @discardableResult
+  static func declinePlayoutDelay(on peer: RTCPeerConnection?, enabled: Bool = true) -> Bool {
+    guard let video = peer?.transceivers.first(where: { $0.mediaType == .video }) else { return enabled }
+    let extensions = video.headerExtensionsToNegotiate
+    guard let offered = extensions.first(where: { $0.uri == playoutDelayURI }) else { return false }
+    let target: RTCRtpTransceiverDirection = enabled ? .stopped : .recvOnly
+    if offered.direction != target {
+      offered.direction = target
+      do { try video.setHeaderExtensionsToNegotiate(extensions) } catch { return offered.direction == .stopped }
+    }
+    return enabled
+  }
 }

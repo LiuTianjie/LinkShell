@@ -161,6 +161,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     if MediaStageProbe.enabled, job.key || rtpTime % 31 == 0 {
       MediaStageProbe.shared.reference(native.pixelBuffer, began: began)
     }
+    let fusion = FusionMetadata.layout(of: native.pixelBuffer)
     compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state] result in
       guard state.withLock({ state in
         guard state.generation == job.generation else { return false }
@@ -183,6 +184,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         let image = RTCEncodedImage()
         // The probe's marker is an H.264 SEI; HEVC would read it as a reserved unit.
         image.buffer = MediaStageProbe.enabled && !hevc ? MediaStageProbe.attaching(to: data, began: began) : data
+        if let fusion { image.buffer = FusionMetadata.attaching(fusion, to: image.buffer, hevc: hevc) }
         image.encodedWidth = width
         image.encodedHeight = height
         image.timeStamp = rtpTime

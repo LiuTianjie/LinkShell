@@ -4,6 +4,7 @@ import { HOST_PROTOCOL, type ProjectSummary, type SessionSummary } from "@linksh
 import type { ProjectGroup } from "@linkshell/client-core";
 import { LOCALE_LABELS, isLocalePreference, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
 import {
+  AppWindowMac,
   BookOpen,
   Check,
   ChevronDown,
@@ -33,7 +34,8 @@ import {
 import { engine, type Computer, type Connection } from "../live/engine";
 import { baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import { DESKTOP_LOCAL, isElectronDesktop, isWindowsDesktop, reportDesktopWorkspace, setDesktopContentFocus, THIS_COMPUTER } from "../live/desktop";
+import { DESKTOP_LOCAL, isElectronDesktop, isWindowsDesktop, reportDesktopError, reportDesktopWorkspace, setDesktopContentFocus, THIS_COMPUTER } from "../live/desktop";
+import { canUseFusionMode, connectAndStartComputerFusion, startComputerFusion } from "../live/fusion";
 import { newVersion, management, startManagement } from "../live/management-store";
 import { isManageView, managePage, type ManagePage } from "../live/management-model";
 import { ManagementDialog } from "../live/Management";
@@ -196,6 +198,9 @@ function ComputerPicker({
         ))}
         {!state.computers.length && <p className="desktop-menu-empty">连接后，在这里切换工作电脑。</p>}
         <DropdownMenuSeparator />
+        {state.connection && selected && state.connection.computer.key === selected.key && (
+          <FusionPickerMenuItem connection={state.connection} name={computerName(selected, names)} />
+        )}
         <DropdownMenuItem onSelect={() => navigate("computers")}><Laptop />电脑与 Agent</DropdownMenuItem>
         <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void refresh(); }} disabled={refreshing}>
           <RefreshCw className={refreshing ? "animate-spin" : undefined} />{refreshing ? "正在刷新…" : "刷新电脑列表"}
@@ -203,6 +208,27 @@ function ComputerPicker({
         <DropdownMenuItem onSelect={connect}><Plus />连接电脑</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function FusionPickerMenuItem({ connection, name }: { connection: Connection; name: string }) {
+  const status = useStore(connection.store, (state) => state.status);
+  const platform = useStore(connection.store, (state) => state.machine?.platform);
+  if (status !== "online" || !canUseFusionMode(connection.computer.key, platform)) return null;
+  return (
+    <DropdownMenuItem
+      onSelect={() => {
+        void startComputerFusion({
+          computerKey: connection.computer.key,
+          name,
+          link: connection.link,
+          streams: connection.streams,
+        }).catch(reportDesktopError);
+      }}
+    >
+      <AppWindowMac aria-hidden="true" />
+      融合模式
+    </DropdownMenuItem>
   );
 }
 
@@ -1022,6 +1048,7 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     else if (command.command === "toggle-sidebar") toggleSidebar();
     else if (command.command === "manage" && isElectronDesktop) openManagement(command.page);
     else if (command.command === "workspace" && isElectronDesktop) openWorkspace();
+    else if (command.command === "fusion" && isElectronDesktop) void connectAndStartComputerFusion(command.computerKey, command.launchBundle);
     else if (command.command === "new-session") {
       setManageModal((prev) => (prev.open ? { ...prev, open: false } : prev));
       if (!opensNewSessions() || props.view === "screen" || screenComputerKey(props.view)) {

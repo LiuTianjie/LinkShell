@@ -14,7 +14,8 @@ export type DesktopCommand =
   | { command: "inspector"; panel?: InspectorPanel }
   | { command: "composer"; target: ComposerShortcutTarget }
   | { command: "manage"; page?: ManagePage }
-  | { command: "workspace" };
+  | { command: "workspace" }
+  | { command: "fusion"; computerKey: string; launchBundle?: string };
 
 const inspectorPanels: readonly string[] = ["changes", "files", "terminal", "tasks", "preview", "settings"];
 const composerTargets: readonly string[] = ["focus", "model", "mode", "effort"];
@@ -22,8 +23,13 @@ const composerTargets: readonly string[] = ["focus", "model", "mode", "effort"];
 /** The native bridge sends untyped JSON; only these shapes are acted on. */
 export function desktopCommand(value: unknown): DesktopCommand | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const { command, cwd, panel, page, target } = value as Record<string, unknown>;
+  const { command, cwd, panel, page, target, computerKey, launchBundle } = value as Record<string, unknown>;
   if (command === "palette" || command === "toggle-sidebar" || command === "workspace") return { command };
+  if (command === "fusion" && typeof computerKey === "string" && computerKey) {
+    return typeof launchBundle === "string" && launchBundle
+      ? { command, computerKey, launchBundle }
+      : { command, computerKey };
+  }
   if (command === "manage") {
     // The menu bar names pages by their title ("更新"); an unknown page opens the overview.
     const known = parseManagePage(page);

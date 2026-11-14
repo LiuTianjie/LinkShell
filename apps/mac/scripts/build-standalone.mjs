@@ -119,6 +119,7 @@ try {
   sign(sparkle); sign(join(app, 'Contents/Frameworks/WebRTC.framework'));
   sign(node, join(mac, 'config/node-entitlements.plist'));
   sign(join(app, 'Contents/MacOS/linkshell-cli'));
+  if (existsSync(join(app, 'Contents/MacOS/LinkShellFusionStub'))) sign(join(app, 'Contents/MacOS/LinkShellFusionStub'));
   sign(app);
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', '--verbose=2', app]);
   // The window: this architecture's Electron goes into the same bundle (one id, one signature, the

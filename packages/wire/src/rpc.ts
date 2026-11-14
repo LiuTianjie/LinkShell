@@ -862,6 +862,20 @@ const coreMethods = {
     }),
     result: screenPrivacyStateSchema,
   },
+  /** Starts macOS application-window Fusion Mode (`LinkShell --fusion-remote`) and returns its control endpoint. */
+  "fusion.start": {
+    params: empty,
+    result: z.object({
+      port: z.number().int().min(1).max(65535),
+      token: z.string().min(1),
+      hosts: z.array(z.string()),
+    }),
+  },
+  /** Stops the host's active Fusion Mode listener, restoring virtual displays and Dock state. */
+  "fusion.stop": {
+    params: empty,
+    result: empty,
+  },
   /** Bytes to the host's end of a stream (base64). */
   "proxy.write": {
     params: z.object({ streamId: z.string().min(1), data: z.string().max(2_000_000) }),

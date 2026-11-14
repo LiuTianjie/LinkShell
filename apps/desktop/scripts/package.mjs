@@ -45,13 +45,13 @@ if (!existsSync(join(source, "Contents/MacOS/LinkShell"))) throw new Error(`Buil
 const electron = resolve(option("--electron", dirname(dirname(dirname(createRequire(import.meta.url)("electron"))))));
 if (!existsSync(electron)) throw new Error(`Electron is not installed: ${electron}`);
 
-// The workspace is rebuilt here, so a change to apps/web needs no Swift rebuild.
-const web = resolve(here, "../web");
+// The workspace is rebuilt here, so a change to apps/desktop-ui needs no Swift rebuild.
+const desktopUI = resolve(here, "../desktop-ui");
 const workspaceOut = join(here, "build/.workspace");
 console.log("[package] building the workspace");
-run("pnpm", ["exec", "tsc", "--noEmit"], { cwd: web });
+run("pnpm", ["exec", "tsc", "--noEmit"], { cwd: desktopUI });
 rmSync(workspaceOut, { recursive: true, force: true });
-run("pnpm", ["exec", "vite", "build", "--outDir", workspaceOut, "--emptyOutDir"], { cwd: web });
+run("pnpm", ["exec", "vite", "build", "--outDir", workspaceOut, "--emptyOutDir"], { cwd: desktopUI });
 console.log("[package] compiling the window");
 run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], { cwd: here });
 console.log("[package] building LinkShellNative (release, universal)");
@@ -152,6 +152,7 @@ try {
   for (const name of readdirSync(join(contents, "MacOS"))) {
     const path = join(contents, "MacOS", name);
     if (name === "LinkShell" || name === "LinkShell Desktop") continue;
+    if (name === "LinkShellFusionStub") { sign(path); continue; }
     // The standalone runtime (node, linkshell-cli) keeps the entitlements its own build gave it.
     try { capture("/usr/bin/codesign", ["--verify", path]); } catch { sign(path); }
   }

@@ -2,15 +2,18 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nati
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection, createServer as createNetServer, type AddressInfo, type Server as NetServer, type Socket as NetSocket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Management } from "./management.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
+import { pickDirectFusionHost } from "./fusion-probe.js";
 import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
+import { normalizePreviewSubPath, RemotePortProxyManager, validatePreviewPort } from "./remote-port-proxy.js";
 import { launchOptions, Runtime } from "./runtime.js";
 import { WorkspaceServer } from "./workspace.js";
 import { checkWindowsRelease, cleanWindowsUpdateDownloads, compareVersions, downloadWindowsInstaller, verifyInstaller, type DownloadedInstaller, type WindowsRelease } from "./windows-update.js";
@@ -23,15 +26,15 @@ const server = new WorkspaceServer(runtime);
 const settings = new Map<string, unknown>();
 const keepAwake = new KeepAwake(powerSaveBlocker);
 
-// Codex's window: the toolbar row is 46px; the traffic lights sit centred in its 46px chrome.
-const TOOLBAR = 46;
-const TRAFFIC_LIGHTS = { x: 16, y: Math.round((TOOLBAR - 14) / 2) };
+// Paseo / T3 Code sculpted 42px chrome: macOS traffic lights sit optically centered at { x: 15, y: 13 }.
+const TOOLBAR = 42;
+const TRAFFIC_LIGHTS = { x: 15, y: 13 };
 const MAC = process.platform === "darwin";
 const WINDOWS = process.platform === "win32";
-/** The page's own ground where the window is not translucent (theme.ts `background`). */
-const ground = () => (nativeTheme.shouldUseDarkColors ? "#1d1d1d" : "#f3f3f3");
-/** Windows draws its caption buttons over the page's 46 px title row (--toolbar), in the page's ink. */
-const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#dfdfdf" : "#1a1c1f", height: TOOLBAR });
+/** The page's own ground where the window is not translucent (`--ls-ground` L0). */
+const ground = () => (nativeTheme.shouldUseDarkColors ? "#090a0c" : "#f2f3f6");
+/** Windows draws its caption buttons over the page's 42 px title row (--chrome-h), in the page's ink (`--ls-fg`). */
+const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#eceef2" : "#141518", height: TOOLBAR });
 /** The theme the opaque ground and the caption buttons were last painted for. */
 let surfaceDark: boolean | undefined;
 
@@ -54,7 +57,13 @@ if (!app.requestSingleInstanceLock({ scope: runtime.scope })) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
-    if (launchOptions(argv).checkUpdates) openManagement("更新");
+    const opts = launchOptions(argv);
+    if (opts.checkUpdates) openManagement("更新");
+    if (opts.fusionConnect) {
+      command({ command: "fusion", computerKey: opts.fusionConnect, launchBundle: opts.fusionLaunch });
+      if (!opts.fusionLaunch) showWindow();
+      return;
+    }
     showWindow();
   });
   void app.whenReady().then(ready);
@@ -100,7 +109,7 @@ function updateWindowSurface() {
   const bounds = window.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const physical = bounds.width * display.scaleFactor * bounds.height * display.scaleFactor;
-  const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true && !nativeScreenShown;
+  const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true && !nativeScreenShown && !isWindowFullScreen();
   window.setVibrancy(translucent ? "menu" : null);
   window.setBackgroundColor(translucent ? "#00000000" : ground());
   send("linkshell-desktop-surface", { translucent });
@@ -120,6 +129,7 @@ function send(name: string, detail: unknown) {
 let wantedFullScreen: boolean | undefined;
 let wantedImmersiveFullScreen = false;
 let fullScreenMoving = false;
+let preSimpleFullScreenBounds: Electron.Rectangle | undefined;
 /** The last leave was asked for by the page (its wish is already false), not the window's own button. */
 let fullScreenAsked = false;
 let fullScreenRetry: ReturnType<typeof setTimeout> | undefined;
@@ -143,6 +153,7 @@ function reconcileFullScreen() {
   if (MAC && wanted && wantedImmersiveFullScreen && !window.isFullScreen()) {
     clearTimeout(fullScreenRetry);
     if (!window.isSimpleFullScreen()) {
+      preSimpleFullScreenBounds = window.getBounds();
       rememberBounds();
       window.setSimpleFullScreen(true);
     }
@@ -155,10 +166,20 @@ function reconcileFullScreen() {
   if (MAC && !wanted && window.isSimpleFullScreen()) {
     clearTimeout(fullScreenRetry);
     wantedImmersiveFullScreen = false;
-    nativeModule?.setImmersiveFullScreen(false);
+    const restoreBounds = preSimpleFullScreenBounds;
+    preSimpleFullScreenBounds = undefined;
     window.setSimpleFullScreen(false);
+    nativeModule?.setImmersiveFullScreen(false);
+    const restoreChrome = () => {
+      if (!window || window.isDestroyed() || isWindowFullScreen()) return;
+      if (restoreBounds) window.setBounds(restoreBounds);
+      window.setWindowButtonPosition(TRAFFIC_LIGHTS);
+      updateWindowSurface();
+    };
+    restoreChrome();
+    setTimeout(restoreChrome, 60);
+    setTimeout(restoreChrome, 320);
     wantedFullScreen = undefined;
-    updateWindowSurface();
     send("linkshell-desktop-window", { fullscreen: false });
     send("linkshell-desktop-fullscreen", { fullscreen: false });
     return;
@@ -208,6 +229,7 @@ function setVisible(value: boolean) {
 
 function createWindow() {
   const state = settings.get("window") as { x?: number; y?: number; width?: number; height?: number } | undefined;
+  if (!MAC) surfaceDark = nativeTheme.shouldUseDarkColors;
   window = new BrowserWindow({
     title: "LinkShell",
     width: state?.width ?? 1280,
@@ -247,8 +269,8 @@ function createWindow() {
   window.on("blur", () => { syncImmersivePresentation(); updateWindowSurface(); });
   window.on("resize", updateWindowSurface);
   window.on("moved", updateWindowSurface);
-  // Started at sign-in: the window waits in the tray until it is asked for.
-  window.on("ready-to-show", () => { if (!quitting && !launch.hidden) showWindow(); });
+  // Started at sign-in or silently awakened by a Dock Stub app: wait in the menu bar unless asked for.
+  window.on("ready-to-show", () => { if (!quitting && !launch.hidden && !(launch.fusionConnect && launch.fusionLaunch)) showWindow(); });
   window.on("show", () => setVisible(!window!.isMinimized()));
   // macOS sends "hide" while the window moves into or out of its full-screen Space, though it stays
   // on screen: taking that as hidden unmounted the remote screen and so ended its full screen.
@@ -266,6 +288,11 @@ function createWindow() {
     nativeModule?.setImmersiveFullScreen(false);
     if (isSimpleFullScreen()) {
       window!.setSimpleFullScreen(false);
+      if (preSimpleFullScreenBounds) {
+        window!.setBounds(preSimpleFullScreenBounds);
+        preSimpleFullScreenBounds = undefined;
+      }
+      if (MAC) window!.setWindowButtonPosition(TRAFFIC_LIGHTS);
       send("linkshell-desktop-window", { fullscreen: false });
       send("linkshell-desktop-fullscreen", { fullscreen: false });
       window!.hide();
@@ -286,6 +313,7 @@ function createWindow() {
   window.on("leave-full-screen", () => {
     fullScreenMoving = false;
     wantedImmersiveFullScreen = false;
+    if (MAC && window && !window.isDestroyed()) window.setWindowButtonPosition(TRAFFIC_LIGHTS);
     syncImmersivePresentation();
     // Left by the window's own button or Esc: what asked for full screen leaves it too.
     if (wantedFullScreen === true && !fullScreenAsked) wantedFullScreen = false;
@@ -374,11 +402,11 @@ function startServer() {
 /** Immediate themed shell shown while the local workspace server cold-starts, preventing a blank 1-3s delay. */
 function showLoading() {
   if (!window) return;
-  const html = `<!doctype html><meta charset="utf-8"><title>LinkShell</title><style>
+  const html = `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
-    body{margin:0;height:100vh;display:grid;place-items:center;background:light-dark(#f3f3f3,#1d1d1d);color:light-dark(rgb(26 28 31/.58),rgb(223 223 223/.58));-webkit-app-region:drag;user-select:none}
+    body{margin:0;height:100vh;display:grid;place-items:center;background:light-dark(#f2f3f6,#090a0c);color:light-dark(rgb(20 21 24/.62),rgb(236 238 242/.62));-webkit-app-region:drag;user-select:none}
     main{display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
-    .spinner{width:14px;height:14px;border-radius:999px;border:1.5px solid light-dark(rgb(26 28 31/.16),rgb(223 223 223/.2));border-top-color:light-dark(#4c5fd5,#5263e8);animation:spin 1s linear infinite}
+    .spinner{width:14px;height:14px;border-radius:999px;border:1.5px solid light-dark(rgb(20 21 24/.16),rgb(236 238 242/.2));border-top-color:light-dark(#4c5fd5,#5263e8);animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     @media (prefers-reduced-motion:reduce){.spinner{animation:none;border-color:light-dark(#4c5fd5,#5263e8)}}
   </style><main><span class="spinner" aria-hidden="true"></span><span>正在打开工作台…</span></main>`;
@@ -388,7 +416,7 @@ function showLoading() {
 /** Shown when the page itself cannot be: the native shell has no other way to say it. */
 function showProblem(message: string) {
   if (!window) return;
-  const html = `<!doctype html><meta charset="utf-8"><title>LinkShell</title><style>
+  const html = `<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}
     body{margin:0;height:100vh;display:grid;place-items:center;background:transparent;color:light-dark(#1a1c1f,#dfdfdf);-webkit-app-region:drag}
     main{max-width:420px;text-align:center;padding:24px}h1{font-size:16px;font-weight:600;margin:0 0 8px}
@@ -403,6 +431,7 @@ function showProblem(message: string) {
 
 async function retry() {
   if (!(await flushOrConfirm("仍然重新连接"))) return;
+  remotePortProxies.stopAll();
   server.stop();
   startServer();
 }
@@ -476,8 +505,12 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       markPageReady();
       return;
     case "appearance":
-      if (WorkspacePolicy.validAppearance(message.value) && message.value !== appearance()) {
-        settings.set("appearance", message.value); void saveSettings(); applyAppearance(); updateTray();
+      if (WorkspacePolicy.validAppearance(message.value)) {
+        const changed = settings.get("appearance") !== message.value;
+        settings.set("appearance", message.value);
+        if (changed) void saveSettings();
+        applyAppearance();
+        if (changed) updateTray();
       }
       return;
     case "external":
@@ -489,10 +522,29 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       if (!MAC || typeof message.id !== "string") return;
       try {
         if (!nativeModule || !runtime.helper) throw new Error("原生屏幕组件不可用，请重新安装 LinkShell");
-        const rect = message.rect as Record<string, unknown> | undefined;
         const zoom = window.webContents.getZoomFactor();
-        const adjusted = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number")
-          ? { ...message, rect: Object.fromEntries(["x", "y", "width", "height"].map((key) => [key, (rect[key] as number) * zoom])) } : message;
+        const isFiniteRect = (raw: unknown): raw is Record<string, number> =>
+          !!raw && typeof raw === "object" && ["x", "y", "width", "height"].every((key) => {
+            const val = (raw as Record<string, unknown>)[key];
+            return typeof val === "number" && Number.isFinite(val);
+          });
+        const scaleRect = (raw: Record<string, number>) => ({
+          x: raw.x * zoom,
+          y: raw.y * zoom,
+          width: raw.width * zoom,
+          height: raw.height * zoom,
+        });
+        const adjusted: Record<string, unknown> = { ...message };
+        if (isFiniteRect(message.rect)) adjusted.rect = scaleRect(message.rect);
+        if (Array.isArray(message.holes)) {
+          adjusted.holes = message.holes.slice(0, 64).filter(isFiniteRect).map((hole) => ({
+            ...scaleRect(hole),
+            ...(typeof hole.radius === "number" && Number.isFinite(hole.radius) && hole.radius >= 0
+              ? { radius: hole.radius * zoom }
+              : {}),
+          }));
+        }
+        if ("overlayOpen" in message) adjusted.overlayOpen = Boolean(message.overlayOpen);
         if (message.type === "start") {
           nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => {
             if ((detail as { type?: unknown }).type === "error") setNativeScreenShown(false);
@@ -520,6 +572,9 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       reconcileFullScreen();
       return;
     }
+    case "fusionTunnel":
+      handleFusionTunnelMessage(message);
+      return;
     case "invoke": return void invoke(event.sender, message);
   }
 });
@@ -672,6 +727,14 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       shell.showItemInFolder(path);
       return {};
     }
+    case "fusionStart": return startFusionMode(params);
+    case "fusionState": return getFusionState(params);
+    case "fusionIcons": return getFusionIcons(params);
+    case "fusionLaunchApp": return controlFusionHub(params, "launchApp");
+    case "fusionQuitApp": return controlFusionHub(params, "quitApp");
+    case "fusionStop": return stopFusionHub(params);
+    case "openRemotePortExternal": return openRemotePortExternal(params);
+    case "remotePortReply": return remotePortProxies.reply(params);
     default: throw new Error("不支持的操作");
   }
 }
@@ -719,6 +782,8 @@ app.on("before-quit", (event) => {
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
+    stopAllFusionTunnels();
+    remotePortProxies.stopAll();
     server.stop();
     menuBar?.stop();
     rememberBounds();
@@ -739,6 +804,337 @@ function openSetup() {
   // The system opens it, so the permissions it shows are LinkShell's, not this process's.
   spawn("/usr/bin/open", ["-n", "-a", helper, "--args", "--setup"], { stdio: "ignore", detached: true }).unref();
   return {};
+}
+
+type FusionTunnelState = {
+  tunnelId: string;
+  server: NetServer;
+  localPort: number;
+  connections: Map<string, NetSocket>;
+};
+const fusionTunnels = new Map<string, FusionTunnelState>();
+
+function stopAllFusionTunnels() {
+  for (const state of fusionTunnels.values()) {
+    for (const sock of state.connections.values()) sock.destroy();
+    state.connections.clear();
+    state.server.close();
+  }
+  fusionTunnels.clear();
+}
+
+const remotePortProxies = new RemotePortProxyManager({
+  dispatch: (payload) => {
+    if (!pageReady || !window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) {
+      return false;
+    }
+    send("linkshell-desktop-remote-port-req", payload);
+    return true;
+  },
+});
+
+async function openRemotePortExternal(params: Record<string, unknown>): Promise<{ url: string; localPort: number }> {
+  const computerKey = typeof params.computerKey === "string" ? params.computerKey.trim() : "";
+  const isLocal = !computerKey || computerKey === "desktop:local";
+  const forbiddenPort = isLocal && server.policy ? Number(server.policy.origin.port) : undefined;
+  const port = validatePreviewPort(params.port, forbiddenPort);
+  const safePath = normalizePreviewSubPath(params.path);
+  const localPort = isLocal ? port : await remotePortProxies.ensureProxy(computerKey, port);
+  const url = `http://127.0.0.1:${localPort}${safePath}`;
+  if (params.open !== false) await shell.openExternal(url);
+  return { url, localPort };
+}
+
+function handleFusionTunnelMessage(message: Record<string, unknown>) {
+  const tunnelId = typeof message.tunnelId === "string" ? message.tunnelId : "";
+  const connId = typeof message.connId === "string" ? message.connId : "";
+  const type = typeof message.type === "string" ? message.type : "";
+  if (!tunnelId || !connId) return;
+  let owner: FusionTunnelState | undefined;
+  for (const state of fusionTunnels.values()) {
+    if (state.tunnelId === tunnelId) { owner = state; break; }
+  }
+  const sock = owner?.connections.get(connId);
+  if (!sock) return;
+  if (type === "data" && typeof message.data === "string") {
+    sock.write(Buffer.from(message.data, "base64"));
+  } else if (type === "close") {
+    owner?.connections.delete(connId);
+    sock.end();
+  }
+}
+
+async function ensureFusionTunnel(computerKey: string): Promise<FusionTunnelState> {
+  const existing = fusionTunnels.get(computerKey);
+  if (existing && existing.server.listening) return existing;
+  if (existing) {
+    for (const sock of existing.connections.values()) sock.destroy();
+    existing.server.close();
+    fusionTunnels.delete(computerKey);
+  }
+  const tunnelId = randomUUID();
+  const connections = new Map<string, NetSocket>();
+  const tcpServer = createNetServer((sock) => {
+    const connId = randomUUID();
+    connections.set(connId, sock);
+    sock.setNoDelay(true);
+    send("linkshell-fusion-tunnel", { tunnelId, connId, type: "open" });
+    sock.on("data", (chunk: Buffer) => {
+      send("linkshell-fusion-tunnel", { tunnelId, connId, type: "data", data: chunk.toString("base64") });
+    });
+    const closed = () => {
+      if (!connections.delete(connId)) return;
+      send("linkshell-fusion-tunnel", { tunnelId, connId, type: "close" });
+    };
+    sock.once("close", closed);
+    sock.once("error", closed);
+  });
+  await new Promise<void>((resolve, reject) => {
+    tcpServer.once("error", reject);
+    tcpServer.listen(0, "127.0.0.1", () => {
+      tcpServer.removeListener("error", reject);
+      resolve();
+    });
+  });
+  const localPort = (tcpServer.address() as AddressInfo).port;
+  const state: FusionTunnelState = { tunnelId, server: tcpServer, localPort, connections };
+  fusionTunnels.set(computerKey, state);
+  return state;
+}
+
+function spawnFusionLocal(helper: string, args: string[]) {
+  const env: NodeJS.ProcessEnv = { ...process.env, LINKSHELL_HOME: runtime.home };
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  spawn(helper, args, { detached: true, stdio: "ignore", env }).unref();
+}
+
+async function startFusionMode(params: Record<string, unknown>) {
+  if (!MAC || !runtime.helper || !existsSync(runtime.helper)) {
+    throw new Error("融合模式需要 macOS 桌面版 LinkShell");
+  }
+  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
+  const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
+  const port = Number(params.port);
+  const token = typeof params.token === "string" ? params.token : "";
+  const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
+  const launchBundle = typeof params.launchBundle === "string" && params.launchBundle ? params.launchBundle : undefined;
+  if (!computerKey || !token || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error("远端融合模式连接信息无效");
+  }
+  const directHost = await pickDirectFusionHost(hosts, port);
+  const extra = launchBundle ? ["--launch", launchBundle] : [];
+  if (directHost) {
+    spawnFusionLocal(runtime.helper, [
+      "--fusion-local",
+      "--host", directHost,
+      "--port", String(port),
+      "--token", token,
+      "--name", name,
+      "--computer-key", computerKey,
+      ...extra,
+    ]);
+    return { mode: "direct" as const, host: directHost, port };
+  }
+  const tunnel = await ensureFusionTunnel(computerKey);
+  spawnFusionLocal(runtime.helper, [
+    "--fusion-local",
+    "--host", "127.0.0.1",
+    "--port", String(tunnel.localPort),
+    "--token", token,
+    "--name", name,
+    "--computer-key", computerKey,
+    ...extra,
+  ]);
+  return { mode: "tunnel" as const, tunnelId: tunnel.tunnelId, port: tunnel.localPort };
+}
+
+function toFusionSlug(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  return slug || "remote";
+}
+
+function mapFusionCategory(raw: string): string {
+  if (raw.includes("developer-tools")) return "开发工具";
+  if (raw.includes("productivity") || raw.includes("finance") || raw.includes("business")) return "效率";
+  if (raw.includes("utilities")) return "实用工具";
+  if (raw.includes("social-networking")) return "社交";
+  if (raw.includes("entertainment") || raw.includes("games") || raw.includes("music") || raw.includes("video")) return "娱乐";
+  if (raw.includes("graphics-design") || raw.includes("photography")) return "创意";
+  return "其他";
+}
+
+function queryFusionSocket(hostSlug: string, payload: Record<string, unknown>, timeoutMs = 450): Promise<Record<string, unknown> | undefined> {
+  if (!MAC) return Promise.resolve(undefined);
+  const safeSlug = toFusionSlug(hostSlug);
+  const sockPath = join(runtime.home, `fusion-${safeSlug}.sock`);
+  if (!existsSync(sockPath)) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    let settled = false;
+    let buf = "";
+    const sock = createConnection(sockPath);
+    const finish = (value?: Record<string, unknown>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(undefined), timeoutMs);
+    sock.once("connect", () => {
+      sock.write(JSON.stringify(payload) + "\n");
+    });
+    sock.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf8");
+      const nl = buf.indexOf("\n");
+      if (nl >= 0) {
+        try {
+          finish(JSON.parse(buf.slice(0, nl)) as Record<string, unknown>);
+        } catch {
+          finish(undefined);
+        }
+      }
+    });
+    sock.once("error", () => finish(undefined));
+    sock.once("end", () => finish(undefined));
+  });
+}
+
+async function readCachedFusionState(name: string, hostSlug: string, computerKey: string) {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const iconDir = join(runtime.home, "fusion-icons", hostSlug);
+  const appsDir = join(app.getPath("home"), "Applications/LinkShell", name);
+  const iconBundles: string[] = [];
+  try {
+    for (const file of await readdir(iconDir)) {
+      if (file.endsWith(".png")) iconBundles.push(file.slice(0, -4));
+    }
+  } catch { /* No icon cache yet. */ }
+
+  try {
+    const raw = JSON.parse(await readFile(join(iconDir, "catalog.json"), "utf8")) as {
+      apps?: Array<Record<string, unknown>>;
+      appsDir?: string;
+    };
+    if (Array.isArray(raw.apps) && raw.apps.length > 0) {
+      return {
+        appsDir: typeof raw.appsDir === "string" && raw.appsDir ? raw.appsDir : appsDir,
+        iconBundles,
+        apps: raw.apps,
+      };
+    }
+  } catch { /* Fallback to scanning materialized Stub bundles if catalog.json is not written yet. */ }
+
+  const fallbackApps: Array<Record<string, unknown>> = [];
+  try {
+    const entries = await readdir(appsDir);
+    const suffix = ` · ${name}`;
+    for (const entry of entries) {
+      if (!entry.endsWith(".app")) continue;
+      const appPath = join(appsDir, entry);
+      try {
+        const xml = await readFile(join(appPath, "Contents/Info.plist"), "utf8");
+        const field = (key: string) => {
+          const m = new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`).exec(xml);
+          return m?.[1]?.trim() ?? "";
+        };
+        const bundle = field("LSFusionBundleID");
+        if (!bundle) continue;
+        const display = field("CFBundleDisplayName") || entry.slice(0, -4);
+        const cleanName = display.endsWith(suffix) ? display.slice(0, -suffix.length) : display;
+        const rawCategory = field("LSApplicationCategoryType");
+        fallbackApps.push({
+          name: cleanName,
+          bundle,
+          category: mapFusionCategory(rawCategory),
+          rawCategory,
+          isSystem: false,
+          stubPath: appPath,
+        });
+      } catch { /* Ignore partial bundle. */ }
+    }
+  } catch { /* No Stub directory yet. */ }
+
+  void computerKey;
+  return { appsDir, iconBundles, apps: fallbackApps };
+}
+
+async function getFusionState(params: Record<string, unknown>) {
+  const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
+  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
+  const hostSlug = toFusionSlug(name);
+  const live = await queryFusionSocket(hostSlug, { t: "status" });
+  const cached = (!live || !Array.isArray(live.apps) || live.apps.length === 0)
+    ? await readCachedFusionState(name, hostSlug, computerKey)
+    : undefined;
+  const liveApps = Array.isArray(live?.apps) && live.apps.length > 0 ? live.apps : (cached?.apps ?? []);
+  const liveIcons = Array.isArray(live?.iconBundles) && live.iconBundles.length > 0 ? live.iconBundles : (cached?.iconBundles ?? []);
+  return {
+    hubRunning: Boolean(live),
+    connected: live?.connected === true,
+    rttMs: typeof live?.rttMs === "number" ? live.rttMs : undefined,
+    hostLabel: typeof live?.hostLabel === "string" ? live.hostLabel : name,
+    hostSlug,
+    appsDir: typeof live?.appsDir === "string" ? live.appsDir : (cached?.appsDir ?? join(app.getPath("home"), "Applications/LinkShell", name)),
+    statusText: typeof live?.statusText === "string" ? live.statusText : undefined,
+    activeBundles: Array.isArray(live?.activeBundles) ? live.activeBundles : [],
+    windowCounts: live?.windowCounts && typeof live.windowCounts === "object" ? live.windowCounts : {},
+    iconBundles: liveIcons,
+    apps: liveApps,
+  };
+}
+
+async function getFusionIcons(params: Record<string, unknown>) {
+  if (!MAC) return { icons: {} };
+  const { readFile } = await import("node:fs/promises");
+  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : "remote");
+  const bundles = Array.isArray(params.bundles)
+    ? params.bundles.filter((b): b is string => typeof b === "string" && b.length > 0).slice(0, 48)
+    : [];
+  const iconDir = join(runtime.home, "fusion-icons", hostSlug);
+  const icons: Record<string, { src: string; badged: boolean }> = {};
+  for (const bundle of bundles) {
+    const safe = bundle.replaceAll("/", "_").replaceAll(":", "_").replaceAll("..", "_");
+    const uiPath = join(iconDir, "ui", `${safe}.png`);
+    try {
+      const bytes = await readFile(uiPath);
+      icons[bundle] = { src: `data:image/png;base64,${bytes.toString("base64")}`, badged: true };
+      continue;
+    } catch { /* Fall back to raw cached PNG if ui thumbnail hasn't been generated yet. */ }
+    const rawPath = join(iconDir, `${safe}.png`);
+    if (existsSync(rawPath)) {
+      try {
+        const img = nativeImage.createFromPath(rawPath);
+        if (!img.isEmpty()) {
+          const resized = img.resize({ width: 144, height: 144, quality: "best" }).toPNG();
+          icons[bundle] = { src: `data:image/png;base64,${resized.toString("base64")}`, badged: false };
+        }
+      } catch { /* Ignore unreadable icon. */ }
+    }
+  }
+  return { icons };
+}
+
+async function controlFusionHub(params: Record<string, unknown>, type: "launchApp" | "quitApp") {
+  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : String(params.name ?? "remote"));
+  const bundle = typeof params.bundle === "string" ? params.bundle : "";
+  if (!bundle) throw new Error("缺少目标应用标识");
+  const reply = await queryFusionSocket(hostSlug, { t: type, bundle, force: params.force === true });
+  return { ok: Boolean(reply) };
+}
+
+async function stopFusionHub(params: Record<string, unknown>) {
+  const hostSlug = toFusionSlug(typeof params.hostSlug === "string" ? params.hostSlug : String(params.name ?? "remote"));
+  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
+  await queryFusionSocket(hostSlug, { t: "stopHub" });
+  const tunnel = computerKey ? fusionTunnels.get(computerKey) : undefined;
+  if (tunnel) {
+    for (const sock of tunnel.connections.values()) sock.destroy();
+    tunnel.connections.clear();
+    tunnel.server.close();
+    fusionTunnels.delete(computerKey);
+  }
+  return { ok: true };
 }
 
 /** The file LinkShell.Screen.exe refuses to capture beside (the earlier Windows app's switch). */
@@ -1067,4 +1463,5 @@ async function ready() {
   nativeTheme.on("updated", updateWindowSurface);
   startUpdater();
   if (launch.checkUpdates) { openManagement("更新"); checkUpdates(); }
+  if (launch.fusionConnect) command({ command: "fusion", computerKey: launch.fusionConnect, launchBundle: launch.fusionLaunch });
 }

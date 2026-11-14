@@ -1,5 +1,7 @@
 import CoreFoundation
 import Foundation
+import LinkShellScreen
+import WebRTC
 import XCTest
 @testable import LinkShell
 
@@ -30,6 +32,69 @@ final class DesktopScreenReceiverTests: XCTestCase {
     var boolean = frame
     boolean["x"] = true
     XCTAssertNil(DesktopScreenBridge.rect(boolean))
+  }
+
+  func testBridgeParsesBoundedCutoutHolesWithDefaultAndExplicitRadius() throws {
+    let raw: [Any] = [
+      ["x": 120, "y": 48, "width": 220, "height": 280],
+      ["x": 400, "y": 80, "width": 180, "height": 120, "radius": 14],
+      ["x": 10, "y": 10, "width": 0, "height": 40],
+      ["x": true, "y": 10, "width": 40, "height": 40],
+    ]
+    let parsed = try XCTUnwrap(DesktopScreenBridge.holes(raw))
+    XCTAssertEqual(parsed, [
+      DesktopScreenHole(rect: CGRect(x: 120, y: 48, width: 220, height: 280), radius: 10),
+      DesktopScreenHole(rect: CGRect(x: 400, y: 80, width: 180, height: 120), radius: 14),
+    ])
+    XCTAssertNil(DesktopScreenBridge.holes(nil))
+  }
+
+  func testActiveReceiverPreservesLiveStatusAcrossVisibilityChangesAndAppliesInBandPacing() {
+    final class DummyOutput: NSObject, DesktopScreenOutput {
+      var onInput: (([String: Any], Bool) -> Void)?
+      var onFirstFrame: (() -> Void)?
+      var onFailure: ((String) -> Void)?
+      var controlEnabled = false
+      var physicalKeys = false
+      func updateCursor(_ message: [String: Any]) {}
+      func setSize(_ size: CGSize) {}
+      func renderFrame(_ frame: WebRTC.RTCVideoFrame?) {}
+      func stop() {}
+    }
+
+    let output = DummyOutput()
+    var statuses: [[String: Any]] = []
+    let liveExpectation = expectation(description: "live status")
+    let pacingExpectation = expectation(description: "in-band pacing")
+    pacingExpectation.expectedFulfillmentCount = 2
+
+    let receiver = DesktopScreenReceiver(
+      surface: output,
+      smooth: false,
+      onSignal: { _ in },
+      onStatus: { status in
+        statuses.append(status)
+        if status["live"] as? Bool == true { liveExpectation.fulfill() }
+        if status["pacing"] != nil { pacingExpectation.fulfill() }
+      },
+      onFailure: { XCTFail("Unexpected failure: \($0)") }
+    )
+    defer { receiver.stop() }
+
+    receiver.receive(["rtc": ["t": "config", "iceServers": []]])
+    receiver.pictureArrived()
+    wait(for: [liveExpectation], timeout: 3.0)
+
+    // Transient visibility changes on an active peer must NEVER emit `live: false`.
+    receiver.setPresentationVisible(false)
+    receiver.setPresentationVisible(true)
+    receiver.setSmooth(true)
+    receiver.setSmooth(false)
+    wait(for: [pacingExpectation], timeout: 3.0)
+
+    XCTAssertFalse(statuses.contains { ($0["live"] as? Bool) == false }, "Active receiver must not flash live: false")
+    let pacings = statuses.compactMap { $0["pacing"] as? String }
+    XCTAssertEqual(pacings, ["smooth", "immediate"])
   }
 
   func testRequestIDsCannotBeBooleansFractionsOrUnsafeJSONIntegers() {
