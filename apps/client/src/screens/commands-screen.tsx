@@ -37,7 +37,8 @@ export function CommandsScreen() {
     if (command.action === "commands") { setQuery(""); return; }
     // The composer can unmount in adaptive layouts; write its persistent draft
     // instead of depending on a live event listener behind this sheet.
-    setText(`/${command.name} `);
+    // What was already typed stays, behind the command (replacing a command typed before it).
+    setText((current) => `/${command.name} ${current.replace(/^\s*[／/]\S*\s*/, "")}`.trimEnd() + " ");
     router.back();
   };
 

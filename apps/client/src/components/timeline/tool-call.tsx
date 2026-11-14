@@ -360,7 +360,7 @@ function ToolRow({ item }: { item: ToolItem }) {
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${described.verb}${described.subject}${described.suffix ?? ""}`}
-        style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28 }}
+        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28, opacity: pressed ? 0.6 : 1 })}
       >
         {/* A bare glyph, not a tile: a run of tool calls should read as lines, not a stack of boxes. */}
         <View style={{ width: GLYPH, alignItems: "center" }}>
@@ -465,7 +465,7 @@ function CommandBlock({ item, command, output }: { item: ToolItem; command: stri
         </ScrollView>
         {output ? <OutputLines text={output} /> : null}
       </View>
-      {ended ? <Text style={[type.caption, { alignSelf: "flex-end", color: ended === "成功" ? colors.tertiaryLabel : colors.danger }]}>{ended}</Text> : null}
+      {ended ? <Text style={[type.caption, { alignSelf: "flex-end", color: ended === "成功" ? colors.tertiaryLabel : colors.secondaryLabel }]}>{ended}</Text> : null}
     </View>
   );
 }

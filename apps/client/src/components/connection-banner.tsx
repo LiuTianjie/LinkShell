@@ -1,17 +1,21 @@
 import { translateSocketError } from "@linkshell/client-core";
 import { HOST_PROTOCOL } from "@linkshell/wire";
 import { router } from "expo-router";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
+import { PressableFeedback } from "./pressable-feedback";
 
 /** Normalizes transport/relay/LAN errors into user-facing Chinese without raw socket noise. */
 export function formatConnectionDetail(detail?: string): string | undefined {
   const raw = detail?.trim();
   if (!raw) return undefined;
+  // The RPC layer's own words for the same two things, with the method name and the limit in them.
+  if (/^请求超时（/.test(raw)) return "电脑没有响应";
+  if (/^(?:连接已断开|正在重新连接|连接已停止)\s*[（(]/.test(raw)) return "连接已断开";
   const translated = translateSocketError(raw);
   if (/^bad_identity$/i.test(translated) || /invalid .*signature|identity mismatch/i.test(translated)) {
     return "电脑的身份校验没有通过，请重新配对";
@@ -41,6 +45,11 @@ export function formatConnectionDetail(detail?: string): string | undefined {
   return translated;
 }
 
+/** A refusal that retrying cannot get past: the computer or the gateway no longer accepts this phone. */
+export function needsRepairing(formatted?: string): boolean {
+  return !!formatted && /重新配对|没有权限连接/.test(formatted);
+}
+
 /** Shown while the host is unreachable; tapping opens the connection sheet. */
 export function ConnectionBanner() {
   const status = useConnectionStatus();
@@ -63,11 +72,12 @@ export function ConnectionBanner() {
   if (status === "online" || status === "idle") return null;
   if (status === "locked") {
     return (
-      <Pressable
+      <PressableFeedback
         onPress={() => router.push("/unlock")}
         accessibilityRole="button"
         accessibilityHint="输入访问密码"
-        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card }}
+        outerStyle={{ marginTop: 8 }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card, overflow: "hidden" }}
       >
         <Icon sf="lock.fill" md="lock" size={18} color={colors.secondaryLabel} />
         <View style={{ flex: 1, gap: 2 }}>
@@ -75,18 +85,20 @@ export function ConnectionBanner() {
           <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>轻点输入密码后继续</Text>
         </View>
         <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
-      </Pressable>
+      </PressableFeedback>
     );
   }
   const connecting = status === "connecting";
+  // Refused, not unreachable: retrying changes nothing, and the next step is pairing again.
+  const repair = !connecting && needsRepairing(formattedDetail);
   return (
-    <Pressable
-      onPress={() => router.push("/connect")}
+    <PressableFeedback
+      onPress={() => router.push(repair ? "/pair" : "/connect")}
       onLongPress={() => link.reconnectNow(true)}
       accessibilityRole="button"
-      accessibilityHint="打开连接设置"
+      accessibilityHint={repair ? "重新配对这台电脑" : "打开连接设置"}
+      outerStyle={{ marginTop: 8 }}
       style={{
-        marginTop: 8,
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
@@ -94,6 +106,7 @@ export function ConnectionBanner() {
         borderRadius: radius.card,
         borderCurve: "continuous",
         backgroundColor: colors.card,
+        overflow: "hidden",
       }}
     >
       {/* A connection that fails is an error (danger), not something waiting on the user (amber). */}
@@ -104,13 +117,13 @@ export function ConnectionBanner() {
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>
-          {connecting ? "正在连接电脑…" : "电脑暂时连不上"}
+          {connecting ? "正在连接电脑…" : repair ? "需要重新配对" : "电脑暂时连不上"}
         </Text>
         <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
-          {connecting ? "稍等片刻" : `${formattedDetail ? `${formattedDetail} · ` : ""}会自动重试，轻点查看连接设置`}
+          {connecting ? "稍等片刻" : repair ? `${formattedDetail} · 轻点重新配对` : `${formattedDetail ? `${formattedDetail} · ` : ""}会自动重试，轻点查看连接设置`}
         </Text>
       </View>
       <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
-    </Pressable>
+    </PressableFeedback>
   );
 }

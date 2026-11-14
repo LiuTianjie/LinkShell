@@ -1,9 +1,22 @@
+import Storage from "expo-sqlite/kv-store";
 import { useCallback, type SetStateAction } from "react";
 import { useStore } from "zustand";
 import { useConnection } from "./client";
 import { composerDraftKey, createComposerDrafts, EMPTY_DRAFT, type DraftAttachment } from "./composer-drafts";
 
-const drafts = createComposerDrafts();
+const DRAFTS_KEY = "composer.drafts.v1";
+
+const drafts = createComposerDrafts({
+  load() {
+    const raw = Storage.getItemSync(DRAFTS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  },
+  save(texts) {
+    if (Object.keys(texts).length) Storage.setItemSync(DRAFTS_KEY, JSON.stringify(texts));
+    else Storage.removeItemSync(DRAFTS_KEY);
+  },
+});
 
 /** The welcome view only needs presence, not a re-render for every keystroke. */
 export function useHasComposerDraft(sessionId: string) {

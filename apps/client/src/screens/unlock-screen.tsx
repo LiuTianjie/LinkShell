@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import { describeActionError } from "@/lib/locale";
 import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -38,7 +39,8 @@ export function UnlockScreen() {
       haptics.success();
     } catch (reason) {
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      // A wrong password and "too many tries" come from the computer in its own words.
+      setError(describeActionError(reason));
       setPassword("");
     } finally {
       setBusy(false);

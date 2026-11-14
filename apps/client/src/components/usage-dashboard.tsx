@@ -224,7 +224,7 @@ export function UsageDashboard({ report }: { report: UsageReport }) {
       {silent.length ? (
         <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
           {silent.map((entry) => agentLook(entry.id, entry.label).short).join(", ")}:{" "}
-          {pick({ zh: "暂无记录。", en: "no usage logs.", ja: "記録なし。" })}
+          {pick({ zh: "暂无记录。", en: "No usage yet.", ja: "記録なし。" })}
         </Text>
       ) : null}
     </>

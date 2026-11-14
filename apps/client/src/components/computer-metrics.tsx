@@ -309,7 +309,7 @@ export function ComputerMetrics() {
                               paddingLeft: 8,
                               borderTopWidth: StyleSheet.hairlineWidth,
                               borderTopColor: colors.separator,
-                              opacity: pressed ? 0.65 : 1,
+                              opacity: pressed ? 0.6 : 1,
                             })}
                           >
                             <View style={{ flex: 1, gap: 2 }}>

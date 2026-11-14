@@ -56,7 +56,7 @@ const NO_COMPUTER_KEY = "none";
 
 function temporaryDisconnect(message: string): boolean {
   // Identity, pairing, account and other explicit refusals must remain visible immediately.
-  return /^(?:连接已断开|电脑不在线|电脑没有响应|连接电脑超时，请检查网络连接|连接网关超时|网络连接意外中断|网络请求失败，请检查网络连接|连接繁忙，正在重连|与网关的连接断开了|连不上网关|网关没有响应|没有连上网关|网关没有及时响应（[^）]*）|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
+  return /^(?:连接已断开|电脑不在线|电脑没有响应|连接电脑超时，请检查网络连接|连接网关超时|网络连接意外中断|网络请求失败，请检查网络连接|连接繁忙，正在重连|与网关的连接断开了|连不上网关|网关没有响应|没有连上网关|网关没有及时响应（[^）]*）|请求超时（[^）]*）|(?:连接已断开|正在重新连接)\s*\([^)]*\)|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
 }
 
 function fallbackComputer(): Computer {

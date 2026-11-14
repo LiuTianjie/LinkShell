@@ -169,6 +169,23 @@ export function PreviewContent({
     });
     return () => sub.remove();
   }, [fullscreen]);
+  // Android's back goes back in the page first, as a browser's does, and leaves the preview after that.
+  const canGoBack = !!nav?.canGoBack;
+  useEffect(() => {
+    if (fullscreen || !canGoBack || embedded) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      web.current?.goBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [fullscreen, canGoBack, embedded]);
+  // A page that failed while the computer was out of reach loads again once it is back.
+  const linkStatus = useClient((state) => state.status);
+  const failed = !!failure;
+  useEffect(() => {
+    if (linkStatus === "online" && failed) retry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the link coming back retries; a failure while online waits for the button.
+  }, [linkStatus]);
 
   const retry = () => {
     setFailure(null);
@@ -317,7 +334,12 @@ export function PreviewContent({
               {pick({ zh: `打不开 localhost:${port}`, en: `Cannot reach localhost:${port}`, ja: `localhost:${port} に接続できません` })}
             </Text>
             <Text style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>
-              {pick({
+              {linkStatus === "locked"
+                ? pick({ zh: "这台电脑设置了访问密码，输入后才能预览。", en: "This computer has an access password. Enter it to preview.", ja: "この PC にはアクセスパスワードがあります。入力するとプレビューできます。" })
+                : linkStatus !== "online"
+                  // Not the port's fault: nothing on the computer can be reached right now.
+                  ? pick({ zh: "电脑现在连不上，连上后会自动重新加载。", en: "The computer is out of reach. This reloads once it is back.", ja: "PC に接続できません。再接続されると自動で再読み込みします。" })
+                  : pick({
                 zh: "电脑上这个端口可能没有在运行服务，启动后再试。",
                 en: "No HTTP service appears to be listening on this port on your computer.",
                 ja: "PC 上でこのポートが起動していない可能性があります。起動後に再試行してください。",
@@ -366,10 +388,10 @@ export function PreviewContent({
                 paddingVertical: 6,
                 borderRadius: 999,
                 backgroundColor: colors.danger,
-                opacity: pressed || sendingErrors ? 0.75 : 1,
+                opacity: pressed || sendingErrors ? 0.6 : 1,
               })}
             >
-              <Text style={[type.caption, { color: "#ffffff", fontWeight: "600" }]}>
+              <Text style={[type.caption, { color: colors.plain, fontWeight: "600" }]}>
                 {t("ports.sendErrorsToAgent", { count: runtimeErrors.length })}
               </Text>
             </Pressable>

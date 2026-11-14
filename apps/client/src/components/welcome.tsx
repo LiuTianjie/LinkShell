@@ -60,7 +60,7 @@ export function Welcome() {
                 borderRadius: 999,
                 borderCurve: "continuous",
                 backgroundColor: active ? colors.accentSoft : colors.fill,
-                opacity: pressed ? 0.65 : 1,
+                opacity: pressed ? 0.6 : 1,
               })}
             >
               <Text style={[type.caption, { color: active ? colors.accent : colors.secondaryLabel, fontWeight: active ? "600" : "500" }]}>

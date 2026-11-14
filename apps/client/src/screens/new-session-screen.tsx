@@ -1,7 +1,8 @@
 import { displayModelName, type AgentInfo, type MethodResult } from "@linkshell/wire";
 import { router, useLocalSearchParams } from "expo-router";
 import Storage from "expo-sqlite/kv-store";
-import { useEffect, useMemo, useState } from "react";
+import { randomUUID } from "expo-crypto";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
@@ -17,6 +18,7 @@ import { onDirectoryPicked } from "@/lib/directory-pick";
 import { BROWSE_DIRECTORY_ACTION, QUICK_SESSION_ACTION, newSessionDirectory } from "@/lib/new-session-directory";
 import { sessionPreferences } from "@/lib/session-preferences";
 import { haptics } from "@/lib/haptics";
+import { describeActionError } from "@/lib/locale";
 import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
 import { agentLook, tierCopy } from "@/theme/agents";
@@ -70,10 +72,10 @@ function ChoiceCard({
       }}
     >
       {children}
-      <Text numberOfLines={1} style={[type.footnote, { color: colors.label, fontWeight: selected ? "700" : "500" }]}>
+      <Text numberOfLines={1} style={[type.footnote, { color: colors.label, fontWeight: selected ? "600" : "500" }]}>
         {label}
       </Text>
-      {note ? <Text style={[type.caption2, { color: colors.waiting }]}>{note}</Text> : null}
+      {note ? <Text style={[type.caption, { color: colors.secondaryLabel }]}>{note}</Text> : null}
     </Pressable>
   );
 }
@@ -99,7 +101,7 @@ export function NewSessionScreen() {
   const machine = useClient((state) => state.machine);
   const projects = useClient((state) => state.projects);
   const online = useClient((state) => state.status === "online");
-  const { createSession, send, agentModels } = useActions();
+  const { createSession, agentModels } = useActions();
 
   const agents = useMemo(() => (machine?.agents ?? []).filter((agent) => agent.installed && agent.tier !== "terminal"), [machine]);
   const remembered = sessionPreferences.read(machine?.machineId);
@@ -170,6 +172,10 @@ export function NewSessionScreen() {
   }));
   const unavailableModel = selectedModel && models && !listing?.error && !models.models.some((entry) => entry.value === selectedModel);
 
+  const notSignedIn = agents.filter((agent) => agent.auth?.state === "missing");
+  const missingAuth = notSignedIn.length
+    ? { names: notSignedIn.map((agent) => agentLook(agent.id, agent.label).short).join("、"), hint: notSignedIn.length === 1 ? notSignedIn[0]!.auth?.hint : undefined }
+    : undefined;
   const targetCwd = cwd;
   const ready = online && (terminal || (!!selectedAgent && usable(selectedAgent))) && targetCwd.length > 0 && !busy;
 
@@ -182,8 +188,20 @@ export function NewSessionScreen() {
     }
   };
 
+  // One id per thing asked for: after a timeout or a dropped link, tapping 开始 again repeats
+  // the same request, which the computer answers with the session it already made.
+  const createRequest = useRef<{ key: string; id: string }>(undefined);
+  const starting = useRef(false);
   const start = async () => {
-    if (!ready) return;
+    if (!ready || starting.current) return;
+    starting.current = true;
+    try {
+      await create();
+    } finally {
+      starting.current = false;
+    }
+  };
+  const create = async () => {
     setBusy(true);
     setError(null);
     haptics.medium();
@@ -195,7 +213,7 @@ export function NewSessionScreen() {
         openTerminal(created.id);
       } catch (reason) {
         haptics.error();
-        setError(reason instanceof Error ? reason.message : String(reason));
+        setError(describeActionError(reason));
         setBusy(false);
       }
       return;
@@ -206,15 +224,19 @@ export function NewSessionScreen() {
       const chosen = models && selectedModel && models.models.some((entry) => entry.value === selectedModel) ? selectedModel : undefined;
       const configEntries = (models?.config ?? []).filter((option) => pickedConfig[option.id] !== undefined && option.values.some((value) => value.value === pickedConfig[option.id]))
         .map((option) => [option.id, pickedConfig[option.id]!] as const);
-      const session = await createSession({ agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined, model: chosen, config: configEntries.length ? Object.fromEntries(configEntries) : undefined });
+      const text = prompt.trim();
+      const input = { agent: selectedAgent.id, cwd: targetCwd, worktree: (worktree && !!git) || undefined, model: chosen, config: configEntries.length ? Object.fromEntries(configEntries) : undefined };
+      const key = JSON.stringify([input, text]);
+      if (createRequest.current?.key !== key) createRequest.current = { key, id: randomUUID() };
+      // The first message travels with the request, so a session is never made without it.
+      const session = await createSession({ ...input, requestId: createRequest.current.id, prompt: text ? [{ type: "text", text }] : undefined, clientMessageId: text ? createRequest.current.id : undefined });
+      createRequest.current = undefined;
       remember(selectedAgent.id);
       router.dismiss();
       openSession(session.id);
-      const text = prompt.trim();
-      if (text) void send(session.id, [{ type: "text", text }]);
     } catch (reason) {
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(describeActionError(reason));
       setBusy(false);
     }
   };
@@ -268,6 +290,14 @@ export function NewSessionScreen() {
           ) : agents.length === 0 ? (
             <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
               {online ? "这台电脑上还没有可用的 Agent" : "连上电脑后才能新建会话"}
+            </Text>
+          ) : null}
+          {!online && (terminal || agents.length > 0) ? (
+            <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>电脑现在连不上，连上后才能开始</Text>
+          ) : null}
+          {missingAuth ? (
+            <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
+              {missingAuth.names} 还没登录{missingAuth.hint ? `：${missingAuth.hint}` : "，请先在电脑上登录"}
             </Text>
           ) : null}
           {!terminal && selectedAgent ? (
@@ -373,7 +403,7 @@ export function NewSessionScreen() {
               <Icon sf="folder.fill" md="folder" size={20} color={colors.accent} />
               <View style={{ flex: 1, gap: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text numberOfLines={1} style={[type.body, { flexShrink: 1, fontSize: 16, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
+                  <Text numberOfLines={1} style={[type.callout, { flexShrink: 1, color: cwd ? colors.label : colors.tertiaryLabel, fontWeight: "600" }]}>
                     {quick ? "快速会话" : cwd ? baseName(cwd) : "选择项目"}
                   </Text>
                   {branch ? <BranchTag branch={branch} font={type.footnote} max={20} /> : null}
@@ -479,7 +509,7 @@ function ModelRow({ name, note, menu = false, label = "模型", category = "mode
     >
       <Icon sf={category === "effort" ? "brain" : category === "mode" ? "lock.shield" : "cpu"} md={category === "effort" ? "psychology" : category === "mode" ? "shield" : "memory"} size={20} color={colors.accent} />
       <View style={{ flex: 1, gap: 1 }}>
-        <Text numberOfLines={1} style={[type.body, { fontSize: 16, color: colors.label, fontWeight: "600" }]}>{name}</Text>
+        <Text numberOfLines={1} style={[type.callout, { color: colors.label, fontWeight: "600" }]}>{name}</Text>
         {note ? <Text numberOfLines={2} style={[type.caption, { color: colors.tertiaryLabel }]}>{note}</Text> : null}
       </View>
       {menu ? <Icon sf="chevron.up.chevron.down" md="unfold_more" size={13} color={colors.tertiaryLabel} weight="semibold" /> : null}

@@ -23,7 +23,7 @@ import { Glass } from "@/components/glass";
 import { Icon } from "@/components/icon";
 import { StatusDot } from "@/components/status";
 import { ScrollableState } from "@/components/scrollable-state";
-import { EmptyState, LoadingState } from "@/components/state-views";
+import { EmptyState, LoadingState, LockedComputer, WaitingForComputer } from "@/components/state-views";
 import { TimelineSkeleton } from "@/components/timeline/skeleton";
 import { Timeline, type TimelineRef } from "@/components/timeline/timeline";
 import { TimelineFork, TimelineQuestions, TimelineSession, TimelineSide, TimelineWaiting, TimelineWrapUp } from "@/components/timeline/context";
@@ -34,9 +34,9 @@ import {
 } from "@/lib/coding-ux";
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
-import { useLocale } from "@/lib/locale";
+import { describeActionError, useLocale } from "@/lib/locale";
 import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
-import { fileChanges, sessionTitle } from "@/lib/describe";
+import { sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { BranchTag } from "@/components/branch-tag";
@@ -93,12 +93,12 @@ function HeaderTitle({
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <AgentTile agent={agent} size={28} />
       <View style={{ flexShrink: 1 }}>
-        <Text numberOfLines={1} style={{ fontSize: 15, lineHeight: 19, fontWeight: "600", color: colors.label }}>
+        <Text numberOfLines={1} style={[type.subhead, { fontWeight: "600", color: colors.label }]}>
           {title}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           {live ? <StatusDot /> : null}
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, lineHeight: 15, fontWeight: "500", color: colors.secondaryLabel }}>
+          <Text numberOfLines={1} style={[type.caption, { flexShrink: 1, fontWeight: "500", color: colors.secondaryLabel }]}>
             {subtitle}
           </Text>
           {branch ? (
@@ -118,7 +118,11 @@ function countChanges(items: TimelineItem[]): number {
   const paths = new Set<string>();
   for (const item of items) {
     if (item.kind !== "tool" || item.status === "failed") continue;
-    for (const change of fileChanges(item.content)) paths.add(change.path);
+    // Only which files, never the line diff: this runs again on every streamed chunk.
+    for (const entry of item.content) {
+      if (entry.type === "diff") paths.add(entry.path);
+      else if (entry.type === "patch") paths.add(entry.movePath ?? entry.path);
+    }
   }
   return paths.size;
 }
@@ -167,6 +171,8 @@ export function SessionContent({
   const loaded = useClient((state) => state.sessionsLoaded);
   const ready = useClient((state) => !!state.ready[id]);
   const online = useClient((state) => state.status === "online");
+  const linkStatus = useClient((state) => state.status);
+  const opening = useClient((state) => !!state.open[id] && !state.ready[id]);
   const connecting = useConnectionStatus() === "connecting";
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
@@ -303,7 +309,8 @@ export function SessionContent({
         pick({ zh: "要重新发送吗？", en: "Would you like to retry?", ja: "再送信しますか？" }),
         [
           { text: t("common.cancel"), style: "cancel" },
-          { text: t("session.delete"), style: "destructive", onPress: () => actions.discard(clientMessageId) },
+          // Only this unsent message goes, not the session.
+          { text: pick({ zh: "删除这条消息", en: "Delete Message", ja: "このメッセージを削除" }), style: "destructive", onPress: () => actions.discard(clientMessageId) },
           { text: t("common.retry"), onPress: () => void actions.retry(clientMessageId) },
         ],
       );
@@ -349,7 +356,7 @@ export function SessionContent({
         haptics.error();
         Alert.alert(
           pick({ zh: "分叉失败", en: "Fork failed", ja: "フォークに失敗しました" }),
-          reason instanceof Error ? reason.message : String(reason),
+          describeActionError(reason),
         );
       })
       .finally(() => setForking(false));
@@ -393,7 +400,7 @@ export function SessionContent({
       await work();
     } catch (error) {
       haptics.error();
-      Alert.alert(failure, error instanceof Error ? error.message : String(error));
+      Alert.alert(failure, describeActionError(error));
     }
   };
 
@@ -405,7 +412,14 @@ export function SessionContent({
           <ConnectionBanner />
         </View>
         <ScrollableState>
-          {loaded ? (
+          {linkStatus === "locked" ? (
+            <LockedComputer />
+          ) : online && opening ? (
+            // Not in the list's first page (archived, or older): the subscription's answer brings it.
+            <LoadingState label={t("common.loading")} />
+          ) : !online && !connecting ? (
+            <WaitingForComputer what={pick({ zh: "这段对话", en: "this conversation", ja: "この会話" })} />
+          ) : loaded && online ? (
             <EmptyState
               icon={{ sf: "questionmark.bubble", md: "help" }}
               title={pick({ zh: "找不到这个会话", en: "Session not found", ja: "セッションが見つかりません" })}
@@ -432,7 +446,10 @@ export function SessionContent({
   const canFork = tier !== "terminal" && online;
 
   const hasHistory = summary.lastSeq > 0 || !!summary.preview || !!summary.title;
-  const loading = !ready && !wasReady.current && !cachedAtOpen && online && hasHistory;
+  // History exists and none of it is here yet. Only a reachable computer can be waited on with a
+  // skeleton; out of reach, say so instead of offering to "start" a conversation that has one.
+  const awaiting = !ready && !wasReady.current && !cachedAtOpen && hasHistory;
+  const loading = awaiting && (online || connecting);
   const started =
     hasEarlier ||
     items.some(
@@ -466,7 +483,7 @@ export function SessionContent({
   ];
 
   const intro =
-    loading || started || hasDraft || view?.goal ? null : (
+    awaiting || started || hasDraft || view?.goal ? null : (
       <View style={{ alignItems: "center", gap: 12, paddingHorizontal: 28 }}>
         <AgentTile agent={summary.agent} size={56} />
         <View style={{ alignItems: "center", gap: 4 }}>
@@ -585,8 +602,8 @@ export function SessionContent({
                             : hasWorkflows
                               ? pick({ zh: "Agent 与工作流", en: "Agents & Workflows", ja: "Agent とワークフロー" })
                               : subagentsRunning
-                                ? pick({ zh: `子代理（${subagentsRunning}）`, en: `Subagents (${subagentsRunning})`, ja: `サブエージェント (${subagentsRunning})` })
-                                : pick({ zh: "子代理", en: "Subagents", ja: "サブエージェント" }),
+                                ? pick({ zh: `子 Agent（${subagentsRunning}）`, en: `Subagents (${subagentsRunning})`, ja: `サブエージェント (${subagentsRunning})` })
+                                : pick({ zh: "子 Agent", en: "Subagents", ja: "サブエージェント" }),
                           live: subagentsRunning > 0 || tasksRunning > 0,
                           onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                         },
@@ -697,7 +714,7 @@ export function SessionContent({
                             .catch((error: unknown) => {
                               Alert.alert(
                                 pick({ zh: "打开终端失败", en: "Failed to open terminal", ja: "ターミナルを開けませんでした" }),
-                                error instanceof Error ? error.message : String(error),
+                                describeActionError(error),
                               );
                             });
                         },
@@ -794,6 +811,7 @@ export function SessionContent({
                               progress: promptProgress,
                               online,
                               connecting,
+                              locked: linkStatus === "locked",
                               ready,
                               hasPermission: !!view?.permissions.length,
                               queued: shownQueue(summary.queue, queueing).length,
@@ -820,6 +838,11 @@ export function SessionContent({
             </Animated.View>
           ) : null}
           {loading ? <TimelineSkeleton label={t("common.loading")} top={headerConsumed ? 16 : headerHeight + 16} /> : null}
+          {awaiting && !loading ? (
+            <Animated.View pointerEvents="box-none" style={[{ position: "absolute", left: 0, right: 0, top: 0, justifyContent: "center" }, introFrame]}>
+              {linkStatus === "locked" ? <LockedComputer /> : <WaitingForComputer what={pick({ zh: "这段对话", en: "this conversation", ja: "この会話" })} />}
+            </Animated.View>
+          ) : null}
           <View pointerEvents="box-none" style={{ position: "absolute", left: 16, right: 16, top: headerConsumed ? 4 : headerHeight + 4, zIndex: 10 }}>
             <ConnectionBanner />
           </View>
@@ -884,7 +907,11 @@ export function SessionContent({
                     ) : null}
                   </>
                 }
-                onSend={commandControls.send}
+                onSend={(content) => {
+                  // Sent while reading back: what was just said is the thing to look at.
+                  listRef.current?.followNow();
+                  return commandControls.send(content);
+                }}
                 onStop={() => guard(() => actions.cancel(id), pick({ zh: "停止失败", en: "Stop failed", ja: "停止に失敗しました" }))}
                 queue={shownQueue(summary.queue, queueing)}
                 onUnqueue={(clientMessageId) =>

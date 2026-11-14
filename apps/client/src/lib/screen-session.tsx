@@ -1,4 +1,5 @@
 import { createContext, use, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { describeActionError } from "@/lib/locale";
 import { AppState, Platform, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
@@ -145,10 +146,23 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   }, [reset]);
   useEffect(() => () => { pauseWatchdog.clear(); lease.dispose(); }, [lease, pauseWatchdog]);
 
+  const failedAt = useRef(0);
+  useEffect(() => {
+    if (failure) failedAt.current = Date.now();
+  }, [failure]);
   const attach = useCallback((nextOwner: object) => {
     pauseWatchdog.clear();
     owner.current = nextOwner;
     lease.activate(nextOwner);
+    // Opening the screen again asks for it again: what failed on an earlier visit (taken over,
+    // idle, offline at the time) must not answer for this one. A session kept from a moment ago
+    // still has its picture and its path; a failure that only just happened stays on screen.
+    if (!lease.getSnapshot().resource && failedAt.current && Date.now() - failedAt.current > 2000) {
+      failedAt.current = 0;
+      setFailure(null);
+      setPlayback(resumeWith.current ?? initialPlayback());
+      resumeWith.current = null;
+    }
     sendSession(AppState.currentState === "active");
   }, [lease, pauseWatchdog, sendSession]);
   const detach = useCallback((previousOwner: object) => {
@@ -220,7 +234,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
           setDisplay(targetDisplay);
         }
       }).catch((reason: unknown) => {
-        if (lease.isCurrent(generation)) setFailure(reason instanceof Error ? reason.message : String(reason));
+        if (lease.isCurrent(generation)) setFailure(describeActionError(reason));
       });
     };
     // Waiting briefly is useful only before the first forward exists. A later bulk-path upgrade
@@ -377,7 +391,7 @@ function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable
     originWhitelist={["http://127.0.0.1*"]}
     onMessage={(event) => onMessage(viewer, event)}
     onLoadEnd={() => onLoaded(viewer)}
-    onError={({ nativeEvent }) => onUnavailable(viewer, nativeEvent.description || "屏幕页面加载失败，请重试")}
+    onError={() => onUnavailable(viewer, "屏幕页面加载失败，请重试")}
     // A stale token answers 403: without this the page stays blank behind the loading cover.
     onHttpError={({ nativeEvent }) => onUnavailable(viewer, nativeEvent.statusCode === 403 ? "屏幕连接已过期，请重新连接" : "屏幕页面加载失败，请重试")}
     onContentProcessDidTerminate={() => onUnavailable(viewer)}

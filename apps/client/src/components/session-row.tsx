@@ -326,7 +326,6 @@ export const SessionRow = memo(function SessionRow({
       branch={branch}
       detail={detail ?? (project || branch ? undefined : look.name)}
       detailColor={running ? colors.running : failed ? colors.danger : colors.secondaryLabel}
-      warn={failed}
       position={position}
       onPress={onPress ?? (() => openSession(session.id))}
       accessibilityLabel={[title, project, look.name, detail].filter(Boolean).join("，")}

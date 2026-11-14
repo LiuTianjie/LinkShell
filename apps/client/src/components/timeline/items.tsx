@@ -572,8 +572,8 @@ export const PermissionResult = memo(function PermissionResult({ item }: { item:
         sf={allowed ? "checkmark.shield.fill" : "xmark.shield.fill"}
         md={allowed ? "verified_user" : "gpp_bad"}
         size={14}
-        // A refusal is the user's choice, not a failure: grey, like the 拒绝 button that made it.
-        color={allowed ? colors.ok : colors.secondaryLabel}
+        // Allowing and refusing are both the user's choice, neither a success nor a failure: grey.
+        color={colors.secondaryLabel}
       />
       <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
         {allowed ? "已允许" : "已拒绝"} · {item.title}

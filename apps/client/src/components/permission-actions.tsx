@@ -5,6 +5,7 @@ import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
 import { permissionChoices, type PermissionChoice } from "@/lib/describe";
 import { haptics } from "@/lib/haptics";
+import { describeActionError } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Button } from "./button";
@@ -53,7 +54,7 @@ export function PermissionActions({
       await onChoose(choice.option.optionId);
     } catch (reason) {
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(describeActionError(reason));
       setBusy(null);
     }
   };

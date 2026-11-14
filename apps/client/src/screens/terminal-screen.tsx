@@ -1,4 +1,5 @@
 import { useTerminalFontSize, setTerminalFontSize, TERMINAL_FONT_MIN, TERMINAL_FONT_MAX, TERMINAL_FONT_DEFAULT } from "@/lib/terminal-preferences";
+import { describeActionError } from "@/lib/locale";
 import * as Clipboard from "expo-clipboard";
 import { File } from "expo-file-system";
 import { restoreTerminalRecording, restoreTerminalState } from "@/lib/terminal-replay";
@@ -263,17 +264,24 @@ export function TerminalScreen() {
 
   const handlePasteClipboard = useCallback(async () => {
     if (attaching.current) return;
+    let clip = "";
     try {
-      const clip = await Clipboard.getStringAsync();
-      if (clip) {
-        await pasteSafeChunked(clip);
-        haptics.selection();
-        return;
-      }
+      clip = await Clipboard.getStringAsync();
     } catch {
-      // Fall back to native pasteClipboard
+      // The clipboard couldn't be read from here: the native view pastes it itself, below.
     }
-    await view.current?.pasteClipboard().catch(() => {});
+    if (!clip) {
+      await view.current?.pasteClipboard().catch(() => {});
+      return;
+    }
+    try {
+      await pasteSafeChunked(clip);
+      haptics.selection();
+    } catch (reason) {
+      // Part of it may already be in the terminal: pasting it all again would type that part twice.
+      haptics.error();
+      Alert.alert("粘贴没有完成", describeActionError(reason));
+    }
   }, [pasteSafeChunked]);
 
   const handleKey = useCallback(
@@ -447,6 +455,10 @@ export function TerminalScreen() {
     haptics.medium();
     void link.call("terminals.create", { cwd: info.cwd, command: info.command, cols: info.cols, rows: info.rows }).then(({ terminal }) => {
       router.replace({ pathname: "/terminal/[id]", params: { id: terminal.id } });
+    }).catch((reason: unknown) => {
+      // The computer's limit on terminals, a folder that is gone: say it, or the tap did nothing.
+      haptics.error();
+      Alert.alert("没能重新运行", describeActionError(reason));
     });
   };
 

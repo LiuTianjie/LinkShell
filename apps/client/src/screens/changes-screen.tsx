@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+import { errorCode } from "@/lib/action-error";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from "react-native";
 import type { Locale } from "@linkshell/client-core";
@@ -175,7 +176,7 @@ function FileRow({
               paddingVertical: 4,
               borderRadius: 999,
               backgroundColor: colors.fill,
-              opacity: reverting ? 0.45 : pressed ? 0.65 : 1,
+              opacity: reverting ? 0.45 : pressed ? 0.6 : 1,
             })}
           >
             {reverting ? (
@@ -280,8 +281,10 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
       setGitBranch(res.branch);
       setGitTruncated(res.truncated);
       setGitSupported(true);
-    } catch {
-      setGitSupported(false);
+    } catch (reason) {
+      // Only a computer that cannot do this at all loses the tab. A timeout or a dropped link
+      // falls back to the session's own changes and leaves the tab there to try again.
+      if (errorCode(reason) === "host_outdated") setGitSupported(false);
       setMode("session");
     } finally {
       setGitLoading(false);
@@ -475,7 +478,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
                 backgroundColor: colors.fill,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: pressed ? 0.65 : 1,
+                opacity: pressed ? 0.6 : 1,
               })}
             >
               {gitLoading ? (

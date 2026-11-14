@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { gatewayAddress } from "@/lib/gateway-address";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, View } from "react-native";
@@ -9,7 +10,7 @@ import { pairByCode, pairByLink } from "@linkshell/client-core";
 import { decodePairingLink, type PairingLink } from "@linkshell/wire";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
-import { DEFAULT_GATEWAY, relayFor, useComputers } from "@/lib/computers";
+import { DEFAULT_GATEWAY, relayFor, useComputers, dropRelayIfUnused } from "@/lib/computers";
 import { useContentWidth } from "@/lib/content-width";
 import { haptics } from "@/lib/haptics";
 import { deviceIdentity } from "@/lib/identity";
@@ -30,11 +31,20 @@ function friendly(error: unknown): string {
   const code = (error as { code?: string }).code;
   if (code === "pairing_expired") return "配对码不对或已过期，请在电脑上重新运行 linkshell pair";
   if (code === "pairing_refused") return "电脑拒绝了这次配对，请确认二维码或配对码是最新的";
-  if (code === "machine_offline") return "电脑现在不在线";
+  if (code === "machine_offline") return "电脑现在不在线，请确认电脑上的 LinkShell 正在运行，再重新运行 linkshell pair";
   if (code === "rate_limited") return "尝试太频繁了，请稍等一分钟";
-  if (code === "offline" || code === "timeout") return "连不上网关，请检查网络";
+  if (code === "offline" || code === "timeout" || code === "closed") return "连不上网关，请检查网络后再试";
+  // What is left without a word of Chinese is a decoding error ("invalid base64"): the link itself is damaged.
+  if (!/[\u4e00-\u9fff]/.test(message)) return "二维码或链接的内容不完整，请在电脑上重新运行 linkshell pair";
   return message;
 }
+
+/** A failure the same code can get past by itself (the network), unlike a code that is wrong or used up. */
+function transient(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === "offline" || code === "timeout" || code === "closed" || code === "rate_limited" || code === "machine_offline";
+}
+
 
 /**
  * Add a computer: scan the QR from `linkshell pair` (or open its link from
@@ -63,8 +73,12 @@ export function PairScreen() {
     router.navigate("/");
   }, []);
 
+  // The QR code that just failed for good, and the last thing scanned that isn't a pairing code:
+  // the camera sees the same picture many times a second, and each is answered once.
+  const refused = useRef<string | null>(null);
+  const notPairing = useRef<string | null>(null);
   const runLink = useCallback(
-    async (link: PairingLink) => {
+    async (link: PairingLink, scanned?: string) => {
       if (handled.current) return;
       handled.current = true;
       setError(null);
@@ -76,8 +90,11 @@ export function PairScreen() {
         haptics.error();
         setError(friendly(reason));
         setBusy(null);
-        // Let the camera try again after a moment.
-        setTimeout(() => (handled.current = false), 1500);
+        // A code that is wrong or used up stays so however often it is scanned (and each try
+        // counts against the gateway's limit): wait for another one. The network may come back.
+        if (scanned && !transient(reason)) refused.current = scanned;
+        dropRelayIfUnused(link.gateway);
+        setTimeout(() => (handled.current = false), transient(reason) ? 5000 : 1500);
       }
     },
     [finish],
@@ -92,12 +109,19 @@ export function PairScreen() {
 
   const runCode = async (digits: string) => {
     if (digits.length !== 6 || busy) return;
+    const address = gatewayAddress(gateway);
+    if (!address) {
+      haptics.error();
+      setError("网关地址格式不对，例如 wss://gateway.example.com");
+      return;
+    }
     setError(null);
     setBusy("正在配对…");
     try {
-      const machine = await pairByCode(relayFor(gateway), deviceIdentity(), digits);
-      finish(gateway, machine);
+      const machine = await pairByCode(relayFor(address), deviceIdentity(), digits);
+      finish(address, machine);
     } catch (reason) {
+      dropRelayIfUnused(address);
       haptics.error();
       setError(friendly(reason));
       setBusy(null);
@@ -127,7 +151,7 @@ export function PairScreen() {
             width: permission?.granted ? cameraSize : "100%",
             height: permission?.granted ? cameraSize : undefined,
             alignSelf: "center",
-            borderRadius: permission?.granted ? 28 : 20,
+            borderRadius: permission?.granted ? radius.panel : radius.card,
             borderCurve: "continuous",
             overflow: "hidden",
             backgroundColor: permission?.granted ? "#000000" : colors.sheetCard,
@@ -145,8 +169,14 @@ export function PairScreen() {
                   busy
                     ? undefined
                     : ({ data }) => {
+                        if (data === refused.current || data === notPairing.current) return;
                         const link = decodePairingLink(data);
-                        if (link) void runLink(link);
+                        if (link) void runLink(link, data);
+                        else {
+                          notPairing.current = data;
+                          haptics.error();
+                          setError("这不是 LinkShell 的配对二维码，请扫描电脑上 linkshell pair 显示的二维码");
+                        }
                       }
                 }
               />

@@ -29,7 +29,7 @@ import { commandDetail, commandQuery, matchCommands, normalizeCommandText } from
 import { haptics } from "@/lib/haptics";
 import { imageMimeType } from "@/lib/image-type";
 import { isRisky, isToggle, modelChipLabel, optionLabel, valueHint, valueLabel } from "@/lib/labels";
-import { useLocale, type LocalizedTriplet } from "@/lib/locale";
+import { describeActionError, useLocale, type LocalizedTriplet } from "@/lib/locale";
 import { queuedSendAction } from "@/lib/queued-send-action";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
@@ -49,6 +49,7 @@ import { UsageRing } from "./usage-ring";
 import { VoiceInputBar } from "./voice-input-bar";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_ATTACHMENTS = 4;
 /** How far the cards' glass shadow reaches past them (pt); the composer's side padding bounds `side`. */
 const CARD_SHADOW = { top: 10, side: 10, bottom: 14 };
 
@@ -96,6 +97,16 @@ export interface ComposerProps {
 }
 
 type Blocked = { title: string; detail?: string } | null;
+
+/** A picked file's name back from the `attachment:` URI it was sent under. */
+function resourceName(uri: string): string {
+  const name = uri.replace(/^attachment:/, "");
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
 
 function blockedReason(props: ComposerProps, pick: (copy: LocalizedTriplet) => string): Blocked {
   const name = agentLook(props.agent).short;
@@ -265,10 +276,18 @@ export function Composer(props: ComposerProps) {
       }
       const result = camera ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
       if (result.canceled) return;
-      const picked = result.assets
-        .filter((asset) => asset.base64 && asset.base64.length * 0.75 <= MAX_IMAGE_BYTES)
+      const readable = result.assets.filter((asset) => !!asset.base64);
+      const picked = readable
+        .filter((asset) => asset.base64!.length * 0.75 <= MAX_IMAGE_BYTES)
         .map((asset) => ({ uri: asset.uri, mimeType: imageMimeType(asset.base64!, asset.mimeType), data: asset.base64! }));
-      if (picked.length < result.assets.length) {
+      if (readable.length < result.assets.length) {
+        // Not a size problem: the system handed over no data (a photo still in iCloud, say).
+        Alert.alert(
+          pick({ zh: "有图片没能读取", en: "Some images couldn't be read", ja: "読み込めない画像がありました" }),
+          pick({ zh: "系统没有给出图片内容，可以等它下载到本机后再选一次。", en: "The system returned no data for them. Wait until they are downloaded to this device and pick again.", ja: "画像データを取得できませんでした。端末にダウンロードされてからもう一度選択してください。" }),
+        );
+      }
+      if (picked.length < readable.length) {
         Alert.alert(
           pick({ zh: "图片超过 5 MB 上限", en: "Image exceeds 5 MB limit", ja: "画像が 5 MB の上限を超えています" }),
           pick({
@@ -279,7 +298,9 @@ export function Composer(props: ComposerProps) {
         );
       }
       if (picked.length) {
-        setAttachments((current) => [...current, ...picked].slice(0, 4));
+        const room = Math.max(0, MAX_ATTACHMENTS - attachments.length);
+        if (picked.length > room) showFlash(pick({ zh: `最多 ${MAX_ATTACHMENTS} 个附件，多出的没有添加`, en: `Up to ${MAX_ATTACHMENTS} attachments; the rest were not added`, ja: `添付は最大 ${MAX_ATTACHMENTS} 件です。残りは追加されませんでした` }));
+        setAttachments((current) => [...current, ...picked].slice(0, MAX_ATTACHMENTS));
         haptics.selection();
       }
     } catch (error) {
@@ -301,7 +322,8 @@ export function Composer(props: ComposerProps) {
         const decoded = bytes.toString("utf8");
         const docText = !audio && (/^text\//.test(mimeType) || /\.(md|txt|json|csv|ts|tsx|js|jsx|py|swift|rs|go|yaml|yml)$/i.test(asset.name)) && Buffer.from(decoded).equals(bytes) ? decoded : undefined;
         const picked: DraftAttachment = { kind: audio ? "audio" : "resource", name: asset.name, uri: `attachment:${encodeURIComponent(asset.name)}`, mimeType, data: bytes.toString("base64"), text: docText };
-        setAttachments((current) => [...current, picked].slice(0, 4));
+        if (attachments.length >= MAX_ATTACHMENTS) showFlash(pick({ zh: `最多 ${MAX_ATTACHMENTS} 个附件，多出的没有添加`, en: `Up to ${MAX_ATTACHMENTS} attachments; the rest were not added`, ja: `添付は最大 ${MAX_ATTACHMENTS} 件です。残りは追加されませんでした` }));
+        setAttachments((current) => [...current, picked].slice(0, MAX_ATTACHMENTS));
       } finally {
         if (file.uri.startsWith(Paths.cache.uri)) {
           try { file.delete(); } catch { /* Cache eviction is best effort. */ }
@@ -338,19 +360,17 @@ export function Composer(props: ComposerProps) {
         : { type: attachment.kind === "audio" ? "audio" : "image", mimeType: attachment.mimeType, data: attachment.data }),
       ...(body ? [{ type: "text" as const, text: normalizeCommandText(body) }] : []),
     ];
-    if (overrideText === undefined) {
-      setText("");
-      setAttachments([]);
-    }
+    // Also for a message sent by voice: its words are already in the input, and left there a
+    // second tap on send would say them again.
+    setText("");
+    setAttachments([]);
     try {
       const delivery = await props.onSend(content);
       if (delivery === "steered") showFlash(pick({ zh: "已插话，正在调整方向", en: "Steered into current turn", ja: "現在のターンに指示を反映しました" }));
       else if (delivery === "failed") haptics.error();
     } catch (error) {
-      if (overrideText === undefined) {
-        setText((current) => current || text);
-        setAttachments((current) => current.length ? current : attachments);
-      }
+      setText((current) => current || (overrideText ?? text));
+      setAttachments((current) => current.length ? current : attachments);
       Alert.alert(pick({ zh: "命令未执行", en: "Command failed", ja: "送信できませんでした" }), error instanceof Error ? error.message : String(error));
     }
   };
@@ -382,16 +402,30 @@ export function Composer(props: ComposerProps) {
   }, [autoStartVoice, focused, inputDisabled, onAutoStartVoiceConsumed, startVoice]);
 
   const editQueued = async (clientMessageId: string) => {
-    const content = await props.onTakeQueued(clientMessageId).catch(() => undefined);
-    if (!content) return;
+    let content: ContentBlock[] | undefined;
+    try {
+      content = await props.onTakeQueued(clientMessageId);
+    } catch (error) {
+      Alert.alert(pick({ zh: "没能取回这条消息", en: "Couldn't take the message back", ja: "メッセージを取り消せませんでした" }), describeActionError(error));
+      return;
+    }
+    if (!content) {
+      // It left the queue between the tap and the computer's answer.
+      showFlash(pick({ zh: "这条消息已经发出，无法再编辑", en: "Already sent; it can no longer be edited", ja: "すでに送信されたため編集できません" }));
+      return;
+    }
+    const queued = props.queue?.find((entry) => entry.clientMessageId === clientMessageId);
+    const pictures = content.filter((block) => block.type === "image").length;
+    // Queued from another device: the computer's queue only counts pictures, it doesn't hold them.
+    if (queued && queued.images > pictures) showFlash(pick({ zh: "图片不在这台手机上，只取回了文字", en: "Its pictures aren't on this phone; only the text came back", ja: "画像はこの端末にないため、テキストのみ戻しました" }));
     const words = content.map((block) => (block.type === "text" ? block.text : "")).join("").trim();
     const images = content.flatMap((block): DraftAttachment[] =>
       (block.type === "image" || block.type === "audio") && block.data
         ? [{ kind: block.type, uri: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType, data: block.data }]
-        : block.type === "resource" ? [{ kind: "resource", uri: block.resource.uri, name: block.resource.uri, mimeType: block.resource.mimeType ?? "application/octet-stream", data: block.resource.blob ?? "", text: block.resource.text }] : [],
+        : block.type === "resource" ? [{ kind: "resource", uri: block.resource.uri, name: resourceName(block.resource.uri), mimeType: block.resource.mimeType ?? "application/octet-stream", data: block.resource.blob ?? "", text: block.resource.text }] : [],
     );
     if (words) setText((current) => [words, current.trim()].filter(Boolean).join("\n\n"));
-    if (images.length) setAttachments((current) => [...images, ...current].slice(0, 4));
+    if (images.length) setAttachments((current) => [...images, ...current].slice(0, MAX_ATTACHMENTS));
   };
 
   const stop = async () => {
@@ -404,8 +438,12 @@ export function Composer(props: ComposerProps) {
     }
   };
 
+  // A question takes typed words as its answer. An approval doesn't: the turn is held on it, and
+  // what is typed now waits in the queue behind it.
   const placeholder = permission
-    ? pick({ zh: "或者直接告诉它该怎么做…", en: "Or type instructions directly…", ja: "または直接指示を入力…" })
+    ? permission.questions?.length
+      ? pick({ zh: "或者直接告诉它该怎么做…", en: "Or type instructions directly…", ja: "または直接指示を入力…" })
+      : pick({ zh: "先处理上面的请求，消息会排在它后面", en: "Answer the request above first; messages queue behind it", ja: "先に上のリクエストに応答してください。メッセージはその後に送信されます" })
     : turnActive
       ? pick({ zh: `排队一条消息，${name} 忙完这一轮就发`, en: `Queue a message for ${name}…`, ja: `${name} の次のターンに予約送信…` })
       : t("composer.placeholder");
@@ -556,7 +594,8 @@ export function Composer(props: ComposerProps) {
                     contained
                     key={permission.requestId}
                     request={permission}
-                    count={totalPermissions}
+                    // The pager above already says which of them this is.
+                    count={1}
                     agentName={name}
                     disabled={!props.online}
                     onAnswer={props.onAnswer}
@@ -680,7 +719,7 @@ export function Composer(props: ComposerProps) {
                     disabled={!props.online || !!blocked}
                     onSelectConfig={(optionId, value) =>
                       void setConfig(props.sessionId, optionId, value).catch((error: unknown) =>
-                        Alert.alert("切换失败", error instanceof Error ? error.message : String(error)),
+                        Alert.alert(pick({ zh: "切换失败", en: "Couldn't switch", ja: "切り替えに失敗しました" }), describeActionError(error)),
                       )
                     }
                     onMoreSettings={props.onSettings}
@@ -746,7 +785,7 @@ export function Composer(props: ComposerProps) {
                 borderRadius: 999,
                 borderCurve: "continuous",
                 backgroundColor: colors.card,
-                opacity: pressed ? 0.65 : 1,
+                opacity: pressed ? 0.6 : 1,
               })}
             >
               <Icon sf="bolt.fill" md="bolt" size={11} color={colors.accent} />
@@ -771,7 +810,7 @@ export function Composer(props: ComposerProps) {
               borderRadius: 999,
               borderCurve: "continuous",
               backgroundColor: colors.fill,
-              opacity: pressed ? 0.65 : 1,
+              opacity: pressed ? 0.6 : 1,
             })}
           >
             <Icon sf="plus" md="add" size={12} color={colors.secondaryLabel} />
@@ -799,7 +838,8 @@ export function Composer(props: ComposerProps) {
                 value={text}
                 onChangeText={setText}
                 onSelectionChange={(e) => setSelectionEnd(e.nativeEvent.selection.end)}
-                editable={!inputDisabled}
+                // Typing goes on through a reconnect: only sending waits for the computer.
+                editable={!desktopDriving && !(blocked && props.online)}
                 multiline
                 placeholder={
                   blocked
@@ -852,7 +892,7 @@ export function Composer(props: ComposerProps) {
                           disabled={!props.online || !!blocked}
                           onSelectConfig={(optionId, value) =>
                             void setConfig(props.sessionId, optionId, value).catch((error: unknown) =>
-                              Alert.alert("切换失败", error instanceof Error ? error.message : String(error)),
+                              Alert.alert(pick({ zh: "切换失败", en: "Couldn't switch", ja: "切り替えに失敗しました" }), describeActionError(error)),
                             )
                           }
                           onMoreSettings={props.onSettings}

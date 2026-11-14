@@ -12,6 +12,7 @@ import {
   type LocaleStorage,
 } from "@linkshell/client-core";
 import Storage from "expo-sqlite/kv-store";
+import { actionErrorText } from "./action-error";
 import { useCallback, useSyncExternalStore } from "react";
 
 export {
@@ -127,4 +128,9 @@ export function useLocale() {
     pick,
     speechLocale: dateLocaleTag(locale),
   };
+}
+
+/** A failed action in the app's language, without the RPC layer's method names (see `actionErrorText`). */
+export function describeActionError(error: unknown): string {
+  return actionErrorText(error, getMobileLocale());
 }

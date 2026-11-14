@@ -46,7 +46,7 @@ export function PermissionPager({
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: colors.fill,
-          opacity: !canPrev ? 0.35 : pressed ? 0.65 : 1,
+          opacity: !canPrev ? 0.35 : pressed ? 0.6 : 1,
         })}
       >
         <Icon sf="chevron.left" md="chevron_left" size={12} color={colors.label} weight="semibold" />
@@ -71,7 +71,7 @@ export function PermissionPager({
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: colors.fill,
-          opacity: !canNext ? 0.35 : pressed ? 0.65 : 1,
+          opacity: !canNext ? 0.35 : pressed ? 0.6 : 1,
         })}
       >
         <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.label} weight="semibold" />

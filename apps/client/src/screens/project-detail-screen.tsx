@@ -104,7 +104,7 @@ function UnusedWorktrees({ source, sessionCount }: { source: string; sessionCoun
                 accessibilityRole="button"
                 accessibilityLabel={`删除 worktree ${entry.branch}`}
                 hitSlop={8}
-                style={({ pressed }) => ({ alignSelf: stacked ? "flex-end" : undefined, paddingHorizontal: 8, paddingVertical: 8, opacity: pressed ? 0.5 : 1 })}
+                style={({ pressed }) => ({ alignSelf: stacked ? "flex-end" : undefined, paddingHorizontal: 8, paddingVertical: 8, opacity: pressed ? 0.6 : 1 })}
               >
                 <Text style={[type.subhead, { color: colors.danger }]}>删除</Text>
               </Pressable>

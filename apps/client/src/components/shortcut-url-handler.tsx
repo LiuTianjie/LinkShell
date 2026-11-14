@@ -60,6 +60,18 @@ export function ShortcutUrlHandler() {
     return () => sub.remove();
   }, []);
 
+  // "Approve the latest" means the one waiting now. If the computer can't be reached soon, the
+  // request is dropped for the list of what waits: never an approval handed out minutes later
+  // to whatever happens to be newest then.
+  useEffect(() => {
+    if (pendingAction !== "approve-latest") return;
+    const timer = setTimeout(() => {
+      setPendingAction(null);
+      router.push({ pathname: "/activity", params: { filter: "attention" } });
+    }, 20_000);
+    return () => clearTimeout(timer);
+  }, [pendingAction]);
+
   useEffect(() => {
     if (!pendingAction || !navigation?.key) return;
     const allSessions = mergeLiveViewsIntoSessions(Object.values(sessions), views).filter((s) => !s.archived);
@@ -89,7 +101,8 @@ export function ShortcutUrlHandler() {
         return;
       }
       const perm = target.permission;
-      if (perm.questions && perm.questions.length > 0) {
+      // A question needs its answer and an authorization link its page: neither is a one-tap approval.
+      if ((perm.questions && perm.questions.length > 0) || perm.url) {
         router.push({ pathname: "/session/[id]", params: { id: target.id } });
         return;
       }

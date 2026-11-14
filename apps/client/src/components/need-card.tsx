@@ -1,9 +1,11 @@
 import type { SessionSummary } from "@linkshell/wire";
 import { memo } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressableFeedback } from "./pressable-feedback";
 import { Text } from "@/components/fixed-text";
 import { useActions, useClient } from "@/lib/client";
 import { sessionTitle, needsUserInput } from "@/lib/describe";
+import { useLocale } from "@/lib/locale";
 import { baseName, relativeTime } from "@/lib/format";
 import { agentLook } from "@/theme/agents";
 import { colors } from "@/theme/colors";
@@ -16,13 +18,17 @@ import { openSession, SessionAvatar } from "./session-row";
 /** A session waiting on the user, with its approval right on the card. */
 export const NeedCard = memo(function NeedCard({ session, now, onPress }: { session: SessionSummary; now: number; onPress?: () => void }) {
   const { respond } = useActions();
+  const { pick } = useLocale();
   const online = useClient((state) => state.status === "online");
   const permission = session.permission;
   const question = session.asyncQuestions?.[0];
   const asks = permission ? !!permission.questions?.length : needsUserInput(session);
+  // An authorization link is only opened from the session, where its address is shown first:
+  // accepting here would tell the agent "opened" without any page having been opened.
+  const inSession = asks || !!permission?.url;
   const extra = Math.max(0, session.pendingPermissions + (session.asyncQuestions?.length ?? 0) - 1);
 
-  const prompt = permission?.questions?.[0]?.text ?? question?.title ?? permission?.title ?? "需要你的确认";
+  const prompt = permission?.questions?.[0]?.text ?? question?.title ?? permission?.title ?? pick({ zh: "等你确认", en: "Waiting for your approval", ja: "承認待ち" });
 
   return (
     <View
@@ -34,10 +40,11 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
         gap: 12,
       }}
     >
-      <Pressable
+      <PressableFeedback
+        feedback="button"
         onPress={onPress ?? (() => openSession(session.id))}
         accessibilityRole="button"
-        accessibilityLabel={`打开 ${sessionTitle(session)}`}
+        accessibilityLabel={pick({ zh: `打开 ${sessionTitle(session)}`, en: `Open ${sessionTitle(session)}`, ja: `${sessionTitle(session)} を開く` })}
         style={{ flexDirection: "row", gap: 12, alignItems: "center" }}
       >
         <SessionAvatar session={session} size={32} />
@@ -55,7 +62,7 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
           </View>
         </View>
         <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
-      </Pressable>
+      </PressableFeedback>
 
       <View style={{ gap: 6 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -69,7 +76,7 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
             {prompt}
           </Text>
           {extra ? (
-            <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500" }]}>还有 {extra} 项</Text>
+            <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500" }]}>{pick({ zh: `还有 ${extra} 项`, en: `${extra} more`, ja: `他 ${extra} 件` })}</Text>
           ) : null}
         </View>
         {permission?.detail && permission.detail !== prompt ? (
@@ -81,11 +88,11 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
         ) : null}
       </View>
 
-      {asks ? (
+      {inSession ? (
         // Questions are answered in the session, where there is room for them.
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={[type.footnote, { color: colors.waiting }]}>等你回答</Text>
-          <Button title="回答" variant="tonal" icon={{ sf: "arrow.right", md: "arrow_forward" }} onPress={onPress ?? (() => openSession(session.id))} />
+          <Text style={[type.footnote, { color: colors.waiting }]}>{asks ? pick({ zh: "等你回答", en: "Waiting for your answer", ja: "回答待ち" }) : pick({ zh: "等你确认", en: "Waiting for your approval", ja: "承認待ち" })}</Text>
+          <Button title={asks ? pick({ zh: "回答", en: "Answer", ja: "回答" }) : pick({ zh: "查看", en: "Review", ja: "確認" })} variant="tonal" icon={{ sf: "arrow.right", md: "arrow_forward" }} onPress={onPress ?? (() => openSession(session.id))} />
         </View>
       ) : permission ? (
         <PermissionActions

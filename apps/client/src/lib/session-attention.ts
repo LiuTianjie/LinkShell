@@ -145,7 +145,11 @@ export function mergeLiveViewsIntoSessions(
 ): SessionSummary[] {
   if (!views && !promptProgress) return sessions;
   return sessions.map((session) => {
-    const view = views?.[session.id];
+    // A view only follows its session while that session is open; after it is closed it keeps
+    // what it last saw (a running turn, a pending approval). The summary is newer once the
+    // computer has logged events the view never got, and then the summary alone is right.
+    const cached = views?.[session.id];
+    const view = cached && cached.lastSeq >= session.lastSeq ? cached : undefined;
     const progress = promptProgress?.[session.id];
     if (!view && !progress) return session;
     const isTurnActive = Boolean(

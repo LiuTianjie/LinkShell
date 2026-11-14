@@ -174,7 +174,7 @@ export function AccountMembership({ userId, embedded = false }: { userId: string
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: pressed ? colors.fill : undefined,
-              opacity: pressed ? 0.65 : 1,
+              opacity: pressed ? 0.6 : 1,
             })}
           >
             {loading ? (

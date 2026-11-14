@@ -7,6 +7,7 @@ import { useKeyboardState } from "react-native-keyboard-controller";
 import { useConnection } from "@/lib/client";
 import { useContentHeight } from "@/lib/content-height";
 import { haptics } from "@/lib/haptics";
+import { describeActionError, useLocale } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
 import { Button } from "./button";
@@ -42,6 +43,9 @@ function Field({
   onChange: (next: { values: string[]; other: string }) => void;
 }) {
   const many = question.kind === "choices";
+  const { pick: say } = useLocale();
+  const multiple = say({ zh: "可多选", en: "Choose any", ja: "複数選択可" });
+  const answerHere = say({ zh: "输入你的回答", en: "Type your answer", ja: "回答を入力" });
   const pick = (value: string) => {
     haptics.selection();
     if (many) onChange({ ...entry, values: entry.values.includes(value) ? entry.values.filter((v) => v !== value) : [...entry.values, value] });
@@ -54,10 +58,10 @@ function Field({
         {question.header ? (
           <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>
             {question.header}
-            {many ? " · 可多选" : ""}
+            {many ? ` · ${multiple}` : ""}
           </Text>
         ) : many ? (
-          <Text style={[type.caption, { color: colors.secondaryLabel }]}>可多选</Text>
+          <Text style={[type.caption, { color: colors.secondaryLabel }]}>{multiple}</Text>
         ) : null}
         <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>{question.text}</Text>
       </View>
@@ -93,7 +97,7 @@ function Field({
             <View style={{ flex: 1, gap: 1 }}>
               <Text style={[type.subhead, { color: colors.label, fontWeight: selected ? "600" : "400" }]}>
                 {label.text}
-                {label.recommended ? <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{"  推荐"}</Text> : null}
+                {label.recommended ? <Text style={[type.caption, { color: colors.accent, fontWeight: "600" }]}>{`  ${say({ zh: "推荐", en: "Recommended", ja: "おすすめ" })}`}</Text> : null}
               </Text>
               {option.description ? <Text style={[type.caption, { color: colors.secondaryLabel }]}>{option.description}</Text> : null}
             </View>
@@ -110,10 +114,10 @@ function Field({
           autoCapitalize="none"
           autoCorrect={!question.secret}
           keyboardType={question.constraints?.type === "integer" || question.constraints?.type === "number" ? "numbers-and-punctuation" : question.constraints?.format === "email" ? "email-address" : "default"}
-          placeholder={typed ? "输入你的回答" : question.options?.length ? "或者自己写" : "输入你的回答"}
+          placeholder={typed || !question.options?.length ? answerHere : say({ zh: "或者自己写", en: "Or write your own", ja: "または自分で入力" })}
           placeholderTextColor={colors.placeholder as string}
           selectionColor={colors.accent}
-          accessibilityLabel={typed ? question.text : "自己写一个回答"}
+          accessibilityLabel={typed ? question.text : say({ zh: "自己写一个回答", en: "Write your own answer", ja: "自分で回答を入力" })}
           style={[
             type.subhead,
             { color: colors.label, backgroundColor: colors.fill, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, maxHeight: 110 },
@@ -150,6 +154,7 @@ export function QuestionCard({
   onChoose: (requestId: string, optionId: string) => Promise<void>;
 }) {
   const questions = request.questions ?? [];
+  const { pick: say } = useLocale();
   const { computer } = useConnection();
   const key = JSON.stringify([computer.key, sessionId, request.requestId]);
   const snapshot = useCallback(() => pendingDrafts.get(key) ?? EMPTY_DRAFT, [key]);
@@ -158,7 +163,7 @@ export function QuestionCard({
     const value = { ...draft, [questionId]: entry };
     saveDraft(key, value);
   };
-  const [busy, setBusy] = useState<"answer" | "skip" | null>(null);
+  const [busy, setBusy] = useState<"answer" | "skip" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const height = useContentHeight();
   const keyboardHeight = useKeyboardState((state) => state.height);
@@ -173,8 +178,10 @@ export function QuestionCard({
   const validation = questions.map((question) => questionAnswerError(question, answers.find((answer) => answer.id === question.id))).find(Boolean);
   const ready = !validation;
   const skip = request.options.find((option) => option.optionId === "skip");
+  // The computer also offers to stop the turn here; leaving it out left no way to do that from the card.
+  const stop = request.options.find((option) => option.optionId === "cancel");
 
-  const run = async (kind: "answer" | "skip", action: () => Promise<void>) => {
+  const run = async (kind: "answer" | "skip" | "stop", action: () => Promise<void>) => {
     if (busy) return;
     setBusy(kind);
     setError(null);
@@ -184,7 +191,7 @@ export function QuestionCard({
       for (const listener of draftListeners) listener();
     } catch (reason) {
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(describeActionError(reason));
       setBusy(null);
     }
   };
@@ -204,7 +211,7 @@ export function QuestionCard({
         {/* Waiting on the user, so amber, as the approval card is. */}
         <Icon sf="questionmark.bubble.fill" md="help" size={15} color={colors.waiting} />
         <Text numberOfLines={1} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
-          {agentName} 想问你
+          {say({ zh: `${agentName} 想问你`, en: `${agentName} has a question`, ja: `${agentName} からの質問` })}
         </Text>
         {count > 1 ? <Text style={[type.caption, { color: colors.waiting, fontWeight: "600" }]}>1/{count}</Text> : null}
       </View>
@@ -224,10 +231,14 @@ export function QuestionCard({
       {validation && Object.keys(draft).length ? <Text style={[type.caption, { color: colors.danger }]}>{validation}</Text> : null}
       <View style={{ flexDirection: "row", alignSelf: "stretch", gap: 8 }}>
         {skip ? (
-          <Button title="跳过" variant="tonal" size="large" wide busy={busy === "skip"} disabled={disabled || busy !== null} onPress={() => void run("skip", () => onChoose(request.requestId, skip.optionId))} />
+          <Button title={say({ zh: "跳过", en: "Skip", ja: "スキップ" })} variant="tonal" size="large" wide busy={busy === "skip"} disabled={disabled || busy !== null} onPress={() => void run("skip", () => onChoose(request.requestId, skip.optionId))} />
         ) : null}
-        <Button title="提交" variant="primary" size="large" wide busy={busy === "answer"} disabled={disabled || busy !== null || !ready} onPress={() => void submit()} />
+        <Button title={say({ zh: "提交", en: "Submit", ja: "送信" })} variant="primary" size="large" wide busy={busy === "answer"} disabled={disabled || busy !== null || !ready} onPress={() => void submit()} />
       </View>
+      {stop ? (
+        // Last and quiet, as on an approval: 跳过 → 提交 → 停止.
+        <Button title={say({ zh: "停止", en: "Stop", ja: "停止" })} variant="plain" size="small" busy={busy === "stop"} disabled={disabled || busy !== null} onPress={() => void run("stop", () => onChoose(request.requestId, stop.optionId))} />
+      ) : null}
       </QuestionBody>
     </Glass>
   );

@@ -15,7 +15,8 @@ import { HeaderActions, useHeaderTitleWidth, type HeaderMenuItem } from "@/compo
 import { ScrollableState } from "@/components/scrollable-state";
 import { Markdown } from "@/components/markdown";
 import { EmptyState, LoadingState } from "@/components/state-views";
-import { useConnection } from "@/lib/client";
+import { describeActionError } from "@/lib/locale";
+import { useConnection, useClient } from "@/lib/client";
 import { baseName, fileSize, relativeTime, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { LinkBase } from "@/lib/links";
@@ -179,6 +180,8 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
   const [wrap, setWrap] = useState(() => WRAPS.test(baseName(path)));
   const [editing, setEditing] = useState(false);
   const open = useRef(true);
+  const [attempt, setAttempt] = useState(0);
+  const online = useClient((state) => state.status === "online");
 
   useEffect(() => {
     open.current = true;
@@ -193,12 +196,18 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
         if (!open.current) return;
         // Too big for a phone: the computer says so, with the size.
         const tooLarge = reason instanceof RpcError && reason.appCode === "too_large";
-        setError({ message: reason instanceof Error ? reason.message : String(reason), tooLarge });
+        setError({ message: describeActionError(reason), tooLarge });
       });
     return () => {
       open.current = false;
     };
-  }, [link, path]);
+  }, [link, path, attempt]);
+  // A file that failed to open while the computer was out of reach opens by itself once it is back.
+  const failedToOpen = !!error && !error.tooLarge;
+  useEffect(() => {
+    if (online && failedToOpen) setAttempt((value) => value + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the link coming back retries; a failure while online waits for the button.
+  }, [online]);
 
   const loadMore = useCallback(() => {
     if (!file || file.kind !== "text" || !file.truncated || file.nextOffset === undefined || atLimit(file) || more === "loading") return;
@@ -313,11 +322,11 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
           {error.tooLarge ? (
             <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以保存到手机后用别的 App 打开。" action={saving.busy ? undefined : { title: "保存到文件", onPress: saving.save }} />
           ) : (
-            <EmptyState icon={{ sf: "doc.questionmark", md: "draft" }} title="打不开这个文件" message={error.message} />
+            <EmptyState icon={{ sf: "doc.questionmark", md: "draft" }} title="打不开这个文件" message={error.message} action={{ title: "重试", onPress: () => setAttempt((value) => value + 1) }} />
           )}
         </ScrollableState>
       ) : !file ? (
-        <ScrollableState><LoadingState /></ScrollableState>
+        <ScrollableState><LoadingState label="正在读取…" /></ScrollableState>
       ) : file.kind === "image" ? (
         <Image source={{ uri: `data:${file.mimeType};base64,${file.data}` }} style={{ flex: 1, margin: 16 }} contentFit="contain" />
       ) : file.kind === "binary" ? (

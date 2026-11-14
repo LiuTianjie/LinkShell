@@ -1,7 +1,7 @@
 import { nativeStatusBar } from "@/lib/native-status-bar";
 import * as Clipboard from "expo-clipboard";
 import { useKeepAwake } from "expo-keep-awake";
-import { Stack, useIsFocused, useNavigation, type NativeStackNavigationProp } from "expo-router";
+import { router, Stack, useIsFocused, useNavigation, type NativeStackNavigationProp } from "expo-router";
 import { useHeaderHeight, type ParamListBase } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -18,7 +18,7 @@ import { Button } from "@/components/button";
 import { HeaderActions } from "@/components/header-actions";
 import { ScreenConnectionLoading } from "@/components/screen-connection-loading";
 import { Icon } from "@/components/icon";
-import { useConnection } from "@/lib/client";
+import { useConnection, useConnectionStatus } from "@/lib/client";
 import { SCREEN_IDLE, useScreenSession, type ScreenPageMessage, type ScreenPresentation, type ScreenViewport } from "@/lib/screen-session";
 import { haptics } from "@/lib/haptics";
 import { loadScreenShortcuts, saveScreenShortcuts, screenShortcuts } from "@/lib/settings";
@@ -34,6 +34,7 @@ import { type } from "@/theme/type";
  */
 export function ScreenScreen() {
   const { computer } = useConnection();
+  const linkStatus = useConnectionStatus();
   const { viewer, failure, preparing, generation, display, mode, playback, attach, detach, present: publishPresentation, inject, focus, selectDisplay, retry } = useScreenSession();
   const owner = useRef({}).current;
   const focusGeneration = useRef(0);
@@ -250,6 +251,19 @@ export function ScreenScreen() {
           <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>{failure}</Text>
           {failure === SCREEN_IDLE ? <Text style={[type.footnote, { color: "rgba(255,255,255,0.5)", textAlign: "center" }]}>画面经中转传输时，3 分钟没有操作会自动断开，以节省流量</Text> : null}
           <Button title={failure === SCREEN_IDLE ? "重新连接" : "重试"} variant="tonal" size="small" onPress={retry} />
+        </ScrollView>
+      ) : !viewer && linkStatus !== "online" && linkStatus !== "connecting" ? (
+        // The picture only starts once the computer is reachable: say what it waits for
+        // instead of a "connecting" page that cannot finish.
+        <ScrollView style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingTop: Math.max(insets.top, fullscreen ? 0 : headerHeight) + 24, paddingBottom: insets.bottom + 24, paddingLeft: insets.left + 24, paddingRight: insets.right + 24, gap: 12 }}>
+          <Icon sf={linkStatus === "locked" ? "lock" : "wifi.slash"} md={linkStatus === "locked" ? "lock" : "wifi_off"} size={36} color="rgba(255,255,255,0.45)" />
+          <Text style={[type.subhead, { color: "rgba(255,255,255,0.75)", textAlign: "center" }]}>
+            {linkStatus === "locked" ? "这台电脑设置了访问密码" : "电脑暂时连不上"}
+          </Text>
+          <Text style={[type.footnote, { color: "rgba(255,255,255,0.5)", textAlign: "center" }]}>
+            {linkStatus === "locked" ? "输入密码后才能查看屏幕" : "连上之后，画面会自动显示"}
+          </Text>
+          {linkStatus === "locked" ? <Button title="输入访问密码" variant="tonal" size="small" onPress={() => router.push("/unlock")} /> : null}
         </ScrollView>
       ) : !viewer ? (
         <ScreenConnectionLoading key={generation} preparing={preparing} onRetry={retry} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} />

@@ -1,4 +1,5 @@
 import type { AgentInfo, GatewayStatus, UsageReport } from "@linkshell/wire";
+import { formatConnectionDetail } from "@/components/connection-banner";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -93,7 +94,7 @@ function AgentRow({ agent, first }: { agent: AgentInfo; first: boolean }) {
           {missing ? <Icon sf="exclamationmark.circle.fill" md="error" size={16} color={colors.waiting} /> : null}
           {agent.capabilities.acp ? (
             <Button
-              title={pending ? `${t("session.waiting")} ${pending}` : t("nav.settings")}
+              title={pending ? `${pick({ zh: "等你处理", en: "Needs You", ja: "確認待ち" })} ${pending}` : t("nav.settings")}
               size="small"
               variant={pending ? "warning" : "plain"}
               onPress={() => router.push({ pathname: "/acp", params: { agent: agent.id } })}
@@ -277,7 +278,7 @@ function ComputerPanel({
             accessibilityRole="button"
             accessibilityState={{ expanded: false }}
             onPress={onToggle}
-            style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, opacity: pressed ? 0.65 : 1 })}
+            style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}
           >
             <Text accessibilityRole="header" style={[type.callout, { flex: 1, fontWeight: "500", color: colors.label }]}>
               {title}
@@ -306,7 +307,7 @@ function ComputerPanel({
           disabled={!onToggle}
           onPress={onToggle}
           hitSlop={6}
-          style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, opacity: onToggle && pressed ? 0.65 : 1 })}
+          style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, opacity: onToggle && pressed ? 0.6 : 1 })}
         >
           <Text style={[type.footnote, { flex: 1, fontWeight: "600", color: colors.secondaryLabel }]}>{title}</Text>
           {detail ? <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{detail}</Text> : null}
@@ -510,7 +511,10 @@ export function ComputerScreen() {
         .join(" · ")
     : status === "connecting"
       ? t("connection.connecting")
-      : `${t("connection.offline")}${detail ? ` · ${detail}` : ""}`;
+      : status === "locked"
+        // Reached, and waiting for its password: not "未连接".
+        ? pick({ zh: "需要访问密码", en: "Access password needed", ja: "アクセスパスワードが必要です" })
+        : `${t("connection.offline")}${formatConnectionDetail(detail) ? ` · ${formatConnectionDetail(detail)}` : ""}`;
 
   const transportSummary =
     computer.kind === "relay"
@@ -535,6 +539,11 @@ export function ComputerScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={async () => {
+              // Out of reach, the calls would wait half a minute for the link: reconnect instead.
+              if (link.status !== "online") {
+                link.reconnectNow(true);
+                return;
+              }
               setRefreshing(true);
               await refresh();
               setRefreshing(false);
@@ -576,7 +585,7 @@ export function ComputerScreen() {
                       <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
                     </Pressable>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <LinkDot health={online ? "online" : status === "connecting" ? "connecting" : detail ? "error" : "offline"} />
+                      <LinkDot health={online ? "online" : status === "connecting" ? "connecting" : status === "locked" ? "offline" : detail ? "error" : "offline"} />
                       <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, flex: 1 }]}>
                         {statusSummary}
                       </Text>

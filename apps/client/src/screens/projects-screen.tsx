@@ -34,7 +34,7 @@ function openProject(project: ProjectGroup, computerKey?: string) {
 function activityOf(project: ProjectGroup): string {
   const waiting = project.sessions.filter((session) => session.state === "waiting" || session.pendingPermissions > 0 || Boolean(session.asyncQuestions?.length)).length;
   const running = project.sessions.filter((session) => session.state === "running").length;
-  return [waiting ? `${waiting} 待处理` : "", running ? `${running} 进行中` : ""].filter(Boolean).join(" · ");
+  return [waiting ? `${waiting} 等你处理` : "", running ? `${running} 运行中` : ""].filter(Boolean).join(" · ");
 }
 
 function ProjectCard({ project, now, computerKey }: { project: ProjectGroup; now: number; computerKey?: string }) {

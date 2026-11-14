@@ -83,6 +83,14 @@ function persist(saved: Saved): void {
   }
 }
 
+/** A change that only the gateway can make was asked for while it is out of reach. */
+export class GatewayUnreachable extends Error {
+  constructor() {
+    super("连不上网关");
+    this.name = "GatewayUnreachable";
+  }
+}
+
 export function relayKey(gateway: string, machineId: string): string {
   return `${gateway}#${machineId}`;
 }
@@ -147,6 +155,31 @@ export function relayFor(gateway: string): RelayClient {
   return relay;
 }
 
+/**
+ * Lets go of a gateway nothing uses: one a pairing was tried at (a typo, a QR code from a gateway
+ * that is gone) and that would otherwise keep reconnecting until the app was closed.
+ */
+export function dropRelayIfUnused(gateway: string): void {
+  const url = normalizeGateway(gateway);
+  const relay = relays.get(url);
+  if (!relay) return;
+  const { saved } = useComputers.getState();
+  const used =
+    saved.relay.some((entry) => entry.gateway === url) ||
+    saved.direct.some((entry) => entry.fallbackGateway === url) ||
+    (url === normalizeGateway(DEFAULT_GATEWAY) && !!useAccount.getState().session);
+  if (used) return;
+  // Out of the map first: its last status is nobody's any more.
+  relays.delete(url);
+  relayAccounts.delete(url);
+  relay.stop();
+  useComputers.setState((state) => {
+    const { [url]: _status, ...relayStatus } = state.relayStatus;
+    const { [url]: _discovery, ...discovery } = state.discovery;
+    return { relayStatus, discovery };
+  });
+}
+
 export function reconnectRelays(): void {
   for (const relay of relays.values()) relay.reconnectNow();
 }
@@ -180,7 +213,7 @@ interface ComputersState {
    * the account is taken off the account at the gateway (it comes back if it ever signs in again).
    * False when the gateway kept it: one from before it could forget an account's computer.
    */
-  remove(key: string): Promise<boolean>;
+  remove(key: string, options?: { localOnly?: boolean }): Promise<boolean>;
   refresh(gateway: string): Promise<void>;
   setOnline(gateway: string, id: string, online: boolean): void;
 }
@@ -268,9 +301,14 @@ export const useComputers = create<ComputersState>((set, get) => ({
       machine: host.machine,
     });
   },
-  async remove(key) {
+  async remove(key, options) {
     const current = get().saved;
     const relayEntry = current.relay.find((entry) => relayKey(entry.gateway, entry.machine.id) === key);
+    // Unpairing happens at the gateway. Out of its reach, dropping the computer here would only
+    // hide it until the next list brought it back, so it stays and the caller says why.
+    const gatewayOf = relayEntry?.gateway ?? Object.entries(get().live).find(([gateway, machines]) => machines.some((entry) => relayKey(gateway, entry.id) === key))?.[0];
+    // (`localOnly` is the way out for a gateway that is gone for good.)
+    if (gatewayOf && !options?.localOnly && relayFor(gatewayOf).status !== "online") throw new GatewayUnreachable();
     if (relayEntry) await relayFor(relayEntry.gateway).request("machines.forget", { machineId: relayEntry.machine.id }).catch(() => {});
     const nextLanUrls = current.lanUrls ? { ...current.lanUrls } : undefined;
     if (nextLanUrls) {

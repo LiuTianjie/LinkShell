@@ -27,6 +27,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("@/components/fixed-text", () => ({ Text: "Text" }));
 vi.mock("../src/components/icon", () => ({ Icon: "Icon" }));
+vi.mock("../src/components/pressable-feedback", () => ({ PressableFeedback: "PressableFeedback" }));
 vi.mock("@/theme/colors", () => ({
   colors: { card: "#111", label: "#fff", secondaryLabel: "#aaa", tertiaryLabel: "#666", danger: "#f00" },
 }));
@@ -82,7 +83,7 @@ vi.mock("@/lib/live-activity-push", () => ({
   },
 }));
 
-const { formatConnectionDetail } = await import("../src/components/connection-banner");
+const { formatConnectionDetail, needsRepairing } = await import("../src/components/connection-banner");
 const { IOSAttentionSync } = await import("../src/components/ios-attention-sync");
 
 describe("ConnectionBanner Chinese error formatting & QR-paired IOSAttentionSync", () => {
@@ -110,6 +111,12 @@ describe("ConnectionBanner Chinese error formatting & QR-paired IOSAttentionSync
       expect(result).not.toContain("itool.tech/pro");
     }
 
+    // The RPC layer names the method and its limit; the banner says what it means.
+    expect(formatConnectionDetail("请求超时（machine.info，10000 ms）")).toBe("电脑没有响应");
+    expect(formatConnectionDetail("连接已断开 (machine.info)")).toBe("连接已断开");
+    expect(needsRepairing(formatConnectionDetail("not_paired"))).toBe(true);
+    expect(needsRepairing(formatConnectionDetail("bad_identity"))).toBe(true);
+    expect(needsRepairing(formatConnectionDetail("ECONNREFUSED"))).toBe(false);
     expect(formatConnectionDetail(undefined)).toBeUndefined();
     expect(formatConnectionDetail("   ")).toBeUndefined();
     // Already-clean Chinese refusal copy passes through intact.

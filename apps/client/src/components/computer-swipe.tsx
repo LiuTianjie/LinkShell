@@ -4,7 +4,7 @@ import ReanimatedSwipeable, { type SwipeableMethods } from "react-native-gesture
 import Animated from "react-native-reanimated";
 import { Text } from "@/components/fixed-text";
 import { Icon } from "@/components/icon";
-import { useComputers, type Computer } from "@/lib/computers";
+import { GatewayUnreachable, useComputers, type Computer } from "@/lib/computers";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
@@ -29,9 +29,21 @@ export function confirmRemoveComputer(computer: Computer, name: string, done?: (
           void useComputers
             .getState()
             .remove(computer.key)
-            .then((removed) => {
-              if (!removed) Alert.alert("没能移除", "这个网关的版本还不支持移除同一账号下的电脑，升级网关后再试。");
-            })
+            .then(
+              (removed) => {
+                if (!removed) Alert.alert("没能移除", "这个网关的版本还不支持移除同一账号下的电脑，升级网关后再试。");
+              },
+              (reason: unknown) => {
+                if (!(reason instanceof GatewayUnreachable)) {
+                  Alert.alert("没能移除", "这台电脑还在列表里，请稍后再试。");
+                  return;
+                }
+                Alert.alert("现在连不上网关", "解除配对要经过网关，这台电脑还在列表里。可以联网后再试；如果这个网关已经不用了，也可以只从这台手机移除。", [
+                  { text: "好", style: "cancel" },
+                  { text: "只从这台手机移除", style: "destructive", onPress: () => void useComputers.getState().remove(computer.key, { localOnly: true }).catch(() => {}) },
+                ]);
+              },
+            )
             .finally(done),
       },
     ],
@@ -71,10 +83,11 @@ export function ComputerSwipe({ computer, name, enabled, background, children }:
             onPress={remove}
             accessibilityRole="button"
             accessibilityLabel={`移除 ${name}`}
-            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.7 : 1 })}
+            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.6 : 1 })}
           >
-            <Icon sf="trash" md="delete" size={17} color="#fff" />
-            <Text style={[type.caption, { color: "#fff", fontWeight: "600" }]}>移除</Text>
+            {/* `plain` is white on the light red and black on the lighter dark-mode red: readable on both. */}
+            <Icon sf="trash" md="delete" size={17} color={colors.plain} />
+            <Text style={[type.caption, { color: colors.plain, fontWeight: "600" }]}>移除</Text>
           </Pressable>
         </Animated.View>
       )}

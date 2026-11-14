@@ -11,7 +11,8 @@ import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions"
 import { Icon, type IconProps } from "@/components/icon";
 import { PressableFeedback } from "@/components/pressable-feedback";
 import { positionOf, type RowPosition } from "@/components/session-row";
-import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
+import { EmptyState, LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
+import { describeActionError } from "@/lib/locale";
 import { useClient, useConnection } from "@/lib/client";
 import { baseName, fileSize, shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -140,6 +141,7 @@ export function FilesScreen() {
   const { link } = useConnection();
   const online = useClient((state) => state.status === "online");
   const offline = useClient((state) => unreachable(state.status));
+  const locked = useClient((state) => state.status === "locked");
   const { hidden, setHidden } = useFilePreferences();
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +155,7 @@ export function FilesScreen() {
     link
       .call("fs.list", { path: params.path || undefined, hidden, files: true })
       .then((result) => !cancelled && setListing(result))
-      .catch((reason: unknown) => !cancelled && setError(reason instanceof Error ? reason.message : String(reason)));
+      .catch((reason: unknown) => !cancelled && setError(describeActionError(reason)));
     return () => {
       cancelled = true;
     };
@@ -224,7 +226,7 @@ export function FilesScreen() {
               action={{ title: "重试", onPress: () => setRound((value) => value + 1) }}
             />
           ) : !listing ? (
-            offline ? <WaitingForComputer what="这个文件夹里的文件" /> : <LoadingState label="正在读取…" />
+            locked ? <LockedComputer /> : offline ? <WaitingForComputer what="这个文件夹里的文件" /> : <LoadingState label="正在读取…" />
           ) : (
             <EmptyState
               icon={{ sf: "folder", md: "folder_open" }}

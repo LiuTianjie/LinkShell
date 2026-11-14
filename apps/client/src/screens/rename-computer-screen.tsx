@@ -1,4 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
+import { errorCode } from "@/lib/action-error";
+import { describeActionError } from "@/lib/locale";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { HostLink, TunnelSocket } from "@linkshell/client-core";
@@ -55,7 +57,8 @@ function ComputerNameForm({ computerKey }: { computerKey: string }) {
       syncComputerName(computer, info);
       if (!info.naming) setError("请先更新这台电脑上的 LinkShell，更新后即可在所有端同步名称。");
     }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      // Only the selected computer can be unlocked: say where to go, not just that it is locked.
+      if (!cancelled) setError(errorCode(reason) === "locked" && !shared ? "这台电脑设置了访问密码：先切换到它并输入密码，再改名" : describeActionError(reason));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; target.current = undefined; if (!shared) link.stop(); };
     // Refreshing the display name must not replace the connection or the user's draft.
@@ -74,7 +77,7 @@ function ComputerNameForm({ computerKey }: { computerKey: string }) {
     } catch (reason) {
       if (target.current !== link) return;
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(describeActionError(reason));
     } finally {
       if (target.current === link) setSaving(false);
     }

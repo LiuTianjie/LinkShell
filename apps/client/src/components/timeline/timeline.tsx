@@ -8,6 +8,7 @@ import { Text } from "@/components/fixed-text";
 import type { SharedValue } from "react-native-reanimated";
 import { buildRows, visible, type Row } from "@/lib/timeline-rows";
 import { haptics } from "@/lib/haptics";
+import { useLocale } from "@/lib/locale";
 import { colors } from "@/theme/colors";
 import { type } from "@/theme/type";
 import { Icon } from "../icon";
@@ -35,20 +36,25 @@ export interface EarlierHistory {
  * leaves the user stuck. One height in both states, so the rows below stay put.
  */
 function EarlierRow({ loading, onPress }: { loading: boolean; onPress: () => void }) {
+  const { pick } = useLocale();
+  const copy = {
+    loading: pick({ zh: "正在加载更早的消息", en: "Loading earlier messages", ja: "以前のメッセージを読み込み中" }),
+    load: pick({ zh: "加载更早的消息", en: "Load earlier messages", ja: "以前のメッセージを読み込む" }),
+  };
   return (
     <Pressable
       disabled={loading}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={loading ? "正在加载更早的消息" : "加载更早的消息"}
-      style={{ height: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 }}
+      accessibilityLabel={loading ? copy.loading : copy.load}
+      style={({ pressed }) => ({ height: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, opacity: pressed ? 0.6 : 1 })}
     >
       {loading ? (
         <ActivityIndicator size="small" color={colors.tertiaryLabel} style={{ transform: [{ scale: 0.75 }], width: 13, height: 13 }} />
       ) : (
         <Icon sf="arrow.up" md="arrow_upward" size={12} color={colors.secondaryLabel} weight="medium" />
       )}
-      <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{loading ? "正在加载更早的消息…" : "加载更早的消息"}</Text>
+      <Text style={[type.footnote, { color: colors.secondaryLabel }]}>{loading ? `${copy.loading}…` : copy.load}</Text>
     </Pressable>
   );
 }
@@ -77,6 +83,8 @@ export interface TimelineRef {
   scrollToEnd: (params?: Parameters<LegendListRef["scrollToEnd"]>[0]) => void;
   scrollToIndex: (params: Parameters<LegendListRef["scrollToIndex"]>[0]) => void;
   scrollToItemId: (itemId: string, animated?: boolean) => void;
+  /** Goes to the newest row and follows it again (the user just sent something). */
+  followNow: () => void;
 }
 
 export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline(
@@ -183,6 +191,10 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       scrollToEnd: (params) => list.current?.scrollToEnd(params),
       scrollToIndex: (params) => list.current?.scrollToIndex(params),
       scrollToItemId,
+      followNow: () => {
+        pinned.current = true;
+        void list.current?.scrollToEnd({ animated: true });
+      },
     }),
     [scrollToItemId],
   );

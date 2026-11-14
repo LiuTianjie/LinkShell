@@ -272,7 +272,7 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
         const subName = subDetail?.name;
         const subModel = subDetail?.model;
         const taskText =
-          subDetail?.task?.trim() || cleanToolTitle(item.title) || item.name || "执行子代理任务";
+          subDetail?.task?.trim() || cleanToolTitle(item.title) || item.name || "执行子 Agent 任务";
         let subOutput = stripTerminalAnsi(item.output);
         if (!subOutput && item.sub?.items?.length) {
           for (let i = item.sub.items.length - 1; i >= 0; i -= 1) {
@@ -290,7 +290,7 @@ export function extractAllWatchTimelineItems(view: SessionView | undefined): Wat
         result.push({
           id: item.id,
           kind: "subagent",
-          title: subName ? `子代理 · ${subName}` : `子代理 · ${subType}`,
+          title: subName ? `子 Agent · ${subName}` : `子 Agent · ${subType}`,
           text: taskText.slice(0, 240),
           ...(subOutput ? { detail: subOutput.slice(-800) } : {}),
           subagentType: subType.slice(0, 48),

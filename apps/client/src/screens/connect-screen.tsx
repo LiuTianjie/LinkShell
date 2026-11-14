@@ -1,4 +1,5 @@
 import * as Clipboard from "expo-clipboard";
+import { formatConnectionDetail } from "@/components/connection-banner";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, Switch, View } from "react-native";
@@ -120,7 +121,7 @@ export function ConnectScreen() {
             ? `${t("connection.online")} ${machine?.hostname.replace(/\.local$/, "") ?? ""}`
             : status === "connecting"
               ? t("connection.connecting")
-              : `${t("connection.offline")}${detail ? ` · ${detail}` : ""}`}
+              : `${t("connection.offline")}${formatConnectionDetail(detail) ? ` · ${formatConnectionDetail(detail)}` : ""}`}
         </Text>
       </View>
 

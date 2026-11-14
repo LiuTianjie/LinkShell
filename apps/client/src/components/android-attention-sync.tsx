@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { liveActivityDetailLink } from "@linkshell/wire";
 import { Platform } from "react-native";
 import {
   buildLiveActivitySnapshot,
@@ -117,9 +118,9 @@ export function AndroidAttentionSync() {
       );
       const subtitle =
         notice.eventType === "approval"
-          ? pick({ zh: "有待确认的操作审批", en: "A session is waiting for approval", ja: "承認待ちの操作があります" })
+          ? pick({ zh: "有操作等你确认", en: "A session is waiting for approval", ja: "承認待ちの操作があります" })
           : notice.eventType === "question"
-            ? pick({ zh: "Agent 正在等待你的回答", en: "Agent is waiting for your answer", ja: "エージェントが回答を待っています" })
+            ? pick({ zh: "Agent 等你回答", en: "Agent is waiting for your answer", ja: "エージェントが回答を待っています" })
             : notice.eventType === "error"
               ? pick({ zh: "会话执行遇到错误", en: "A session encountered an error", ja: "セッションでエラーが発生しました" })
               : pick({ zh: "本轮任务已完成", en: "Agent turn completed", ja: "タスクが完了しました" });
@@ -128,7 +129,9 @@ export function AndroidAttentionSync() {
         title: computerName,
         subtitle,
         computerName,
-        deepLink: `linkshell:///session/${encodeURIComponent(notice.sessionId)}`,
+        // Through the computer it came from: tapped after switching computers, a bare session
+        // link would look the id up on whichever one is selected now.
+        deepLink: liveActivityDetailLink(computer.key, "session", notice.sessionId),
         urgent: notice.eventType !== "completed",
         ongoing: false,
       });

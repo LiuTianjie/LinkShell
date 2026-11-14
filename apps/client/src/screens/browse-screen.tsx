@@ -8,6 +8,8 @@ import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { Icon } from "@/components/icon";
 import { useClient, useConnection } from "@/lib/client";
+import { LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
+import { describeActionError } from "@/lib/locale";
 import { pickDirectory } from "@/lib/directory-pick";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -103,6 +105,9 @@ export function BrowseScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ query: string; entries: DirectoryEntry[] } | null>(null);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchRound, setSearchRound] = useState(0);
+  const linkStatus = useClient((state) => state.status);
   const scroll = useRef<KeyboardAwareScrollViewRef>(null);
   const crumbBar = useRef<ScrollView>(null);
 
@@ -117,7 +122,7 @@ export function BrowseScreen() {
         setListing(result);
         scroll.current?.scrollTo({ y: 0, animated: false });
       })
-      .catch((reason: unknown) => !cancelled && setError(reason instanceof Error ? reason.message : String(reason)));
+      .catch((reason: unknown) => !cancelled && setError(describeActionError(reason)));
     return () => {
       cancelled = true;
     };
@@ -129,22 +134,29 @@ export function BrowseScreen() {
     if (!text || !online) {
       setResults(null);
       setSearching(false);
+      setSearchError(null);
       return;
     }
     setSearching(true);
+    setSearchError(null);
     let cancelled = false;
     const timer = setTimeout(() => {
       link
         .call("fs.search", { query: text }, 10_000)
         .then((result) => !cancelled && setResults({ query: text, entries: result.entries }))
-        .catch(() => !cancelled && setResults({ query: text, entries: [] }))
+        // A search that failed is not a search that found nothing.
+        .catch((reason: unknown) => {
+          if (cancelled) return;
+          setResults({ query: text, entries: [] });
+          setSearchError(describeActionError(reason));
+        })
         .finally(() => !cancelled && setSearching(false));
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [link, online, query]);
+  }, [link, online, query, searchRound]);
 
   const trail = useMemo(() => (listing ? crumbs(listing.path, listing.home) : []), [listing]);
   const open = (target: string) => {
@@ -155,10 +167,13 @@ export function BrowseScreen() {
   // New folder: a name field at the top of the list, then straight into it.
   const [naming, setNaming] = useState<string | null>(null);
   const [making, setMaking] = useState(false);
+  // Its own message under the name field: the listing behind it is still good.
+  const [makeError, setMakeError] = useState<string | null>(null);
   const makeFolder = async () => {
     const name = naming?.trim();
     if (!name || !listing || making) return;
     setMaking(true);
+    setMakeError(null);
     try {
       const result = await link.call("fs.mkdir", { parent: listing.path, name });
       setNaming(null);
@@ -166,7 +181,7 @@ export function BrowseScreen() {
       open(result.path);
     } catch (reason) {
       haptics.error();
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setMakeError(describeActionError(reason));
     } finally {
       setMaking(false);
     }
@@ -308,13 +323,19 @@ export function BrowseScreen() {
               <Button title="创建" variant="primary" size="small" disabled={!naming.trim() || making} onPress={() => void makeFolder()} />
             </View>
           ) : null}
+          {naming !== null && makeError ? <Text selectable style={[type.footnote, { color: colors.danger, paddingHorizontal: 8 }]}>{makeError}</Text> : null}
           {error && !searchMode ? (
             <View style={{ gap: 8 }}>
               <Text style={[type.subhead, { color: colors.danger, padding: 8 }]}>{error}</Text>
               <Button title="重新读取目录" disabled={!online} onPress={() => setRound((value) => value + 1)} />
             </View>
           ) : !listing && !searchMode ? (
-            <ActivityIndicator style={{ marginTop: 24 }} color={colors.secondaryLabel} />
+            linkStatus === "locked" ? <LockedComputer /> : unreachable(linkStatus) ? <WaitingForComputer what="电脑上的目录" /> : <LoadingState label="正在读取…" />
+          ) : searchMode && searchError && !searching ? (
+            <View style={{ gap: 8, marginTop: 20 }}>
+              <Text selectable style={[type.subhead, { color: colors.secondaryLabel, textAlign: "center" }]}>搜索没有完成：{searchError}</Text>
+              <Button title="重试" disabled={!online} onPress={() => setSearchRound((value) => value + 1)} />
+            </View>
           ) : rows.length === 0 ? (
             <Text style={[type.subhead, { color: colors.tertiaryLabel, textAlign: "center", marginTop: 28 }]}>
               {searchMode ? (searching ? "正在搜索…" : `没有找到「${query.trim()}」`) : "这里没有子目录"}

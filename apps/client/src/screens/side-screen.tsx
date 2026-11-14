@@ -272,7 +272,7 @@ function Intro({ agentName, how, quoting, disabled, onAsk }: { agentName: string
             accessibilityRole="button"
             accessibilityLabel={`问：${question}`}
             accessibilityState={{ disabled }}
-            style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.fill, opacity: disabled ? 0.45 : pressed ? 0.7 : 1 })}
+            style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.fill, opacity: disabled ? 0.45 : pressed ? 0.6 : 1 })}
           >
             <Text style={[type.subhead, { color: colors.label }]}>{question}</Text>
           </Pressable>

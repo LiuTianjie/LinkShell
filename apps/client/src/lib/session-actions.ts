@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { Alert } from "react-native";
 import { sessionTitle } from "@/lib/describe";
 import { haptics } from "@/lib/haptics";
+import { describeActionError } from "@/lib/locale";
 import { branchLabel } from "@/lib/worktree";
 import { agentLook } from "@/theme/agents";
 
@@ -13,7 +14,7 @@ type Actions = Pick<ClientActions, "archive" | "deleteSession" | "listWorktrees"
 
 function failed(title: string, reason: unknown) {
   haptics.error();
-  Alert.alert(title, reason instanceof Error ? reason.message : String(reason));
+  Alert.alert(title, describeActionError(reason));
 }
 
 export function renameSession(session: SessionSummary) {

@@ -21,7 +21,7 @@ import { SessionAvatar, SessionRow, positionOf, type RowPosition } from "@/compo
 import { TerminalRow } from "@/components/terminal-row";
 import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
-import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
+import { EmptyState, LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
 import { LinkDot } from "@/components/status";
 import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
@@ -124,7 +124,7 @@ function sectionWords(locale: Locale) {
   return {
     need: "等你处理",
     fail: "出错",
-    run: "进行中",
+    run: "运行中",
     pin: "已置顶",
     term: "终端",
     snooze: "稍后处理",
@@ -692,7 +692,7 @@ function SwipeableSessionRow({
             onPress={handlePin}
             accessibilityRole="button"
             accessibilityLabel={pinned ? "取消置顶" : "置顶会话"}
-            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.7 : 1 })}
+            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.6 : 1 })}
           >
             <Icon sf={pinned ? "pin.slash" : "pin.fill"} md="push_pin" size={17} color="#fff" />
             <Text style={[type.caption, { color: "#fff", fontWeight: "600" }]}>{pinned ? "取消置顶" : "置顶"}</Text>
@@ -700,15 +700,15 @@ function SwipeableSessionRow({
         </Animated.View>
       )}
       renderRightActions={() => (
-        <Animated.View style={{ width: 84, backgroundColor: colors.waitingFill, ...rightCorners }}>
+        <Animated.View style={{ width: 84, backgroundColor: colors.fillStrong, ...rightCorners }}>
           <Pressable
             onPress={handleArchive}
             accessibilityRole="button"
             accessibilityLabel={session.archived ? "取消归档" : "归档"}
-            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.7 : 1 })}
+            style={({ pressed }) => ({ flex: 1, alignItems: "center", justifyContent: "center", gap: 4, opacity: pressed ? 0.6 : 1 })}
           >
-            <Icon sf={session.archived ? "tray.and.arrow.up" : "archivebox"} md={session.archived ? "unarchive" : "archive"} size={17} color="#fff" />
-            <Text style={[type.caption, { color: "#fff", fontWeight: "600" }]}>{session.archived ? "取消归档" : "归档"}</Text>
+            <Icon sf={session.archived ? "tray.and.arrow.up" : "archivebox"} md={session.archived ? "unarchive" : "archive"} size={17} color={colors.label} />
+            <Text style={[type.caption, { color: colors.label, fontWeight: "600" }]}>{session.archived ? "取消归档" : "归档"}</Text>
           </Pressable>
         </Animated.View>
       )}
@@ -750,7 +750,7 @@ function HomeList({
     }
     return frozenSessionsRef.current;
   });
-  const { computer } = useConnection();
+  const { computer, link } = useConnection();
   const names = useComputerNames((state) => state.names);
   const online = useClient((state) => state.status === "online");
   const loaded = useClient((state) => state.sessionsLoaded);
@@ -807,9 +807,11 @@ function HomeList({
   }, [focused, computerName, allSessions, terminals, online, views, promptProgress]);
 
   const frozenBuiltRef = useRef<ReturnType<typeof buildItems> | null>(null);
+  // A snooze ends by the clock, not by anything the computer sends: while one runs, the list follows the clock.
+  const snoozeNow = Object.keys(snoozedMap).length > 0 ? now : 0;
   const { items, waiting, running, failed, pinnedCount, snoozedCount } = useMemo(() => {
     if (!focused && frozenBuiltRef.current !== null) return frozenBuiltRef.current;
-    const next = buildItems(allSessions, terminals, Date.now(), locale, {
+    const next = buildItems(allSessions, terminals, snoozeNow || Date.now(), locale, {
       pinnedIds,
       snoozedMap,
       filter,
@@ -817,7 +819,7 @@ function HomeList({
     frozenBuiltRef.current = next;
     return next;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` invalidates date buckets on midnight rollover.
-  }, [focused, allSessions, terminals, day, locale, pinnedIds, snoozedMap, filter]);
+  }, [focused, allSessions, terminals, day, locale, pinnedIds, snoozedMap, filter, snoozeNow]);
   const empty = loaded && Object.keys(sessionsById).length === 0 && terminals.length === 0;
   const frozenResultsRef = useRef<Item[] | null>(null);
   const results = useMemo(() => {
@@ -847,10 +849,16 @@ function HomeList({
   }, [filter, filterChips]);
 
   const onRefresh = useCallback(async () => {
+    // Offline, the list call would wait half a minute for the link before failing: reconnect
+    // instead (the banner says where that stands) and let go of the spinner.
+    if (!online) {
+      link.reconnectNow(true);
+      return;
+    }
     setRefreshing(true);
     await refresh();
     setRefreshing(false);
-  }, [refresh]);
+  }, [refresh, online, link]);
 
   const onEndReached = useCallback(() => {
     if (!online || !loaded || searching || sessionsNextBefore === undefined || loadingMoreRef.current) return;
@@ -1038,6 +1046,12 @@ function HomeList({
               <AttentionIsland payload={liveActivityPayload} onOpenHero={openHeroFromIsland} />
             ) : null}
             <ConnectionBanner />
+            {loaded && error && online ? (
+              // The list on screen is the last one that loaded; say that this refresh didn't.
+              <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4, paddingTop: 8 }]}>
+                {pick({ zh: "没能刷新会话列表，下拉可重试", en: "Couldn't refresh sessions. Pull down to retry.", ja: "セッションを更新できませんでした。引き下げて再試行してください。" })}
+              </Text>
+            ) : null}
           </View>
         }
         ListFooterComponent={
@@ -1046,7 +1060,7 @@ function HomeList({
               onPress={() => router.push("/archived")}
               accessibilityRole="button"
               hitSlop={8}
-              style={{ alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 18 }}
+              style={({ pressed }) => ({ alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 18, opacity: pressed ? 0.6 : 1 })}
             >
               <Icon sf="archivebox" md="archive" size={13} color={colors.tertiaryLabel} />
               <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{t("nav.archived")}</Text>
@@ -1056,6 +1070,9 @@ function HomeList({
         ListEmptyComponent={
           !hasComputer ? (
             <Welcome />
+          ) : connectionStatus === "locked" ? (
+            // Nothing loads until the password is given: a spinner here would never end.
+            <LockedComputer />
           ) : !loaded ? (
             connectionStatus === "connecting" ? (
               <LoadingState label={t("connection.reconnecting")} />

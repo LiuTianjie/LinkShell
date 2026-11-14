@@ -162,3 +162,38 @@ it("keeps pairings but rejects old account computers when an offline sign-out co
   expect(computers.listComputers(computers.useComputers.getState())).toHaveLength(1);
   expect(computers.useComputers.getState().discovery[computers.DEFAULT_GATEWAY]).toBe("ready");
 });
+
+it("keeps a paired computer when it cannot be unpaired at the gateway, and removes it once it can", async () => {
+  const { GatewayUnreachable, listComputers, relayKey, useComputers } = await import("../src/lib/computers");
+  const gateway = "wss://gateway.example.com";
+  const key = useComputers.getState().addPaired(gateway, { ...machine, via: "paired" as const });
+  expect(key).toBe(relayKey(gateway, machine.id));
+  const relay = fake.relays[fake.relays.length - 1]!;
+
+  // Out of the gateway's reach: dropping it locally would only hide it until the next list.
+  await expect(useComputers.getState().remove(key)).rejects.toBeInstanceOf(GatewayUnreachable);
+  expect(listComputers(useComputers.getState()).map((computer) => computer.key)).toContain(key);
+  expect(relay.request).not.toHaveBeenCalledWith("machines.forget", expect.anything());
+
+  relay.emit("online");
+  await settle();
+  await expect(useComputers.getState().remove(key)).resolves.toBe(true);
+  expect(relay.request).toHaveBeenCalledWith("machines.forget", { machineId: machine.id });
+  expect(useComputers.getState().saved.relay).toEqual([]);
+});
+
+it("lets go of a gateway that a failed pairing opened, and keeps one a computer is paired through", async () => {
+  const { dropRelayIfUnused, relayFor, useComputers } = await import("../src/lib/computers");
+  const stray = relayFor("wss://typo.example.com");
+  const strayRelay = fake.relays[fake.relays.length - 1]!;
+  dropRelayIfUnused("wss://typo.example.com");
+  expect(strayRelay.status).toBe("stopped");
+  expect(useComputers.getState().relayStatus["wss://typo.example.com"]).toBeUndefined();
+  // Asked for again, it is a new connection, not the stopped one.
+  expect(relayFor("wss://typo.example.com")).not.toBe(stray);
+
+  useComputers.getState().addPaired("wss://home.example.com", { ...machine, via: "paired" as const });
+  const kept = relayFor("wss://home.example.com");
+  dropRelayIfUnused("wss://home.example.com");
+  expect(relayFor("wss://home.example.com")).toBe(kept);
+});

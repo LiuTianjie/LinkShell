@@ -60,6 +60,7 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
   let response: Response | undefined;
   let json: Record<string, unknown>;
   try {
+   try {
     try {
       response = await fetch(grant === "refresh_token" ? TOKEN_PROXY_URL : AUTH_PROXY_URL, {
         method: "POST",
@@ -81,6 +82,11 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
       });
     }
     json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+   } catch {
+    // The platform's own words ("Network request failed", "Aborted") say nothing to the person
+    // signing in. Not final: a refresh that failed this way keeps its session and tries again.
+    throw new AuthRefused(accountErrorMessage(controller.signal.aborted ? "timeout" : "network"), false);
+   }
   } finally {
     clearTimeout(timeout);
   }

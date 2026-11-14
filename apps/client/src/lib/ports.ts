@@ -1,7 +1,8 @@
 import type { PortInfo } from "@linkshell/wire";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useConnection } from "@/lib/client";
+import { describeActionError } from "@/lib/locale";
 
 /** How often an open list re-checks what's running (dev servers come and go). */
 const POLL_MS = 10_000;
@@ -18,8 +19,13 @@ export function usePorts(enabled = true) {
       setPorts(result.ports);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(describeActionError(reason));
     }
+  }, [link]);
+  // Another computer: its ports, not a moment more of the last one's.
+  useEffect(() => {
+    setPorts(null);
+    setError(null);
   }, [link]);
 
   useFocusEffect(

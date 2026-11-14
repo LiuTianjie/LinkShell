@@ -199,6 +199,27 @@ describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () 
     expect(payload.subtitle).toContain("目标 · 完成全部单元测试");
   });
 
+  it("lets the summary win over the view a closed conversation left behind", () => {
+    // Left while a turn ran and an approval waited; both ended on the computer afterwards.
+    const stale = {
+      ...emptyView("s-closed"),
+      state: "running" as const,
+      turnActive: true,
+      lastSeq: 40,
+      permissions: [{ requestId: "r-1", title: "运行 rm -rf build", options: [], ts: 1 }],
+    };
+    const finished = makeSession({ id: "s-closed", state: "idle", lastSeq: 46 });
+    const [merged] = mergeLiveViewsIntoSessions([finished], { "s-closed": stale });
+    expect(merged?.state).toBe("idle");
+    expect(merged?.permission).toBeUndefined();
+    expect(merged?.pendingPermissions).toBe(0);
+
+    // The same view while the conversation is open and ahead of the last summary still counts.
+    const [live] = mergeLiveViewsIntoSessions([makeSession({ id: "s-closed", state: "idle", lastSeq: 38 })], { "s-closed": stale });
+    expect(live?.state).toBe("waiting");
+    expect(live?.permission?.requestId).toBe("r-1");
+  });
+
   it("wakes a snoozed session immediately if it needs attention or starts running", () => {
     const now = 10_000;
     snoozeSession("s-snooze", 60_000, now);
