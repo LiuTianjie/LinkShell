@@ -35,13 +35,16 @@ export function useMcpAppsDiscovery(params: {
   online: boolean;
   sessionId?: string;
   sessionAgent?: string;
+  /** The agent's `mcpApps` capability; older hosts don't say, and there only Codex had them. */
+  capable?: boolean;
 }): McpAppsDiscoveryState {
   const { connection, online, sessionId, sessionAgent } = params;
+  const capable = params.capable ?? sessionAgent === "codex";
   const [apps, setApps] = useState<McpApp[]>([]);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!connection || !online || !sessionId) {
+    if (!connection || !online || !sessionId || !capable) {
       setApps([]);
       return;
     }
@@ -54,7 +57,7 @@ export function useMcpAppsDiscovery(params: {
     } finally {
       setLoading(false);
     }
-  }, [connection, online, sessionId]);
+  }, [capable, connection, online, sessionId]);
 
   useEffect(() => {
     void refresh();
@@ -62,9 +65,7 @@ export function useMcpAppsDiscovery(params: {
 
   const safeApps = Array.isArray(apps) ? apps : [];
 
-  const showPluginTab = Boolean(
-    safeApps.length > 0 || sessionAgent === "codex" || sessionAgent === "claude",
-  );
+  const showPluginTab = safeApps.length > 0 || capable;
 
   return {
     apps: safeApps,

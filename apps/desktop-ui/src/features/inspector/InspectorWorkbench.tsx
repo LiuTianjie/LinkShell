@@ -170,6 +170,7 @@ export function InspectorWorkbench({
     online,
     sessionId,
     sessionAgent: session?.agent,
+    capable: agentInfo?.capabilities?.mcpApps,
   });
 
   // Reset per-host/cwd derived branch & diff stats when switching workspace scope.

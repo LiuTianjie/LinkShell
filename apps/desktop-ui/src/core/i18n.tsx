@@ -378,9 +378,9 @@ const desktopZh = {
   "desktop.shell.projectCount": "{count} 个项目",
   "desktop.shell.projectCountOne": "1 个项目",
   "desktop.shell.justNow": "刚刚",
-  "desktop.shell.minutesAgo": "{count} 分钟前",
-  "desktop.shell.hoursAgo": "{count} 小时前",
-  "desktop.shell.daysAgo": "{count} 天前",
+  "desktop.shell.minutesAgo": "{count}分钟前",
+  "desktop.shell.hoursAgo": "{count}小时前",
+  "desktop.shell.daysAgo": "{count}天前",
   "desktop.shell.sessionNotFound": "会话已不存在",
 } as const;
 
