@@ -15,7 +15,7 @@ import {
   FULLSCREEN_SHORTCUT,
   formatShortcut,
 } from "../../bridge/shortcuts";
-import { hasOpenOverlay } from "../../bridge/top-layer-registry";
+import { hasOpenOverlay, notifyOverlayLayout } from "../../bridge/top-layer-registry";
 import { useI18n } from "../../core/i18n";
 import { routerStore } from "../../core/router-store";
 import {
@@ -54,7 +54,7 @@ import {
   isImeComposing,
 } from "../../primitives";
 import { NativeMetalStage } from "./NativeMetalStage";
-import { getRemoteCopy, type RemoteCopy } from "./remote-copy";
+import { getRemoteCopy, localizeRemoteMessage, type RemoteCopy } from "./remote-copy";
 import type { RemoteStageStatus, ScreenTransportMode } from "./stage-types";
 import {
   resolveLocalDesktopEnv,
@@ -203,6 +203,23 @@ export function RemoteScreenWorkspace({
     setStageStatus(INITIAL_STAGE_STATUS);
     setStarted(true);
   }, [computerKey]);
+
+  // The host keeps the curtain and lock-on-disconnect between viewers: show what it has, per
+  // computer, so the first click changes what it says it changes.
+  useEffect(() => {
+    setPrivacy({ curtain: false, lockOnDisconnect: false, supported: true });
+    if (!connection || !online) return undefined;
+    let alive = true;
+    connection.link
+      .call("screen.privacy", {})
+      .then((res) => {
+        if (alive) setPrivacy(res);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [computerKey, connection, online]);
 
   // Query `screen.access` when connected so permission & capability issues have proactive guidance.
   const refreshAccess = useCallback(
@@ -892,8 +909,12 @@ export function RemoteScreenWorkspace({
 
   const stageNotice =
     transientNote ??
-    stageStatus.notice ??
+    (stageStatus.notice ? localizeRemoteMessage(stageStatus.notice) : undefined) ??
     (fallbackReason && stageStatus.live ? copy.screenFallbackBanner : undefined);
+
+  useEffect(() => {
+    if (useNativeMetal) notifyOverlayLayout();
+  }, [stageNotice, useNativeMetal]);
 
   const livePathLabel = stageStatus.telemetry.path
     ? formatPathLabel(stageStatus.telemetry.path, copy)
@@ -1229,14 +1250,16 @@ export function RemoteScreenWorkspace({
                 ? copy.screenIdlePausedTitle
                 : stageStatus.taken
                   ? copy.screenTakenTitle
-                  : copy.fusionConnectionErrorTitle}
+                  : copy.screenErrorTitle}
             </h3>
             <p className="ls-screen-overlay-card__desc">
               {stageStatus.idle
                 ? copy.screenIdlePausedDesc
                 : stageStatus.taken
                   ? copy.screenTakenDesc
-                  : (stageStatus.error ?? copy.screenConnectingDesc)}
+                  : stageStatus.error
+                    ? localizeRemoteMessage(stageStatus.error)
+                    : copy.screenConnectingDesc}
             </p>
             <div className="ls-screen-overlay-card__actions">
               <Button
@@ -1288,7 +1311,12 @@ export function RemoteScreenWorkspace({
         ) : null}
 
         {stageNotice ? (
-          <div role="status" className="ls-screen-stage-notice">
+          <div
+            role="status"
+            className="ls-screen-stage-notice"
+            // Over the Mac's native picture, which would otherwise cover it.
+            data-native-overlay={useNativeMetal ? "" : undefined}
+          >
             <span>{stageNotice}</span>
           </div>
         ) : null}

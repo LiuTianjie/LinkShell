@@ -2,7 +2,7 @@ import { useState, type JSX } from "react";
 import {
   evaluateFusionCapability,
   fusionCapabilityMessage,
-  startComputerFusion,
+  connectAndStartComputerFusion,
   useFusionState,
 } from "../../core/fusion-store";
 import { useActiveDesktopPlatform, useI18n } from "../../core/i18n";
@@ -124,7 +124,7 @@ export function FusionQuickTrigger({
   const { locale } = useI18n();
   const activePlatform = useActiveDesktopPlatform();
   const copy = getRemoteCopy(locale);
-  const { computer, connection, displayName, remotePlatform } =
+  const { computer, connection, remotePlatform } =
     useRemoteComputer(computerKey);
   const fusion = useFusionState(computerKey);
   const [startingLocal, setStartingLocal] = useState(false);
@@ -165,19 +165,11 @@ export function FusionQuickTrigger({
     routerStore.getState().openFusion(computerKey);
     if (isConnected || isBusy) return;
     if (connection && computer?.machine.online !== false) {
+      // An entry point like the others: after Disconnect it opens the page without restarting.
       setStartingLocal(true);
-      void startComputerFusion({
-        computerKey,
-        name: displayName,
-        link: connection.link,
-        streams: connection.streams,
-      })
-        .catch(() => {
-          // Error is recorded in `fusionStore` and surfaced inside `FusionWorkspace`.
-        })
-        .finally(() => {
-          setStartingLocal(false);
-        });
+      void connectAndStartComputerFusion(computerKey).finally(() => {
+        setStartingLocal(false);
+      });
     }
   };
 

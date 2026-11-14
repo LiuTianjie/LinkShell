@@ -285,6 +285,11 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
   const expected = new Map<string, string>();
   const watchers = new Map<string, () => void>();
   const reconnectTimers = new Map<string, unknown>();
+  /** Restarts the reconnect timer has begun and that haven't settled: the poller leaves them be. */
+  const restarting = new Set<string>();
+  /** Bumped by every Disconnect: a start that began before it must not finish after it. */
+  const stopGenerations = new Map<string, number>();
+  const generationOf = (computerKey: string): number => stopGenerations.get(computerKey) ?? 0;
 
   const stateOf = (computerKey: string): FusionComputerState =>
     store.getState().byComputer[computerKey] ?? EMPTY_FUSION_STATE;
@@ -474,8 +479,17 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         reconnectTimers.delete(computerKey);
         if (stateOf(computerKey).paused || !expected.has(computerKey)) return;
         const restart = deps.restart ?? ((key: string) => connectAndStartComputerFusion(key, undefined, { reconnect: true }));
-        void restart(computerKey).catch((error: unknown) =>
-          handleDrop(computerKey, error instanceof Error ? error.message : String(error)),
+        // Waiting for the computer can take a while; that wait is this attempt, not a new drop.
+        restarting.add(computerKey);
+        void restart(computerKey).then(
+          () => {
+            restarting.delete(computerKey);
+          },
+          (error: unknown) => {
+            restarting.delete(computerKey);
+            if (error instanceof FusionStartCancelled) return;
+            handleDrop(computerKey, error instanceof Error ? error.message : String(error));
+          },
         );
       }, delay),
     );
@@ -510,6 +524,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     }
 
     const run = (async (): Promise<FusionStartReply> => {
+      const generation = generationOf(computerKey);
+      const cancelled = () => generationOf(computerKey) !== generation;
       startingUntil.set(computerKey, now() + FUSION_START_GRACE_MS);
       expected.set(computerKey, name);
       cancelReconnect(computerKey);
@@ -526,6 +542,10 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       try {
         started = await link.call("fusion.start", {});
       } catch (error) {
+        if (cancelled()) {
+          releaseConnection?.();
+          throw new FusionStartCancelled();
+        }
         startingUntil.delete(computerKey);
         releaseConnection?.();
         const rawMessage = error instanceof Error ? error.message : String(error);
@@ -546,6 +566,11 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         });
         throw translated;
       }
+      if (cancelled()) {
+        // Disconnected while the remote was getting ready: its one-time token simply goes unused.
+        releaseConnection?.();
+        throw new FusionStartCancelled();
+      }
 
       try {
         const reply = await invoke<FusionStartReply>(
@@ -560,6 +585,14 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
           },
           20_000,
         );
+        if (cancelled()) {
+          // The hub came up after Disconnect: take it down again, unless a newer start owns it.
+          releaseConnection?.();
+          if (stateOf(computerKey).paused && !inFlightStarts.has(computerKey)) {
+            await invoke("fusionStop", { computerKey, name }, 20_000).catch(() => undefined);
+          }
+          throw new FusionStartCancelled();
+        }
         startingUntil.set(computerKey, now() + FUSION_START_GRACE_MS);
         if (reply?.mode === "tunnel") {
           // The tunnel runs through this computer's connection: hold it for the tunnel's lifetime,
@@ -600,8 +633,10 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         void refreshFusionState(computerKey, name).catch(() => undefined);
         return reply;
       } catch (error) {
-        startingUntil.delete(computerKey);
+        if (error instanceof FusionStartCancelled) throw error;
         releaseConnection?.();
+        if (cancelled()) throw new FusionStartCancelled();
+        startingUntil.delete(computerKey);
         const message = error instanceof Error ? error.message : String(error);
         if (!reconnect) expected.delete(computerKey);
         updateComputer(computerKey, {
@@ -691,7 +726,9 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       !snapshotHubRunning &&
       !snapshotConnected &&
       !inGrace &&
-      (before.phase === "connected" || before.phase === "starting" || (before.phase === "reconnecting" && !reconnectTimers.has(computerKey)));
+      (before.phase === "connected" ||
+        before.phase === "starting" ||
+        (before.phase === "reconnecting" && !reconnectTimers.has(computerKey) && !restarting.has(computerKey)));
 
     updateComputer(computerKey, (prev) => {
       if (prev.phase === "stopping" && !snapshotConnected) {
@@ -799,7 +836,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       error: undefined,
     }));
     try {
-      await invoke(
+      const reply = await invoke<{ ok?: boolean }>(
         "fusionLaunchApp",
         {
           computerKey,
@@ -810,11 +847,16 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         },
         20_000,
       );
+      // The hub isn't listening yet (still starting) or has gone: say so instead of nothing.
+      if (reply?.ok === false) throw new Error(translateDesktop(getDesktopLocale(), "desktop.fusion.appActionFailed"));
       if (options?.name || current.hostLabel) {
         await refreshFusionState(computerKey, options?.name ?? current.hostLabel).catch(
           () => undefined,
         );
       }
+    } catch (error) {
+      updateComputer(computerKey, { error: error instanceof Error ? error.message : String(error) });
+      throw error;
     } finally {
       updateComputer(computerKey, (prev) => {
         const nextBusy = { ...prev.busyBundles };
@@ -835,7 +877,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       error: undefined,
     }));
     try {
-      await invoke(
+      const reply = await invoke<{ ok?: boolean }>(
         "fusionQuitApp",
         {
           computerKey,
@@ -846,11 +888,16 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         },
         20_000,
       );
+      // The hub isn't listening yet (still starting) or has gone: say so instead of nothing.
+      if (reply?.ok === false) throw new Error(translateDesktop(getDesktopLocale(), "desktop.fusion.appActionFailed"));
       if (options?.name || current.hostLabel) {
         await refreshFusionState(computerKey, options?.name ?? current.hostLabel).catch(
           () => undefined,
         );
       }
+    } catch (error) {
+      updateComputer(computerKey, { error: error instanceof Error ? error.message : String(error) });
+      throw error;
     } finally {
       updateComputer(computerKey, (prev) => {
         const nextBusy = { ...prev.busyBundles };
@@ -863,6 +910,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
   /** The user's Disconnect: sticky until they start Fusion again. */
   async function stopFusion(computerKey: string, name?: string): Promise<void> {
     const current = stateOf(computerKey);
+    stopGenerations.set(computerKey, generationOf(computerKey) + 1);
+    restarting.delete(computerKey);
     startingUntil.delete(computerKey);
     inFlightStarts.delete(computerKey);
     expected.delete(computerKey);
@@ -925,7 +974,16 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     stopFusion,
     disposeAll,
     isPaused: (computerKey: string) => stateOf(computerKey).paused === true,
+    generation: generationOf,
   };
+}
+
+/** A start overtaken by the user's Disconnect: not an error to show. */
+export class FusionStartCancelled extends Error {
+  constructor() {
+    super("Fusion start cancelled by Disconnect");
+    this.name = "FusionStartCancelled";
+  }
 }
 
 export const fusionController = createFusionController();
@@ -1022,15 +1080,24 @@ export async function connectAndStartComputerFusion(
   // After Disconnect, entry points (sidebar, command center, Dock stubs) do not undo it: only the
   // Fusion page's own start button (`explicit`) or opening a fused app does.
   if (fusionController.isPaused(computerKey) && !options.explicit && !launchBundle) return;
+  // Disconnect pressed while this waits (for the app, the computer, its connection) wins.
+  const generation = fusionController.generation(computerKey);
+  const stopped = () => fusionController.generation(computerKey) !== generation;
   try {
     await engine.start();
+    if (stopped()) return;
     const computer = await waitForOnlineComputer(computerKey);
+    if (stopped()) return;
     const retained = engine.retainComputer(computer);
     try {
       await waitForConnectionOnline(retained.connection.store);
     } catch (error) {
       retained.release();
       throw error;
+    }
+    if (stopped()) {
+      retained.release();
+      return;
     }
     const name = computerName(computer, computerNames.store.getState());
     await fusionController.startFusion({
@@ -1043,6 +1110,7 @@ export async function connectAndStartComputerFusion(
       reconnect: options.reconnect,
     });
   } catch (error) {
+    if (error instanceof FusionStartCancelled || stopped()) return;
     if (options.reconnect) throw error;
     reportDesktopError(error);
   }

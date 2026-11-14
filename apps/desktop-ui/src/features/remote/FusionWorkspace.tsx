@@ -46,6 +46,7 @@ import {
 import { RemoteModeSwitch } from "./FusionControls";
 import {
   getRemoteCopy,
+  localizeRemoteMessage,
   resolveAppCategory,
   type FusionAlertCopyKind,
   type FusionCategoryKey,
@@ -107,6 +108,7 @@ function classifyFusionError(error: string): FusionErrorKind {
     lower.includes("method not found") ||
     lower.includes("host_outdated") ||
     lower.includes("outdated") ||
+    lower.includes("版本较旧") ||
     lower.includes("不支持")
   ) {
     return "outdated";
@@ -200,7 +202,7 @@ function FusionRemediationBanner({
         ? copy.fusionLockedDesc
         : kind === "outdated"
           ? copy.fusionOutdatedDesc
-          : error;
+          : localizeRemoteMessage(error);
 
   return (
     <div

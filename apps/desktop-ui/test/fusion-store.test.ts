@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createFusionController,
   FUSION_MAX_RECONNECTS,
+  FusionStartCancelled,
   fusionReconnectDelay,
 } from "../src/core/fusion-store";
 
@@ -173,5 +174,68 @@ describe("fusion-store", () => {
     await h.controller.refreshFusionState("k", "Mac");
     expect(h.controller.stateOf("k").phase).toBe("reconnecting");
     expect(h.controller.stateOf("k").reconnectAttempt).toBeGreaterThanOrEqual(1);
+  });
+  it("a restart still waiting for the computer is one attempt, not a new drop on every poll", async () => {
+    let state: Record<string, unknown> = { hubRunning: true, connected: true };
+    const h = harness((method) => (method === "fusionStart" ? { mode: "direct", host: "h", port: 1 } : method === "fusionState" ? state : {}));
+    await h.controller.startFusion({ computerKey: "k", name: "Mac", link: link(), streams: { open: vi.fn() } as never });
+    await flush();
+    let finish!: () => void;
+    h.restart.mockImplementation(() => new Promise<undefined>((resolve) => { finish = () => resolve(undefined); }));
+    state = { hubRunning: false, connected: false };
+    await h.controller.refreshFusionState("k", "Mac");
+    await h.advance(fusionReconnectDelay(1));
+    expect(h.restart).toHaveBeenCalledTimes(1);
+    for (let poll = 0; poll < 6; poll++) {
+      await h.controller.refreshFusionState("k", "Mac");
+      await h.advance(2_000);
+    }
+    expect(h.controller.stateOf("k").reconnectAttempt).toBe(1);
+    expect(h.restart).toHaveBeenCalledTimes(1);
+    finish();
+    await flush();
+    // Settled without the hub coming back: now the poller may count the next attempt.
+    await h.controller.refreshFusionState("k", "Mac");
+    expect(h.controller.stateOf("k").reconnectAttempt).toBe(2);
+  });
+
+  it("Disconnect while the remote is still getting ready wins: nothing starts afterwards", async () => {
+    const calls: string[] = [];
+    const h = harness((method) => {
+      calls.push(method);
+      return method === "fusionStart" ? { mode: "direct", host: "h", port: 1 } : {};
+    });
+    let ready!: (value: unknown) => void;
+    const slowLink = { call: vi.fn(() => new Promise((resolve) => { ready = resolve; })) } as never;
+    const release = vi.fn();
+    const starting = h.controller.startFusion({ computerKey: "k", name: "Mac", link: slowLink, streams: { open: vi.fn() } as never, releaseConnection: release });
+    await flush();
+    await h.controller.stopFusion("k", "Mac");
+    ready({ port: 1, token: "t", hosts: [] });
+    await expect(starting).rejects.toBeInstanceOf(FusionStartCancelled);
+    expect(calls).not.toContain("fusionStart");
+    expect(release).toHaveBeenCalled();
+    expect(h.controller.isPaused("k")).toBe(true);
+    expect(h.controller.stateOf("k").phase).toBe("idle");
+    expect(h.controller.stateOf("k").error).toBeUndefined();
+  });
+
+  it("a hub that comes up after Disconnect is taken down again", async () => {
+    const calls: string[] = [];
+    let hubReady!: (value: unknown) => void;
+    const h = harness((method) => {
+      calls.push(method);
+      if (method === "fusionStart") return new Promise((resolve) => { hubReady = resolve; });
+      return {};
+    });
+    const starting = h.controller.startFusion({ computerKey: "k", name: "Mac", link: link(), streams: { open: vi.fn() } as never });
+    await flush();
+    expect(calls).toContain("fusionStart");
+    await h.controller.stopFusion("k", "Mac");
+    hubReady({ mode: "direct", host: "h", port: 1 });
+    await expect(starting).rejects.toBeInstanceOf(FusionStartCancelled);
+    expect(calls.filter((method) => method === "fusionStop")).toHaveLength(2);
+    expect(h.controller.isPaused("k")).toBe(true);
+    expect(h.controller.stateOf("k").hubRunning).toBe(false);
   });
 });

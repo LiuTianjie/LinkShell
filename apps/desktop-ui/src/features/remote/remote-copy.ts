@@ -151,6 +151,7 @@ export interface RemoteCopy {
   screenIdlePausedTitle: string;
   screenIdlePausedDesc: string;
   screenTakenTitle: string;
+  screenErrorTitle: string;
   screenTakenDesc: string;
   screenPermissionTitle: string;
   screenPermissionDesc: string;
@@ -313,6 +314,7 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   screenIdlePausedTitle: "画面已因空闲自动休眠",
   screenIdlePausedDesc: "为节省中继带宽，无人操作一段时间后画面已暂停，点击即可立即恢复。",
   screenTakenTitle: "画面已在其他窗口打开",
+  screenErrorTitle: "远程画面连接中断",
   screenTakenDesc: "另一台设备或窗口接管了远程画面，点击可重新接管至当前窗口。",
   screenPermissionTitle: "需要远端电脑授权屏幕录制",
   screenPermissionDesc: "请在远端电脑的系统隐私设置中允许 LinkShell 录制屏幕，完成后点击重新连接。",
@@ -497,6 +499,7 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
   screenIdlePausedDesc:
     "Relayed video pauses after idle time to save bandwidth. Click to resume immediately.",
   screenTakenTitle: "Screen opened in another window",
+  screenErrorTitle: "Remote screen disconnected",
   screenTakenDesc: "Another viewer took over this stream. Click to reclaim it here.",
   screenPermissionTitle: "Screen Recording permission needed",
   screenPermissionDesc:
@@ -577,6 +580,7 @@ const JA_COPY = (locale: Locale): RemoteCopy => ({
   screenStart: "画面に接続",
   screenDisconnect: "切断",
   screenReconnect: "再接続",
+  screenErrorTitle: "リモート画面の接続が切れました",
   screenQualityButton: "画質",
   screenQualityTitle: "画質とコーデック設定",
   screenCodecLabel: "ビデオコーデック",
@@ -642,4 +646,57 @@ export function resolveAppCategory(
     return "creative";
   }
   return "other";
+}
+
+type Phrase = Record<Locale, string>;
+
+/**
+ * What the screen and Fusion code (and older hosts) say in Chinese, in the other languages. The
+ * Chinese text stays the source because the retry policy reads it; it is translated only when
+ * shown. A message not listed here (a host's own wording) is shown as it came.
+ */
+const REMOTE_MESSAGES: Phrase[] = [
+  { zh: "屏幕画面被另一台设备接手了", en: "Another device took over the screen.", ja: "別のデバイスが画面を引き継ぎました。" },
+  { zh: "长时间没有操作，画面已断开", en: "The picture was closed after a while without use.", ja: "しばらく操作がなかったため、画面を切断しました。" },
+  { zh: "原生屏幕连接失败", en: "The native screen connection failed.", ja: "ネイティブ画面の接続に失敗しました。" },
+  { zh: "屏幕协商信息过大", en: "The screen negotiation message was too large.", ja: "画面のネゴシエーション情報が大きすぎます。" },
+  { zh: "屏幕协商信息无效", en: "The screen negotiation message was invalid.", ja: "画面のネゴシエーション情報が無効です。" },
+  { zh: "屏幕连接未就绪，请重试", en: "The screen connection isn't ready. Try again.", ja: "画面の接続がまだ準備できていません。もう一度お試しください。" },
+  { zh: "原生屏幕组件不可用", en: "The native screen component isn't available.", ja: "ネイティブ画面コンポーネントを利用できません。" },
+  { zh: "原生视频直连超时", en: "The direct video connection timed out.", ja: "ビデオの直接接続がタイムアウトしました。" },
+  { zh: "屏幕连接已断开", en: "The screen connection dropped.", ja: "画面の接続が切れました。" },
+  { zh: "此电脑未能建立原生视频直连，请重试或检查网络", en: "This computer couldn't open a direct video connection. Try again or check the network.", ja: "このコンピュータとビデオを直接接続できませんでした。もう一度試すか、ネットワークを確認してください。" },
+  { zh: "屏幕设置未能应用，请重新连接", en: "The screen settings didn't apply. Reconnect.", ja: "画面の設定を適用できませんでした。再接続してください。" },
+  { zh: "画面一直没有出现。请确认电脑在线、已允许屏幕录制，然后重新连接。", en: "No picture arrived. Make sure the computer is online and allows screen recording, then reconnect.", ja: "画面が表示されませんでした。コンピュータがオンラインで画面収録が許可されていることを確認してから再接続してください。" },
+  { zh: "屏幕连接已断开，请确认电脑在线后重新连接。", en: "The screen connection dropped. Make sure the computer is online, then reconnect.", ja: "画面の接続が切れました。コンピュータがオンラインであることを確認してから再接続してください。" },
+  { zh: "网络较慢：已降低画质，优先保证跟得上", en: "Slow network: quality lowered to keep up.", ja: "ネットワークが遅いため、追従を優先して画質を下げました。" },
+  { zh: "这个系统版本的浏览器内核不支持视频解码，请更新 LinkShell 后重试。", en: "This version's browser engine can't decode the video. Update LinkShell and try again.", ja: "このバージョンのブラウザエンジンはビデオをデコードできません。LinkShell を更新してからもう一度お試しください。" },
+  { zh: "直连断开了：已改用兼容方式传画面，延迟会高一些", en: "The direct connection dropped: the picture now comes the compatible way, with more delay.", ja: "直接接続が切れたため、互換方式で画面を送っています（遅延が増えます）。" },
+  { zh: "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", en: "No direct connection to the computer: the picture comes the compatible way, with more delay.", ja: "コンピュータと直接接続できないため、互換方式で画面を送っています（遅延が増えます）。" },
+  { zh: "与远端 Mac 的融合连接已断开", en: "The Fusion connection to the remote Mac dropped.", ja: "リモート Mac との融合接続が切れました。" },
+  { zh: "远端电脑的 LinkShell 版本较旧，请先更新远端 LinkShell 后再开启融合模式", en: "LinkShell on the remote computer is too old. Update it there, then start Fusion Mode.", ja: "リモートコンピュータの LinkShell が古いため、更新してから融合モードを開始してください。" },
+  { zh: "未找到对应的远端电脑，请先打开 LinkShell 检查连接", en: "That remote computer wasn't found. Open LinkShell and check the connection.", ja: "リモートコンピュータが見つかりません。LinkShell を開いて接続を確認してください。" },
+  { zh: "远端电脑设置了访问密码，请先在 LinkShell 中解锁", en: "The remote computer has an access password. Unlock it in LinkShell first.", ja: "リモートコンピュータにアクセスパスワードが設定されています。先に LinkShell でロックを解除してください。" },
+  { zh: "连接远端电脑超时，请检查网络或网关状态", en: "Connecting to the remote computer timed out. Check the network or the gateway.", ja: "リモートコンピュータへの接続がタイムアウトしました。ネットワークまたはゲートウェイを確認してください。" },
+];
+
+const FUSION_RETRIES_PREFIX = "融合模式多次重连失败：";
+const OFFLINE_PATTERN = /^「(.+)」当前离线，无法打开融合应用$/;
+
+/** A screen or Fusion message in `locale`; unknown text is returned unchanged. */
+export function localizeRemoteMessage(message: string, locale: Locale = getDesktopLocale()): string {
+  if (locale === "zh" || !message) return message;
+  const known = REMOTE_MESSAGES.find((phrase) => phrase.zh === message);
+  if (known) return known[locale];
+  if (message.startsWith(FUSION_RETRIES_PREFIX)) {
+    const reason = localizeRemoteMessage(message.slice(FUSION_RETRIES_PREFIX.length), locale);
+    return locale === "ja" ? `融合モードの再接続に何度も失敗しました：${reason}` : `Fusion couldn't reconnect: ${reason}`;
+  }
+  const offline = OFFLINE_PATTERN.exec(message);
+  if (offline) {
+    return locale === "ja"
+      ? `「${offline[1]}」はオフラインのため、融合アプリを開けません`
+      : `"${offline[1]}" is offline, so its apps can't be opened.`;
+  }
+  return message;
 }

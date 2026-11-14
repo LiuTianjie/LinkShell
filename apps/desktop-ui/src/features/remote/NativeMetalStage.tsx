@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { DESKTOP_NATIVE_SCREEN_EVENT } from "../../bridge/desktop-bridge";
 import {
   getOpenOverlayRects,
+  hasOpenSelectPicker,
   hasOpenOverlay,
   subscribeOpenOverlay,
   useHasOpenOverlay,
@@ -10,6 +11,8 @@ import {
   CAPABILITIES_WAIT_MS,
   PAUSE_ACK_MS,
   RETRIES_EARNED_MS,
+  SCREEN_IDLE,
+  SCREEN_TAKEN,
   autoScreenWidth,
   effectiveNativeScreenRect,
   nativeScreenQuery,
@@ -36,9 +39,10 @@ function errorMessageOf(reason: unknown): string {
 
 /**
  * macOS Native Metal Stage (`DesktopScreenSurface` / AppKit `ScreenClip` + `CAMetalLayer`).
- * Subscribes to `TopLayerRegistry` (`useHasOpenOverlay`) so opening any `<dialog>`,
- * `[popover="auto"|"manual"]`, or `<select>` collapses the native Metal rect to `0×0`
- * immediately without brittle DOM-scraping, and restores whole-pixel snapped geometry on close.
+ * Subscribes to `TopLayerRegistry` (`useHasOpenOverlay`): every open `<dialog>`, `[popover]`
+ * or `[data-native-overlay]` is cut out of the Metal layer (`holes`) so it shows and takes its
+ * clicks while the picture stays live around it; an open `<select>` picker, which has no box to
+ * cut, collapses the rect to `0×0` until it closes.
  */
 export function NativeMetalStage({
   link,
@@ -62,6 +66,7 @@ export function NativeMetalStage({
   const sessionIdRef = useRef<string | undefined>(undefined);
   const liveSessionRef = useRef<LiveNativeSession | undefined>(undefined);
   const retriesRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastLayoutJsonRef = useRef("");
 
   const [internalRetryNonce, setInternalRetryNonce] = useState(0);
@@ -133,7 +138,9 @@ export function NativeMetalStage({
     (overlayOpen: boolean) => {
       const id = sessionIdRef.current;
       if (!id) return;
-      const rect = computeStageRect(overlayOpen);
+      const rect = hasOpenSelectPicker()
+        ? { x: 0, y: 0, width: 0, height: 0 }
+        : computeStageRect(overlayOpen);
       const holes = getOpenOverlayRects();
       const payload = { rect, holes, overlayOpen };
       const serialized = JSON.stringify(payload);
@@ -183,9 +190,13 @@ export function NativeMetalStage({
   // Reset retry counter when manual revision increments.
   useEffect(() => {
     retriesRef.current = 0;
+    clearTimeout(retryTimerRef.current);
     setRetrying(false);
     setDormant(false);
   }, [revision]);
+
+  // A retry scheduled by a session that is gone must not restart its successor.
+  useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
   // Measure debounced auto stage width on resize.
   useEffect(() => {
@@ -287,7 +298,8 @@ export function NativeMetalStage({
       if (policy === "retry") {
         retriesRef.current += 1;
         setRetrying(true);
-        setTimeout(() => {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = setTimeout(() => {
           setInternalRetryNonce((n) => n + 1);
         }, 800 * retriesRef.current);
         return;
@@ -570,6 +582,8 @@ export function NativeMetalStage({
       controlling: nativeStatus.control === true,
       controlRequested: nativeStatus.controlRequested === true,
       canControl: isLive,
+      taken: error === SCREEN_TAKEN,
+      idle: error === SCREEN_IDLE,
       error: error ?? nativeStatus.controlError,
       telemetry: {
         engine: "metal",

@@ -13,6 +13,7 @@ import { rawPlatform } from "../../bridge/desktop-bridge";
 import {
   ScreenReceiver,
   chosenScreenWidth,
+  ClickCounter,
   fittedRect,
   fittedScreenWidth,
   mouseButton,
@@ -55,6 +56,7 @@ export function WebRtcScreenStage({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imeRef = useRef<HTMLTextAreaElement | null>(null);
   const receiverRef = useRef<ScreenReceiver | null>(null);
+  const clicksRef = useRef(new ClickCounter());
   const composingRef = useRef(false);
 
   const [reconnectNonce, setReconnectNonce] = useState(0);
@@ -340,7 +342,7 @@ export function WebRtcScreenStage({
       btn,
       pt.x,
       pt.y,
-      event.detail || 1,
+      Math.max(event.detail, clicksRef.current.down(btn, event.clientX, event.clientY, event.timeStamp)),
       remoteModifiers(event, localPlat, remotePlat),
     );
   };
@@ -365,7 +367,7 @@ export function WebRtcScreenStage({
       btn,
       pt.x,
       pt.y,
-      1,
+      clicksRef.current.current(btn),
       remoteModifiers(event, localPlat, remotePlat),
     );
   };
@@ -389,6 +391,12 @@ export function WebRtcScreenStage({
     if (!canInput || composingRef.current || event.nativeEvent.isComposing) {
       return;
     }
+    // The window's own full-screen keys stay here: forwarded, nothing would leave full screen
+    // (Windows has no menu to fall back on).
+    if (isLocalFullscreenKey(event)) return;
+    // AltGr types a character (Chromium on Windows reports it as Ctrl+Alt): let it arrive as
+    // text, not as a ⌘⌥ shortcut on the remote.
+    if (isAltGraphCharacter(event, localPlat)) return;
     const mods = remoteModifiers(event, localPlat, remotePlat);
     const hasCommandMod = mods.some((m) => m !== "shift");
     const keyName = hasCommandMod ? shortcutKey(event) : namedKey(event);
@@ -483,4 +491,28 @@ export function WebRtcScreenStage({
       />
     </div>
   );
+}
+
+/** F11, or ⌃⌘F: the shortcuts that toggle this window's full screen. */
+export function isLocalFullscreenKey(event: { key: string; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return event.key === "F11" || (event.ctrlKey && event.metaKey && event.key.toLowerCase() === "f");
+}
+
+/**
+ * A character typed with AltGr (`@` on a German Q, `€`, `{`): Chromium marks it AltGraph, or on
+ * Windows only as Ctrl+Alt with a character that isn't the key's own letter or digit.
+ */
+export function isAltGraphCharacter(
+  event: { key: string; code: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; getModifierState?: (key: "AltGraph") => boolean },
+  local: string,
+): boolean {
+  if (event.key.length !== 1) return false;
+  if (event.getModifierState?.("AltGraph")) return true;
+  if (local !== "windows" || !event.ctrlKey || !event.altKey || event.metaKey) return false;
+  const own = event.code.startsWith("Key")
+    ? event.code.slice(3).toLowerCase()
+    : event.code.startsWith("Digit")
+      ? event.code.slice(5)
+      : undefined;
+  return event.key.toLowerCase() !== own;
 }

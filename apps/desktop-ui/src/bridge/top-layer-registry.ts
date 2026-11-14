@@ -42,6 +42,9 @@ function isTrackedPopover(el: Element): boolean {
 
 function isElementStillOpen(el: Element): boolean {
   if (!el.isConnected) return false;
+  // An overlay that isn't top-layer HTML (the sidebar's hover drawer) marks itself so the native
+  // screen cuts a hole for it too, instead of covering it while it takes the clicks.
+  if (el.hasAttribute("data-native-overlay")) return true;
   const tag = el.tagName.toUpperCase();
   if (tag === "DIALOG") {
     return (el as HTMLDialogElement).open === true;
@@ -159,7 +162,7 @@ export function getOpenOverlayRects(): OverlayCutoutRect[] {
 
   const candidates = new Set<Element>(trackedElements);
   const queried = document.querySelectorAll(
-    'dialog[open], [popover], .ls-popover[data-state="open"], .ls-menu-popover[data-state="open"], select',
+    'dialog[open], [popover], .ls-popover[data-state="open"], .ls-menu-popover[data-state="open"], select, [data-native-overlay]',
   );
   for (const el of queried) {
     if (isElementStillOpen(el)) {
@@ -190,11 +193,29 @@ export function getOpenOverlayRects(): OverlayCutoutRect[] {
   return holes;
 }
 
+/**
+ * A `<select>` whose picker is showing. The picker list (`::picker(select)`) has no box the page
+ * can measure, so the native screen steps aside entirely while one is open.
+ */
+export function hasOpenSelectPicker(): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    return document.querySelector("select:open") !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function hasOpenOverlay(): boolean {
   ensureDomListeners();
   const current = computeOpenState();
   lastSnapshot = current;
   return current;
+}
+
+/** A `[data-native-overlay]` element appeared or went: the native screen re-cuts its holes. */
+export function notifyOverlayLayout(): void {
+  notifySubscribers(true);
 }
 
 export function subscribeOpenOverlay(fn: () => void): () => void {

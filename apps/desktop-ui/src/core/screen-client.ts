@@ -644,6 +644,37 @@ export function screenRate(preferred: string, displayFps: number | undefined): s
   return String(Math.min(wanted, shown));
 }
 
+/**
+ * Chromium leaves `detail` at 0 on pointer events, so double- and triple-clicks are counted here
+ * (the remote's click state is what makes a double-click open a file or select a word).
+ */
+export class ClickCounter {
+  private last?: { button: string; at: number; x: number; y: number; count: number };
+
+  constructor(
+    private readonly intervalMs = 500,
+    private readonly slopPx = 5,
+  ) {}
+
+  /** The click count for a press at (x, y) in CSS pixels. */
+  down(button: string, x: number, y: number, at: number): number {
+    const last = this.last;
+    const repeat =
+      last !== undefined &&
+      last.button === button &&
+      at - last.at <= this.intervalMs &&
+      Math.hypot(x - last.x, y - last.y) <= this.slopPx;
+    const count = repeat ? Math.min(3, last.count + 1) : 1;
+    this.last = { button, at, x, y, count };
+    return count;
+  }
+
+  /** The count the matching release carries. */
+  current(button: string): number {
+    return this.last?.button === button ? this.last.count : 1;
+  }
+}
+
 export type FailureAction = "dormant" | "retry" | "fallback" | "show";
 
 export function nativeSessionPolicy(
@@ -651,6 +682,9 @@ export function nativeSessionPolicy(
   state: { paused: boolean; retries: number; canFallBack: boolean },
 ): FailureAction {
   if (state.paused) return "dormant";
+  // Another device took the screen, or the host ended an unused relayed picture: reconnecting
+  // on our own would take it back from that device, or undo the saving every few minutes.
+  if (message === SCREEN_TAKEN || message === SCREEN_IDLE) return "show";
   if (/不支持|不可用|权限|更新 LinkShell/.test(message)) return "show";
   if (state.retries < AUTO_RETRIES) return "retry";
   if (state.canFallBack && /直连|超时|网络|无法建立|中断|断开/.test(message)) {
@@ -1839,8 +1873,17 @@ export class ScreenReceiver {
     clicks: number,
     modifiers: Modifier[],
   ): void {
-    if (!this.state.canInput) return;
     if (!down && !this.held.has(button)) return;
+    if (!this.state.canInput) {
+      // Recovering mid-drag: the remote must still hear the button go up, or every move after
+      // the picture is back drags and its next click is ignored.
+      if (!down) {
+        const held = this.held.get(button)!;
+        this.held.delete(button);
+        this.sendRelease(held);
+      }
+      return;
+    }
     this.pendingMove = { x, y };
     this.flushMove(true);
     const event = {
@@ -1893,17 +1936,19 @@ export class ScreenReceiver {
   releaseAll(): void {
     const held = [...this.held.values()];
     this.held.clear();
-    const allowed = this.state.canInput;
-    for (const event of held) {
-      const up = { ...event, t: "up" as const };
-      if (allowed) this.post(up, "input");
-      else if (this.lanesOpen()) {
-        this.channels.input!.send(
-          JSON.stringify({ ...this.gate.stamp(up), i: ++this.sent }),
-        );
-      } else {
-        this.sendSocket(this.gate.stamp(up));
-      }
+    for (const event of held) this.sendRelease(event);
+  }
+
+  /** A held button's up, by whatever route is still open. */
+  private sendRelease(event: ScreenInput & { t: "down" }): void {
+    const up = { ...event, t: "up" as const };
+    if (this.state.canInput) this.post(up, "input");
+    else if (this.lanesOpen()) {
+      this.channels.input!.send(
+        JSON.stringify({ ...this.gate.stamp(up), i: ++this.sent }),
+      );
+    } else {
+      this.sendSocket(this.gate.stamp(up));
     }
   }
 

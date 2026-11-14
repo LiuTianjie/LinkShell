@@ -887,6 +887,7 @@ export function Sidebar({
       aria-label={t("desktop.workspace")}
       className={isPeekDrawer ? "desktop-sidebar-peek" : "desktop-sidebar"}
       data-open={isPeekDrawer ? "true" : undefined}
+      data-native-overlay={isPeekDrawer ? "" : undefined}
       onKeyDown={handleTreeKeyDown}
     >
       {isPeekDrawer ? (
