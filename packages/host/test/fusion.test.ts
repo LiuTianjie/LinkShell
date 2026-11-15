@@ -5,6 +5,9 @@ import { FusionShare, reachableHostAddresses } from "../src/fusion.js";
 
 type Access = { recording: boolean | null; control: boolean | null; app?: string };
 
+// These cases exercise the Mac helper over a real Unix socket; Windows uses the node remote.
+const macHelperIt = it.skipIf(process.platform === "win32");
+
 /** Plays LinkShell --fusion-remote: dials the parent socket and answers each token with a port. */
 function fakeRemote(options: { answer?: boolean } = {}) {
   const seen: { args: string[]; tokens: string[]; socket?: Socket } = { args: [], tokens: [] };
@@ -41,7 +44,7 @@ describe("FusionShare", () => {
     for (const s of shares.splice(0)) s.stop();
   });
 
-  it("never puts the token on the remote's command line and hands out a fresh token per start", async () => {
+  macHelperIt("never puts the token on the remote's command line and hands out a fresh token per start", async () => {
     const remote = fakeRemote();
     const fusion = share({ recording: true, control: true }, remote.launch);
     shares.push(fusion);
@@ -76,7 +79,7 @@ describe("FusionShare", () => {
     expect(started.token.length).toBeGreaterThan(20);
   });
 
-  it("shares one answer between concurrent starts so the token is not rotated under the first caller", async () => {
+  macHelperIt("shares one answer between concurrent starts so the token is not rotated under the first caller", async () => {
     const remote = fakeRemote();
     const fusion = share({ recording: true, control: true }, remote.launch);
     shares.push(fusion);
@@ -96,7 +99,7 @@ describe("FusionShare", () => {
     expect(remote.seen.tokens).toHaveLength(0);
   });
 
-  it("stop() during a start rejects it at once instead of after the 15 s timeout", async () => {
+  macHelperIt("stop() during a start rejects it at once instead of after the 15 s timeout", async () => {
     const fusion = share({ recording: true, control: true }, () => undefined, { startTimeoutMs: 60_000 });
     shares.push(fusion);
     const started = fusion.start();
@@ -107,7 +110,7 @@ describe("FusionShare", () => {
     expect(Date.now() - at).toBeLessThan(1_000);
   });
 
-  it("stop() while waiting for the remote's answer rejects the pending start", async () => {
+  macHelperIt("stop() while waiting for the remote's answer rejects the pending start", async () => {
     const remote = fakeRemote({ answer: false });
     const fusion = share({ recording: true, control: true }, remote.launch, { readyTimeoutMs: 60_000 });
     shares.push(fusion);
@@ -117,7 +120,7 @@ describe("FusionShare", () => {
     await expect(started).rejects.toThrow();
   });
 
-  it("a remote that exits before answering fails the start with a clear message", async () => {
+  macHelperIt("a remote that exits before answering fails the start with a clear message", async () => {
     const remote = fakeRemote({ answer: false });
     const fusion = share({ recording: true, control: true }, remote.launch, { readyTimeoutMs: 60_000 });
     shares.push(fusion);
