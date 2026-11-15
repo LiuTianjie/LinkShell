@@ -59,6 +59,12 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0";
 const ACCOUNT_BINDING_ERROR = "网关未确认当前账号，请退出账号后重新登录。";
 
+/** `computer` under the name its host reports: the same object when that is already its name. */
+export function withHostName(computer: Computer, name: string, configured: boolean): Computer {
+  if (computer.machine.name === name && Boolean(computer.machine.namingConfigured) === configured) return computer;
+  return { ...computer, machine: { ...computer.machine, name, namingConfigured: configured } };
+}
+
 export function validateGateway(value: string): string {
   let url: URL;
   try {
@@ -684,44 +690,35 @@ export class DesktopEngine {
       if (state.machine === previous.machine) return;
       if (state.machine?.naming) {
         computerNames.sync(computer, state.machine);
-        const updated: Computer = {
-          ...connection.computer,
-          machine: {
-            ...connection.computer.machine,
-            name: state.machine.hostname,
-            namingConfigured: state.machine.naming.configured,
-          },
-        };
+        const name = state.machine.hostname;
+        const configured = state.machine.naming.configured;
+        const updated = withHostName(connection.computer, name, configured);
         connection.computer = updated;
-        this.state.setState((current) => ({
-          computers: current.computers.map((item) =>
-            item.key === computer.key
-              ? {
-                  ...item,
-                  machine: {
-                    ...item.machine,
-                    name: updated.machine.name,
-                    namingConfigured: updated.machine.namingConfigured,
-                  },
-                }
-              : item,
-          ),
-          connection:
-            current.connection?.computer.key === computer.key
-              ? { ...current.connection, computer: updated }
-              : current.connection,
-          localComputer:
+        // Every connection learns its computer's name when it opens. One that says nothing new
+        // must leave the state alone: a new object here makes whoever holds this connection by
+        // that object let go and reconnect, which brings the same name again, with no end.
+        this.state.setState((current) => {
+          const computers = current.computers.map((item) =>
+            item.key === computer.key ? withHostName(item, name, configured) : item,
+          );
+          const active = current.connection;
+          const connectionNext =
+            active?.computer.key === computer.key && active.computer !== updated
+              ? { ...active, computer: updated }
+              : active;
+          const localNext =
             current.localComputer?.key === computer.key
-              ? {
-                  ...current.localComputer,
-                  machine: {
-                    ...current.localComputer.machine,
-                    name: updated.machine.name,
-                    namingConfigured: updated.machine.namingConfigured,
-                  },
-                }
-              : current.localComputer,
-        }));
+              ? withHostName(current.localComputer, name, configured)
+              : current.localComputer;
+          if (
+            connectionNext === active &&
+            localNext === current.localComputer &&
+            computers.every((item, index) => item === current.computers[index])
+          ) {
+            return current;
+          }
+          return { computers, connection: connectionNext, localComputer: localNext };
+        });
       }
       streams.connect();
     });

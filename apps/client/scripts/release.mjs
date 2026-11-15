@@ -10,7 +10,7 @@
 // Development builds are separate: APP_VARIANT=development (see app.config.js).
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,28 @@ const livePush = platform === "ios" && env.LINKSHELL_LIVE_ACTIVITY_PUSH === "1";
 function run(command, args, cwd = root) {
   console.log(`\n$ ${command} ${args.join(" ")}`);
   execFileSync(command, args, { cwd, stdio: "inherit", env });
+}
+
+// "<binary>: @rpath/<dependency>" for each dependency of the app, its frameworks, dylibs and
+// extensions that isn't in the app's Frameworks; libraries from /usr/lib and /System are the OS's.
+function unloadable(app) {
+  const frameworks = join(app, "Frameworks");
+  const executable = (bundle) => join(bundle, execFileSync("plutil", ["-extract", "CFBundleExecutable", "raw", join(bundle, "Info.plist")], { encoding: "utf8" }).trim());
+  const inside = (dir, suffix) => (existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(suffix)).map((name) => join(dir, name)) : []);
+  const binaries = [
+    executable(app),
+    ...inside(frameworks, ".framework").map(executable),
+    ...inside(frameworks, ".dylib"),
+    ...inside(join(app, "PlugIns"), ".appex").map(executable),
+  ];
+  return binaries.flatMap((binary) =>
+    execFileSync("otool", ["-L", binary], { encoding: "utf8" })
+      .split("\n")
+      .slice(1)
+      .map((line) => line.trim().split(" (")[0])
+      .filter((dep) => dep.startsWith("@rpath/") && !existsSync(join(frameworks, dep.slice("@rpath/".length))))
+      .map((dep) => `${binary.slice(app.length + 1)}: ${dep}`),
+  );
 }
 
 const appJsonPath = join(root, "app.json");
@@ -104,16 +126,25 @@ if (platform === "ios") {
   // The archive is signed for development; the App Store export re-signs it. Check that copy, the
   // one the phone runs, before anything is uploaded.
   const exported = exportWith("export");
+  const unpacked = join(outDir, "ipa-check");
+  rmSync(unpacked, { recursive: true, force: true });
+  execFileSync("ditto", ["-x", "-k", join(exported, "LinkShell.ipa"), unpacked]);
+  const shipped = join(unpacked, "Payload", "LinkShell.app");
+  // A framework that links one the bundle doesn't carry still builds, signs and uploads, and then
+  // dies in dyld before any code runs. 2.3.68 did: Expo linked its precompiled modules, which load
+  // @rpath/React.framework, while React Native built its core from source (as it silently does when
+  // Maven doesn't answer during pod install), so no React.framework was embedded. Hence
+  // usePrecompiledModules: false in app.json.
+  const missing = unloadable(shipped);
+  if (missing.length) throw new Error(`the App Store build cannot launch, missing from Frameworks:\n  ${missing.join("\n  ")}`);
+  console.log("Launch check: every @rpath dependency is in LinkShell.app/Frameworks");
   if (livePush) {
-    const unpacked = join(outDir, "ipa-check");
-    rmSync(unpacked, { recursive: true, force: true });
-    execFileSync("ditto", ["-x", "-k", join(exported, "LinkShell.ipa"), unpacked]);
-    const entitlements = read("codesign", ["-d", "--entitlements", "-", "--xml", join(unpacked, "Payload", "LinkShell.app")]);
+    const entitlements = read("codesign", ["-d", "--entitlements", "-", "--xml", shipped]);
     const production = /<key>aps-environment<\/key>\s*<string>production<\/string>/.test(entitlements);
-    rmSync(unpacked, { recursive: true, force: true });
     if (!production) throw new Error("Live Activity push: the App Store build lacks aps-environment=production. Enable Push Notifications for com.bd.linkshell, or set LINKSHELL_LIVE_ACTIVITY_PUSH=0 on purpose.");
     console.log("Live Activity push: service URL present, App Store build has aps-environment=production");
   }
+  rmSync(unpacked, { recursive: true, force: true });
   if (!prepareOnly) exportWith("upload");
   console.log(prepareOnly ? `\nPrepared IPA in ${join(outDir, "export")}; no upload or publication performed.` : "\nUploaded to App Store Connect; the build shows up in TestFlight after processing.");
 } else {

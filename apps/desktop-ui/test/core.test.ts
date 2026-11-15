@@ -39,6 +39,8 @@ import {
   selectActiveSidebarSessions,
   sessionFamilies,
   translateDesktop,
+  withHostName,
+  type Computer,
 } from "../src/core";
 
 function makeSession(
@@ -874,6 +876,24 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
       router.getState().navigate({ kind: "computers" });
       router.getState().syncFromHash("#view=session:desktop%3Alocal");
       expect(router.getState().activeRoute).toEqual({ kind: "computers" });
+    });
+  });
+
+  describe("Computer identity under host-reported names", () => {
+    const computer: Computer = {
+      key: DESKTOP_LOCAL,
+      gateway: DESKTOP_LOCAL,
+      machine: { id: "m1", name: "Studio", online: true, platform: "darwin", signKey: "", boxKey: "", via: "paired" },
+    };
+
+    it("keeps the same object when the host repeats the name it already has, and replaces it only for a real change", () => {
+      // Every reconnect reports the name again; a new object each time is what made rows reconnect in a loop.
+      expect(withHostName(computer, "Studio", false)).toBe(computer);
+      const configured = withHostName(computer, "Studio", true);
+      expect(configured).not.toBe(computer);
+      expect(configured.machine.namingConfigured).toBe(true);
+      expect(withHostName(configured, "Studio", true)).toBe(configured);
+      expect(withHostName(configured, "Desk", true).machine.name).toBe("Desk");
     });
   });
 

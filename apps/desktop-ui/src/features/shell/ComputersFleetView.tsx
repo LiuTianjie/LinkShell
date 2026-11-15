@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { DESKTOP_LOCAL } from "../../bridge/desktop-bridge";
 import {
@@ -89,13 +89,20 @@ function FleetComputerRow({
     !isLocal &&
     canUseFusionMode(computer.key, computer.machine.platform, currentFusionCapabilityEnv());
 
-  // Observe live telemetry & session counts via metadata-only connection when online
+  // Observe live telemetry & session counts via metadata-only connection when online.
+  // Held by key, not by the `computer` object: that object is replaced whenever the computer's
+  // presence or name is refreshed, and a row that let go of its connection each time would close
+  // and reopen it — the last holder doing so reconnects to the computer over and over.
+  const computerRef = useRef(computer);
+  computerRef.current = computer;
+  const computerKey = computer.key;
+  const reachable = computer.machine.online || isLocal;
   useEffect(() => {
-    if (!computer.machine.online && !isLocal) {
+    if (!reachable) {
       setMetricsState({ history: [] });
       return undefined;
     }
-    const retained = engine.retainComputer(computer, { metadataOnly: true });
+    const retained = engine.retainComputer(computerRef.current, { metadataOnly: true });
     const syncStore = () => {
       const state = retained.connection.store.getState();
       setSessionCount(
@@ -113,7 +120,7 @@ function FleetComputerRow({
       unsubStore();
       retained.release();
     };
-  }, [computer, computer.machine.online, isLocal]);
+  }, [computerKey, reachable]);
 
   const metrics = metricsState.metrics;
   const memPct = metrics ? memoryPercent(metrics) : null;

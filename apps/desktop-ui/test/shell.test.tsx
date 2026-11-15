@@ -1002,6 +1002,43 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
     expect(archiveSearch?.placeholder).not.toContain("…");
   });
 
+  it("keeps a computer row's connection when the computer object is replaced, so the last holder never reconnects in a loop", async () => {
+    const localConn = makeMockConnection(localMac, { sessions: [] });
+    const remoteConn = makeMockConnection(remoteMac, { sessions: [] });
+    const released: string[] = [];
+    const retain = vi.spyOn(engine, "retainComputer").mockImplementation((comp) => ({
+      connection: comp.key === DESKTOP_LOCAL ? localConn : remoteConn,
+      release: () => released.push(comp.key),
+    }));
+
+    // The remote computer is the selected one: the local row is the only holder of the local connection.
+    engine.state.setState({
+      computers: [localMac, remoteMac],
+      localComputer: localMac,
+      connection: remoteConn,
+      locked: false,
+    });
+    routerStore.getState().navigate({ kind: "computers" });
+    mount(<DesktopAppShell platformOverride="macos" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const heldBefore = retain.mock.calls.filter(([comp]) => comp.key === DESKTOP_LOCAL).length;
+    expect(heldBefore).toBeGreaterThan(0);
+
+    // What a presence refresh or a reconnect's machine.info does: the same computer, a new object.
+    for (let round = 0; round < 3; round++) {
+      const refreshed: Computer = { ...localMac, machine: { ...localMac.machine } };
+      await act(async () => {
+        engine.state.setState({ computers: [refreshed, remoteMac], localComputer: refreshed });
+        await Promise.resolve();
+      });
+    }
+
+    expect(retain.mock.calls.filter(([comp]) => comp.key === DESKTOP_LOCAL).length).toBe(heldBefore);
+    expect(released).not.toContain(DESKTOP_LOCAL);
+  });
+
   it("groups sessions and projects by 电脑 → 项目 → 会话 when switched to 所有电脑 and updates live as remote connections finish syncing", async () => {
     const chengduMini: Computer = {
       key: "relay:chengdu-mini",
