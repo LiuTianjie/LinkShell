@@ -224,6 +224,11 @@ extension FusionLocal {
       client.closedByHub = true
     case "menufetch", "menupress":
       if !client.bundle.isEmpty {
+        // A Windows remote has no menu bar (its menus are in its windows): say so at once.
+        if !remoteFeatures.contains("menubar") {
+          if m["t"] as? String == "menufetch" { client.send(["t": "menu", "path": FusionProtocol.path(m["path"]), "error": true]) }
+          return
+        }
         // The stub's own names stay; the wire's are `menu.fetch` / `menu.press`.
         let type = m["t"] as? String == "menufetch" ? "menu.fetch" : "menu.press"
         wire?.send(["t": type, "app": client.bundle, "path": FusionProtocol.path(m["path"])])

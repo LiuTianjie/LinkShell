@@ -208,15 +208,13 @@ extension FusionRemoteSession {
   @MainActor func hello(_ m: [String: Any]) async {
     guard !authenticated, let presented = m["token"] as? String, authorize(presented) else {
       Fusion.log("wrong or spent token")
-      wire.send(["t": "bye", "reason": "token"])
-      wire.close(reason: "token")
+      wire.sendThenClose(["t": "bye", "reason": "token"], reason: "token")
       return
     }
     // An older local Mac speaks v1: say why instead of failing half-way.
     guard (m["proto"] as? NSNumber)?.intValue == FusionProtocol.version else {
       Fusion.log("local speaks protocol \(m["proto"] ?? "1"), not \(FusionProtocol.version)")
-      wire.send(["t": "bye", "reason": "proto", "message": "本机 LinkShell 版本与远端不一致，请把两台电脑都升级到最新版本后再开启融合模式"])
-      wire.close(reason: "proto")
+      wire.sendThenClose(["t": "bye", "reason": "proto", "message": "本机 LinkShell 版本与远端不一致，请把两台电脑都升级到最新版本后再开启融合模式"], reason: "proto")
       return
     }
     authenticated = true
@@ -350,11 +348,10 @@ extension FusionRemoteSession {
     guard !ended else { return }
     var bye: [String: Any] = ["t": "bye", "reason": reason]
     if let message { bye["message"] = message }
-    wire.send(bye)
+    // The `bye` first: putting windows back is AX work that a hung app can drag past the local
+    // side's watchdog, which would take a deliberate end for a dropped connection.
+    wire.sendThenClose(bye, reason: "bye")
     end()
-    // Let the `bye` leave before the connection goes.
-    let wire = self.wire
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { wire.close(reason: "bye") }
   }
 
   private func endHere() {

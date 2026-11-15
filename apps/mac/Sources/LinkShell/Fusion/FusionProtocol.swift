@@ -30,6 +30,14 @@ enum FusionProtocol {
     activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: reason)
   }
 
+  /// The icon cache's file name for an app id, as the desktop reads it (`fusionIconFile` in
+  /// apps/desktop/src/main/fusion/electron-hub.ts): a Windows id has backslashes and the like.
+  static func iconFile(_ app: String) -> String {
+    var name = app.replacingOccurrences(of: "..", with: "_")
+    for character in ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"] { name = name.replacingOccurrences(of: character, with: "_") }
+    return name
+  }
+
   static func path(_ value: Any?) -> [Int] {
     (value as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
   }
@@ -68,6 +76,14 @@ enum FusionProtocol {
     var buttons: [String: [Double]] = [:]
     var hitrects: [[Double]] = []
     var hasButtons: Bool { !buttons.isEmpty }
+  }
+
+  /// What the stub rounds its window to: the measured radius, else the system's own corners
+  /// (Windows 11: 8 pt; macOS: 17, or 26 with a toolbar).
+  static func cornerRadius(_ chrome: Chrome) -> Double {
+    if let radius = chrome.radius, radius >= 6 { return radius }
+    if chrome.style == "windows" { return 8 }
+    return chrome.toolbar ? 26 : 17
   }
 
   static func chrome(_ value: Any?) -> Chrome {

@@ -13,6 +13,7 @@ import { isOpenPathApp, openPathPlan } from "./open-path.js";
 import { restoreWindowBounds } from "./window-bounds.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
 import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "./fusion-probe.js";
+import { FusionElectronHub, fusionIconFile } from "./fusion/electron-hub.js";
 import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
@@ -570,6 +571,12 @@ ipcMain.on("linkshell:boot", (event) => {
     { appearance: appearance(), visible, platform: process.platform } : undefined;
 });
 
+// Fusion's hidden pages: each hub checks the message is from its own page.
+ipcMain.on("linkshell:fusion-hub", (event, body: unknown) => {
+  if (!body || typeof body !== "object") return;
+  for (const hub of electronHubs.values()) hub.fromPage(event.sender, body as Record<string, unknown>);
+});
+
 ipcMain.on("linkshell:message", (event, body: unknown) => {
   const frame = event.senderFrame;
   if (!window || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) return;
@@ -890,6 +897,7 @@ app.on("before-quit", (event) => {
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
+    for (const hub of electronHubs.values()) hub.stop();
     stopAllFusionTunnels();
     remotePortProxies.stopAll();
     server.stop();
@@ -1043,9 +1051,42 @@ function spawnFusionLocal(helper: string, args: string[], token: string) {
   spawn(helper, args, { detached: true, stdio: "ignore", env }).unref();
 }
 
+/**
+ * Which local half shows the remote windows: LinkShell.app's `--fusion-local` and its stubs on a
+ * Mac, the desktop app itself (`FusionElectronHub`) on Windows. LINKSHELL_FUSION_HUB=electron
+ * runs the Windows one on a Mac, to test it there (docs/v2/fusion.md §8.1).
+ */
+const ELECTRON_HUB = WINDOWS || process.env.LINKSHELL_FUSION_HUB === "electron";
+const electronHubs = new Map<string, FusionElectronHub>();
+const electronHubExits = new Map<string, { reason: string; message: string; at: number }>();
+
+function electronHub(computerKey: string, name: string): FusionElectronHub {
+  const existing = electronHubs.get(computerKey);
+  if (existing?.running) return existing;
+  const slug = fusionSlug(computerKey);
+  const hub = new FusionElectronHub({
+    computerKey,
+    name,
+    slug,
+    home: runtime.home,
+    pageURL: () => server.url,
+    preload: join(here, "../preload/fusion-hub.cjs"),
+    relaunch: { executable: process.execPath, args: (bundle) => ["--fusion-connect", computerKey, "--fusion-launch", bundle] },
+    ...(WINDOWS ? { shortcutDir: join(app.getPath("appData"), "Microsoft/Windows/Start Menu/Programs/LinkShell", name.replace(/[\\/:*?"<>|]/g, "_")) } : {}),
+    isTrusted: (url) => server.policy?.isTrusted(url) ?? false,
+    log: (line) => console.log(line),
+  });
+  hub.onExit = (reason, message) => {
+    electronHubExits.set(slug, { reason, message, at: Date.now() });
+    if (electronHubs.get(computerKey) === hub) electronHubs.delete(computerKey);
+  };
+  electronHubs.set(computerKey, hub);
+  return hub;
+}
+
 async function startFusionMode(params: Record<string, unknown>) {
-  if (!MAC || !runtime.helper || !existsSync(runtime.helper)) {
-    throw new Error("融合模式需要 macOS 桌面版 LinkShell");
+  if (!ELECTRON_HUB && (!MAC || !runtime.helper || !existsSync(runtime.helper))) {
+    throw new Error("融合模式需要 macOS 或 Windows 桌面版 LinkShell");
   }
   const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
   const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
@@ -1057,9 +1098,21 @@ async function startFusionMode(params: Record<string, unknown>) {
     throw new Error("远端融合模式连接信息无效");
   }
   const directHost = await pickDirectFusionHost(hosts, port);
+  if (ELECTRON_HUB) {
+    const hub = electronHub(computerKey, name);
+    if (directHost) {
+      hub.connect(directHost, port, token, launchBundle);
+      return { mode: "direct" as const, host: directHost, port };
+    }
+    const tunnel = await ensureFusionTunnel(computerKey);
+    hub.connect("127.0.0.1", tunnel.localPort, token, launchBundle);
+    return { mode: "tunnel" as const, tunnelId: tunnel.tunnelId, port: tunnel.localPort };
+  }
+  const helper = runtime.helper;
+  if (!helper) throw new Error("融合模式需要 macOS 或 Windows 桌面版 LinkShell");
   const extra = launchBundle ? ["--launch", launchBundle] : [];
   if (directHost) {
-    spawnFusionLocal(runtime.helper, [
+    spawnFusionLocal(helper, [
       "--fusion-local",
       "--host", directHost,
       "--port", String(port),
@@ -1070,7 +1123,7 @@ async function startFusionMode(params: Record<string, unknown>) {
     return { mode: "direct" as const, host: directHost, port };
   }
   const tunnel = await ensureFusionTunnel(computerKey);
-  spawnFusionLocal(runtime.helper, [
+  spawnFusionLocal(helper, [
     "--fusion-local",
     "--host", "127.0.0.1",
     "--port", String(tunnel.localPort),
@@ -1206,8 +1259,9 @@ async function getFusionState(params: Record<string, unknown>) {
   const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
   const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
   const hostSlug = fusionSlugOf(params) ?? fusionSlug(name);
-  const live = await queryFusionSocket(hostSlug, { t: "status" });
-  const lastExit = live ? undefined : await readFusionExit(hostSlug);
+  const hub = computerKey ? electronHubs.get(computerKey) : undefined;
+  const live = hub?.running ? hub.status() : await queryFusionSocket(hostSlug, { t: "status" });
+  const lastExit = live ? undefined : (electronHubExits.get(hostSlug) ?? await readFusionExit(hostSlug));
   const cached = (!live || !Array.isArray(live.apps) || live.apps.length === 0)
     ? await readCachedFusionState(name, hostSlug, computerKey)
     : undefined;
@@ -1232,7 +1286,7 @@ async function getFusionState(params: Record<string, unknown>) {
 }
 
 async function getFusionIcons(params: Record<string, unknown>) {
-  if (!MAC) return { icons: {} };
+  if (!MAC && !ELECTRON_HUB) return { icons: {} };
   const { readFile } = await import("node:fs/promises");
   const hostSlug = fusionSlugOf(params);
   if (!hostSlug) return { icons: {} };
@@ -1242,7 +1296,7 @@ async function getFusionIcons(params: Record<string, unknown>) {
   const iconDir = join(runtime.home, "fusion-icons", hostSlug);
   const icons: Record<string, { src: string; badged: boolean }> = {};
   for (const bundle of bundles) {
-    const safe = bundle.replaceAll("/", "_").replaceAll(":", "_").replaceAll("..", "_");
+    const safe = fusionIconFile(bundle);
     const uiPath = join(iconDir, "ui", `${safe}.png`);
     try {
       const bytes = await readFile(uiPath);
@@ -1267,6 +1321,11 @@ async function controlFusionHub(params: Record<string, unknown>, type: "launchAp
   const hostSlug = fusionSlugOf(params);
   const bundle = typeof params.bundle === "string" ? params.bundle : "";
   if (!bundle) throw new Error("缺少目标应用标识");
+  const hub = typeof params.computerKey === "string" ? electronHubs.get(params.computerKey) : undefined;
+  if (hub?.running) {
+    if (type === "launchApp") hub.launchApp(bundle); else hub.quitApp(bundle, params.force === true);
+    return { ok: true };
+  }
   const reply = await queryFusionSocket(hostSlug, { t: type, bundle, force: params.force === true });
   return { ok: Boolean(reply) };
 }
@@ -1274,7 +1333,9 @@ async function controlFusionHub(params: Record<string, unknown>, type: "launchAp
 async function stopFusionHub(params: Record<string, unknown>) {
   const hostSlug = fusionSlugOf(params);
   const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
-  await queryFusionSocket(hostSlug, { t: "stopHub" });
+  const hub = computerKey ? electronHubs.get(computerKey) : undefined;
+  if (hub) { hub.stop(); electronHubs.delete(computerKey); }
+  else await queryFusionSocket(hostSlug, { t: "stopHub" });
   const tunnel = computerKey ? fusionTunnels.get(computerKey) : undefined;
   if (tunnel) {
     for (const sock of tunnel.connections.values()) sock.destroy();

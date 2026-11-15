@@ -52,4 +52,11 @@ final class FusionProtocolTests: XCTestCase {
     XCTAssertEqual(FusionProtocol.displaysSignature(displays), FusionProtocol.displaysSignature(displays))
     XCTAssertNotEqual(FusionProtocol.displaysSignature(displays), FusionProtocol.displaysSignature(Array(displays.prefix(1))))
   }
+
+  func testIconFileNamesMatchTheDesktops() {
+    // Shared vector with apps/desktop/test/fusion-wire.test.mjs (fusionIconFile).
+    XCTAssertEqual(FusionProtocol.iconFile("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\notepad.exe"), "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}_notepad.exe")
+    XCTAssertEqual(FusionProtocol.iconFile("com.apple.Safari"), "com.apple.Safari")
+    XCTAssertEqual(FusionProtocol.iconFile("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")
+  }
 }

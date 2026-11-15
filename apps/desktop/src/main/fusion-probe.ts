@@ -17,7 +17,7 @@ export function isFusionSlug(value: unknown): value is string {
 
 
 /**
- * A TLS 1.2 ClientHello offering only TLS_PSK_WITH_AES_128_GCM_SHA256, FusionRemote's one suite.
+ * A TLS 1.2 ClientHello offering Fusion's pre-shared-key suites (FusionWire.suites).
  * The probe never finishes the handshake, so the single-use token (spent by `hello`) stays intact.
  */
 function fusionClientHello(): Buffer {
@@ -25,7 +25,8 @@ function fusionClientHello(): Buffer {
     Buffer.from([0x03, 0x03]),
     randomBytes(32),
     Buffer.from([0x00]), // no session id
-    Buffer.from([0x00, 0x04, 0x00, 0xa8, 0x00, 0xff]), // PSK_AES_128_GCM_SHA256, renegotiation SCSV
+    // ECDHE_PSK_CHACHA20, ECDHE_PSK_AES128_CBC, PSK_AES128_GCM, PSK_AES128_CBC, renegotiation SCSV
+    Buffer.from([0x00, 0x0a, 0xcc, 0xac, 0xc0, 0x35, 0x00, 0xa8, 0x00, 0x8c, 0x00, 0xff]),
     Buffer.from([0x01, 0x00]), // null compression
   ]);
   const handshake = Buffer.concat([Buffer.from([0x01, 0x00, body.length >> 8, body.length & 0xff]), body]);

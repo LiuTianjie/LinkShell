@@ -27,6 +27,22 @@ namespace LinkShell.Windows {
             public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
         }
 
+        /// <summary>
+        /// Fusion: one window (FFmpeg's gfxcapture, Windows.Graphics.Capture) at the top left of a
+        /// fixed canvas, so resizing the window never restarts the encoder (docs/v2/fusion.md §8.2).
+        /// capture_border=1 keeps the title bar: the default crops to the client area.
+        /// </summary>
+        static void CaptureWindowVideo(long hwnd, int canvasWidth, int canvasHeight, int fps, int bitrate, string executable) {
+            var window = new IntPtr(hwnd);
+            RECT frame;
+            if (!WindowFrame(window, out frame)) throw new ArgumentException("窗口已关闭");
+            var center = new System.Drawing.Point((frame.Left + frame.Right) / 2, (frame.Top + frame.Bottom) / 2);
+            bounds = System.Windows.Forms.Screen.FromPoint(center).Bounds;
+            int w = Math.Max(2, Math.Min(3840, canvasWidth) / 2 * 2), h = Math.Max(2, Math.Min(2160, canvasHeight) / 2 * 2);
+            string source = "gfxcapture=hwnd=" + hwnd + ":capture_border=1:capture_cursor=0:width=" + w + ":height=" + h + ":resize_mode=crop:max_framerate=" + Math.Max(1, Math.Min(60, fps)) + ",";
+            RunVideo(w, h, fps, bitrate, executable, source);
+        }
+
         static void CaptureVideo(int screen, int width, int fps, int bitrate, string executable) {
             bounds = Display(screen);
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
@@ -36,6 +52,14 @@ namespace LinkShell.Windows {
             double scale = Math.Min(1, Math.Min(Math.Max(320, Math.Min(1920, width)) / (double)bounds.Width, 1080.0 / bounds.Height));
             int w = Math.Max(2, (int)(bounds.Width * scale) / 2 * 2), h = Math.Max(2, (int)(bounds.Height * scale) / 2 * 2);
             uint vendor; int output = DesktopDuplication.VideoOutput(bounds, out vendor);
+            RunVideo(w, h, fps, bitrate, executable, "ddagrab=output_idx=" + output + ":framerate=" + fps + ":draw_mouse=0,", vendor);
+        }
+
+        static void RunVideo(int w, int h, int fps, int bitrate, string executable, string source, uint vendor = 0) {
+            if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
+            fps = Math.Max(1, Math.Min(60, fps));
+            bitrate = Math.Max(300000, Math.Min(12000000, bitrate));
+            if (vendor == 0) { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; }
             string preferred = vendor == 0x1002 ? "h264_amf" : vendor == 0x10de ? "h264_nvenc" : vendor == 0x8086 ? "h264_qsv" : "h264_mf";
             string selected = Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_ENCODER");
             var encoders = String.IsNullOrEmpty(selected) ? new[] { preferred, "h264_mf" }.Distinct().ToArray() : new[] { selected };
@@ -51,16 +75,16 @@ namespace LinkShell.Windows {
                     foreach (var encoder in encoders) {
                         if (ended) return;
                         EnsureDesktop();
-                        if (encoder != "h264_mf" && RunVideoEncoder(job, destination, executable, output, w, h, fps, bitrate, encoder, false)) return;
-                        if (RunVideoEncoder(job, destination, executable, output, w, h, fps, bitrate, encoder, true)) return;
+                        if (encoder != "h264_mf" && RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, encoder, false)) return;
+                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, encoder, true)) return;
                     }
                 }
                 if (!ended) throw new InvalidOperationException("这台电脑的硬件视频编码不可用，将使用兼容画面");
             } finally { CloseHandle(job); }
         }
 
-        static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, int output, int width, int height, int fps, int bitrate, string encoder, bool compatible) {
-            string filter = "ddagrab=output_idx=" + output + ":framerate=" + fps + ":draw_mouse=0,";
+        static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible) {
+            string filter = source;
             // Older drivers reject D3D11_BIND_VIDEO_ENCODER surfaces. Use the vendor's scaler
             // where available, then allow CPU conversion while retaining hardware encoding.
             if (compatible) filter += "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=fast_bilinear,format=nv12";
@@ -71,7 +95,8 @@ namespace LinkShell.Windows {
                 encoder == "h264_nvenc" ? "-preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0" :
                 encoder == "h264_qsv" ? "-preset veryfast -async_depth 1 -look_ahead 0" : "-hw_encoding 1 -scenario display_remoting";
             string args = "-hide_banner -loglevel warning -nostats -f lavfi -i \"" + filter + "\" -an -c:v " + encoder + " " + tuning +
-                (encoder == "h264_nvenc" ? " -profile:v baseline -level:v 4.2" : encoder == "h264_amf" ? " -profile:v constrained_baseline -level:v 42" : " -profile:v 66 -level:v 42") + " -bf 0 -g " + fps + " -b:v " + bitrate + " -maxrate " + bitrate + " -bufsize " + (bitrate / 4) +
+                // Level 4.2 stops at 1080p; a Fusion window's canvas is its monitor, up to 4K (5.1).
+                (encoder == "h264_nvenc" ? " -profile:v baseline -level:v " + (width * height > 2088960 ? "5.1" : "4.2") : encoder == "h264_amf" ? " -profile:v constrained_baseline -level:v " + (width * height > 2088960 ? "51" : "42") : " -profile:v 66 -level:v " + (width * height > 2088960 ? "51" : "42")) + " -bf 0 -g " + fps + " -b:v " + bitrate + " -maxrate " + bitrate + " -bufsize " + (bitrate / 4) +
                 " -force_key_frames \"expr:gte(t,n_forced)\" -fps_mode passthrough -bsf:v h264_metadata=aud=insert -flush_packets 1 -f h264 pipe:1";
             using (var process = new Process()) {
                 process.StartInfo = new ProcessStartInfo(executable, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };

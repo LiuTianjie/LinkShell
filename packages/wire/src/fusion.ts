@@ -12,6 +12,8 @@ export const FUSION_PSK_IDENTITY = "linkshell-fusion-v1";
 /** Domain separation: the token is also the `hello` credential, never the raw key. */
 export const FUSION_PSK_LABEL = "linkshell-fusion-psk-v1";
 export const FUSION_MAX_FRAME = 16 << 20;
+/** TLS 1.2 pre-shared-key suites, best first (docs/v2/fusion.md §4.1); OpenSSL names. */
+export const FUSION_CIPHERS = ["ECDHE-PSK-CHACHA20-POLY1305", "ECDHE-PSK-AES128-CBC-SHA", "PSK-AES128-GCM-SHA256", "PSK-AES128-CBC-SHA"];
 /** Raw clipboard bytes; base64 grows them by 4/3 and the frame must still fit. */
 export const FUSION_MAX_CLIPBOARD = 8 << 20;
 /** How long the remote keeps an unexpectedly dropped session for `resume`. */

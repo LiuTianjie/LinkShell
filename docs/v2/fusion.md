@@ -10,8 +10,8 @@
 
 | 本地端 \ 远端 | macOS | Windows |
 | --- | --- | --- |
-| macOS（LinkShell.app hub + 每应用 Stub） | 已有 | 计划 |
-| Windows（Electron 窗口） | 计划 | 不做 |
+| macOS（LinkShell.app hub + 每应用 Stub） | 已有 | 已实现，待实机验证（§8.2、§8.3） |
+| Windows（Electron 窗口） | 已实现，待实机验证（§8.1） | 已实现，待实机验证 |
 
 因此协议不能再携带只有 macOS 才有的概念作为必填项；平台差异通过握手里的 `platform` 和 `features` 表达。
 
@@ -71,7 +71,7 @@
 
 ### 4.1 传输
 
-不变：TCP + TLS 1.2 PSK（`TLS_PSK_WITH_AES_128_GCM_SHA256`，identity `linkshell-fusion-v1`，key = HMAC-SHA256(token, `linkshell-fusion-psk-v1`)），帧 = `[u32 BE 长度][JSON 对象]`。Node 的 `tls`（`pskCallback`）与 Network.framework 都支持这一套，Windows 端直接复用。
+TCP + TLS 1.2 PSK（identity `linkshell-fusion-v1`，key = HMAC-SHA256(token, `linkshell-fusion-psk-v1`)），帧 = `[u32 BE 长度][JSON 对象]`。套件按顺序提供：`ECDHE-PSK-CHACHA20-POLY1305`、`ECDHE-PSK-AES128-CBC-SHA`、`PSK-AES128-GCM-SHA256`、`PSK-AES128-CBC-SHA`。Electron 的 BoringSSL（Windows 上的桌面端）没有 PSK-AES-GCM，所以 v1 唯一的 GCM 套件不够用；前两个带 ECDHE，有前向保密。2026-11-15 在一台 Mac 上实测：Network.framework、OpenSSL 3.5（Node）、Electron 44 两两之间都能谈成。
 
 - 帧上限从 8 MiB 提高到 **16 MiB**；剪贴板原始数据仍限 8 MB，base64 后不会超帧。
 - 所有矩形是 `{x, y, w, h}`（数字）。坐标空间写在字段说明里：**本地全局点**（本地主屏左上角为原点，向下为正）、**窗口内点**（窗口左上角为原点）。
@@ -245,6 +245,57 @@ host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusi
 4. 生命周期：窗口还原、远端状态项、宽限期与 resume、本地断线不关窗口、统一停止入口 —— 完成。
 5. 一条 PeerConnection：`FusionMedia` / `FusionMediaReceiver`，`ScreenSession` 去掉融合分支 —— 完成。
 6. host 返回 `proto` / `platform`，桌面端检查版本并驱动 resume —— 完成；主进程 `FusionHubDriver` 留到第 7 步。
-7. Windows 本地端（Electron），然后 Windows 远端 —— 下一步。
+7. Windows 本地端（Electron）与 Windows 远端（host + `LinkShell.Screen.exe --fusion`）—— 已实现，见 §8.5。
 
 第 2–5 步只做了单元测试（协议样例、纯逻辑、传输）和编译，**没有两台 Mac 的端到端验证**：一条 PC 的重协商与 transceiver 回收、resume、窗口还原、远端状态项都要实机确认。
+
+## 8. Windows
+
+应用永远在自己的系统上运行：传的只是窗口画面、对窗口的输入和窗口信息。下面两部分各自独立，Windows 本地连 Windows 远端在两部分都完成后即可用。
+
+### 8.1 Windows 本地端（Electron，显示 Mac 或 Windows 的应用）
+
+- **主进程**（`apps/desktop/src/main/fusion/`）：`wire.ts` 是 Node 版控制连接（与 `FusionWire` 同一套 TLS-PSK 与分帧）；`hub-driver.ts` 定义 `FusionHubDriver`（启动、状态、启动/退出应用、停止），`MacHub` 是现在的 `--fusion-local` 进程，`ElectronHub` 在主进程里实现同样的协议状态机：握手、目录、窗口记录、`bye`、断线保持与 `resume`。
+- **窗口**：每个远端窗口一个无边框 `BrowserWindow`。位置由本地决定（拖动、缩放后发 `place`，带递增的 `seq`），尺寸在远端确认（`ack`）后采纳远端的实际大小。Windows 上用 `setAppDetails` 给每个远端应用一个 AppUserModelID（`LinkShell.Fusion.<slug>.<hash>`）、图标（PNG 内嵌的 ICO）与重新启动命令，于是每个应用在任务栏、Alt-Tab 里独立；用过的应用在开始菜单 `LinkShell\<电脑>\` 下生成快捷方式（`shell.writeShortcutLink`），Windows 搜索能找到。
+- **画面**：每台远端一个隐藏的渲染窗口加载 `fusion.html`（desktop-ui 的第二个入口），持有那条 RTCPeerConnection；远端窗口的 `BrowserWindow` 由它 `window.open` 打开，与它同一进程，可以直接把轨道放进子窗口的 `<video>`。裁剪元数据用 encoded insertable streams 从 H.264 SEI 读出，按 RTP 时间戳与 `requestVideoFrameCallback` 对上，每一帧调整 `<video>` 的位置与缩放。
+- **输入**：子窗口里的鼠标、键盘带上流键 `k` 发到 `input` / `pointer` 通道。远端是 Mac 时 Ctrl 映射为 ⌘。
+- **标题栏**：Mac 窗口的红绿灯在画面里：关闭发 `wclose.req`，最小化、缩放在本地做；标题栏空白处是拖动区（`-webkit-app-region: drag`），`hitrects` 是非拖动区。Mac 应用的菜单：标题栏右键弹出原生菜单（`menu.fetch`）。
+- **弹出菜单**：显示层流 `d<i>` 里的每个弹出窗口一个不抢焦点、置顶的子窗口。
+- 这套也能在 Mac 上跑（`LINKSHELL_FUSION_HUB=electron`），用来在单机上测试。
+
+### 8.2 Windows 远端（被 Mac 或 Windows 使用）
+
+- **host 自己就是远端**：Windows 上 `FusionShare` 不启动单独进程，在 host 里开同一套 TLS-PSK 控制服务；WebRTC 用 werift（远程桌面已经在用），一条 PeerConnection，每个流一个视频 transceiver。
+- **`LinkShell.Screen.exe --fusion`**：窗口枚举与变化（EnumWindows，约 30 Hz：位置、标题、所属进程与 AppUserModelID、是否最小化 / 隐藏 / 工具窗口 / 弹出菜单），应用目录（`shell:AppsFolder`），图标，启动（`shell:AppsFolder\<AUMID>`），退出（`WM_CLOSE`，强制时结束进程），缩放（`SetWindowPos`），聚焦（`SetForegroundWindow`），关闭（`WM_CLOSE`），标题栏按钮（`DWMWA_CAPTION_BUTTON_BOUNDS`），输入（`SendInput`，先把目标窗口切到前台）。与 host 之间是标准输入输出上的 JSON 行，与远程桌面的组件一样。
+- **截取**：每个窗口一个 ffmpeg：`gfxcapture=hwnd=<h>:capture_border=1:capture_cursor=0:width=W:height=H:resize_mode=crop:max_framerate=60`（FFmpeg 8.1 起有，随包的就是 8.1），之后走远程桌面同样的硬件 H.264 编码器选择。`capture_border=1` 截整个可见窗口（含标题栏，不含不可见的缩放边框）；画布固定为窗口所在显示器的大小，窗口在左上角，缩放窗口不必重启编码器。host 在每一帧前插入与 Mac 相同格式的 SEI。
+- **弹出菜单、下拉框、提示**：在 Windows 上是独立的顶层窗口。每块显示器一路 ddagrab 流作为 `d<i>`，SEI 列出其中的弹出窗口；本地按 `offset` 把它们放在父窗口旁边。
+- **坐标**：远端没有虚拟屏幕，窗口留在原地。本地位置由本地决定，远端记住每个窗口最后一次 `place` 的本地位置，用于 `wopen` / `layout`；只同步尺寸：本地点数 × 远端显示器缩放 = 远端像素。
+- **features**：`clipboard`、`keys`；没有 `menubar`、`dockmenu`、`virtual-displays`。
+- **限制**：锁屏、UAC 安全桌面时不可用；窗口重叠时，只有前台窗口的悬停是准的（一操作就切到前台）；显卡同时硬件编码的路数有限，非聚焦窗口降到 30 fps，超过上限时只编码最近使用的几个窗口。
+
+### 8.3 Mac 本地端显示 Windows 窗口
+
+- `chrome.style == "windows"`：Stub 不画红绿灯、不做 macOS 圆角；Windows 的最小化 / 最大化 / 关闭按钮区域映射成本地操作。
+- 远端 `platform == "windows"` 时，⌘ 映射为 Ctrl，Option 映射为 Alt。
+- 远端没有 `menubar`：Stub 只显示自己的最小菜单（退出、窗口）。
+
+### 8.4 验证
+
+- **模拟对端**：TS 写的参考实现能扮演远端或本地，单机跑握手、窗口、画面、输入。Windows 本地端在 Mac 上就能对着它测。
+- **Windows CI**：在 Windows runner 上对真实窗口（记事本）跑 Windows 远端：列出应用、启动、收到 `wopen`、视频轨道有帧、点击后窗口状态变化。
+- **实机**：两台电脑的组合（Mac↔Windows、Windows↔Windows）、多显示器与缩放、输入法、快捷键、断线恢复、结束后窗口状态。
+
+### 8.5 状态（2026-11-15）
+
+已验证：
+- `apps/desktop/scripts/fusion-e2e.mjs`：真实 Electron 里的 `FusionElectronHub` + `fusion.html`，对着 host 的模拟远端（同一台 Mac）：窗口打开、画面按 SEI 裁剪、点击送到远端窗口、缩放、关闭，6 项通过。
+- `packages/host/test/fusion-remote.test.ts`：Node 远端 + 模拟平台，真实 TLS-PSK 与 WebRTC（werift 作接收方）：握手、目录、`wopen`、`streams`、带 SEI 的 RTP、按流键分发输入、缩放确认、关闭与 `app.exited`。
+- TLS-PSK 套件：Network.framework、OpenSSL 3.5、Electron 44 两两握手（每个套件逐一）。
+- `apps/windows/src/*.cs` 在 Mono `mcs -langversion:5` 下编译通过（与 .NET Framework 自带编译器同一语言版本）。
+
+未验证（需要 Windows 实机或 Windows CI）：`Fusion.cs` 的 P/Invoke 与窗口分类、`gfxcapture` 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、Mac 本地端连 Windows 远端的整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
+
+尚未实现：Electron 本地端的剪贴板同步、Windows 远端的光标形状、Windows 远端的剪贴板。
+
+已知限制：Windows 远端的每帧元数据（`ack`、窗口大小）是在 host 发出这一帧时取的最新值，不是截取时刻的值（Mac 远端用 4 ms 采样环按截取时间对齐），缩放过程中裁剪会有短暂错位；`MAX_WINDOW_STREAMS`（6）个窗口以上不再出画面，并提示一次。
+

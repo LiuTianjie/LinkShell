@@ -374,43 +374,40 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     });
     expect(container.querySelector("button")).toBeNull();
 
-    // 2. Hidden on Windows client -> Windows remote
+    // 2. Windows client -> Windows remote, and -> Mac remote: both fuse (docs/v2/fusion.md §8)
     installPreloadBridge("win32");
     act(() => {
       root.render(<FusionQuickTrigger computerKey={remoteWin.key} compact />);
     });
-    expect(container.querySelector("button")).toBeNull();
-
-    // 3. Hidden on Windows client -> Mac remote (no dead Fusion trigger outside RemoteModeSwitch)
+    expect(container.querySelector("button")?.disabled).toBe(false);
     act(() => {
       root.render(<FusionQuickTrigger computerKey={remoteMac.key} />);
     });
-    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("button")?.disabled).toBe(false);
 
-    // 3b. RemoteModeSwitch on Windows client -> Mac remote keeps disabled Fusion tab + tooltip explanation
+    // 3. RemoteModeSwitch on Windows client -> Mac remote offers the Fusion tab
     act(() => {
       root.render(
         <RemoteModeSwitch computerKey={remoteMac.key} activeMode="screen" />,
       );
     });
-    const winSwitchFusionBtn = container.querySelector<HTMLButtonElement>(
-      'button[data-mode="fusion"]',
-    );
-    expect(winSwitchFusionBtn?.disabled).toBe(true);
-    expect(container.querySelector('[popover="hint"]')?.textContent).toContain(
-      "macOS",
-    );
+    expect(container.querySelector<HTMLButtonElement>('button[data-mode="fusion"]')?.disabled).toBe(false);
 
-    // 3c. Disabled with popover="hint" explanation on Mac client -> Windows remote
+    // 3b. Mac client -> Windows remote
     installPreloadBridge("darwin");
     act(() => {
       root.render(<FusionQuickTrigger computerKey={remoteWin.key} />);
     });
-    const macToWinDisabledBtn = container.querySelector("button");
-    expect(macToWinDisabledBtn?.disabled).toBe(true);
-    expect(container.querySelector('[popover="hint"]')?.textContent).toContain(
-      "macOS",
-    );
+    expect(container.querySelector("button")?.disabled).toBe(false);
+
+    // 3c. Disabled with an explanation for a Linux remote
+    const remoteLinux = makeMockComputer("wss://gateway.itool.tech#linux-box", "linux", "Linux Box");
+    engine.state.setState({ computers: [localMac, remoteMac, remoteWin, remoteLinux], localComputer: localMac });
+    act(() => {
+      root.render(<FusionQuickTrigger computerKey={remoteLinux.key} />);
+    });
+    expect(container.querySelector("button")?.disabled).toBe(true);
+    expect(container.querySelector('[popover="hint"]')?.textContent).toContain("Windows");
 
     // 4. Enabled on Mac client -> Mac remote
     act(() => {
@@ -567,24 +564,25 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     ).not.toBeNull();
   });
 
-  it("renders self-explanatory capability EmptyState on Windows client and step-by-step permission remediation on macOS", async () => {
+  it("renders self-explanatory capability EmptyState for an unsupported remote and step-by-step permission remediation on macOS", async () => {
     const remoteMac = makeMockComputer(
       "wss://gateway.itool.tech#studio-perm",
       "darwin",
       "Remote Studio",
     );
+    const remoteLinux = makeMockComputer("wss://gateway.itool.tech#linux-perm", "linux", "Linux Box");
     const mockConn = makeMockConnection(remoteMac);
     engine.state.setState({
-      computers: [remoteMac],
+      computers: [remoteMac, remoteLinux],
       connection: mockConn,
     });
 
-    // 1. Windows client -> clear capability explanation + 1-click switch to Full Desktop
+    // 1. A Linux remote -> clear capability explanation + 1-click switch to Full Desktop
     installPreloadBridge("win32");
     await act(async () => {
       root.render(
         <DialogProvider>
-          <FusionWorkspace computerKey={remoteMac.key} />
+          <FusionWorkspace computerKey={remoteLinux.key} />
         </DialogProvider>,
       );
       await Promise.resolve();
@@ -599,7 +597,7 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     });
     expect(routerStore.getState().activeRoute).toEqual({
       kind: "screen",
-      computerKey: remoteMac.key,
+      computerKey: remoteLinux.key,
     });
 
     // 2. macOS client with Screen Recording permission error -> step-by-step remediation banner

@@ -40,7 +40,7 @@ extension FusionLocal {
     let title = m["title"] as? String ?? (apps.first(where: { $0.bundle == bundle })?.name ?? "")
     let chrome = FusionProtocol.chrome(m["chrome"])
     let toolbar = chrome.toolbar
-    let radius = chrome.radius.flatMap { $0 >= 6 ? $0 : nil } ?? (toolbar ? 26.0 : 17.0)
+    let radius = FusionProtocol.cornerRadius(chrome)
     let frame = Fusion.rect(m["frame"])
     let buttons = chrome.buttons
     let hitrects = chrome.hitrects
@@ -89,7 +89,7 @@ extension FusionLocal {
     let id = CGWindowID(Fusion.number(m["id"]))
     let chrome = FusionProtocol.chrome(m["chrome"])
     let toolbar = chrome.toolbar
-    let radius = chrome.radius.flatMap { $0 >= 6 ? $0 : nil } ?? windows[id]?.cornerRadius ?? (toolbar ? 26.0 : 17.0)
+    let radius = chrome.radius.flatMap { $0 >= 6 ? $0 : nil } ?? windows[id]?.cornerRadius ?? FusionProtocol.cornerRadius(chrome)
     let title = m["title"] as? String ?? ""
     let buttons = chrome.buttons
     let hitrects = chrome.hitrects

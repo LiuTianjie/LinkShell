@@ -14,13 +14,11 @@ extension FusionLocal {
   // MARK: Stub .app Bundle Generation & Badged Icon Compositor
 
   func iconCacheFile(for bundle: String) -> URL {
-    let safe = bundle.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
-    return iconCacheDir.appendingPathComponent("\(safe).png")
+    iconCacheDir.appendingPathComponent("\(FusionProtocol.iconFile(bundle)).png")
   }
 
   func uiIconFile(for bundle: String) -> URL {
-    let safe = bundle.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
-    return uiIconCacheDir.appendingPathComponent("\(safe).png")
+    uiIconCacheDir.appendingPathComponent("\(FusionProtocol.iconFile(bundle)).png")
   }
 
   static func writeUITilePNG(image: NSImage, to url: URL) {

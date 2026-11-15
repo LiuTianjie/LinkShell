@@ -35,6 +35,15 @@ final class FusionWire {
 
   init(_ connection: NWConnection) { self.connection = connection }
 
+  /// Offered in this order. Electron's BoringSSL (the desktop on Windows) has no PSK-AES-GCM, so
+  /// the suites every end has come first; ECDHE adds forward secrecy to the pre-shared key.
+  static let suites: [UInt16] = [
+    0xCCAC, // TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256
+    0xC035, // TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA
+    0x00A8, // TLS_PSK_WITH_AES_128_GCM_SHA256
+    0x008C, // TLS_PSK_WITH_AES_128_CBC_SHA
+  ]
+
   static func psk(token: String) -> Data {
     let key = SymmetricKey(data: Data(token.utf8))
     return Data(HMAC<SHA256>.authenticationCode(for: Data(pskLabel.utf8), using: key))
@@ -57,8 +66,8 @@ final class FusionWire {
     // PSK suites exist only up to TLS 1.2; 1.3 would negotiate certificates instead.
     sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
     sec_protocol_options_set_max_tls_protocol_version(options, .TLSv12)
-    if let suite = tls_ciphersuite_t(rawValue: UInt16(TLS_PSK_WITH_AES_128_GCM_SHA256)) {
-      sec_protocol_options_append_tls_ciphersuite(options, suite)
+    for raw in FusionWire.suites {
+      if let suite = tls_ciphersuite_t(rawValue: raw) { sec_protocol_options_append_tls_ciphersuite(options, suite) }
     }
     let parameters = NWParameters(tls: tls, tcp: tcp)
     parameters.allowLocalEndpointReuse = true
@@ -141,6 +150,17 @@ final class FusionWire {
         self.readHeader()
       }
     }
+  }
+
+  /// A last message (`bye`): the connection closes once it has been handed to the network, not
+  /// before — closing at once would cancel it unsent.
+  func sendThenClose(_ message: [String: Any], reason: String) {
+    guard JSONSerialization.isValidJSONObject(message), let body = try? JSONSerialization.data(withJSONObject: message) else { return close(reason: reason) }
+    var frame = Data([UInt8(body.count >> 24 & 0xff), UInt8(body.count >> 16 & 0xff), UInt8(body.count >> 8 & 0xff), UInt8(body.count & 0xff)])
+    frame.append(body)
+    connection.send(content: frame, completion: .contentProcessed { [weak self] _ in
+      self?.queue.asyncAfter(deadline: .now() + 0.05) { self?.close(reason: reason) }
+    })
   }
 
   func send(_ message: [String: Any]) {

@@ -8,6 +8,11 @@ import { createInterface } from "node:readline";
 import { FUSION_PORT, FUSION_PROTO, RpcError, type FusionPlatform, type FusionStartResult, type RelayIceServer, type TurnCredentials } from "@linkshell/wire";
 import { NO_APP, macAppSupported, shippedApp } from "./input.js";
 import type { ScreenShare } from "./screen.js";
+import type { FusionPlatform as RemotePlatform } from "./fusion/platform.js";
+import { FusionNodeRemote } from "./fusion/remote.js";
+import { SimulatedFusionPlatform } from "./fusion/simulated.js";
+import { WindowsFusionPlatform } from "./fusion/windows.js";
+import { windowsHelper } from "./windows-screen.js";
 
 const DEFAULT_FUSION_PORT = FUSION_PORT;
 const EXCLUDED_IFACE_PREFIXES = ["lo", "awdl", "llw", "bridge", "anpi", "ap", "vmenet", "vnic", "docker"];
@@ -66,6 +71,12 @@ export interface FusionShareOptions {
   home?: () => string;
   /** Which remote this host would start; tests pin it. */
   platform?: () => FusionPlatform | undefined;
+  /**
+   * The operating system half of a remote that runs in the host itself (Windows, or the simulated
+   * one): undefined where LinkShell.app is the remote. Defaults by platform and
+   * LINKSHELL_FUSION_SIMULATED=1.
+   */
+  nodePlatform?: () => RemotePlatform | undefined;
 }
 
 interface ReadyWaiter {
@@ -87,7 +98,8 @@ export class FusionShare {
   private starting?: Promise<FusionStartResult>;
   private waiters: ReadyWaiter[] = [];
   private failLaunch?: (error: Error) => void;
-  private readonly opts: Required<Omit<FusionShareOptions, "launch" | "app" | "supported" | "home" | "platform">> & FusionShareOptions;
+  private nodeRemote?: FusionNodeRemote;
+  private readonly opts: Required<Omit<FusionShareOptions, "launch" | "app" | "supported" | "home" | "platform" | "nodePlatform">> & FusionShareOptions;
 
   constructor(
     private readonly log: (message: string) => void,
@@ -100,10 +112,11 @@ export class FusionShare {
   }
 
   async start(): Promise<FusionStartResult> {
+    const nodePlatform = (this.opts.nodePlatform ?? defaultNodePlatform)();
+    if (nodePlatform) return this.startNode(nodePlatform);
     const platform = (this.opts.platform ?? (() => (this.opts.supported ? "macos" : fusionPlatform())))();
     if (platform === "windows") {
-      // The Windows remote (window capture, SendInput, AUMID catalog) is the next step of Fusion v2.
-      throw RpcError.app("not_supported", "Windows 电脑作为融合远端还在开发中，目前只能融合 macOS 电脑上的应用");
+      throw RpcError.app("not_supported", "这台 Windows 电脑缺少屏幕组件（LinkShell.Screen.exe），请安装 Windows 桌面版后再开启融合模式");
     }
     if (platform !== "macos" || !(this.opts.supported ?? macAppSupported)()) {
       throw RpcError.app("not_supported", "融合模式目前只能融合 macOS 电脑上的应用");
@@ -129,7 +142,20 @@ export class FusionShare {
     return this.starting;
   }
 
+  /** Windows (and the simulated remote): the remote half runs here, in the host (docs/v2/fusion.md §8.2). */
+  private async startNode(platform: RemotePlatform): Promise<FusionStartResult> {
+    const access = await this.screen.access(false).catch(() => undefined);
+    if (access?.recording === false) {
+      throw RpcError.app("permission_denied", "这台电脑关闭了远程屏幕，请在 LinkShell 设置中开启后再开启融合模式");
+    }
+    this.nodeRemote ??= new FusionNodeRemote(platform, { log: this.log });
+    const token = randomBytes(24).toString("base64url");
+    const port = await this.nodeRemote.issue(token, await this.buildIceConfig());
+    return { port, token, hosts: reachableHostAddresses(), proto: FUSION_PROTO, platform: platform.platform === "windows" ? "windows" : fusionPlatform() ?? "windows" };
+  }
+
   stop(): void {
+    this.nodeRemote?.stop();
     const error = RpcError.app("internal", "融合模式已停止");
     this.failLaunch?.(error);
     this.rejectWaiters(error);
@@ -297,3 +323,12 @@ function defaultLaunch(app: string, args: string[]) {
   child.once("error", () => undefined);
   child.unref();
 }
+
+/** Windows hosts are their own remote, with LinkShell.Screen.exe for the operating system's part. */
+function defaultNodePlatform(): RemotePlatform | undefined {
+  if (process.env.LINKSHELL_FUSION_SIMULATED === "1") return simulatedPlatform ??= new SimulatedFusionPlatform();
+  if (process.platform === "win32" && windowsHelper()) return windowsPlatform ??= new WindowsFusionPlatform();
+  return undefined;
+}
+let simulatedPlatform: RemotePlatform | undefined;
+let windowsPlatform: RemotePlatform | undefined;

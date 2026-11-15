@@ -1671,7 +1671,7 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
     expect(inspectorCss).toContain(".ls-sidechat-panel");
   });
 
-  it("renders bare {macName} without '融合模式 · ' prefix in Home Hub on macOS, suppresses all .home-fusion-row items on Windows clients, and renders Ctrl+/Alt+ shortcuts without macOS glyphs", () => {
+  it("renders bare {macName} without '融合模式 · ' prefix in Home Hub on macOS, shows the same .home-fusion-row items on Windows clients, and renders Ctrl+/Alt+ shortcuts without macOS glyphs", () => {
     const prevDesktop = window.linkshellDesktop;
     const air3 = {
       ...remoteMac,
@@ -1733,7 +1733,8 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
       });
 
       expect(document.documentElement.dataset.platform).toBe("windows");
-      expect(host.querySelectorAll(".home-fusion-row")).toHaveLength(0);
+      // Windows fuses Mac apps too (docs/v2/fusion.md §8.1).
+      expect(host.querySelectorAll(".home-fusion-row")).toHaveLength(3);
 
       const allKbdText = Array.from(document.querySelectorAll(".ls-kbd"))
         .map((el) => el.textContent ?? "")

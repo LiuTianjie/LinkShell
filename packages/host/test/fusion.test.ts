@@ -58,12 +58,22 @@ describe("FusionShare", () => {
     expect(first.platform).toBe("macos");
   });
 
-  it("says a Windows remote is not there yet instead of failing to launch it", async () => {
+  it("tells a Windows computer without its screen helper what is missing instead of failing to launch", async () => {
     const remote = fakeRemote();
-    const fusion = share({ recording: true, control: true }, remote.launch, { platform: () => "windows" });
+    const fusion = share({ recording: true, control: true }, remote.launch, { platform: () => "windows", nodePlatform: () => undefined });
     shares.push(fusion);
-    await expect(fusion.start()).rejects.toThrow(/Windows/);
+    await expect(fusion.start()).rejects.toThrow(/LinkShell\.Screen\.exe/);
     expect(remote.seen.args).toEqual([]);
+  });
+
+  it("runs a node remote in the host itself where there is one (Windows, the simulated remote)", async () => {
+    const { SimulatedFusionPlatform } = await import("../src/fusion/simulated.js");
+    const fusion = share({ recording: true, control: true }, () => { throw new Error("must not launch LinkShell.app"); }, { nodePlatform: () => new SimulatedFusionPlatform() });
+    shares.push(fusion);
+    const started = await fusion.start();
+    expect(started.proto).toBe(2);
+    expect(started.port).toBeGreaterThan(0);
+    expect(started.token.length).toBeGreaterThan(20);
   });
 
   it("shares one answer between concurrent starts so the token is not rotated under the first caller", async () => {

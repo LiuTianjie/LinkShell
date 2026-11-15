@@ -45,12 +45,13 @@ export function evaluateFusionCapability(
   const electron = env?.electron ?? isElectronRuntime();
   const localPlatform = env?.localPlatform ?? getActiveDesktopPlatform();
   if (!electron) return { supported: false, reason: "not-electron" };
-  if (localPlatform === "windows") return { supported: false, reason: "windows-client" };
-  if (localPlatform !== "macos") return { supported: false, reason: "not-electron" };
+  // Both desktops fuse (docs/v2/fusion.md §8): a Mac with LinkShell.app's stubs, Windows in the
+  // desktop app itself. `windows-client` stays in the type for older callers; it is not returned.
+  if (localPlatform !== "macos" && localPlatform !== "windows") return { supported: false, reason: "not-electron" };
   if (!computerKey || computerKey === DESKTOP_LOCAL) {
     return { supported: false, reason: "local-computer" };
   }
-  if (remotePlatform !== "darwin" && remotePlatform !== "macos") {
+  if (!["darwin", "macos", "win32", "windows"].includes(remotePlatform ?? "")) {
     return { supported: false, reason: "non-macos-remote" };
   }
   return { supported: true, reason: "ok" };

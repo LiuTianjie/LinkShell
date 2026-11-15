@@ -88,6 +88,14 @@ namespace LinkShell.Windows {
                     Capture(Int32.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), args.Length == 5 ? Int32.Parse(args[4]) : 75);
                     return 0;
                 }
+                if (args.Length == 1 && args[0] == "--fusion") {
+                    Fusion();
+                    return 0;
+                }
+                if (args.Length == 7 && args[0] == "--fusion-video") {
+                    CaptureWindowVideo(Int64.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), Int32.Parse(args[4]), Int32.Parse(args[5]), args[6]);
+                    return 0;
+                }
                 if (args.Length == 6 && args[0] == "--video") {
                     CaptureVideo(Int32.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), Int32.Parse(args[4]), args[5]);
                     return 0;

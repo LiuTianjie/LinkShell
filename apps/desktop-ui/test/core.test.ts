@@ -200,12 +200,12 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
         }),
       ).toBe(true);
 
-      const winClient = evaluateFusionCapability("wss://gw::mac-remote", "darwin", {
-        electron: true,
-        localPlatform: "windows",
-      });
-      expect(winClient).toEqual({ supported: false, reason: "windows-client" });
-      expect(fusionCapabilityMessage(winClient.reason, "en")).toContain("Windows");
+      // Windows shows Mac apps, and either desktop shows a Windows computer's (docs/v2/fusion.md §8).
+      expect(evaluateFusionCapability("wss://gw::mac-remote", "darwin", { electron: true, localPlatform: "windows" }))
+        .toEqual({ supported: true, reason: "ok" });
+      expect(evaluateFusionCapability("wss://gw::win-remote", "win32", { electron: true, localPlatform: "macos" }))
+        .toEqual({ supported: true, reason: "ok" });
+      expect(fusionCapabilityMessage("non-macos-remote", "en")).toContain("Windows");
 
       const localMac = evaluateFusionCapability(DESKTOP_LOCAL, "darwin", {
         electron: true,

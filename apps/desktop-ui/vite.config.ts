@@ -7,6 +7,11 @@ export default defineConfig({
   build: {
     target: "chrome152",
     rollupOptions: {
+      // The workspace, and Fusion's hidden page (docs/v2/fusion.md §8.1).
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        fusion: fileURLToPath(new URL("./fusion.html", import.meta.url)),
+      },
       output: {
         manualChunks(id) {
           if (id.includes("/@xterm/")) return "terminal";
