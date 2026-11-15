@@ -145,26 +145,26 @@ describe("entitlement mapping", () => {
   });
 
   it("formats tier labels and locale-aware URLs across zh, en, and ja", () => {
-    expect(membershipTierLabel("monthly")).toBe("iTool 月度会员");
-    expect(membershipTierLabel("yearly")).toBe("iTool 年度会员");
-    expect(membershipTierLabel("monthly", { locale: "en" })).toBe("iTool Monthly");
-    expect(membershipTierLabel("yearly", { locale: "ja" })).toBe("iTool 年額プラン");
+    expect(membershipTierLabel("monthly")).toBe("LinkShell 会员");
+    expect(membershipTierLabel("yearly")).toBe("LinkShell 会员");
+    expect(membershipTierLabel("monthly", { locale: "en" })).toBe("LinkShell Membership");
+    expect(membershipTierLabel("yearly", { locale: "ja" })).toBe("LinkShell メンバーシップ");
     expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "zh" })).toBe("7 天免费试用 · 剩余 5 天");
     expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "en" })).toBe("7-day free trial · 5d left");
     expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "ja" })).toBe("7日間無料トライアル · 残り 5 日");
 
-    expect(ITOOL_MEMBERSHIP_URL).toBe("https://www.itool.tech/zh/pro?from=linkshell");
-    expect(ITOOL_YEARLY_UPGRADE_URL).toBe("https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly");
-    expect(itoolMembershipUrl("zh")).toBe("https://www.itool.tech/zh/pro?from=linkshell");
-    expect(itoolMembershipUrl("en")).toBe("https://www.itool.tech/en/pro?from=linkshell");
-    expect(itoolMembershipUrl("ja")).toBe("https://www.itool.tech/en/pro?from=linkshell");
-    expect(itoolYearlyUpgradeUrl("en")).toBe("https://www.itool.tech/en/pro?from=linkshell&checkout=yearly");
-    expect(itoolYearlyUpgradeUrl("ja")).toBe("https://www.itool.tech/en/pro?from=linkshell&checkout=yearly");
+    expect(ITOOL_MEMBERSHIP_URL).toBe("https://www.itool.tech/zh/pro?product=linkshell");
+    expect(ITOOL_YEARLY_UPGRADE_URL).toBe("https://www.itool.tech/zh/pro?product=bundle&checkout=yearly");
+    expect(itoolMembershipUrl("zh")).toBe("https://www.itool.tech/zh/pro?product=linkshell");
+    expect(itoolMembershipUrl("en")).toBe("https://www.itool.tech/en/pro?product=linkshell");
+    expect(itoolMembershipUrl("ja")).toBe("https://www.itool.tech/en/pro?product=linkshell");
+    expect(itoolYearlyUpgradeUrl("en")).toBe("https://www.itool.tech/en/pro?product=bundle&checkout=yearly");
+    expect(itoolYearlyUpgradeUrl("ja")).toBe("https://www.itool.tech/en/pro?product=bundle&checkout=yearly");
 
-    expect(monthlyUpgradeLabel()).toBe("已解锁 2/7 款产品 · 升级年度");
-    expect(monthlyUpgradeLabel("en")).toBe("2 of 7 products unlocked · Go yearly");
-    expect(monthlyUpgradeLabel("ja")).toContain("2");
-    expect([MONTHLY_PRODUCT_COUNT, MEMBERSHIP_PRODUCT_TOTAL]).toEqual([2, 7]);
+    expect(monthlyUpgradeLabel()).toBe("LinkShell 已开通 · 查看全产品年包");
+    expect(monthlyUpgradeLabel("en")).toBe("LinkShell is active · View annual bundle");
+    expect(monthlyUpgradeLabel("ja")).toContain("LinkShell");
+    expect([MONTHLY_PRODUCT_COUNT, MEMBERSHIP_PRODUCT_TOTAL]).toEqual([2, 8]);
   });
 });
 
@@ -261,7 +261,7 @@ describe("fetchReferralSummary & referralFromResponse", () => {
       invited: 4,
       rewarded: 2,
       earnedDays: 44,
-      shareUrl: "https://www.itool.tech/en/pro?from=linkshell&ref=AB2C3D4E",
+      shareUrl: "https://www.itool.tech/en/pro?product=linkshell&ref=AB2C3D4E",
     });
     expect(fetchMock.mock.calls[0]![0]).toBe(ITOOL_REFERRAL_URL);
   });
@@ -272,7 +272,7 @@ describe("fetchReferralSummary & referralFromResponse", () => {
     const summary = await fetchReferralSummary(options);
     expect(summary.code).toBe("AB2C3D4E");
     expect(summary.earnedDays).toBe(44);
-    expect(summary.shareUrl).toBe("https://www.itool.tech/pro?from=linkshell&ref=AB2C3D4E");
+    expect(summary.shareUrl).toBe("https://www.itool.tech/pro?product=linkshell&ref=AB2C3D4E");
     expect(fetchMock.mock.calls[1]![0]).toBe("https://project.supabase.co/rest/v1/rpc/itool_my_referral");
   });
 

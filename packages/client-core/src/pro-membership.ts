@@ -1,6 +1,5 @@
 /**
- * LinkShell is part of the iTool membership: the monthly tier (iTool site + LinkShell) and the
- * yearly tier (every iTool product) both include it. Membership is bought on itool.tech only;
+ * LinkShell can be purchased on its own or through the all-products annual bundle. Membership is bought on itool.tech only;
  * clients just read the entitlement and send people to the buy page on desktop/web.
  */
 
@@ -54,15 +53,15 @@ export const REFERRAL_YEARLY_DAYS = 30;
 
 /**
  * Locale-aware membership purchase URL for Desktop & Web (phones must NEVER link to it per App Store 3.1.1).
- * `zh` routes to `/zh/pro?from=linkshell`; `en` and `ja` route to `/en/pro?from=linkshell`.
+ * `zh` routes to `/zh/pro?product=linkshell`; `en` and `ja` route to `/en/pro?product=linkshell`.
  */
 export function itoolMembershipUrl(locale: Locale = "zh"): string {
   const prefix = locale === "zh" ? "zh" : "en";
-  return `https://www.itool.tech/${prefix}/pro?from=${LINKSHELL_PRODUCT}`;
+  return `https://www.itool.tech/${prefix}/pro?product=${LINKSHELL_PRODUCT}`;
 }
 
 export function itoolYearlyUpgradeUrl(locale: Locale = "zh"): string {
-  return `${itoolMembershipUrl(locale)}&checkout=yearly`;
+  return `${itoolMembershipUrl(locale).replace("product=linkshell", "product=bundle")}&checkout=yearly`;
 }
 
 /**
@@ -70,15 +69,15 @@ export function itoolYearlyUpgradeUrl(locale: Locale = "zh"): string {
  * Phones must not link to these (App Store rules).
  * The entitlement & referral APIs stay on the bare domain so no cross-host redirect drops Bearer tokens.
  */
-export const ITOOL_MEMBERSHIP_URL = "https://www.itool.tech/zh/pro?from=linkshell";
+export const ITOOL_MEMBERSHIP_URL = "https://www.itool.tech/zh/pro?product=linkshell";
 export const ITOOL_ENTITLEMENT_URL = `https://itool.tech/api/membership/entitlement?product=${LINKSHELL_PRODUCT}`;
 export const ITOOL_REFERRAL_URL = "https://itool.tech/api/membership/referral";
 
 /**
- * iTool products a membership can unlock: yearly unlocks all of them, monthly the iTool site and LinkShell.
+ * iTool products a membership can unlock: the bundle unlocks all of them. The monthly count describes historical plans only.
  * Mirrors itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS: change them when it changes.
  */
-export const MEMBERSHIP_PRODUCT_TOTAL = 7;
+export const MEMBERSHIP_PRODUCT_TOTAL = 8;
 export const MONTHLY_PRODUCT_COUNT = 2;
 
 /**
@@ -86,13 +85,13 @@ export const MONTHLY_PRODUCT_COUNT = 2;
  * person is signed in. Like the buy page, phones must not link to it (App Store rules).
  * apps/mac mirrors this and the counts in `DesktopModel.swift` (`ITool`).
  */
-export const ITOOL_YEARLY_UPGRADE_URL = `${ITOOL_MEMBERSHIP_URL}&checkout=yearly`;
+export const ITOOL_YEARLY_UPGRADE_URL = `${ITOOL_MEMBERSHIP_URL.replace("product=linkshell", "product=bundle")}&checkout=yearly`;
 
 /** The upgrade row monthly members see on the computer: what they have, and the way to the rest. */
 export const MONTHLY_UPGRADE_COPY = {
-  zh: { unlocked: `已解锁 ${MONTHLY_PRODUCT_COUNT}/${MEMBERSHIP_PRODUCT_TOTAL} 款产品`, action: "升级年度" },
-  en: { unlocked: `${MONTHLY_PRODUCT_COUNT} of ${MEMBERSHIP_PRODUCT_TOTAL} products unlocked`, action: "Go yearly" },
-  ja: { unlocked: `${MEMBERSHIP_PRODUCT_TOTAL} 製品中 ${MONTHLY_PRODUCT_COUNT} 製品が利用可能`, action: "年額プランへ" },
+  zh: { unlocked: "LinkShell 已开通", action: "查看全产品年包" },
+  en: { unlocked: "LinkShell is active", action: "View annual bundle" },
+  ja: { unlocked: "LinkShell は利用可能です", action: "全製品の年額セットを見る" },
 } as const;
 
 export function monthlyUpgradeLabel(lang: keyof typeof MONTHLY_UPGRADE_COPY = "zh"): string {
@@ -123,7 +122,7 @@ export interface MembershipTierLabelOptions {
 }
 
 export function membershipTierLabel(
-  tier: MembershipTier | undefined,
+  _tier: MembershipTier | undefined,
   opts?: MembershipTierLabelOptions,
 ): string {
   const locale: Locale = opts?.locale ?? "zh";
@@ -141,12 +140,12 @@ export function membershipTierLabel(
   }
 
   if (locale === "en") {
-    return tier === "yearly" ? "iTool Yearly" : tier === "monthly" ? "iTool Monthly" : "iTool Membership";
+    return "LinkShell Membership";
   }
   if (locale === "ja") {
-    return tier === "yearly" ? "iTool 年額プラン" : tier === "monthly" ? "iTool 月額プラン" : "iTool メンバーシップ";
+    return "LinkShell メンバーシップ";
   }
-  return tier === "yearly" ? "iTool 年度会员" : tier === "monthly" ? "iTool 月度会员" : "iTool 会员";
+  return "LinkShell 会员";
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -200,7 +199,7 @@ export function referralShareUrl(code: string, locale?: Locale): string {
   if (locale) {
     return `${itoolMembershipUrl(locale)}&ref=${encodeURIComponent(normalized)}`;
   }
-  return `https://www.itool.tech/pro?from=${LINKSHELL_PRODUCT}&ref=${encodeURIComponent(normalized)}`;
+  return `https://www.itool.tech/pro?product=${LINKSHELL_PRODUCT}&ref=${encodeURIComponent(normalized)}`;
 }
 
 export function referralFromResponse(value: unknown, locale?: Locale): ReferralSummary {

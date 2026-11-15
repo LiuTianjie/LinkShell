@@ -29,7 +29,7 @@ final class DesktopTests: XCTestCase {
     XCTAssertEqual(try decode("2028-01-02T08:00:00.000+08:00").membership(at: now), .pro(expected, .monthly))
     let yearly = try JSONDecoder().decode(DesktopSnapshot.Account.self, from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"yearly","planExpiresAt":"2028-01-02T00:00:00Z"}"#.utf8))
     XCTAssertEqual(yearly.membership(at: now), .pro(expected, .yearly))
-    XCTAssertEqual(DesktopMembershipTier.yearly.label, "iTool 年度会员")
+    XCTAssertEqual(DesktopMembershipTier.yearly.label, "LinkShell 会员")
     XCTAssertEqual(try decode("2028-01-02T00:00:00Z").membership(at: expected), .free)
     XCTAssertEqual(try decode("invalid").membership(at: now), .unknown)
     let missing = try JSONDecoder().decode(DesktopSnapshot.Account.self, from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","planExpiresAt":null}"#.utf8))
@@ -79,9 +79,9 @@ final class DesktopTests: XCTestCase {
     XCTAssertEqual(expiringTrial.badgeLabel(at: now), "7 天免费试用 · 剩余 2 天")
     XCTAssertTrue(expiringTrial.isTrialExpiringSoon(at: now))
 
-    XCTAssertEqual(ITool.membershipURL(locale: "zh-Hans-CN"), "https://www.itool.tech/zh/pro?from=linkshell")
-    XCTAssertEqual(ITool.membershipURL(locale: "en-US"), "https://www.itool.tech/en/pro?from=linkshell")
-    XCTAssertEqual(ITool.yearlyUpgradeURL(locale: "ja-JP"), "https://www.itool.tech/en/pro?from=linkshell&checkout=yearly")
+    XCTAssertEqual(ITool.membershipURL(locale: "zh-Hans-CN"), "https://www.itool.tech/zh/pro?product=linkshell")
+    XCTAssertEqual(ITool.membershipURL(locale: "en-US"), "https://www.itool.tech/en/pro?product=linkshell")
+    XCTAssertEqual(ITool.yearlyUpgradeURL(locale: "ja-JP"), "https://www.itool.tech/en/pro?product=bundle&checkout=yearly")
   }
 
   func testScreenPrivacyCurtainAndAutoLockLifecycle() {

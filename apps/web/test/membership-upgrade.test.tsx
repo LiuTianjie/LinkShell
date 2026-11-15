@@ -38,7 +38,7 @@ describe("the yearly upgrade for monthly members", () => {
     expect(swift).toContain(`static let yearlyUpgradeURL = "${ITOOL_YEARLY_UPGRADE_URL}"`);
     expect(swift).toContain(`static let productTotal = ${MEMBERSHIP_PRODUCT_TOTAL}`);
     expect(swift).toContain(`static let monthlyProductCount = ${MONTHLY_PRODUCT_COUNT}`);
-    expect(swift).toContain('static let monthlyUnlocked = "已解锁 \\(monthlyProductCount)/\\(productTotal) 款产品"');
+    expect(swift).toContain(`static let monthlyUnlocked = "${MONTHLY_UPGRADE_COPY.zh.unlocked}"`);
     expect(swift).toContain(`static let upgradeAction = "${MONTHLY_UPGRADE_COPY.zh.action}"`);
   });
 });

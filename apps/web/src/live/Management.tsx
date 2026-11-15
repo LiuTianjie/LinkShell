@@ -592,7 +592,7 @@ function Membership({ state }: { state: ManagementState }) {
         </SettingRow>
       )}
       {membership.kind === "pro" && !membership.isTrial && membership.tier === "monthly" && (
-        // Monthly covers two of the iTool products: one quiet row, the way to the rest at its end.
+        // Offer the all-products bundle without inferring the account's other entitlements.
         <SettingRow title={upgradeCopy.unlocked} onClick={() => openYearlyUpgradePage(locale)}>
           <span className="text-link">{upgradeCopy.action}</span>
         </SettingRow>
@@ -600,7 +600,7 @@ function Membership({ state }: { state: ManagementState }) {
       {membership.kind === "free" && (
         <SettingRow
           title={t("desktop.membership.subscribeAction")}
-          detail="月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品"
+          detail="LinkShell 可按月或按年单独购买，也可选择全产品年包；前往 iTool 官网查看价格"
         >
           <Button size="sm" variant="secondary" onClick={() => openMembershipPage(locale)}>{t("desktop.membership.subscribeAction")}</Button>
         </SettingRow>

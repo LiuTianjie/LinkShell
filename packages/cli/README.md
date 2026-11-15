@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-After your 7-day free trial, the official gateway uses an iTool membership on the account: [get it on itool.tech](https://www.itool.tech/pro?from=linkshell) with an international card via Creem ($3.19/mo, $26.49/yr) or Alipay (¥9.9/mo, ¥99/yr — monthly covers the iTool site and LinkShell; yearly covers every iTool product). Invite a friend and both of you receive 14 days (monthly) or 30 days (yearly). `linkshell login` shows your trial or membership status; the desktop app refreshes it after you subscribe.
+After the 7-day free trial, buy LinkShell on its own (CNY 9.9/month or 49/year; USD 3.19/month or 13.49/year), or choose the all-products annual bundle (CNY 99 or USD 26.49). Prices include tax. [Choose a plan on iTool](https://www.itool.tech/en/pro?product=linkshell) with the same account; Alipay is one-time and Creem renews automatically until canceled. Refresh membership in the desktop app or web workspace after purchase. Existing access and referral rewards are preserved.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 

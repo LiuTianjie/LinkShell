@@ -451,7 +451,7 @@ struct DesktopView: View {
         .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
       }
       if case .pro(_, .monthly) = model.membership {
-        // Monthly covers two of the iTool products: one quiet line, the way to the rest at its end.
+        // Product access does not tell us how many other products this account owns.
         HStack(spacing: 4) {
           Text("\(ITool.monthlyUnlocked) ·").foregroundStyle(DesktopStyle.secondary)
           Button(ITool.upgradeAction) { model.openMembershipPage(upgrade: true) }
@@ -463,7 +463,7 @@ struct DesktopView: View {
         Button("开通 iTool 会员") { model.openMembershipPage() }
           .buttonStyle(DesktopButtonStyle(.primary))
           .disabled(model.busy || model.preview)
-        Text("月度 ¥9.9 含 LinkShell，年度 ¥99 含全部 iTool 产品。")
+        Text("LinkShell 可按月或按年单独购买，也可选择全产品年包；前往 iTool 官网查看价格。")
           .font(.system(size: 11)).foregroundStyle(DesktopStyle.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }

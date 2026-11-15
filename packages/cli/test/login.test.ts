@@ -100,7 +100,7 @@ describe("linkshell login", () => {
     expect(await login.result).toMatchObject({ success: true, plan: "pro", email: "me@example.com", userId: "u1", accessToken: "a1" });
     expect(auth.loadAuth()).toMatchObject({ accessToken: "a1", refreshToken: "r1", userId: "u1" });
     expect(login.said()).toContain("Logged in as me@example.com");
-    expect(login.said()).toContain("iTool monthly member");
+    expect(login.said()).toContain("LinkShell member");
     // The five-minute limit must not outlive the login: it would keep the command running.
     const limit = started.mock.results[started.mock.calls.findIndex(([, delay]) => delay === 5 * 60 * 1000)]?.value;
     expect(limit).toBeDefined();

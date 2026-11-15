@@ -24,7 +24,7 @@ struct DesktopDevice: Decodable, Identifiable {
 }
 enum DesktopMembershipTier: Equatable {
   case monthly, yearly
-  var label: String { self == .yearly ? "iTool 年度会员" : "iTool 月度会员" }
+  var label: String { "LinkShell 会员" }
 }
 /// The iTool membership's addresses and products. Mirrors packages/client-core/src/pro-membership.ts
 /// (ITOOL_MEMBERSHIP_URL, ITOOL_YEARLY_UPGRADE_URL, MEMBERSHIP_PRODUCT_TOTAL, MONTHLY_PRODUCT_COUNT,
@@ -34,20 +34,20 @@ enum ITool {
     locale.lowercased().hasPrefix("zh") ? "zh" : "en"
   }
   /// www and a locale up front: the bare domain costs two redirects.
-  static let membershipURL = "https://www.itool.tech/zh/pro?from=linkshell"
+  static let membershipURL = "https://www.itool.tech/zh/pro?product=linkshell"
   /// itool.tech opens the yearly checkout once signed in when `checkout=yearly` is present.
-  static let yearlyUpgradeURL = "https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly"
+  static let yearlyUpgradeURL = "https://www.itool.tech/zh/pro?product=bundle&checkout=yearly"
   static func membershipURL(locale: String) -> String {
-    "https://www.itool.tech/\(pathLocale(locale))/pro?from=linkshell"
+    "https://www.itool.tech/\(pathLocale(locale))/pro?product=linkshell"
   }
   static func yearlyUpgradeURL(locale: String) -> String {
-    "https://www.itool.tech/\(pathLocale(locale))/pro?from=linkshell&checkout=yearly"
+    "https://www.itool.tech/\(pathLocale(locale))/pro?product=bundle&checkout=yearly"
   }
-  /// Mirror itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS (all of them yearly, two monthly).
-  static let productTotal = 7
+  /// Mirror itool-tech src/lib/membership.ts MEMBERSHIP_PRODUCTS (the bundle includes all products; the monthly count is historical).
+  static let productTotal = 8
   static let monthlyProductCount = 2
-  static let monthlyUnlocked = "已解锁 \(monthlyProductCount)/\(productTotal) 款产品"
-  static let upgradeAction = "升级年度"
+  static let monthlyUnlocked = "LinkShell 已开通"
+  static let upgradeAction = "查看全产品年包"
 }
 enum DesktopMembership: Equatable {
   case signedOut, unknown, free, pro(Date, DesktopMembershipTier)

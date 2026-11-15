@@ -168,9 +168,7 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
             : undefined;
         const activeLabel = result.isTrial
           ? `7-day free trial${trialDaysLeft !== undefined ? ` · ${trialDaysLeft}d left` : ""}`
-          : result.tier === "yearly"
-            ? "iTool yearly member"
-            : "iTool monthly member";
+          : "LinkShell member";
         const planLabel = result.plan === "pro" ? `\x1b[32m${activeLabel}\x1b[0m` : "Free";
         process.stderr.write(
           `  \x1b[32m✓\x1b[0m Logged in as ${result.email || result.userId} (${planLabel})\n\n`,
