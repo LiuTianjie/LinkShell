@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClickCounter, SCREEN_IDLE, SCREEN_TAKEN, cursorCss, fusionInputMessage, nativeSessionPolicy } from "../src/core/screen-client";
+import { ClickCounter, SCREEN_IDLE, SCREEN_TAKEN, cursorCss, fusionInputMessage, nativeScreenQuery, nativeSessionPolicy, viewerScreenMatch } from "../src/core/screen-client";
 import { isAltGraphCharacter, isLocalFullscreenKey } from "../src/features/remote/WebRtcScreenStage";
 
 const key = (init: Partial<{ key: string; code: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; altGraph: boolean }>) => ({
@@ -84,5 +84,24 @@ describe("a Fusion window's input", () => {
   it("repeats the window in `k` for a 0.10.106 remote where the event has none of its own", () => {
     expect(fusionInputMessage({ t: "move", x: 0.5, y: 0.25 }, "w12", 8)).toEqual({ t: "move", x: 0.5, y: 0.25, stream: "w12", k: "w12", i: 8 });
     expect(fusionInputMessage({ t: "text", s: "你好" }, "d0", 9)).toEqual({ t: "text", s: "你好", stream: "d0", k: "d0", i: 9 });
+  });
+});
+
+describe("asking for the desktop at this screen's resolution", () => {
+  it("says the screen in its own points and their pixels", () => {
+    // A Surface Go: 1920 × 1280 pixels at 150 %.
+    expect(viewerScreenMatch({ screen: { width: 1280, height: 853 }, devicePixelRatio: 1.5 })).toBe("1280x853@1.5");
+    expect(viewerScreenMatch({ screen: { width: 1512, height: 982 }, devicePixelRatio: 2 })).toBe("1512x982@2");
+  });
+
+  it("leaves an upright or tiny screen out", () => {
+    expect(viewerScreenMatch({ screen: { width: 853, height: 1280 }, devicePixelRatio: 1.5 })).toBeUndefined();
+    expect(viewerScreenMatch({ screen: { width: 640, height: 480 }, devicePixelRatio: 1 })).toBeUndefined();
+    expect(viewerScreenMatch(undefined)).toBeUndefined();
+  });
+
+  it("goes in the stream's query only when wanted", () => {
+    expect(nativeScreenQuery("t", 0, "1920", "60", false, "1280x853@1.5")).toContain("match=1280x853%401.5");
+    expect(nativeScreenQuery("t", 0, "1920", "60")).not.toContain("match=");
   });
 });

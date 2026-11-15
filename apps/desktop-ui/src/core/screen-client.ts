@@ -56,6 +56,8 @@ export interface UnifiedScreenPreferences {
   pacing: ScreenPacingChoice;
   control: boolean;
   mode: ScreenModeChoice;
+  /** The computer shows its desktop at this screen's resolution while it is watched (a Mac can). */
+  match: boolean;
   byComputer: Record<string, { display?: number }>;
 }
 
@@ -66,6 +68,7 @@ export interface ScreenPreferencesStoreState extends UnifiedScreenPreferences {
   setPacing(pacing: ScreenPacingChoice): void;
   setControl(control: boolean): void;
   setMode(mode: ScreenModeChoice): void;
+  setMatch(match: boolean): void;
   setComputerDisplay(computerKey: string, display: number): void;
   hydrate(): void;
 }
@@ -77,6 +80,7 @@ const DEFAULT_SCREEN_PREFERENCES: UnifiedScreenPreferences = {
   pacing: "smooth",
   control: true,
   mode: "view",
+  match: true,
   byComputer: {},
 };
 
@@ -132,6 +136,7 @@ export function loadUnifiedScreenPreferences(): UnifiedScreenPreferences {
       pacing: sanitizePacingChoice(stored.pacing),
       control: typeof stored.control === "boolean" ? stored.control : true,
       mode: sanitizeModeChoice(stored.mode),
+      match: typeof stored.match === "boolean" ? stored.match : true,
       byComputer:
         stored.byComputer && typeof stored.byComputer === "object"
           ? { ...stored.byComputer }
@@ -177,6 +182,7 @@ export function loadUnifiedScreenPreferences(): UnifiedScreenPreferences {
     pacing: sanitizePacingChoice(legacyPacing),
     control: typeof legacyControl === "boolean" ? legacyControl : DEFAULT_SCREEN_PREFERENCES.control,
     mode: sanitizeModeChoice(legacyMode),
+    match: true,
     byComputer: {},
   };
 
@@ -202,6 +208,7 @@ function persistUnifiedScreenPreferences(state: UnifiedScreenPreferences): void 
     pacing: state.pacing,
     control: state.control,
     mode: state.mode,
+    match: state.match,
     byComputer: state.byComputer,
   });
 }
@@ -217,6 +224,7 @@ export function createScreenPreferencesStore() {
         pacing: patch.pacing ?? current.pacing,
         control: patch.control ?? current.control,
         mode: patch.mode ?? current.mode,
+        match: patch.match ?? current.match,
         byComputer: patch.byComputer ?? current.byComputer,
       };
       set(next);
@@ -230,6 +238,7 @@ export function createScreenPreferencesStore() {
       setPacing: (pacing) => commit({ pacing: sanitizePacingChoice(pacing) }),
       setControl: (control) => commit({ control: Boolean(control) }),
       setMode: (mode) => commit({ mode: sanitizeModeChoice(mode) }),
+      setMatch: (match) => commit({ match: Boolean(match) }),
       setComputerDisplay: (computerKey, display) =>
         commit({
           byComputer: {
@@ -257,6 +266,23 @@ export function autoScreenWidth(stage: { width: number; ratio: number }): string
   const ratio = Math.min(Math.max(stage.ratio || 1, 1), 2);
   const target = Math.max(stage.width, 0) * ratio;
   return FITTED_STAGE_WIDTHS.find((width) => Number(width) >= target) ?? "2560";
+}
+
+/**
+ * This computer's screen for the `match` query: its size in CSS pixels (the points the remote
+ * desktop is laid out in) and its pixels to one of them, as `1280x853@1.5`. A Mac being watched
+ * makes a display of that size, so the picture fills this screen with no bars; undefined for a
+ * screen that is no desktop's (upright, or too small), which is left as it is.
+ */
+export function viewerScreenMatch(
+  view: { screen?: { width: number; height: number }; devicePixelRatio?: number } | undefined =
+    typeof window === "undefined" ? undefined : window,
+): string | undefined {
+  const width = Math.round(view?.screen?.width ?? 0);
+  const height = Math.round(view?.screen?.height ?? 0);
+  if (!(width >= 800 && height >= 500 && width >= height)) return undefined;
+  const scale = Math.min(4, Math.max(1, Math.round((view?.devicePixelRatio || 1) * 100) / 100));
+  return `${width}x${height}@${scale}`;
 }
 
 export function screenQuery(
@@ -466,6 +492,7 @@ export function nativeScreenQuery(
   width: string,
   maxFps: string,
   hevc = false,
+  match?: string,
 ): string {
   const query = new URLSearchParams({
     token,
@@ -476,6 +503,7 @@ export function nativeScreenQuery(
     turn: "1",
   });
   if (hevc) query.set("codec", "hevc");
+  if (match) query.set("match", match);
   return `/stream?${query}`;
 }
 
@@ -788,6 +816,8 @@ export interface ReceiverOptions {
   active: boolean;
   control: boolean;
   hevc: boolean;
+  /** `viewerScreenMatch()`, when the computer should show its desktop at this screen's resolution. */
+  match?: string;
   relayed: boolean;
   videoTrack?: boolean;
   video: HTMLVideoElement;
@@ -990,6 +1020,7 @@ export class ScreenReceiver {
       turn: "1",
     });
     if (this.options.hevc) query.set("codec", "hevc");
+    if (this.options.match) query.set("match", this.options.match);
     if (this.options.relayed) query.set("q", "low");
     try {
       const socket = await openWebSocket(

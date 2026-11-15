@@ -49,6 +49,8 @@ export interface SharedStageProps {
   widthChoice: ScreenWidthChoice;
   fpsChoice: ScreenFpsChoice;
   codecChoice: ScreenCodecChoice;
+  /** Ask the computer for its desktop at this screen's resolution. */
+  matchResolution: boolean;
   pacingChoice: ScreenPacingChoice;
   transportMode: ScreenTransportMode;
   controlWanted: boolean;

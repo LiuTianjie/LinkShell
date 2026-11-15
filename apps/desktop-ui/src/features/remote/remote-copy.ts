@@ -101,6 +101,9 @@ export interface RemoteCopy {
   screenFpsLabel: string;
   screenCodecLabel: string;
   screenPacingLabel: string;
+  screenMatchLabel: string;
+  screenMatchViewer: string;
+  screenMatchRemote: string;
   screenTransportModeLabel: string;
   screenTransportAuto: string;
   screenTransportCompat: string;
@@ -265,6 +268,9 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   screenFpsLabel: "帧率上限",
   screenCodecLabel: "视频编码",
   screenPacingLabel: "画面节奏",
+  screenMatchLabel: "桌面分辨率",
+  screenMatchViewer: "跟随本机屏幕 (Mac 远端)",
+  screenMatchRemote: "保持远端原样",
   screenTransportModeLabel: "传输通道",
   screenTransportAuto: "自动 (优先低延迟视频流)",
   screenTransportCompat: "兼容模式 (加密字节流)",
@@ -449,6 +455,9 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
   screenFpsLabel: "Frame Rate Cap",
   screenCodecLabel: "Video Codec",
   screenPacingLabel: "Frame Pacing",
+  screenMatchLabel: "Desktop Resolution",
+  screenMatchViewer: "Match This Screen (Mac remotes)",
+  screenMatchRemote: "Keep the Remote's Own",
   screenTransportModeLabel: "Transport Mode",
   screenTransportAuto: "Auto (Low-latency WebRTC)",
   screenTransportCompat: "Compatible (E2E Byte Stream)",

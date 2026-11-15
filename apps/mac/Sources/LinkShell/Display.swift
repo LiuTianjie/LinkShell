@@ -33,7 +33,12 @@ struct Display {
     CGGetActiveDisplayList(0, nil, &count)
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
     CGGetActiveDisplayList(count, &ids, &count)
-    return ids.prefix(Int(count)).map(Display.init(id:))
+    // A display made to match a viewer's resolution (`ScreenMatch`) stands in for the one that
+    // mirrors it: the list, and every `screen` number, stays what it was before the viewer came.
+    var seen = Set<CGDirectDisplayID>()
+    return ids.prefix(Int(count)).compactMap { id -> CGDirectDisplayID? in
+      ScreenMatch.isMatch(id) ? ScreenMatch.watched(by: id) : id
+    }.filter { seen.insert($0).inserted }.map(Display.init(id:))
   }
 
   static func at(_ screen: Int) -> Display? {

@@ -25,6 +25,7 @@ import {
   shortcutKey,
   snappedRect,
   textInput,
+  viewerScreenMatch,
   wheelPixels,
   type ReceiverState,
 } from "../../core/screen-client";
@@ -44,6 +45,7 @@ export function WebRtcScreenStage({
   widthChoice,
   fpsChoice,
   codecChoice,
+  matchResolution,
   transportMode,
   controlWanted,
   remotePlatform,
@@ -158,6 +160,7 @@ export function WebRtcScreenStage({
       active: initial.active,
       control: initial.controlWanted,
       hevc: codecChoice === "auto",
+      match: matchResolution ? viewerScreenMatch() : undefined,
       relayed: false,
       videoTrack: transportMode !== "compat",
       video,
@@ -183,7 +186,7 @@ export function WebRtcScreenStage({
       receiver.stop();
       if (receiverRef.current === receiver) receiverRef.current = null;
     };
-  }, [codecChoice, link, reconnectNonce, revision, streams, transportMode]);
+  }, [codecChoice, link, matchResolution, reconnectNonce, revision, streams, transportMode]);
 
   // Apply in-band display / resolution / fps updates without tearing down WebRTC when supported.
   useEffect(() => {

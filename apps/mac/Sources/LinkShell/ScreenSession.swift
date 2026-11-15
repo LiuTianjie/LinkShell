@@ -17,6 +17,8 @@ struct ScreenRequest {
   let maxFps: Int
   let codec: String
   let relayKbps: Int?
+  /// The viewer's own screen, when it wants this Mac's desktop at that resolution (`ScreenMatch`).
+  let match: ScreenMatch.Wanted?
 
   init(viewer: String, _ message: [String: Any]) {
     self.viewer = viewer
@@ -33,6 +35,7 @@ struct ScreenRequest {
     let ceiling = (message["maxFps"] as? Int) ?? Tuning.fullFps
     maxFps = [30, 60, 120].contains(ceiling) ? ceiling : Tuning.fullFps
     codec = (message["codec"] as? String) == "hevc" ? "hevc" : "h264"
+    match = ScreenMatch.Wanted(message["match"])
   }
 }
 
@@ -68,6 +71,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private let options: Options
   private let link: Link
   private var display = Display.main
+  /// The display made at the viewer's resolution, which the chosen one mirrors meanwhile.
+  private var match: ScreenMatch?
   private var connection: RTCPeerConnection?
   private var peerFactory: RTCPeerConnectionFactory?
   private var transceiver: RTCRtpTransceiver?
@@ -155,7 +160,26 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func start() {
     // Asking ScreenCaptureKit without the permission makes the system ask the user: don't.
     guard Permissions.recording() else { return fail(Permissions.notRecording) }
-    guard let display = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
+    guard let chosen = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
+    if let wanted = request.match, let size = ScreenMatch.size(for: wanted, watching: chosen.bounds.size) {
+      let link = self.link
+      ScreenMatch.begin(watching: chosen.id, size: size, hz: Double(request.maxFps), log: { link.log($0) }) { [weak self] match in
+        guard let self, !self.closed else { match?.end(); return }
+        self.match = match
+        self.begin(self.shown(chosen))
+      }
+      return
+    }
+    begin(chosen)
+  }
+
+  /// The display the picture is of: the one matched to the viewer, for the display that mirrors it.
+  private func shown(_ display: Display) -> Display {
+    guard let match, match.physical == display.id, match.displayID != 0 else { return display }
+    return Display(id: match.displayID)
+  }
+
+  private func begin(_ display: Display) {
     self.display = display
     appliedConfiguration = ScreenConfiguration(requestId: 0, screen: request.screen, maxWidth: request.maxWidth, maxFps: request.maxFps, paused: false)
     awake = Awake()
@@ -274,6 +298,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func close() {
     guard !closed else { return }
     closed = true
+    match?.end()
+    match = nil
     captureGeneration += 1
     configurations.cancel()
     inputGate.suspended = true
@@ -312,7 +338,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
       return
     }
     if !configurations.busy, captureReady, !inputGate.suspended, let appliedConfiguration,
-       configuration.sameCapture(as: appliedConfiguration), let target = Display.at(configuration.screen),
+       configuration.sameCapture(as: appliedConfiguration), let target = Display.at(configuration.screen).map(shown),
        target.id == display.id, target.pictureSize(maxWidth: configuration.maxWidth) == size {
       // Even an unchanged picture may have a new input generation.
       control?.releaseAll()
@@ -362,7 +388,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
 
   private func beginCapture(_ work: ScreenConfigurationQueue.Work) {
     let configuration = work.configuration
-    guard let display = Display.at(configuration.screen), let source else {
+    guard let display = Display.at(configuration.screen).map(shown), let source else {
       return finishConfiguration(work, error: "所选显示器已断开")
     }
     self.display = display

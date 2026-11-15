@@ -20,6 +20,7 @@ import {
   postNativeScreen,
   screenRate,
   screenSignal,
+  viewerScreenMatch,
   targetChanged,
   type NativeScreenEvent,
   type NativeScreenStatus,
@@ -53,6 +54,7 @@ export function NativeMetalStage({
   widthChoice,
   fpsChoice,
   codecChoice,
+  matchResolution,
   pacingChoice,
   controlWanted,
   revision,
@@ -459,6 +461,7 @@ export function NativeMetalStage({
               startTarget.width,
               startTarget.maxFps,
               codecChoice === "auto",
+              matchResolution ? viewerScreenMatch() : undefined,
             ),
             {
               open: () => {
@@ -539,6 +542,7 @@ export function NativeMetalStage({
     };
   }, [
     codecChoice,
+    matchResolution,
     computeStageRect,
     dormant,
     internalRetryNonce,

@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError, type RelayIceServer, type ScreenPrivacyState, type TurnCredentials } from "@linkshell/wire";
-import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type StreamProfile, type VideoConfigured } from "./input.js";
+import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type ScreenMatch, type StreamProfile, type VideoConfigured } from "./input.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { SCREEN_IDLE, SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
@@ -209,6 +209,17 @@ export function videoWidth(asked: string | null): number | undefined {
   return Number.isInteger(width) && width >= 640 ? Math.min(width, VIDEO_WIDEST) : undefined;
 }
 
+/**
+ * `match=1280x853@1.5`: the viewer's own screen, in its points and their pixels, when it wants the
+ * computer's desktop at that resolution (a Mac makes a display for it; see ScreenMatch.swift).
+ */
+export function videoMatch(asked: string | null): ScreenMatch | undefined {
+  const found = /^(\d{3,5})x(\d{3,5})@(\d(?:\.\d{1,3})?)$/.exec(asked ?? "");
+  if (!found) return undefined;
+  const w = Number(found[1]), h = Number(found[2]), scale = Number(found[3]);
+  return w >= 800 && w <= 8192 && h >= 500 && h <= 8192 && scale >= 1 && scale <= 4 ? { w, h, scale } : undefined;
+}
+
 /** A receiver capability, not a request to disable the sender's frame-rate adaptation. */
 export function videoMaxFps(asked: string | null): number | undefined {
   return asked === "30" || asked === "60" || asked === "120" ? Number(asked) : undefined;
@@ -257,6 +268,8 @@ const VIEWER_OWN = new Set(["ack", "ping", "measure", "keyframe", "hidden"]);
 
 /** What `offerVideo` needs of the viewer it offers the picture to. */
 interface VideoViewer {
+  /** The viewer's own screen, when it asked for the desktop at that resolution. */
+  match?: ScreenMatch;
   closed(): boolean;
   claim(): void;
   tell(message: object): void;
@@ -451,7 +464,8 @@ export class ScreenShare {
       // "turn": the viewer takes a TURN login along with the address, and knows a relayed picture can end for being
       // unused. Older ones drop the login (and WebRTC then refuses the whole configuration): they get neither.
       const turn = url.searchParams.get("turn") === "1";
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn));
+      const match = videoMatch(url.searchParams.get("match"));
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn, match));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -707,7 +721,7 @@ export class ScreenShare {
     viewer.tell({ rtc: { t: "config", iceServers } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
     const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
-    await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}) }, (message) => {
+    await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}), ...(viewer.match ? { match: viewer.match } : {}) }, (message) => {
       if (this.video !== mine) return;
       const kind = String(message.t);
       if (kind === "gone" || kind === "rtc.error") {
@@ -738,7 +752,7 @@ export class ScreenShare {
     return { id, reconfigure: status.videoReconfigure === true, keys: status.keys === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
   }
 
-  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false): void {
+  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false, match?: ScreenMatch): void {
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
     let closed = false;
@@ -1119,7 +1133,7 @@ export class ScreenShare {
     if (wantsVideo) {
       let lostWhileOpening = false;
       void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, turn, {
-        closed: () => !live(), claim, tell,
+        match, closed: () => !live(), claim, tell,
         refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
         lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
         path: (through) => {

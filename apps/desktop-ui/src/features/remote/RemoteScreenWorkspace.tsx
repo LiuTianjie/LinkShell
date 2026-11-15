@@ -637,6 +637,18 @@ export function RemoteScreenWorkspace({
             onValueChange={(val) => prefs.setCodec(val as ScreenCodecChoice)}
           />
 
+          <Select
+            size="sm"
+            fullWidth
+            label={copy.screenMatchLabel}
+            value={prefs.match ? "viewer" : "remote"}
+            options={[
+              { value: "viewer", label: copy.screenMatchViewer },
+              { value: "remote", label: copy.screenMatchRemote },
+            ]}
+            onValueChange={(val) => prefs.setMatch(val === "viewer")}
+          />
+
           {useNativeMetal ? (
             <Select
               size="sm"
@@ -1068,6 +1080,7 @@ export function RemoteScreenWorkspace({
               widthChoice={prefs.width}
               fpsChoice={prefs.maxFps}
               codecChoice={prefs.codec}
+              matchResolution={prefs.match}
               pacingChoice={prefs.pacing}
               transportMode={transportMode}
               controlWanted={prefs.control}
@@ -1090,6 +1103,7 @@ export function RemoteScreenWorkspace({
               widthChoice={prefs.width}
               fpsChoice={prefs.maxFps}
               codecChoice={prefs.codec}
+              matchResolution={prefs.match}
               pacingChoice={prefs.pacing}
               transportMode={transportMode}
               controlWanted={prefs.control}

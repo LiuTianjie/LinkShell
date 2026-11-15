@@ -108,7 +108,11 @@ export interface VideoOffer {
   maxWidth?: number;
   /** "hevc": offered first, H.264 after, for a receiver that decodes it. Older apps ignore it and send H.264. */
   codec?: "hevc";
+  /** The viewer's screen (its points, and pixels to a point): the app shows the desktop at that resolution. Older apps ignore it. */
+  match?: ScreenMatch;
 }
+
+export interface ScreenMatch { w: number; h: number; scale: number }
 
 export interface VideoConfiguration {
   requestId: number;

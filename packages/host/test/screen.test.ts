@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeInputApp, shippedApp } from "../src/input.js";
-import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, resolvedCandidate, videoWidth, videoMaxFps } from "../src/screen.js";
+import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, resolvedCandidate, videoMatch, videoWidth, videoMaxFps } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -97,6 +97,17 @@ describe("the width a viewer asks the video track for", () => {
 
   it("is the app's own choice when it says nothing that makes sense", () => {
     for (const asked of [null, "", "auto", "12", "1920.5", "-1"]) expect(videoWidth(asked)).toBeUndefined();
+  });
+});
+
+describe("the screen a viewer wants the desktop matched to", () => {
+  it("is its size in points and its pixels to a point", () => {
+    expect(videoMatch("1280x853@1.5")).toEqual({ w: 1280, h: 853, scale: 1.5 });
+    expect(videoMatch("1512x982@2")).toEqual({ w: 1512, h: 982, scale: 2 });
+  });
+
+  it("is nothing when the viewer does not say, or says what no screen is", () => {
+    for (const asked of [null, "", "1", "1280x853", "320x200@1", "1280x853@9", "99999x853@1", "1280x853@1.5;rm"]) expect(videoMatch(asked)).toBeUndefined();
   });
 });
 
