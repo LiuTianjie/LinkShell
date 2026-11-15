@@ -113,9 +113,8 @@ for that screen, using RPC. Android/Web retain their existing stream path. Both 
 paths use ScreenCaptureKit/VideoToolbox; only the byte stream includes the cursor in the
 picture. There is no TURN service.
 
-See the [current architecture and diagrams](../../docs/v2/screen-realtime.md),
-[iOS receiver](../client/modules/link-screen/README.md) and
-[historical measurements](../../docs/v2/screen-realtime-history.md). Stable 120 fps, stable
+See the [current architecture and diagrams](../../docs/v2/screen-realtime.md) and
+[iOS receiver](../client/modules/link-screen/README.md). Stable 120 fps, stable
 4K/60 and phone-side FlexFEC recovery are not established; the recorded periodic stutter is
 still unresolved. These are validation limits, not reasons to change defaults without evidence.
 

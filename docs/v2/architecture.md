@@ -299,7 +299,7 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 | M5 | 终端、开发预览、推送、语音输入迁移；发布 | 真机验收 |
 | M6 ✅ | 删除 v1 代码，网关合并为一个包（2026-10，见 §8） | 全量 build + typecheck + 测试；新镜像挂旧数据卷启动，配对仍在 |
 
-2.0 于 2026-09-30 发布，M3–M5 的主体（加密通道、中继、配对、App、终端、开发预览）都在其中。当时列在里面但没有做的：推送、局域网发现、语音输入、Web 端。开发预览和屏幕兼容字节流后来增加了 Host ↔ 客户端的 WebRTC DataChannel（`packages/wire/src/direct.ts`）。Mac 屏幕另有 LinkShell.app ↔ 接收器的视频连接；iOS 默认原生 WebRTC/Metal，失败依次回退 WebView 视频和 RPC。两套连接、当前参数及性能边界见 [screen-realtime.md](screen-realtime.md)，旧设计和实验见 [历史存档](screen-realtime-history.md)。
+2.0 于 2026-09-30 发布，M3–M5 的主体（加密通道、中继、配对、App、终端、开发预览）都在其中。当时列在里面但没有做的：推送、局域网发现、语音输入、Web 端。开发预览和屏幕兼容字节流后来增加了 Host ↔ 客户端的 WebRTC DataChannel（`packages/wire/src/direct.ts`）。Mac 屏幕另有 LinkShell.app ↔ 接收器的视频连接；iOS 默认原生 WebRTC/Metal，失败依次回退 WebView 视频和 RPC。两套连接、当前参数及性能边界见 [screen-realtime.md](screen-realtime.md)。
 
 ## 10. 风险
 
