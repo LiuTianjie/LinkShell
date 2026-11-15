@@ -48,7 +48,8 @@
         {
           "ios": {
             "enableSceneSupport": true,
-            "usePrecompiledModules": false
+            "usePrecompiledModules": false,
+            "buildReactNativeFromSource": true
           },
           "android": {
             "buildArchs": [
