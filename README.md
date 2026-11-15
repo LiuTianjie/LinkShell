@@ -33,6 +33,8 @@ Claude Code, Codex and other coding agents keep running on your computer. From y
 
 Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, against macOS, Linux or Windows.
 
+Fusion Mode in the desktop app opens another computer's app windows alongside your local ones. Version 0.10.106 adds Fusion v2 with reconnect/resume and Windows support in preview. Both computers must upgrade; clipboard sharing is currently Mac-to-Mac only. See the [Fusion specification and validation limits](docs/v2/fusion.md).
+
 ## What it does
 
 <table>
@@ -72,9 +74,9 @@ Works with iPhone (including iPhone Duo), Apple Watch, Android and the browser, 
 
 ## Install on your computer
 
-**Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
+**Mac: the standalone app** (macOS 13+, [Apple Silicon](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-arm64.dmg) · [Intel](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-x64.dmg)). Drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. It brings its own CLI, Host and Node and updates them together; nothing else is needed. It also gives you a desktop workspace for this Mac or another computer, token usage by agent, and launch at login. See the [desktop guide](docs/mac-desktop.md).
 
-**Windows: desktop preview** (Windows 10 1809+ / Windows 11 x64, [installer](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-Setup-0.10.105-windows-x64.exe) · [portable ZIP](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-windows-x64.zip)). Both bundle Node, CLI, Host, ConPTY and screen components, with the same desktop workspace as macOS for conversations, terminals, files and port previews. The window is the same Electron app as on macOS and needs no WebView2 Runtime. Direct H.264 video and JPEG fallback support viewing and control on the unlocked desktop. Packages are unsigned and may show unknown-publisher or SmartScreen prompts; see the [Windows guide](docs/windows-desktop.md) for installation and validation limits.
+**Windows: desktop preview** (Windows 10 1809+ / Windows 11 x64, [installer](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-Setup-0.10.106-windows-x64.exe) · [portable ZIP](https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-windows-x64.zip)). Both bundle Node, CLI, Host, ConPTY and screen components, with the same desktop workspace as macOS for conversations, terminals, files and port previews. The window is the same Electron app as on macOS and needs no WebView2 Runtime. Direct H.264 video and JPEG fallback support viewing and control on the unlocked desktop. Packages are unsigned and may show unknown-publisher or SmartScreen prompts; see the [Windows guide](docs/windows-desktop.md) for installation and validation limits.
 
 **macOS or Linux: the CLI** (Node.js 22.13 or newer).
 

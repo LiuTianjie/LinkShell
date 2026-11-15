@@ -599,9 +599,9 @@
         <p>LinkShell 分两部分：电脑上的 Host（可用 Mac、Windows 桌面 App 或 CLI 管理），和手机上的 App。下面按顺序走一遍。</p>
 
         <h2 id="d-install">安装</h2>
-        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-x64.dmg">Mac · Intel</a></p>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-x64.dmg">Mac · Intel</a></p>
         <p>独立 Mac App 需要 macOS 13 及以上，内置运行环境，无需另外安装 Node。打开 App 即可登录、管理服务与更新；下面是可选的命令行安装方式。</p>
-        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-Setup-0.10.105-windows-x64.exe">Windows · 安装器</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-windows-x64.zip">Windows · ZIP</a></p>
+        <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-Setup-0.10.106-windows-x64.exe">Windows · 安装器</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.106/LinkShell-0.10.106-windows-x64.zip">Windows · ZIP</a></p>
         <p>Windows 桌面版需要 Windows 10 1809+ / Windows 11 x64，内置 CLI、Host 和 Node；窗口与 Mac 是同一个 Electron 应用，不需要 WebView2 Runtime。安装器和便携 ZIP 均未签名，可能出现「未知发布者」或 SmartScreen 提示。</p>
         <p>CLI 方式需要 macOS 或 Linux、Node.js 22.13 或更新版本（独立 Mac App 已内置）。</p>
         <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
@@ -674,14 +674,14 @@
         <p>切换显示器或清晰度会沿用已经建立的屏幕连接。在 App 或网页工作区内离开屏幕页时暂停采集，两分钟内返回可复用连接继续观看。进入后台、隐藏网页标签或断线后会释放连接，下次重新建立；旧版电脑端仍按原有方式重连。</p>
         <p class="note">稳定 120 fps、稳定 4K/60 和真机弱网效果仍待验证。完整技术链路、回退规则和已知问题见 <a href="https://github.com/LiuTianjie/LinkShell/blob/main/docs/v2/screen-realtime.md">远程桌面架构与链路图</a>。</p>
 
-        <h2 id="d-fusion">融合模式（Mac 到 Mac）</h2>
-        <p>融合模式把另一台 Mac 上的应用一个个开到你面前这台 Mac 上：每个远端应用在本机有自己的图标，出现在程序坞和 ⌘Tab 里，窗口和本机应用放在一起用。它只在桌面版里有，两台都得是 Mac。</p>
+        <h2 id="d-fusion">融合模式（Mac 与 Windows）</h2>
+        <p>融合模式把另一台电脑上的应用窗口开到你面前，和本机应用放在一起用。Mac 上的远端应用出现在程序坞和 ⌘Tab 里，Windows 上则出现在任务栏和 Alt-Tab 里。0.10.106 加入 Windows 预览支持，Mac 与 Windows 可以互为本地端和远端。</p>
         <ul>
-          <li><b>准备</b>：两台 Mac 都装 LinkShell 桌面版（macOS 13 及以上），并且在工作台里能看到对方。被连的那台在设置里打开屏幕录制和辅助功能；它锁屏时，先在远程桌面里解锁。</li>
-          <li><b>开启</b>：在工作台里切到那台 Mac，点顶部的「融合模式」。连上后会列出它的应用，可以按分类找或搜索，点一个就在本机打开。</li>
-          <li><b>用起来</b>：本机为每个远端应用生成一个替身应用，放在 <code>~/Applications/LinkShell/&lt;电脑名&gt;/</code>，聚焦搜索里也找得到。远端把窗口放到和你屏幕一致的虚拟显示器上，每个窗口单独一路视频；剪贴板两边同步，键盘和触控板直接操作远端窗口。</li>
-          <li><b>连接</b>：两台 Mac 能直接互通（同一局域网或 Tailscale）时直连，否则走端到端加密隧道。两台之间的控制连接是 TLS，密钥一次性生成，只在加密隧道里传。意外断开会自动重连；点了「断开融合」就保持断开，只打开页面也不会自动开启。</li>
-          <li><b>还没有</b>：声音、拖放和通知同步。</li>
+          <li><b>准备</b>：两台电脑都升级到 0.10.106 或更新的桌面版，并且在工作台里能看到对方。Mac 需要 macOS 13 及以上，被连的 Mac 要允许屏幕录制和辅助功能；Windows 需要处于已解锁的交互桌面。</li>
+          <li><b>开启</b>：在工作台里切到那台电脑，点顶部的「融合模式」。连上后会列出它的应用，可以按分类找或搜索，点一个就在本机打开。</li>
+          <li><b>用起来</b>：键盘和鼠标直接操作远端窗口。Mac 为每个远端应用生成可在聚焦搜索中找到的替身应用；Windows 为用过的远端应用创建开始菜单快捷方式。剪贴板同步目前仅支持 Mac 到 Mac。</li>
+          <li><b>连接与结束</b>：能直接互通时优先直连，否则通过加密隧道连接。短暂断线会尝试恢复；主动断开后不会自行重连。结束融合时，远端 Mac 会把窗口放回原位。新版融合协议要求两台电脑同时升级。</li>
+          <li><b>预览限制</b>：暂不支持声音、拖放和通知同步；Windows 远端光标形状和剪贴板同步尚未实现，同时最多输出 6 路窗口画面，缩放时可能短暂出现裁剪错位。跨机、多显示器和输入法体验仍待实机验证。</li>
         </ul>
 
         <h2 id="d-iphone-duo">iPhone Duo 与自适应布局</h2>
