@@ -960,7 +960,25 @@ export interface ComposerAttachment {
   mimeType: string;
   size: number;
   isImage: boolean;
+  /** The bytes are UTF-8 text, whatever the type says: the only files an agent can be handed inline. */
+  isText?: boolean;
   previewUrl?: string;
+}
+
+/**
+ * The type a browser gives a file comes from the system's registry of extensions: on Windows a
+ * .md or .py often has none and a .ts is "video/vnd.dlna.mpeg-tts", so the bytes decide instead.
+ */
+export async function isUtf8Text(file: Blob): Promise<boolean> {
+  if (file.size > EMBEDDED_LIMIT_BYTES) return false;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.includes(0)) return false;
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function prepareComposerAttachment(rawFile: File): Promise<ComposerAttachment> {
@@ -968,6 +986,7 @@ export async function prepareComposerAttachment(rawFile: File): Promise<Composer
   validateAttachmentSize(processed);
   const mimeType = processed.type || "application/octet-stream";
   const isImage = /^image\//i.test(mimeType);
+  const isText = !isImage && (await isUtf8Text(processed));
   const previewUrl =
     isImage && typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
       ? URL.createObjectURL(processed)
@@ -979,6 +998,7 @@ export async function prepareComposerAttachment(rawFile: File): Promise<Composer
     mimeType,
     size: processed.size,
     isImage,
+    isText,
     previewUrl,
   };
 }
@@ -1008,9 +1028,13 @@ type AgentCapabilities = AgentInfo["capabilities"] | undefined;
 function attachmentRoute(item: ComposerAttachment, capabilities: AgentCapabilities): "image" | "audio" | "resource" | "upload" {
   if (NATIVE_IMAGE.test(item.mimeType) && capabilities?.images) return "image";
   if (/^audio\//.test(item.mimeType) && capabilities?.audio && item.size <= EMBEDDED_LIMIT_BYTES) return "audio";
-  if (capabilities?.embeddedContext && item.size <= EMBEDDED_LIMIT_BYTES) return "resource";
+  // Only text goes inline: adapters may drop an embedded blob without a word (Claude's does), so
+  // anything else is written into the session and linked by path, which every agent can open.
+  if (capabilities?.embeddedContext && item.isText && item.size <= EMBEDDED_LIMIT_BYTES) return "resource";
   return "upload";
 }
+
+const TEXT_TYPE = /^text\/|^application\/(json|xml|javascript|x-sh|x-yaml|yaml|toml|x-httpd-php|sql)\b|\+(json|xml)$/i;
 
 export function attachmentsNeedUpload(
   attachments: readonly ComposerAttachment[],
@@ -1053,19 +1077,15 @@ export async function buildPromptContentBlocks(options: {
       content.push({ type: "resource_link", uri: path, name: item.name });
       continue;
     }
-    const data = await fileToBase64(item.file);
-    if (route === "image") {
-      content.push({ type: "image", mimeType: item.mimeType, data });
-    } else if (route === "audio") {
-      content.push({ type: "audio", mimeType: item.mimeType, data });
+    if (route === "image" || route === "audio") {
+      content.push({ type: route, mimeType: item.mimeType, data: await fileToBase64(item.file) });
     } else {
-      const textual = /^text\//.test(item.mimeType) || item.mimeType === "application/json";
       content.push({
         type: "resource",
         resource: {
           uri: `attachment:${encodeURIComponent(item.name)}`,
-          mimeType: item.mimeType || "application/octet-stream",
-          ...(textual ? { text: await item.file.text() } : { blob: data }),
+          mimeType: TEXT_TYPE.test(item.mimeType) ? item.mimeType : "text/plain",
+          text: await item.file.text(),
         },
       });
     }

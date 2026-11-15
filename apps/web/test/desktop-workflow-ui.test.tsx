@@ -179,7 +179,7 @@ describe("ComposerBox paste, IME composition & field-sizing helpers", () => {
   it("packages large pasted text attachments alongside typed text and uploaded files", async () => {
     const bigLog = "x".repeat(LARGE_PASTE_CHARS + 128);
     const pdfFile = new File(["hello-pdf"], "spec.pdf", { type: "application/pdf" });
-    expect(filesNeedUpload([pdfFile], { images: true })).toBe(true);
+    expect(await filesNeedUpload([pdfFile], { images: true })).toBe(true);
 
     const uploadCalls: Array<{ dir: string; name: string }> = [];
     const blocks = await buildComposerContentBlocks({

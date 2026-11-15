@@ -910,7 +910,8 @@ export function RemoteScreenWorkspace({
   const stageNotice =
     transientNote ??
     (stageStatus.notice ? localizeRemoteMessage(stageStatus.notice) : undefined) ??
-    (fallbackReason && stageStatus.live ? copy.screenFallbackBanner : undefined);
+    // The reason, not a guess: a decoder or a sender can fail as well as the network.
+    (fallbackReason && stageStatus.live ? copy.screenFallbackBanner + localizeRemoteMessage(fallbackReason) : undefined);
 
   useEffect(() => {
     if (useNativeMetal) notifyOverlayLayout();

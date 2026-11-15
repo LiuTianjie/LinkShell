@@ -324,7 +324,7 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   screenUnsupportedDesc: "请确认远端电脑运行在图形桌面会话中并已安装桌面屏幕组件。",
   screenOfflineTitle: "远端电脑当前离线",
   screenOfflineDesc: "等待远端电脑重新上线后即可连接桌面画面。",
-  screenFallbackBanner: "原生直连受网络限制，已自动切换至兼容通道",
+  screenFallbackBanner: "原生画面未连上，已改用兼容画面：",
   screenTryNativeAgain: "重试原生 Metal",
   clarityChoices: {
     auto: "随窗口自动适配",
@@ -512,7 +512,7 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
     "Ensure the remote computer has an active graphical desktop session and screen helper.",
   screenOfflineTitle: "Remote computer is offline",
   screenOfflineDesc: "The remote screen will be available once the computer comes back online.",
-  screenFallbackBanner: "Direct Metal blocked by network; using compatible stream",
+  screenFallbackBanner: "Native picture didn't connect; using the compatible stream: ",
   screenTryNativeAgain: "Retry Native Metal",
   clarityChoices: {
     auto: "Auto (Fit Window)",

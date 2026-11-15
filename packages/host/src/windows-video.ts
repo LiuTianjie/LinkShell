@@ -89,6 +89,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private readonly warming = new Promise<void>(resolve => { this.warmed = resolve; });
   private readonly monitor: ReturnType<typeof setInterval>;
   private readonly timeout: ReturnType<typeof setTimeout>;
+  private unsteady?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly request: VideoOffer,
@@ -116,10 +117,15 @@ export class WindowsVideoSession implements ScreenVideoSession {
       if (this.closed) return;
       this.events.tell({ t: "state", connection: state, ice: this.pc.iceConnectionState });
       this.connected = state === "connected";
+      clearTimeout(this.unsteady);
       if (this.connected) {
         this.needsKey = true;
         this.events.log("[screen] Windows H.264 video connected directly to the viewer");
-      } else if (state === "failed" || state === "closed" || state === "disconnected") this.fail("video connection lost");
+      } else if (state === "disconnected") {
+        // Missed consent checks on Wi-Fi recover on their own; ending at once sent the viewer to
+        // the JPEG fallback for good. The receivers allow four seconds, the sender a little more.
+        this.unsteady = setTimeout(() => { if (!this.connected) this.fail("video connection lost"); }, 5000);
+      } else if (state === "failed" || state === "closed") this.fail("video connection lost");
     });
     for (const label of ["input", "pointer", "cursor", "shape"]) {
       const lossy = label === "pointer" || label === "cursor";
@@ -328,7 +334,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
     if (this.closed) return;
     this.closed = true;
     this.warmed();
-    clearInterval(this.monitor); clearTimeout(this.timeout);
+    clearInterval(this.monitor); clearTimeout(this.timeout); clearTimeout(this.unsteady);
     this.release();
     void this.stopCapture();
     void this.pc.close().catch(() => {});

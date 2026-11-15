@@ -134,16 +134,40 @@ export function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export function filesNeedUpload(
+const INLINE_LIMIT = 5 * 1024 * 1024;
+const TEXT_TYPE = /^text\/|^application\/(json|xml|javascript|x-sh|x-yaml|yaml|toml|x-httpd-php|sql)\b|\+(json|xml)$/i;
+
+/**
+ * The type a browser gives a file comes from the system's registry of extensions: on Windows a
+ * .md or .py often has none and a .ts is "video/vnd.dlna.mpeg-tts", so the bytes decide instead.
+ */
+export async function isUtf8Text(file: Blob): Promise<boolean> {
+  if (file.size > INLINE_LIMIT) return false;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.includes(0)) return false;
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fileRoute(file: File, capabilities?: AgentInfo["capabilities"]): Promise<"image" | "audio" | "resource" | "upload"> {
+  if (/^image\/(png|jpe?g|webp|gif)$/.test(file.type) && capabilities?.images) return "image";
+  if (/^audio\//.test(file.type) && capabilities?.audio && file.size <= INLINE_LIMIT) return "audio";
+  // Only text goes inline: adapters may drop an embedded blob without a word (Claude's does), so
+  // anything else is written into the session and linked by path, which every agent can open.
+  if (capabilities?.embeddedContext && !/^image\//.test(file.type) && (await isUtf8Text(file))) return "resource";
+  return "upload";
+}
+
+export async function filesNeedUpload(
   files: readonly File[],
   capabilities?: AgentInfo["capabilities"],
-): boolean {
-  return files.some((file) => {
-    if (/^image\/(png|jpe?g|webp|gif)$/.test(file.type) && capabilities?.images) return false;
-    if (/^audio\//.test(file.type) && capabilities?.audio && file.size <= 5 * 1024 * 1024) return false;
-    if (capabilities?.embeddedContext && file.size <= 5 * 1024 * 1024) return false;
-    return true;
-  });
+): Promise<boolean> {
+  for (const file of files) if ((await fileRoute(file, capabilities)) === "upload") return true;
+  return false;
 }
 
 export async function buildComposerContentBlocks({
@@ -175,29 +199,21 @@ export async function buildComposerContentBlocks({
   try {
     for (const file of files) {
       onSendingFile?.(file.name);
-      const data = await fileToBase64(file);
-      if (/^image\/(png|jpe?g|webp|gif)$/.test(file.type) && capabilities?.images) {
-        content.push({ type: "image", mimeType: file.type, data });
-      } else if (
-        /^audio\//.test(file.type) &&
-        capabilities?.audio &&
-        file.size <= 5 * 1024 * 1024
-      ) {
-        content.push({ type: "audio", mimeType: file.type, data });
-      } else if (capabilities?.embeddedContext && file.size <= 5 * 1024 * 1024) {
+      const route = await fileRoute(file, capabilities);
+      if (route === "image" || route === "audio") {
+        content.push({ type: route, mimeType: file.type, data: await fileToBase64(file) });
+      } else if (route === "resource") {
         content.push({
           type: "resource",
           resource: {
             uri: `attachment:${encodeURIComponent(file.name)}`,
-            mimeType: file.type || "application/octet-stream",
-            ...(/^text\//.test(file.type) || file.type === "application/json"
-              ? { text: await file.text() }
-              : { blob: data }),
+            mimeType: TEXT_TYPE.test(file.type) ? file.type : "text/plain",
+            text: await file.text(),
           },
         });
       } else {
         const cached = uploadCache?.get(file);
-        const path = cached ?? (await callUpload(uploadDir, file.name, data)).path;
+        const path = cached ?? (await callUpload(uploadDir, file.name, await fileToBase64(file))).path;
         uploadCache?.set(file, path);
         content.push({
           type: "resource_link",

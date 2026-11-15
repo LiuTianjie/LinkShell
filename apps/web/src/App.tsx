@@ -1007,7 +1007,7 @@ function NewSession({
     const trimmedCwd = cwd.trim();
     const useWorktree = worktree && !!git.value && gitPath === cwd;
     void job.run(async () => {
-      if (useWorktree && filesNeedUpload(payload.files, selectedAgent?.capabilities)) {
+      if (useWorktree && await filesNeedUpload(payload.files, selectedAgent?.capabilities)) {
         const createdSession = await actions.createSession({
           agent,
           cwd: trimmedCwd,
