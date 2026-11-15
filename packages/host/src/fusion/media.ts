@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useAbsSendTime, useH264, useSdesMid, type RTCDataChannel, type RTCRtpTransceiver } from "werift";
-import { ScreenInputOrder, h264Nals, h264Payloads } from "../screen-h264.js";
+import { H264_MIME, ScreenInputOrder, h264Nals, h264Payloads } from "../screen-h264.js";
 import { inputEvent } from "../input.js";
 import type { FusionVideoSource } from "./platform.js";
 
@@ -33,6 +33,24 @@ export function fusionSei(layout: FusionLayout): Buffer {
 }
 
 /**
+ * One message of the input channels: which stream it is for, and the event itself. `stream`
+ * names the window; 0.10.106 wrote it to `k`, over a key event's own `k` (the key's name), so
+ * its other events are still read here and its named keys were lost before they arrived.
+ */
+export function fusionInput(message: Record<string, unknown>): { stream: string; event: Record<string, unknown> } | undefined {
+  const { stream, ...event } = message;
+  if (typeof stream === "string") {
+    // What has no `k` of its own carries the stream there too, for a 0.10.106 remote.
+    if (event.t !== "key") delete event.k;
+    return { stream, event };
+  }
+  if (typeof event.k !== "string") return undefined;
+  const legacy = event.k;
+  delete event.k;
+  return { stream: legacy, event };
+}
+
+/**
  * RTP numbering belongs to the transceiver: its SSRC stays in the SDP while it waits in the spare
  * list, so the receiver keeps its jitter and frame buffers, and a reused one must go on counting
  * where it stopped. Fresh random numbers would read as old packets there and be dropped.
@@ -45,10 +63,30 @@ interface Stream {
   rtp: RtpState;
   source?: FusionVideoSource;
   layout: () => FusionLayout | undefined;
+  /** The receiver cannot decode what comes next: nothing but a key picture, or the replay, goes out. */
   needsKey: boolean;
+  /** The receiver knows this stream's mid (its offer was answered): nothing is sent before. */
+  announced: boolean;
+  started?: boolean;
   parameterSets: Map<number, Buffer>;
+  /**
+   * Every access unit since the last key picture, as the encoder made them. A window's capture
+   * stops while the window does not change (Windows.Graphics.Capture sends a frame per change),
+   * so a receiver that connects, or loses a packet, minutes later gets no new key picture to
+   * start from: it is sent these again, and has the window as it is now.
+   */
+  replay: Buffer[];
+  replayBytes: number;
+  replayedAt: number;
+  replayTimer?: ReturnType<typeof setTimeout>;
   sending: Promise<void>;
 }
+
+/** A replay longer than this is given up: the receiver waits for the next key picture, as it did before. */
+const REPLAY_MAX_UNITS = 240;
+const REPLAY_MAX_BYTES = 8 << 20;
+/** Lost packets come in bursts: one replay answers them all. */
+const REPLAY_EVERY_MS = 1000;
 
 export interface FusionMediaEvents {
   signal(payload: Record<string, unknown>): void;
@@ -64,6 +102,8 @@ export class FusionNodeMedia {
   private readonly rtp = new WeakMap<RTCRtpTransceiver, RtpState>();
   private readonly channels = new Map<string, RTCDataChannel>();
   private readonly order = new ScreenInputOrder();
+  /** The streams of the offer the receiver is answering. */
+  private offered: Stream[] = [];
   private negotiating = false;
   private offerWanted = false;
   private offerTimer?: ReturnType<typeof setTimeout>;
@@ -77,7 +117,7 @@ export class FusionNodeMedia {
       bundlePolicy: "max-bundle",
       codecs: { video: [
         // Level 5.1: a window's canvas is its monitor, up to 4K (4.2 stops at 1080p).
-        useH264({ payloadType: 96, parameters: "profile-level-id=42e033;packetization-mode=1;level-asymmetry-allowed=1" }),
+        useH264({ mimeType: H264_MIME, payloadType: 96, parameters: "profile-level-id=42e033;packetization-mode=1;level-asymmetry-allowed=1" }),
         new RTCRtpCodecParameters({ mimeType: "video/rtx", clockRate: 90000, payloadType: 97, parameters: "apt=96" }),
       ] },
       headerExtensions: { video: [useSdesMid(), useAbsSendTime()] },
@@ -88,8 +128,10 @@ export class FusionNodeMedia {
     this.pc.connectionStateChange.subscribe((state) => {
       if (this.closed) return;
       this.connected = state === "connected";
+      // As the Mac remote logs it: what a field report needs to tell "never connected" from "no pictures".
+      this.events.log(`[fusion] media: connection ${state}`);
       this.events.signal({ t: "state", connection: state });
-      if (this.connected) for (const stream of this.streams.values()) stream.needsKey = true;
+      if (this.connected) for (const stream of this.streams.values()) this.wantKey(stream);
     });
     for (const label of ["input", "pointer", "cursor", "shape"]) {
       const lossy = label === "pointer" || label === "cursor";
@@ -99,11 +141,9 @@ export class FusionNodeMedia {
       channel.onMessage.subscribe((data) => {
         if (this.closed || typeof data !== "string" || data.length > 32_000) return;
         try {
-          const message = JSON.parse(data) as Record<string, unknown>;
-          const key = typeof message.k === "string" ? message.k : "";
-          if (!this.streams.has(key)) return;
-          const { k: _k, ...event } = message;
-          if (inputEvent.safeParse(event).success && this.order.accept(event, lossy)) this.events.input(key, event);
+          const input = fusionInput(JSON.parse(data) as Record<string, unknown>);
+          if (!input || !this.streams.has(input.stream)) return;
+          if (inputEvent.safeParse(input.event).success && this.order.accept(input.event, lossy)) this.events.input(input.stream, input.event);
         } catch { /* Invalid input never ends a session. */ }
       });
     }
@@ -124,11 +164,12 @@ export class FusionNodeMedia {
       this.rtp.set(transceiver, { seq: randomBytes(2).readUInt16BE(), timestamp: randomBytes(4).readUInt32BE(), lastFrame: performance.now() });
       const owner = transceiver;
       transceiver.sender.onPictureLossIndication.subscribe(() => {
-        for (const stream of this.streams.values()) if (stream.transceiver === owner) stream.needsKey = true;
+        for (const stream of this.streams.values()) if (stream.transceiver === owner) this.wantKey(stream);
       });
     }
     const stream: Stream = {
-      key, transceiver, rtp: this.rtp.get(transceiver)!, layout, needsKey: true, parameterSets: new Map(), sending: Promise.resolve(),
+      key, transceiver, rtp: this.rtp.get(transceiver)!, layout, needsKey: true, announced: false, parameterSets: new Map(),
+      replay: [], replayBytes: 0, replayedAt: 0, sending: Promise.resolve(),
     };
     this.streams.set(key, stream);
     stream.source = start(
@@ -142,6 +183,8 @@ export class FusionNodeMedia {
     const stream = this.streams.get(key);
     if (!stream) return;
     this.streams.delete(key);
+    clearTimeout(stream.replayTimer);
+    stream.replay = [];
     stream.source?.stop();
     stream.transceiver.setDirection("inactive");
     this.spare.push(stream.transceiver);
@@ -160,6 +203,12 @@ export class FusionNodeMedia {
       if (m.t === "answer" && typeof m.sdp === "string") {
         await this.pc.setRemoteDescription({ type: "answer", sdp: m.sdp });
         this.negotiating = false;
+        // The receiver has these streams' mids now: each starts from a key picture.
+        for (const stream of this.offered) {
+          if (stream.announced || this.streams.get(stream.key) !== stream) continue;
+          stream.announced = true;
+          this.wantKey(stream);
+        }
         if (this.offerWanted) this.wantOffer();
       } else if (m.t === "ice" && typeof m.candidate === "string") {
         await this.pc.addIceCandidate({ candidate: m.candidate, sdpMid: (m.sdpMid as string | undefined) ?? undefined, sdpMLineIndex: Number(m.sdpMLineIndex ?? 0) });
@@ -184,29 +233,77 @@ export class FusionNodeMedia {
     this.offerWanted = false;
     this.negotiating = true;
     const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
-    // The mids exist only now; the receiver must know them before it sees the tracks.
-    const streams = [...this.streams.values()].flatMap((s) => (s.transceiver.mid ? [{ k: s.key, mid: s.transceiver.mid }] : []));
+    // werift gives the transceivers their mids as it starts to apply the offer, and only then waits
+    // for ICE gathering: seconds, on a computer with many interfaces or a STUN server out of
+    // reach. The offer goes out now and the candidates follow, as they do for the remote screen.
+    const applied = this.pc.setLocalDescription(offer);
+    applied.catch((error) => this.events.log(`[fusion] media offer: ${String(error)}`));
+    if ([...this.streams.values()].some((s) => !s.transceiver.mid)) await applied.catch(() => undefined);
+    if (this.closed) return;
+    // The receiver must know the mids before it sees the tracks.
+    this.offered = [...this.streams.values()].filter((s) => s.transceiver.mid);
+    const streams = this.offered.map((s) => ({ k: s.key, mid: s.transceiver.mid! }));
     this.events.signal({ t: "streams", streams });
-    this.events.signal({ t: "offer", sdp: this.pc.localDescription?.sdp ?? offer.sdp });
+    this.events.signal({ t: "offer", sdp: offer.sdp });
   }
 
+  /** An access unit from a stream's encoder: kept for a replay, and sent when the receiver can use it. */
   private frame(stream: Stream, unit: Buffer, key: boolean): void {
     for (const nal of h264Nals(unit)) {
       const type = nal[0]! & 31;
       if (type === 7 || type === 8) stream.parameterSets.set(type, Buffer.from(nal));
     }
-    if (!this.connected || this.closed || this.streams.get(stream.key) !== stream) return;
+    if (this.closed || this.streams.get(stream.key) !== stream) return;
+    if (key) { stream.replay = []; stream.replayBytes = 0; }
+    if (key || stream.replay.length) {
+      stream.replay.push(unit);
+      stream.replayBytes += unit.length;
+      if (stream.replay.length > REPLAY_MAX_UNITS || stream.replayBytes > REPLAY_MAX_BYTES) { stream.replay = []; stream.replayBytes = 0; }
+    }
+    if (!this.connected || !stream.announced) return;
+    // Waiting for a key picture: what is skipped here is in the replay, if one goes out first.
     if (stream.needsKey && !key) return;
+    if (this.send(stream, unit, key)) { stream.needsKey = false; this.started(stream); }
+  }
+
+  private started(stream: Stream): void {
+    if (stream.started) return;
+    stream.started = true;
+    this.events.log(`[fusion] ${stream.key}: first picture sent (mid ${stream.transceiver.mid})`);
+  }
+
+  /** The receiver needs a picture to start from: the replay if there is one, else the next key picture. */
+  private wantKey(stream: Stream): void {
+    stream.needsKey = true;
+    this.catchUp(stream);
+  }
+
+  private catchUp(stream: Stream): void {
+    clearTimeout(stream.replayTimer);
+    stream.replayTimer = undefined;
+    if (this.closed || !this.connected || !stream.announced || !stream.needsKey || this.streams.get(stream.key) !== stream) return;
+    const later = (ms: number) => { stream.replayTimer = setTimeout(() => this.catchUp(stream), ms); stream.replayTimer.unref?.(); };
+    if (!stream.replay.length) return;
+    const wait = stream.replayedAt + REPLAY_EVERY_MS - performance.now();
+    if (wait > 0) return later(wait);
+    // No crop yet (the window is being laid out): a picture without one would be drawn wrong.
+    if (!stream.layout()) return later(100);
+    stream.replayedAt = performance.now();
     stream.needsKey = false;
+    stream.replay.forEach((unit, index) => this.send(stream, unit, index === 0));
+    this.started(stream);
+  }
+
+  /** Packetizes one access unit with the stream's crop metadata; false when there is no crop to send it with. */
+  private send(stream: Stream, unit: Buffer, key: boolean): boolean {
     const layout = stream.layout();
+    // A frame without metadata is dropped by the local side once it has seen one: send none rather than a wrong crop.
+    if (!layout) return false;
     const now = performance.now();
     stream.rtp.timestamp = (stream.rtp.timestamp + Math.max(1, Math.round((now - stream.rtp.lastFrame) * 90))) >>> 0;
     stream.rtp.lastFrame = now;
     const nals = h264Nals(unit);
     const missing = key ? [...stream.parameterSets].filter(([type]) => !nals.some((nal) => (nal[0]! & 31) === type)).map(([, nal]) => Buffer.concat([Buffer.from([0, 0, 0, 1]), nal])) : [];
-    // A frame without metadata is dropped by the local side once it has seen one: send none rather than a wrong crop.
-    if (!layout) return;
     const payloads = h264Payloads(Buffer.concat([...missing, fusionSei(layout), unit]));
     const timestamp = stream.rtp.timestamp;
     stream.sending = stream.sending.then(async () => {
@@ -217,13 +314,14 @@ export class FusionNodeMedia {
         }), payload))));
       }
     }).catch(() => undefined);
+    return true;
   }
 
   end(): void {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.offerTimer);
-    for (const stream of this.streams.values()) stream.source?.stop();
+    for (const stream of this.streams.values()) { clearTimeout(stream.replayTimer); stream.source?.stop(); }
     this.streams.clear();
     void this.pc.close().catch(() => undefined);
   }

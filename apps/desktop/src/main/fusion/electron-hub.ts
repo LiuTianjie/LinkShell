@@ -19,6 +19,8 @@ export const FUSION_PROTO = 2;
 const RESUME_GRACE_MS = 30_000;
 // No `clipboard` yet: syncing it from the desktop app is a follow-up.
 const LOCAL_FEATURES = ["keys"];
+/** What a taskbar and the app grid need; a Mac's Dock icon (1024) is thirty times the bytes. */
+const ICON_PIXELS = 256;
 
 export interface FusionHubOptions {
   computerKey: string;
@@ -90,6 +92,9 @@ export class FusionElectronHub {
   private alerts = new Map<string, Record<string, unknown>>();
   private iconBundles = new Set<string>();
   private iconRequested = new Set<string>();
+  private iconQueue: string[] = [];
+  private iconInFlight?: string;
+  private iconTimer?: ReturnType<typeof setTimeout>;
   private pendingLaunches: string[] = [];
   private quitting = new Map<string, number>();
   private statusText = "正在初始化融合会话…";
@@ -271,20 +276,53 @@ export class FusionElectronHub {
       computerKey: this.options.computerKey, hostLabel: this.options.name, hostSlug: this.options.slug, updatedAt: Date.now(),
       apps: this.apps.map((a) => ({ name: a.name, bundle: a.app, category: a.category, isSystem: a.system })),
     }));
-    this.apps.forEach((entry, index) => setTimeout(() => this.requestIcon(entry.app), index * 20).unref?.());
+    for (const entry of this.apps) this.requestIcon(entry.app);
+    // What was still queued when the last connection dropped goes on from here.
+    this.requestNextIcon();
   }
 
-  private requestIcon(app: string): void {
-    if (this.iconRequested.has(app) || existsSync(join(this.iconsDir, `${fusionIconFile(app)}.png`))) {
+  /**
+   * Icons are asked for one at a time, at the size a taskbar needs. A hundred at once (a megabyte
+   * each from a Mac at its Dock's size) filled the control connection for minutes through a relay,
+   * with every window and every answer queued behind them. `first`: an app being opened now.
+   */
+  private requestIcon(app: string, first = false): void {
+    if (this.iconRequested.has(app)) {
+      const index = this.iconQueue.indexOf(app);
+      if (first && index > 0) { this.iconQueue.splice(index, 1); this.iconQueue.unshift(app); }
+      return;
+    }
+    if (existsSync(join(this.iconsDir, `${fusionIconFile(app)}.png`))) {
       this.iconBundles.add(app);
       return;
     }
     this.iconRequested.add(app);
-    this.send({ t: "icon", app });
+    if (first) this.iconQueue.unshift(app); else this.iconQueue.push(app);
+    this.requestNextIcon();
+  }
+
+  private requestNextIcon(): void {
+    if (this.iconInFlight !== undefined || !this.connection || this.connection.isClosed) return;
+    const app = this.iconQueue.shift();
+    if (app === undefined) return;
+    this.iconInFlight = app;
+    this.send({ t: "icon", app, size: ICON_PIXELS });
+    // A remote without an icon for it answers without one; an older remote does not answer at all.
+    clearTimeout(this.iconTimer);
+    this.iconTimer = setTimeout(() => this.iconAnswered(app), 2_000);
+    this.iconTimer.unref?.();
+  }
+
+  private iconAnswered(app: string): void {
+    if (this.iconInFlight !== app) return;
+    this.iconInFlight = undefined;
+    clearTimeout(this.iconTimer);
+    this.requestNextIcon();
   }
 
   private icon(m: FusionMessage): void {
     const app = String(m.app ?? "");
+    if (app) this.iconAnswered(app);
     if (!app || typeof m.png !== "string") return;
     const png = Buffer.from(m.png, "base64");
     const file = fusionIconFile(app);
@@ -307,7 +345,7 @@ export class FusionElectronHub {
       if (!this.pendingLaunches.includes(app)) this.pendingLaunches.push(app);
       return;
     }
-    this.requestIcon(app);
+    this.requestIcon(app, true);
     this.send({ t: "launch", app });
     this.shortcut(app);
   }
@@ -378,7 +416,7 @@ export class FusionElectronHub {
     record.chrome = (m.chrome ?? record.chrome) as Record<string, unknown>;
     record.stream = String(m.stream ?? record.stream);
     this.windows.set(id, record);
-    this.requestIcon(app);
+    this.requestIcon(app, true);
     if (record.win && !record.win.isDestroyed()) {
       this.toPage({ t: "open", id, key: record.stream, chrome: record.chrome, title: record.title, reuse: true });
       return;

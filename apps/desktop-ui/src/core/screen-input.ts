@@ -107,6 +107,37 @@ export function textInput(text: string): ScreenInput[] {
   return out;
 }
 
+/** A remote pointer's picture: `w`, `h` and the hot spot in the remote's points, the PNG `scale` pixels to a point. */
+export interface CursorPicture {
+  url: string;
+  w: number;
+  h: number;
+  hotX: number;
+  hotY: number;
+  scale: number;
+}
+
+/**
+ * That picture as a CSS cursor. `image-set` carries the scale: a bare `url()` is drawn a pixel of
+ * the PNG to a CSS pixel, which made a Mac's pointer twice its size here, with its hot spot a
+ * quarter of the way in. The hot spot is in CSS pixels of the picture at the size it is drawn.
+ */
+export function cursorCss(shape: CursorPicture): string {
+  const scale = shape.scale >= 1 && shape.scale <= 4 ? shape.scale : 1;
+  const inside = (value: number, size: number) => Math.min(Math.max(0, Math.round(value)), Math.max(0, Math.ceil(size) - 1));
+  return `image-set(url("${shape.url}") ${scale}x) ${inside(shape.hotX, shape.w)} ${inside(shape.hotY, shape.h)}, default`;
+}
+
+/**
+ * An input event as Fusion's data channels carry it (docs/v2/fusion.md §5): `stream` names the
+ * window or display layer. Not `k`, which a `key` event already uses for the key's name: written
+ * over it, Return, Backspace, the arrows and every shortcut arrived as a key called "w12".
+ * Events with no `k` of their own carry the stream there as well, for a 0.10.106 remote.
+ */
+export function fusionInputMessage(event: ScreenInput, stream: string, number: number): Record<string, unknown> {
+  return { ...event, stream, ...(event.t === "key" ? {} : { k: stream }), i: number };
+}
+
 export function mouseButton(button: number): "left" | "right" | undefined {
   return button === 0 ? "left" : button === 2 ? "right" : undefined;
 }

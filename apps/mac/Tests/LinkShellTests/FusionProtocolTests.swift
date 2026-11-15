@@ -53,6 +53,39 @@ final class FusionProtocolTests: XCTestCase {
     XCTAssertNotEqual(FusionProtocol.displaysSignature(displays), FusionProtocol.displaysSignature(Array(displays.prefix(1))))
   }
 
+  func testInputNamesItsWindowInStreamAndAKeyKeepsItsName() {
+    // Shared vectors with apps/desktop-ui/test/screen-input.test.ts.
+    let key = FusionProtocol.inputEvent(["t": "key", "k": "return", "m": ["cmd"]], stream: "w12", number: 7)
+    XCTAssertEqual(key["k"] as? String, "return")
+    XCTAssertEqual(key["stream"] as? String, "w12")
+    XCTAssertEqual(key["i"] as? Int, 7)
+    XCTAssertEqual(FusionProtocol.inputStream(key), "w12")
+    // No `k` of its own: the stream is there too, for a 0.10.106 remote.
+    let move = FusionProtocol.inputEvent(["t": "move", "x": 0.5, "y": 0.25], stream: "w12", number: 8)
+    XCTAssertEqual(move["k"] as? String, "w12")
+    XCTAssertEqual(FusionProtocol.inputStream(move), "w12")
+    // From a 0.10.106 local: only `k`.
+    XCTAssertEqual(FusionProtocol.inputStream(["t": "down", "b": "left", "k": "d0", "i": 3]), "d0")
+    XCTAssertNil(FusionProtocol.inputStream(["t": "move", "x": 0, "y": 0]))
+  }
+
+  func testALiveProcessIsNotTakenForAnEndedApp() {
+    // This test's own process: not an application the system lists, and alive.
+    XCTAssertFalse(FusionProtocol.processEnded(getpid()))
+    // A pid nothing has: ended.
+    XCTAssertTrue(FusionProtocol.processEnded(99_999_999))
+  }
+
+  func testAnOffersCodecNamesAreTheOnesTheDecoderFactoryLists() {
+    // As a Windows host up to 0.10.106 offered it: answered as "h264", no decoder was found.
+    let offer = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 97\r\na=rtpmap:96 h264/90000\r\na=fmtp:96 profile-level-id=42e02a\r\na=rtpmap:97 rtx/90000\r\n"
+    let fixed = DesktopScreenCodec.canonicalNames(inOffer: offer)
+    XCTAssertTrue(fixed.contains("a=rtpmap:96 H264/90000\r\n"))
+    XCTAssertTrue(fixed.contains("a=rtpmap:97 rtx/90000\r\n"))
+    XCTAssertEqual(DesktopScreenCodec.canonicalNames(inOffer: fixed), fixed)
+    XCTAssertTrue(DesktopScreenCodec.canonicalNames(inOffer: "a=rtpmap:98 h265/90000\r\n").contains("H265/90000"))
+  }
+
   func testIconFileNamesMatchTheDesktops() {
     // Shared vector with apps/desktop/test/fusion-wire.test.mjs (fusionIconFile).
     XCTAssertEqual(FusionProtocol.iconFile("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\notepad.exe"), "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}_notepad.exe")

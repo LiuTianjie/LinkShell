@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useH264, useSdesMid, useAbsSendTime, type RTCDataChannel } from "werift";
 import { inputEvent, type VideoOffer, type VideoSignal, type VideoConfiguration, type VideoConfigured } from "./input.js";
-import { H264AccessUnits, ScreenInputOrder, h264Nals, h264Payloads } from "./screen-h264.js";
-import { windowsHelper } from "./windows-screen.js";
+import { H264_MIME, H264AccessUnits, ScreenInputOrder, h264Nals, h264Payloads } from "./screen-h264.js";
+import { noteWindowsVideo, windowsHelper, windowsVideoEnv } from "./windows-screen.js";
 
 export interface ScreenVideoSession {
   id: string;
@@ -33,6 +33,35 @@ const profiles = [
   { width: 960, fps: 30, bitrate: 1_500_000 },
   { width: 640, fps: 20, bitrate: 700_000 },
 ];
+
+/**
+ * The best profile this computer has shown it can make. A small PC that captures 30 frames a
+ * second never reaches a 60 fps profile however good the network is: without this each viewer
+ * started at the top, was moved down ten seconds later (an encoder restart, a frozen picture,
+ * often a reconnect) and then, on a good network, was moved up to fall again.
+ */
+const machine = { level: 0, at: 0 };
+/** One step higher is tried again after this long: the computer may only have been busy. */
+const MACHINE_RETRY_MS = 30 * 60_000;
+
+export function windowsMachineLevel(now = Date.now()): number {
+  return machine.level > 0 && now - machine.at > MACHINE_RETRY_MS ? machine.level - 1 : machine.level;
+}
+
+export function noteWindowsMachineLevel(level: number, now = Date.now()): void {
+  machine.level = Math.max(0, Math.min(profiles.length - 1, level));
+  machine.at = now;
+}
+
+/**
+ * The next profile down for a sender that delivered `made` frames a second: past the ones that
+ * ask for more frames than it makes, since those would only be left the same way.
+ */
+export function windowsSlowerLevel(level: number, made: number | undefined): number {
+  let next = Math.min(profiles.length - 1, level + 1);
+  if (made !== undefined) while (next < profiles.length - 1 && profiles[next]!.fps > made * 1.15) next++;
+  return next;
+}
 
 export function windowsVideoProfile(level: number, request: Pick<VideoOffer, "maxWidth" | "maxFps" | "fps">) {
   const profile = profiles[Math.max(0, Math.min(profiles.length - 1, level))]!;
@@ -61,7 +90,12 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private pending: { unit: Buffer; key: boolean; at: number }[] = [];
   private needsKey = true;
   private connected = false;
-  private level = 0;
+  private level = windowsMachineLevel();
+  /** Seconds in a row in which the capture and encoder made well under the profile's frame rate. */
+  private behindIntervals = 0;
+  private made = 0;
+  /** When the running capture delivered its first frame: its first seconds say nothing about its rate. */
+  private steadySince = Infinity;
   private changed = performance.now();
   private goodSince = performance.now();
   private seq = randomBytes(2).readUInt16BE();
@@ -99,7 +133,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
       iceServers: weriftIceServers(request.iceServers),
       bundlePolicy: "max-bundle",
       codecs: { video: [
-        useH264({ payloadType: 96, parameters: "profile-level-id=42e02a;packetization-mode=1;level-asymmetry-allowed=1" }),
+        useH264({ mimeType: H264_MIME, payloadType: 96, parameters: "profile-level-id=42e02a;packetization-mode=1;level-asymmetry-allowed=1" }),
         new RTCRtpCodecParameters({ mimeType: "video/rtx", clockRate: 90000, payloadType: 97, parameters: "apt=96" }),
       ] },
       headerExtensions: { video: [useSdesMid(), useAbsSendTime()] },
@@ -194,10 +228,11 @@ export class WindowsVideoSession implements ScreenVideoSession {
     if (this.closed || this.hidden) return;
     const profile = this.profile();
     const child = spawn(windowsHelper()!, ["--video", String(this.request.screen), String(profile.width), String(profile.fps), String(profile.bitrate), windowsMedia()!], {
-      windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: windowsVideoEnv(),
     });
     this.child = child;
     this.needsKey = true;
+    this.steadySince = Infinity;
     const splitter = new H264AccessUnits();
     let errors = "", received = false;
     const startup = setTimeout(() => { if (this.child === child && !received) this.fail("hardware encoder produced no frames"); }, 12_000);
@@ -206,6 +241,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
       if (this.child !== child || this.closed) return;
       try {
         splitter.push(chunk, (unit, key) => {
+          if (!received) this.steadySince = performance.now() + 3000;
           received = true; clearTimeout(startup); this.warmed();
           this.enqueue(unit, key);
         });
@@ -213,6 +249,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
     });
     child.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString(); errors = (errors + text).slice(-2000);
+      noteWindowsVideo(text);
       const encoder = /\[video\] encoder=(\S+)/.exec(text)?.[1];
       if (encoder) { this.encoder = encoder; this.events.log(`[screen] Windows hardware encoder: ${encoder}`); }
     });
@@ -273,6 +310,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
     const profile = this.profile();
     const sendBitrate = Math.round(this.sentBytes * 8 / elapsed);
     if (process.env.LINKSHELL_SCREEN_DIAGNOSTICS === "1") this.events.log(`[screen] Windows video ${JSON.stringify({ captured: this.captured, sent: this.sentFrames, dropped: this.dropped, queueDrops: this.queueDrops, pli: this.plis, bitrate: sendBitrate, estimate: this.estimate })}`);
+    // What the capture and encoder delivered, whatever was then sent: the computer's own limit.
+    this.made = this.captured / Math.max(elapsed, 0.001);
     this.captured = this.queueDrops = this.plis = 0;
     this.events.tell({ t: "stats", encoder: this.encoder, codec: "H264", fps: Math.round(this.sentFrames / elapsed), bitrate: Math.round(this.sentBytes * 8 / elapsed), targetFps: profile.fps, targetBitrate: profile.bitrate, dropped: this.dropped });
     this.sentFrames = this.sentBytes = 0; this.lastStats = now;
@@ -291,17 +330,26 @@ export class WindowsVideoSession implements ScreenVideoSession {
     // A same-computer receiver can bootstrap a low REMB from an almost still desktop.
     // That estimate says nothing about link capacity and must not trigger repeated encoder restarts.
     const loopback = pair && pair.localCandidate.host === pair.remoteCandidate.host;
-    const strained = this.dropped > profile.fps / 2 || (!loopback && feedback && this.estimate < profile.bitrate * 0.75 && sendBitrate > this.estimate * 0.9);
+    // The screen is duplicated at a constant rate, so fewer frames than asked for is the computer, not the picture.
+    const behind = now > this.steadySince && this.made < profile.fps * 0.7;
+    this.behindIntervals = behind ? this.behindIntervals + 1 : 0;
+    const strained = behind || this.dropped > profile.fps / 2 || (!loopback && feedback && this.estimate < profile.bitrate * 0.75 && sendBitrate > this.estimate * 0.9);
     this.strainedIntervals = strained ? this.strainedIntervals + 1 : 0;
     this.dropped = 0;
     if (strained) {
       this.goodSince = now;
-      if (this.strainedIntervals >= 3 && now - this.changed > 10_000 && this.level < profiles.length - 1) this.adapt(this.level + 1);
-    } else if (feedback && this.level > 0 && this.estimate > profiles[this.level - 1]!.bitrate * 1.2 && now - this.goodSince > 20_000 && now - this.changed > 20_000) this.adapt(this.level - 1);
+      if (this.strainedIntervals >= 3 && now - this.changed > 10_000 && this.level < profiles.length - 1) {
+        const machineLimit = this.behindIntervals >= 3;
+        const next = windowsSlowerLevel(this.level, machineLimit ? this.made : undefined);
+        if (machineLimit) noteWindowsMachineLevel(next);
+        this.adapt(next);
+      }
+    } else if (feedback && this.level > windowsMachineLevel() && this.estimate > profiles[this.level - 1]!.bitrate * 1.2 && now - this.goodSince > 20_000 && now - this.changed > 20_000) this.adapt(this.level - 1);
   }
 
   private adapt(level: number): void {
     this.level = level; this.changed = performance.now(); this.needsKey = true;
+    this.strainedIntervals = this.behindIntervals = 0;
     this.events.log(`[screen] Windows video profile: ${JSON.stringify(this.profile())}`);
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); this.startCapture(); }).catch(error => this.fail(String(error)));
   }

@@ -123,10 +123,19 @@ describe("Fusion remote in the host (simulated platform)", () => {
     local.connection.send({ t: "rtc", m: { t: "control" } });
     const control = await local.next((m) => m.t === "rtc" && (m.m as { t: string }).t === "control");
     expect(control.m).toMatchObject({ trusted: true });
-    input!.send(JSON.stringify({ t: "down", b: "left", n: 1, k: `w${wopen.id}`, i: 1 }));
-    input!.send(JSON.stringify({ t: "down", b: "left", n: 1, k: "w999999", i: 2 }));
+    const stream = `w${wopen.id}`;
+    input!.send(JSON.stringify({ t: "down", b: "left", n: 1, stream, k: stream, i: 1 }));
+    input!.send(JSON.stringify({ t: "down", b: "left", n: 1, stream: "w999999", i: 2 }));
+    // A key keeps its name: the window is named in `stream`, not over the key's `k`.
+    input!.send(JSON.stringify({ t: "key", k: "return", stream, i: 3 }));
+    // 0.10.106 named the window in `k`: its clicks still arrive.
+    input!.send(JSON.stringify({ t: "up", b: "left", n: 1, k: stream, i: 4 }));
     await new Promise((r) => setTimeout(r, 300));
-    expect(platform.inputs).toEqual([{ target: { window: wopen.id }, event: { t: "down", b: "left", n: 1, i: 1 } }]);
+    expect(platform.inputs).toEqual([
+      { target: { window: wopen.id }, event: { t: "down", b: "left", n: 1, i: 1 } },
+      { target: { window: wopen.id }, event: { t: "key", k: "return", i: 3 } },
+      { target: { window: wopen.id }, event: { t: "up", b: "left", n: 1, i: 4 } },
+    ]);
 
     // A resize from the local side reaches the window, and the next layout acknowledges it.
     local.connection.send({ t: "place", id: wopen.id, seq: 1, frame: { x: 200, y: 100, w: 640, h: 480 }, resize: true });
@@ -158,6 +167,37 @@ describe("Fusion remote in the host (simulated platform)", () => {
     })();
     expect(resumed).toBeDefined();
   }, 60_000);
+
+  it("sends a window that has stopped changing to a receiver that connects afterwards", async () => {
+    // Windows.Graphics.Capture sends a frame per change: a still window's encoder says nothing
+    // more, and the receiver must get the key picture and what followed it all the same.
+    const nal = (type: number, text: string) => Buffer.concat([Buffer.from([0, 0, 0, 1, type]), Buffer.from(text)]);
+    class StillPlatform extends SimulatedFusionPlatform {
+      windowVideo(_id: number, _canvas: { w: number; h: number }, _fps: number, _bitrate: number, onUnit: (unit: Buffer, key: boolean) => void): { stop(): void } {
+        onUnit(Buffer.concat([nal(0x67, "sps"), nal(0x68, "pps"), nal(0x65, "KEY-PICTURE")]), true);
+        onUnit(nal(0x41, "DELTA-ONE"), false);
+        onUnit(nal(0x41, "DELTA-TWO"), false);
+        return { stop() {} };
+      }
+      monitorVideo(): { stop(): void } { return { stop() {} }; }
+    }
+    const platform = new StillPlatform();
+    const remote = new FusionNodeRemote(platform, { log: () => {}, port: 0 });
+    cleanups.push(() => remote.stop());
+    const port = await remote.issue("still-token", []);
+    const local = new Local(port, "still-token");
+    cleanups.push(() => local.close());
+    await local.next((m) => m.t === "ready");
+    local.connection.send({ t: "launch", app: SIMULATED_APP });
+    const wopen = await local.next((m) => m.t === "wopen");
+    const got = (text: string) => (local.packets.get(`w${wopen.id}`) ?? []).some((payload) => payload.includes(text));
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && !(got("KEY-PICTURE") && got("DELTA-TWO"))) await new Promise((r) => setTimeout(r, 100));
+    expect(["LinkShellFusion1", "KEY-PICTURE", "DELTA-ONE", "DELTA-TWO"].map(got)).toEqual([true, true, true, true]);
+    // In the encoder's order: the key picture first.
+    const order = (local.packets.get(`w${wopen.id}`) ?? []).map((payload) => ["KEY-PICTURE", "DELTA-ONE", "DELTA-TWO"].find((text) => payload.includes(text))).filter(Boolean);
+    expect(order.slice(0, 3)).toEqual(["KEY-PICTURE", "DELTA-ONE", "DELTA-TWO"]);
+  }, 30_000);
 
   it("shows a new session nothing an earlier session launched", async () => {
     const platform = new SimulatedFusionPlatform();

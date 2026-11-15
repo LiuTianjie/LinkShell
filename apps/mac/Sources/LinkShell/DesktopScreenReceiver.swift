@@ -185,7 +185,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       return fail("电脑返回了无效的视频协商信息")
     }
     negotiating = true
-    peer.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp)) { [weak self, weak peer] error in
+    peer.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: DesktopScreenCodec.canonicalNames(inOffer: sdp))) { [weak self, weak peer] error in
       self?.queue.async { [weak self, weak peer] in
         guard let self, let peer, !self.closed, self.peer === peer else { return }
         if error != nil { return self.fail("视频格式协商失败") }

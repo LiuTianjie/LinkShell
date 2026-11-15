@@ -241,7 +241,7 @@ export class FusionNodeSession {
   private startMedia(): void {
     this.media?.end();
     const media = new FusionNodeMedia(this.ice.flatMap(weriftServer), {
-      signal: (payload) => this.send({ t: "rtc", m: payload }),
+      signal: (payload) => { this.trace("→", payload); this.send({ t: "rtc", m: payload }); },
       input: (key, event) => this.input(key, event),
       error: (key, message) => this.send({ t: "alert", kind: "webrtc", subject: key, message }),
       log: this.log,
@@ -254,7 +254,15 @@ export class FusionNodeSession {
     for (const state of this.windows.values()) if (state.streamed) this.openStream(state);
   }
 
+  /** LINKSHELL_FUSION_DIAGNOSTICS=1: the media signalling, both ways, in the host's log. */
+  private trace(direction: string, m: Record<string, unknown>): void {
+    if (process.env.LINKSHELL_FUSION_DIAGNOSTICS !== "1") return;
+    const sdp = typeof m.sdp === "string" ? ` ${m.sdp.split(/\r?\n/).filter((line) => /^(m=|a=mid|a=(sendonly|recvonly|inactive|sendrecv)|a=rtpmap|a=fmtp|a=group|a=extmap|a=ssrc|a=msid|a=rtcp|a=setup|a=bundle)/.test(line)).join(" | ")}` : "";
+    this.log(`[fusion] rtc ${direction} ${String(m.t)}${sdp || ` ${JSON.stringify(m).slice(0, 300)}`}`);
+  }
+
   private rtc(m: Record<string, unknown>): void {
+    this.trace("←", m);
     if (m.t === "restart") {
       this.log("[fusion] media restart");
       this.startMedia();
@@ -278,7 +286,8 @@ export class FusionNodeSession {
 
   private async icon(app: string): Promise<void> {
     const png = await this.platform.icon(app).catch(() => undefined);
-    if (png) this.send({ t: "icon", app, png: png.toString("base64") });
+    // Answered either way: the local side asks for one icon at a time, and waits for this.
+    this.send({ t: "icon", app, ...(png ? { png: png.toString("base64") } : {}) });
   }
 
   // ── Windows ────────────────────────────────────────────────────────────

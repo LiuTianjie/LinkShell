@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import { windowsHelper } from "../windows-screen.js";
+import { noteWindowsVideo, windowsHelper, windowsVideoEnv } from "../windows-screen.js";
 import { windowsMedia } from "../windows-video.js";
 import { processSource, type FusionAppInfo, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
 
@@ -119,14 +119,16 @@ export class WindowsFusionPlatform implements FusionPlatform {
 
   windowVideo(id: number, canvas: { w: number; h: number }, fps: number, bitrate: number, onUnit: (unit: Buffer, key: boolean) => void, onEnd: (reason: string) => void): FusionVideoSource {
     if (!this.helper || !this.ffmpeg) throw new Error("Windows 视频组件缺失");
-    const child = spawn(this.helper, ["--fusion-video", String(id), String(canvas.w), String(canvas.h), String(fps), String(bitrate), this.ffmpeg], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(this.helper, ["--fusion-video", String(id), String(canvas.w), String(canvas.h), String(fps), String(bitrate), this.ffmpeg], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: windowsVideoEnv() });
+    child.stderr?.on("data", (chunk: Buffer) => noteWindowsVideo(chunk.toString()));
     return processSource(child, onUnit, onEnd);
   }
 
   monitorVideo(index: number, fps: number, bitrate: number, onUnit: (unit: Buffer, key: boolean) => void, onEnd: (reason: string) => void): FusionVideoSource {
     if (!this.helper || !this.ffmpeg) throw new Error("Windows 视频组件缺失");
     const width = Math.min(1920, this.monitorList.find((m) => m.index === index)?.rect.w ?? 1920);
-    const child = spawn(this.helper, ["--video", String(index), String(width), String(fps), String(bitrate), this.ffmpeg], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(this.helper, ["--video", String(index), String(width), String(fps), String(bitrate), this.ffmpeg], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: windowsVideoEnv() });
+    child.stderr?.on("data", (chunk: Buffer) => noteWindowsVideo(chunk.toString()));
     return processSource(child, onUnit, onEnd);
   }
 

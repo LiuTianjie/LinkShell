@@ -71,12 +71,22 @@ namespace LinkShell.Windows {
             try {
                 var limits = new JobLimits { Basic = new BasicLimits { Flags = 0x2000 } }; // KILL_ON_JOB_CLOSE, including a killed helper.
                 if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobLimits)))) throw new InvalidOperationException("无法配置视频进程生命周期");
+                // Each attempt: an encoder, and whether frames are converted on the CPU on their way to it.
+                var attempts = new List<KeyValuePair<string, bool>>();
+                foreach (var encoder in encoders) {
+                    if (encoder != "h264_mf") attempts.Add(new KeyValuePair<string, bool>(encoder, false));
+                    attempts.Add(new KeyValuePair<string, bool>(encoder, true));
+                }
+                // What made pictures last time goes first (the host remembers it): a driver that
+                // refuses the zero-copy path refuses it every time, at an FFmpeg launch each.
+                string hint = Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_VIDEO_HINT");
+                int known = String.IsNullOrEmpty(hint) ? -1 : attempts.FindIndex(a => a.Key + (a.Value ? ":compatible" : ":native") == hint);
+                if (known > 0) { var first = attempts[known]; attempts.RemoveAt(known); attempts.Insert(0, first); }
                 using (var destination = Console.OpenStandardOutput()) {
-                    foreach (var encoder in encoders) {
+                    foreach (var attempt in attempts) {
                         if (ended) return;
                         EnsureDesktop();
-                        if (encoder != "h264_mf" && RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, encoder, false)) return;
-                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, encoder, true)) return;
+                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value)) return;
                     }
                 }
                 if (!ended) throw new InvalidOperationException("这台电脑的硬件视频编码不可用，将使用兼容画面");
@@ -109,7 +119,7 @@ namespace LinkShell.Windows {
                 var copy = Task.Run(() => {
                     var buffer = new byte[65536]; int count;
                     while ((count = process.StandardOutput.BaseStream.Read(buffer, 0, buffer.Length)) > 0) {
-                        if (Interlocked.Exchange(ref received, 1) == 0) Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + fps);
+                        if (Interlocked.Exchange(ref received, 1) == 0) Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + fps + " path=" + (compatible ? "compatible" : "native"));
                         destination.Write(buffer, 0, count); destination.Flush();
                     }
                 });

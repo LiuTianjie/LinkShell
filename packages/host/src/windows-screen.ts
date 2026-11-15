@@ -30,6 +30,23 @@ export function windowsHelper(): string | undefined {
   return process.platform === "win32" && file && existsSync(file) ? file : undefined;
 }
 
+/**
+ * Which encoder, and which way of getting frames to it, made pictures last time on this computer.
+ * A helper told so tries that first: a driver that refuses the zero-copy path refuses it every
+ * time, and finding that out again costs each start an FFmpeg launch (a second on a small PC).
+ */
+let videoHint: string | undefined;
+
+export function windowsVideoEnv(): NodeJS.ProcessEnv {
+  return videoHint ? { ...process.env, LINKSHELL_WINDOWS_VIDEO_HINT: videoHint } : process.env;
+}
+
+/** Reads the helper's `[video] encoder=h264_qsv … path=compatible` line. */
+export function noteWindowsVideo(stderr: string): void {
+  const found = /\[video\] encoder=(h264_[a-z]+)\b[^\n]*\bpath=(native|compatible)/.exec(stderr);
+  if (found) videoHint = `${found[1]}:${found[2]}`;
+}
+
 export async function windowsDisplays(): Promise<AppDisplay[]> {
   const helper = windowsHelper();
   if (!helper) throw new Error("请安装 Windows 桌面版，或设置 LINKSHELL_WINDOWS_HELPER 指向 LinkShell.Screen.exe");

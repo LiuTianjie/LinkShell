@@ -69,6 +69,16 @@ enum DesktopScreenCodec {
     return (first >> 1) & 0x3f
   }
 
+  /// An offer with the codec names this factory lists. libwebrtc answers in the offer's spelling
+  /// and then asks for a decoder by that name, exactly: "h264" (how a Windows host up to
+  /// 0.10.106 wrote it) found none, every frame went to a decoder that does nothing, and the
+  /// picture never came.
+  static func canonicalNames(inOffer sdp: String) -> String {
+    ["H264", "H265"].reduce(sdp) { text, name in
+      text.replacingOccurrences(of: "(?mi)^(a=rtpmap:\\d+ )\(name)/", with: "$1\(name)/", options: .regularExpression)
+    }
+  }
+
   func isPicture(_ kind: UInt8) -> Bool { self == .h264 ? (1...5).contains(kind) : kind <= 31 }
   func isKey(_ kind: UInt8) -> Bool { self == .h264 ? kind == 5 : (16...21).contains(kind) }
   func isDelimiter(_ kind: UInt8) -> Bool { kind == (self == .h264 ? 9 : 35) }

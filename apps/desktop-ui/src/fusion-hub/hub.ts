@@ -1,4 +1,4 @@
-import { ClickCounter, mouseButton, namedKey, remoteModifiers, shortcutKey, textInput, wheelPixels, type ScreenInput, type ScreenPlatform } from "../core/screen-input";
+import { ClickCounter, cursorCss, fusionInputMessage, mouseButton, namedKey, remoteModifiers, shortcutKey, textInput, wheelPixels, type ScreenInput, type ScreenPlatform } from "../core/screen-input";
 import { fusionLayout, popupPlacement, windowPlacement, type FusionLayout } from "./sei";
 
 /**
@@ -49,7 +49,27 @@ function post(key: string, event: ScreenInput, lane: Lane): void {
   if (!trusted || !channel || channel.readyState !== "open") return;
   if (channel.bufferedAmount > (lane === "pointer" ? 16_384 : 262_144)) return;
   eventNumber += 1;
-  channel.send(JSON.stringify({ ...event, k: key, i: eventNumber }));
+  channel.send(JSON.stringify(fusionInputMessage(event, key, eventNumber)));
+}
+
+/** The remote pointer's pictures by id: each comes once, then only its id (as in screen sharing). */
+const cursors = new Map<string, string>();
+
+/** The remote says what its pointer looks like over a window: the pointer here wears it there. */
+function shapeTold(message: HubMessage): void {
+  if (message.t !== "shape" || typeof message.id !== "string" || message.id.length > 64) return;
+  if (typeof message.png === "string" && message.png.length <= 1_400_000 && /^[A-Za-z0-9+/=]+$/.test(message.png)) {
+    const [w, h, hotX, hotY, scale] = [message.w, message.h, message.hotX, message.hotY, message.scale].map(Number);
+    if (w! > 0 && h! > 0 && w! <= 256 && h! <= 256 && Number.isFinite(hotX) && Number.isFinite(hotY)) {
+      if (cursors.size >= 64) cursors.clear();
+      cursors.set(message.id, cursorCss({ url: `data:image/png;base64,${message.png}`, w: w!, h: h!, hotX: hotX!, hotY: hotY!, scale: scale! }));
+    }
+  }
+  const css = cursors.get(message.id);
+  if (!css) return;
+  const key = String(message.k ?? "");
+  views.get(key)?.setCursor(css);
+  for (const popup of popups.values()) if (popup.key === key) popup.setCursor(css);
 }
 
 function requestControl(): void {
@@ -96,6 +116,10 @@ function createPeer(iceServers: RTCIceServer[]): void {
     const channel = event.channel;
     if (!["input", "pointer", "cursor", "shape"].includes(channel.label) || channels[channel.label]) return channel.close();
     channels[channel.label] = channel;
+    if (channel.label === "shape") channel.onmessage = (event) => {
+      if (peer !== pc || typeof event.data !== "string") return;
+      try { shapeTold(JSON.parse(event.data) as HubMessage); } catch { /* A malformed shape changes nothing. */ }
+    };
     channel.onopen = () => requestControl();
     if (channel.readyState === "open") requestControl();
   };
@@ -273,6 +297,10 @@ abstract class Surface {
   detach(): void {
     this.video.srcObject = null;
     this.mid = undefined;
+  }
+
+  setCursor(css: string): void {
+    if (!this.win.closed) this.win.document.body.style.cursor = css;
   }
 
   private pointerMove(event: PointerEvent): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClickCounter, SCREEN_IDLE, SCREEN_TAKEN, nativeSessionPolicy } from "../src/core/screen-client";
+import { ClickCounter, SCREEN_IDLE, SCREEN_TAKEN, cursorCss, fusionInputMessage, nativeSessionPolicy } from "../src/core/screen-client";
 import { isAltGraphCharacter, isLocalFullscreenKey } from "../src/features/remote/WebRtcScreenStage";
 
 const key = (init: Partial<{ key: string; code: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; altGraph: boolean }>) => ({
@@ -61,5 +61,28 @@ describe("remote messages in the viewer's language", () => {
     );
     expect(localizeRemoteMessage("「Studio」当前离线，无法打开融合应用", "ja")).toContain("Studio");
     expect(localizeRemoteMessage("某个主机自己的说明", "en")).toBe("某个主机自己的说明");
+  });
+});
+
+describe("the remote pointer's picture", () => {
+  it("is drawn at the size it has on the remote, with the hot spot in the same points", () => {
+    // A Mac's arrow: 17 × 23 points, sent as a 34 × 46 pixel PNG.
+    const css = cursorCss({ url: "data:image/png;base64,AAAA", w: 17, h: 23, hotX: 4, hotY: 4, scale: 2 });
+    expect(css).toBe('image-set(url("data:image/png;base64,AAAA") 2x) 4 4, default');
+  });
+
+  it("keeps the hot spot inside the picture and a scale it can't use out of it", () => {
+    expect(cursorCss({ url: "u", w: 16, h: 16, hotX: 40, hotY: -3, scale: 0 })).toBe('image-set(url("u") 1x) 15 0, default');
+  });
+});
+
+describe("a Fusion window's input", () => {
+  it("names its window in `stream`, and leaves a key its name", () => {
+    expect(fusionInputMessage({ t: "key", k: "return", m: ["cmd"] }, "w12", 7)).toEqual({ t: "key", k: "return", m: ["cmd"], stream: "w12", i: 7 });
+  });
+
+  it("repeats the window in `k` for a 0.10.106 remote where the event has none of its own", () => {
+    expect(fusionInputMessage({ t: "move", x: 0.5, y: 0.25 }, "w12", 8)).toEqual({ t: "move", x: 0.5, y: 0.25, stream: "w12", k: "w12", i: 8 });
+    expect(fusionInputMessage({ t: "text", s: "你好" }, "d0", 9)).toEqual({ t: "text", s: "你好", stream: "d0", k: "d0", i: 9 });
   });
 });

@@ -109,6 +109,8 @@ final class FusionRemoteSession: @unchecked Sendable {
   var hooksInstalled = false
   /// Media restarts asked for by the local computer, to stop a loop of failing ones.
   var mediaRestarts: [Double] = []
+  /// The local side asked for new media while the displays were being rebuilt.
+  var restartAfterRebuild = false
   /// When a shown window was last brought back onto a virtual display.
   var offDisplayStamps: [CGWindowID: Double] = [:]
   /// When a shown, off-screen window's app first failed to answer AX.
@@ -173,14 +175,13 @@ final class FusionRemoteSession: @unchecked Sendable {
       if let app = m["app"] as? String { pressMenu(bundle: app, path: FusionProtocol.path(m["path"])) }
     case "dockmenu.press":
       if let app = m["app"] as? String { performDockAction(bundle: app, path: FusionProtocol.path(m["path"])) }
-    case "icon": if let app = m["app"] as? String { sendIcon(app) }
+    case "icon": if let app = m["app"] as? String { sendIcon(app, pixels: (m["size"] as? NSNumber)?.intValue) }
     case "focus": focus(CGWindowID(Fusion.number(m["id"])))
     case "place":
       let seq = UInt64(max(0, Fusion.number(m["seq"])))
       enqueuePlace(CGWindowID(Fusion.number(m["id"])), seq: seq, local: Fusion.rect(m["frame"]), resize: m["resize"] as? Bool == true)
     case "wclose.req":
       closeRemoteWindow(CGWindowID(Fusion.number(m["id"])))
-    case "ping": wire.send(["t": "pong", "ts": m["ts"] ?? 0])
     case "clip":
       if clipboard.armed, let item = FusionClipboardItem(message: m) {
         clipboard.didWrite(changeCount: item.write(to: NSPasteboard.general))

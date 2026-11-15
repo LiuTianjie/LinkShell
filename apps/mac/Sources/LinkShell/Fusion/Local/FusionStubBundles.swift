@@ -126,13 +126,44 @@ extension FusionLocal {
     if let png = icon.png { iconPNGs[bundle] = png }
   }
 
-  func requestIconIfNeeded(_ bundle: String) {
-    guard !bundle.isEmpty, !iconRequested.contains(bundle) else { return }
+  /// Icons are asked for one at a time. All at once (a hundred apps, up to a megabyte each from a
+  /// Mac) they filled the control connection for seconds on a LAN and for minutes through a relay,
+  /// where the gateway closes a receiver that falls 4 MB behind, with every window and every
+  /// answer queued behind them. `first`: an app being opened now does not wait its turn.
+  func requestIconIfNeeded(_ bundle: String, first: Bool = false) {
+    guard !bundle.isEmpty else { return }
+    if iconRequested.contains(bundle) {
+      if first, let index = iconQueue.firstIndex(of: bundle), index > 0 {
+        iconQueue.remove(at: index)
+        iconQueue.insert(bundle, at: 0)
+      }
+      return
+    }
     iconRequested.insert(bundle)
-    wire?.send(["t": "icon", "app": bundle])
+    if first { iconQueue.insert(bundle, at: 0) } else { iconQueue.append(bundle) }
+    requestNextIcon()
+  }
+
+  func requestNextIcon() {
+    guard iconInFlight == nil, !iconQueue.isEmpty, let wire else { return }
+    let bundle = iconQueue.removeFirst()
+    iconInFlight = bundle
+    wire.send(["t": "icon", "app": bundle])
+    // A remote that has no icon for it answers without one; an older remote does not answer at all.
+    iconTimer?.invalidate()
+    iconTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.iconAnswered(bundle) }
+  }
+
+  func iconAnswered(_ bundle: String) {
+    guard iconInFlight == bundle else { return }
+    iconInFlight = nil
+    iconTimer?.invalidate()
+    iconTimer = nil
+    requestNextIcon()
   }
 
   func remoteIcon(_ m: [String: Any]) {
+    if let answered = m["app"] as? String { iconAnswered(answered) }
     guard let bundle = m["app"] as? String,
           let b64 = m["png"] as? String,
           let data = Data(base64Encoded: b64),
@@ -186,7 +217,7 @@ extension FusionLocal {
   func launchApp(bundle: String) {
     quittingBundles.removeValue(forKey: bundle)
     syncFastState()
-    requestIconIfNeeded(bundle)
+    requestIconIfNeeded(bundle, first: true)
     launchSentAt[bundle] = CACurrentMediaTime()
     wire?.send(["t": "launch", "app": bundle])
     ensureStubRunning(bundle: bundle, activate: true)

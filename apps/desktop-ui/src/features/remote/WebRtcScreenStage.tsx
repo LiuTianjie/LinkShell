@@ -14,6 +14,7 @@ import {
   ScreenReceiver,
   chosenScreenWidth,
   ClickCounter,
+  cursorCss,
   fittedRect,
   fittedScreenWidth,
   mouseButton,
@@ -306,12 +307,7 @@ export function WebRtcScreenStage({
   const customCursorStyle = useMemo(() => {
     if (!canInput) return undefined;
     const shape = receiverState?.shape;
-    if (!shape) return undefined;
-    const cssW = Math.max(1, Math.round(shape.w / shape.scale));
-    const cssH = Math.max(1, Math.round(shape.h / shape.scale));
-    const hotX = Math.min(cssW - 1, Math.max(0, Math.round(shape.hotX / shape.scale)));
-    const hotY = Math.min(cssH - 1, Math.max(0, Math.round(shape.hotY / shape.scale)));
-    return `url("${shape.url}") ${hotX} ${hotY}, default`;
+    return shape ? cursorCss(shape) : undefined;
   }, [canInput, receiverState?.shape]);
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {

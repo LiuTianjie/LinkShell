@@ -67,7 +67,7 @@ extension FusionRemoteSession {
     d.maxPixelsWide = UInt32(points.width + 200) * UInt32(scale)
     d.maxPixelsHigh = UInt32(points.height + 200) * UInt32(scale)
     d.sizeInMillimeters = CGSize(width: points.width / 110 * 25.4, height: points.height / 110 * 25.4)
-    d.vendorID = 0x4C53; d.productID = 0x4600 + UInt32(index); d.serialNum = 100 + UInt32(index)
+    d.vendorID = FusionProtocol.virtualDisplayVendor; d.productID = 0x4600 + UInt32(index); d.serialNum = 100 + UInt32(index)
     d.terminationHandler = { _, _ in Fusion.log("virtual display \(index) ended by the system") }
     guard let display = CGVirtualDisplay(descriptor: d) else { return nil }
     if !display.apply(settings(points: points, scale: scale, hz: hz)) { Fusion.log("virtual display \(index): settings refused") }
@@ -98,7 +98,8 @@ extension FusionRemoteSession {
     guard !ended else { return }
     displayReady = true
     sendReady()
-    if media == nil { startMedia() } else { for mirror in mirrors { openOverlay(mirror) } }
+    if media == nil { startMedia() } else if restartAfterRebuild { restartMedia() } else { for mirror in mirrors { openOverlay(mirror) } }
+    restartAfterRebuild = false
     if let next = pendingDisplays {
       pendingDisplays = nil
       await rebuildDisplays(next)

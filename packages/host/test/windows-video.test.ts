@@ -76,3 +76,33 @@ describe("Windows H.264 media", () => {
     expect(page).toContain('if (windowsHost)');
   });
 });
+
+describe("what a small computer can make", () => {
+  it("moves past the profiles that ask for more frames than it makes", async () => {
+    const { windowsSlowerLevel } = await import("../src/windows-video.js");
+    // 32 frames a second at 1920 / 60: 1600 / 60 would be left the same way, 1280 / 30 fits.
+    expect(windowsSlowerLevel(0, 32)).toBe(2);
+    expect(windowsSlowerLevel(0, 58)).toBe(1);
+    // The network's doing: one step, as before.
+    expect(windowsSlowerLevel(0, undefined)).toBe(1);
+    expect(windowsSlowerLevel(4, 5)).toBe(4);
+  });
+
+  it("starts the next viewer where the computer coped, and tries one step higher half an hour later", async () => {
+    const { noteWindowsMachineLevel, windowsMachineLevel } = await import("../src/windows-video.js");
+    noteWindowsMachineLevel(2, 1_000_000);
+    expect(windowsMachineLevel(1_000_000 + 60_000)).toBe(2);
+    expect(windowsMachineLevel(1_000_000 + 31 * 60_000)).toBe(1);
+    noteWindowsMachineLevel(0, 0);
+    expect(windowsMachineLevel(10)).toBe(0);
+  });
+
+  it("remembers which encoder path made pictures, for the helper to try first", async () => {
+    const { noteWindowsVideo, windowsVideoEnv } = await import("../src/windows-screen.js");
+    expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBeUndefined();
+    noteWindowsVideo("[video] child=4300\n[video:h264_qsv] Could not create the texture (80070057)\n");
+    expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBeUndefined();
+    noteWindowsVideo("[video] encoder=h264_qsv width=1920 height=1280 fps=30 path=compatible\n");
+    expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBe("h264_qsv:compatible");
+  });
+});

@@ -1,3 +1,11 @@
+/**
+ * H.264's name as the SDP carries it. werift's own default is "video/h264"; libwebrtc answers with
+ * the offer's spelling and then looks its decoder up by that name, exactly: the Mac app's (and any
+ * Objective-C receiver's) factory lists "H264", found nothing for "h264", and decoded no frame —
+ * the picture never came, and the viewer fell back to the socket after its timeout.
+ */
+export const H264_MIME = "video/H264";
+
 /** Annex-B access units with a bounded carry buffer, including split start codes. */
 export class H264AccessUnits {
   private bytes: Buffer = Buffer.alloc(0);

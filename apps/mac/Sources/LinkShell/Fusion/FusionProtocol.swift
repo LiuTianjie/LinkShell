@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -40,6 +41,48 @@ enum FusionProtocol {
 
   static func path(_ value: Any?) -> [Int] {
     (value as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
+  }
+
+  // MARK: Processes and displays
+
+  /// Whether a fused app's process has ended. The process table decides: the system's list of
+  /// running applications can miss a live one for a moment (it did, in the field), and an app
+  /// taken for ended has every window closed on the other computer.
+  static func processEnded(_ pid: pid_t) -> Bool {
+    if let app = NSRunningApplication(processIdentifier: pid) { return app.isTerminated }
+    return kill(pid, 0) != 0 && errno == ESRCH
+  }
+
+  /// The vendor number of the virtual displays a Fusion remote makes (`FusionDisplays`).
+  static let virtualDisplayVendor: UInt32 = 0x4C53
+
+  /// A display this Mac made as someone else's Fusion remote. It is not one of this Mac's own
+  /// screens: mirrored to a third computer, it would be rebuilt there each time the other session
+  /// starts or ends.
+  static func isOwnVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
+    CGDisplayVendorNumber(id) == virtualDisplayVendor
+  }
+
+  // MARK: Input (§5)
+
+  /// The field of an input event that names its window or display layer. Not `k`: a `key` event
+  /// already has one, the key's name.
+  static let inputStreamField = "stream"
+
+  /// Which stream an input event is for. 0.10.106 wrote it to `k`, over a key's name: its other
+  /// events still find their window here, its named keys were lost on the way.
+  static func inputStream(_ event: [String: Any]) -> String? {
+    (event[inputStreamField] as? String) ?? (event["k"] as? String)
+  }
+
+  /// An input event as it goes on the data channel. Events without a `k` of their own carry the
+  /// stream there too, for a 0.10.106 remote.
+  static func inputEvent(_ event: [String: Any], stream: String, number: Int) -> [String: Any] {
+    var out = event
+    out[inputStreamField] = stream
+    if out["k"] == nil { out["k"] = stream }
+    out["i"] = number
+    return out
   }
 
   /// What a rebuild of the remote's virtual displays depends on (not `hz`).

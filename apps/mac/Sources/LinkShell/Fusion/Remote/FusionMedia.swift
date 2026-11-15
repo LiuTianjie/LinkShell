@@ -496,7 +496,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
 
   private func apply(_ data: Data, replaceable: Bool) {
     guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let key = object["k"] as? String, let stream = streams[key], let event = InputEvent(json: data) else { return }
+          let key = FusionProtocol.inputStream(object), let stream = streams[key], let event = InputEvent(json: data) else { return }
     if let number = event.number {
       if replaceable, event.kind == "move", number < newestEvent { return }
       newestEvent = max(newestEvent, number)

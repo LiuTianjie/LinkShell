@@ -52,9 +52,17 @@ extension FusionRemoteSession {
   /// The local computer lost the pictures (its peer connection failed) while the control connection
   /// lives: a new peer connection, with every display layer and window on it again.
   func restartMedia() {
+    guard !paused, !ended else { return }
+    // The virtual displays are being rebuilt: there is nothing to send pictures of yet. The local
+    // side has already dropped its peer connection, so the restart happens as soon as they are back.
+    guard displayReady else {
+      Fusion.log("media restart: after the displays are rebuilt")
+      restartAfterRebuild = true
+      return
+    }
     let now = CACurrentMediaTime()
     mediaRestarts = mediaRestarts.filter { now - $0 < 60 } + [now]
-    guard displayReady, !paused, mediaRestarts.count <= 4 else {
+    guard mediaRestarts.count <= 4 else {
       Fusion.log("media restart refused (\(mediaRestarts.count) in a minute)")
       return
     }

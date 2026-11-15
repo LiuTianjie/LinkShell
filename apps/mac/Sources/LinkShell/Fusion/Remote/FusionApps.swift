@@ -58,24 +58,33 @@ extension FusionRemoteSession {
     return nil
   }
 
-  func sendIcon(_ bundle: String) {
+  /// `pixels`: the side the local computer wants (a Windows taskbar needs 256, a Mac's Dock 1024).
+  /// Always answered, without `png` when there is no icon: the local side asks for the next one then.
+  func sendIcon(_ bundle: String, pixels: Int? = nil) {
+    guard let data = Self.iconPNG(bundle, pixels: min(1024, max(64, pixels ?? 1024))) else {
+      return wire.send(["t": "icon", "app": bundle])
+    }
+    wire.send(["t": "icon", "app": bundle, "png": data.base64EncodedString()])
+  }
+
+  static func iconPNG(_ bundle: String, pixels: Int) -> Data? {
     // Always resolve symlinks (e.g. `/Applications/Safari.app -> .../Cryptexes/.../Safari.app`)
     // before `NSWorkspace.shared.icon(forFile:)` so macOS never stamps a shortcut alias arrow!
-    guard let resolvedURL = Self.resolvedApplicationURL(for: bundle) else { return }
+    guard let resolvedURL = resolvedApplicationURL(for: bundle) else { return nil }
     let icon = NSWorkspace.shared.icon(forFile: resolvedURL.path)
-    let ptSize = NSSize(width: 512, height: 512)
+    // Two pixels to a point, as the Dock draws it.
+    let ptSize = NSSize(width: Double(pixels) / 2, height: Double(pixels) / 2)
     guard let rep = NSBitmapImageRep(
-      bitmapDataPlanes: nil, pixelsWide: 1024, pixelsHigh: 1024, bitsPerSample: 8, samplesPerPixel: 4,
+      bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4,
       hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
-    ) else { return }
+    ) else { return nil }
     rep.size = ptSize
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     NSGraphicsContext.current?.imageInterpolation = .high
     icon.draw(in: NSRect(origin: .zero, size: ptSize), from: .zero, operation: .copy, fraction: 1.0)
     NSGraphicsContext.restoreGraphicsState()
-    guard let data = rep.representation(using: .png, properties: [:]) else { return }
-    wire.send(["t": "icon", "app": bundle, "png": data.base64EncodedString()])
+    return rep.representation(using: .png, properties: [:])
   }
 
   func launch(_ bundle: String) {

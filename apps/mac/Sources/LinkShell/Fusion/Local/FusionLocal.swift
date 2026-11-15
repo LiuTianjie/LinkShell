@@ -94,7 +94,6 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   let iconCacheDir: URL
   var listenFD: Int32 = -1
   var wire: FusionWire?
-  var pingTimer: Timer?
   var displays: [Int: (local: CGRect, scale: Int)] = [:]
   var outputs: [String: FusionOutput] = [:]
   var media: FusionMediaReceiver?
@@ -129,6 +128,10 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   var realIconBundles: Set<String> = []
   var iconPNGs: [String: String] = [:]
   var iconRequested: Set<String> = []
+  /// Icons still to ask for, and the one asked for now (`requestIconIfNeeded`).
+  var iconQueue: [String] = []
+  var iconInFlight: String?
+  var iconTimer: Timer?
   var apps: [AppEntry] = []
   var selectedCategory = "全部"
   var searchQuery = ""
@@ -253,8 +256,6 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    pingTimer?.invalidate()
-    pingTimer = nil
     for stub in stubs.values {
       stub.closedByHub = true
       stub.close()
@@ -420,6 +421,10 @@ extension FusionLocal {
     wire?.onClose = nil
     wire?.close()
     iconRequested.removeAll()
+    iconQueue.removeAll()
+    iconInFlight = nil
+    iconTimer?.invalidate()
+    iconTimer = nil
     let endpointPort = NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: FusionWire.port)!
     let connection = NWConnection(host: NWEndpoint.Host(host), port: endpointPort, using: FusionWire.parameters(token: token))
     let wire = FusionWire(connection)
@@ -437,8 +442,11 @@ extension FusionLocal {
 
   static func localDisplays() -> [[String: Any]] {
     let primary = NSScreen.screens.first?.frame.height ?? 0
-    return NSScreen.screens.compactMap { screen in
-      guard let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { return nil }
+    let number = { (screen: NSScreen) in (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value }
+    // Not the displays this Mac makes as another computer's remote; all of them on a Mac with no screen of its own.
+    let own = NSScreen.screens.filter { screen in number(screen).map { !FusionProtocol.isOwnVirtualDisplay($0) } ?? false }
+    return (own.isEmpty ? NSScreen.screens : own).compactMap { screen in
+      guard let id = number(screen) else { return nil }
       let v = screen.visibleFrame
       let visible = CGRect(x: v.minX, y: primary - v.maxY, width: v.width, height: v.height)
       // Built-in panels can report 0 Hz; the screen's own maximum is the truth for ProMotion.
@@ -485,10 +493,7 @@ extension FusionLocal {
     ]
     if suspended, let sessionID { hello["resume"] = sessionID }
     wire?.send(hello)
-    pingTimer?.invalidate()
-    pingTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-      self?.wire?.send(["t": "ping", "ts": CACurrentMediaTime()])
-    }
+    wire?.startPinging(every: 1.5)
   }
 
   func welcome(_ m: [String: Any]) {
@@ -674,18 +679,13 @@ extension FusionLocal {
   }
 
   func ensureIcons() {
-    // Request icons progressively: prioritize existing Stub `.app` bundles + common apps first.
     // Apps with a stub on disk first: their Dock and Spotlight icons are the ones people see.
     var priority: [String] = []
     for b in existingStubBundles.sorted() where !priority.contains(b) {
       priority.append(b)
     }
     let ordered = priority + apps.map(\.bundle).filter { !priority.contains($0) }
-    for (idx, bundle) in ordered.enumerated() {
-      DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.02) { [weak self] in
-        self?.requestIconIfNeeded(bundle)
-      }
-    }
+    for bundle in ordered { requestIconIfNeeded(bundle) }
   }
 
   /// Stub bundles whose app left the remote are removed, so Spotlight and Launchpad stop offering
@@ -799,8 +799,6 @@ extension FusionLocal {
 
   func closed(reason: String = "closed") {
     connected = false
-    pingTimer?.invalidate()
-    pingTimer = nil
     media?.stop()
     media = nil
     // A drop after a session was running is likely a blip: the windows stay, and the desktop

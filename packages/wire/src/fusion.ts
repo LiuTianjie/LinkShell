@@ -145,7 +145,8 @@ export const fusionMessageSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("app.exited"), app: appId }),
   z.object({ t: z.literal("app.hidden"), app: appId, on: z.boolean() }),
   z.object({ t: z.literal("app.active"), on: z.boolean() }),
-  z.object({ t: z.literal("icon"), app: appId, png: z.string().optional() }),
+  // Local → remote: the request (`size`: the side wanted, in pixels). Remote → local: the answer, without `png` when the app has no icon.
+  z.object({ t: z.literal("icon"), app: appId, png: z.string().optional(), size: z.number().int().min(16).max(1024).optional() }),
   z.object({
     t: z.literal("wopen"),
     id: windowId,

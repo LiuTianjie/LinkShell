@@ -131,6 +131,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
     let decoder = DesktopScreenDecoderFactory(onStatus: { [weak self] status in
       self?.queue.async { [weak self] in self?.status(status) }
     }, onFailure: { [weak self] message in
+      Fusion.log("media: decoder failed: \(message)")
       self?.queue.async { [weak self] in self?.status(["decoderError": message]) }
     })
     guard !decoder.supportedCodecs().isEmpty else { return fail("此 Mac 不支持远程桌面硬件解码") }
@@ -143,7 +144,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
   private func accept(_ sdp: String) {
     guard let peer else { return }
     negotiating = true
-    peer.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp)) { [weak self, weak peer] error in
+    peer.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: DesktopScreenCodec.canonicalNames(inOffer: sdp))) { [weak self, weak peer] error in
       self?.queue.async { [weak self, weak peer] in
         guard let self, let peer, !self.closed else { return }
         if error != nil { return self.fail("融合视频格式协商失败") }
@@ -218,6 +219,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
       guard !self.closed else { return }
       if !self.receivedAny {
         self.receivedAny = true
+        Fusion.log("media: first picture (\(key))")
         self.status(["live": true, "transport": "native-webrtc", "renderer": "Metal"])
       }
       self.outputs[key]?.receivedPicture = true
@@ -254,9 +256,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
     guard let channel = channels[replaceable ? "pointer" : "input"], channel.readyState == .open else { return }
     if channel.bufferedAmount > (replaceable ? 16_384 : 262_144) { return }
     eventNumber += 1
-    var event = message
-    event["k"] = key
-    event["i"] = eventNumber
+    let event = FusionProtocol.inputEvent(message, stream: key, number: eventNumber)
     guard let data = try? JSONSerialization.data(withJSONObject: event), data.count <= 64_000,
           channel.sendData(RTCDataBuffer(data: data, isBinary: false)) else { return }
     if let button = message["b"] as? String, ["left", "right", "middle"].contains(button) {
@@ -272,8 +272,9 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
     heldButtons.removeAll()
     for (_, var message) in held {
       message["t"] = "up"
-      let key = message["k"] as? String ?? ""
-      message.removeValue(forKey: "k"); message.removeValue(forKey: "i")
+      let key = FusionProtocol.inputStream(message) ?? ""
+      // A button event has no `k` of its own: what is there is the stream, put back by `send`.
+      for field in [FusionProtocol.inputStreamField, "k", "i"] { message.removeValue(forKey: field) }
       send(key, message, replaceable: false)
     }
   }
@@ -328,6 +329,8 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
   func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
     queue.async {
       guard !self.closed, self.peer === peerConnection else { return }
+      // What a field report needs to tell "never connected" from "connected, no pictures".
+      Fusion.log("media: ice \(Self.name(newState))")
       switch newState {
       case .connected, .completed:
         self.disconnectedAt = nil
@@ -349,6 +352,20 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
       dataChannel.delegate = self
       if dataChannel.label == "input", self.receivedAny { self.requestControl() }
       self.outputs.keys.forEach(self.publishControl)
+    }
+  }
+
+  private static func name(_ state: RTCIceConnectionState) -> String {
+    switch state {
+    case .new: return "new"
+    case .checking: return "checking"
+    case .connected: return "connected"
+    case .completed: return "completed"
+    case .failed: return "failed"
+    case .disconnected: return "disconnected"
+    case .closed: return "closed"
+    case .count: return "?"
+    @unknown default: return "?"
     }
   }
 

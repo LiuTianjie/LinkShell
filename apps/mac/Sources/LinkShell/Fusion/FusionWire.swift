@@ -29,6 +29,8 @@ final class FusionWire {
   private var closed = false
   private var lastHeard = CACurrentMediaTime()
   private var watchdog: DispatchSourceTimer?
+  private var pinger: DispatchSourceTimer?
+  private var answersPings = false
   private var waitingTimer: DispatchSourceTimer?
   /// How long `.waiting` (no route, refused) may last before the connection is given up.
   var waitingTimeout: TimeInterval = 6
@@ -110,6 +112,28 @@ final class FusionWire {
     }
   }
 
+  // Keeping the link alive is this connection's own work, on its own queue. A ping sent, or
+  // answered, from the main thread stops whenever the main thread is busy (a hundred icons
+  // arriving, an app that will not answer Accessibility): the other end then takes a live
+  // computer for a dead one, and every window goes.
+
+  /// The local side: a ping every `interval`.
+  func startPinging(every interval: TimeInterval) {
+    queue.async {
+      self.pinger?.cancel()
+      let timer = DispatchSource.makeTimerSource(queue: self.queue)
+      timer.schedule(deadline: .now() + interval, repeating: interval)
+      timer.setEventHandler { [weak self] in self?.send(["t": "ping", "ts": CACurrentMediaTime()]) }
+      timer.resume()
+      self.pinger = timer
+    }
+  }
+
+  /// The remote side: each ping is answered as it arrives, and goes no further.
+  func answerPings() {
+    queue.async { self.answersPings = true }
+  }
+
   private func armWaiting() {
     guard waitingTimer == nil else { return }
     let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -128,6 +152,7 @@ final class FusionWire {
     lock.lock(); let was = closed; closed = true; lock.unlock()
     guard !was else { return }
     watchdog?.cancel()
+    pinger?.cancel()
     cancelWaiting()
     connection.cancel()
     DispatchQueue.main.async { self.onClose?(reason) }
@@ -145,7 +170,11 @@ final class FusionWire {
         guard error == nil, let body, body.count == length else { return self.close(reason: "closed") }
         self.lastHeard = CACurrentMediaTime()
         if let message = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
-          DispatchQueue.main.async { self.onMessage?(message) }
+          if self.answersPings, message["t"] as? String == "ping" {
+            self.send(["t": "pong", "ts": message["ts"] ?? 0])
+          } else {
+            DispatchQueue.main.async { self.onMessage?(message) }
+          }
         }
         self.readHeader()
       }

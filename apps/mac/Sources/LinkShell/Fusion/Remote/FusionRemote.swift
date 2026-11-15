@@ -93,31 +93,73 @@ final class FusionRemote {
 
   /// Each token gets its own listener, keyed to it: a TLS-PSK listener's key is fixed once started.
   /// Sessions already accepted keep running on their connections when the old listener goes.
+  ///
+  /// The old listener gives the port back only once it says `.cancelled`: one started on the same
+  /// port before that fails with "Address already in use", so the next one waits for it.
   func relisten() {
-    guard let token else { return }
-    listener?.newConnectionHandler = nil
-    listener?.stateUpdateHandler = nil
-    listener?.cancel()
-    listener = nil
+    guard token != nil else { return }
     listenerGeneration += 1
     let generation = listenerGeneration
+    guard let old = listener else { return listen(generation: generation, attempt: 0) }
+    listener = nil
+    old.newConnectionHandler = nil
+    var opened = false
+    let open = { [weak self] in
+      guard let self, !opened else { return }
+      opened = true
+      // A newer token came while this one waited: its own turn opens the listener.
+      if generation == self.listenerGeneration { self.listen(generation: generation, attempt: 0) }
+    }
+    old.stateUpdateHandler = { state in
+      switch state {
+      case .cancelled, .failed: open()
+      default: break
+      }
+    }
+    old.cancel()
+    // Should the old listener never report: the retries below cover a port that is still held.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { open() }
+  }
+
+  /// The requested port, tried again while something still holds it (an earlier remote on its way
+  /// out, the listener before this one), then any port: the host passes on whichever it gets.
+  private func listen(generation: Int, attempt: Int) {
+    guard generation == listenerGeneration, let token else { return }
     let parameters = FusionWire.parameters(token: token)
-    let endpointPort: NWEndpoint.Port = requestedPort == 0 ? .any : (NWEndpoint.Port(rawValue: requestedPort) ?? .any)
-    guard let listener = (try? NWListener(using: parameters, on: endpointPort)) ?? (try? NWListener(using: parameters, on: .any)) else {
+    let anyPort = requestedPort == 0 || attempt >= Self.listenRetries
+    let endpointPort: NWEndpoint.Port = anyPort ? .any : (NWEndpoint.Port(rawValue: requestedPort) ?? .any)
+    guard let listener = try? NWListener(using: parameters, on: endpointPort) else {
       Fusion.log("cannot listen on \(requestedPort)")
       writeParent(["t": "error", "message": "远端融合模式无法监听端口"])
       return
+    }
+    var settled = false
+    let retry = { [weak self, weak listener] (error: NWError) in
+      guard let self, !settled, generation == self.listenerGeneration else { return }
+      settled = true
+      listener?.stateUpdateHandler = nil
+      listener?.newConnectionHandler = nil
+      listener?.cancel()
+      if self.listener === listener { self.listener = nil }
+      guard !anyPort else {
+        Fusion.log("fusion listener failed: \(error)")
+        self.writeParent(["t": "error", "message": "远端融合模式监听失败：\(error.localizedDescription)"])
+        return
+      }
+      Fusion.log("port \(self.requestedPort) is busy (\(error)), attempt \(attempt + 1)")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.listen(generation: generation, attempt: attempt + 1) }
     }
     listener.stateUpdateHandler = { [weak self, weak listener] state in
       guard let self, let listener, generation == self.listenerGeneration else { return }
       switch state {
       case .ready:
+        guard !settled else { return }
+        settled = true
         let actual = listener.port?.rawValue ?? self.requestedPort
         Fusion.log("fusion remote on \(actual): AX \(AXIsProcessTrusted()), capture \(CGPreflightScreenCaptureAccess())")
         self.writeParent(["t": "ready", "ready": true, "port": Int(actual), "pid": Int(getpid())])
       case .failed(let error):
-        Fusion.log("fusion listener failed: \(error)")
-        self.writeParent(["t": "error", "message": "远端融合模式监听失败：\(error.localizedDescription)"])
+        retry(error)
       default:
         break
       }
@@ -128,6 +170,9 @@ final class FusionRemote {
     listener.start(queue: .main)
     self.listener = listener
   }
+
+  /// A second of retries on the requested port before taking any other.
+  static let listenRetries = 4
 
   func accept(_ connection: NWConnection) {
     Fusion.log("connection from \(connection.endpoint)")
@@ -178,6 +223,7 @@ final class FusionRemote {
       guard let session else { return }
       self.closed(session, reason: reason)
     }
+    wire.answerPings()
     wire.start()
     DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self, weak session] in
       guard let self, let session, self.pending[key] != nil else { return }

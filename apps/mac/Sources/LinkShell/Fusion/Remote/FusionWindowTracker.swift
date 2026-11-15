@@ -74,12 +74,10 @@ extension FusionRemoteSession {
   func track() {
     // Nothing can be told while there is no connection; the next `track()` after a resume sees it all.
     guard !paused, !ended else { return }
-    let gone = fused.filter { pid in
-      guard let app = NSRunningApplication(processIdentifier: pid) else { return true }
-      return app.isTerminated
-    }
+    let gone = fused.filter { FusionProtocol.processEnded($0) }
     if !gone.isEmpty {
       for pid in gone {
+        Fusion.log("app \(pidToBundle[pid] ?? "?") (\(pid)) exited")
         if let bundle = pidToBundle.removeValue(forKey: pid) {
           let stillAlive = fused.contains { $0 != pid && pidToBundle[$0] == bundle }
           if !stillAlive { wire.send(["t": "app.exited", "app": bundle]) }
