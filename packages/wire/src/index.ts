@@ -22,3 +22,4 @@ export * from "./side.js";
 export * from "./rpc-mcp.js";
 export * from "./lsa.js";
 export * from "./envelopes.js";
+export * from "./fusion.js";

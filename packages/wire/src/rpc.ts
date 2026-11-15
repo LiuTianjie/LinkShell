@@ -3,6 +3,7 @@ import { usageQuerySchema, usageReportSchema } from "./usage.js";
 import { goalChangeSchema, sessionGoalSchema } from "./goal.js";
 import { acpAgentSettingsSchema, acpFeaturesSchema, acpRemoteAgentSchema, acpProviderSchema } from "./acp.js";
 import { editorRequestSchema, editorResultSchema } from "./editor.js";
+import { fusionStartResultSchema } from "./fusion.js";
 import { liveActivityIdSchema, liveActivityPushToStartSchema, liveActivitySubscriptionSchema, wakeupNoticeSchema } from "./live-activity.js";
 import {
   backgroundTaskSchema,
@@ -876,16 +877,12 @@ const coreMethods = {
     }),
     result: screenPrivacyStateSchema,
   },
-  /** Starts macOS application-window Fusion Mode (`LinkShell --fusion-remote`) and returns its control endpoint. */
+  /** Starts Fusion Mode's remote half on this computer and returns its control endpoint (docs/v2/fusion.md). */
   "fusion.start": {
     params: empty,
-    result: z.object({
-      port: z.number().int().min(1).max(65535),
-      token: z.string().min(1),
-      hosts: z.array(z.string()),
-    }),
+    result: fusionStartResultSchema,
   },
-  /** Stops the host's active Fusion Mode listener, restoring virtual displays and Dock state. */
+  /** Ends any Fusion session on this computer: windows go back where they were, virtual displays go. */
   "fusion.stop": {
     params: empty,
     result: empty,

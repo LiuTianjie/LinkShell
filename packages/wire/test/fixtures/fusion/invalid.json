@@ -1,0 +1,12 @@
+[
+  {"why":"v1 hello has no proto, platform or features","message":{"t":"hello","token":"tok","displays":[{"id":1,"frame":{"x":0,"y":0,"w":1512,"h":982},"visible":{"x":0,"y":38,"w":1512,"h":944},"scale":2,"hz":120}]}},
+  {"why":"v1 identifies apps by bundle","message":{"t":"launch","bundle":"com.apple.Safari"}},
+  {"why":"v1 catalog entries are all strings","message":{"t":"apps","apps":[{"name":"Safari","bundle":"com.apple.Safari","category":"","system":"0"}]}},
+  {"why":"v1 sig envelope is gone","message":{"t":"sig","k":"w4711","m":{"rtc":{"t":"offer","sdp":"v=0"}}}},
+  {"why":"v1 dragzone is gone","message":{"t":"dragzone","id":4711,"ok":true}},
+  {"why":"wopen needs chrome and a stream","message":{"t":"wopen","id":4711,"app":"com.apple.Safari","title":"x","activate":false,"frame":{"x":0,"y":0,"w":10,"h":10},"toolbar":false,"buttons":{},"hitrects":[]}},
+  {"why":"unknown platform","message":{"t":"welcome","proto":2,"platform":"linux","features":[],"session":"s","resumed":false}},
+  {"why":"menu.press needs a parent and an item","message":{"t":"menu.press","app":"com.apple.Safari","path":[2]}},
+  {"why":"stream keys are w<id> or d<index>","message":{"t":"rtc","m":{"t":"streams","streams":[{"k":"window-1","mid":"0"}]}}},
+  {"why":"rects are {x,y,w,h}","message":{"t":"place","id":1,"seq":1,"frame":[0,0,10,10],"resize":false}}
+]
