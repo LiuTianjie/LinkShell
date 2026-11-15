@@ -69,7 +69,7 @@ META = {
     },
     ("zh", "pricing"): {
         "title": "LinkShell 定价 | 免费使用，iTool 会员提供官方网关",
-        "description": "LinkShell 全部功能免费，自建网关即可使用。iTool 会员提供官方网关：月度 ¥9.9 含 iTool 网站和 LinkShell，年度 ¥99 含全部 iTool 产品，在 itool.tech 用支付宝开通。连接始终端到端加密。",
+        "description": "LinkShell 全部功能免费，自建网关即可使用。iTool 会员提供官方网关：单品 ¥49/年或 ¥9.9/月，全产品年包 ¥99/年，价格已含税，可在本页购买。连接始终端到端加密。",
         "keywords": "LinkShell 定价, iTool 会员, 官方网关, 免费, 自建网关",
         "image_alt": "LinkShell：在手机上继续电脑里的编程 Agent",
     },
@@ -87,7 +87,7 @@ META = {
     },
     ("en", "pricing"): {
         "title": "LinkShell Pricing: Free, or the iTool Membership from $3.19 a Month",
-        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19 USD monthly or $26.49 USD yearly. Pay by international card or Alipay.",
+        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19/month or $13.49/year for LinkShell, or $26.49/year for all products. Tax included. Purchase on this page.",
         "keywords": "LinkShell pricing, iTool membership, official gateway, free, self-hosted gateway",
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
@@ -307,7 +307,7 @@ def structured_data(lang: str, view: str, page: str) -> dict:
         # checkout= opens that plan's payment once the visitor is signed in.
         buy = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?from=linkshell&checkout="
         # USD list prices verified against iTool's live /api/pay/creem/config on 2026-11-11.
-        currency, monthly_price, yearly_price = ("USD", "3.19", "26.49") if lang == "en" and view == "pricing" else ("CNY", "9.9", "99")
+        currency, monthly_price, yearly_price = ("USD", "3.19", "13.49") if lang == "en" and view == "pricing" else ("CNY", "9.9", "49")
         graph.append({
             "@type": "SoftwareApplication",
             "@id": software_id,
@@ -327,12 +327,12 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "offers": [
                 {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": currency, "url": pricing},
                 {
-                    "@type": "Offer", "name": "iTool membership (monthly)", "price": monthly_price, "priceCurrency": currency, "url": buy + "monthly",
-                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": monthly_price, "priceCurrency": currency, "billingDuration": "P1M"},
+                    "@type": "Offer", "name": "LinkShell (monthly)", "price": monthly_price, "priceCurrency": currency, "url": buy + "monthly",
+                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": monthly_price, "priceCurrency": currency, "billingDuration": "P1M", "valueAddedTaxIncluded": True},
                 },
                 {
-                    "@type": "Offer", "name": "iTool membership (yearly)", "price": yearly_price, "priceCurrency": currency, "url": buy + "yearly",
-                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": yearly_price, "priceCurrency": currency, "billingDuration": "P1Y"},
+                    "@type": "Offer", "name": "LinkShell (yearly)", "price": yearly_price, "priceCurrency": currency, "url": buy + "yearly",
+                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": yearly_price, "priceCurrency": currency, "billingDuration": "P1Y", "valueAddedTaxIncluded": True},
                 },
             ],
         })

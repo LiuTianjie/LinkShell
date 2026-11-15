@@ -969,22 +969,9 @@
     window.addEventListener('DOMContentLoaded', () => { if (shown === 'pricing') initPricing(); });
   </script>
 
-  <!-- Pricing: one iTool membership, bought on itool.tech; the toggle only shows the two tiers. -->
+  <!-- Static storefront and client-side navigation share one initializer. -->
   <script>
-    let pricingCycle = 'monthly';
-
-    function setPricingCycle(cycle) {
-      pricingCycle = cycle;
-      document.querySelectorAll('.cycle-btn').forEach((b) => b.classList.toggle('active', b.dataset.cycle === cycle));
-      document.getElementById('price-monthly').style.display = cycle === 'monthly' ? '' : 'none';
-      document.getElementById('price-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-      document.getElementById('price-alt-monthly').style.display = cycle === 'monthly' ? '' : 'none';
-      document.getElementById('price-alt-yearly').style.display = cycle === 'yearly' ? '' : 'none';
-    }
-
-    function initPricing() {
-      setPricingCycle(pricingCycle);
-    }
+    function initPricing() { window.iToolStorefront?.(); }
   </script>
   <script>
     // ── The live request in the hero: what the phone shows when an agent asks ──
