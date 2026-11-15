@@ -87,10 +87,7 @@ extension FusionRemoteSession {
     displayReady = false
     Fusion.log("rebuilding virtual displays for \(locals.count) local display(s)")
     for id in Array(streams.keys) { closeStream(id) }
-    for mirror in mirrors {
-      mirror.session?.close()
-      if mirror.descriptor >= 0 { close(mirror.descriptor) }
-    }
+    for mirror in mirrors { media?.closeStream(mirror.streamKey) }
     mirrors.removeAll()
     moved.removeAll()
     lastLayout = ""
@@ -100,8 +97,8 @@ extension FusionRemoteSession {
     rebuilding = false
     guard !ended else { return }
     displayReady = true
-    sendReady(catalog: Self.apps())
-    startOverlaySessions()
+    sendReady()
+    if media == nil { startMedia() } else { for mirror in mirrors { openOverlay(mirror) } }
     if let next = pendingDisplays {
       pendingDisplays = nil
       await rebuildDisplays(next)
@@ -120,7 +117,7 @@ extension FusionRemoteSession {
     }
     var hz: [Int: Double] = [:]
     for (i, d) in locals.enumerated() {
-      let frame = Fusion.rect(d["frame"]); let scale = max(Int(Fusion.number(d["scale"])), 1)
+      let frame = Fusion.rect(d["frame"]); let scale = FusionProtocol.backingScale(Fusion.number(d["scale"]))
       var visible = Fusion.rect(d["visible"])
       if visible.width < 100 || visible.height < 100 { visible = frame }
       hz[i] = max(Fusion.number(d["hz"]), 60)

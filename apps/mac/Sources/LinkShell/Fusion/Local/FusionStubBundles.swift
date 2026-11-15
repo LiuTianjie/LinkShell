@@ -131,11 +131,11 @@ extension FusionLocal {
   func requestIconIfNeeded(_ bundle: String) {
     guard !bundle.isEmpty, !iconRequested.contains(bundle) else { return }
     iconRequested.insert(bundle)
-    wire?.send(["t": "icon", "bundle": bundle])
+    wire?.send(["t": "icon", "app": bundle])
   }
 
   func remoteIcon(_ m: [String: Any]) {
-    guard let bundle = m["bundle"] as? String,
+    guard let bundle = m["app"] as? String,
           let b64 = m["png"] as? String,
           let data = Data(base64Encoded: b64),
           let raw = NSImage(data: data) else { return }
@@ -190,7 +190,7 @@ extension FusionLocal {
     syncFastState()
     requestIconIfNeeded(bundle)
     launchSentAt[bundle] = CACurrentMediaTime()
-    wire?.send(["t": "launch", "bundle": bundle])
+    wire?.send(["t": "launch", "app": bundle])
     ensureStubRunning(bundle: bundle, activate: true)
   }
 

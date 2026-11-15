@@ -102,7 +102,7 @@
 - 心跳：本地每 1.5 秒 `ping {ts}`，远端回 `pong {ts}`。本地 5 秒、远端 8 秒没收到任何帧即判定断开。
 - 主动结束：任一方发 `bye {reason, message?}` 后关闭连接。`reason`：`user`（用户结束）、`stopped`（host 停止）、`replaced`（另一台本地端连入）、`proto`、`token`、`error`。
 - 远端收到 `bye` 或宽限期过后才真正结束会话：把每个被挪动过的窗口放回会话开始时记下的位置和大小，删除虚拟屏幕，恢复 Dock。
-- 非主动断开（无 `bye`）：远端进入 30 秒宽限期；本地 hub 不退出、不关 Stub，窗口显示「正在重连」，由桌面端重新 `fusion.start` 后以 `resume` 接回。
+- 非主动断开（无 `bye`）：远端进入 30 秒宽限期；本地 hub 不退出、不关 Stub，窗口显示「正在重连」，由桌面端重新 `fusion.start` 后以 `resume` 接回。本地通常先发现断线（5 秒对 8 秒），所以远端在旧连接还没超时时也接受同一会话的 `resume`。断线期间关掉的窗口在接回后由远端补发 `wclose`，退出的应用补发 `app.exited`。
 - 远端在会话期间显示菜单栏状态项（「融合中：<本地电脑>」），提供「结束融合」，等同 `bye {reason:"user"}`。
 
 ### 4.4 消息
@@ -143,7 +143,7 @@
 
 ### 4.5 显示器描述（`hello.displays[]` / `displays.displays[]`）
 
-`{frame, visible, scale, hz}`：`frame` 为该显示器在本地全局点下的区域；`visible` 为可用区域（去掉菜单栏、Dock、任务栏）；`scale` 为像素/点，可为小数（Windows 的 1.25、1.5）；`hz` 为最高刷新率。远端按这些建同样布局的虚拟屏幕；`visible` 用于把窗口限制在本地可用区域内。
+`{frame, visible, scale, hz}`：`frame` 为该显示器在本地全局点下的区域；`visible` 为可用区域（去掉菜单栏、Dock、任务栏）；`scale` 为像素/点，可为小数（Windows 的 1.25、1.5）；`hz` 为最高刷新率。远端按这些建同样布局的虚拟屏幕：虚拟屏幕只有 1x 和 2x，`scale` 大于 1 一律按 2x 建（`FusionProtocol.backingScale`）。`visible` 目前远端只记录，窗口仍限制在虚拟屏幕内。
 
 ### 4.6 features
 
@@ -174,11 +174,11 @@
 每个融合会话一条 PeerConnection，远端是发起方（offer）。
 
 - **视频**：每个「流」一个 send-only 视频 transceiver。流是一个窗口（`w<id>`）或一块虚拟屏幕的弹出层（`d<index>`）。窗口关闭时 transceiver 置为 inactive 并回收给下一个窗口，避免 SDP 无限增长。
-- **数据通道**：整条连接只有 4 条，标签与普通屏幕共享相同：`input`（可靠有序）、`pointer`（无序、不重传）、`cursor`（无序）、`shape`（可靠）。每条输入、光标、形状消息都带 `k`（流键）。
+- **数据通道**：整条连接只有 4 条，标签与普通屏幕共享相同：`input`（可靠有序）、`pointer`（无序、不重传）、`cursor`（无序，融合不使用，保留以与屏幕共享一致）、`shape`（可靠）。每条输入消息带 `k`（流键）和整条连接共用的序号 `i`；`shape` 带 `k`，发给用户最近操作的那个窗口。
 - **映射**：`wopen.stream` 和 `rtc {t:"streams"}` 给出 `{k, mid}`，本地按 transceiver 的 `mid` 把解码帧交给对应窗口。
 - **重协商**：流增减时远端重新 offer（合并 50 ms 内的变化）。本地只回 answer，从不主动 offer。
 - **码率**：所有流共享一个带宽估计；每个发送端按焦点设置 `maxBitrateBps`、`maxFramerate` 和 `networkPriority`（聚焦窗口 60/120 fps 高优先级，其他 30 fps，弹出层空闲时 2 fps）。
-- **裁剪元数据**：不变，仍放在 H.264 SEI 里随帧传（窗口位置、裁剪、`ack`）。
+- **裁剪元数据**：仍放在 H.264 SEI 里随帧传（窗口位置、裁剪、`ack`），v2 在数组末尾加了窗口 id（第 15 个元素）：transceiver 回收给下一个窗口时，本地据此丢掉上一个窗口残留的帧。
 
 ### 5.2 `rtc` 消息
 
@@ -192,6 +192,7 @@
 | `streams` | R | `streams[]`：`{k, mid}`，每次 offer 之前发 |
 | `control` | L 请求 / R 回复 | 回复：`available`、`trusted` |
 | `state` | R | `connection`：仅用于日志 |
+| `restart` | L | 本地的 PC 失败而控制连接还在：远端新建一条 PC，重新挂上所有流（每分钟最多几次） |
 
 ### 5.3 与普通屏幕共享的关系
 
@@ -203,40 +204,47 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `FusionRemote.swift` | 进程入口、与 host 的 socket、token、监听器 |
-| `FusionRemoteSession.swift` | 协议分发、握手、宽限期与 resume、会话结束 |
-| `FusionDisplays.swift` | 虚拟屏幕的创建、重建与释放 |
-| `FusionWindowTracker.swift` | 窗口追踪（`track`）、弹出窗口、屏幕外窗口救回、窗口原始位置记录与还原 |
-| `FusionPlacement.swift` | `place` 队列、seq / ack、采样器 |
-| `FusionAccessibility.swift` | 窗口外观、菜单栏与 Dock 菜单镜像 |
+| `FusionRemote.swift` | 进程入口、与 host 的 socket、token、监听器、当前会话 / 挂起会话 / resume |
+| `FusionRemoteSession.swift` | 协议分发、握手、宽限期与 resume、`finish` / `end`、窗口还原 |
+| `FusionDisplays.swift` | 虚拟屏幕的创建、重建与释放；远端 Dock 的隐藏与恢复（`FusionDock`） |
+| `FusionWindowTracker.swift` | 窗口追踪（`track`）、弹出窗口、屏幕外窗口救回、记录窗口原始位置、聚焦 |
+| `FusionPlacement.swift` | `place` 队列、seq / ack、采样器（`FusionSampler`，SEI 内容） |
+| `FusionAccessibility.swift` | 窗口外观测量、菜单栏与 Dock 菜单镜像 |
 | `FusionApps.swift` | 应用目录、图标、启动、退出 |
-| `FusionMedia.swift` | 一条 PC、视频发送端、输入通道 |
+| `FusionStreams.swift` | 截取钩子；会话与 `FusionMedia` 之间：开关窗口流、弹出层 |
+| `FusionMedia.swift` | 一条 PC、每个流一个视频发送端、共享输入通道、码率策略、重协商 |
 | `FusionStatusItem.swift` | 远端菜单栏状态项 |
 
 本地（`apps/mac/Sources/LinkShell/Fusion/Local/`）：
 
 | 文件 | 职责 |
 | --- | --- |
-| `FusionLocal.swift` | 进程入口、控制连接、断线保持与 resume |
-| `FusionHubSocket.swift` | 本机 socket：Stub 注册、桌面端控制请求 |
+| `FusionLocal.swift` | 进程入口、控制连接、握手、`bye`、断线保持与 resume、退出原因 |
+| `FusionHubSocket.swift` | 本机 socket：Stub 注册、桌面端控制请求（`StubClient`） |
 | `FusionStubBundles.swift` | Stub `.app` 生成、图标合成、清理 |
-| `FusionFrames.swift` | 解码帧裁剪、交给 Stub、弹出窗口 |
+| `FusionFrames.swift` | 窗口记录、解码帧裁剪、交给 Stub、弹出窗口（`FusionOutput`） |
 | `FusionMediaReceiver.swift` | 一条 PC、按 mid 分流、输入发送 |
 
-共享：`FusionWire.swift`（传输）、`FusionProtocol.swift`（消息常量、版本、矩形与外观的编解码）、`FusionMetadata.swift`（SEI）。
+共享：`Fusion/FusionWire.swift`（传输）、`Fusion/FusionProtocol.swift`（版本、features、消息类型表、显示器签名、`chrome` 编解码）、`Fusion/FusionMetadata.swift`（SEI）。hub 与 Stub 之间的本机 IPC 不属于本协议，沿用原来的消息名。
 
-桌面主进程：`apps/desktop/src/main/fusion/`，`FusionHubDriver` 接口；`mac-hub.ts` 实现现在的 `--fusion-local` 进程，Windows 实现留待 Windows 本地端。
+`ScreenSession` 已去掉全部融合分支，只服务普通屏幕共享。
 
-host：`FusionShare` 依赖 `FusionLauncher` 接口；`launchers/mac.ts` 为现在的实现，Windows 启动器留待 Windows 远端。
+host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusion.start` 返回 `proto` 与 `platform`。Windows 远端尚未实现，`fusion.start` 返回明确的「还在开发中」。
 
-## 7. 实施顺序
+桌面端：`fusion-store` 在拉起 hub 之前检查 `proto`；hub 报告 `reconnecting` 时重新 `fusion.start` 拿新 token，交给已在运行的 hub 以 `resume` 接回。主进程里 hub 的启动与查询（`startFusionMode`、`queryFusionSocket`）仍写在 `main.ts`，等 Windows 本地端实现时再抽成 `FusionHubDriver`。
 
-1. 协议规格、schema 与样例（本文 + `packages/wire`）。
-2. Swift 拆文件（只移动代码，不改行为）。
-3. Swift 接入 v2：握手、`app` 标识、`chrome`、`bye`、去掉死代码与兼容补丁、帧上限、fd 泄漏。
-4. 生命周期：窗口还原、远端状态项、宽限期与 resume、本地断线不关窗口、统一停止入口。
-5. 一条 PeerConnection：`FusionMedia` / `FusionMediaReceiver`，`ScreenSession` 去掉融合分支。
-6. host 与桌面端按平台分派，UI 按 `fusion.start` 返回的 `platform` / `features` 判断能力。
-7. Windows 本地端（Electron），然后 Windows 远端。
+### 停止
 
-第 2–5 步需要两台 Mac 实测；单元测试只覆盖协议样例、纯逻辑与传输。
+融合页「断开」与 ⌘K「结束融合模式」走同一条路径：桌面端让本地 hub 退出，hub 先发 `bye {reason:"user"}`，远端立即还原窗口、删除虚拟屏幕、恢复 Dock。hub 若已不在，远端在 30 秒宽限期后自行结束。远端菜单栏的「结束融合」发 `bye {reason:"user"}` 给本地，本地 hub 退出并显示原因。
+
+## 7. 实施顺序与状态
+
+1. 协议规格、schema 与样例 —— 完成。
+2. Swift 拆文件 —— 完成。
+3. Swift 接入 v2：握手、`app` 标识、`chrome`、`bye`、去掉死代码与兼容补丁、帧上限 —— 完成。
+4. 生命周期：窗口还原、远端状态项、宽限期与 resume、本地断线不关窗口、统一停止入口 —— 完成。
+5. 一条 PeerConnection：`FusionMedia` / `FusionMediaReceiver`，`ScreenSession` 去掉融合分支 —— 完成。
+6. host 返回 `proto` / `platform`，桌面端检查版本并驱动 resume —— 完成；主进程 `FusionHubDriver` 留到第 7 步。
+7. Windows 本地端（Electron），然后 Windows 远端 —— 下一步。
+
+第 2–5 步只做了单元测试（协议样例、纯逻辑、传输）和编译，**没有两台 Mac 的端到端验证**：一条 PC 的重协商与 transceiver 回收、resume、窗口还原、远端状态项都要实机确认。

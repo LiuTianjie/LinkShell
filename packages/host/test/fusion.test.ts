@@ -54,6 +54,16 @@ describe("FusionShare", () => {
     expect(remote.seen.args).toContain("--home");
     expect(first.port).toBe(50_000);
     expect(second.port).toBe(50_001);
+    expect(first.proto).toBe(2);
+    expect(first.platform).toBe("macos");
+  });
+
+  it("says a Windows remote is not there yet instead of failing to launch it", async () => {
+    const remote = fakeRemote();
+    const fusion = share({ recording: true, control: true }, remote.launch, { platform: () => "windows" });
+    shares.push(fusion);
+    await expect(fusion.start()).rejects.toThrow(/Windows/);
+    expect(remote.seen.args).toEqual([]);
   });
 
   it("shares one answer between concurrent starts so the token is not rotated under the first caller", async () => {

@@ -34,21 +34,22 @@ extension FusionLocal {
 
   func remoteWindowOpened(_ m: [String: Any]) {
     let id = CGWindowID(Fusion.number(m["id"]))
-    let bundle = m["bundle"] as? String ?? ""
+    let bundle = m["app"] as? String ?? ""
     // A window that opens while the app is quitting is usually its "save changes?" prompt: show it.
     quittingBundles.removeValue(forKey: bundle)
     let title = m["title"] as? String ?? (apps.first(where: { $0.bundle == bundle })?.name ?? "")
-    let toolbar = m["toolbar"] as? Bool == true
-    let radius = toolbar ? 26.0 : 17.0
+    let chrome = FusionProtocol.chrome(m["chrome"])
+    let toolbar = chrome.toolbar
+    let radius = chrome.radius.flatMap { $0 >= 6 ? $0 : nil } ?? (toolbar ? 26.0 : 17.0)
     let frame = Fusion.rect(m["frame"])
-    let buttons = Self.parseButtons(m["buttons"])
-    let hitrects = Self.parseHitRects(m["hitrects"])
+    let buttons = chrome.buttons
+    let hitrects = chrome.hitrects
+    let key = m["stream"] as? String ?? "w\(id)"
     windows[id] = WindowRecord(
       id: id, bundle: bundle, title: title, toolbar: toolbar, cornerRadius: radius,
-      frame: frame, dragZone: nil, buttons: buttons, hitrects: hitrects, ackSeq: 0
+      frame: frame, buttons: buttons, hitrects: hitrects, ackSeq: 0, stream: key
     )
 
-    let key = "w\(id)"
     // Only a window that follows something the person did in that app takes the focus here;
     // windows replayed on reconnect or opened by the app on its own never steal it.
     let activate = m["activate"] as? Bool == true
@@ -70,8 +71,8 @@ extension FusionLocal {
 
   func remoteWindowClosed(_ m: [String: Any]) {
     let id = CGWindowID(Fusion.number(m["id"]))
-    let key = "w\(id)"
-    receivers.removeValue(forKey: key)?.stop()
+    let key = windows[id]?.stream ?? "w\(id)"
+    media?.remove(key)
     outputs.removeValue(forKey: key)
     lastWindowSEI.removeValue(forKey: id)
     clearAlert("webrtc", subject: key)
@@ -83,48 +84,25 @@ extension FusionLocal {
     refreshStatus()
   }
 
+  /// `wstyle`: a measured corner radius and toolbar, a new title, or the chrome re-measured after a resize.
   func remoteWindowStyle(_ m: [String: Any]) {
     let id = CGWindowID(Fusion.number(m["id"]))
-    let toolbar = m["toolbar"] as? Bool == true
-    let r = Fusion.number(m["r"])
-    let radius = r >= 6 ? r : (toolbar ? 26.0 : 17.0)
+    let chrome = FusionProtocol.chrome(m["chrome"])
+    let toolbar = chrome.toolbar
+    let radius = chrome.radius.flatMap { $0 >= 6 ? $0 : nil } ?? windows[id]?.cornerRadius ?? (toolbar ? 26.0 : 17.0)
     let title = m["title"] as? String ?? ""
-    let buttons = Self.parseButtons(m["buttons"])
-    let hitrects = Self.parseHitRects(m["hitrects"])
+    let buttons = chrome.buttons
+    let hitrects = chrome.hitrects
     windows[id]?.toolbar = toolbar
     windows[id]?.cornerRadius = radius
     if !title.isEmpty { windows[id]?.title = title }
     if !buttons.isEmpty { windows[id]?.buttons = buttons }
-    if m["hitrects"] != nil { windows[id]?.hitrects = hitrects }
-    if let bundle = windows[id]?.bundle {
-      stubs[bundle]?.send([
-        "t": "style", "id": Int(id), "toolbar": toolbar, "r": radius, "title": title,
-        "buttons": windows[id]?.buttons ?? buttons, "hitrects": windows[id]?.hitrects ?? hitrects,
-      ])
-    }
-  }
-
-  func remoteWindowChrome(_ m: [String: Any]) {
-    let id = CGWindowID(Fusion.number(m["id"]))
-    let buttons = Self.parseButtons(m["buttons"])
-    let hitrects = Self.parseHitRects(m["hitrects"])
-    if !buttons.isEmpty { windows[id]?.buttons = buttons }
     windows[id]?.hitrects = hitrects
     if let bundle = windows[id]?.bundle {
       stubs[bundle]?.send([
-        "t": "chrome", "id": Int(id),
-        "buttons": windows[id]?.buttons ?? buttons,
-        "hitrects": hitrects,
+        "t": "style", "id": Int(id), "toolbar": toolbar, "r": radius, "title": windows[id]?.title ?? title,
+        "buttons": windows[id]?.buttons ?? buttons, "hitrects": windows[id]?.hitrects ?? hitrects,
       ])
-    }
-  }
-
-  func remoteDragZone(_ m: [String: Any]) {
-    let id = CGWindowID(Fusion.number(m["id"]))
-    let ok = m["ok"] as? Bool == true
-    windows[id]?.dragZone = ok
-    if let bundle = windows[id]?.bundle {
-      stubs[bundle]?.send(["t": "dragzone", "id": Int(id), "ok": ok])
     }
   }
 
@@ -134,7 +112,7 @@ extension FusionLocal {
     for entry in list {
       let id = CGWindowID(Fusion.number(entry["id"]))
       let own = entry["own"] as? Bool == true
-      let bundle = entry["bundle"] as? String ?? ""
+      let bundle = entry["app"] as? String ?? ""
       let frame = Fusion.rect(entry["frame"])
       if own {
         if windows[id] != nil {
@@ -160,8 +138,9 @@ extension FusionLocal {
       } else {
         seenPopups.insert(id)
         let parent = CGWindowID(Fusion.number(entry["parent"]))
-        let pdx = (entry["pdx"] as? NSNumber)?.doubleValue
-        let pdy = (entry["pdy"] as? NSNumber)?.doubleValue
+        let offset = entry["offset"] as? [String: Any]
+        let pdx = (offset?["x"] as? NSNumber)?.doubleValue
+        let pdy = (offset?["y"] as? NSNumber)?.doubleValue
         popups[id] = PopupRecord(id: id, bundle: bundle, parentID: parent, frame: frame, pdx: pdx, pdy: pdy, layer: Int(Fusion.number(entry["layer"])))
       }
     }
@@ -209,6 +188,10 @@ extension FusionLocal {
     guard let winInfo = fastWindows[id], !winInfo.bundle.isEmpty else { fastLock.unlock(); return }
     guard let stub = fastStubs[winInfo.bundle] else { fastLock.unlock(); return }
     var resolved: [Double]?
+    // A reused transceiver may still deliver what it carried before: another window (its id is in
+    // the frame) or a popup layer (whose metadata is a list of windows, not one window).
+    if sei != nil, parsedSEI == nil { fastLock.unlock(); return }
+    if let arr = parsedSEI, arr.count >= 15, CGWindowID(arr[14]) != id { fastLock.unlock(); return }
     if let arr = parsedSEI, arr.count >= 12 {
       fastWindowSEI[id] = arr
       resolved = arr
@@ -341,6 +324,8 @@ final class FusionOutput: NSObject, DesktopScreenOutput {
   var controlEnabled = false { didSet { owner?.controlChanged(key) } }
   var physicalKeys = false { didSet { owner?.controlChanged(key) } }
   var first = true
+  /// Set by `FusionMediaReceiver` once this stream has shown a frame: input waits for it.
+  var receivedPicture = false
 
   init(key: String, owner: FusionLocal, picture: @escaping (CVPixelBuffer, Data?) -> Void) {
     self.key = key

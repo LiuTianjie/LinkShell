@@ -49,6 +49,8 @@ final class FusionRemote {
   var listener: NWListener?
   var listenerGeneration = 0
   var current: FusionRemoteSession?
+  /// A session whose connection dropped without a `bye`, kept for `resume` (docs/v2/fusion.md §4.3).
+  var suspended: FusionRemoteSession?
   var pending: [ObjectIdentifier: FusionRemoteSession] = [:]
   var signalSources: [DispatchSourceSignal] = []
 
@@ -78,7 +80,8 @@ final class FusionRemote {
       let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
       source.setEventHandler { [weak self] in
         Fusion.log("signal \(sig): ending")
-        self?.current?.end()
+        self?.current?.finish(reason: "stopped", message: "远端 LinkShell 已退出")
+        self?.suspended?.end()
         self?.pending.values.forEach { $0.end() }
         exit(0)
       }
@@ -134,19 +137,45 @@ final class FusionRemote {
     session.onAuthenticated = { [weak self, weak session] in
       guard let self, let session else { return }
       self.pending.removeValue(forKey: key)
+      // A new local computer (or the same one, not resuming): whatever was here gives way.
+      self.suspended?.end()
+      self.suspended = nil
       if self.current !== session {
-        self.current?.end()
+        self.current?.finish(reason: "replaced", message: "另一台电脑开启了与这台 Mac 的融合模式")
         self.current = session
       }
       // The client pings every 1.5 s: silence means it is gone (asleep, off the network).
       wire.startWatchdog(timeout: 8)
     }
+    session.resumeTarget = { [weak self] id in
+      guard let self else { return nil }
+      if let old = self.suspended, old.sessionID == id {
+        self.suspended = nil
+        // Its grace may have run out already: nothing left to resume, start afresh.
+        return old.ended ? nil : old
+      }
+      // The local computer often notices a dead link (5 s) before this side does (8 s): the session
+      // is still current here, on a connection that is gone. Take it over.
+      if let current = self.current, current.sessionID == id, !current.ended {
+        current.detachWire()
+        return current
+      }
+      return nil
+    }
+    session.onResumed = { [weak self, weak session] old in
+      guard let self else { return }
+      if let session { self.pending.removeValue(forKey: ObjectIdentifier(session)) }
+      if self.current !== old { self.current?.finish(reason: "replaced") }
+      self.current = old
+      self.attach(old, to: wire)
+      wire.startWatchdog(timeout: 8)
+    }
     wire.onMessage = { [weak session] in session?.receive($0) }
     wire.onClose = { [weak self, weak session] reason in
-      Fusion.log("connection closed: \(reason)")
-      self?.pending.removeValue(forKey: key)
-      session?.end()
-      if self?.current === session { self?.current = nil }
+      guard let self else { return }
+      self.pending.removeValue(forKey: key)
+      guard let session else { return }
+      self.closed(session, reason: reason)
     }
     wire.start()
     DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self, weak session] in
@@ -157,6 +186,26 @@ final class FusionRemote {
     }
   }
 
+  /// A resumed session takes over the new connection.
+  func attach(_ session: FusionRemoteSession, to wire: FusionWire) {
+    wire.onMessage = { [weak session] in session?.receive($0) }
+    wire.onClose = { [weak self, weak session] reason in
+      guard let self, let session else { return }
+      self.closed(session, reason: reason)
+    }
+  }
+
+  /// A `bye` (either way) has already ended the session; anything else may be a blip.
+  func closed(_ session: FusionRemoteSession, reason: String) {
+    Fusion.log("connection closed: \(reason)")
+    guard current === session else { return session.end() }
+    current = nil
+    if session.ended || reason == "bye" || reason == "token" || reason == "proto" { return session.end() }
+    suspended?.end()
+    suspended = session
+    session.suspend()
+  }
+
   func handleParent(_ message: [String: Any]) {
     switch message["t"] as? String {
     case "token":
@@ -165,8 +214,10 @@ final class FusionRemote {
       iceServers = (message["ice"] as? [[String: Any]]) ?? []
       relisten()
     case "stop":
-      current?.end()
+      current?.finish(reason: "stopped", message: "远端电脑结束了融合模式")
       current = nil
+      suspended?.end()
+      suspended = nil
     default:
       break
     }
@@ -234,9 +285,12 @@ final class FusionRemote {
           DispatchQueue.main.async { self?.handleParent(message) }
         }
       }
+      // The host is gone (stopped, upgraded): end everything here, a held session included,
+      // and let the `bye` leave before the process does.
       DispatchQueue.main.async {
-        self?.current?.end()
-        exit(0)
+        self?.current?.finish(reason: "stopped", message: "远端 LinkShell 已停止")
+        self?.suspended?.end()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
       }
     }
   }

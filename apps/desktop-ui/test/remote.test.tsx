@@ -633,7 +633,7 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     );
     const mockConn = makeMockConnection(remoteMac, async (method) => {
       if (method === "fusion.start") {
-        return { port: 51900, token: "tok-headless", hosts: ["192.168.1.90"] };
+        return { port: 51900, token: "tok-headless", hosts: ["192.168.1.90"], proto: 2, platform: "macos" };
       }
       return {};
     });

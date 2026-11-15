@@ -1216,6 +1216,7 @@ async function getFusionState(params: Record<string, unknown>) {
   return {
     hubRunning: Boolean(live),
     connected: live?.connected === true,
+    reconnecting: live?.reconnecting === true,
     rttMs: typeof live?.rttMs === "number" ? live.rttMs : undefined,
     hostLabel: typeof live?.hostLabel === "string" ? live.hostLabel : name,
     hostSlug,

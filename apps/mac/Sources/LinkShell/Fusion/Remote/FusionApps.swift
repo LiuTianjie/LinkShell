@@ -13,10 +13,10 @@ import WebRTC
 extension FusionRemoteSession {
   // MARK: apps, icons, and windows
 
-  static func apps() -> [[String: String]] {
+  static func apps() -> [[String: Any]] {
     var seen: Set<String> = []
     var paths: [String: String] = [:]
-    var result: [[String: String]] = []
+    var result: [[String: Any]] = []
     let folders = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"]
     for folder in folders {
       for name in (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? [] where name.hasSuffix(".app") {
@@ -33,16 +33,16 @@ extension FusionRemoteSession {
         let isSystem = id != "com.apple.Safari" && (folder.hasPrefix("/System/") || resolvedURL.path.hasPrefix("/System/Applications/"))
         result.append([
           "name": FileManager.default.displayName(atPath: resolvedURL.path).replacingOccurrences(of: ".app", with: ""),
-          "bundle": id,
+          "app": id,
           "category": cat,
-          "system": isSystem ? "1" : "0",
+          "system": isSystem,
         ])
       }
     }
     appPathsLock.lock()
     appPaths = paths
     appPathsLock.unlock()
-    return result.sorted { $0["name"]!.localizedStandardCompare($1["name"]!) == .orderedAscending }
+    return result.sorted { ($0["name"] as? String ?? "").localizedStandardCompare($1["name"] as? String ?? "") == .orderedAscending }
   }
 
   static func resolvedApplicationURL(for bundle: String) -> URL? {
@@ -75,7 +75,7 @@ extension FusionRemoteSession {
     icon.draw(in: NSRect(origin: .zero, size: ptSize), from: .zero, operation: .copy, fraction: 1.0)
     NSGraphicsContext.restoreGraphicsState()
     guard let data = rep.representation(using: .png, properties: [:]) else { return }
-    wire.send(["t": "icon", "bundle": bundle, "png": data.base64EncodedString()])
+    wire.send(["t": "icon", "app": bundle, "png": data.base64EncodedString()])
   }
 
   func launch(_ bundle: String) {
@@ -111,7 +111,7 @@ extension FusionRemoteSession {
   func quit(_ bundle: String, force: Bool) {
     let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
     if running.isEmpty {
-      wire.send(["t": "app.exited", "bundle": bundle])
+      wire.send(["t": "app.exited", "app": bundle])
       return
     }
     for app in running {

@@ -102,6 +102,8 @@ export const fusionRtcSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("streams"), streams: z.array(z.object({ k: streamKey, mid: z.string() })) }),
   z.object({ t: z.literal("control"), available: z.boolean().optional(), trusted: z.boolean().optional() }),
   z.object({ t: z.literal("state"), connection: z.string() }),
+  /** Local → remote: the peer connection failed while the control connection lives; make a new one. */
+  z.object({ t: z.literal("restart") }),
 ]);
 
 const clip = {
@@ -118,6 +120,8 @@ export const fusionMessageSchema = z.discriminatedUnion("t", [
     platform: fusionPlatformSchema,
     features: z.array(fusionFeatureSchema),
     displays: z.array(fusionDisplaySchema).min(1).max(16),
+    /** The local computer's name, for the remote's menu bar item. */
+    name: z.string().max(256).optional(),
     resume: z.string().optional(),
   }),
   z.object({

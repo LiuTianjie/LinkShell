@@ -131,7 +131,7 @@ final class FusionWire {
       guard error == nil, let data, data.count == 4 else { return self.close(reason: "closed") }
       let b = [UInt8](data)
       let length = Int(b[0]) << 24 | Int(b[1]) << 16 | Int(b[2]) << 8 | Int(b[3])
-      guard length > 0, length < 8 << 20 else { return self.close(reason: "protocol") }
+      guard length > 0, length < FusionProtocol.maxFrame else { return self.close(reason: "protocol") }
       self.connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, error in
         guard error == nil, let body, body.count == length else { return self.close(reason: "closed") }
         self.lastHeard = CACurrentMediaTime()

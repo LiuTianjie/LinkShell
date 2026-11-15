@@ -5,11 +5,11 @@ import { createServer, type Server, type Socket } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { RpcError, type RelayIceServer, type TurnCredentials } from "@linkshell/wire";
+import { FUSION_PORT, FUSION_PROTO, RpcError, type FusionPlatform, type FusionStartResult, type RelayIceServer, type TurnCredentials } from "@linkshell/wire";
 import { NO_APP, macAppSupported, shippedApp } from "./input.js";
 import type { ScreenShare } from "./screen.js";
 
-const DEFAULT_FUSION_PORT = 47391;
+const DEFAULT_FUSION_PORT = FUSION_PORT;
 const EXCLUDED_IFACE_PREFIXES = ["lo", "awdl", "llw", "bridge", "anpi", "ap", "vmenet", "vnic", "docker"];
 
 function isTailscaleCGNAT(ip: string): boolean {
@@ -46,10 +46,13 @@ export function reachableHostAddresses(interfaces: ReturnType<typeof networkInte
   return found.map((item) => item.ip);
 }
 
-export interface FusionStartResult {
-  port: number;
-  token: string;
-  hosts: string[];
+export type { FusionStartResult };
+
+/** Which kind of remote this computer can be (docs/v2/fusion.md §3); undefined: none yet. */
+export function fusionPlatform(platform: NodeJS.Platform = process.platform): FusionPlatform | undefined {
+  if (platform === "darwin") return "macos";
+  if (platform === "win32") return "windows";
+  return undefined;
 }
 
 export interface FusionShareOptions {
@@ -61,6 +64,8 @@ export interface FusionShareOptions {
   startTimeoutMs?: number;
   readyTimeoutMs?: number;
   home?: () => string;
+  /** Which remote this host would start; tests pin it. */
+  platform?: () => FusionPlatform | undefined;
 }
 
 interface ReadyWaiter {
@@ -82,7 +87,7 @@ export class FusionShare {
   private starting?: Promise<FusionStartResult>;
   private waiters: ReadyWaiter[] = [];
   private failLaunch?: (error: Error) => void;
-  private readonly opts: Required<Omit<FusionShareOptions, "launch" | "app" | "supported" | "home">> & FusionShareOptions;
+  private readonly opts: Required<Omit<FusionShareOptions, "launch" | "app" | "supported" | "home" | "platform">> & FusionShareOptions;
 
   constructor(
     private readonly log: (message: string) => void,
@@ -95,8 +100,13 @@ export class FusionShare {
   }
 
   async start(): Promise<FusionStartResult> {
-    if (!(this.opts.supported ?? macAppSupported)()) {
-      throw RpcError.app("not_supported", "融合模式目前仅支持连接到 macOS 电脑");
+    const platform = (this.opts.platform ?? (() => (this.opts.supported ? "macos" : fusionPlatform())))();
+    if (platform === "windows") {
+      // The Windows remote (window capture, SendInput, AUMID catalog) is the next step of Fusion v2.
+      throw RpcError.app("not_supported", "Windows 电脑作为融合远端还在开发中，目前只能融合 macOS 电脑上的应用");
+    }
+    if (platform !== "macos" || !(this.opts.supported ?? macAppSupported)()) {
+      throw RpcError.app("not_supported", "融合模式目前只能融合 macOS 电脑上的应用");
     }
     const app = (this.opts.app ?? shippedApp)();
     if (!app) {
@@ -180,7 +190,7 @@ export class FusionShare {
     });
     socket.write(`${JSON.stringify({ t: "token", token, ice })}\n`);
     const port = await ready;
-    return { port, token, hosts: reachableHostAddresses() };
+    return { port, token, hosts: reachableHostAddresses(), proto: FUSION_PROTO, platform: "macos" };
   }
 
   private onLine(line: string) {

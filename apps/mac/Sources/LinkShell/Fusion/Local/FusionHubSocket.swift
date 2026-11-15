@@ -105,12 +105,12 @@ extension FusionLocal {
         let now = CACurrentMediaTime()
         if now - (launchSentAt[bundle] ?? 0) >= 4.0 {
           launchSentAt[bundle] = now
-          wire?.send(["t": "launch", "bundle": bundle])
+          wire?.send(["t": "launch", "app": bundle])
         }
       }
     } else {
       for rec in existing {
-        let key = "w\(rec.id)"
+        let key = rec.stream
         let (ctrl, keys) = control(of: key)
         client.send([
           "t": "wopen", "id": Int(rec.id), "title": rec.title, "toolbar": rec.toolbar, "r": rec.cornerRadius,
@@ -118,9 +118,6 @@ extension FusionLocal {
           "buttons": rec.buttons, "hitrects": rec.hitrects, "ack": rec.ackSeq,
           "activate": false,
         ])
-        if let dz = rec.dragZone {
-          client.send(["t": "dragzone", "id": Int(rec.id), "ok": dz])
-        }
       }
     }
     reloadGrid()
@@ -161,8 +158,8 @@ extension FusionLocal {
   func purgeLocalState(forBundle bundle: String) {
     let winIDs = windows.values.filter { $0.bundle == bundle }.map(\.id)
     for id in winIDs {
-      let key = "w\(id)"
-      receivers.removeValue(forKey: key)?.stop()
+      let key = windows[id]?.stream ?? "w\(id)"
+      media?.remove(key)
       outputs.removeValue(forKey: key)
       windows.removeValue(forKey: id)
       lastWindowSEI.removeValue(forKey: id)
@@ -179,7 +176,7 @@ extension FusionLocal {
     guard !bundle.isEmpty else { return }
     quittingBundles[bundle] = CACurrentMediaTime() + 6.0
     launchingStubs.remove(bundle)
-    wire?.send(["t": "quit", "bundle": bundle, "force": force])
+    wire?.send(["t": "quit", "app": bundle, "force": force])
     reloadGrid()
     saveCatalogToDisk()
     refreshStatus()
@@ -210,7 +207,7 @@ extension FusionLocal {
       clipboardFocused()
       wire?.send(["t": "focus", "id": id])
     case "prewarm":
-      wire?.send(["t": "prewarm", "id": m["id"] ?? 0])
+      wire?.send(["t": "prewarm", "id": DesktopScreenBridge.integer(m["id"]) ?? 0])
     case "active":
       setStubActive(client.bundle, m["on"] as? Bool == true)
     case "reopen":
@@ -220,20 +217,22 @@ extension FusionLocal {
         let now = CACurrentMediaTime()
         if now - (launchSentAt[client.bundle] ?? 0) >= 2.0 {
           launchSentAt[client.bundle] = now
-          wire?.send(["t": "launch", "bundle": client.bundle])
+          wire?.send(["t": "launch", "app": client.bundle])
         }
       }
     case "detach":
       client.closedByHub = true
     case "menufetch", "menupress":
       if !client.bundle.isEmpty {
-        wire?.send(["t": m["t"] ?? "", "bundle": client.bundle, "path": m["path"] ?? [Int]()])
+        // The stub's own names stay; the wire's are `menu.fetch` / `menu.press`.
+        let type = m["t"] as? String == "menufetch" ? "menu.fetch" : "menu.press"
+        wire?.send(["t": type, "app": client.bundle, "path": FusionProtocol.path(m["path"])])
       }
     case "dockaction":
       if !client.bundle.isEmpty {
         quittingBundles.removeValue(forKey: client.bundle)
         syncFastState()
-        wire?.send(["t": "dockaction", "bundle": client.bundle, "path": m["path"] ?? [Int]()])
+        wire?.send(["t": "dockmenu.press", "app": client.bundle, "path": FusionProtocol.path(m["path"])])
       }
     case "quit":
       client.closedByQuit = true

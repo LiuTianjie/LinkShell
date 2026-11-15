@@ -136,6 +136,19 @@ export interface FusionHubSnapshot {
   apps: FusionRemoteApp[];
   alerts?: FusionAlert[];
   lastExit?: FusionExitInfo;
+  /** The hub lost its connection and keeps its windows, waiting for a new token to resume with. */
+  reconnecting?: boolean;
+}
+
+/** The control protocol this desktop's hub speaks (docs/v2/fusion.md). */
+export const FUSION_PROTO = 2;
+
+/** Why a remote can't be fused, from what `fusion.start` returned; undefined when it can. */
+export function fusionProtocolMismatch(started: { proto?: unknown }): string | undefined {
+  const proto = typeof started.proto === "number" ? started.proto : 1;
+  if (proto < FUSION_PROTO) return "远端电脑的 LinkShell 版本较旧，请先更新远端 LinkShell 后再开启融合模式";
+  if (proto > FUSION_PROTO) return "本机 LinkShell 版本较旧，请先更新本机 LinkShell 后再开启融合模式";
+  return undefined;
 }
 
 export interface FusionComputerState {
@@ -538,9 +551,12 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
         hostLabel: name || prev.hostLabel,
       }));
 
-      let started: { port: number; token: string; hosts: string[] };
+      let started: { port: number; token: string; hosts: string[]; proto?: number; platform?: string };
       try {
         started = await link.call("fusion.start", {});
+        // Checked before a hub is started: a v1 remote would only fail later, with a vaguer reason.
+        const mismatch = fusionProtocolMismatch(started);
+        if (mismatch) throw new Error(mismatch);
       } catch (error) {
         if (cancelled()) {
           releaseConnection?.();
@@ -712,6 +728,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
     const inGrace = now() < (startingUntil.get(computerKey) ?? 0);
     const snapshotHubRunning = Boolean(snapshot?.hubRunning ?? snapshot?.running);
     const snapshotConnected = snapshot?.connected === true;
+    // The hub is up but lost the remote: it needs a fresh token (a restart) to resume its session.
+    const snapshotReconnecting = snapshotHubRunning && !snapshotConnected && snapshot?.reconnecting === true;
     const incomingApps = Array.isArray(snapshot?.apps) ? snapshot.apps : [];
     if (snapshotConnected) {
       startingUntil.delete(computerKey);
@@ -723,7 +741,7 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       expected.has(computerKey) &&
       !before.paused &&
       before.phase !== "stopping" &&
-      !snapshotHubRunning &&
+      (!snapshotHubRunning || snapshotReconnecting) &&
       !snapshotConnected &&
       !inGrace &&
       (before.phase === "connected" ||
@@ -737,7 +755,9 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
       const effectiveHubRunning = snapshotHubRunning || snapshotConnected || inGrace;
       const nextPhase: FusionComputerState["phase"] = snapshotConnected
         ? "connected"
-        : inGrace
+        : snapshotReconnecting
+          ? "reconnecting"
+          : inGrace
           ? prev.phase === "reconnecting"
             ? "reconnecting"
             : "starting"

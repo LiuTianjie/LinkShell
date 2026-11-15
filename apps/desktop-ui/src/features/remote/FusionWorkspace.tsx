@@ -548,12 +548,11 @@ export function FusionWorkspace({
     [computerKey, connection, displayName],
   );
 
+  // The hub says `bye` on its way out and the remote puts its windows back at once: the same
+  // path as 结束融合模式 in the command center (docs/v2/fusion.md §4.3).
   const handleDisconnectFusion = useCallback(async () => {
     await stopComputerFusion(computerKey, displayName);
-    if (connection) {
-      await connection.link.call("fusion.stop", {}).catch(() => undefined);
-    }
-  }, [computerKey, connection, displayName]);
+  }, [computerKey, displayName]);
 
   const handleLaunchOrActivate = useCallback(
     async (app: ExtendedFusionApp) => {

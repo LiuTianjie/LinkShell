@@ -93,48 +93,10 @@ extension FusionRemoteSession {
     return false
   }
 
-  /// Evaluates via Accessibility whether the hovered titlebar spot is empty draggable chrome vs an interactive button/input.
-  func evaluateDragZone(id: CGWindowID, pid: pid_t, nx: Double, ny: Double) {
-    let now = CACurrentMediaTime()
-    guard now - (hoverStamps[id] ?? 0) >= 1.0 / 60 else { return }
-    hoverStamps[id] = now
-    guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?.first,
-          let bounds = info[kCGWindowBounds as String] as? [String: Any],
-          let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return }
-    let x = nx * frame.width, y = ny * frame.height
-    var ok = false
-    if y <= 54, x >= 88 {
-      ok = true
-      let gx = Float(frame.minX + x), gy = Float(frame.minY + y)
-      var hit: AXUIElement?
-      if AXUIElementCopyElementAtPosition(FusionRemoteSession.axApp(pid), gx, gy, &hit) == .success, var element = hit {
-        let interactive: Set<String> = [
-          "AXButton", "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox",
-          "AXPopUpButton", "AXMenuButton", "AXRadioButton", "AXCheckBox", "AXTabGroup",
-          "AXSegmentedControl", "AXSlider", "AXIncrementor", "AXLink", "AXColorWell",
-        ]
-        for _ in 0..<5 {
-          var roleRef: CFTypeRef?
-          let role = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success ? (roleRef as? String ?? "") : ""
-          if role == "AXWindow" || role == "AXApplication" { break }
-          if interactive.contains(role) { ok = false; break }
-          var parentRef: CFTypeRef?
-          guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef) == .success, let parent = parentRef else { break }
-          element = parent as! AXUIElement
-        }
-      }
-    }
-    if dragZones[id] != ok {
-      dragZones[id] = ok
-      wire.send(["t": "dragzone", "id": id, "ok": ok])
-    }
-  }
-
   /// Measures true corner radius (accounting for 1x vs 2x scale!) so macOS 26 Tahoe 27pt vs 17pt corners match 1:1.
   func measureStyle(id: CGWindowID, pid: pid_t, bundle: String, title: String, initialToolbar: Bool) {
     guard #available(macOS 14.0, *) else { return }
-    let wire = self.wire
-    Task {
+    Task { [weak self] in
       try? await Task.sleep(nanoseconds: 120_000_000)
       let content: SCShareableContent? = await withCheckedContinuation { cont in
         ScreenCapturer.fetchShareableContent(maxAge: 0.15) { c, _ in cont.resume(returning: c) }
@@ -158,8 +120,8 @@ extension FusionRemoteSession {
       guard d > 0, d < limit, scale > 0 else { return }
       let radius = (Double(d) / (1 - 0.70710678)) / scale
       let toolbar = initialToolbar || radius > 21.5
-      let (buttons, hitrects) = await MainActor.run { self.inspectWindowChrome(pid: pid, id: id, frame: window.frame) }
-      wire.send(["t": "style", "id": id, "bundle": bundle, "toolbar": toolbar, "r": radius, "title": title, "buttons": buttons, "hitrects": hitrects])
+      guard let (buttons, hitrects) = await MainActor.run(body: { self?.inspectWindowChrome(pid: pid, id: id, frame: window.frame) }) else { return }
+      await MainActor.run { self?.wire.send(["t": "wstyle", "id": id, "title": title, "chrome": FusionProtocol.chrome(toolbar: toolbar, radius: radius, buttons: buttons, hitrects: hitrects)]) }
       Fusion.log("window \(id) (\(bundle)) corner \(String(format: "%.1f", radius)) pt toolbar=\(toolbar)")
     }
   }
@@ -184,7 +146,7 @@ extension FusionRemoteSession {
           let sig = String(data: data, encoding: .utf8),
           force || dockMenuSent[bundle] != sig else { return }
     dockMenuSent[bundle] = sig
-    wire.send(["t": "dockmenu", "bundle": bundle, "items": items])
+    wire.send(["t": "dockmenu", "app": bundle, "items": items])
   }
 
   func extractDockMenu(pid: pid_t) -> [[String: Any]] {
@@ -312,9 +274,9 @@ extension FusionRemoteSession {
       DispatchQueue.main.async {
         guard let self, !self.ended else { return }
         if let items {
-          self.wire.send(["t": "menu", "bundle": bundle, "path": path, "items": items])
+          self.wire.send(["t": "menu", "app": bundle, "path": path, "items": items])
         } else {
-          self.wire.send(["t": "menu", "bundle": bundle, "path": path, "error": true])
+          self.wire.send(["t": "menu", "app": bundle, "path": path, "error": true])
         }
       }
     }

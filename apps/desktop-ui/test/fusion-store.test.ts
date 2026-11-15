@@ -63,7 +63,7 @@ function harness(invokeImpl: Invoke) {
   return { controller, posted, restart, release, streams, opened, advance, tunnelEvent };
 }
 
-const link = (port = 47391) => ({ call: vi.fn(async () => ({ port, token: "t", hosts: [] })) }) as never;
+const link = (port = 47391) => ({ call: vi.fn(async () => ({ port, token: "t", hosts: [], proto: 2, platform: "macos" })) }) as never;
 const flush = async () => {
   for (let i = 0; i < 6; i++) await Promise.resolve();
 };
@@ -132,6 +132,32 @@ describe("fusion-store", () => {
     expect(final.error).toContain("远端 Mac 已无响应");
     await h.advance(60_000);
     expect(h.restart).toHaveBeenCalledTimes(FUSION_MAX_RECONNECTS);
+  });
+
+  it("refuses a remote that speaks another Fusion protocol before starting a hub", async () => {
+    const calls: string[] = [];
+    const h = harness((method) => { calls.push(method); return {}; });
+    const old = { call: vi.fn(async () => ({ port: 1, token: "t", hosts: [] })) } as never;
+    await expect(h.controller.startFusion({ computerKey: "k", name: "Mac", link: old, streams: { open: vi.fn() } as never }))
+      .rejects.toThrow(/远端电脑的 LinkShell 版本较旧/);
+    const newer = { call: vi.fn(async () => ({ port: 1, token: "t", hosts: [], proto: 3, platform: "macos" })) } as never;
+    await expect(h.controller.startFusion({ computerKey: "k2", name: "Mac", link: newer, streams: { open: vi.fn() } as never }))
+      .rejects.toThrow(/本机 LinkShell 版本较旧/);
+    expect(calls).not.toContain("fusionStart");
+    expect(h.controller.stateOf("k").phase).toBe("error");
+  });
+
+  it("restarts a hub that is up but waiting to resume, so it gets a fresh token", async () => {
+    let state: Record<string, unknown> = { hubRunning: true, connected: true };
+    const h = harness((method) => (method === "fusionStart" ? { mode: "direct", host: "h", port: 1 } : method === "fusionState" ? state : {}));
+    await h.controller.startFusion({ computerKey: "k", name: "Mac", link: link(), streams: { open: vi.fn() } as never });
+    await flush();
+    await h.advance(20_000);
+    state = { hubRunning: true, connected: false, reconnecting: true };
+    await h.controller.refreshFusionState("k", "Mac");
+    expect(h.controller.stateOf("k").phase).toBe("reconnecting");
+    await h.advance(fusionReconnectDelay(1));
+    expect(h.restart).toHaveBeenCalledTimes(1);
   });
 
   it("a successful reconnect resets the attempt counter", async () => {

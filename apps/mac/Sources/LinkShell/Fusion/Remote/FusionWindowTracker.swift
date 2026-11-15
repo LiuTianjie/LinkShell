@@ -72,6 +72,8 @@ extension FusionRemoteSession {
   }
 
   func track() {
+    // Nothing can be told while there is no connection; the next `track()` after a resume sees it all.
+    guard !paused, !ended else { return }
     let gone = fused.filter { pid in
       guard let app = NSRunningApplication(processIdentifier: pid) else { return true }
       return app.isTerminated
@@ -80,7 +82,7 @@ extension FusionRemoteSession {
       for pid in gone {
         if let bundle = pidToBundle.removeValue(forKey: pid) {
           let stillAlive = fused.contains { $0 != pid && pidToBundle[$0] == bundle }
-          if !stillAlive { wire.send(["t": "app.exited", "bundle": bundle]) }
+          if !stillAlive { wire.send(["t": "app.exited", "app": bundle]) }
         }
       }
       fused.subtract(gone)
@@ -116,6 +118,7 @@ extension FusionRemoteSession {
       guard let mirror = mirror(remote: probe) ?? mirror(remote: CGPoint(x: frame.midX, y: frame.midY)) ?? mirrors.first(where: { $0.remote.intersects(frame) }) else {
         if layer == 0, !moved.contains(id), let main = mirrors.first, let w = axWindow(pid: pid, id: id) {
           moved.insert(id)
+          if originalFrames[id] == nil { originalFrames[id] = (pid, frame) }
           var p = CGPoint(x: main.remote.midX - frame.width / 2, y: max(main.remote.minY + 60, main.remote.midY - frame.height / 2))
           AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &p)!)
         }
@@ -220,10 +223,8 @@ extension FusionRemoteSession {
       sampler.set(popups: popups, parents: popupParents)
       lastPopupMirrors = Set(raw.filter { popups.contains($0.id) }.map(\.mirror.index))
       let warm = prewarmUntil > CACurrentMediaTime()
-      for mirror in mirrors {
-        let activeOnMirror = lastPopupMirrors.contains(mirror.index)
-        mirror.session?.setFusionOverlayActive(activeOnMirror || warm)
-      }
+      let busy = lastPopupMirrors
+      media?.setOverlaysActive { warm || busy.contains($0) }
     }
 
     let rootSet = Set(roots.map(\.id))
@@ -235,22 +236,29 @@ extension FusionRemoteSession {
           existing.groupIDs = group
           streams[r.id] = existing
           Fusion.log("w\(r.id): switching to display \(r.mirror.index) (\(target.pixelWidth)×\(target.pixelHeight) @\(r.mirror.scale)x)")
-          existing.session.switchFusionDisplay(target, windowIDs: group)
+          media?.moveWindow(existing.key, to: target, group: group)
         } else if existing.groupIDs != group {
           existing.groupIDs = group
           streams[r.id] = existing
-          existing.session.updateFusionWindowGroup(group)
+          media?.updateGroup(existing.key, group)
         }
       } else {
         openStream(r.id, pid: r.pid, bundle: r.bundle, title: r.title, mirror: r.mirror, groupIDs: group, remoteFrame: r.frame, local: r.local)
       }
+    }
+    // After a resume: windows that closed while the connection was down are closed there too,
+    // and the window that was in use gets its full rate back.
+    if let known = resumeKnown, displayReady, !rebuilding, media != nil {
+      resumeKnown = nil
+      for id in known where streams[id] == nil { wire.send(["t": "wclose", "id": id]) }
+      media?.focus(streams[focusedWindowID]?.key)
     }
     var hiddenNow: Set<String> = []
     for id in Array(streams.keys) where !rootSet.contains(id) {
       if let rescueUntil = rescuingWindowIDs[id], now < rescueUntil { continue }
       // A hidden app's windows are hidden, not closed: they come back when it is shown again.
       if let s = streams[id], fused.contains(s.pid), NSRunningApplication(processIdentifier: s.pid)?.isHidden == true {
-        hiddenNow.insert(s.bundle)
+        hiddenNow.insert(s.app)
         continue
       }
       // Only hold a stream open if the remote window entered Full-Screen Space or Dock Minimization
@@ -268,8 +276,8 @@ extension FusionRemoteSession {
       closeStream(id)
     }
 
-    for bundle in hiddenNow.subtracting(hiddenBundles) { wire.send(["t": "apphidden", "bundle": bundle, "on": true]) }
-    for bundle in hiddenBundles.subtracting(hiddenNow) { wire.send(["t": "apphidden", "bundle": bundle, "on": false]) }
+    for bundle in hiddenNow.subtracting(hiddenBundles) { wire.send(["t": "app.hidden", "app": bundle, "on": true]) }
+    for bundle in hiddenBundles.subtracting(hiddenNow) { wire.send(["t": "app.hidden", "app": bundle, "on": false]) }
     hiddenBundles = hiddenNow
 
     placeLock.lock()
@@ -279,7 +287,7 @@ extension FusionRemoteSession {
     var windowsPayload: [[String: Any]] = []
     for w in raw where (w.root && streams[w.id] != nil) || popups.contains(w.id) {
       var entry: [String: Any] = [
-        "id": w.id, "pid": w.pid, "bundle": w.bundle, "layer": w.layer, "z": w.z,
+        "id": w.id, "app": w.bundle, "layer": w.layer,
         "own": w.root, "title": w.title, "frame": Fusion.dict(w.local),
         "ack": Int(ackSnapshot[w.id] ?? 0),
       ]
@@ -289,8 +297,7 @@ extension FusionRemoteSession {
           Self.distanceSquared($0.frame, CGPoint(x: w.frame.midX, y: w.frame.minY)) < Self.distanceSquared($1.frame, CGPoint(x: w.frame.midX, y: w.frame.minY))
         }) {
           entry["parent"] = parent.id
-          entry["pdx"] = Double(w.frame.minX - parent.frame.minX)
-          entry["pdy"] = Double(w.frame.minY - parent.frame.minY)
+          entry["offset"] = ["x": Double(w.frame.minX - parent.frame.minX), "y": Double(w.frame.minY - parent.frame.minY)]
         }
       }
       windowsPayload.append(entry)
@@ -388,7 +395,7 @@ extension FusionRemoteSession {
       clipboard.armed = true
     }
     focusedWindowID = id
-    for (wid, s) in streams { s.session.setFusionFocused(wid == id) }
+    media?.focus(stream.key)
     let candidatePids = (streams[id].map { [$0.pid] } ?? []) + Array(fused)
     for pid in candidatePids {
       guard let w = axWindow(pid: pid, id: id) else { continue }
@@ -399,7 +406,7 @@ extension FusionRemoteSession {
       AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
       AXUIElementSetAttributeValue(w, kAXFocusedAttribute as CFString, kCFBooleanTrue)
       AXUIElementPerformAction(w, kAXRaiseAction as CFString)
-      if let bundle = pidToBundle[pid] ?? streams[id]?.bundle {
+      if let bundle = pidToBundle[pid] ?? streams[id]?.app {
         dockMenuStamps[bundle] = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
           self?.syncDockMenuIfNeeded(pid: pid, bundle: bundle)

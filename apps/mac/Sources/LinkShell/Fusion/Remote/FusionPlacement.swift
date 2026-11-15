@@ -186,7 +186,9 @@ final class FusionSampler {
       r2(local.minX), r2(local.minY), r2(local.width), r2(local.height),
       r6(nx), r6(ny), r6(nw), r6(nh),
       r2(inWin.minX), r2(inWin.minY), r2(inWin.width), r2(inWin.height),
-      Double(mirror.scale), Double(ackAtTime),
+      // The window id last: one transceiver carries a later window after this one closes, and
+      // the receiver drops a frame whose id is not the window its stream now belongs to.
+      Double(mirror.scale), Double(ackAtTime), Double(id),
     ])
   }
 
@@ -360,7 +362,7 @@ extension FusionRemoteSession {
         guard let self, !self.ended else { return }
         if didResize, resolvedPid != 0, self.streams[id] != nil {
           let (buttons, hitrects) = self.inspectWindowChrome(pid: resolvedPid, id: id, frame: settledRect)
-          self.wire.send(["t": "chrome", "id": id, "buttons": buttons, "hitrects": hitrects])
+          self.wire.send(["t": "wstyle", "id": id, "chrome": FusionProtocol.chrome(toolbar: self.hasToolbar(pid: resolvedPid, id: id), radius: nil, buttons: buttons, hitrects: hitrects)])
         }
         self.lastLayout = ""
         self.track()

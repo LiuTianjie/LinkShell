@@ -62,10 +62,11 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     var toolbar: Bool
     var cornerRadius: Double
     var frame: CGRect
-    var dragZone: Bool?
     var buttons: [String: [Double]]
     var hitrects: [[Double]]
     var ackSeq: Int
+    /// Its stream key on the shared media connection (`wopen.stream`).
+    var stream: String
   }
 
   struct PopupRecord {
@@ -95,7 +96,20 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   var pingTimer: Timer?
   var displays: [Int: (local: CGRect, scale: Int)] = [:]
   var outputs: [String: FusionOutput] = [:]
-  var receivers: [String: DesktopScreenReceiver] = [:]
+  var media: FusionMediaReceiver?
+  /// The remote's answer to `hello`; nothing else counts before it (docs/v2/fusion.md §4.2).
+  var welcomed = false
+  /// `welcome.session`: offered as `resume` when this hub reconnects after a drop.
+  var sessionID: String?
+  var remoteFeatures: Set<String> = []
+  /// The connection dropped without a `bye`: windows stay, waiting for a new token to resume with.
+  var suspended = false
+  var suspendTimer: Timer?
+  /// What the remote (or a protocol mismatch) said, shown instead of a generic reason.
+  var exitMessage: String?
+  var mediaRestarts: [Double] = []
+  /// How the hub leaves once its session is over; tests stay alive.
+  var terminate: () -> Void = { NSApp.terminate(nil) }
   var windows: [CGWindowID: WindowRecord] = [:]
   var lastWindowSEI: [CGWindowID: [Double]] = [:]
   var popups: [CGWindowID: PopupRecord] = [:]
@@ -293,6 +307,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
       client.send([
         "t": "status",
         "connected": connected,
+        "reconnecting": suspended,
         "rttMs": Int(rtt.rounded()),
         "hostLabel": hostLabel,
         "hostSlug": hostSlug,
@@ -327,9 +342,11 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     case "stopHub":
       client.send(["t": "ok"])
       client.close()
+      sayBye()
       stopping = true
       writeExitStatus(reason: "stopped")
-      NSApp.terminate(nil)
+      // The `bye` must leave before the process does, or the remote waits out its grace period.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.terminate() }
     default:
       client.close()
     }
@@ -361,7 +378,7 @@ extension FusionLocal {
     appActiveTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: false) { [weak self] _ in
       guard let self, self.activeStubs.isEmpty, self.remoteAppActive else { return }
       self.remoteAppActive = false
-      self.wire?.send(["t": "appactive", "on": false])
+      self.wire?.send(["t": "app.active", "on": false])
     }
   }
 
@@ -426,17 +443,11 @@ extension FusionLocal {
       // Built-in panels can report 0 Hz; the screen's own maximum is the truth for ProMotion.
       let modeHz = CGDisplayCopyDisplayMode(id)?.refreshRate ?? 0
       let hz = max(modeHz, Double(screen.maximumFramesPerSecond), 60)
-      return ["id": id, "frame": Fusion.dict(CGDisplayBounds(id)), "visible": Fusion.dict(visible), "scale": screen.backingScaleFactor, "hz": hz]
+      return ["frame": Fusion.dict(CGDisplayBounds(id)), "visible": Fusion.dict(visible), "scale": Double(screen.backingScaleFactor), "hz": hz]
     }
   }
 
-  static func displaysSignature(_ displays: [[String: Any]]) -> String {
-    let parts = displays.map { d -> String in
-      let f = Fusion.rect(d["frame"]), v = Fusion.rect(d["visible"])
-      return "\(f.minX),\(f.minY),\(f.width),\(f.height)|\(v.minY),\(v.height)|\(Fusion.number(d["scale"]))"
-    }
-    return parts.joined(separator: ";")
-  }
+  static func displaysSignature(_ displays: [[String: Any]]) -> String { FusionProtocol.displaysSignature(displays) }
 
   /// Plugging a display, changing a scale or waking re-describes the local screens; the remote
   /// rebuilds its virtual displays to match, otherwise windows clamp onto stale ones.
@@ -465,22 +476,104 @@ extension FusionLocal {
     let screens = Self.localDisplays()
     lastDisplaysSignature = Self.displaysSignature(screens)
     observeDisplays()
-    wire?.send(["t": "hello", "token": token, "displays": screens])
+    welcomed = false
+    var hello: [String: Any] = [
+      "t": "hello", "proto": FusionProtocol.version, "token": token, "platform": "macos",
+      "features": FusionProtocol.localFeatures, "displays": screens,
+      "name": Host.current().localizedName ?? "",
+    ]
+    if suspended, let sessionID { hello["resume"] = sessionID }
+    wire?.send(hello)
     pingTimer?.invalidate()
     pingTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
       self?.wire?.send(["t": "ping", "ts": CACurrentMediaTime()])
     }
   }
 
+  func welcome(_ m: [String: Any]) {
+    guard (m["proto"] as? NSNumber)?.intValue == FusionProtocol.version else {
+      return outdated("远端 LinkShell 版本与本机不一致，请把两台电脑都升级到最新版本后再开启融合模式")
+    }
+    welcomed = true
+    let resumed = m["resumed"] as? Bool == true && suspended
+    sessionID = m["session"] as? String
+    remoteFeatures = Set((m["features"] as? [String]) ?? [])
+    suspendTimer?.invalidate()
+    suspendTimer = nil
+    suspended = false
+    if !resumed {
+      // A new session on the remote: windows from before it are gone there too.
+      dropWindows()
+    }
+    clearAlert("reconnecting")
+    startMedia()
+    Fusion.log("welcome: session \(sessionID ?? "?")\(resumed ? " (resumed)" : ""), features \(remoteFeatures.sorted())")
+  }
+
+  /// A new peer connection for the pictures, with every stream already announced added to it.
+  func startMedia() {
+    media?.stop()
+    let media = FusionMediaReceiver(physicalKeys: remoteFeatures.contains("keys"), onSignal: { [weak self] payload in
+      self?.wire?.send(["t": "rtc", "m": payload])
+    }, onStatus: { [weak self] status in
+      guard let self else { return }
+      if let error = status["controlError"] as? String, !error.isEmpty { self.setAlert("accessibility", message: error) }
+      if status["live"] as? Bool == true { self.clearAlert("webrtc") }
+      self.refreshStatus()
+    }, onFailure: { [weak self] message in
+      self?.mediaFailed(message)
+    })
+    self.media = media
+    for output in outputs.values {
+      output.receivedPicture = false
+      media.add(output)
+    }
+  }
+
+  /// The pictures' connection failed while the control connection lives (video goes its own way,
+  /// direct or through TURN): ask the remote for a fresh one, a few times a minute at most.
+  func mediaFailed(_ message: String) {
+    updateStatus("融合视频：\(message)")
+    let now = CACurrentMediaTime()
+    mediaRestarts = mediaRestarts.filter { now - $0 < 60 } + [now]
+    guard connected, welcomed, mediaRestarts.count <= 3 else {
+      setAlert("webrtc", message: message)
+      return
+    }
+    Fusion.log("media failed (\(message)): restarting it")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+      guard let self, self.connected, self.welcomed else { return }
+      self.startMedia()
+      self.wire?.send(["t": "rtc", "m": ["t": "restart"]])
+    }
+  }
+
+  /// The remote is older (or newer) than this hub: say so and stop, there is nothing to retry.
+  func outdated(_ message: String) {
+    Fusion.log("protocol mismatch: \(message)")
+    exitMessage = message
+    stopping = true
+    wire?.onClose = nil
+    wire?.close(reason: "proto")
+    closed(reason: "proto")
+  }
+
   func receive(_ m: [String: Any]) {
-    switch m["t"] as? String {
+    let type = m["t"] as? String
+    if type == "welcome" { return welcome(m) }
+    if type == "bye" { return bye(m) }
+    // A v1 remote answers `hello` with `apps`: it cannot speak to this hub.
+    guard welcomed else {
+      if type == "apps" || type == "ready" { outdated("远端 LinkShell 版本较旧，请先升级远端电脑的 LinkShell 后再开启融合模式") }
+      return
+    }
+    switch type {
     case "apps": applyCatalog(m)
     case "ready": ready(m)
-    case "sig": if let key = m["k"] as? String { receivers[key]?.receive(m["m"] as? [String: Any] ?? [:]) }
+    case "rtc": if let payload = m["m"] as? [String: Any] { media?.receive(payload) }
     case "wopen": remoteWindowOpened(m)
     case "wclose": remoteWindowClosed(m)
-    case "style": remoteWindowStyle(m)
-    case "chrome": remoteWindowChrome(m)
+    case "wstyle": remoteWindowStyle(m)
     case "fullscreen":
       let id = CGWindowID(Fusion.number(m["id"]))
       if let bundle = windows[id]?.bundle {
@@ -491,28 +584,27 @@ extension FusionLocal {
       if let bundle = windows[id]?.bundle {
         stubs[bundle]?.send(["t": "minimize", "id": Int(id)])
       }
-    case "apphidden":
-      if let bundle = m["bundle"] as? String {
+    case "app.hidden":
+      if let bundle = m["app"] as? String {
         stubs[bundle]?.send(["t": "hidden", "on": m["on"] as? Bool == true])
       }
     case "clip":
       receiveRemoteClipboard(m)
     case "menu":
-      if let bundle = m["bundle"] as? String {
+      if let bundle = m["app"] as? String {
         var forward = m
-        forward.removeValue(forKey: "bundle")
+        forward.removeValue(forKey: "app")
         stubs[bundle]?.send(forward)
       }
-    case "dragzone": remoteDragZone(m)
     case "layout": remoteLayout(m["windows"] as? [[String: Any]] ?? [])
     case "icon": remoteIcon(m)
     case "dockmenu":
-      if let bundle = m["bundle"] as? String, let items = m["items"] as? [[String: Any]] {
+      if let bundle = m["app"] as? String, let items = m["items"] as? [[String: Any]] {
         dockMenus[bundle] = items
         stubs[bundle]?.send(["t": "dockmenu", "items": items])
       }
     case "app.exited":
-      if let bundle = m["bundle"] as? String {
+      if let bundle = m["app"] as? String {
         quittingBundles.removeValue(forKey: bundle)
         purgeLocalState(forBundle: bundle)
         if let stub = stubs[bundle] {
@@ -525,8 +617,6 @@ extension FusionLocal {
     case "pong":
       rtt = (CACurrentMediaTime() - Fusion.number(m["ts"])) * 1000
       refreshStatus()
-    case "error":
-      updateStatus("远端提示：\(m["message"] as? String ?? "")")
     case "alert":
       let kind = m["kind"] as? String ?? "remote"
       let subject = m["subject"] as? String ?? ""
@@ -540,57 +630,44 @@ extension FusionLocal {
     }
   }
 
+  /// The remote ended the session (stopped there, another computer took over, a protocol mismatch):
+  /// its message is what the person sees, and there is nothing to resume.
+  func bye(_ m: [String: Any]) {
+    let reason = m["reason"] as? String ?? "stopped"
+    Fusion.log("remote said bye: \(reason)")
+    exitMessage = m["message"] as? String
+    stopping = reason == "user" || reason == "stopped"
+    // Said on purpose: there is no session left to resume.
+    sessionID = nil
+    suspended = false
+    wire?.onClose = nil
+    wire?.close(reason: "bye")
+    closed(reason: reason == "proto" ? "proto" : (stopping ? "stopped" : reason))
+  }
+
+  /// Ends the session from here: the remote puts its windows back at once instead of waiting.
+  func sayBye() {
+    wire?.send(["t": "bye", "reason": "user"])
+  }
+
+  /// A stream the remote announced: its frames arrive on the shared media connection.
   func receiver(_ key: String, picture: @escaping (CVPixelBuffer, Data?) -> Void) {
     let output = FusionOutput(key: key, owner: self, picture: picture)
     outputs[key] = output
     syncFastState()
-    receivers[key] = DesktopScreenReceiver(surface: output, preferH264: true, onSignal: { [weak self] message in
-      self?.wire?.send(["t": "sig", "k": key, "m": message])
-    }, onStatus: { [weak self] status in
-      guard let self else { return }
-      if let error = status["controlError"] as? String, !error.isEmpty {
-        self.setAlert("accessibility", message: error)
-      } else if status["control"] as? Bool == true {
-        self.clearAlert("accessibility")
-      }
-      if status["live"] as? Bool == true { self.clearAlert("webrtc", subject: key) }
-      self.refreshStatus()
-    }, onFailure: { [weak self] message in
-      guard let self else { return }
-      self.updateStatus("\(key)：\(message)")
-      var extra: [String: Any] = ["stream": key]
-      if key.hasPrefix("w"), let id = CGWindowID(key.dropFirst()), let bundle = self.windows[id]?.bundle { extra["bundle"] = bundle }
-      self.setAlert("webrtc", subject: key, message: message, extra: extra)
-    })
-    receivers[key]?.setControl(true)
+    media?.add(output)
   }
 
   static func parseApps(_ raw: Any?) -> [AppEntry] {
-    let list: [[String: String]]
-    if let direct = raw as? [[String: String]] {
-      list = direct
-    } else if let generic = raw as? [[String: Any]] {
-      list = generic.map { dict in
-        var out: [String: String] = [:]
-        for (k, v) in dict {
-          if let s = v as? String { out[k] = s }
-        }
-        return out
-      }
-    } else {
-      list = []
-    }
-    return list.compactMap { item in
-      let name = item["name"] ?? ""
-      let bundle = item["bundle"] ?? ""
-      guard !bundle.isEmpty else { return nil }
-      let rawCat = item["category"] ?? ""
+    ((raw as? [[String: Any]]) ?? []).compactMap { item in
+      guard let bundle = item["app"] as? String, !bundle.isEmpty else { return nil }
+      let rawCat = item["category"] as? String ?? ""
       return AppEntry(
-        name: name,
+        name: item["name"] as? String ?? "",
         bundle: bundle,
         rawCategory: rawCat,
         category: Self.mapCategory(rawCat),
-        isSystem: item["system"] == "1"
+        isSystem: item["system"] as? Bool == true
       )
     }
   }
@@ -676,24 +753,23 @@ extension FusionLocal {
 
   func ready(_ m: [String: Any]) {
     connected = true
-    let indices = Set((m["displays"] as? [[String: Any]] ?? []).map { Int(Fusion.number($0["index"])) })
+    let list = m["displays"] as? [[String: Any]] ?? []
+    let screens = Self.localDisplays()
+    let indices = Set(list.map { Int(Fusion.number($0["index"])) })
     for index in displays.keys where !indices.contains(index) {
       displays.removeValue(forKey: index)
-      receivers.removeValue(forKey: "d\(index)")?.stop()
+      media?.remove("d\(index)")
       outputs.removeValue(forKey: "d\(index)")
     }
-    for d in m["displays"] as? [[String: Any]] ?? [] {
+    for d in list {
       let index = Int(Fusion.number(d["index"]))
-      displays[index] = (Fusion.rect(d["local"]), Int(Fusion.number(d["scale"])))
-      // A display rebuild sends `ready` again: the old overlay peer must not linger beside the new one.
-      receivers.removeValue(forKey: "d\(index)")?.stop()
+      // The remote's virtual display is 1x or 2x whatever this screen's scale (Windows' 1.5 included).
+      let scale = index < screens.count ? FusionProtocol.backingScale(Fusion.number(screens[index]["scale"])) : 2
+      displays[index] = (Fusion.rect(d["frame"]), scale)
+      media?.remove("d\(index)")
       receiver("d\(index)") { [weak self] buffer, layout in self?.handleDisplayPicture(index, buffer, layout) }
     }
     syncFastState()
-    let parsed = Self.parseApps(m["apps"])
-    if !parsed.isEmpty || apps.isEmpty {
-      apps = parsed
-    }
     reloadGrid()
     saveCatalogToDisk()
     refreshStatus()
@@ -706,13 +782,49 @@ extension FusionLocal {
     }
   }
 
+  /// Windows of a session that is gone: their stubs close them.
+  func dropWindows() {
+    let ids = Array(windows.keys)
+    for (id, record) in windows {
+      stubs[record.bundle]?.send(["t": "wclose", "id": Int(id)])
+    }
+    windows.removeAll()
+    lastWindowSEI.removeAll()
+    popups.removeAll()
+    shownPopupsByDisplay.removeAll()
+    outputs.removeAll()
+    syncFastState(removedWindowIDs: ids)
+  }
+
   func closed(reason: String = "closed") {
-    writeExitStatus(reason: stopping ? "stopped" : reason)
     connected = false
     pingTimer?.invalidate()
     pingTimer = nil
-    receivers.values.forEach { $0.stop() }
-    receivers.removeAll()
+    media?.stop()
+    media = nil
+    // A drop after a session was running is likely a blip: the windows stay, and the desktop
+    // brings a new token (`activate`) to resume with (docs/v2/fusion.md §4.3).
+    // A failed attempt to resume (unreachable, refused) keeps waiting too: the desktop tries again.
+    if !stopping, welcomed || suspended, sessionID != nil, reason != "proto", reason != "token" {
+      welcomed = false
+      outputs.values.forEach { $0.receivedPicture = false; $0.controlEnabled = false }
+      updateStatus("与 \(hostLabel) 的连接中断，正在重新连接…")
+      setAlert("reconnecting", message: "与 \(hostLabel) 的连接中断，正在重新连接…")
+      // Armed once, at the first drop: the remote's grace counts from then, not from each retry.
+      if !suspended {
+        suspended = true
+        suspendTimer?.invalidate()
+        suspendTimer = Timer.scheduledTimer(withTimeInterval: FusionProtocol.resumeGrace + 5, repeats: false) { [weak self] _ in
+          guard let self, self.suspended else { return }
+          self.suspended = false
+          self.sessionID = nil
+          self.closed(reason: reason)
+        }
+      }
+      Fusion.log("connection lost (\(reason)): keeping windows for a resume")
+      return
+    }
+    writeExitStatus(reason: reason == "proto" ? "proto" : (stopping ? "stopped" : reason))
     outputs.removeAll()
     windows.removeAll()
     lastWindowSEI.removeAll()
@@ -727,7 +839,7 @@ extension FusionLocal {
     stubHadRealIconOnLaunch.removeAll()
     syncFastState()
     updateStatus("与 \(hostLabel) 的连接已断开 — 可在 LinkShell 中重新开启融合模式")
-    NSApp.terminate(nil)
+    terminate()
   }
 }
 
@@ -768,7 +880,7 @@ extension FusionLocal {
   func writeExitStatus(reason: String) {
     let payload: [String: Any] = [
       "reason": reason,
-      "message": Self.describeClose(reason),
+      "message": exitMessage ?? Self.describeClose(reason),
       "at": Int(Date().timeIntervalSince1970 * 1000),
       "wasConnected": connected,
       "alerts": alertList,
@@ -784,6 +896,8 @@ extension FusionLocal {
     case "tls", "token": return "无法与远端 Mac 的融合服务完成加密握手（直连可能被代理或 VPN 拦截），请重新开启融合模式"
     case "unreachable", "failed": return "无法连接到远端 Mac 的融合服务"
     case "stopped": return "融合模式已停止"
+    case "proto": return "两台电脑的 LinkShell 版本不一致，请都升级到最新版本后再开启融合模式"
+    case "replaced": return "另一台电脑开启了与远端的融合模式"
     default: return "与远端 Mac 的融合连接已断开"
     }
   }
