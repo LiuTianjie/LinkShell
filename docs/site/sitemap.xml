@@ -13,6 +13,19 @@
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-screen.jpg</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/iphone-duo-expanded-dark.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-follow.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-queue.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-zh-light.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-zh-dark.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/linkshell.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/notes.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/terminal.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/messages.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/xcode-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/photos-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/trash.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/pay_wechat.jpg</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/pay_ali.jpg</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/" />
@@ -32,6 +45,20 @@
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-screen.jpg</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/iphone-duo-expanded-dark.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-screen.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/film.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-follow.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/promo/card-queue.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-en-light.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/safari-en-dark.jpg</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/linkshell.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/notes.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/terminal.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/messages.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/xcode-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/photos-mini.png</image:loc></image:image>
+    <image:image><image:loc>https://linkshell.itool.tech/assets/fusion/trash.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/pay_wechat.jpg</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/pay_ali.jpg</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/" />

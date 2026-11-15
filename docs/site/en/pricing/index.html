@@ -192,17 +192,17 @@
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
-  <meta name="theme-color" content="#09090b" />
-  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#f3f1ec" />
+  <meta name="color-scheme" content="light dark" />
   <link rel="manifest" href="site.webmanifest" />
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Instrument+Serif&amp;family=Noto+Serif+SC:wght@600;700&amp;family=Noto+Serif+JP:wght@600;700&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
   <script>
-    // Before first paint: the theme (?theme=, then the saved choice; dark otherwise) and that
+    // Before first paint: the theme (?theme=, then the saved choice; paper otherwise) and that
     // scripts run. Each language has its own address (against <base>: data-alt is the other of
     // Chinese and English, data-alt-<lang> any further one a view has): the visitor's choice
     // (?lang=, then the saved one) leads there, and with no choice yet a Chinese page (the root
@@ -216,7 +216,7 @@
         saved = localStorage.getItem('linkshell-lang');
         if (known.test(lang)) localStorage.setItem('linkshell-lang', lang);
       } catch (e) { }
-      root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      root.dataset.theme = theme === 'dark' ? 'dark' : 'light';
       root.classList.add('js');
       if (!known.test(lang)) lang = saved;
       if (!known.test(lang) && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
@@ -270,37 +270,45 @@
       color-scheme: dark;
     }
 
+    /* Paper: the site's default. Warm off-white, ink type, the indigo for what can be pressed. */
     :root[data-theme="light"] {
-      --bg: #fafafa;
-      --surface: #f2f2f3;
-      --surface-2: #e9e9eb;
-      --surface-3: #dcdcdf;
-      --border: rgba(9, 9, 11, .08);
-      --border-strong: rgba(9, 9, 11, .18);
-      --text: #09090b;
-      --text-sec: #52525b;
-      --text-muted: #52525b;
+      --bg: #f3f1ec;
+      --surface: #ebe8e1;
+      --surface-2: #e3dfd6;
+      --surface-3: #d8d3c8;
+      --border: rgba(30, 26, 16, .12);
+      --border-strong: rgba(30, 26, 16, .24);
+      --text: #121110;
+      --text-sec: #5c5850;
+      --text-muted: #5c5850;
       --accent: #4c5fd5;
       --accent-fill: #4c5fd5;
       --accent-hover: #4254c7;
       --accent-ink: #ffffff;
-      --ink: #09090b;
-      --ink-fg: #fafafa;
+      --ink: #121110;
+      --ink-fg: #f3f1ec;
       --success: #187a4a;
       --danger: #c8322f;
       --warning: #ad5200;
-      --code-bg: #f2f2f3;
+      --code-bg: #ebe8e1;
       color-scheme: light;
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; -webkit-text-size-adjust: 100%; }
     body { margin: 0; background: var(--bg); color: var(--text); font: var(--body)/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; text-underline-offset: 3px; }
     img { max-width: 100%; height: auto; display: block; }
     h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.1; letter-spacing: -.035em; text-wrap: balance; }
     html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.01em; line-height: 1.22; }
+    /* Headlines are set in a serif: Noto Serif SC / JP for Chinese and Japanese, Instrument Serif for English. */
+    :root { --serif: "Instrument Serif", Georgia, "Times New Roman", serif; --serif-w: 400; }
+    html[lang^="zh"] { --serif: "Noto Serif SC", "Songti SC", "STSong", serif; --serif-w: 700; }
+    html[lang="ja"] { --serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif; --serif-w: 700; }
+    :is(h1, h2, .day-say, .clock .now, .three > div > b, .step::before, .price) { font-family: var(--serif); font-weight: var(--serif-w); }
+    html[lang="en"] :is(h1, h2, .day-say) { letter-spacing: -.015em; line-height: 1.02; }
+    html[lang^="zh"] :is(h1, h2, .day-say), html[lang="ja"] :is(h1, h2, .day-say) { letter-spacing: 0; }
     p { margin: 0; }
     code, pre { font-family: var(--mono); }
     :not(pre) > code { font-size: .88em; background: var(--surface-2); padding: .12em .38em; border-radius: 6px; white-space: nowrap; }
@@ -323,8 +331,8 @@
     @media (max-width: 700px) { :root { --gutter: 20px; } }
 
     /* nav: a plain row on the page's own ground */
-    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); }
-    .nav .wrap { display: flex; align-items: center; gap: 4px; height: 68px; }
+    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); transition: background-color .3s; }
+    .nav .wrap { display: flex; align-items: center; gap: 4px; height: 60px; }
     .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--text); font-size: var(--body); font-weight: 600; letter-spacing: -.01em; }
     .brand:hover { text-decoration: none; }
     .brand img { width: 28px; height: 28px; border-radius: 7px; }
@@ -342,11 +350,11 @@
 
     /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
     .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: var(--fam-r-md); font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
+    .btn { display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 24px; border: 0; border-radius: 999px; font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
     .btn:hover { text-decoration: none; }
     .btn:active { transform: scale(.97); }
-    .btn-p { background: var(--accent-fill); color: var(--accent-ink); }
-    .btn-p:hover { background: var(--accent-hover); }
+    .btn-p { background: var(--ink); color: var(--ink-fg); }
+    .btn-p:hover { background: color-mix(in srgb, var(--ink) 82%, var(--bg)); }
     .btn-s { background: var(--surface-2); color: var(--text); }
     .btn-s:hover { background: var(--surface-3); }
     .btn svg { width: 18px; height: 18px; flex: none; }
@@ -392,7 +400,7 @@
     /* home: the first screen says what this is, and lets you do its one thing */
     .hero { padding-block: 96px 0; }
     .hero-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: center; }
-    .hero h1 { font-size: clamp(48px, 6.3vw, 98px); font-weight: 600; letter-spacing: -.055em; line-height: .98; }
+    .hero h1 { font-size: clamp(44px, 5.4vw, 84px); line-height: 1.06; }
     html[lang^="zh"] .hero h1 { letter-spacing: -.03em; line-height: 1.1; }
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
@@ -856,26 +864,62 @@
       document.querySelectorAll('.hour').forEach((h) => watch.observe(h));
     })();
 
-    // ── Fusion: the other Mac's apps slide into this Dock, badge and all ──
+    // ── Fusion: the drawn desktop keeps its proportions; the other Mac's apps arrive once it is seen ──
     (() => {
-      const fz = document.getElementById('fz');
-      if (!fz) return;
-      const fit = () => fz.style.setProperty('--fz-s', fz.clientWidth / 1120);
+      const desk = document.querySelector('.desk');
+      if (!desk) return;
+      const fit = () => desk.style.setProperty('--desk-s', desk.clientWidth / 1280);
       fit();
-      if ('ResizeObserver' in window) new ResizeObserver(fit).observe(fz); else addEventListener('resize', fit);
+      if ('ResizeObserver' in window) new ResizeObserver(fit).observe(desk); else addEventListener('resize', fit);
       const bounce = (el) => { el.classList.remove('bounce'); void el.offsetWidth; el.classList.add('bounce'); };
-      const remote = [...fz.querySelectorAll('.fz-app.remote')];
-      remote.forEach((el) => el.addEventListener('click', () => bounce(el)));
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) { fz.classList.add('played'); return; }
-      // Played once, when most of it is on screen: one app at a time, as if chosen in LinkShell.
+      const remote = [...desk.querySelectorAll('.fz-app.remote')];
+      const canvas = desk.querySelector('.desk-canvas');
+      const front = desk.querySelector('.desk-bar b');
+      const wins = Object.fromEntries([...desk.querySelectorAll('.win')].map((w) => [w.dataset.app, w]));
+      const icon = (id) => desk.querySelector(`.fz-app[data-app="${id}"]`);
+      let order = [];
+      const paint = () => {
+        order.forEach((id, i) => { wins[id].style.zIndex = 3 + i; wins[id].classList.toggle('front', i === order.length - 1); });
+        const top = order[order.length - 1];
+        front.textContent = top ? icon(top).querySelector('.name').textContent : 'Finder';
+      };
+      // A window grows out of, and shrinks back into, its own Dock icon.
+      const aim = (id) => {
+        const scale = desk.clientWidth / 1280, c = canvas.getBoundingClientRect(), r = icon(id).getBoundingClientRect(), w = wins[id];
+        const x = (r.left + r.width / 2 - c.left) / scale - w.offsetLeft, y = (r.top + r.height / 2 - c.top) / scale - w.offsetTop;
+        w.style.transformOrigin = `${x}px ${y}px`;
+      };
+      const open = (id) => { aim(id); wins[id].classList.remove('shut'); order = order.filter((o) => o !== id).concat(id); paint(); };
+      const shut = (id) => { aim(id); wins[id].classList.add('shut'); order = order.filter((o) => o !== id); paint(); };
+      remote.forEach((el) => el.addEventListener('click', () => {
+        const id = el.dataset.app;
+        bounce(el);
+        if (!order.includes(id)) open(id);
+        else if (order[order.length - 1] !== id) { order = order.filter((o) => o !== id).concat(id); paint(); }
+        else shut(id);
+      }));
+      Object.entries(wins).forEach(([id, w]) => {
+        w.addEventListener('pointerdown', () => { if (order.includes(id) && order[order.length - 1] !== id) { order = order.filter((o) => o !== id).concat(id); paint(); } });
+        w.querySelector('.tl .min').addEventListener('click', (e) => { e.stopPropagation(); shut(id); });
+      });
+      const note = desk.querySelector('.note');
+      const sequence = ['xcode', 'photos', 'safari'];
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) { sequence.forEach(open); note.classList.add('in'); return; }
+      remote.forEach((el) => el.classList.add('away'));
+      Object.values(wins).forEach((w) => w.classList.add('shut'));
+      paint();
+      // One app at a time, as if chosen in LinkShell: it lands in the Dock, then its window opens.
       const seen = new IntersectionObserver(([entry]) => {
         if (!entry.isIntersecting) return;
         seen.disconnect();
-        remote.forEach((el) => el.classList.add('away'));
-        fz.classList.add('played');
-        remote.forEach((el, i) => setTimeout(() => { el.classList.remove('away'); setTimeout(() => bounce(el), 450); }, 500 + i * 1300));
-      }, { threshold: 0.6 });
-      seen.observe(fz);
+        sequence.forEach((id, i) => {
+          const t = 400 + i * 1500;
+          setTimeout(() => { icon(id).classList.remove('away'); setTimeout(() => bounce(icon(id)), 450); }, t);
+          setTimeout(() => open(id), t + 1000);
+        });
+        setTimeout(() => note.classList.add('in'), 400 + 2 * 1500 + 1500);
+      }, { threshold: 0.5 });
+      seen.observe(desk);
     })();
 
     // ── The agents row: each agent's mark and name, once ──
@@ -899,13 +943,13 @@
       if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       const film = document.getElementById('film-stage');
       if (film) { film.classList.add('shutter'); requestAnimationFrame(() => setTimeout(() => film.classList.add('in'), 120)); }
-      const parts = '.hero h1, .hero .lead, .hero .btns, .ask, .day-say, .hour h2, .hour > p, .shot, .fz, .steps-line li, .duo-figure, .rest h2, .index > div, .agents h2, .agent-line, .agent-notes > p, .setup h2, .setup .wrap > p, .three > div, .trust h2, .route, .trust-notes > p, .back h2, .back p, .back .btns, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .agent, .step, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
+      const parts = '.news, .kicker, .fusion h2, .fusion > .wrap > p, .desk, .hero h1, .hero .lead, .hero .btns, .ask, .day-say, .hour h2, .hour > p, .shot, .fz, .steps-line li, .duo-figure, .rest h2, .index > div, .agents h2, .agent-line, .setup h2, .setup .wrap > p, .three > div, .trust h2, .route, .trust-say, .back h2, .back p, .back .btns, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .agent, .step, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
       const seen = new IntersectionObserver((entries) => entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         entry.target.classList.add('in');
         seen.unobserve(entry.target);
       }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
-      document.querySelectorAll('.hero, .day-say, .hour, .rest, .agents, .setup, .trust, .back, .sec, .feature, .close, .pricing').forEach((section) => {
+      document.querySelectorAll('.fusion, .hero, .day-say, .hour, .rest, .agents, .setup, .trust, .back, .sec, .feature, .close, .pricing').forEach((section) => {
         let n = 0;
         section.querySelectorAll(parts).forEach((el) => {
           if (el.closest('.rise') || el.closest('#film-stage')) return;

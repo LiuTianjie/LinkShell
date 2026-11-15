@@ -191,17 +191,17 @@
   <meta name="format-detection" content="telephone=no,email=no,address=no" />
   <meta name="application-name" content="LinkShell" />
   <meta name="apple-mobile-web-app-title" content="LinkShell" />
-  <meta name="theme-color" content="#09090b" />
-  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#f3f1ec" />
+  <meta name="color-scheme" content="light dark" />
   <link rel="manifest" href="site.webmanifest" />
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Instrument+Serif&amp;family=Noto+Serif+SC:wght@600;700&amp;family=Noto+Serif+JP:wght@600;700&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
   <script>
-    // Before first paint: the theme (?theme=, then the saved choice; dark otherwise) and that
+    // Before first paint: the theme (?theme=, then the saved choice; paper otherwise) and that
     // scripts run. Each language has its own address (against <base>: data-alt is the other of
     // Chinese and English, data-alt-<lang> any further one a view has): the visitor's choice
     // (?lang=, then the saved one) leads there, and with no choice yet a Chinese page (the root
@@ -215,7 +215,7 @@
         saved = localStorage.getItem('linkshell-lang');
         if (known.test(lang)) localStorage.setItem('linkshell-lang', lang);
       } catch (e) { }
-      root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      root.dataset.theme = theme === 'dark' ? 'dark' : 'light';
       root.classList.add('js');
       if (!known.test(lang)) lang = saved;
       if (!known.test(lang) && root.dataset.lang === 'zh' && !/bot|crawl|spider|slurp|google|baidu|bing|yandex|lighthouse|preview/i.test(navigator.userAgent)) {
@@ -270,37 +270,45 @@
       color-scheme: dark;
     }
 
+    /* Paper: the site's default. Warm off-white, ink type, the indigo for what can be pressed. */
     :root[data-theme="light"] {
-      --bg: #fafafa;
-      --surface: #f2f2f3;
-      --surface-2: #e9e9eb;
-      --surface-3: #dcdcdf;
-      --border: rgba(9, 9, 11, .08);
-      --border-strong: rgba(9, 9, 11, .18);
-      --text: #09090b;
-      --text-sec: #52525b;
-      --text-muted: #52525b;
+      --bg: #f3f1ec;
+      --surface: #ebe8e1;
+      --surface-2: #e3dfd6;
+      --surface-3: #d8d3c8;
+      --border: rgba(30, 26, 16, .12);
+      --border-strong: rgba(30, 26, 16, .24);
+      --text: #121110;
+      --text-sec: #5c5850;
+      --text-muted: #5c5850;
       --accent: #4c5fd5;
       --accent-fill: #4c5fd5;
       --accent-hover: #4254c7;
       --accent-ink: #ffffff;
-      --ink: #09090b;
-      --ink-fg: #fafafa;
+      --ink: #121110;
+      --ink-fg: #f3f1ec;
       --success: #187a4a;
       --danger: #c8322f;
       --warning: #ad5200;
-      --code-bg: #f2f2f3;
+      --code-bg: #ebe8e1;
       color-scheme: light;
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; -webkit-text-size-adjust: 100%; }
     body { margin: 0; background: var(--bg); color: var(--text); font: var(--body)/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; text-underline-offset: 3px; }
     img { max-width: 100%; height: auto; display: block; }
     h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.1; letter-spacing: -.035em; text-wrap: balance; }
     html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.01em; line-height: 1.22; }
+    /* Headlines are set in a serif: Noto Serif SC / JP for Chinese and Japanese, Instrument Serif for English. */
+    :root { --serif: "Instrument Serif", Georgia, "Times New Roman", serif; --serif-w: 400; }
+    html[lang^="zh"] { --serif: "Noto Serif SC", "Songti SC", "STSong", serif; --serif-w: 700; }
+    html[lang="ja"] { --serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif; --serif-w: 700; }
+    :is(h1, h2, .day-say, .clock .now, .three > div > b, .step::before, .price) { font-family: var(--serif); font-weight: var(--serif-w); }
+    html[lang="en"] :is(h1, h2, .day-say) { letter-spacing: -.015em; line-height: 1.02; }
+    html[lang^="zh"] :is(h1, h2, .day-say), html[lang="ja"] :is(h1, h2, .day-say) { letter-spacing: 0; }
     p { margin: 0; }
     code, pre { font-family: var(--mono); }
     :not(pre) > code { font-size: .88em; background: var(--surface-2); padding: .12em .38em; border-radius: 6px; white-space: nowrap; }
@@ -323,8 +331,8 @@
     @media (max-width: 700px) { :root { --gutter: 20px; } }
 
     /* nav: a plain row on the page's own ground */
-    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); }
-    .nav .wrap { display: flex; align-items: center; gap: 4px; height: 68px; }
+    header.nav { position: sticky; top: 0; z-index: 20; background: var(--bg); transition: background-color .3s; }
+    .nav .wrap { display: flex; align-items: center; gap: 4px; height: 60px; }
     .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--text); font-size: var(--body); font-weight: 600; letter-spacing: -.01em; }
     .brand:hover { text-decoration: none; }
     .brand img { width: 28px; height: 28px; border-radius: 7px; }
@@ -342,11 +350,11 @@
 
     /* buttons: one shape (a pill), one primary (the indigo fill), the rest a tone step */
     .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 0; border-radius: var(--fam-r-md); font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
+    .btn { display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 24px; border: 0; border-radius: 999px; font-size: var(--body); font-weight: 500; letter-spacing: -.005em; cursor: pointer; transition: background-color .15s, color .15s, transform .15s var(--ease); }
     .btn:hover { text-decoration: none; }
     .btn:active { transform: scale(.97); }
-    .btn-p { background: var(--accent-fill); color: var(--accent-ink); }
-    .btn-p:hover { background: var(--accent-hover); }
+    .btn-p { background: var(--ink); color: var(--ink-fg); }
+    .btn-p:hover { background: color-mix(in srgb, var(--ink) 82%, var(--bg)); }
     .btn-s { background: var(--surface-2); color: var(--text); }
     .btn-s:hover { background: var(--surface-3); }
     .btn svg { width: 18px; height: 18px; flex: none; }
@@ -392,7 +400,7 @@
     /* home: the first screen says what this is, and lets you do its one thing */
     .hero { padding-block: 96px 0; }
     .hero-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: center; }
-    .hero h1 { font-size: clamp(48px, 6.3vw, 98px); font-weight: 600; letter-spacing: -.055em; line-height: .98; }
+    .hero h1 { font-size: clamp(44px, 5.4vw, 84px); line-height: 1.06; }
     html[lang^="zh"] .hero h1 { letter-spacing: -.03em; line-height: 1.1; }
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
@@ -594,8 +602,8 @@
     }
   </style>
   <style>
-    /* The home page tells one day away from the computer. No labels, no cards: type, the
-       product's own recordings, and room around them. A clock on the left keeps the hour. */
+    /* The home page: Fusion Mode first, on a drawn Mac desktop; then, on paper, how it works,
+       the phone, and one day away from the computer with a clock keeping the hour. */
 
     /* The day: a statement, then the hours. */
     .day { padding-top: 240px; }
@@ -626,68 +634,140 @@
     .shot .phone.side { width: 100%; }
     .hour .duo-figure { margin-top: 64px; }
 
-    /* Fusion: a close-up of this Mac's Dock. Apps from the other Mac slide in wearing the badge
-       LinkShell puts on them (the computer's name, bottom right), and Safari's window rises. */
-    .fz { position: relative; margin-top: 64px; aspect-ratio: 1120 / 560; overflow: hidden; border-radius: var(--fam-r-lg); background: #15173a; user-select: none; -webkit-user-select: none; }
-    .fz-canvas { position: absolute; top: 0; left: 0; width: 1120px; height: 560px; transform: scale(var(--fz-s, 1)); transform-origin: 0 0; color: #f5f5f7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif; }
-    .fz-wall { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .fz-win { position: absolute; overflow: hidden; border-radius: 14px; background: #1e1e20; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .18), 0 30px 80px rgba(0, 0, 0, .5); transition: opacity .6s var(--ease), transform .9s var(--ease); } /* taste-skill-ignore: macOS's own window shadow, inside the drawing */
-    .fz-win header { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; background: #2a2a2d; }
-    .fz-win header i { width: 13px; height: 13px; border-radius: 50%; background: #ff5f57; }
-    .fz-win header i + i { background: #febc2e; } .fz-win header i + i + i { background: #28c840; }
-    .fz-notes { left: 70px; top: 40px; width: 420px; height: 300px; background: #232325; }
-    .fz-notes header i { background: #4a4a4e !important; }
-    .fz-notes .tx { padding: 22px 26px; }
-    .fz-notes b { display: block; margin-bottom: 14px; font-size: 19px; font-weight: 700; }
-    .fz-notes span { display: block; height: 10px; margin-top: 12px; border-radius: 4px; background: rgba(255, 255, 255, .12); }
-    .fz-safari { left: 360px; top: 70px; width: 640px; height: 330px; }
-    .fz:not(.played) .fz-safari { opacity: 0; transform: translateY(60px) scale(.94); }
-    .fz-safari header { gap: 8px; }
-    .fz-safari .url { flex: 1; max-width: 300px; height: 26px; margin: 0 auto; border-radius: 8px; background: #3a3a3d; color: rgba(255, 255, 255, .7); font-size: 12.5px; line-height: 26px; text-align: center; }
-    .fz-page { padding: 34px 40px; background: #fafafa; height: 100%; color: #09090b; }
-    .fz-page b { display: block; font-size: 30px; font-weight: 700; letter-spacing: -.03em; }
-    .fz-page p { margin-top: 8px; color: #52525b; font-size: 14px; }
-    .fz-page .row { display: flex; gap: 14px; margin-top: 24px; }
-    .fz-page .row span { flex: 1; height: 120px; border-radius: 12px; background: #ececf1; }
-    .fz-page .row span:first-child { background: #5263e8; }
-    .fz-dock { position: absolute; left: 50%; bottom: 18px; display: flex; align-items: flex-end; padding: 10px 8px; border-radius: 30px; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .32), 0 16px 40px rgba(0, 0, 0, .3); backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8); transform: translateX(-50%); }
-    .fz-dock hr { align-self: stretch; width: 1px; margin: 8px 8px; border: 0; background: rgba(255, 255, 255, .3); }
-    .fz-app { position: relative; display: grid; place-items: center; width: 100px; padding: 0; border: 0; background: none; transition: width .7s var(--ease), opacity .4s; }
+    /* The hero's one line of news, leading to the Fusion section. */
+    .news { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; margin-bottom: 30px; padding: 7px 16px; border-radius: 999px; background: var(--surface); color: var(--text); font-size: var(--small); line-height: 1.4; transition: background-color .15s; }
+    .news:hover { background: var(--surface-2); text-decoration: none; }
+    .news b { color: var(--accent); font-weight: 600; }
+    .news svg { flex: none; width: 14px; height: 14px; color: var(--text-sec); transition: transform .2s var(--ease); }
+    .news:hover svg { transform: translateX(3px); }
+    .hero .film { margin-top: 96px; }
+
+    /* Fusion Mode, its own section. Its picture is this Mac's desktop, drawn at 1280 × 720 and
+       scaled: the menu bar, a notification, ⌘Tab and the Dock, with the real apps' icons, the
+       remote ones badged by FusionStubBundles.composeBadgedIcon itself (assets/fusion). It follows
+       the site's light and dark themes, as macOS would. */
+    .fusion { padding-top: 240px; }
+    .kicker { margin-bottom: 22px; color: var(--accent); font-size: var(--small); font-weight: 600; letter-spacing: .02em; }
+    .fusion h2 { max-width: 15em; font-size: var(--big); }
+    .fusion > .wrap > p:not(.kicker):not(.how) { max-width: 32em; margin-top: 24px; color: var(--text-sec); font-size: 19px; line-height: 1.7; }
+    .fusion .how { margin-top: 36px; color: var(--text-sec); }
+    .fusion .how a { margin-left: .4em; white-space: nowrap; }
+    .desk { --w0: #15173a; --w1: #1a1d47; --w2: #1f2459; --w3: #283084; --w4: #3741b0; --w5: #4a56d6; --wl: rgba(141, 155, 255, .35);
+      --d-ink: #fff; --d-sec: rgba(255, 255, 255, .78); --d-glass: rgba(255, 255, 255, .16); --d-edge: rgba(255, 255, 255, .3); --d-bar: rgba(12, 12, 30, .3); --d-note: rgba(40, 40, 54, .62); --d-tip: rgba(40, 40, 44, .92); --d-dot: rgba(255, 255, 255, .85); --d-switch: rgba(34, 34, 40, .78); --d-hi: rgba(255, 255, 255, .16); }
+    :root[data-theme="light"] .desk { --w0: #ebe9f7; --w1: #e2e0f5; --w2: #d7d5f2; --w3: #c3c2ee; --w4: #a9aae8; --w5: #8f92e2; --wl: rgba(82, 99, 232, .3);
+      --d-ink: #121110; --d-sec: rgba(18, 17, 16, .66); --d-glass: rgba(255, 255, 255, .42); --d-edge: rgba(255, 255, 255, .85); --d-bar: rgba(255, 255, 255, .5); --d-note: rgba(255, 255, 255, .74); --d-tip: rgba(255, 255, 255, .95); --d-dot: rgba(18, 17, 16, .7); --d-switch: rgba(246, 246, 250, .72); --d-hi: rgba(18, 17, 16, .1); }
+    .desk { position: relative; margin-top: 64px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 22px; background: var(--w0); box-shadow: 0 40px 90px rgba(30, 28, 20, .2), 0 0 0 1px var(--border); user-select: none; -webkit-user-select: none; }
+    .desk-canvas { position: absolute; top: 0; left: 0; width: 1280px; height: 720px; transform: scale(var(--desk-s, 1)); transform-origin: 0 0; color: var(--d-ink); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; letter-spacing: 0; }
+    .desk-wall { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .desk-wall .w0 { fill: var(--w0); } .desk-wall .w1 { fill: var(--w1); } .desk-wall .w2 { fill: var(--w2); } .desk-wall .w3 { fill: var(--w3); } .desk-wall .w4 { fill: var(--w4); } .desk-wall .w5 { fill: var(--w5); }
+    .desk-wall .wl { fill: none; stroke: var(--wl); stroke-width: 1.5; }
+    .desk-bar { position: absolute; inset: 0 0 auto; z-index: 5; display: flex; align-items: center; gap: 20px; height: 30px; padding: 0 18px; background: var(--d-bar); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); font-size: 13.5px; }
+    .desk-bar b { font-weight: 700; }
+    .desk-bar time { margin-left: auto; font-variant-numeric: tabular-nums; }
+    .note { position: absolute; top: 44px; right: 14px; z-index: 6; display: flex; align-items: center; gap: 12px; width: 360px; padding: 12px 16px 12px 12px; border-radius: 20px; background: var(--d-note); box-shadow: inset 0 0 0 .5px var(--d-edge), 0 12px 30px rgba(0, 0, 0, .16); backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); font-size: 13.5px; line-height: 1.4; color: var(--d-sec); transform: translateX(420px); transition: transform .8s var(--ease); }
+    .note.in { transform: none; }
+    .note b { display: block; color: var(--d-ink); font-size: 14px; }
+    .note .ico { flex: none; width: 48px; height: 48px; margin: -4px; }
+    /* The remote apps' windows, macOS 26: Safari with a real page, Xcode with a SwiftUI file,
+       Photos with LinkShell's own screenshots. Each opens out of its Dock icon and goes back into
+       it; clicking a window brings it forward. Light and dark follow the site's theme. */
+    .win { --w-bar: #f7f6fa; --w-ink: #3a3a40; --w-soft: rgba(0, 0, 0, .06); --w-bg: #ffffff; --w-side: #f1f0f5; --w-line: rgba(0, 0, 0, .08); --w-sec: #86868b;
+      position: absolute; z-index: 3; overflow: hidden; border-radius: 18px; background: var(--w-bg); color: var(--w-ink); box-shadow: 0 0 0 .5px rgba(0, 0, 0, .18), 0 28px 70px rgba(0, 0, 0, .28); transition: transform .65s var(--ease), opacity .5s; }
+    :root:not([data-theme="light"]) .win { --w-bar: #2c2c31; --w-ink: #e8e8ed; --w-soft: rgba(255, 255, 255, .08); --w-bg: #1e1e22; --w-side: #26262b; --w-line: rgba(255, 255, 255, .08); --w-sec: #98989d; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .16), 0 28px 70px rgba(0, 0, 0, .5); }
+    .win.shut { opacity: 0; transform: scale(.05); pointer-events: none; }
+    .win:not(.front) .tl i { background: var(--w-soft) !important; box-shadow: none; }
+    .w-bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 14px 0 18px; background: var(--w-bar); box-shadow: 0 .5px 0 var(--w-line); }
+    .tl { display: flex; gap: 8px; margin-right: 14px; }
+    .tl i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .2); }
+    .tl i + i { background: #febc2e; cursor: pointer; } .tl i + i + i { background: #28c840; cursor: default; }
+    .w-btn { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; }
+    .w-btn svg { width: 16px; height: 16px; }
+    .w-btn.dim, .sf-btn.dim { opacity: .35; }
+    .sf { left: 290px; top: 146px; width: 700px; height: 452px; }
+    .sf-btn { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; }
+    .sf-btn svg { width: 16px; height: 16px; }
+    .sf-url { display: flex; align-items: center; gap: 8px; width: 320px; height: 32px; margin: 0 auto; padding: 0 12px; border-radius: 10px; background: var(--w-soft); font-size: 13px; }
+    .sf-url svg { width: 12px; height: 12px; opacity: .6; }
+    .sf-url svg:last-child { margin-left: auto; }
+    .sf-url svg:first-child + * { margin: 0 auto; }
+    .sf-page { height: calc(100% - 52px); overflow: hidden; }
+    .sf-page img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .pg-dark, :root:not([data-theme="light"]) .pg-light { display: none; }
+    :root:not([data-theme="light"]) .pg-dark { display: block; }
+    /* Xcode */
+    .xc { left: 40px; top: 50px; width: 720px; height: 460px; }
+    .xc-scheme { margin-left: 10px; padding: 5px 12px; border-radius: 8px; background: var(--w-soft); font-size: 12.5px; white-space: nowrap; }
+    .xc-scheme i, .xc-status i { margin: 0 4px; font-style: normal; color: var(--w-sec); }
+    .xc-status { flex: 1; max-width: 300px; margin: 0 auto; padding: 5px 12px; border-radius: 8px; background: var(--w-soft); font-size: 12.5px; text-align: center; white-space: nowrap; }
+    .xc-body { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; height: calc(100% - 52px); }
+    .xc-nav { padding: 10px 6px; background: var(--w-side); font-size: 12.5px; }
+    .xc-nav .r { display: flex; align-items: center; gap: 6px; height: 24px; border-radius: 6px; white-space: nowrap; }
+    .xc-nav .r.on { background: #2f6bff; color: #fff; }
+    .xc-nav svg { width: 13px; height: 13px; flex: none; color: #2f8cff; }
+    .xc-nav .r.on svg { color: #fff; }
+    .sw { flex: none; width: 12px; height: 12px; border-radius: 3px; background: #f05138; }
+    .xc-ed { min-width: 0; border-left: .5px solid var(--w-line); border-right: .5px solid var(--w-line); }
+    .xc-tab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-bottom: .5px solid var(--w-line); font-size: 12px; }
+    .xc-src { --k: #9b2393; --t: #3900a0; --s: #c41a16; --n: #1c00cf; --a: #643820; padding: 10px 0; font: 12px/1.75 "SF Mono", "Geist Mono", ui-monospace, Menlo, monospace; white-space: pre; counter-reset: ln; overflow: hidden; }
+    :root:not([data-theme="light"]) .xc-src { --k: #fc5fa3; --t: #d0a8ff; --s: #fc6a5d; --n: #d0bf69; --a: #fd8f3f; }
+    .xc-src .ln { display: block; position: relative; min-height: 1.75em; padding-left: 44px; }
+    .xc-src .ln::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 30px; color: var(--w-sec); text-align: right; }
+    .xc-src .k { color: var(--k); font-weight: 600; } .xc-src .t { color: var(--t); } .xc-src .s { color: var(--s); } .xc-src .n { color: var(--n); } .xc-src .a { color: var(--a); }
+    .xc-pv { display: flex; flex-direction: column; align-items: center; gap: 30px; padding: 12px; background: var(--w-side); }
+    .xc-pv-h { align-self: flex-start; color: var(--w-sec); font-size: 11.5px; }
+    .xc-card { display: grid; gap: 2px; width: 150px; padding: 16px; border-radius: 18px; background: var(--w-bg); box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
+    .xc-card span { font-size: 13px; font-weight: 600; }
+    .xc-card b { font-size: 38px; font-weight: 600; line-height: 1.1; }
+    /* Photos */
+    .ph { left: 640px; top: 70px; width: 600px; height: 440px; }
+    .ph-wrap { display: grid; grid-template-columns: 150px minmax(0, 1fr); height: 100%; }
+    .ph-side { background: var(--w-side); font-size: 13px; }
+    .ph-side .w-bar { background: transparent; box-shadow: none; }
+    .ph-side .r { height: 28px; margin: 0 8px; padding: 0 10px; border-radius: 7px; line-height: 28px; }
+    .ph-side .r.on { background: var(--w-soft); font-weight: 600; }
+    .ph-main { display: flex; flex-direction: column; min-width: 0; }
+    .ph-top { display: flex; align-items: center; height: 52px; padding: 0 16px; }
+    .ph-top b { font-size: 15px; }
+    .ph-seg { display: flex; gap: 2px; margin-left: auto; padding: 2px; border-radius: 8px; background: var(--w-soft); font-size: 12px; }
+    .ph-seg i { padding: 3px 10px; border-radius: 6px; font-style: normal; color: var(--w-sec); }
+    .ph-seg i.on { background: var(--w-bg); color: var(--w-ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+    .ph-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 0 3px; overflow: hidden; }
+    .ph-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+    .desk-dock { position: absolute; left: 50%; bottom: 10px; z-index: 4; transform: translateX(-50%); }
+    .fz-dock { display: flex; align-items: flex-end; padding: 4px 6px; border-radius: 26px; background: var(--d-glass); box-shadow: inset 0 0 0 .5px var(--d-edge), 0 14px 36px rgba(0, 0, 0, .16); backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8); }
+    .fz-dock hr { align-self: stretch; width: 1px; margin: 12px 6px; border: 0; background: var(--d-edge); }
+    .fz-app { position: relative; display: grid; place-items: center; width: 74px; padding: 0; border: 0; background: none; color: inherit; transition: width .7s var(--ease), opacity .4s; }
     .fz-app.remote { cursor: pointer; }
-    .fz:not(.played) .fz-app.remote, .fz-app.remote.away { width: 0; opacity: 0; }
-    .fz-app::after { content: ""; position: absolute; bottom: -7px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: rgba(255, 255, 255, .85); opacity: 0; }
+    .fz-app.remote.away { width: 0; opacity: 0; }
+    .fz-app::after { content: ""; position: absolute; bottom: 0; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--d-dot); opacity: 0; }
     .fz-app.on::after { opacity: 1; }
-    .fz-app .name { position: absolute; bottom: calc(100% + 18px); left: 50%; padding: 4px 12px; border-radius: 8px; background: rgba(40, 40, 44, .92); font-size: 13px; white-space: nowrap; transform: translateX(-50%); opacity: 0; transition: opacity .15s; pointer-events: none; }
+    .fz-app .name { position: absolute; bottom: calc(100% + 14px); left: 50%; padding: 4px 12px; border-radius: 8px; background: var(--d-tip); font-size: 13px; white-space: nowrap; transform: translateX(-50%); opacity: 0; transition: opacity .15s; pointer-events: none; }
     .fz-app:hover .name { opacity: 1; }
     .fz-app.bounce .ico { animation: fz-bounce 1s var(--ease); }
-    @keyframes fz-bounce { 0%, 100% { transform: none; } 25% { transform: translateY(-30px); } 50% { transform: none; } 70% { transform: translateY(-12px); } }
-    .ico { position: relative; width: 84px; height: 84px; }
-    .ico > svg { width: 100%; height: 100%; display: block; }
-    .ico > img { width: 100%; height: 100%; border-radius: 22.5%; }
-    /* The badge, as FusionStubBundles.composeBadgedIcon draws it: accentFill, a white edge, the
-       first four letters of the computer's name. */
-    .ico .badge { position: absolute; right: 5%; bottom: 9%; display: grid; place-items: center; min-width: 34%; height: 18%; padding: 0 6%; border: 1.6px solid rgba(255, 255, 255, .92); border-radius: 5px; background: #4c5fd5; color: #fff; font: 700 11px/1 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .03em; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
-    .fz-key { position: absolute; left: 50%; bottom: 150px; display: flex; gap: 40px; color: rgba(255, 255, 255, .78); font-size: 14px; transform: translateX(-50%); }
-    .fz-key span { display: inline-flex; align-items: center; gap: 10px; }
-    .fz-key .ico { width: 30px; height: 30px; }
-    .fz-key .ico .badge { font-size: 0; min-width: 40%; height: 26%; border-width: 1px; border-radius: 3px; }
-    .steps-line { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin: 56px 0 0; padding: 0; list-style: none; counter-reset: s; }
-    .steps-line li { counter-increment: s; color: var(--text-sec); font-size: 17px; line-height: 1.6; }
-    .steps-line li::before { content: counter(s); display: block; margin-bottom: 14px; color: var(--text); font-size: 44px; font-weight: 500; letter-spacing: -.04em; line-height: 1; }
-    .steps-line b { color: var(--text); font-weight: 600; }
+    @keyframes fz-bounce { 0%, 100% { transform: none; } 25% { transform: translateY(-28px); } 50% { transform: none; } 70% { transform: translateY(-11px); } }
+    .ico { position: relative; display: block; width: 74px; height: 74px; }
+    .ico > img { width: 100%; height: 100%; }
+    @media (max-width: 700px) {
+      .fusion { padding-top: 160px; }
+      .desk { margin: 44px calc(var(--gutter) * -1) 0; border-radius: 0; box-shadow: none; }
+      .news { margin-bottom: 24px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .fz-app, .note, .win { transition: none; }
+      .fz-app.bounce .ico { animation: none; }
+    }
 
     /* The rest: a plain index, two columns, hairlines between. */
     .rest { padding-top: 240px; }
     .rest h2, .agents h2, .setup h2, .trust h2 { max-width: 14em; font-size: var(--big); letter-spacing: -.04em; }
     html[lang^="zh"] :is(.rest, .agents, .setup, .trust) h2 { letter-spacing: -.02em; }
     .index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 80px; margin: 72px 0 0; }
-    .index div { margin: 0; padding: 26px 0 28px; border-top: 1px solid var(--border); }
-    .index dt { font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
-    .index dd { margin: 8px 0 0; color: var(--text-sec); }
+    .index div { margin: 0; padding: 22px 0 24px; border-top: 1px solid var(--border); }
+    .index dt { font: var(--serif-w) clamp(22px, 2.2vw, 30px)/1.3 var(--serif); letter-spacing: -.005em; }
 
     /* The agents, named large, each with its own mark. */
     .agents { padding-top: 240px; }
-    .agent-line { margin-top: 56px; font-size: clamp(30px, 3.6vw, 50px); font-weight: 600; letter-spacing: -.035em; line-height: 1.5; }
+    .agent-line { margin-top: 56px; font: var(--serif-w) clamp(32px, 4vw, 56px)/1.45 var(--serif); letter-spacing: -.01em; }
     .agent-line .av { width: .9em; height: .9em; }
     .agent-line > span { display: inline-flex; align-items: center; gap: .24em; margin-right: .55em; white-space: nowrap; }
     .agent-line > span.any { color: var(--text-sec); }
@@ -708,10 +788,11 @@
 
     /* Trust: the route, said in words. */
     .trust { padding-top: 240px; }
-    .route { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 64px; font-size: clamp(28px, 3.4vw, 46px); font-weight: 600; letter-spacing: -.035em; }
+    .route { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 64px; font: var(--serif-w) clamp(30px, 3.8vw, 52px)/1.3 var(--serif); letter-spacing: -.01em; }
     .route i { display: inline-flex; align-items: center; gap: 12px; color: var(--text-sec); font: 500 var(--small) var(--mono); letter-spacing: 0; }
     .route i::before, .route i::after { content: ""; width: 36px; border-top: 1px solid var(--border-strong); }
     .route .home { color: var(--accent); }
+    .trust-say { max-width: 34em; margin-top: 48px; color: var(--text-sec); font-size: 19px; }
     .trust-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 56px; }
     .trust-notes p { color: var(--text-sec); }
     .trust-notes b { display: block; margin-bottom: 6px; color: var(--text); font-weight: 600; }
@@ -743,13 +824,12 @@
       .back { padding-top: 180px; }
       .hour > p { font-size: 17px; }
       .shot { flex-direction: column; align-items: center; gap: 28px; margin-top: 44px; }
-      .fz { margin: 44px calc(var(--gutter) * -1) 0; border-radius: 0; }
       .index { grid-template-columns: minmax(0, 1fr); margin-top: 44px; }
       .three > div > b { font-size: 56px; }
       .route i::before, .route i::after { width: 16px; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .fz-win, .fz-app { transition: none; }
+      .fz-app, .note { transition: none; }
       .fz-app.bounce .ico { animation: none; }
       .clock .now { transition: none; }
     }
@@ -782,8 +862,9 @@
       <div class="wrap">
         <div class="hero-top">
           <div>
+            <a class="news" href="#fusion"><b>新增融合模式</b>：把另一台 Mac 的应用，开在这台 Mac 上<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
             <h1><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></h1>
-            <p class="lead">Claude Code、Codex 这些编程 Agent 留在电脑上跑；你在手机、手表或锁屏上看它干活、点一下批准、随时插话。另一台 Mac 的应用，也能直接开在手边这台上。</p>
+            <p class="lead">Claude Code 和 Codex 在电脑上埋头写代码，你该吃饭吃饭，该开会开会。它要权限，手机震一下；你有想法，随时插一句。</p>
             <div class="btns">
               <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>iPhone 下载</a>
               <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>Android APK</a>
@@ -811,7 +892,6 @@
             <p class="ask-foot">这就是手机上收到的请求。点一下试试。</p>
           </div>
         </div>
-
         <div class="stage film" id="film-stage">
           <figure class="media">
             <picture>
@@ -827,44 +907,44 @@
 
     <section class="day">
       <div class="wrap">
-        <p class="day-say">你不用一直守在电脑前。<span>这是离开它的一天。</span></p>
+        <p class="day-say">没人规定写代码就得坐在电脑前。<span>比如今天。</span></p>
         <div class="day-grid">
-          <aside class="clock" aria-hidden="true"><span class="now">08:50</span><span class="where">出门</span><ol><li><a href="#features"><time>08:50</time>出门</a></li><li><a href="#glance"><time>09:20</time>地铁上</a></li><li><a href="#queue"><time>12:40</time>午饭</a></li><li><a href="#remote-desktop"><time>15:10</time>会议间隙</a></li><li><a href="#computer-use"><time>16:30</time>还在开会</a></li><li><a href="#iphone-duo"><time>18:30</time>回家路上</a></li><li><a href="#fusion"><time>21:30</time>客厅</a></li></ol></aside>
+          <aside class="clock" aria-hidden="true"><span class="now">08:50</span><span class="where">出门</span><ol><li><a href="#features"><time>08:50</time>出门</a></li><li><a href="#glance"><time>09:20</time>地铁上</a></li><li><a href="#queue"><time>12:40</time>午饭</a></li><li><a href="#remote-desktop"><time>15:10</time>会议间隙</a></li><li><a href="#computer-use"><time>16:30</time>还在开会</a></li><li><a href="#iphone-duo"><time>18:30</time>回家路上</a></li></ol></aside>
           <div class="hours">
           <article class="hour" id="features" data-time="08:50" data-where-zh="出门" data-where-en="Out the door">
             <p class="when">08:50 · 出门</p>
-            <h2><span class="nb">它在电脑上干活，</span><span class="nb">你在手机上看着。</span></h2>
-            <p>回复逐字出现；它读了什么、改了什么、跑了什么命令，实时更新，每个文件的改动都能看 diff。要权限、要你做选择的时候，请求推到手机上，点一下就行。</p>
+            <h2><span class="nb">电梯还没到，</span><span class="nb">第一个文件已经改完了。</span></h2>
+            <p>回复一个字一个字往外冒；读了哪些文件、改了哪几行、跑了什么命令，手机上都看得见。要你点头的事，它会先来问。</p>
             <div class="shot"><figure class="phone"><img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="手机上的会话：Agent 读文件、改代码、列计划，然后请求运行测试的权限" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video></figure></div>
           </article>
           <article class="hour" id="glance" data-time="09:20" data-where-zh="地铁上" data-where-en="On the train">
             <p class="when">09:20 · 地铁上</p>
-            <h2><span class="nb">锁屏上点一下，</span><span class="nb">就批准了。</span></h2>
-            <p>实时活动把 Agent 的进度放在锁屏和灵动岛上；它要权限时，卡片上直接有「拒绝」和「允许」。Apple Watch 上也能看会话、回请求、发一句短消息。</p><p class="fine">实时活动需要 iOS 16.2 及以上，卡片上的按钮需要 iOS 17；手表 App 需要 watchOS 10 及以上。</p>
+            <h2><span class="nb">不用解锁，</span><span class="nb">就能批准。</span></h2>
+            <p>进度挂在锁屏和灵动岛上，要权限时卡片上就有「允许」。人挤得掏不出手机？抬一下手腕也行。</p>
             <div class="shot"><figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="iPhone 锁屏上的 LinkShell 实时活动：一条待确认的构建请求，带拒绝和允许按钮" /></figure><figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="Apple Watch 上的 LinkShell：一条待确认的请求，带拒绝和允许按钮" /></figure></div>
           </article>
           <article class="hour" id="queue" data-time="12:40" data-where-zh="午饭" data-where-en="Lunch">
             <p class="when">12:40 · 午饭</p>
-            <h2><span class="nb">它正忙，</span><span class="nb">你照样能插话。</span></h2>
-            <p>忙的时候发的消息先排队：可以调整顺序、取回重写，或者立即发送，直接插进 Codex 和 Claude 当前这一轮。电脑上正在跑的那一轮，手机上也能停。</p><p>会话在哪儿开的都行：终端里的 <code>linkshell claude</code>、<code>linkshell codex</code>，普通的 <code>claude</code>、<code>codex</code>，或者它们的桌面 App。</p>
+            <h2><span class="nb">它忙它的，</span><span class="nb">你说你的。</span></h2>
+            <p>吃着饭想起一件事，直接发：消息先排队，急的话插进正在跑的这一轮。电脑上那一轮，手机上也能喊停。</p>
             <div class="shot"><figure class="phone"><img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="Agent 正在构建时，一条排队的消息被立即发送，插进了当前这一轮" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video></figure></div>
           </article>
           <article class="hour" id="remote-desktop" data-time="15:10" data-where-zh="会议间隙" data-where-en="Between meetings">
             <p class="when">15:10 · 会议间隙</p>
-            <h2><span class="nb">Mac 的桌面，</span><span class="nb">就在口袋里。</span></h2>
-            <p>Agent 改完了，就在手机上打开真实的桌面：看看网页、动一下编辑器、点掉一个弹窗。横过来全屏，双指放大；触控板和直接点按随手切换，长文字和剪贴板也能发过去。</p><p class="fine">画面最宽 3840 像素，iOS 最高 120 Hz，实际效果随设备和网络变化。完整控制需要 macOS 13 及以上。</p>
+            <h2><span class="nb">整个 Mac 桌面，</span><span class="nb">揣进兜里。</span></h2>
+            <p>改好了想亲眼看看？在手机上打开真实的桌面，点网页、挪窗口、关掉那个弹窗。横过来，还能双指放大。</p>
             <div class="shot"><figure class="phone side"><img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="手机横屏显示电脑屏幕：浏览器里的页面和终端，切到触控板模式后出现指针" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video></figure></div>
           </article>
           <article class="hour" id="computer-use" data-time="16:30" data-where-zh="还在开会" data-where-en="Still in the meeting">
             <p class="when">16:30 · 还在开会</p>
-            <h2><span class="nb">让 Codex</span><span class="nb">自己去点。</span></h2>
-            <p>在手机上让 Codex 操作电脑上的浏览器和桌面应用，它的操作画面在会话上方的小窗里实时显示。边看边聊，小窗可以拖开、放大或收起。目前支持 macOS 上的 Codex，<a href="docs/#d-computer-use">看看怎么用</a>。</p>
+            <h2><span class="nb">会还没开完，</span><span class="nb">让 Codex 替你点鼠标。</span></h2>
+            <p>让 Codex 去用电脑上的浏览器和应用，它点到哪儿，手机上的小窗就跟到哪儿。目前是 macOS 上的 Codex，<a href="docs/#d-computer-use">怎么用</a>。</p>
             <div class="shot"><figure class="phone"><img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="手机端 Computer Use：Codex 会话上方的实时画面浮窗" /></figure></div>
           </article>
           <article class="hour" id="iphone-duo" data-time="18:30" data-where-zh="回家路上" data-where-en="Ride home">
             <p class="when">18:30 · 回家路上</p>
-            <h2><span class="nb">展开 iPhone Duo，</span><span class="nb">对话和改动并排。</span></h2>
-            <p>展开时，对话和改动或预览并排放；折叠时，界面按可用区域重新安排，会话不中断。普通 iPhone 用单栏，操作一样。</p>
+            <h2><span class="nb">iPhone Duo 一展开，</span><span class="nb">对话和改动各占一边。</span></h2>
+            <p>合上是一栏，打开是两栏，会话一下都不断。</p>
           <figure class="duo-figure">
               <div class="duo-viewer" id="duo-viewer" data-state="idle">
                 <div class="duo-controls" role="group" aria-label="iPhone Duo">
@@ -890,68 +970,76 @@
               <figcaption>屏幕内容来自 App 实际运行截图 · iPhone Duo 模拟器。</figcaption>
             </figure>
           </article>
-          <article class="hour" id="fusion" data-time="21:30" data-where-zh="客厅" data-where-en="Living room">
-            <p class="when">21:30 · 客厅</p>
-            <h2><span class="nb">书房那台 Mac 的应用，</span><span class="nb">开在手边的 MacBook 上。</span></h2>
-            <p>融合模式把另一台 Mac 的应用一个个接过来：它们出现在这台 Mac 的程序坞和 ⌘Tab 里，图标右下角标着来自哪台电脑，各开各的窗口，和本机应用放在一起用。</p>
-            <div class="fz" id="fz" role="img" aria-label="这台 Mac 的程序坞：本机应用旁边，来自 Mac mini 的 Safari、Xcode 和照片带着右下角的 MINI 角标，Safari 的窗口开在桌面上">
-              <div class="fz-canvas">
-                <svg class="fz-wall" viewBox="0 0 1120 560" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="1120" height="560" fill="#15173a"/><path d="M520 0C660 140 920 170 1120 110V0Z" fill="#1a1d47"/><path d="M0 290C220 210 440 380 700 290S1040 170 1120 190V560H0Z" fill="#1f2459"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300V560H0Z" fill="#283084"/><path d="M0 460C320 380 600 540 1120 400V560H0Z" fill="#3741b0"/><path d="M0 520C340 460 700 590 1120 490V560H0Z" fill="#4a56d6"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300" fill="none" stroke="#8d9bff" stroke-opacity=".35" stroke-width="1.5"/></svg>
-                <div class="fz-win fz-notes"><header><i></i><i></i><i></i></header><div class="tx"><b>今晚</b><span style="width:80%"></span><span style="width:64%"></span><span style="width:72%"></span><span style="width:40%"></span></div></div>
-                <div class="fz-win fz-safari"><header><i></i><i></i><i></i><span class="url">localhost:3000</span></header><div class="fz-page"><b>Weather</b><p>暗色模式下的天气卡片</p><div class="row"><span></span><span></span><span></span></div></div></div>
-                <div class="fz-dock">
-                  <span class="fz-app on" data-app="ls"><span class="ico"><img src="assets/adaptive-icon.png" alt="" width="84" height="84" loading="lazy" /></span><span class="name">LinkShell</span></span><span class="fz-app on" data-app="notes"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="n1"><rect x="1" y="1" width="98" height="98" rx="22.5"/></clipPath></defs><g clip-path="url(#n1)"><rect width="100" height="100" fill="#fff"/><rect width="100" height="27" fill="#f8c933"/><path d="M16 46h68M16 60h68M16 74h50" stroke="#d1d1d6" stroke-width="2.5" stroke-linecap="round"/></g></svg></span><span class="name">备忘录</span></span><span class="fz-app" data-app="term"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#2a2a2d"/><rect x="9" y="9" width="82" height="82" rx="15" fill="#1c1c1e"/><path d="m27 38 14 12-14 12" fill="none" stroke="#f5f5f7" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M47 64h24" stroke="#f5f5f7" stroke-width="6" stroke-linecap="round"/></svg></span><span class="name">终端</span></span><span class="fz-app" data-app="msg"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#34c759"/><ellipse cx="50" cy="47" rx="30" ry="24" fill="#fff"/><path d="M28 62c-2 8-6 12-10 14 9 1 16-3 20-7z" fill="#fff"/></svg></span><span class="name">信息</span></span><button type="button" tabindex="-1" class="fz-app remote on" data-app="safari"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#ffffff" stroke="#e5e5ea" stroke-width="1"/><circle cx="50" cy="50" r="41" fill="#1a8cff"/><circle cx="50" cy="50" r="41" fill="none" stroke="#0a6fd8" stroke-width="1.5"/><path d="M50.0 17.0L50.0 11.0" stroke="#fff" stroke-width="2.4"/><path d="M55.7 17.5L56.4 13.6" stroke="#fff" stroke-width="1.6"/><path d="M61.3 19.0L62.7 15.2" stroke="#fff" stroke-width="1.6"/><path d="M66.5 21.4L69.5 16.2" stroke="#fff" stroke-width="2.4"/><path d="M71.2 24.7L73.8 21.7" stroke="#fff" stroke-width="1.6"/><path d="M75.3 28.8L78.3 26.2" stroke="#fff" stroke-width="1.6"/><path d="M78.6 33.5L83.8 30.5" stroke="#fff" stroke-width="2.4"/><path d="M81.0 38.7L84.8 37.3" stroke="#fff" stroke-width="1.6"/><path d="M82.5 44.3L86.4 43.6" stroke="#fff" stroke-width="1.6"/><path d="M83.0 50.0L89.0 50.0" stroke="#fff" stroke-width="2.4"/><path d="M82.5 55.7L86.4 56.4" stroke="#fff" stroke-width="1.6"/><path d="M81.0 61.3L84.8 62.7" stroke="#fff" stroke-width="1.6"/><path d="M78.6 66.5L83.8 69.5" stroke="#fff" stroke-width="2.4"/><path d="M75.3 71.2L78.3 73.8" stroke="#fff" stroke-width="1.6"/><path d="M71.2 75.3L73.8 78.3" stroke="#fff" stroke-width="1.6"/><path d="M66.5 78.6L69.5 83.8" stroke="#fff" stroke-width="2.4"/><path d="M61.3 81.0L62.7 84.8" stroke="#fff" stroke-width="1.6"/><path d="M55.7 82.5L56.4 86.4" stroke="#fff" stroke-width="1.6"/><path d="M50.0 83.0L50.0 89.0" stroke="#fff" stroke-width="2.4"/><path d="M44.3 82.5L43.6 86.4" stroke="#fff" stroke-width="1.6"/><path d="M38.7 81.0L37.3 84.8" stroke="#fff" stroke-width="1.6"/><path d="M33.5 78.6L30.5 83.8" stroke="#fff" stroke-width="2.4"/><path d="M28.8 75.3L26.2 78.3" stroke="#fff" stroke-width="1.6"/><path d="M24.7 71.2L21.7 73.8" stroke="#fff" stroke-width="1.6"/><path d="M21.4 66.5L16.2 69.5" stroke="#fff" stroke-width="2.4"/><path d="M19.0 61.3L15.2 62.7" stroke="#fff" stroke-width="1.6"/><path d="M17.5 55.7L13.6 56.4" stroke="#fff" stroke-width="1.6"/><path d="M17.0 50.0L11.0 50.0" stroke="#fff" stroke-width="2.4"/><path d="M17.5 44.3L13.6 43.6" stroke="#fff" stroke-width="1.6"/><path d="M19.0 38.7L15.2 37.3" stroke="#fff" stroke-width="1.6"/><path d="M21.4 33.5L16.2 30.5" stroke="#fff" stroke-width="2.4"/><path d="M24.7 28.8L21.7 26.2" stroke="#fff" stroke-width="1.6"/><path d="M28.8 24.7L26.2 21.7" stroke="#fff" stroke-width="1.6"/><path d="M33.5 21.4L30.5 16.2" stroke="#fff" stroke-width="2.4"/><path d="M38.7 19.0L37.3 15.2" stroke="#fff" stroke-width="1.6"/><path d="M44.3 17.5L43.6 13.6" stroke="#fff" stroke-width="1.6"/><path d="M66 30 54 54 46 46z" fill="#ff3b30"/><path d="M34 70 46 46 54 54z" fill="#f2f2f7"/></svg><span class="badge">MINI</span></span><span class="name">Safari</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="xcode"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#147efb"/><path d="M22 22h56v56H22z" fill="none" stroke="#5aa5ff" stroke-width="1.4"/><path d="M50 22v56M22 50h56M22 36h56M22 64h56M36 22v56M64 22v56" stroke="#3d93fc" stroke-width="1"/><g transform="rotate(-38 52 54)"><rect x="47" y="36" width="10" height="50" rx="4" fill="#fff"/><path d="M33 26h38a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H33l-8-8z" fill="#e8f1ff"/></g></svg><span class="badge">MINI</span></span><span class="name">Xcode</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="photos"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#ffffff" stroke="#e5e5ea" stroke-width="1"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ff9500" fill-opacity=".82" transform="rotate(0 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ffcc00" fill-opacity=".82" transform="rotate(45 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#a5d63a" fill-opacity=".82" transform="rotate(90 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#34c759" fill-opacity=".82" transform="rotate(135 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#30b0c7" fill-opacity=".82" transform="rotate(180 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#5e5ce6" fill-opacity=".82" transform="rotate(225 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#bf5af2" fill-opacity=".82" transform="rotate(270 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ff375f" fill-opacity=".82" transform="rotate(315 50 50)"/></svg><span class="badge">MINI</span></span><span class="name">照片</span></button><hr /><span class="fz-app" data-app="trash"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="rgba(255,255,255,.1)"/><path d="M30 34h40l-4 46H34z" fill="rgba(255,255,255,.2)" stroke="rgba(255,255,255,.85)" stroke-width="2.5" stroke-linejoin="round"/><path d="M25 30h50M42 30v-6h16v6M42 44v26M50 44v26M58 44v26" stroke="rgba(255,255,255,.85)" stroke-width="2.5" stroke-linecap="round"/></svg></span><span class="name">废纸篓</span></span>
-                </div>
-              </div>
-            </div>
-            <ol class="steps-line">
-              <li><b>在 LinkShell 里选中那台 Mac</b>，点「融合模式」。</li>
-              <li><b>从它的应用里点一个</b>，可以按分类找，也可以搜索。</li>
-              <li><b>它就在程序坞里了</b>，⌘Tab 能切到，剪贴板两边通。</li>
-            </ol>
-            <p class="fine">两台 Mac 都要装 LinkShell 桌面版（macOS 13 及以上），被连的那台打开屏幕录制和辅助功能。能直连就直连，否则走端到端加密隧道。声音、拖放和通知还不支持。<a href="docs/#d-fusion">使用说明</a></p>
-          </article>
           </div>
         </div>
       </div>
     </section>
 
+    <section class="fusion" id="fusion">
+      <div class="wrap">
+        <p class="kicker">新功能 · 融合模式</p>
+        <h2><span class="nb">书房那台 Mac 的应用，</span><span class="nb">开在客厅这台上。</span></h2>
+        <p>Xcode 在书房的 Mac mini 上跑着，你窝在沙发上用 MacBook 打开它，就像它本来就装在这儿。图标角上那块小牌子，写着它从哪儿来。</p>
+        <div class="desk" role="img" aria-label="这台 Mac 的桌面：来自 Mac mini 的 Safari 开着窗口，程序坞里的 Safari、Xcode 和照片带着 MINI 角标">
+          <div class="desk-canvas">
+            <svg class="desk-wall" viewBox="0 0 1120 560" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="1120" height="560" class="w0"/><path d="M520 0C660 140 920 170 1120 110V0Z" class="w1"/><path d="M0 290C220 210 440 380 700 290S1040 170 1120 190V560H0Z" class="w2"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300V560H0Z" class="w3"/><path d="M0 460C320 380 600 540 1120 400V560H0Z" class="w4"/><path d="M0 520C340 460 700 590 1120 490V560H0Z" class="w5"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300" class="wl"/></svg>
+            <div class="desk-bar"><b>Safari</b><span>文件</span><span>编辑</span><span>显示</span><span>历史记录</span><span>书签</span><span>窗口</span><time>周五 21:30</time></div>
+            <div class="note"><span class="ico"><img src="assets/fusion/safari-mini.png" alt="" width="256" height="256" loading="lazy" /></span><span><b>Safari 来自 MINI</b>书房那台 Mac 上的 Safari，已经开在这台 Mac 上。</span></div>
+<div class="win xc" data-app="xcode">
+              <div class="w-bar"><span class="tl"><i></i><i class="min"></i><i></i></span><span class="w-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></span><span class="w-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7 4 19 12 7 20 7 4" fill="currentColor"/></svg></span><span class="w-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg></span><span class="xc-scheme">LinkShell <i>›</i> iPhone 16 Pro</span><span class="xc-status">构建成功 <i>|</i> 今天 21:30</span><span class="w-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></span><span class="w-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></span></div>
+              <div class="xc-body">
+                <div class="xc-nav"><div class="r" style="padding-left:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>LinkShell</div><div class="r" style="padding-left:24px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>WeatherKit</div><div class="r on" style="padding-left:38px"><i class="sw"></i>WeatherCard.swift</div><div class="r" style="padding-left:38px"><i class="sw"></i>Forecast.swift</div><div class="r" style="padding-left:38px"><i class="sw"></i>CityList.swift</div><div class="r" style="padding-left:24px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>Resources</div><div class="r" style="padding-left:24px"><i class="sw"></i>Info.plist</div></div>
+                <div class="xc-ed"><div class="xc-tab"><i class="sw"></i>WeatherCard.swift</div><div class="xc-src"><span class="ln"><span class="k">import</span> SwiftUI</span><span class="ln"></span><span class="ln"><span class="k">struct</span> <span class="t">WeatherCard</span>: <span class="t">View</span> {</span><span class="ln">    <span class="k">let</span> city: <span class="t">String</span></span><span class="ln">    <span class="k">let</span> temperature: <span class="t">Int</span></span><span class="ln">    <span class="a">@Environment</span>(\.colorScheme) <span class="k">private var</span> scheme</span><span class="ln"></span><span class="ln">    <span class="k">var</span> body: <span class="k">some</span> <span class="t">View</span> {</span><span class="ln">        <span class="t">VStack</span>(alignment: .leading, spacing: <span class="n">8</span>) {</span><span class="ln">            <span class="t">Text</span>(city)</span><span class="ln">                .font(.headline)</span><span class="ln">            <span class="t">Text</span>(<span class="s">"\(temperature)°"</span>)</span><span class="ln">                .font(.system(size: <span class="n">56</span>, weight: .semibold))</span><span class="ln">        }</span><span class="ln">        .padding(<span class="n">20</span>)</span><span class="ln">        .background(.thinMaterial, in: .rect(cornerRadius: <span class="n">20</span>))</span><span class="ln">    }</span><span class="ln">}</span></div></div>
+                <div class="xc-pv"><span class="xc-pv-h">预览</span><div class="xc-card"><span>上海</span><b>26°</b></div></div>
+              </div>
+            </div>
+            <div class="win ph" data-app="photos">
+              <div class="ph-wrap">
+                <div class="ph-side"><div class="w-bar"><span class="tl"><i></i><i class="min"></i><i></i></span></div><div class="r">图库</div><div class="r">精选</div><div class="r on">截屏</div><div class="r">视频</div><div class="r">个人收藏</div></div>
+                <div class="ph-main"><div class="ph-top"><b>截屏</b><span class="ph-seg"><i>年</i><i>月</i><i class="on">全部</i></span></div><div class="ph-grid"><img src="assets/promo/clip-follow.jpg" alt="" loading="lazy" style="object-position:top" /><img src="assets/promo/lock-screen.jpg" alt="" loading="lazy" style="object-position:center 30%" /><img src="assets/promo/clip-screen.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/watch-approval.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/clip-queue.jpg" alt="" loading="lazy" style="object-position:top" /><img src="assets/promo/card-screen.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/film.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/card-follow.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/clip-follow.jpg" alt="" loading="lazy" style="object-position:center 70%" /><img src="assets/promo/card-queue.jpg" alt="" loading="lazy" style="object-position:center" /><img src="assets/promo/lock-screen.jpg" alt="" loading="lazy" style="object-position:bottom" /><img src="assets/promo/clip-queue.jpg" alt="" loading="lazy" style="object-position:bottom" /></div></div>
+              </div>
+            </div>
+            <div class="win sf" data-app="safari">
+              <div class="sf-bar w-bar"><span class="tl"><i></i><i class="min"></i><i></i></span><span class="sf-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></span><span class="sf-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="sf-btn dim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span><span class="sf-url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="10" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>linkshell.itool.tech<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></span><span class="sf-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4M12 2v13"/></svg></span><span class="sf-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></span><span class="sf-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></span></div>
+              <div class="sf-page"><img class="pg-light" src="assets/fusion/safari-zh-light.jpg" width="1290" height="702" alt="" loading="lazy" /><img class="pg-dark" src="assets/fusion/safari-zh-dark.jpg" width="1290" height="702" alt="" loading="lazy" /></div>
+            </div>
+            <div class="desk-dock"><div class="fz-dock"><span class="fz-app on" data-app="ls"><span class="ico"><img src="assets/fusion/linkshell.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">LinkShell</span></span><span class="fz-app on" data-app="notes"><span class="ico"><img src="assets/fusion/notes.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">备忘录</span></span><span class="fz-app" data-app="term"><span class="ico"><img src="assets/fusion/terminal.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">终端</span></span><span class="fz-app" data-app="msg"><span class="ico"><img src="assets/fusion/messages.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">信息</span></span><button type="button" tabindex="-1" class="fz-app remote on" data-app="safari"><span class="ico"><img src="assets/fusion/safari-mini.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">Safari</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="xcode"><span class="ico"><img src="assets/fusion/xcode-mini.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">Xcode</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="photos"><span class="ico"><img src="assets/fusion/photos-mini.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">照片</span></button><hr /><span class="fz-app" data-app="trash"><span class="ico"><img src="assets/fusion/trash.png" alt="" width="256" height="256" loading="lazy" /></span><span class="name">废纸篓</span></span></div></div>
+          </div>
+        </div>
+        <p class="how">在 LinkShell 里选中那台 Mac，点「融合模式」，挑个应用。就这么多。<a href="docs/#d-fusion">使用说明</a></p>
+      </div>
+    </section>
+
     <section class="rest">
       <div class="wrap">
-        <h2>手机上，还能这样用。</h2>
-        <dl class="index"><div><dt>电脑上的真终端</dt><dd>开一个终端跑 dev server、看日志、用 git，带 Ctrl、Esc、Tab 和方向键工具栏；关掉 App 也不会中断。</dd></div><div><dt>在手机上打开 localhost</dt><dd>电脑上的 <code>localhost:3000</code> 直接在手机里打开，热更新照常工作，不用暴露端口，也不用同一个 Wi-Fi。</dd></div><div><dt>分叉和 worktree</dt><dd>想换个思路，就从那条回复分叉出一个新会话；可以放进新的 git worktree，不碰你手头的工作区。</dd></div><div><dt>旁支对话</dt><dd>有个问题想问，又不想打断正在跑的这一轮：用 Agent 自己的方式另开一个旁支，Codex 的 <code>/side</code>、Claude 和 Grok 的 <code>/btw</code>，问答不进入会话。</dd></div><div><dt>子 Agent 与工作流</dt><dd>按阶段跟进 Claude Workflow，打开每个 Agent 的对话和工具结果。后台工作流保留在输入框上方；标题旁可查看全部工作流和子 Agent。</dd></div><div><dt>斜杠命令和 skills</dt><dd>输入 <code>/</code> 列出 Agent 的命令和你的 skills。<code>/compact</code>、<code>/review</code> 对 Codex 同样可用。</dd></div><div><dt>Mac 上的完整工作台</dt><dd>Mac App 里也能继续对话、处理审批、开终端和远程桌面，连本机或别的电脑都行。还有按 Agent 统计的 Token 用量、开机自启和浅色 / 深色外观。</dd></div><div><dt>文件和会话管理</dt><dd>浏览项目里的文件，把手机里的图片和文件传给 Agent。会话可以重命名、归档、删除，<code>claude --resume</code> 里也能看到新名字。</dd></div></dl>
+        <h2>还有一些顺手的小事。</h2>
+        <dl class="index"><div><dt>电脑上的真终端</dt></div><div><dt>在手机上打开 localhost</dt></div><div><dt>分叉和 worktree</dt></div><div><dt>旁支对话</dt></div><div><dt>子 Agent 与工作流</dt></div><div><dt>斜杠命令和 skills</dt></div><div><dt>Mac 上的完整工作台</dt></div><div><dt>文件和会话管理</dt></div></dl>
       </div>
     </section>
 
     <section class="agents" id="agents">
       <div class="wrap">
-        <h2>用你电脑上已经装好、已经登录的 Agent。</h2>
-        <p class="agent-line"><span><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span>Codex</span><span><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span>Claude Code</span><span><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span>Gemini CLI</span><span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span>GitHub Copilot</span><span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>OpenCode</span><span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span>Cursor</span><span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span>Grok</span><span class="any">和任何命令行工具</span></p>
-        <div class="agent-notes">
-          <p><b>Codex</b>用 <code>linkshell codex</code> 打开的终端和手机同时在线，哪一端都能发消息、打断、审批。</p>
-          <p><b>Claude Code</b>电脑上用它自己的界面（<code>linkshell claude</code>），手机一发消息就接管，电脑上按任意键收回。</p>
-          <p><b>其余 Agent</b>通过 Agent Client Protocol 新建、继续会话，实时输出、审批、切换模式和模型。LinkShell 不经手任何 Agent 的账号和密钥。</p>
-        </div>
+        <h2>你在用哪个 Agent，就接着用哪个。</h2>
+        <p class="agent-line"><span><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span>Codex</span><span><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span>Claude Code</span><span><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span>Gemini CLI</span><span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span>GitHub Copilot</span><span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>OpenCode</span><span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span>Cursor</span><span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span>Grok</span><span class="any">……还有任何命令行工具</span></p>
       </div>
     </section>
 
     <section class="setup" id="install">
       <div class="wrap">
-        <h2>三步，连上你的电脑。</h2>
-        <p>Mac 和 Windows 下载桌面版；Linux 或者更喜欢命令行，就装 CLI（需要 Node.js 22.13 或更新）。</p>
+        <h2>装起来，比泡杯咖啡还快。</h2>
         <div class="three">
           <div>
             <b>1</b>
             <h3>装上</h3>
-            <p>桌面版自带 CLI、Host 和 Node，一起更新。Mac 需要 macOS 13 及以上，打开后在设置里开屏幕录制和辅助功能。</p>
+            <p>桌面版自带 CLI、Host 和 Node。</p>
             <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-arm64.dmg">Mac · Apple silicon</a><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-x64.dmg">Mac · Intel</a><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-Setup-0.10.105-windows-x64.exe">Windows</a></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell setup</code></pre>
           </div>
           <div>
             <b>2</b>
-            <h3>连上手机</h3>
-            <p>官方网关：电脑和 App 登录同一个账号，电脑自动出现；新账号免费试用 7 天，不用绑卡。自建网关：配对一次，扫码即可。</p>
+            <h3>登录</h3>
+            <p>电脑和 App 登录同一个账号；或者自建网关，扫码配对。</p>
             <pre><code><span class="pr">$ </span>linkshell login
 <span class="cm"># 或者自建网关</span>
 <span class="pr">$ </span>linkshell host --gateway wss://gw.you
@@ -959,8 +1047,8 @@
           </div>
           <div>
             <b>3</b>
-            <h3>开始</h3>
-            <p>在手机上新建会话；或者在电脑终端里这样启动，随时交给手机。细节在<a href="docs/">文档</a>里。</p>
+            <h3>开干</h3>
+            <p>在手机上新建会话，或者从终端启动。<a href="docs/">文档</a></p>
             <pre><code><span class="pr">$ </span>linkshell claude
 <span class="pr">$ </span>linkshell codex</code></pre>
           </div>
@@ -970,20 +1058,16 @@
 
     <section class="trust" id="how">
       <div class="wrap">
-        <h2><span class="nb">代码和 Agent，</span><span class="nb">一直在你的电脑上。</span></h2>
+        <h2>代码哪儿也不去。</h2>
         <p class="route"><span>你的手机</span><i>密文</i><span>网关</span><i>密文</i><span class="home">你的电脑</span></p>
-        <div class="trust-notes">
-          <p><b>网关只转发密文</b>官方网关和自建网关都看不到你的代码和对话。配对一次，长期有效。</p>
-          <p><b>官方或自建</b>新账号免费试用官方网关 7 天，之后是 iTool 会员；也可以用一条命令或 Docker 自建，完全免费。</p>
-          <p><b>屏幕和预览走直连</b>能直连时点对点传输，网关只负责牵线；打不通时经官方 TURN 中继，仍是端到端加密。</p>
-        </div>
+        <p class="trust-say">中间的网关只看得到一堆乱码，官方的、你自建的，都一样。屏幕和预览能走直连就走直连。</p>
       </div>
     </section>
 
     <section class="back">
       <div class="wrap">
-        <h2>回到电脑前，<span class="nb">一切都在。</span></h2>
-        <p>会话、上下文和历史都留在电脑上，按任意键就接回来。全部功能免费：新账号可以免费试用官方网关 7 天，也可以一条命令自建网关。</p>
+        <h2>回到桌前，<span class="nb">按任意键，</span><span class="nb">接着来。</span></h2>
+        <p>全部功能免费。新账号送 7 天官方网关，也可以一条命令自建一个。</p>
         <div class="btns">
           <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone 下载</a>
           <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
@@ -1222,26 +1306,62 @@
       document.querySelectorAll('.hour').forEach((h) => watch.observe(h));
     })();
 
-    // ── Fusion: the other Mac's apps slide into this Dock, badge and all ──
+    // ── Fusion: the drawn desktop keeps its proportions; the other Mac's apps arrive once it is seen ──
     (() => {
-      const fz = document.getElementById('fz');
-      if (!fz) return;
-      const fit = () => fz.style.setProperty('--fz-s', fz.clientWidth / 1120);
+      const desk = document.querySelector('.desk');
+      if (!desk) return;
+      const fit = () => desk.style.setProperty('--desk-s', desk.clientWidth / 1280);
       fit();
-      if ('ResizeObserver' in window) new ResizeObserver(fit).observe(fz); else addEventListener('resize', fit);
+      if ('ResizeObserver' in window) new ResizeObserver(fit).observe(desk); else addEventListener('resize', fit);
       const bounce = (el) => { el.classList.remove('bounce'); void el.offsetWidth; el.classList.add('bounce'); };
-      const remote = [...fz.querySelectorAll('.fz-app.remote')];
-      remote.forEach((el) => el.addEventListener('click', () => bounce(el)));
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) { fz.classList.add('played'); return; }
-      // Played once, when most of it is on screen: one app at a time, as if chosen in LinkShell.
+      const remote = [...desk.querySelectorAll('.fz-app.remote')];
+      const canvas = desk.querySelector('.desk-canvas');
+      const front = desk.querySelector('.desk-bar b');
+      const wins = Object.fromEntries([...desk.querySelectorAll('.win')].map((w) => [w.dataset.app, w]));
+      const icon = (id) => desk.querySelector(`.fz-app[data-app="${id}"]`);
+      let order = [];
+      const paint = () => {
+        order.forEach((id, i) => { wins[id].style.zIndex = 3 + i; wins[id].classList.toggle('front', i === order.length - 1); });
+        const top = order[order.length - 1];
+        front.textContent = top ? icon(top).querySelector('.name').textContent : 'Finder';
+      };
+      // A window grows out of, and shrinks back into, its own Dock icon.
+      const aim = (id) => {
+        const scale = desk.clientWidth / 1280, c = canvas.getBoundingClientRect(), r = icon(id).getBoundingClientRect(), w = wins[id];
+        const x = (r.left + r.width / 2 - c.left) / scale - w.offsetLeft, y = (r.top + r.height / 2 - c.top) / scale - w.offsetTop;
+        w.style.transformOrigin = `${x}px ${y}px`;
+      };
+      const open = (id) => { aim(id); wins[id].classList.remove('shut'); order = order.filter((o) => o !== id).concat(id); paint(); };
+      const shut = (id) => { aim(id); wins[id].classList.add('shut'); order = order.filter((o) => o !== id); paint(); };
+      remote.forEach((el) => el.addEventListener('click', () => {
+        const id = el.dataset.app;
+        bounce(el);
+        if (!order.includes(id)) open(id);
+        else if (order[order.length - 1] !== id) { order = order.filter((o) => o !== id).concat(id); paint(); }
+        else shut(id);
+      }));
+      Object.entries(wins).forEach(([id, w]) => {
+        w.addEventListener('pointerdown', () => { if (order.includes(id) && order[order.length - 1] !== id) { order = order.filter((o) => o !== id).concat(id); paint(); } });
+        w.querySelector('.tl .min').addEventListener('click', (e) => { e.stopPropagation(); shut(id); });
+      });
+      const note = desk.querySelector('.note');
+      const sequence = ['xcode', 'photos', 'safari'];
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) { sequence.forEach(open); note.classList.add('in'); return; }
+      remote.forEach((el) => el.classList.add('away'));
+      Object.values(wins).forEach((w) => w.classList.add('shut'));
+      paint();
+      // One app at a time, as if chosen in LinkShell: it lands in the Dock, then its window opens.
       const seen = new IntersectionObserver(([entry]) => {
         if (!entry.isIntersecting) return;
         seen.disconnect();
-        remote.forEach((el) => el.classList.add('away'));
-        fz.classList.add('played');
-        remote.forEach((el, i) => setTimeout(() => { el.classList.remove('away'); setTimeout(() => bounce(el), 450); }, 500 + i * 1300));
-      }, { threshold: 0.6 });
-      seen.observe(fz);
+        sequence.forEach((id, i) => {
+          const t = 400 + i * 1500;
+          setTimeout(() => { icon(id).classList.remove('away'); setTimeout(() => bounce(icon(id)), 450); }, t);
+          setTimeout(() => open(id), t + 1000);
+        });
+        setTimeout(() => note.classList.add('in'), 400 + 2 * 1500 + 1500);
+      }, { threshold: 0.5 });
+      seen.observe(desk);
     })();
 
     // ── The agents row: each agent's mark and name, once ──
@@ -1265,13 +1385,13 @@
       if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       const film = document.getElementById('film-stage');
       if (film) { film.classList.add('shutter'); requestAnimationFrame(() => setTimeout(() => film.classList.add('in'), 120)); }
-      const parts = '.hero h1, .hero .lead, .hero .btns, .ask, .day-say, .hour h2, .hour > p, .shot, .fz, .steps-line li, .duo-figure, .rest h2, .index > div, .agents h2, .agent-line, .agent-notes > p, .setup h2, .setup .wrap > p, .three > div, .trust h2, .route, .trust-notes > p, .back h2, .back p, .back .btns, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .agent, .step, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
+      const parts = '.news, .kicker, .fusion h2, .fusion > .wrap > p, .desk, .hero h1, .hero .lead, .hero .btns, .ask, .day-say, .hour h2, .hour > p, .shot, .fz, .steps-line li, .duo-figure, .rest h2, .index > div, .agents h2, .agent-line, .setup h2, .setup .wrap > p, .three > div, .trust h2, .route, .trust-say, .back h2, .back p, .back .btns, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .agent, .step, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
       const seen = new IntersectionObserver((entries) => entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         entry.target.classList.add('in');
         seen.unobserve(entry.target);
       }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
-      document.querySelectorAll('.hero, .day-say, .hour, .rest, .agents, .setup, .trust, .back, .sec, .feature, .close, .pricing').forEach((section) => {
+      document.querySelectorAll('.fusion, .hero, .day-say, .hour, .rest, .agents, .setup, .trust, .back, .sec, .feature, .close, .pricing').forEach((section) => {
         let n = 0;
         section.querySelectorAll(parts).forEach((el) => {
           if (el.closest('.rise') || el.closest('#film-stage')) return;
