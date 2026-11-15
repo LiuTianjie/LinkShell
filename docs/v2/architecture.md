@@ -98,7 +98,7 @@ codex app-server --listen unix://$HOME/.linkshell/run/codex.sock
 
 ### 3.2 Claude（档位 2）
 
-参照 Happy 的本地/远程模式切换：
+本地/远程模式切换：
 
 ```
 电脑模式：shim 在用户终端里运行 `claude --session-id <id>`（或 --resume <id>）
@@ -312,7 +312,5 @@ LinkShell **从不经手 Agent 的凭据**，只用与用户终端完全相同�
 ## 参考
 
 - [Agent Client Protocol](https://agentclientprotocol.com)：session/resume、session/close 已定稿，session/list 在 v2 中为必选
-- [Happy](https://github.com/slopus/happy)（MIT）：本地/远程切换、消息 seq 与 localId、端到端加密、推送
-- [OpenCode server](https://www.mintlify.com/anomalyco/opencode/server)：服务端 + TUI attach 的多客户端结构
 - [Claude Code Remote Control](https://code.claude.com/docs/en/remote-control.md)：官方的 Claude 远程方案（只走 Anthropic 中继）
 - Codex app-server：`codex app-server generate-ts` 可生成完整协议类型

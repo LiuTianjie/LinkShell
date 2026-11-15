@@ -3,7 +3,7 @@
    conversation. Only the desktop shell gets these rules. */
 
 @layer components {
-/* ── Primitives, at Codex's values ───────────────────────────────────────── */
+/* ── Primitives ──────────────────────────────────────────────────────────── */
 /* Tooltips are inverted: ink with the page's colour as text in the light theme, a raised grey in
    the dark one; 13 px, a control's 6 px corner and the floating shadow. */
 html[data-desktop] [data-slot="tooltip-content"] { padding: 5px 10px !important; border: 0; border-radius: var(--radius-control); background: var(--label) !important; box-shadow: 0 8px 18px rgb(15 23 42 / .2); color: var(--plain) !important; font-size: 13px; font-weight: 400; letter-spacing: -.15px; line-height: 18px; }
@@ -169,7 +169,7 @@ html[data-desktop] .desktop-main .settings-panel-disclosure[aria-expanded="true"
 html[data-desktop] [data-slot="select-item"]:has([data-slot="select-item-body"]) { align-items: flex-start; padding-block: 6px; }
 html[data-desktop] [data-slot="select-item"]:has([data-slot="select-item-body"]) > span:first-child { top: 8px; }
 html[data-desktop] [data-slot="select-item-description"] { color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; white-space: normal; }
-/* Tasks, as Codex's background terminals: one grouped list, a row per task — the title, its state
+/* Tasks: one grouped list, a row per task — the title, its state
    as a dot and a word at the right, the command under it in mono — a stop button beside a running
    one, and its output opening under the row in a well. No cards inside cards. */
 html[data-desktop] .desktop-main .tasks-panel { display: flex; flex-direction: column; gap: 12px; }

@@ -1,4 +1,4 @@
-/* 本机管理: this Mac's service, in the Electron window. Like Codex's settings, its pages take
+/* 本机管理: this Mac's service, in the Electron window. Its pages take
    the sidebar and the main panel shows one page: a toolbar, then groups. A group is a title, its
    rows in one rounded box with hairlines between them, and its footnotes; nothing nests a box in
    a box. Ink: titles in the text colour at 500, explanations at 70 %, only times and fine print
@@ -82,7 +82,7 @@ html[data-desktop] .management-footnote[data-tone="warning"] { color: var(--wait
 html[data-desktop] .management-footnote[data-tone="success"] { color: var(--ok); }
 html[data-desktop] .management-footnote code { padding: 1px 5px; border-radius: var(--radius-small); background: var(--fill); color: var(--secondaryLabel); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 
-/* Rows, as Codex's settings: 12 × 16 in, 48 px for one line and 60 for two. The control column
+/* Rows: 12 × 16 in, 48 px for one line and 60 for two. The control column
    gives back 2 px above and below, so a 28 px control centres in a 48 px row. */
 html[data-desktop] .management-row { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; padding: 12px 16px; border: 0; background: transparent; color: var(--label); font: inherit; font-size: 13px; text-align: left; }
 html[data-desktop] .management-row + .management-row::before,

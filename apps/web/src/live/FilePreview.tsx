@@ -29,7 +29,7 @@ function renderable(path: string, file: FileResult | undefined): "markdown" | "i
 }
 
 /**
- * A file in the desktop's panels, as Codex's file preview: one 40 px bar (back, the name, how to
+ * A file in the desktop's panels: one 40 px bar (back, the name, how to
  * show it, the actions, the rest in a menu), then the file itself edge to edge: rendered when it
  * can be (Markdown, an image), else its source, numbered and coloured.
  */

@@ -1104,7 +1104,7 @@ function UserBlocks({
   );
 }
 
-/** Past 20 lines (or a wall of text without breaks) a message folds, as in Codex. */
+/** Past 20 lines (or a wall of text without breaks) a message folds. */
 function longMessage(text: string): boolean {
   return text.length > 2400 || text.split("\n").length > 20;
 }
@@ -1125,7 +1125,7 @@ const CONTEXT_ICONS: Record<UserContext["kind"], LucideIcon> = {
   other: Paperclip,
 };
 
-/** What a client attached to the message (files, a selection, the browser it had open), as Codex shows it. */
+/** What a client attached to the message (files, a selection, the browser it had open). */
 function UserContextChips({ context }: { context: UserContext[] }) {
   return (
     <div className="user-context">
@@ -1179,7 +1179,7 @@ export const TimelineEntry = memo(function TimelineEntry({
   const actions = useActions();
   const navigation = useContext(TimelineNavigation);
   const searchQuery = useContext(TimelineSearch);
-  // A long message folds to its first lines, as Codex folds one past 20.
+  // A long message folds to its first lines past 20.
   const [unfolded, setUnfolded] = useState(false);
   const job = useJob();
   const online = useSessionOnline();
@@ -1498,7 +1498,7 @@ export const TimelineEntry = memo(function TimelineEntry({
 
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
-/** An error as the Claude app shows it: what kind of failure, what to do, the agent's words one click away. */
+/** An error: what kind of failure, what to do, the agent's words one click away. */
 function ErrorCard({ item, anchorId, historical }: { item: Extract<TimelineItem, { kind: "error" }>; anchorId?: string; historical?: boolean }) {
   const shown = presentError(item);
   return (
@@ -1646,7 +1646,7 @@ function CommandBody({ item, command }: { item: ToolItem; command: string }) {
 }
 
 /**
- * One tool call, worded as the Claude app words it ("已读取 foo.ts", "正在运行 npm test"); its file
+ * One tool call, worded as the verb and what it acted on ("已读取 foo.ts", "正在运行 npm test"); its file
  * opens from the row. Opens to what it did: a command's run, a diff, a search's matches. Reading a
  * file and listing a directory have nothing more to show and stay one line.
  */
@@ -1741,7 +1741,7 @@ function ToolRecord({
       <DiffStat added={stat.added} removed={stat.removed} />
       {meta && <small>{meta}</small>}
       {item.detail?.type === "mcp" && item.detail.app && navigation?.openApp && (
-        // The call's page, as Codex's launcher card: open it here without unfolding the row.
+        // The call's page: open it here without unfolding the row.
         <button
           type="button"
           className="tool-app-open"

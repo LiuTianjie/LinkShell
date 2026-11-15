@@ -362,7 +362,7 @@ a > .external-link-icon {
 @keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) { [data-slot="skeleton"] { animation: none; } }
 
-/* Floating surfaces share one layered, Linear-style shadow and a hairline
+/* Floating surfaces share one layered shadow and a hairline
    frame; the flat shadcn shadow-md/ring is replaced here in one place. */
 [data-slot="popover-content"],
 [data-slot="dropdown-menu-content"],

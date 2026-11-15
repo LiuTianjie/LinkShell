@@ -33,7 +33,7 @@ export function selectedTimelineText(selection: Selection | null, track: HTMLEle
 }
 
 /**
- * Codex-style actions on selected timeline text: ask about it in a new side conversation (agents
+ * Actions on selected timeline text: ask about it in a new side conversation (agents
  * that have one), or quote it into the reply.
  */
 export function SelectionActions({

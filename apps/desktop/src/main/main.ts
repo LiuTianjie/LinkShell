@@ -34,7 +34,7 @@ const keepAwake = new KeepAwake(powerSaveBlocker);
 let locale: MainLocale = "zh";
 const t = (key: MainKey, params?: Record<string, string | number>) => translateMain(locale, key, params);
 
-// Paseo / T3 Code sculpted 42px chrome: macOS traffic lights sit optically centered at { x: 15, y: 13 }.
+// A 42 px toolbar: macOS traffic lights sit optically centered in it at { x: 15, y: 13 }.
 const TOOLBAR = 42;
 const TRAFFIC_LIGHTS = { x: 15, y: 13 };
 const MAC = process.platform === "darwin";
@@ -680,7 +680,7 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
 });
 
 /**
- * A native context menu at the pointer, as Codex's sidebar menus: the page sends the items and
+ * A native context menu at the pointer: the page sends the items and
  * gets back the id of the one chosen (none when the menu is dismissed). Shortcuts are shown,
  * not registered: the page owns its keys.
  */

@@ -1,6 +1,6 @@
 # 桌面版改用 Electron（分支 feat/desktop-electron）
 
-依据见 [Codex / Claude 逆向参考](codex-reference.md)。两家都是 Chromium 运行时（Electron / OWL）+ React 19 + Tailwind 4 + Radix + Motion。我们的工作台本来就是 React 19 + Tailwind 4 + Radix（`apps/web`），换的是运行时：Mac 的 WKWebView、Windows 的 WebView2 都换成 Electron 44（与 Claude 桌面版同版本）。
+我们的工作台本来就是 React 19 + Tailwind 4 + Radix（`apps/web`），换的是运行时：Mac 的 WKWebView、Windows 的 WebView2 都换成 Electron 44。
 
 ## 一个 App、一个身份
 
@@ -42,9 +42,9 @@ LinkShell.app/Contents/
 1. `apps/desktop`：主进程（窗口、菜单、菜单栏、单实例、设置、保存屏障、下载、权限、导航安全策略）、preload 桥（与 WKWebView / WebView2 同样的 `{action}` 消息）、现有 `desktop-workspace` 侧车不变。
 2. 原生模块与打包签名；Swift 入口在打开 App 时交给 Electron。
 3. 本机管理从 SwiftUI 移进网页（`apps/web/src/live/Management*.tsx`）。
-4. 流式回复：照 Codex 的自适应缓冲放字（`smooth-text.ts`），Markdown 按块解析，只重解析最后一块，新块淡入。
-5. 桌面配色换成 Codex 的令牌（`theme.ts` 的 `nativeDesktopColors`）。
-6. 布局与组件质感（规则见 `apps/web/DESIGN.md` 的桌面版一节）：半透明侧栏、46px 工具栏、实心主面板、30px 侧栏行、浮动输入框、新建会话页、统一 diff（按文件分组的变更面板）、检查器标签页、侧栏收起与边缘唤出、Shiki 代码高亮（Codex 的 codex-light / codex-dark 配色）。
+4. 流式回复：自适应缓冲放字（`smooth-text.ts`），Markdown 按块解析，只重解析最后一块，新块淡入。
+5. 桌面配色按 [视觉规范](visual-system.md) 的令牌（`theme.ts` 的 `nativeDesktopColors`）。
+6. 布局与组件质感（规则见 `apps/web/DESIGN.md` 的桌面版一节）：半透明侧栏、46px 工具栏、实心主面板、30px 侧栏行、浮动输入框、新建会话页、统一 diff（按文件分组的变更面板）、检查器标签页、侧栏收起与边缘唤出、Shiki 代码高亮（浅色 / 深色两套配色）。
 
 ## 待做
 

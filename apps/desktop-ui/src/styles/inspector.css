@@ -1,6 +1,6 @@
 @layer components {
   /* =========================================================================
-   * 1. Paseo + T3 Code Sculpted Right Inspector Shell, Resizer & Segmented Header
+   * 1. Right Inspector Shell, Resizer & Segmented Header
    * ========================================================================= */
   .inspector-workbench {
     position: relative;
@@ -55,7 +55,7 @@
     overflow: clip;
   }
 
-  /* Paseo-inspired segmented pill bar in header */
+  /* Segmented pill bar in header */
   .inspector-header-tablist,
   .inspector-header-tablist.ls-tab-list[data-variant="segmented"] {
     flex: 1 1 auto;
@@ -132,7 +132,7 @@
     flex-shrink: 0;
   }
 
-  /* Monochrome High-Contrast Primary Keycap (Paseo / T3 Code restrained primary CTA) */
+  /* Monochrome High-Contrast Primary Keycap */
   .inspector-keycap-btn {
     background-color: var(
       --ls-primary-bg,
@@ -439,7 +439,7 @@
   }
 
   /* =========================================================================
-   * 2. Paseo Colored File-Extension Badges (.inspector-ext-badge)
+   * 2. Colored File-Extension Badges (.inspector-ext-badge)
    * ========================================================================= */
   .inspector-ext-badge {
     display: inline-flex;
@@ -512,9 +512,9 @@
   }
 
   /* =========================================================================
-   * 3. Paseo ChangesPanel: Single Header Row, Hierarchical Tree & Sculpted Diffs
+   * 3. ChangesPanel: Single Header Row, Hierarchical Tree & Sculpted Diffs
    * ========================================================================= */
-  .inspector-paseo-branchbar {
+  .inspector-change-branchbar {
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -534,14 +534,14 @@
     container-type: inline-size;
   }
 
-  .inspector-paseo-branchbar::-webkit-scrollbar {
+  .inspector-change-branchbar::-webkit-scrollbar {
     display: none;
   }
 
   /* At the panel's default width the totals (already on the tab and on every file) give their
      room to the branch name, which is shown nowhere else. */
   @container (max-width: 460px) {
-    .inspector-paseo-branchbar .inspector-change-tree-stat {
+    .inspector-change-branchbar .inspector-change-tree-stat {
       display: none;
     }
   }
@@ -1758,7 +1758,7 @@
   }
 
   /* =========================================================================
-   * 8. Antigravity + Codex + Claude Desktop Tabbed Right Side Panel (#73 C.5, #75)
+   * 8. Tabbed Right Side Panel (#73 C.5, #75)
    *    - Browser-style elevated pill tab bar (.ls-inspector-header, 42px)
    *    - Stable tab dimensions on selection (zero font-weight / padding shift)
    *    - Clean borderless New Tab overview (.ls-newtab: pill search, 2x3 tools
@@ -1919,7 +1919,7 @@
     font-weight: 500;
   }
 
-  /* Codex Reference Screenshot 2 (#75, #80 1B): elevated rounded pill card has NO floating underline bar beneath it */
+  /* Elevated rounded pill card (#75, #80 1B) has NO floating underline bar beneath it */
   .ls-inspector-tab::after,
   .ls-inspector-tab[aria-selected="true"]::after,
   .ls-inspector-tab[data-active="true"]::after,
@@ -2035,7 +2035,7 @@
     color: var(--ls-fg);
   }
 
-  /* Row 1: Antigravity-style rounded pill search / URL bar */
+  /* Row 1: Rounded pill search / URL bar */
 
   .ls-newtab__search-form {
     position: relative;
@@ -2191,7 +2191,7 @@
     gap: 6px;
   }
 
-  /* Clean Antigravity-style borderless action rows (.ls-newtab__action when standalone) */
+  /* Clean borderless action rows (.ls-newtab__action when standalone) */
   .ls-newtab__actions:not(.ls-newtab__tools-grid) {
     display: flex;
     flex-direction: column;
@@ -2229,7 +2229,7 @@
     outline-offset: 1px;
   }
 
-  /* Row 2: Codex-style 2x3 Tactile Tools Grid (.ls-newtab__tools-grid) */
+  /* Row 2: 2x3 Tactile Tools Grid (.ls-newtab__tools-grid) */
   .ls-newtab__tools-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2399,7 +2399,7 @@
     background-color: var(--ls-hover);
   }
 
-  /* Row 4: Claude Desktop-style Borderless Environment & Context Usage */
+  /* Row 4: Borderless Environment & Context Usage */
   .ls-newtab__context {
     padding-block-start: 14px;
     border-block-start: var(--ls-hairline) solid var(--ls-border);

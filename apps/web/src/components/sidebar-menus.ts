@@ -6,8 +6,8 @@ import { sendDesktopCommand } from "../live/desktop-commands";
 import type { Connection } from "../live/engine";
 import { confirmAndDeleteSession } from "../live/session-actions";
 
-// The sidebar's right-click menus, after Codex's (its groups, in its order), with what LinkShell
-// can do: native menus at the pointer, in the Electron window only.
+// The sidebar's right-click menus, with what LinkShell can do: native menus at the pointer, in
+// the Electron window only.
 
 type Dialogs = ReturnType<typeof useDialogs>;
 interface MenuContext { connection: Connection; dialogs: Dialogs; navigate: (view: string) => void; at?: { x: number; y: number } }

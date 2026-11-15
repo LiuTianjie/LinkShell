@@ -64,7 +64,7 @@ const consoleNeutrals: Palette = {
   composerToolbar: ["#f7f8fa", "#ffffff04"],
 };
 
-// Syntax colours (Codex's codex-light / codex-dark), read by the highlighter's CSS-variable theme
+// Syntax colours (light / dark), read by the highlighter's CSS-variable theme
 // in highlight-engine.ts; text the grammar doesn't colour keeps the block's own colour.
 const codeColors: Palette = {
   "code-foreground": ["currentColor", "currentColor"],

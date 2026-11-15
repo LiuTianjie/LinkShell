@@ -1,4 +1,4 @@
-/* A file in the desktop's panels (FilePreview.tsx), after Codex's file preview: one 40 px bar with
+/* A file in the desktop's panels (FilePreview.tsx): one 40 px bar with
    a hairline under it, then the file on the panel's own surface, no frame around it. */
 html[data-desktop] .desktop-main .file-preview { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 html[data-desktop] .desktop-main .file-preview-bar { display: flex; flex: none; align-items: center; gap: 2px; height: 40px; padding: 0 4px 0 0; border-bottom: var(--hairline) solid var(--separator); }

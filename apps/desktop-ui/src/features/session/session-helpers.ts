@@ -361,7 +361,7 @@ export interface SessionCopy {
   cancelAction: string;
   deleteComment: string;
 
-  // Floating Context Status Pills (Paseo / T3 Code)
+  // Floating Context Status Pills
   tasksPillLabel: (done: number, total: number) => string;
   subagentsPillLabel: (count: number, running: number) => string;
   viewChangesLabel: string;

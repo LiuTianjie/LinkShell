@@ -46,7 +46,7 @@ const usableAgent = (entry: AgentInfo) =>
   entry.installed && !entry.problem && entry.auth?.state !== "missing" && entry.tier !== "terminal";
 
 /**
- * A new session on the desktop, as Codex starts a thread: an empty conversation with the
+ * A new session on the desktop: an empty conversation with the
  * composer in the middle. What is chosen before writing (the agent, its model, where it works,
  * its own worktree) are the composer's pills; Enter starts it.
  */
@@ -296,7 +296,7 @@ export function NewSessionPage({
             </>
           )}
         />
-        {/* Where the work happens sits under the box, as in Codex; the box holds who answers and how. */}
+        {/* Where the work happens sits under the box; the box holds who answers and how. */}
         <div className="new-session-place">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

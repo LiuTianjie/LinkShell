@@ -610,7 +610,7 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     } else if stub.inFullScreenTransition {
       return
     } else {
-      // System-initiated resize (macOS Tahoe Window Tiling, Menu Zoom, Rectangle/Raycast AX):
+      // System-initiated resize (window tiling, zoom, window managers resizing through Accessibility):
       // lock causal sequence immediately at 0ms and dispatch coalesced resize sync!
       stub.scheduleProgrammaticGeometrySync(resize: true)
     }

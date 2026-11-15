@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// A restrained, Linear-grade alert: a soft semantic tint, a tinted left rail,
+// A restrained alert: a soft semantic tint, a tinted left rail,
 // one matching icon, and a clear title/description hierarchy. Colours come
 // only from semantic tokens (--info / --warning / --danger / --success), mixed
 // softly with color-mix so nothing reads as a harsh block.

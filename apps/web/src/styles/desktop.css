@@ -1,4 +1,4 @@
-/* LinkShell desktop workspace, after Codex's desktop app (docs/design/codex-reference.md).
+/* LinkShell desktop workspace (colours and sizes: docs/design/visual-system.md).
 
    - The window is one surface. The sidebar runs to the window's edges and, in the Mac app, is
      see-through over the window's vibrancy; the main view beside it is one solid panel with a
@@ -122,7 +122,7 @@ html[data-desktop] .desktop-sidebar-resizer:is(:hover, :focus-visible, [data-dra
 html[data-desktop] .desktop-sidebar-resizer:focus-visible { outline: none; }
 html[data-desktop] .desktop-root[data-sidebar="hidden"] .desktop-sidebar-slot { width: 0; opacity: 0; }
 /* Without the sidebar the main panel reaches the window's top; its own title row keeps clear of
-   the traffic lights and the button that brings the sidebar back (Codex does the same). */
+   the traffic lights and the button that brings the sidebar back. */
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-body { padding-left: var(--gutter); }
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 112px; }
 html[data-desktop][data-fullscreen] .desktop-root[data-shell="electron"][data-sidebar="hidden"] .desktop-main { --titlebar-inset: 44px; }
@@ -146,7 +146,7 @@ html[data-desktop] .desktop-root:has(.screen-fullscreen) .desktop-floating-title
 html[data-desktop] .desktop-root[data-shell="electron"] :is(.session-heading, .desktop-page-title, .inspector-tabs) :is(button, a, input, select, [role="button"], [role="tab"], [role="combobox"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
 @media (prefers-reduced-motion: reduce) { html[data-desktop] .desktop-sidebar-slot { transition: none; } }
 
-/* The Mac window, as Codex's: the main surface runs to the window's top, right and bottom edges
+/* The Mac window: the main surface runs to the window's top, right and bottom edges
    (the window's own corners round it), set off from the sidebar by a hairline, not floated as an
    inset card. Beside a session the conversation and the inspector share that one surface,
    divided by a hairline. Windows keeps the inset panel under its drawn title bar. */
@@ -298,7 +298,7 @@ html[data-desktop] .tree-title { display: grid; grid-template-columns: minmax(0,
 /* A row that also names its project is two lines; every other row is the sidebar's 30 px. */
 html[data-desktop] .tree-session:has(.tree-title small) { height: auto; padding-block: 5px; }
 /* A session started from or forked off the one above it: indented under its title, an elbow of
-   hairline leading to it, as the Claude app nests side sessions. */
+   hairline leading to it. */
 html[data-desktop] .tree-session[data-child] { position: relative; padding-left: 26px; }
 html[data-desktop] .tree-session[data-child]::before { content: ""; position: absolute; top: 6px; left: 16px; width: 7px; height: 9px; border-bottom-left-radius: 4px; box-shadow: inset 1px -1px 0 color-mix(in oklab, var(--label) 22%, transparent); pointer-events: none; }
 html[data-desktop] .tree-session[data-child] .tree-state { margin-inline: 2px 4px; }
@@ -343,7 +343,7 @@ html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):n
 html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):not([aria-pressed="true"]):is(:hover, :active):not(:disabled) { background: var(--accentHover) !important; }
 html[data-desktop] [data-button][data-variant="default"]:not(.terminal-bottom):not([aria-pressed="true"]):disabled { background: var(--accentFill) !important; color: var(--primaryForeground) !important; opacity: .4 !important; }
 html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]) { border: 0 !important; border-radius: var(--radius-control); background: var(--fill) !important; box-shadow: none; color: var(--label) !important; }
-/* Codex's secondary states: a little darker on hover, lighter while pressed (light); in the dark, steps of white. */
+/* Secondary states: a little darker on hover, lighter while pressed (light); in the dark, steps of white. */
 html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):hover:not(:disabled) { background: color-mix(in oklab, var(--label) 10%, transparent) !important; }
 html[data-desktop] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]):active:not(:disabled) { background: color-mix(in oklab, var(--label) 4%, transparent) !important; }
 html[data-desktop][data-theme="dark"] [data-button][data-variant="secondary"]:not(.terminal-bottom):not([aria-pressed="true"]) { background: color-mix(in oklab, var(--label) 5%, transparent) !important; }
@@ -360,7 +360,7 @@ html[data-desktop] [data-button][data-variant="destructive"] { border-radius: va
 /* A single focus outline replaces the primitive's border and inset ring. */
 html[data-desktop] [data-button][data-variant]:focus-visible { border-color: transparent !important; box-shadow: none !important; outline: 2px solid var(--focus); outline-offset: 2px; }
 html[data-desktop] [data-button]:disabled { cursor: default; }
-/* Disabled controls fade, as Codex's (40 %), instead of turning grey. */
+/* Disabled controls fade (40 %) instead of turning grey. */
 html[data-desktop] [data-button]:is([data-variant="ghost"], [data-variant="outline"], [data-variant="secondary"]):disabled { opacity: .4 !important; }
 /* Interactive things keep the arrow, as in a native app. */
 html[data-desktop] :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, a.desktop-place, .list-row, [cmdk-item]) { cursor: default; }
@@ -404,7 +404,7 @@ html[data-desktop] [data-slot="textarea"] { border: 0 !important; border-radius:
    the buttons and selects beside them. Terminal tabs share the primitive but are a tab strip (their
    own rules, desktop-resources.css): no thumb, no raised step. */
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] { height: 28px; min-height: 28px; gap: 2px; padding: 2px; border: 0; border-radius: var(--radius-card); background: var(--segment-track); }
-/* In the dark the track is a tint of white over the panel (Codex's 5 %), never darker than the page. */
+/* In the dark the track is a tint of white over the panel (5 %), never darker than the page. */
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"]:not(.terminal-tab-list) [data-slot="tabs-trigger"] { height: 24px !important; padding-inline: 10px !important; border: 0 !important; border-radius: var(--radius-control) !important; color: var(--secondaryLabel); font-size: 13px; font-weight: 500; transition: background var(--transition), color var(--transition); }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after { display: none; }
 html[data-desktop] :is(.desktop-main, .management-dialog) [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]:hover { color: var(--label); }
@@ -450,7 +450,7 @@ html[data-desktop] [data-slot="sheet-content"] { background: var(--plain); }
 /* ⌘K: 520 px, a dialog's 12 px corners and its shadow; rows 5 × 8 px with 6 px corners, the
    ones not chosen at 75 %. */
 /* Opaque enough (with a 32 px blur) that the page behind never reads through as text; in the dark,
-   Codex's 1 px inner light on the edge. */
+   a 1 px inner light on the edge. */
 html[data-desktop] [data-slot="dialog-content"].command-center { top: 14% !important; width: min(520px, calc(100vw - 48px)) !important; max-width: none !important; padding: 4px !important; overflow: hidden; border-radius: var(--radius-panel) !important; background: color-mix(in oklab, var(--plain) 94%, transparent) !important; -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8); box-shadow: 0 0 0 .5px var(--separatorStrong), 0 16px 32px -8px rgb(0 0 0 / .3); }
 html[data-desktop][data-theme="dark"] [data-slot="dialog-content"].command-center { background: color-mix(in oklab, var(--cardRaised) 94%, transparent) !important; box-shadow: inset 0 0 1px rgb(255 255 255 / .2), 0 0 0 .5px rgb(255 255 255 / .1), 0 16px 40px -8px rgb(0 0 0 / .6) !important; }
 html[data-desktop] .command-center [data-slot="command"] { border-radius: var(--radius-card) !important; background: transparent; padding: 0; }
@@ -530,7 +530,7 @@ html[data-desktop] .desktop-main .session-search:not(.page-header *) { flex: 1; 
 html[data-desktop] .desktop-main .session-overview-tools { flex: 1; justify-content: flex-end; }
 html[data-desktop] .desktop-main :is(.session-overview-tools, .page-header) [data-slot="select-trigger"] { height: 28px; }
 
-/* Lists: rows straight on the panel, as Codex's thread lists. A row is two lines (what, then
+/* Lists: rows straight on the panel. A row is two lines (what, then
    where and how it is going), divided by hairlines that step aside for the row under the
    pointer. A group is a small title and its rows. */
 html[data-desktop] .desktop-main .list-section-title { display: flex; align-items: baseline; gap: 6px; min-height: 28px; margin: 0; padding: 4px 12px; color: var(--label); font-size: 13px; font-weight: 500; }
@@ -592,7 +592,7 @@ html[data-desktop][data-theme="dark"] .agent-glyph-dark { display: block; }
 html[data-desktop][data-theme="dark"] .agent-mark[data-light-tile] { background: var(--agent-mark-dark) !important; }
 
 /* Groups: rows in one 8 px box with hairlines between them (the same box as 本机管理's). A row
-   under the pointer is tinted edge to edge, as Codex's card rows: the box has no padding of its
+   under the pointer is tinted edge to edge: the box has no padding of its
    own and its first and last rows take its corners. */
 html[data-desktop] .desktop-main :is(.computers-section, .worktree-list:not(:empty), .resource-entry-list:not(:empty), .resource-service-list:not(:empty)),
 html[data-desktop] .desktop-main .screens-page > div:has(> .screen-row) { padding: 0; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
@@ -603,7 +603,7 @@ html[data-desktop][data-theme="dark"] .desktop-main :is(.computers-section, .wor
 html[data-desktop][data-theme="dark"] .desktop-main .screens-page > div:has(> .screen-row) { background: color-mix(in oklab, var(--label) 2%, transparent); }
 html[data-desktop] .desktop-main .live-overview :is(.computers-section-heading h2, .list-section-title) { margin: 0; }
 html[data-desktop] .desktop-main .computers-section-heading p { margin-top: 4px; color: var(--tertiaryLabel); font-size: 12px; line-height: 18px; }
-/* Rows in a group sit 16 px in from its edges, their hairlines too, as Codex's settings rows. A
+/* Rows in a group sit 16 px in from its edges, their hairlines too. A
    group's title and its line of why sit above its box, starting where the box does (13 / 500
    secondary); groups are 24 px apart. */
 html[data-desktop] .desktop-main .computers-page,
@@ -727,7 +727,7 @@ html[data-desktop] .desktop-main:has(> .session-page, > .workspace-stage:not([hi
    and no pill track behind the tabs (that track spans the whole row here, not just the tabs). */
 html[data-desktop] .desktop-main .terminal-workspace { border-top: 0; }
 html[data-desktop] .desktop-main .terminal-tab-list[data-variant="line"] { padding: 0; background: transparent; }
-/* The terminal is the panel's own surface, 8 / 16 / 12 px in from its edges, as Codex's. */
+/* The terminal is the panel's own surface, 8 / 16 / 12 px in from its edges. */
 html[data-desktop] .desktop-main :is(.terminal-live, .xterm-host) { border-radius: 0; }
 html[data-desktop] .desktop-main .terminal-live { padding: 8px 12px 12px 16px; background: var(--terminal); color: var(--codeText); }
 html[data-desktop] .desktop-main .terminal-live .xterm-viewport::-webkit-scrollbar { width: 10px; }

@@ -53,7 +53,7 @@ describe("SmoothRelease", () => {
     const shown = drain(release, 0, 2);
     expect(shown[1]).toBeGreaterThan(0);
     expect(shown[1]).toBeLessThan(400);
-    // Most of it within a second, then easing to the end (the tail lands softly, as in Codex).
+    // Most of it within a second, then easing to the end (the tail lands softly).
     expect(shown[20]).toBeGreaterThan(300);
     expect(shown.at(-1)).toBeLessThanOrEqual(400);
     for (let i = 1; i < shown.length; i++) expect(shown[i]).toBeGreaterThanOrEqual(shown[i - 1]!);

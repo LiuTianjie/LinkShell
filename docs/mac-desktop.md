@@ -4,13 +4,13 @@
 
 ## 桌面工作台
 
-窗口是装在同一个 `LinkShell.app` 里的 Electron 44：打开 App 时 Swift 入口 `execv` 成 `LinkShell Desktop`，bundle id、签名和已授予的录屏 / 辅助功能权限都不变；Host 调用的 `Contents/MacOS/LinkShell`（屏幕、输入、权限检查）照旧。布局与视觉照 Codex 桌面版：半透明侧栏、46px 工具栏、实心主面板、浮动输入框，配色用 Codex 的令牌。设计规则见 `apps/web/DESIGN.md` 的桌面版一节，方案见[桌面版改用 Electron](design/desktop-electron-plan.md)。
+窗口是装在同一个 `LinkShell.app` 里的 Electron 44：打开 App 时 Swift 入口 `execv` 成 `LinkShell Desktop`，bundle id、签名和已授予的录屏 / 辅助功能权限都不变；Host 调用的 `Contents/MacOS/LinkShell`（屏幕、输入、权限检查）照旧。布局是半透明侧栏、46px 工具栏、实心主面板、浮动输入框；颜色和尺寸见[视觉规范](design/visual-system.md)，方案见[桌面版改用 Electron](design/desktop-electron-plan.md)。
 
 - **侧栏：** 按项目分组的会话；子会话（Claude 桌面 App 启动的会话、分叉）缩进在父会话下，可折叠，已归档的不显示。会话和项目行有右键菜单（重命名、分叉、复制、在 Finder 中显示、归档、删除；在此项目中新建、复制路径、全部归档）。
 - **这台 Mac / 其他电脑：** 连接本机运行中的 Host 不需要账号、会员或网关；其他电脑通过账号或配对码添加。
 - **新建会话：** 选 Agent、模型、项目和分支。模型是 Agent 报给这台电脑的真实列表；ACP Agent（Gemini、Grok、Copilot、Antigravity 等）在这台电脑上用过一次后才有列表，之前显示「默认模型」。
-- **对话：** 各 Agent 统一按 Claude 桌面 App 的方式呈现：只给模型看的标签（`<system-reminder>`、IDE 状态等）不显示；其他会话发来的消息显示为「收到的消息来自「会话」」并可打开；子代理的回传、`!` 命令、CI 与定时任务事件各有自己的样式；Codex Desktop 附带的文件、粘贴内容和浏览器状态显示为气泡上方的标签。计划卡在本轮末尾逐步更新。
-- **检查器：** 变更、文件（可收起、可拖宽的文件列表）、终端、任务、端口预览；Codex 会话还有插件（MCP Apps），调用插件时自动打开。
+- **对话：** 各 Agent 统一呈现：只给模型看的标签（`<system-reminder>`、IDE 状态等）不显示；其他会话发来的消息显示为「收到的消息来自「会话」」并可打开；子代理的回传、`!` 命令、CI 与定时任务事件各有自己的样式；Codex Desktop 附带的文件、粘贴内容和浏览器状态显示为气泡上方的标签。计划卡在本轮末尾逐步更新。运行中追加消息：Agent 支持插话（Steer）时直接送进当前一轮，否则按钮写明会先打断再发送。选中对话里的文字会浮出「在侧边问答中提问」（仅支持侧边问答的 Agent）和「引用到回复」。斜杠命令只列这个 Agent 自己有的。
+- **检查器：** 变更、文件（可收起、可拖宽的文件列表）、终端、任务、端口预览；侧边问答只对有旁支对话的 Agent 开放（Codex 的 `/side`，Claude、Grok 的 `/btw`），不打断主任务，草稿按会话保留；插件（MCP Apps）只对报告支持的 Agent 显示，调用插件时自动打开。
 - **远程桌面：** Mac 恢复原生 WebRTC → VideoToolbox 硬件解码 → 最新帧缓存 → Metal 呈现，Apple silicon 优先 H.265，Intel 优先 H.264；只协商本机支持硬件解码的格式。Electron 负责界面和加密信令；`LinkShell --desktop-media` 子进程独立加载 `WebRTC.framework`，通过 IOSurface Mach 端口把解码画面交给窗口内的 AppKit/Metal 视图，避免与 Chromium 的同名 Objective-C 类冲突。像素不经过 JavaScript、Canvas 或 Chromium `<video>`。AppKit 鼠标、键盘和输入法走原生 DataChannel；主线程不处理逐帧呈现。共享画面直到 GPU 完成才释放，最多三个未释放帧和一个最新候选帧；隐藏、重连、页面崩溃及退出都会暂停或清理原生接收。Windows 保留原有 Chromium 接收器。
 - **本机管理：** 总览、设备、访问密码、用量统计、日志、更新、设置。「网关」一行的「更改…」可在官方网关、自建网关（填 `wss://` 地址）和关闭之间切换。
 
@@ -56,7 +56,7 @@ App 内的 CLI、Host 和 Node 是配套版本。设置里的“安装到 ~/.loc
 
 Host 按需读取 `CODEX_HOME` 下的 `sessions` / `archived_sessions` 和 `CLAUDE_CONFIG_DIR` 下的 `projects`，未设置时使用 `~/.codex`、`~/.claude`。包括本地终端及子代理产生的用量，不限于 LinkShell 创建的会话；最多每分钟重新扫描一次，未变化的文件复用内存缓存。Codex 累计计数转为增量，Claude 重复回复按消息去重；原始对话和日志路径不会传到统计页面。缺失日志无法补算，超出 256 MB 的单文件或读取失败会提示统计不完整。
 
-统计来自工具日志，展示按公开 API 单价折算的估算价值（Estimated API Value）以及通过手机/远程端完成的对话轮次与审批统计，直观反映远程协作收益；估算值不等同于订阅剩余额度或实际账单。旧 Host 不支持该接口时客户端会提示更新。实现参考 [CC Switch 的本地日志统计思路](https://github.com/farion1231/cc-switch/tree/main/src-tauri/src/services)，未引入其代理接管或凭据管理。
+统计来自工具日志，展示按公开 API 单价折算的估算价值（Estimated API Value）以及通过手机/远程端完成的对话轮次与审批统计，直观反映远程协作收益；估算值不等同于订阅剩余额度或实际账单。旧 Host 不支持该接口时客户端会提示更新。统计只读本地日志，不接管代理、不管理凭据。
 
 ## 更新
 

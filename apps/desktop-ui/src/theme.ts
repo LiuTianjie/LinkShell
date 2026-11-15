@@ -26,7 +26,7 @@ const brandAliases: Palette = {
 
 /**
  * 7-tier Carbon-Obsidian & Alabaster multi-elevation surface and typography ramp
- * (Paseo + T3 Code sculpted instrument aesthetic) for LinkShell Desktop (macOS & Windows).
+ * (sculpted instrument aesthetic) for LinkShell Desktop (macOS & Windows).
  * Every light and dark surface satisfies WCAG AA >= 4.5:1 for both `secondaryLabel` and
  * `tertiaryLabel`, with `contrast(secondaryLabel) > contrast(tertiaryLabel) + 1.0`.
  */
@@ -59,7 +59,7 @@ export const desktopNeutrals: Palette = {
   sheetCard: ["#ffffff", "#1d1f26"],
   popover: ["#ffffff", "#1d1f26"],
 
-  // Monochrome High-Contrast Primary Keycaps (Paseo / T3 Code primary action triggers)
+  // Monochrome High-Contrast Primary Keycaps
   primaryKeycapBg: ["#141518", "#ededf0"],
   primaryKeycapFg: ["#ffffff", "#0b0c0e"],
   primaryKeycapHover: ["#26282e", "#ffffff"],
@@ -88,7 +88,7 @@ export const desktopNeutrals: Palette = {
   fill: ["rgba(17,19,24,0.05)", "rgba(255,255,255,0.065)"],
   fillStrong: ["rgba(17,19,24,0.10)", "rgba(255,255,255,0.12)"],
 
-  // Crisp Emerald & Coral Diff Grounds & Text (Paseo / T3 Code precision review)
+  // Crisp Emerald & Coral Diff Grounds & Text
   diffAdd: ["rgba(26,127,55,0.11)", "rgba(63,185,80,0.15)"],
   diffDel: ["rgba(207,34,46,0.10)", "rgba(248,81,73,0.15)"],
   diffAddText: ["#1a7f37", "#3fb950"],
@@ -99,7 +99,7 @@ export const desktopNeutrals: Palette = {
   scrollbarThumbHover: ["#606672", "#8b92a0"],
 };
 
-/** Shiki CSS-variable syntax theme tokens (`codex-light` / `codex-dark` calibrated). */
+/** Shiki CSS-variable syntax theme tokens. */
 export const codeSyntaxColors: Palette = {
   "code-foreground": ["currentColor", "currentColor"],
   "code-background": ["transparent", "transparent"],
@@ -132,7 +132,7 @@ export const desktopPalette: Palette = {
   ...codeSyntaxColors,
 };
 
-/** Calibrated Ghostty-inspired Dark ANSI 16 palette for integrated xterm instances. */
+/** Calibrated Dark ANSI 16 palette for integrated xterm instances. */
 export const terminalDarkAnsiPalette = {
   background: "#090a0d",
   foreground: "#e6e9f0",

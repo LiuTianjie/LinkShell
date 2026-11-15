@@ -73,7 +73,7 @@ const FAST_MODE_REASONS: Record<string, string> = {
 
 /**
  * The settings people change mid-conversation, on the composer itself: mode, model and effort,
- * each a menu of its values, the way Codex and Claude's desktop apps put them under the prompt.
+ * each a menu of its values, under the prompt.
  * Everything else stays in the settings panel.
  */
 /**

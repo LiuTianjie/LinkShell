@@ -83,7 +83,7 @@ export function FileExtBadge({ path }: { path: string }) {
   );
 }
 
-/** Formats large diff counts compactly like Paseo (`1920 -> "1.9k"`), keeping `< 1000` exact. */
+/** Formats large diff counts compactly (`1920 -> "1.9k"`), keeping `< 1000` exact. */
 export function formatCompactStat(value: number): string {
   if (value < 1000) return String(value);
   if (value < 10_000) {
@@ -126,7 +126,7 @@ interface MutableDir<T> {
 }
 
 /**
- * Builds Paseo's indented compact-folder hierarchy (collapsing single-child folder chains
+ * Builds the indented compact-folder hierarchy (collapsing single-child folder chains
  * like `packages/website/src` into one collapsible row with aggregated `+N -M` totals).
  */
 export function buildCompactChangeTree<

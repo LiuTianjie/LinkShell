@@ -1153,7 +1153,7 @@ export function ChangesPanel({
   return (
     <div className="inspector-panel-fill">
       {/* Single Clean Changes Header Row: branch + uncommitted +X -Y + scope/view + refresh/commit */}
-      <div className="inspector-paseo-branchbar">
+      <div className="inspector-change-branchbar">
         <div className="inspector-subbar-group" style={{ minInlineSize: 0 }}>
           {gitBranch ? (
             <span className="inspector-branch-pill">

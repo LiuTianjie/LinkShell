@@ -253,7 +253,7 @@ function ConnectionSummary({ connection }: { connection: Connection }) {
 }
 
 function PickerCopy({ name, detail, online }: { name: string; detail: string; online: boolean }) {
-  // In the Electron window one line, as Codex's workspace switcher: the name, its state on hover.
+  // In the Electron window one line: the name, its state on hover.
   return (
     <>
       <span className="desktop-presence" data-online={online || undefined} />
@@ -332,7 +332,7 @@ function SessionRow({
         <span className={fold ? "tree-name" : undefined}>
           {fold ? <span>{titleOf(session)}</span> : titleOf(session)}
           {fold && (
-            // Inside the row so it reads as part of the title, as the Claude app draws it; it folds
+            // Inside the row so it reads as part of the title; it folds
             // without opening the session.
             <span className="tree-fold" aria-hidden onClick={(event) => { event.stopPropagation(); fold.toggle(); }}>
               <ChevronDown size={12} />
@@ -1000,8 +1000,8 @@ export function DesktopShell({ children, ...props }: ConsoleShellProps) {
     setSidebarWidth(width);
     try { saveLocal("desktopSidebarWidth", width); } catch { /* The layout still works without storage. */ }
   };
-  // With the sidebar hidden, the pointer at the window's left edge brings it out over the page
-  // (Codex's peek); leaving it puts it away again.
+  // With the sidebar hidden, the pointer at the window's left edge brings it out over the page;
+  // leaving it puts it away again.
   const [peek, setPeek] = useState(false);
   useEffect(() => {
     if (!isElectronDesktop || !sidebarHidden) { setPeek(false); return; }

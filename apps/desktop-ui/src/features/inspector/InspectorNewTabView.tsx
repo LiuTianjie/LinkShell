@@ -372,7 +372,7 @@ export function InspectorNewTabView({
 
   return (
     <div className="ls-newtab inspector-panel-scroll" data-testid="inspector-new-tab">
-      {/* Row 1: Antigravity-style Pill Search / URL Input */}
+      {/* Row 1: Pill Search / URL Input */}
       <form
         className="ls-newtab__search-form ls-newtab__search"
         onSubmit={handleSearchSubmit}
@@ -452,7 +452,7 @@ export function InspectorNewTabView({
         ) : null}
       </form>
 
-      {/* Row 2: Codex-style 2-Column Tactile 工具 Grid */}
+      {/* Row 2: 2-Column Tactile 工具 Grid */}
       <section className="ls-newtab__section">
         <div className="ls-newtab__section-head">
           <span className="ls-newtab__section-title">{ti("toolsSection")}</span>
@@ -670,7 +670,7 @@ export function InspectorNewTabView({
         </div>
       </section>
 
-      {/* Row 3: Antigravity-style Conditional Subagents Section */}
+      {/* Row 3: Conditional Subagents Section */}
       {mergedSubagents.length > 0 ? (
         <section
           className="ls-newtab__section ls-newtab__subagents"
@@ -808,7 +808,7 @@ export function InspectorNewTabView({
         </section>
       ) : null}
 
-      {/* Row 4: Claude-style Borderless Environment & Context */}
+      {/* Row 4: Borderless Environment & Context */}
       <section
         className="ls-newtab__section ls-newtab__context"
         data-testid="inspector-newtab-context"

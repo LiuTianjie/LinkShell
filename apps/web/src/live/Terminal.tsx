@@ -244,7 +244,7 @@ export function Terminal({
     };
     const scrollWatch = term.onScroll(scrolled);
     const writeWatch = term.onWriteParsed(scrolled);
-    // A considered 16-colour palette in Ghostty's muted spirit — soft, legible,
+    // A considered, muted 16-colour palette — soft, legible,
     // never the harsh VGA primaries. Background/foreground track the app theme.
     const ansi = {
       black: "#3b3b45",

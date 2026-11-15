@@ -1021,7 +1021,7 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
     expect(onQrOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("enforces system.css Paseo/T3 obsidian-sculpted invariants (@layer components, zero !important, zero overflow:hidden, #0b0c0f rail, #111216 cards & monochrome keycaps)", () => {
+  it("enforces system.css obsidian-sculpted invariants (@layer components, zero !important, zero overflow:hidden, #0b0c0f rail, #111216 cards & monochrome keycaps)", () => {
     const css = readFileSync(
       resolve(__dirname, "../src/styles/system.css"),
       "utf8",

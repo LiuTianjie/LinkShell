@@ -234,7 +234,7 @@ export function Management({ page, navigate }: { page: ManagePage; navigate: (pa
 }
 
 /**
- * A group, as Codex's settings sections: a title flush with its box, the rows in one rounded box,
+ * A group: a title flush with its box, the rows in one rounded box,
  * then any footnotes, which belong to the group and sit under the rows' text.
  */
 function Group({ title, trailing, children }: { title: string; trailing?: string; children: ReactNode }) {
@@ -264,7 +264,7 @@ function Status({ text, tone, label }: { text?: string; tone?: "success" | "warn
 }
 
 /**
- * One setting, as Codex's settings rows: what it is and a line of why on the left; its state or
+ * One setting: what it is and a line of why on the left; its state or
  * control on the right. With `onClick` the whole row is the way there.
  */
 function SettingRow({ title, detail, children, onClick }: { title: ReactNode; detail?: ReactNode; children?: ReactNode; onClick?: () => void }) {
@@ -934,8 +934,8 @@ function SettingsPage({ facts }: { facts: Facts }) {
 }
 
 /**
- * Management's pages, in the window's sidebar while management is open (as Codex's settings
- * take the sidebar), so the content has the whole main panel. They are the workspace sidebar's
+ * Management's pages, in the window's sidebar while management is open, so the content has the
+ * whole main panel. They are the workspace sidebar's
  * own rows, so icons and words sit in the same columns on either side of the switch.
  */
 export function ManagementNav({ page, navigate, back }: { page: ManagePage; navigate: (page: ManagePage) => void; back: () => void }) {

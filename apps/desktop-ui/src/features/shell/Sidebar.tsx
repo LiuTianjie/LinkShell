@@ -134,7 +134,7 @@ interface SessionRowProps {
 }
 
 /**
- * Clean T3 Code / Linear Session Row:
+ * Session Row:
  * - Inside a project group (`!isPinnedSection && !computerBadge`): single-line row (`AgentMark` + live `StatusDot` + `Title` + `wt` tag + timestamp) without repeating parent project monogram/slug.
  * - In pinned attention section (`isPinnedSection`) or cross-computer badge (`computerBadge`): shows compact context subline.
  */
@@ -918,7 +918,7 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Paseo Top Action Stack: Full-width sculpted ComputerSwitcher + quiet ghost action rows */}
+      {/* Top Action Stack: Full-width sculpted ComputerSwitcher + quiet ghost action rows */}
       <div className="sidebar-top-stack">
         <ComputerSwitcher onSelectDone={onNavigateDone} />
 
@@ -1107,7 +1107,7 @@ export function Sidebar({
           </div>
         ) : null}
 
-        {/* Paseo Status Section 1: Active Working Set (waiting -> running -> <6h recent) */}
+        {/* Status Section 1: Active Working Set (waiting -> running -> <6h recent) */}
         {activeEntries.length > 0 ? (
           <section
             className="sidebar-section"

@@ -30,7 +30,7 @@
     --ls-danger-soft: light-dark(rgba(200, 50, 47, 0.09), rgba(255, 123, 114, 0.14));
 
     /* -----------------------------------------------------------------------
-     * 2. 7-Tier Carbon-Obsidian & Alabaster Surface System (Paseo + T3 Code)
+     * 2. 7-Tier Carbon-Obsidian & Alabaster Surface System
      * ----------------------------------------------------------------------- */
     --ls-ground: light-dark(#f2f3f6, #090a0c);
     --ls-sidebar: light-dark(#f2f3f6, #090a0c);
@@ -54,7 +54,7 @@
     --ls-sheet-card: light-dark(#ffffff, #1d1f26);
     --ls-elevated: var(--ls-popover);
 
-    /* Monochrome High-Contrast Primary Keycaps (Paseo / T3 Code primary actions) */
+    /* Monochrome High-Contrast Primary Keycaps */
     --ls-primary-bg: light-dark(#141518, #ededf0);
     --ls-primary-fg: light-dark(#ffffff, #0b0c0e);
     --ls-primary-hover: light-dark(#26282e, #ffffff);

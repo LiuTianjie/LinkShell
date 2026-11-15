@@ -4,7 +4,7 @@ Read the repository's root `AGENTS.md` as well.
 
 ## Design direction
 
-Colours, radii, type sizes, motion and the shared components follow **[docs/design/visual-system.md](../../docs/design/visual-system.md)**, the one visual system for the app, the desktop, this web console and the site. It supersedes the earlier Linear and Codex references: they remain examples of restraint, not sources of colours or sizes. Change that document and `apps/client/src/theme/brand-colors.json` first, then every surface together.
+Colours, radii, type sizes, motion and the shared components follow **[docs/design/visual-system.md](../../docs/design/visual-system.md)**, the one visual system for the app, the desktop, this web console and the site. Change that document and `apps/client/src/theme/brand-colors.json` first, then every surface together.
 
 - Use shadcn/ui (Radix) primitives from `src/components/ui` for navigation, buttons, forms, menus, tabs, tables, dialogs, status badges, loading and empty states. Extend shared component variants when necessary; keep page-level classes focused on layout.
 - Use quiet neutrals, subtle borders and clear typography. Primary actions use LinkShell indigo (`accentFill`) with white text; navigation selection uses a neutral surface. Avoid pill-shaped buttons, vivid navigation stripes, oversized dashboard cards and heavy decorative shadows.

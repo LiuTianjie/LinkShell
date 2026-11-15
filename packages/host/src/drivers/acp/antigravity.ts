@@ -146,7 +146,7 @@ export function resolveAntigravityLaunch(env: NodeJS.ProcessEnv = process.env): 
   const binaryName = process.platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par";
   const harnessName = process.platform === "win32" ? "localharness_external.exe" : "localharness_external";
 
-  const explicitPath = env.LINKSHELL_ANTIGRAVITY_ACP_PATH?.trim() || env.T3CODE_ANTIGRAVITY_ACP_PATH?.trim();
+  const explicitPath = env.LINKSHELL_ANTIGRAVITY_ACP_PATH?.trim();
   let binaryPath: string | undefined;
   let version = ANTIGRAVITY_ACP_VERSION;
 
@@ -155,16 +155,7 @@ export function resolveAntigravityLaunch(env: NodeJS.ProcessEnv = process.env): 
   } else {
     const home = env.HOME || homedir();
     const linkshellHome = env.LINKSHELL_HOME || join(home, ".linkshell");
-    const toolRoots = [
-      join(linkshellHome, "tools", "antigravity-acp"),
-      join(home, ".t3", "tools", "antigravity-acp"),
-      ...(process.platform === "darwin"
-        ? [
-            join(home, "Library", "Application Support", "t3code (Alpha)", "tools", "antigravity-acp"),
-            join(home, "Library", "Application Support", "t3code", "tools", "antigravity-acp"),
-          ]
-        : []),
-    ];
+    const toolRoots = [join(linkshellHome, "tools", "antigravity-acp")];
     const managed = findInManagedToolRoots(toolRoots, binaryName);
     if (managed) {
       binaryPath = managed.path;

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 /**
  * A streaming reply arrives in bursts: a network chunk is often hundreds of characters, then
  * nothing for a while. Shown as it arrives, the text jumps. This releases it at a rate that
- * follows the backlog (Codex's buffer, read from its desktop app): every 50 ms step the rate
+ * follows the backlog: every 50 ms step the rate
  * moves halfway toward 1.5× the backlog when it is small and 1/1.2 of it when it is large, so a
  * burst drains smoothly over the next frames and a long one speeds up instead of lagging.
  * Times are in seconds.
@@ -16,7 +16,7 @@ export class SmoothRelease {
   private lastDrain?: number;
   private carry = 0;
 
-  /** `floor`: the shortest gap an arrival rate is measured over (Codex's default, 10 s). */
+  /** `floor`: the shortest gap an arrival rate is measured over (10 s). */
   constructor(length: number, private readonly floor = 10) { this.shown = length; this.target = length; }
 
   get length() { return this.shown; }

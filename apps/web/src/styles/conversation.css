@@ -1,7 +1,6 @@
 /* Chat detail: heading, message timeline, markdown, tool/diff/plan cards, async
-   questions, approvals, pinned composer, side panel. Modeled on Claude / Codex
-   Desktop — assistant text flows full width, the user speaks in a quiet bubble,
-   tool work folds into flat hairline rows. One authored value per rule; the
+   questions, approvals, pinned composer, side panel. Assistant text flows full width, the
+   user speaks in a quiet bubble, tool work folds into flat hairline rows. One authored value per rule; the
    markup always renders inside .console-main, so there are no override layers. */
 @layer components {
   /* ---- Page frame: heading pinned, conversation scrolls, composer pinned ---- */
@@ -746,7 +745,7 @@
     transform: rotate(90deg);
   }
 
-  /* ---- Tool record: a flat inline row, like Claude Desktop. No box when
+  /* ---- Tool record: a flat inline row. No box when
      folded; a hairline frame appears only once it's open. ---- */
   .tool-record {
     border: 1px solid transparent;
@@ -848,7 +847,7 @@
   }
   .tool-output-text:first-of-type { margin-top: 0; }
 
-  /* A row worded as the Claude app words it: the verb, then what it acted on. A row with nothing
+  /* A row worded as the verb, then what it acted on. A row with nothing
      to open (a file read, a directory listed) is the same line without the chevron. */
   .tool-record > .tool-summary {
     display: flex;
@@ -1016,7 +1015,7 @@
   }
   .diff-line[data-kind="add"] { background: var(--diffAdd); }
   .diff-line[data-kind="del"] { background: var(--diffDel); }
-  /* The tint says added or removed; the code itself keeps its own (syntax) colours, as Codex's. */
+  /* The tint says added or removed; the code itself keeps its own (syntax) colours. */
   .diff-line[data-kind="add"] .diff-sign { color: var(--diffAddText); }
   .diff-line[data-kind="del"] .diff-sign { color: var(--diffDelText); }
   .diff-number { color: var(--quaternaryLabel); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }

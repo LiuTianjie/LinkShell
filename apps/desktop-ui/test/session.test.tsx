@@ -908,7 +908,7 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
         text: expect.stringContaining("Rename to `nextCount` for clarity"),
       });
 
-      // 6. SessionHeaderActions stays Paseo-clean (no duplicate Terminal/Inspector/Find buttons)
+      // 6. SessionHeaderActions stays clean (no duplicate Terminal/Inspector/Find buttons)
       //    and moves `findInSession` (`会话内查找`) into the `[•••]` Session overflow Menu right above `copyTitle`
       const headerActions = container.querySelector(".ls-session-header-actions")!;
       expect(headerActions).not.toBeNull();

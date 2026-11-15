@@ -499,7 +499,7 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     expect(cssText).toContain("inset-inline-start: 0;");
     expect(cssText).not.toContain("inset-inline-start: -3px");
 
-    // Paseo compact folder tree & extension badge helpers
+    // Compact folder tree & extension badge helpers
     expect(
       toRepoRelativePath(
         "/Users/dev/claude-remote/apps/desktop-ui/src/theme.ts",
@@ -584,7 +584,7 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     expect(sidePanel.querySelector("textarea")).toBeNull();
   });
 
-  it("renders Antigravity/Codex browser-style .ls-inspector-header, InspectorNewTabView 2x3 tools grid + port shortcut + environment strip, keepMounted tabs, width toggle, and tab close", async () => {
+  it("renders browser-style .ls-inspector-header, InspectorNewTabView 2x3 tools grid + port shortcut + environment strip, keepMounted tabs, width toggle, and tab close", async () => {
     createMockConnectionRig({
       mcpApps: [
         {
@@ -795,9 +795,9 @@ describe("Phase 2B Slice 3: Inspector Workbench, Atomic Dockable Terminal & Stan
     });
     await flushAsync();
 
-    // Single merged top header row (zero stacked .inspector-paseo-summarybar clutter)
-    expect(container.querySelector(".inspector-paseo-branchbar")).not.toBeNull();
-    expect(container.querySelector(".inspector-paseo-summarybar")).toBeNull();
+    // Single merged top header row (zero stacked .inspector-change-summarybar clutter)
+    expect(container.querySelector(".inspector-change-branchbar")).not.toBeNull();
+    expect(container.querySelector(".inspector-change-summarybar")).toBeNull();
     expect(container.querySelector(".inspector-commit-bar")).toBeNull();
 
     // Switch Unified -> Split diff view

@@ -155,7 +155,7 @@ function appResult(call: AppCall): unknown {
 const appInput = (call: AppCall) =>
   call.rawInput && typeof call.rawInput === "object" && !Array.isArray(call.rawInput) ? (call.rawInput as Record<string, unknown>) : {};
 
-// The desktop inspector's tools beside a conversation, as Codex keeps them: what changed, the
+// The desktop inspector's tools beside a conversation: what changed, the
 // files, a terminal and the computer's preview. Tasks join while the session has some running
 // or done; settings, goal, side, MCP and apps are opened from elsewhere (the composer's chips,
 // the ••• menu) and show as a tab only while open.
@@ -294,7 +294,7 @@ export function Session({
   };
 
   // MCP Apps (Codex): a tool's own page in the inspector. The agent's call to such a tool opens it
-  // there by itself, as Codex does; the inspector's + menu opens one by hand.
+  // there by itself; the inspector's + menu opens one by hand.
   const [apps, setApps] = useState<AppTab[]>([]);
   const appCalls = useMemo(() => (isDesktop ? (view?.items ?? []).filter(isAppCall) : []), [view?.items]);
   const seenCalls = useRef<Set<string>>(undefined);
@@ -1528,7 +1528,7 @@ export function Session({
                     </div>
                     <div className="composer-actions">
                       {(() => {
-                        // As Codex: while a turn runs and nothing is typed, the send button is the
+                        // While a turn runs and nothing is typed, the send button is the
                         // stop button; typing turns it back into send (to the queue), with 插话
                         // beside it and stop as a small square.
                         const running = view?.turnActive || session.state === "unknown";
@@ -1854,7 +1854,7 @@ function ConversationPanel({
   /** Open MCP Apps: a tab each, after the tools, closed with their ×. */
   apps?: { id: AppPanel; title: string }[];
   closeApp?: (id: AppPanel) => void;
-  /** What the tab row's + offers (Codex's new-tab menu). */
+  /** What the tab row's + offers (the new-tab menu). */
   launcher?: ReactNode;
 }) {
   // Desktop CSS turns the same inspector into an overlay. Keep its file/editor state mounted

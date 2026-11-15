@@ -68,9 +68,8 @@ html[data-desktop] .desktop-main .session-find-actions [data-button]:hover:not(:
 html[data-desktop] .desktop-main .session-find-actions [data-button] svg { width: 14px; height: 14px; }
 
 /* Reading column: 48 rem centred, 32 px from the toolbar. The composer floats over the end of
-   it, so the column leaves room for it (Session measures its height). Values from Codex's
-   thread (docs/design/codex-reference.md): 14 px / 1.625 text, 16 px between turns, 4 px
-   between working rows. */
+   it, so the column leaves room for it (Session measures its height). 14 px / 1.625 text,
+   16 px between turns, 4 px between working rows. */
 html[data-desktop] .desktop-main .conversation { scrollbar-gutter: stable both-edges; scroll-padding-bottom: calc(var(--composer-height, 120px) + 16px); }
 html[data-desktop] .desktop-main .conversation-content { padding: 32px max(24px, calc((100% - 768px) / 2)) calc(var(--composer-height, 120px) + 24px); }
 /* The space between two entries is set once, on the second (the timeline is a flex column, so
@@ -184,7 +183,7 @@ html[data-desktop] .desktop-main .steps-summary-icon { width: 16px; height: 16px
 html[data-desktop] .desktop-main .steps-summary-chevron { width: 14px; height: 14px; opacity: 0; transition: opacity 150ms var(--ease-out), transform 200ms var(--ease-out); }
 html[data-desktop] .desktop-main .steps-summary:hover .steps-summary-chevron,
 html[data-desktop] .desktop-main .steps-summary[aria-expanded="true"] .steps-summary-chevron { opacity: 1; }
-/* The row reads left to right as Codex's: what ran, how many failed, what changed, the chevron
+/* The row reads left to right: what ran, how many failed, what changed, the chevron
    right after them, nothing pushed to the far edge. */
 html[data-desktop] .desktop-main .steps-summary { max-width: 100%; }
 html[data-desktop] .desktop-main .steps-summary-label { flex: 0 1 auto; }
@@ -219,7 +218,7 @@ html[data-desktop] .desktop-main :is(.plan-card, .notice-card) { border: 0; bord
 html[data-desktop] .desktop-main .diff-block { overflow: hidden; border: 0; border-radius: var(--radius-card); background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .diff-block > summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: var(--label); font-size: 13px; font-weight: 500; }
 
-/* A task list, as the Claude app's: a box on the surface, a row per step, its mark at the left. */
+/* A task list: a box on the surface, a row per step, its mark at the left. */
 html[data-desktop] .desktop-main .plan-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: transparent; box-shadow: inset 0 0 0 var(--hairline) var(--separatorStrong); }
 html[data-desktop] .desktop-main .plan-card > strong { color: var(--secondaryLabel); font-size: 12px; font-weight: 500; }
 html[data-desktop] .desktop-main .plan-card ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
@@ -316,7 +315,7 @@ html[data-desktop] .desktop-main .conversation-jump [data-button]:hover { backgr
 /* As wide as the reading column above it, so the two edges line up. */
 html[data-desktop] .desktop-main .composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; padding: 24px max(24px, calc((100% - 768px) / 2)) 16px; border: 0; background: linear-gradient(to bottom, transparent, var(--plain) 24px); pointer-events: none; }
 html[data-desktop] .desktop-main .composer-wrap > * { pointer-events: auto; }
-/* As Codex: one rounded surface, the text and its tools on the same ground (visual-system.md, 输入框). */
+/* One rounded surface, the text and its tools on the same ground (visual-system.md, 输入框). */
 html[data-desktop] .desktop-main .composer { height: auto; min-height: 112px; overflow: clip; border: 0; border-radius: var(--radius-composer); background: var(--composerSurface); opacity: 1; box-shadow: var(--composer-shadow); transition: box-shadow 180ms var(--ease-out); }
 html[data-desktop] .desktop-main .composer:focus-within { box-shadow: var(--composer-shadow-focus); }
 html[data-desktop] .desktop-main .composer textarea { min-height: 64px; padding: 16px 18px 4px 18px; font-size: 14px; line-height: 22px; }
@@ -339,7 +338,7 @@ html[data-desktop] .desktop-main .composer [data-button].composer-stop:disabled 
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small { color: var(--secondaryLabel); }
 html[data-desktop] .desktop-main .composer [data-button].composer-stop-small .composer-stop-glyph { width: 10px; height: 10px; }
 html[data-desktop] .desktop-main .composer [data-button].composer-steer { height: 28px !important; padding-inline: 12px; border-radius: var(--radius-control); font-size: 13px; }
-/* The mode, model and effort read as words until pointed at, like Codex's. */
+/* The mode, model and effort read as words until pointed at. */
 html[data-desktop] .desktop-main .composer-toolbar [data-button][data-variant="toolbar"],
 html[data-desktop] .new-session-bar [data-button][data-variant="toolbar"] { gap: 4px; border-radius: var(--radius-control); padding-inline: 8px; font-weight: 400; }
 html[data-desktop] .desktop-main .context-ring { gap: 6px; padding: 0 4px; color: var(--tertiaryLabel); font-size: 12px; }
@@ -363,7 +362,7 @@ html[data-desktop] .desktop-main .live-side-panel { position: relative; flex: no
 html[data-desktop] .inspector-tabs { position: relative; z-index: 2; display: flex; flex: none; align-items: center; gap: 0; height: var(--toolbar); padding: 0 8px 0 10px; overflow-x: auto; animation: toolbar-scrolled linear both; animation-timeline: --inspector; animation-range: 0 12px; }
 html[data-desktop] .inspector-tabs > button[role="tab"] { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondaryLabel); font: inherit; font-size: 13px; font-weight: 500; cursor: default; transition: background var(--transition), color var(--transition); }
 html[data-desktop] .inspector-tabs > button[role="tab"]:hover { background: var(--fill); color: var(--label); }
-/* The open tab, as Codex's tab strip: a raised step with a hairline and a small shadow in the
+/* The open tab: a raised step with a hairline and a small shadow in the
    light; in the dark a tint (a shadow doesn't read there). */
 html[data-desktop] .inspector-tabs > button[data-active] { background: var(--fill); box-shadow: none; color: var(--label); }
 /* Opened from elsewhere (settings, goal, side, MCP): set apart from the standing tools. */
@@ -414,7 +413,7 @@ html[data-desktop] .desktop-main .side-panel-content :is(pre, code) { font-famil
   html[data-desktop] .inspector-resizer { left: -6px; }
 }
 
-/* A new session: an empty conversation with the composer in its middle, as Codex starts a thread. */
+/* A new session: an empty conversation with the composer in its middle. */
 html[data-desktop] :is(.desktop-main, .workspace-stage) > .new-session-page { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
 html[data-desktop] .desktop-root[data-shell="electron"][data-sidebar="hidden"]:not([data-fullscreen]) .new-session-page::before { content: ""; position: sticky; top: 0; left: 0; right: 0; z-index: 0; flex: none; height: var(--toolbar, 46px); margin-bottom: calc(-1 * var(--toolbar, 46px)); -webkit-app-region: drag; app-region: drag; }
 html[data-desktop] .desktop-root[data-shell="electron"] .new-session-page :is(button, a, input, textarea, select, [role="button"], [data-slot]) { -webkit-app-region: no-drag; app-region: no-drag; }
@@ -498,7 +497,7 @@ html[data-desktop] .desktop-main .changes-file-name { display: flex; min-width: 
 html[data-desktop] .desktop-main .changes-file-name > small { flex: 0 1000 auto; min-width: 2ch; overflow: hidden; direction: rtl; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 html[data-desktop] .desktop-main .changes-file-name > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Tool rows worded as the Claude app words them: the same quiet 60 % line, its file opening from
+/* Tool rows worded as the verb and what it acted on: the same quiet 60 % line, its file opening from
    the row; a row with nothing to open is the same line without the chevron. */
 html[data-desktop] .desktop-main .tool-record > .tool-summary { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; min-height: 26px; padding: 2px 0; color: color-mix(in oklab, var(--label) 60%, transparent); font-size: 14px; line-height: 22px; transition: color 150ms var(--ease-out); }
 html[data-desktop] .desktop-main .tool-record > .tool-summary:hover { color: var(--label); }

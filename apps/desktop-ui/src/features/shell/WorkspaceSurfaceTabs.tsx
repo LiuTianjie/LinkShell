@@ -28,7 +28,7 @@ export interface WorkspaceSurfaceTabsProps {
 }
 
 /**
- * Paseo-inspired 34px Workspace Surface Tab Strip (`#30` §5.2):
+ * 34px Workspace Surface Tab Strip (`#30` §5.2):
  * Switches instantaneously between Session Canvas, Terminals, Files, Port Previews,
  * Remote Screen, and Fusion Mode — with ZERO double headers inside child views.
  */

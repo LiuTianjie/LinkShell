@@ -539,7 +539,7 @@ export function Files({
   const summary = submitted
     ? `“${submitted}”的目录结果`
     : `${entries.length}${loaded.value?.truncated ? "+" : ""} 个${directoriesOnly ? "目录" : "项目"}`;
-  // The desktop puts where you are and what you can do in one toolbar row, as Codex's file pages:
+  // The desktop puts where you are and what you can do in one toolbar row:
   // the page's own toolbar, or in the inspector a compact bar with the rest in a menu.
   const desktopLayout = isDesktop && !directoriesOnly;
   const upward = (

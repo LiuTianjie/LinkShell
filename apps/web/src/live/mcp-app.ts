@@ -1,10 +1,10 @@
-// An MCP App's host side (SEP-1865 / `@modelcontextprotocol/ext-apps`, as Codex hosts them): the
+// An MCP App's host side (SEP-1865 / `@modelcontextprotocol/ext-apps`): the
 // page a tool ships (`ui://…`) runs in a sandboxed frame of its own and talks to us over
 // postMessage JSON-RPC (`ui/*`, plus the MCP requests it may make of its own server).
 
 export const MCP_APP_PROTOCOL = "2026-01-26";
 
-/** The MIME types Codex accepts for an app's page. */
+/** The MIME types accepted for an app's page: the spec's, the older Skybridge one and plain HTML. */
 export function isAppPage(mimeType: string | undefined): boolean {
   const type = (mimeType ?? "").toLowerCase().replace(/\s+/g, "");
   return type === "text/html;profile=mcp-app" || type === "text/html+skybridge" || type === "text/html";
@@ -26,7 +26,7 @@ function origins(value: unknown): string[] {
   });
 }
 
-/** The page's display mode preference and CSP, from its resource's `_meta` (Codex's keys). */
+/** The page's display mode preference and CSP, from its resource's `_meta` (`ui.csp`; display modes under `openai/ui`). */
 export function appResourceMeta(meta: unknown): { csp: AppCsp; displayModes: string[]; preferred?: string } {
   const root = obj(meta) ?? {};
   const ui = obj(root.ui) ?? {};

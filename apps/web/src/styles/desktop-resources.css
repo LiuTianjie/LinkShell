@@ -1,4 +1,4 @@
-/* The desktop's resource pages: files, port previews and worktrees (Codex's file tree and lists). */
+/* The desktop's resource pages: files, port previews and worktrees. */
 
 /* ── Files ───────────────────────────────────────────────────────────────── */
 /* On the 文件 page the toolbar is the page's: back and up, where you are, then search, refresh and
@@ -141,7 +141,7 @@ html[data-desktop] .desktop-main .acp-settings details > div { padding: 0 16px 1
 html[data-desktop] .desktop-main .acp-settings p.muted { color: var(--tertiaryLabel); font-size: 12px; }
 
 /* ── Terminals ───────────────────────────────────────────────────────────── */
-/* One 32 px row, as Codex's terminal panel: the tabs, then (over the row's end) the open terminal's
+/* One 32 px row: the tabs, then (over the row's end) the open terminal's
    new / menu buttons; nothing between the row and the shell. Its state shows only when it isn't
    simply connected; the way back to the newest output floats at the foot while scrolled up. */
 html[data-desktop] .desktop-main .terminal-tab-bar { height: 36px; min-height: 36px; padding: 0; border-bottom: 0; }
@@ -176,7 +176,7 @@ html[data-desktop] .desktop-main .terminal-bottom[data-button] { position: absol
 html[data-desktop] .desktop-main .terminal-bottom[data-hidden] { opacity: 0; translate: 0 4px; pointer-events: none; }
 html[data-desktop] .desktop-main .terminal-bottom[data-button]:hover { background: var(--plain); color: var(--label); }
 
-/* A background task's command: two lines at most, the whole of it on hover (Codex's command rows). */
+/* A background task's command: two lines at most, the whole of it on hover. */
 html[data-desktop] .desktop-main .task-command { display: -webkit-box; overflow: hidden; font-family: var(--mono); font-size: 12px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 
 /* ── Small things shared by these pages ──────────────────────────────────── */

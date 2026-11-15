@@ -559,7 +559,7 @@
     box-shadow: var(--ls-focus-ring), var(--ls-shadow-popover);
   }
 
-  /* User Turn (T3 Code / Paseo right-aligned sculpted obsidian pill-card) */
+  /* User Turn (right-aligned sculpted obsidian pill-card) */
   .ls-turn-user {
     display: flex;
     flex-direction: column;
@@ -918,7 +918,7 @@
     color: var(--ls-diff-del-fg);
   }
 
-  /* Whisper-Quiet Inline Tool & Reasoning Disclosures (Paseo / T3 Code) */
+  /* Whisper-Quiet Inline Tool & Reasoning Disclosures */
   .ls-tool-row-inline {
     padding-block: 1px;
   }
@@ -1501,7 +1501,7 @@
   }
 
   /* ==========================================================================
-   * 5. Codex Desktop & Claude Code Sculpted Monochrome Approval & Question Cards
+   * 5. Sculpted Monochrome Approval & Question Cards
    *    - Calm monochrome chrome (zero orange left bar, zero orange icon box)
    *    - Single-line header + recessed command well + numbered 1..9 keycaps
    * ========================================================================== */
@@ -1743,7 +1743,7 @@
   }
 
   /* ==========================================================================
-   * 6. Paseo + T3 Code Sculpted Floating Composer Dock & Status Pills
+   * 6. Sculpted Floating Composer Dock & Status Pills
    * ========================================================================== */
   .ls-composer-shell {
     inline-size: 100%;
@@ -1761,7 +1761,7 @@
     gap: 8px;
   }
 
-  /* Paseo-style Floating Context Status Pills Strip */
+  /* Floating Context Status Pills Strip */
   .ls-composer-status-pills {
     display: flex;
     flex-wrap: wrap;

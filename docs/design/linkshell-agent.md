@@ -253,7 +253,7 @@ interface Envelope {
 
 - 渠道里的一切内容都是不可信数据；只有认出是 owner 或被授权的人，才算指令。
 - 适配器不保存对话状态。没有可重放游标的渠道（飞书长连接事件就没有），重连后用 `backfill` 按「上次见到的时间」补拉，靠信封 id 去重。
-- 发件箱按「对话线 + 会话」保序，带幂等键，渠道断开时排队，失败退避（照搬 dsh 的 `outbox` / `effects`）。
+- 发件箱按「对话线 + 会话」保序，带幂等键，渠道断开时排队，失败退避（`outbox` / `effects` 两层）。
 
 ### 6.2 人和身份
 
@@ -294,7 +294,7 @@ interface Envelope {
 
 ## 7. 任务
 
-参考了 Beads（可开始队列、原子认领）、Vibe Kanban（任务 → 尝试 → 会话三层）、Linear（状态由事件推导）、dsh（阶段函数）、Anthropic 长任务文章（交接说明、验收证据）和 GTD（视图）。
+设计要点：可开始队列与原子认领；任务 → 尝试 → 会话三层；状态由事件推导；阶段函数；交接说明与验收证据；按视图查看。
 
 ### 7.1 数据模型（`lsa.db`，`node:sqlite`）
 
@@ -336,7 +336,7 @@ outbox(id, line_id, channel, chat_id, reply_to, purpose /*ack|answer|result|atte
 
 ### 7.2 阶段与视图
 
-阶段函数照搬 dsh `ticketStage()` 的写法：自上而下，第一条命中即为结果，各阶段互斥并覆盖所有情况。
+阶段函数的写法：自上而下，第一条命中即为结果，各阶段互斥并覆盖所有情况。
 
 ```
 有未回答的问题或待批准的计划          → 需要你：回答 / 批准
@@ -355,7 +355,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 ### 7.3 一次执行
 
 - 状态由会话事件推导，Agent 不能直接写。会话在跑就是 running；有审批或提问是 needs_input；一轮结束后，由大脑验收：通过是 review，失败是 failed；用户验收后是 succeeded。
-- **快照简报**作为首条消息：原话、未完成的验收项、前置任务的结论、上一次执行的交接说明、项目卡里的构建和测试方法。派发之后的补充信息用 `tasks.message` 发进执行会话（GitHub Copilot 的经验：写回任务描述，执行方看不到）。
+- **快照简报**作为首条消息：原话、未完成的验收项、前置任务的结论、上一次执行的交接说明、项目卡里的构建和测试方法。派发之后的补充信息用 `tasks.message` 发进执行会话（写回任务描述的话，执行方看不到）。
 - **一次执行只推进一个任务。** 干活时发现的新问题用 `tasks.create(discovered_from=…)` 放进收件箱，不顺手扩大范围。
 - 重跑、换电脑、换 Agent，都是新建一次执行。
 
@@ -364,7 +364,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 远程的干活会话没法注入 LSA 工具（`sessions.create` 没有工具参数，远程 host 也没有把工具调用回传给主控的通道），而且要对所有 Agent 一视同仁，所以第一期用**约定格式的最后一条消息**：
 
 - 执行结束前，引擎发一条收尾指令，要求用固定格式回复四节：已完成（提交、PR）、当前状态（能否构建、测试结果）、下一步、未决问题和坑；同时逐条回应验收项，并附上证据。
-- 引擎解析这条回复，写进 `tasks.handoff` 和 `acceptance`。验收项只能勾选、附证据，不能删改（Anthropic 长任务文章里「只允许改 passes」的道理）。解析失败时，让大脑读原文后代写。
+- 引擎解析这条回复，写进 `tasks.handoff` 和 `acceptance`。验收项只能勾选、附证据，不能删改（只允许改通过状态，执行方才没法靠改验收项过关）。解析失败时，让大脑读原文后代写。
 - 新执行的开场固定为：读交接 → `git log` → 跑冒烟测试 → 开工。
 
 以后可以给 host 加「会话工具」能力：远程 host 替主控注入一个工具，并把调用经隧道回传。这需要专门设计，不放进第一期。
@@ -391,7 +391,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 - 每个文件在 frontmatter 里写受众标签；工具层按调用方所在对话线的受众过滤。群线没有原生工具，所以读不到不该读的。
 - **进度不是记忆。** 进度以任务账为准。
 - **编码 Agent 的记忆不归 LSA 管。** LSA 只读项目里的 `CLAUDE.md`、`AGENTS.md`；要改就开一个干活的会话去改。
-- **有上限，写满时报错**（Hermes 的做法），由大脑当场合并或删除。
+- **有上限，写满时报错**，由大脑当场合并或删除。
 - **检索**：SQLite FTS5 索引所有 Markdown 和对话记录。向量检索以后作为可选插件。
 - **防污染**：写 `USER.md` 时，引擎核对证据确实是 owner 发的消息；其它写入记录来源。第二期起记忆目录用 git 跟踪，每次整理都是一次提交，可以在 App 里看改动、一键撤销。
 - **整理（第二期）**：主控空闲、并且距上次整理超过一天时，开一个短会话，把近期日志提炼进 `MEMORY.md` 和项目卡，把过时的条目标为 superseded。
@@ -414,7 +414,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 ### 9.2 技能（第二期）
 
 - 格式用 agentskills.io 的 `SKILL.md`（渐进式披露）。目录有两个：`~/.linkshell/lsa/skills/`（LSA 专用）和 `~/.agents/skills/`（和编码 Agent 共享）。
-- 大脑可以提议新增或修改技能，写入需要 owner 批准。30 天没用标为过期，60 天归档，从不删除（Hermes 的 Curator）。
+- 大脑可以提议新增或修改技能，写入需要 owner 批准。30 天没用标为过期，60 天归档，从不删除。
 
 ### 9.3 插件（第二期起）
 
@@ -465,7 +465,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 | 技能与插件 | 启用、停用、来源（第二期） |
 | 预算 | 每天、每个任务的上限，以及超限时的行为 |
 
-- 大脑只能读配置（`config.read`）和提议修改（`config.propose`），不能直接写。这和 dsh 里「从工具发起的保存不能修改执行环境」同理。
+- 大脑只能读配置（`config.read`）和提议修改（`config.propose`），不能直接写。道理是：从工具发起的保存不能修改执行环境。
 - 第二期加上版本记录和回退。涉及策略的配置一旦变化，进行中的任务会收到一条「策略已变更」，下次执行时按新策略重新校验。
 
 ## 11. 安全
@@ -520,7 +520,7 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 
 ### 第二期：越用越顺手
 
-技能和 Curator；日程和规则（observe 模式）；记忆用 git 加整理；人员表；配置的版本记录；任务依赖和排序分；周回顾；桌面端面板；配对模式下连接多台电脑。
+技能和技能整理；日程和规则（observe 模式）；记忆用 git 加整理；人员表；配置的版本记录；任务依赖和排序分；周回顾；桌面端面板；配对模式下连接多台电脑。
 
 ### 第三期：飞书
 
@@ -559,12 +559,6 @@ LSA 标签页的任务视图：**需要你**、**进行中**（按电脑分组�
 
 ## 15. 参考
 
-- [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)：阶段函数、编排与执行分离、outbox/effects、规则和 observe 模式、注意力原则
-- [OpenClaw](https://github.com/openclaw/openclaw)：Gateway 加 nodes、审批绑定计划、Markdown 记忆、定时任务是一等对象；[微信 ClawBot](https://cloud.tencent.com/developer/article/2711310)
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)：有上限的记忆、Curator、无人值守默认拒绝
-- [Letta Code](https://github.com/letta-ai/letta-code)、[sleep-time agents](https://docs.letta.com/guides/agents/architectures/sleeptime)
 - [Agent Skills](https://github.com/agentskills/agentskills)、[MCP 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/changelog.mdx)、[memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool)、[ACP Registry](https://github.com/agentclientprotocol/registry)
-- [Beads](https://github.com/gastownhall/beads)、[Backlog.md](https://github.com/MrLesk/Backlog.md)、[Vibe Kanban](https://github.com/BloopAI/vibe-kanban)、[Linear Agent](https://linear.app/developers/agent-interaction)、[Copilot cloud agent API](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/use-cloud-agent-via-the-api)、[Taskwarrior](https://github.com/GothenburgBitFactory/taskwarrior)、[Org-mode](https://orgmode.org/manual/Deadlines-and-Scheduling.html)
-- [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)、[Ralph loop](https://ghuntley.com/ralph/)
-- [OpenAI Agents SDK（JS）](https://github.com/openai/openai-agents-js)、[CaMeL](https://arxiv.org/abs/2503.18813)、[双 LLM 模式](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
+- [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)、[CaMeL](https://arxiv.org/abs/2503.18813)、[双 LLM 模式](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
 - LinkShell：[v2 架构](../v2/architecture.md)、[会话恢复](../v2/session-recovery.md)、[命令与目标](../v2/commands-and-goals.md)

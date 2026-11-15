@@ -100,7 +100,7 @@ export function AgentMark({
 }) {
   const mark = agentMarks[agent.toLowerCase()];
   if (isDesktop && mark) {
-    // The desktop draws every agent the same way, as Codex's own glyphs: the bare mark, no tile.
+    // The desktop draws every agent the same way: the bare mark, no tile.
     // A one-colour mark takes the label's ink of each theme (a picture can't read CSS colour, so
     // both are drawn and the theme shows one); a full mark loses the white ground it was drawn on.
     const glyph = (ink: string) => {

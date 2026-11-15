@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isDesktop } from "../live/desktop";
 
 /**
- * A page's title row. On the desktop it is the page's toolbar, as in Codex: one 46 px row with
+ * A page's title row. On the desktop it is the page's toolbar: one 46 px row with
  * the title and the page's actions, pinned while the page scrolls under it, a hairline only once
  * something is under it, and room for the window's traffic lights when the sidebar is hidden.
  * Elsewhere it is the page's heading. `detail` is a short fact (a count, a computer), never a

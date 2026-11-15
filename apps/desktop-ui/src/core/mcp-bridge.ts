@@ -1,4 +1,4 @@
-// Host-side MCP App bridge (SEP-1865 / `@modelcontextprotocol/ext-apps`, matching Codex Desktop):
+// Host-side MCP App bridge (SEP-1865 / `@modelcontextprotocol/ext-apps`):
 // sandboxed `ui://…` iframe pages communicate over postMessage JSON-RPC (`ui/*`, `tools/call`, `resources/read`).
 
 export const MCP_APP_PROTOCOL = "2026-01-26";

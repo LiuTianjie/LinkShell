@@ -180,7 +180,7 @@
   }
 
   /* =========================================================================
-   * 3. Unified 3-Column Sculpted Island Workbench (Paseo + T3 Code Framing)
+   * 3. Unified 3-Column Sculpted Island Workbench
    * ========================================================================= */
   .desktop-workbench {
     --sidebar-col: var(--sidebar-w, 256px);
@@ -284,7 +284,7 @@
   }
 
   /* Sculpted Island Edge when Sidebar is expanded:
-     - macOS / Linux: crisp inset card island on deep #090a0c ground (T3 Code / Paseo style)
+     - macOS / Linux: crisp inset card island on deep #090a0c ground
      - Windows: crisp left border + rounded top-left corner while keeping y=0 aligned with titleBarOverlay */
   .desktop-root:not([data-sidebar-collapsed="true"]):not([data-fullscreen="true"]):not([data-platform="windows"])
     :is(.desktop-main) {

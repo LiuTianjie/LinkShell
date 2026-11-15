@@ -62,7 +62,7 @@ function TooltipContent({
         {...props}
       >
         {children}
-        {/* The desktop's tooltips have no arrow (Codex's don't): hiding it with CSS left the
+        {/* The desktop's tooltips have no arrow: hiding it with CSS left the
             square it is drawn from showing as a light diamond on the dark bubble. */}
         {!isDesktop && (
           <TooltipPrimitive.Arrow data-slot="tooltip-arrow" className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />

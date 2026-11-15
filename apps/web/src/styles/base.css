@@ -4,7 +4,7 @@
   }
 :root {
     /* Lead with the platform UI face (SF Pro on macOS, Segoe on Windows, Inter
-       elsewhere) — the same type Claude Desktop and Linear render in. */
+       elsewhere). */
     font-family:
       -apple-system,
       BlinkMacSystemFont,
@@ -32,10 +32,10 @@
     --radius-card: 8px;
     --radius-well: 8px;
     --radius-panel: 12px;
-    /* The composer alone is rounder, as Codex's (visual-system.md, 输入框). */
+    /* The composer alone is rounder (visual-system.md, 输入框). */
     --radius-composer: 24px;
-    /* One considered mono stack for code, terminals and diffs; Ghostty's bundled
-       face (Berkeley-like) is preferred where present. */
+    /* One considered mono stack for code, terminals and diffs; Berkeley Mono is
+       preferred where present. */
     --font-mono:
       "Berkeley Mono", "SF Mono", ui-monospace, SFMono-Regular,
       "JetBrains Mono", "Menlo", "Consolas", monospace;

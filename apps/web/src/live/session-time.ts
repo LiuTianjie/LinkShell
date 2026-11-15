@@ -39,7 +39,7 @@ export function compactTime(timestamp: number, now = Date.now()): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-/** A message's own time, as Codex stamps it: the time today, with the weekday within a week, else with the date. */
+/** A message's own time: the time today, with the weekday within a week, else with the date. */
 export function messageTime(timestamp: number, now = Date.now()): string {
   const date = new Date(timestamp);
   const time = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });

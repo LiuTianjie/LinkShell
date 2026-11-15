@@ -76,7 +76,7 @@ export function signInProblem(email: string, password: string): { field: "email"
 }
 
 /**
- * The iTool account sign-in, as Codex's desktop app has it: providers first, then email and
+ * The iTool account sign-in: providers first, then email and
  * password, then the ways that stay on the web. The panel only collects and shows; the caller
  * signs in (through the Electron window or the workspace service), so no token passes through it.
  */

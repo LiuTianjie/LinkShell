@@ -42,6 +42,4 @@ Codex 内置命令先发布，Skills 扫描完成后补充；`skills/changed` �
 - [OpenAI：Codex 命令](https://developers.openai.com/codex/cli/slash-commands)
 - [OpenAI：App Server Goal API](https://developers.openai.com/codex/app-server)
 - [Claude Code：命令参考](https://code.claude.com/docs/en/commands)
-- [Happy：手机输入候选列表](https://github.com/slopus/happy/blob/main/packages/happy-app/sources/components/AgentInputAutocomplete.tsx)
-- [Happy：Claude Goal transcript 适配](https://github.com/slopus/happy/blob/main/packages/happy-cli/src/claude/claudeGoalStatus.ts)
 - 当前安装的 `codex-cli 0.159.3` 生成的 app-server TypeScript 协议，以及 `@agentclientprotocol/claude-agent-acp@0.84.0`、`@anthropic-ai/claude-agent-sdk@0.3.284` 的类型与适配器源码。

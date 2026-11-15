@@ -329,7 +329,7 @@
   }
 
   /* =========================================================================
-   * 3. Paseo Quiet Action Rows, Remote Twin Pills & Rich 2-Line Session Tree
+   * 3. Quiet Action Rows, Remote Twin Pills & Rich 2-Line Session Tree
    * ========================================================================= */
   .sidebar-top-stack {
     display: flex;
@@ -339,7 +339,7 @@
     flex-shrink: 0;
   }
 
-  /* Quiet Paseo Ghost Rows (+ New Session / Search) — zero loud filled CTA bars */
+  /* Quiet Ghost Rows (+ New Session / Search) — zero loud filled CTA bars */
   .desktop-new-session,
   .sidebar-search-row {
     inline-size: 100%;
@@ -467,7 +467,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Paseo Status & Workspaces Section Headers */
+  /* Status & Workspaces Section Headers */
   .desktop-places:has(+ .sidebar-sessions-scope-bar) {
     border-block-end: 0;
     margin-block-end: 0;
@@ -850,7 +850,7 @@
     padding-inline-start: 12px;
   }
 
-  /* Paseo Sculpted 2-Line Session Card */
+  /* Sculpted 2-Line Session Card */
   .tree-session {
     flex: 1 1 auto;
     min-inline-size: 0;
@@ -1103,7 +1103,7 @@
   }
 
   /* =========================================================================
-   * 5. Paseo Workspace Top Bar (42px) & 34px Workspace Surface Tab Strip
+   * 5. Workspace Top Bar (42px) & 34px Workspace Surface Tab Strip
    * ========================================================================= */
   .desktop-main-header {
     justify-content: space-between;
@@ -1277,7 +1277,7 @@
     }
   }
 
-  /* Paseo 34px Workspace Surface Tab Strip */
+  /* 34px Workspace Surface Tab Strip */
   .desktop-surface-tabs {
     block-size: var(--surface-tabs-h, 34px);
     min-block-size: var(--surface-tabs-h, 34px);
@@ -1625,7 +1625,7 @@
     flex-wrap: wrap;
   }
 
-  /* Sculpted Primary Button Keycap Override inside Shell Views (Paseo/T3 monochrome CTA) */
+  /* Sculpted Primary Button Keycap Override inside Shell Views (monochrome CTA) */
   .shell-page .ls-btn[data-variant="primary"],
   .unlock-card .ls-btn[data-variant="primary"] {
     background-color: var(--ls-primary-bg);
@@ -1639,7 +1639,7 @@
     background-color: var(--ls-primary-hover);
   }
 
-  /* Calm, Concise Workspace Home Hub (T3 Code / Linear Restraint) */
+  /* Calm, Concise Workspace Home Hub */
   .home-hub {
     max-inline-size: 760px;
     gap: 18px;
@@ -1772,7 +1772,7 @@
 
   /* =========================================================================
    * 8. Unified Single-Row Entity Lists (Computers Fleet, Projects, Archive)
-   *    - Single-column Linear / Raycast / Apple Settings grouped list
+   *    - Single-column grouped list
    *    - Strict min-inline-size: 0 + .ls-truncate on text, flex-shrink: 0 on actions
    * ========================================================================= */
   .ls-entity-list {

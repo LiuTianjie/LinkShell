@@ -354,7 +354,7 @@ export function HighlightedCodeBlock({
 }
 
 /**
- * Smooth backlog-following text release buffer (matching Codex desktop streaming dynamics).
+ * Smooth backlog-following text release buffer, so streamed text reveals at an even pace.
  * Times are measured in seconds.
  */
 export class SmoothRelease {

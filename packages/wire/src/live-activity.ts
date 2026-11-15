@@ -268,7 +268,7 @@ function baseName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-/** Classify a session into the 7-phase attention hierarchy (t3code model). */
+/** Classify a session into the 7-phase attention hierarchy. */
 export function classifySessionPhase(session: SessionSummary, online = true): AttentionPhase {
   if (!online || session.state === "offline") return "stale";
   if (needsUserInput(session)) return "waiting_for_input";

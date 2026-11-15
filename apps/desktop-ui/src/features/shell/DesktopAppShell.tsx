@@ -1034,7 +1034,7 @@ export function DesktopAppShell({
           </div>
         ) : null}
 
-        {/* Column 2: L2 Sculpted Island Workspace Canvas + Paseo Surface Tabs + Optional Bottom Terminal */}
+        {/* Column 2: L2 Sculpted Island Workspace Canvas + Surface Tabs + Optional Bottom Terminal */}
         <main className="desktop-main">
           {!isStandaloneRemoteScreen ? (
             <WorkspaceTopBar

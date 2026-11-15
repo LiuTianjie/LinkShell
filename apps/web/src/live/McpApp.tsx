@@ -113,7 +113,7 @@ export function McpAppView({
         ready: () => {
           const opened = latest.current;
           if (opened.launched && opened.result === undefined) {
-            // Opened by hand: the app gets what running it once returns, as Codex starts it.
+            // Opened by hand: the app gets what running it once returns, as if the agent had called it.
             void call(opened.tool, {}).then(
               (result) => {
                 if (latest.current.id !== opened.id) return;

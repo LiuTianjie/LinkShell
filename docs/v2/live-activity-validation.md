@@ -59,10 +59,7 @@ This review's runs passed: wire Live Activity 22, Host relay 22, ACP questions 4
 
 The [official App Server documentation](https://learn.chatgpt.com/docs/app-server#toolrequestuserinput) documents `serverRequest/resolved` for a response to `item/tool/requestUserInput`. That is the pending-request path. The [async tool implementation](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/request_user_input_async.rs) instead emits an agent message with questions and immediately returns `accepted`; that acceptance is not an answer from a user.
 
-Two third-party implementations clarify the distinction:
-
-- [T3 Code's provider contract](https://github.com/pingdotgg/t3code/blob/main/docs/internals/providers.md) explicitly treats async questions as notifications with no pending RPC response. Its own server persists the question and atomically records resolution plus the answering user message. This solves T3's client state, not the official desktop's separate question selection.
-- [codex-web's IPC client](https://github.com/i-am-BT/codex-web/blob/main/desktop-ipc-client.mjs) exposes `thread-follower-submit-user-input`. The installed desktop handler was inspected: it looks up a pending native request. It is not a general close-async-question method. Likewise, `thread-follower-set-queued-follow-ups-state` modifies queued user messages, not the selected question editor.
+The installed desktop's IPC handler for `thread-follower-submit-user-input` was inspected: it looks up a pending native request. It is not a general close-async-question method. Likewise, `thread-follower-set-queued-follow-ups-state` modifies queued user messages, not the selected question editor.
 
 [Upstream issue 44648](https://github.com/openai/codex/issues/44648) reports unresolved async questions after normal-chat answers in the CLI. It is related lifecycle evidence, not proof of the same desktop defect or an official fix.
 
