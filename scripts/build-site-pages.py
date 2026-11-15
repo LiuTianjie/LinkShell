@@ -69,7 +69,7 @@ META = {
     },
     ("zh", "pricing"): {
         "title": "LinkShell 定价 | 免费使用，iTool 会员提供官方网关",
-        "description": "LinkShell 全部功能免费，自建网关即可使用。iTool 会员提供官方网关：单品 ¥49/年或 ¥9.9/月，全产品年包 ¥99/年，价格已含税，可在本页购买。连接始终端到端加密。",
+        "description": "LinkShell 全部功能免费，自建网关即可使用。iTool 会员提供官方网关：单品 ¥49/年或 ¥9.9/月，全产品年包 ¥99/年，价格已含税，前往 iTool 官网购买。连接始终端到端加密。",
         "keywords": "LinkShell 定价, iTool 会员, 官方网关, 免费, 自建网关",
         "image_alt": "LinkShell：在手机上继续电脑里的编程 Agent",
     },
@@ -87,7 +87,7 @@ META = {
     },
     ("en", "pricing"): {
         "title": "LinkShell Pricing: Free, or the iTool Membership from $3.19 a Month",
-        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19/month or $13.49/year for LinkShell, or $26.49/year for all products. Tax included. Purchase on this page.",
+        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19/month or $13.49/year for LinkShell, or $26.49/year for all products. Tax included. Purchase on the iTool website.",
         "keywords": "LinkShell pricing, iTool membership, official gateway, free, self-hosted gateway",
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
