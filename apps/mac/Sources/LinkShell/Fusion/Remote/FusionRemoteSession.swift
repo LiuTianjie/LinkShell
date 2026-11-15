@@ -109,6 +109,10 @@ final class FusionRemoteSession: @unchecked Sendable {
   var hooksInstalled = false
   /// Media restarts asked for by the local computer, to stop a loop of failing ones.
   var mediaRestarts: [Double] = []
+  /// When a shown window was last brought back onto a virtual display.
+  var offDisplayStamps: [CGWindowID: Double] = [:]
+  /// When a shown, off-screen window's app first failed to answer AX.
+  var axDeferStamps: [CGWindowID: Double] = [:]
   var onAuthenticated: (() -> Void)?
   /// The suspended session a `hello` with `resume` names, if this Mac still has it.
   var resumeTarget: ((String) -> FusionRemoteSession?)?

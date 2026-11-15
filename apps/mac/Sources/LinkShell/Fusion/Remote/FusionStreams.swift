@@ -119,6 +119,8 @@ extension FusionRemoteSession {
     clampStamps[id] = nil
     nonAXWindowStamps[id] = nil
     rescuingWindowIDs[id] = nil
+    offDisplayStamps[id] = nil
+    axDeferStamps[id] = nil
     placeLock.lock()
     pendingPlaces[id] = nil
     appliedSeq[id] = nil

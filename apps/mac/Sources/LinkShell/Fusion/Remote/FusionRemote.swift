@@ -25,6 +25,7 @@ final class FusionRemote {
     try? FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
     Fusion.logPath = home + "/fusion-remote.log"
     FusionRemoteSession.home = home
+    FusionProtocol.stayAwake("LinkShell Fusion: lending this Mac's apps to another computer")
     // An earlier run that died without `end()` left the user's Dock hidden: put it back first.
     FusionDock.restoreIfMarked(home: home)
     let app = NSApplication.shared

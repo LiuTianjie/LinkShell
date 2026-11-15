@@ -116,16 +116,26 @@ extension FusionRemoteSession {
       let layer = info[kCGWindowLayer as String] as? Int ?? 0
       let probe = CGPoint(x: frame.midX, y: frame.minY + min(frame.height / 2, 24))
       guard let mirror = mirror(remote: probe) ?? mirror(remote: CGPoint(x: frame.midX, y: frame.midY)) ?? mirrors.first(where: { $0.remote.intersects(frame) }) else {
-        if layer == 0, !moved.contains(id), let main = mirrors.first, let w = axWindow(pid: pid, id: id) {
+        // A window already shown on the local computer that wandered off the virtual displays (an
+        // app restoring its own position, a display change) is brought back, not closed: once a
+        // second at most, and its stream is held meanwhile.
+        let shown = streams[id] != nil
+        if shown {
+          rescuingWindowIDs[id] = max(rescuingWindowIDs[id] ?? 0, now + 1.5)
+        }
+        let again = shown && now - (offDisplayStamps[id] ?? 0) >= 1.0
+        if layer == 0, !moved.contains(id) || again, let main = mirrors.first, let w = axWindow(pid: pid, id: id) {
           moved.insert(id)
-          if originalFrames[id] == nil { originalFrames[id] = (pid, frame) }
+          if shown { offDisplayStamps[id] = now; Fusion.log("w\(id): off the virtual displays at \(frame), bringing it back") }
+          if originalFrames[id] == nil, !shown { originalFrames[id] = (pid, frame) }
           var p = CGPoint(x: main.remote.midX - frame.width / 2, y: max(main.remote.minY + 60, main.remote.midY - frame.height / 2))
           AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &p)!)
         }
         continue
       }
       var kind: AXWindowKind?
-      if layer == 0 && frame.width >= 160 && frame.height >= 100 {
+      // A shown window stays classified when it is resized small, or it would stop being one.
+      if layer == 0 && ((frame.width >= 160 && frame.height >= 100) || streams[id] != nil) {
         let k = classifyAXWindow(pid: pid, id: id, now: now)
         kind = k
         if k.isStandardRoot {
@@ -157,7 +167,11 @@ extension FusionRemoteSession {
       let id = c.id; let pid = c.pid; let frame = c.frame; let mirror = c.mirror; let layer = c.layer
       let root: Bool
       if let k = c.kind {
-        if k.isStandardRoot || streams[id] != nil {
+        if streams[id] != nil, k.exists {
+          // Once shown, a window stays one: an app opening a standard window (a prompt, a quick
+          // entry box) must not demote its borderless main window to a popup and close it.
+          root = true
+        } else if k.isStandardRoot {
           root = k.isStandardRoot || (!pidsWithStandardRoot.contains(pid) && k.exists)
         } else if !pidsWithStandardRoot.contains(pid), k.exists, largestBorderlessByPID[pid]?.id == id {
           root = true
@@ -263,16 +277,34 @@ extension FusionRemoteSession {
       }
       // Only hold a stream open if the remote window entered Full-Screen Space or Dock Minimization
       // (rescue it back onto the virtual desktop); for any genuine close or orderOut, close at 0ms!
-      if let s = streams[id], fused.contains(s.pid), !rawOnScreenIDs.contains(id), let w = axWindow(pid: s.pid, id: id) {
-        var fsRef: CFTypeRef?
-        let isFS = AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &fsRef) == .success && (fsRef as? Bool) == true
-        var minRef: CFTypeRef?
-        let isMin = AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success && (minRef as? Bool) == true
-        if isFS || isMin {
-          rescueOffDesktopWindows()
+      var reason = "gone"
+      if let s = streams[id], fused.contains(s.pid), !rawOnScreenIDs.contains(id) {
+        reason = "off screen"
+        var listRef: CFTypeRef?
+        let listed = AXUIElementCopyAttributeValue(FusionRemoteSession.axApp(s.pid), kAXWindowsAttribute as CFString, &listRef)
+        if listed != .success, Self.liveCGWindowBounds(id) != nil, now - (axDeferStamps[id] ?? now) < 3 {
+          // The app did not answer (busy, in the background): whether this window was minimized or
+          // went full screen can't be told yet, and closing it would be the one wrong answer.
+          if axDeferStamps[id] == nil { axDeferStamps[id] = now; Fusion.log("w\(id): off screen, app not answering (\(listed.rawValue)): waiting") }
           continue
         }
+        axDeferStamps[id] = nil
+        if let w = axWindow(pid: s.pid, id: id) {
+          var fsRef: CFTypeRef?
+          let isFS = AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &fsRef) == .success && (fsRef as? Bool) == true
+          var minRef: CFTypeRef?
+          let isMin = AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success && (minRef as? Bool) == true
+          if isFS || isMin {
+            rescueOffDesktopWindows()
+            continue
+          }
+        }
+      } else if liveIDs.contains(id) {
+        reason = "no longer a window of its own"
+      } else if rawOnScreenIDs.contains(id) {
+        reason = "closing (fading out)"
       }
+      if let s = streams[id] { Fusion.log("w\(id) (\(s.app)) closed: \(reason)") }
       closeStream(id)
     }
 

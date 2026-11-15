@@ -23,6 +23,13 @@ enum FusionProtocol {
     "dockmenu", "dockmenu.press", "clip", "alert", "rtc",
   ]
 
+  /// Both Fusion processes are windowless background apps: App Nap would delay their pings past
+  /// the other side's watchdog and drop the session while the person isn't looking. Held for life.
+  private static var activity: NSObjectProtocol?
+  static func stayAwake(_ reason: String) {
+    activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: reason)
+  }
+
   static func path(_ value: Any?) -> [Int] {
     (value as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? []
   }

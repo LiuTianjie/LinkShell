@@ -22,6 +22,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
 
   static func run() -> Never {
     FusionMetadata.enabled = true
+    FusionProtocol.stayAwake("LinkShell Fusion: showing another computer's apps")
     let host = Launch.value(after: "--host") ?? ""
     let port = Launch.value(after: "--port").flatMap(UInt16.init) ?? FusionWire.port
     // From the environment, never argv: any local user can read another process's arguments.
