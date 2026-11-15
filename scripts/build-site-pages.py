@@ -57,8 +57,8 @@ SWITCH_LABEL = {"zh": "中文", "en": "EN", "ja": "日本語"}
 META = {
     ("zh", "home"): {
         "title": "LinkShell | 手机远程控制 Claude Code、Codex 编程 Agent",
-        "description": "LinkShell 让 Claude Code、Codex、Gemini CLI 等编程 Agent 留在电脑上运行，你在 iPhone、Android、手表或锁屏上看进度、审批、插话；还能远程控制 Mac 桌面。端到端加密，可自建网关。",
-        "keywords": "LinkShell, 手机远程控制 Claude Code, Codex 手机, 编程 Agent, AI 编程助手, 远程桌面, Mac 远程控制, 远程终端, iOS, Android, 端到端加密, 自建网关",
+        "description": "LinkShell 让 Claude Code、Codex、Gemini CLI 等编程 Agent 留在电脑上运行，你在 iPhone、Android、手表或锁屏上看进度、审批、插话；还能远程控制 Mac 桌面，用融合模式把另一台 Mac 的应用开在这台 Mac 上。端到端加密，可自建网关。",
+        "keywords": "LinkShell, 手机远程控制 Claude Code, Codex 手机, 编程 Agent, AI 编程助手, 远程桌面, Mac 远程控制, 融合模式, Mac 应用串流, 远程终端, iOS, Android, 端到端加密, 自建网关",
         "image_alt": "LinkShell 首页：离开电脑，Agent 接着干，手机上收到 Claude 的审批请求",
     },
     ("zh", "docs"): {
@@ -75,8 +75,8 @@ META = {
     },
     ("en", "home"): {
         "title": "LinkShell: Control Claude Code and Codex from Your Phone",
-        "description": "Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, end-to-end encrypted.",
-        "keywords": "LinkShell, Claude Code mobile, Codex on phone, remote control coding agent, AI coding agent, remote desktop, remote Mac, remote terminal, iOS, Android, end-to-end encryption, self-hosted gateway",
+        "description": "Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted.",
+        "keywords": "LinkShell, Claude Code mobile, Codex on phone, remote control coding agent, AI coding agent, remote desktop, remote Mac, Fusion Mode, remote Mac apps, remote terminal, iOS, Android, end-to-end encryption, self-hosted gateway",
         "image_alt": "LinkShell's home page: leave your desk, your agents keep going, with a request from Claude on the phone",
     },
     ("en", "docs"): {

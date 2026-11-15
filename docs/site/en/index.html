@@ -7,8 +7,8 @@
   <base href="../" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LinkShell: Control Claude Code and Codex from Your Phone</title>
-  <meta name="description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, end-to-end encrypted." />
-  <meta name="keywords" content="LinkShell, Claude Code mobile, Codex on phone, remote control coding agent, AI coding agent, remote desktop, remote Mac, remote terminal, iOS, Android, end-to-end encryption, self-hosted gateway" />
+  <meta name="description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted." />
+  <meta name="keywords" content="LinkShell, Claude Code mobile, Codex on phone, remote control coding agent, AI coding agent, remote desktop, remote Mac, Fusion Mode, remote Mac apps, remote terminal, iOS, Android, end-to-end encryption, self-hosted gateway" />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta name="applicable-device" content="pc,mobile" />
   <meta http-equiv="Cache-Control" content="no-transform" />
@@ -19,7 +19,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="LinkShell" />
   <meta property="og:title" content="LinkShell: Control Claude Code and Codex from Your Phone" />
-  <meta property="og:description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, end-to-end encrypted." />
+  <meta property="og:description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted." />
   <meta property="og:url" content="https://linkshell.itool.tech/en/" />
   <meta property="og:image" content="https://linkshell.itool.tech/assets/og-en.png" />
   <meta property="og:image:type" content="image/png" />
@@ -30,7 +30,7 @@
   <meta property="og:locale:alternate" content="zh_CN" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="LinkShell: Control Claude Code and Codex from Your Phone" />
-  <meta name="twitter:description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, end-to-end encrypted." />
+  <meta name="twitter:description" content="Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted." />
   <meta name="twitter:image" content="https://linkshell.itool.tech/assets/og-en.png" />
   <meta name="twitter:image:alt" content="LinkShell&#x27;s home page: leave your desk, your agents keep going, with a request from Claude on the phone" />
   <link rel="preload" as="image" href="assets/promo/film-en.jpg" media="(min-width: 701px)" fetchpriority="high" />
@@ -74,7 +74,7 @@
       "@id": "https://linkshell.itool.tech/en/#webpage",
       "url": "https://linkshell.itool.tech/en/",
       "name": "LinkShell: Control Claude Code and Codex from Your Phone",
-      "description": "Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, end-to-end encrypted.",
+      "description": "Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted.",
       "inLanguage": "en",
       "isPartOf": {
         "@id": "https://linkshell.itool.tech/#website"
@@ -371,11 +371,11 @@
     @media (max-width: 480px) { .cmd { display: flex; } .cmd code { flex: 1; } }
 
     /* the film: a still with its clip over it, set on a panel one tone up */
-    .stage { margin: 0; padding: 14px; border-radius: var(--fam-r-lg); background: var(--surface); }
-    .media { position: relative; margin: 0; border-radius: var(--fam-r-md); overflow: hidden; background: #000; }
+    .stage { margin: 0; }
+    .media { position: relative; margin: 0; border-radius: var(--fam-r-lg); overflow: hidden; background: #000; }
     .media img { width: 100%; aspect-ratio: 16 / 9; }
     .media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } .stage { padding: 8px; border-radius: var(--fam-r-lg); } .media { border-radius: var(--fam-r-md); } }
+    @media (max-width: 700px) { .media img { aspect-ratio: 9 / 16; } }
 
     /* A phone's screen recording, with the phone drawn around it: upright, or on its side for the computer's screen. */
     .phone { position: relative; margin: 40px 0 0; width: min(100%, 340px); border: 9px solid var(--surface-3); border-radius: 54px; overflow: hidden; background: #000; }
@@ -391,13 +391,14 @@
     @media (max-width: 700px) { .phone { margin-inline: auto; } .phone.side { border-width: 6px; border-radius: 26px; } .pair { flex-direction: column; align-items: center; gap: 28px; } }
 
     /* home: the first screen says what this is, and lets you do its one thing */
-    .hero { padding-block: 84px 0; }
-    .hero-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: end; }
-    .hero h1 { font-size: var(--display); font-weight: 600; letter-spacing: -.05em; line-height: 1; }
-    html[lang^="zh"] .hero h1 { letter-spacing: -.02em; line-height: 1.12; }
+    .hero { padding-block: 96px 0; }
+    .hero-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: center; }
+    .hero h1 { font-size: clamp(48px, 6.3vw, 98px); font-weight: 600; letter-spacing: -.055em; line-height: .98; }
+    html[lang^="zh"] .hero h1 { letter-spacing: -.03em; line-height: 1.1; }
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
-    .hero .btns { margin-top: 36px; }
-    .hero .stage { margin-top: 72px; }
+    .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
+    .hero .btns { margin-top: 40px; }
+    .hero .stage { margin-top: 96px; }
     @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
     /* The live fragment: the request an agent sends to your phone, answerable right here. Inside it
@@ -437,84 +438,64 @@
     @keyframes ask-spin { to { transform: rotate(360deg); } }
     @media (max-width: 960px) { .ask { justify-self: start; } }
 
-    /* Each recording stands on a stage panel the width of the column, so no screen is left bare. */
-    .feature-stage { display: flex; justify-content: center; margin-top: 44px; padding: 56px 32px; }
-    .feature-stage .phone, .feature-stage .pair { margin: 0; }
-    .feature-stage .phone.side { width: min(100%, 940px); }
-    @media (max-width: 700px) { .feature-stage { padding: 28px 16px; border-radius: var(--fam-r-lg); } }
-    .duo-figure { margin: 40px 0 0; }
-    .duo-figure img { display: block; width: 100%; height: auto; border-radius: var(--fam-r-lg); background: #000; }
-    .duo-figure figcaption { margin-top: 14px; color: var(--text-sec); font-size: var(--small); }
-
-    /* sections: a large gap between them, a heading on each */
-    .sec { padding-block: 168px 0; }
-    .sec h2 { font-size: var(--heading); margin-bottom: 22px; }
+    /* The pages tell one thing at a time: a heading, a sentence, the product's own recording on
+       the page's ground. No panels, bands, stripes or cards; thin lines only where a list needs
+       its items told apart. The Claude Code and Codex pages and pricing share these. */
+    :root { --big: clamp(34px, 4.4vw, 60px); --huge: clamp(52px, 7.6vw, 116px); --faint: #3f3f46; }
+    :root[data-theme="light"] { --faint: #c4c4c9; }
+    .sec { padding-block: 220px 0; }
+    .sec > .wrap > h2, .sec > .wrap > .text > h2 { max-width: 14em; font-size: var(--big); letter-spacing: -.04em; }
+    html[lang^="zh"] .sec > .wrap > :is(h2, .text > h2) { letter-spacing: -.02em; }
     .sec h3 { font-size: var(--lead); margin-bottom: 10px; letter-spacing: -.015em; }
-    .sec .media { margin-top: 40px; }
-    .feature { margin-top: 152px; }
-    #features .feature:first-child { margin-top: 0; }
+    .feature { margin-top: 220px; }
+    .sec > .wrap > .feature:first-child { margin-top: 0; }
+    .feature h2 { max-width: 14em; font-size: var(--heading); letter-spacing: -.04em; }
+    html[lang^="zh"] .feature h2 { letter-spacing: -.015em; }
+    .feature .text > p { max-width: 32em; margin-top: 22px; color: var(--text-sec); font-size: 19px; line-height: 1.7; }
+    .feature .text > p + p { margin-top: 12px; }
+    /* Every feature: its words, then its recording, left-aligned like the home page's hours. */
+    .feature-stage { display: flex; justify-content: flex-start; margin: 56px 0 0; padding: 0; background: none; border-radius: 0; }
+    .feature-stage .phone, .feature-stage .pair { margin: 0; }
+    .feature-stage .phone { width: min(100%, 360px); }
+    .feature-stage .phone.side { width: 100%; }
+    .pair { gap: 48px; }
+    .feature.split { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 80px; align-items: center; }
+    .feature.split > .feature-stage { margin: 0; justify-content: center; }
+    .feature.split.flip > .text { order: 2; }
+    .feature.split.flip > .feature-stage { order: 1; }
+    .feature.intro-row > .text { max-width: none; }
+    .feature.intro-row > .text > :is(pre, .code) { margin-top: 28px; max-width: 720px; }
+    .note-small { margin-top: 22px; color: var(--text-sec); font-size: var(--small); }
 
-    /* lists set as type: a bold line and its explanation, space between them */
-    .more { display: grid; gap: 26px; margin: 8px 0 0; }
-    .more dt { color: var(--text); font-size: var(--lead); font-weight: 600; letter-spacing: -.015em; line-height: 1.35; }
-    .more dd { margin: 6px 0 0; color: var(--text-sec); }
-    .more div { display: block; }
-    .points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin: 40px 0 0; }
-    .points dt { font-size: var(--body); }
-    @media (max-width: 860px) { .points { grid-template-columns: minmax(0, 1fr); gap: 22px; } }
+    /* Lists: a plain index in two columns, or three short points, thin lines above each item. */
+    .more { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 80px; margin: 56px 0 0; }
+    .more.points { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; }
+    .more > div { margin: 0; padding: 26px 0 28px; border-top: 1px solid var(--border); }
+    .more dt { color: var(--text); font-size: 19px; font-weight: 600; letter-spacing: -.015em; line-height: 1.4; }
+    .more dd { margin: 8px 0 0; color: var(--text-sec); }
 
-    /* Lists that explain things run the column's width as rows: the name on the left, what it does
-       on the right, every other row a tone up so the eye tracks across. No lines. */
-    .text:has(> dl.more:not(.points)), #agents .text { max-width: none; }
-    .text:has(> dl.more:not(.points)) > :is(h2, p), #agents .text > p { max-width: var(--measure); }
-    dl.more:not(.points) { gap: 0; margin-top: 36px; }
-    dl.more:not(.points) > div, .agent { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px 40px; align-items: baseline; margin: 0; padding: 22px 28px; border-radius: var(--fam-r-lg); }
-    dl.more:not(.points) > div:nth-child(odd), .agent:nth-of-type(odd) { background: var(--surface); }
-    dl.more:not(.points) dd { margin: 0; }
-    #agents .agent:first-of-type { margin-top: 36px; }
-    .agent { align-items: center; }
-    .agent p { color: var(--text-sec); }
-    .agent-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0; }
-    @media (max-width: 760px) { dl.more:not(.points) > div, .agent { grid-template-columns: minmax(0, 1fr); padding: 18px 20px; } }
-    .agent-name h3 { margin: 0; font-size: var(--lead); }
-    .marks { display: flex; gap: 6px; }
-    .av { position: relative; flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bd, var(--surface-2)); color: var(--fd, var(--text-sec)); }
-    :root[data-theme="light"] .av { background: var(--bl, var(--surface-2)); color: var(--fl, var(--text-sec)); }
-    .av svg { width: 54%; height: 54%; }
-    .av.full svg { width: 100%; height: 100%; border-radius: 50%; }
-
-    /* The commands run wider than the reading measure, so the section uses the column's width. */
-    #install .text { max-width: none; }
-    #install .text > p, #install .step > p { max-width: var(--measure); }
-    .step { margin-top: 52px; }
+    /* Setup: three numbered columns. */
+    .sec#setup .text { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; max-width: none; counter-reset: step; }
+    .sec#setup .text > h2 { grid-column: 1 / -1; margin-bottom: 80px; }
+    .step { min-width: 0; counter-increment: step; }
+    .step::before { content: counter(step); display: block; margin-bottom: 24px; color: var(--faint); font-size: 72px; font-weight: 500; letter-spacing: -.05em; line-height: 1; }
+    .step h3 { margin-bottom: 10px; }
+    .step > p { color: var(--text-sec); }
+    .step .btns { margin-top: 16px; }
     .step .code, .step > pre { margin-top: 16px; }
-    .step .code + p { margin-top: 20px; }
-    .step h3 { font-size: var(--lead); }
+    .step .code + p, .step pre + p { margin-top: 16px; }
 
-    /* support: who backs it, and how to say thanks, side by side so neither half is empty */
-    .support-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
-    .support { padding: 32px; border-radius: var(--fam-r-lg); background: var(--surface); }
-    .sec .support h3 { font-size: var(--lead); margin-bottom: 8px; letter-spacing: -.015em; }
-    .support p { color: var(--text-sec); }
-    .sponsor { margin-top: 20px; font-size: var(--lead); color: var(--text) !important; }
-    .sponsor a { font-weight: 600; }
-    .qr { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }
-    .qr figure { margin: 0; width: 132px; color: var(--text-sec); font-size: var(--small); text-align: center; }
-    .qr img { width: 100%; border-radius: 12px; margin-bottom: 8px; }
-    @media (max-width: 860px) { .support-row { grid-template-columns: minmax(0, 1fr); gap: 16px; } .support { padding: 24px; } }
-
-    /* the close: one large field a tone up, the page's last word at display size */
-    .close { padding-block: 168px 0; }
-    .close-card { padding: clamp(40px, 7vw, 96px); border-radius: var(--fam-r-lg); background: var(--surface); }
-    .close-card h2 { max-width: 13em; font-size: var(--display); letter-spacing: -.05em; line-height: 1; }
-    html[lang^="zh"] .close-card h2 { letter-spacing: -.02em; line-height: 1.12; }
-    .close-card p { margin-top: 24px; color: var(--text-sec); font-size: var(--lead); }
+    /* the close: the page's last word, large, on the ground */
+    .close { padding-block: 240px 0; }
+    .close-card { padding: 0; background: none; }
+    .close-card h2 { max-width: 12em; font-size: var(--huge); letter-spacing: -.055em; line-height: .98; }
+    html[lang^="zh"] .close-card h2 { letter-spacing: -.03em; line-height: 1.1; }
+    .close-card p { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: 19px; }
     .close .btns { margin-top: 40px; }
-    @media (max-width: 700px) { .close-card { margin-inline: calc(var(--gutter) * -1); padding: 44px 20px; border-radius: var(--fam-r-lg); } }
 
     /* the footer: the name returns at full width */
-    footer { padding-top: 120px; overflow: hidden; }
-    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; justify-content: space-between; color: var(--text-sec); font-size: var(--small); }
+    footer { padding-top: 160px; overflow: hidden; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; justify-content: space-between; padding-top: 28px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
     footer .brand { margin: 0; font-size: var(--small); }
     footer .brand img { width: 22px; height: 22px; border-radius: 5px; }
     footer .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
@@ -523,25 +504,16 @@
     footer nav a:hover { color: var(--text); text-decoration: none; }
     .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
-    @media (max-width: 700px) {
-      .hero { padding-top: 56px; }
-      .hero .stage { margin-top: 48px; }
-      .lead { font-size: 18px; margin-top: 22px; }
-      .sec, .close { padding-top: 112px; }
-      .feature { margin-top: 96px; }
-      .sec .media { margin-top: 28px; }
-      footer { padding-top: 88px; }
-    }
-
-    /* docs */
-    .docs { display: grid; grid-template-columns: 200px minmax(0, 720px); gap: 80px; padding-block: 72px 128px; }
-    .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: var(--small); }
-    .toc a { padding: 6px 12px; border-radius: var(--fam-r-md); color: var(--text-sec); transition: color .15s, background-color .15s; }
-    .toc a:hover { color: var(--text); background: var(--surface); text-decoration: none; }
-    .toc a.on { color: var(--text); background: var(--surface-2); }
-    .doc h1 { font-size: var(--heading); margin-bottom: 18px; }
-    .doc h2 { font-size: clamp(24px, 2.6vw, 30px); margin: 96px 0 18px; letter-spacing: -.02em; }
-    .doc h3 { font-size: var(--lead); margin: 40px 0 12px; }
+    /* docs: a quiet contents column, the text at reading measure, sections apart by space */
+    .docs { display: grid; grid-template-columns: 200px minmax(0, 720px); gap: 96px; padding-block: 96px 128px; }
+    .toc { position: sticky; top: 104px; align-self: start; display: flex; flex-direction: column; gap: 0; font-size: var(--small); }
+    .toc a { padding: 6px 0; color: var(--text-sec); transition: color .15s; }
+    .toc a:hover { color: var(--text); text-decoration: none; }
+    .toc a.on { color: var(--text); }
+    .doc h1 { font-size: var(--big); letter-spacing: -.04em; margin-bottom: 22px; }
+    html[lang^="zh"] .doc h1 { letter-spacing: -.02em; }
+    .doc h2 { font-size: clamp(26px, 2.8vw, 34px); margin: 120px 0 20px; letter-spacing: -.03em; }
+    .doc h3 { font-size: var(--lead); margin: 44px 0 12px; }
     .doc p, .doc li, .doc dd { color: var(--text-sec); }
     .doc b { color: var(--text); font-weight: 600; }
     .doc :is(p, ul, pre, .code, .note) + :is(p, ul, pre, .code, .note) { margin-top: 18px; }
@@ -552,109 +524,56 @@
     .doc dt code { white-space: normal; background: none; padding: 0; color: var(--text); }
     .doc dt:first-child { margin-top: 0; }
     .doc dd { margin: 4px 0 0; }
-    .note { padding: 16px 20px; border-radius: var(--fam-r-lg); background: var(--surface); color: var(--text); }
+    .note { padding: 2px 0 2px 18px; border-left: 2px solid var(--accent); color: var(--text); }
     @media (max-width: 860px) {
-      .docs { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-block: 44px 88px; }
-      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; }
-      .doc h2 { margin-top: 72px; }
+      .docs { grid-template-columns: minmax(0, 1fr); gap: 40px; padding-block: 48px 88px; }
+      .toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px 16px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+      .doc h2 { margin-top: 88px; }
     }
 
     /* pricing */
-    .pricing { padding-block: 104px 0; }
-    .pricing h1 { font-size: var(--display); letter-spacing: -.05em; line-height: 1; }
-    html[lang^="zh"] .pricing h1 { letter-spacing: -.02em; line-height: 1.12; }
-    .pricing .lead { margin-top: 24px; }
-    .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 72px; }
-    .plan { max-width: none; padding: 36px; border-radius: var(--fam-r-lg); background: var(--surface); }
-    .plan.pro { background: var(--surface-2); }
-    .plan h2 { font-size: var(--lead); letter-spacing: -.015em; }
-    .price { margin-top: 18px; font-size: clamp(56px, 6vw, 80px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .pricing { padding-block: 120px 0; }
+    .pricing h1 { font-size: var(--huge); letter-spacing: -.055em; line-height: .98; }
+    html[lang^="zh"] .pricing h1 { letter-spacing: -.03em; line-height: 1.1; }
+    .pricing .lead { margin-top: 28px; }
+    .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 80px; margin-top: 64px; }
+    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; }
+    .plan.pro { border-top-color: var(--accent); }
+    .sec .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
+    .price { margin-top: 18px; font-size: clamp(56px, 6vw, 84px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
-    .cycle { display: inline-flex; gap: 2px; margin-top: 20px; padding: 3px; border-radius: var(--fam-r-md); background: var(--surface-3); }
-    .cycle-btn { height: 34px; padding: 0 18px; border: 0; border-radius: var(--fam-r-sm); background: none; color: var(--text-sec); font-size: var(--small); cursor: pointer; transition: color .15s, background-color .15s; }
-    .cycle-btn.active { background: var(--ink); color: var(--ink-fg); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
     #pricing-buy { max-width: 420px; }
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
     #pricing-buy p { margin-top: 16px; font-size: var(--small); color: var(--text-sec); }
-    .auth-btn { display: flex; justify-content: center; align-items: center; width: 100%; height: 48px; border: 0; border-radius: var(--fam-r-md); background: var(--surface-3); color: var(--text); font: 500 var(--body) var(--sans); cursor: pointer; text-decoration: none !important; transition: background-color .15s; }
-    .auth-btn:hover { background: color-mix(in srgb, var(--surface-3) 80%, var(--text)); }
-    .auth-btn-primary { background: var(--accent-fill); color: var(--accent-ink); }
-    .auth-btn-primary:hover { background: var(--accent-hover); }
-    .auth-btn + .auth-btn { margin-top: 10px; }
-    .ts { color: var(--success); }
-    .to { color: var(--text-sec); }
-    .faq { margin-top: 152px; padding-bottom: 0; }
-    .faq h2 { font-size: var(--heading); }
-    .faq h3 { font-size: var(--lead); margin: 36px 0 8px; }
-    @media (max-width: 860px) {
-      .pricing { padding-block: 56px 0; }
-      .plans { grid-template-columns: minmax(0, 1fr); margin-top: 48px; }
-      .plan { padding: 28px 24px; }
-      .faq { margin-top: 104px; }
-    }
+    .faq { max-width: 760px; margin-top: 200px; padding-bottom: 0; }
+    .faq h2 { margin-bottom: 40px; font-size: var(--big); letter-spacing: -.04em; }
+    .faq h3 { margin: 0; padding: 28px 0 10px; border-top: 1px solid var(--border); font-size: var(--lead); letter-spacing: -.015em; }
+    .faq p { color: var(--text-sec); }
+    .faq h3 + p { padding-bottom: 6px; }
 
-
-    /* ── Section compositions: each feature takes its own shape ───────────── */
     body { overflow-x: clip; }
-    .feature.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 72px; align-items: center; }
-    .feature.split > .text { max-width: 30em; }
-    .feature.split > .stage { margin: 0; }
-    .feature.split.flip > .text { order: 2; }
-    .feature.split.flip > .stage { order: 1; }
-    /* A band: the section's own full-width ground, one tone up, its words centred. */
-    .feature.band { position: relative; padding-block: 120px; }
-    .feature.band::before { content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1; background: var(--surface); }
-    .feature.center > .text { max-width: 760px; margin-inline: auto; text-align: center; }
-    .feature.center > .text h2 { margin-inline: auto; }
-    .feature.band > .feature-stage { margin-top: 56px; padding: 0; background: none; }
-    .feature.band .pair { gap: 64px; }
-    .feature.band .phone { width: min(100%, 380px); }
-    .feature.band .watch { width: min(100%, 260px); }
-    .feature.band .note-small { text-align: center; }
-    /* A field: the one full-width colour field on the page, its phone rising out of the bottom. */
-    .feature.field { position: relative; padding-top: 120px; align-items: end; }
-    .feature.field::before { content: ""; position: absolute; inset: 0 calc(50% - 50vw); z-index: -1; background: var(--field); }
-    .feature.field > .text { align-self: center; padding-bottom: 120px; }
-    .feature.field > .text p { color: var(--field-sec); }
-    .feature.field > .text a { color: var(--field-ink); text-decoration: underline; text-underline-offset: 3px; }
-    .feature.field > .text h2 { color: var(--field-ink); }
-    .feature.field > .stage { padding: 0; background: none; align-self: end; }
-    .feature.field .phone { margin-bottom: -60px; border-color: color-mix(in srgb, var(--field) 70%, #000); }
-    /* accentSoft (16% of the dark accent, 10% of the light one) laid on the page's ground. */
-    :root { --field: color-mix(in srgb, var(--accent) 16%, var(--bg)); --field-ink: var(--text); --field-sec: var(--text-sec); }
-    :root[data-theme="light"] { --field: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
-    .feature.field + .feature { margin-top: 200px; }
-    .feature.center > .feature-stage { margin-top: 48px; padding: 0; background: none; }
-    .feature.center .phone.side { width: 100%; max-width: 1120px; }
-    .feature.center > dl.points { text-align: left; }
-    /* Intro row: the heading on the left, its sentence on the right, the content full width below. */
-    .feature.intro-row > .text { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px 72px; align-items: end; max-width: none; }
-    .feature.intro-row > .text > h2 { margin: 0; }
-    .feature.intro-row > .text > p { max-width: 36em; }
-    .feature.intro-row > .text > dl.more { grid-column: 1 / -1; }
-    /* Install: the heading stays in view on the left while the steps go by on the right. */
-    #install .text { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 72px; max-width: none; }
-    .install-intro { position: sticky; top: 112px; align-self: start; }
-    .install-steps > .step:first-child { margin-top: 0; }
-    /* The agents, passing by: every supported agent's own mark and name. */
-    .agent-strip { margin: 8px 0 32px; }
-    .agent-track { display: flex; flex-wrap: wrap; gap: 10px; }
-    .agent-chip { display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px 0 12px; border-radius: var(--fam-r-md); background: var(--surface); color: var(--text); font-size: var(--body); font-weight: 500; white-space: nowrap; }
-    .agent-chip .av { width: 30px; height: 30px; }
     @media (max-width: 960px) {
-      .feature.split, .feature.intro-row > .text, #install .text { grid-template-columns: minmax(0, 1fr); gap: 32px; }
-      .feature.split.flip > .text, .feature.split.flip > .stage { order: 0; }
-      .feature.split > .stage { margin-top: 8px; }
-      .install-intro { position: static; }
-      .feature.band, .feature.field { padding-top: 88px; }
-      .feature.band { padding-bottom: 88px; }
-      .feature.field > .text { padding-bottom: 0; }
-      .feature.field .phone { margin-bottom: -40px; }
-      .feature.band .pair { gap: 28px; }
+      .feature.split, .sec#setup .text, .more, .more.points, .plans { grid-template-columns: minmax(0, 1fr); }
+      .feature.split { gap: 48px; }
+      .feature.split.flip > .text, .feature.split.flip > .feature-stage { order: 0; }
+      .feature.split > .feature-stage { justify-content: flex-start; }
+      .sec#setup .text > h2 { margin-bottom: 40px; }
+      .step + .step { margin-top: 56px; }
+      .plans { gap: 48px; }
+    }
+    @media (max-width: 700px) {
+      .hero { padding-top: 56px; }
+      .lead { font-size: 18px; margin-top: 22px; }
+      .sec, .close { padding-top: 150px; }
+      .feature { margin-top: 150px; }
+      .feature .text > p { font-size: 17px; }
+      .feature-stage { justify-content: center; }
+      .faq { margin-top: 140px; }
+      footer { padding-top: 112px; }
     }
 
     /* Motion: the film opens like a shutter once; each section's parts rise in once; controls
@@ -671,6 +590,169 @@
       html { scroll-behavior: auto; }
       .js .rise, .js .stage.shutter, .js .stage.shutter .media { opacity: 1; transform: none; clip-path: none; transition: none; }
       .ask-result .spin { animation: none; }
+      .fx-win, .fx-switch { transition: none; }
+      .fx-app.bounce { animation: none; }
+    }
+  </style>
+  <style>
+    /* The home page tells one day away from the computer. No labels, no cards: type, the
+       product's own recordings, and room around them. A clock on the left keeps the hour. */
+
+    /* The day: a statement, then the hours. */
+    .day { padding-top: 240px; }
+    .day-say { max-width: 15em; font-size: var(--big); font-weight: 600; letter-spacing: -.04em; line-height: 1.08; text-wrap: balance; }
+    html[lang^="zh"] .day-say { letter-spacing: -.02em; line-height: 1.25; }
+    .day-say span { color: var(--text-sec); }
+    .day-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 96px; margin-top: 160px; }
+    .clock { position: sticky; top: 120px; align-self: start; }
+    .clock .now { display: block; font-size: clamp(64px, 6.4vw, 96px); font-weight: 500; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; transition: opacity .25s, transform .35s var(--ease); }
+    .clock .now.tick { opacity: 0; transform: translateY(12px); transition: none; }
+    .clock .where { display: block; margin-top: 14px; color: var(--text-sec); font-size: var(--lead); }
+    .clock ol { display: grid; gap: 2px; margin: 56px 0 0; padding: 0; list-style: none; }
+    .clock ol a { display: flex; gap: 16px; padding: 5px 0; color: var(--faint); font-size: var(--small); transition: color .2s; }
+    .clock ol a:hover { color: var(--text-sec); text-decoration: none; }
+    .clock ol a.on { color: var(--text); }
+    .clock ol time { font: 500 var(--small) var(--mono); font-variant-numeric: tabular-nums; }
+    .hour { padding-bottom: 240px; scroll-margin-top: 120px; }
+    .hour:last-child { padding-bottom: 0; }
+    .hour .when { display: none; margin-bottom: 18px; color: var(--text-sec); font: 500 var(--small) var(--mono); }
+    .hour h2 { max-width: 14em; font-size: var(--heading); letter-spacing: -.04em; }
+    html[lang^="zh"] .hour h2 { letter-spacing: -.015em; }
+    .hour > p { max-width: 32em; margin-top: 22px; color: var(--text-sec); font-size: 19px; line-height: 1.7; }
+    .hour > p + p { margin-top: 12px; }
+    .hour .fine { margin-top: 18px; color: var(--text-sec); font-size: var(--small); }
+    .shot { display: flex; align-items: flex-end; gap: 48px; margin-top: 64px; }
+    .shot .phone { margin: 0; width: min(100%, 360px); }
+    .shot .watch { width: min(100%, 230px); }
+    .shot .phone.side { width: 100%; }
+    .hour .duo-figure { margin-top: 64px; }
+
+    /* Fusion: a close-up of this Mac's Dock. Apps from the other Mac slide in wearing the badge
+       LinkShell puts on them (the computer's name, bottom right), and Safari's window rises. */
+    .fz { position: relative; margin-top: 64px; aspect-ratio: 1120 / 560; overflow: hidden; border-radius: var(--fam-r-lg); background: #15173a; user-select: none; -webkit-user-select: none; }
+    .fz-canvas { position: absolute; top: 0; left: 0; width: 1120px; height: 560px; transform: scale(var(--fz-s, 1)); transform-origin: 0 0; color: #f5f5f7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif; }
+    .fz-wall { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .fz-win { position: absolute; overflow: hidden; border-radius: 14px; background: #1e1e20; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .18), 0 30px 80px rgba(0, 0, 0, .5); transition: opacity .6s var(--ease), transform .9s var(--ease); } /* taste-skill-ignore: macOS's own window shadow, inside the drawing */
+    .fz-win header { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; background: #2a2a2d; }
+    .fz-win header i { width: 13px; height: 13px; border-radius: 50%; background: #ff5f57; }
+    .fz-win header i + i { background: #febc2e; } .fz-win header i + i + i { background: #28c840; }
+    .fz-notes { left: 70px; top: 40px; width: 420px; height: 300px; background: #232325; }
+    .fz-notes header i { background: #4a4a4e !important; }
+    .fz-notes .tx { padding: 22px 26px; }
+    .fz-notes b { display: block; margin-bottom: 14px; font-size: 19px; font-weight: 700; }
+    .fz-notes span { display: block; height: 10px; margin-top: 12px; border-radius: 4px; background: rgba(255, 255, 255, .12); }
+    .fz-safari { left: 360px; top: 70px; width: 640px; height: 330px; }
+    .fz:not(.played) .fz-safari { opacity: 0; transform: translateY(60px) scale(.94); }
+    .fz-safari header { gap: 8px; }
+    .fz-safari .url { flex: 1; max-width: 300px; height: 26px; margin: 0 auto; border-radius: 8px; background: #3a3a3d; color: rgba(255, 255, 255, .7); font-size: 12.5px; line-height: 26px; text-align: center; }
+    .fz-page { padding: 34px 40px; background: #fafafa; height: 100%; color: #09090b; }
+    .fz-page b { display: block; font-size: 30px; font-weight: 700; letter-spacing: -.03em; }
+    .fz-page p { margin-top: 8px; color: #52525b; font-size: 14px; }
+    .fz-page .row { display: flex; gap: 14px; margin-top: 24px; }
+    .fz-page .row span { flex: 1; height: 120px; border-radius: 12px; background: #ececf1; }
+    .fz-page .row span:first-child { background: #5263e8; }
+    .fz-dock { position: absolute; left: 50%; bottom: 18px; display: flex; align-items: flex-end; padding: 10px 8px; border-radius: 30px; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .32), 0 16px 40px rgba(0, 0, 0, .3); backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8); transform: translateX(-50%); }
+    .fz-dock hr { align-self: stretch; width: 1px; margin: 8px 8px; border: 0; background: rgba(255, 255, 255, .3); }
+    .fz-app { position: relative; display: grid; place-items: center; width: 100px; padding: 0; border: 0; background: none; transition: width .7s var(--ease), opacity .4s; }
+    .fz-app.remote { cursor: pointer; }
+    .fz:not(.played) .fz-app.remote, .fz-app.remote.away { width: 0; opacity: 0; }
+    .fz-app::after { content: ""; position: absolute; bottom: -7px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: rgba(255, 255, 255, .85); opacity: 0; }
+    .fz-app.on::after { opacity: 1; }
+    .fz-app .name { position: absolute; bottom: calc(100% + 18px); left: 50%; padding: 4px 12px; border-radius: 8px; background: rgba(40, 40, 44, .92); font-size: 13px; white-space: nowrap; transform: translateX(-50%); opacity: 0; transition: opacity .15s; pointer-events: none; }
+    .fz-app:hover .name { opacity: 1; }
+    .fz-app.bounce .ico { animation: fz-bounce 1s var(--ease); }
+    @keyframes fz-bounce { 0%, 100% { transform: none; } 25% { transform: translateY(-30px); } 50% { transform: none; } 70% { transform: translateY(-12px); } }
+    .ico { position: relative; width: 84px; height: 84px; }
+    .ico > svg { width: 100%; height: 100%; display: block; }
+    .ico > img { width: 100%; height: 100%; border-radius: 22.5%; }
+    /* The badge, as FusionStubBundles.composeBadgedIcon draws it: accentFill, a white edge, the
+       first four letters of the computer's name. */
+    .ico .badge { position: absolute; right: 5%; bottom: 9%; display: grid; place-items: center; min-width: 34%; height: 18%; padding: 0 6%; border: 1.6px solid rgba(255, 255, 255, .92); border-radius: 5px; background: #4c5fd5; color: #fff; font: 700 11px/1 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .03em; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
+    .fz-key { position: absolute; left: 50%; bottom: 150px; display: flex; gap: 40px; color: rgba(255, 255, 255, .78); font-size: 14px; transform: translateX(-50%); }
+    .fz-key span { display: inline-flex; align-items: center; gap: 10px; }
+    .fz-key .ico { width: 30px; height: 30px; }
+    .fz-key .ico .badge { font-size: 0; min-width: 40%; height: 26%; border-width: 1px; border-radius: 3px; }
+    .steps-line { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin: 56px 0 0; padding: 0; list-style: none; counter-reset: s; }
+    .steps-line li { counter-increment: s; color: var(--text-sec); font-size: 17px; line-height: 1.6; }
+    .steps-line li::before { content: counter(s); display: block; margin-bottom: 14px; color: var(--text); font-size: 44px; font-weight: 500; letter-spacing: -.04em; line-height: 1; }
+    .steps-line b { color: var(--text); font-weight: 600; }
+
+    /* The rest: a plain index, two columns, hairlines between. */
+    .rest { padding-top: 240px; }
+    .rest h2, .agents h2, .setup h2, .trust h2 { max-width: 14em; font-size: var(--big); letter-spacing: -.04em; }
+    html[lang^="zh"] :is(.rest, .agents, .setup, .trust) h2 { letter-spacing: -.02em; }
+    .index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 80px; margin: 72px 0 0; }
+    .index div { margin: 0; padding: 26px 0 28px; border-top: 1px solid var(--border); }
+    .index dt { font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
+    .index dd { margin: 8px 0 0; color: var(--text-sec); }
+
+    /* The agents, named large, each with its own mark. */
+    .agents { padding-top: 240px; }
+    .agent-line { margin-top: 56px; font-size: clamp(30px, 3.6vw, 50px); font-weight: 600; letter-spacing: -.035em; line-height: 1.5; }
+    .agent-line .av { width: .9em; height: .9em; }
+    .agent-line > span { display: inline-flex; align-items: center; gap: .24em; margin-right: .55em; white-space: nowrap; }
+    .agent-line > span.any { color: var(--text-sec); }
+    .agent-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 56px; }
+    .agent-notes p { color: var(--text-sec); }
+    .agent-notes b { display: block; margin-bottom: 6px; color: var(--text); font-weight: 600; }
+
+    /* Setup: three numbers. */
+    .setup { padding-top: 240px; }
+    .setup > .wrap > p { max-width: 36em; margin-top: 22px; color: var(--text-sec); font-size: 19px; }
+    .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px; margin-top: 80px; }
+    .three > div > b { display: block; color: var(--faint); font-size: 72px; font-weight: 500; letter-spacing: -.05em; line-height: 1; }
+    .three h3 { margin: 24px 0 10px; font-size: var(--lead); letter-spacing: -.015em; }
+    .three p { color: var(--text-sec); }
+    .three .code, .three > div > pre { margin-top: 18px; }
+    .three .btns { margin-top: 18px; gap: 8px; }
+    .three .btn { height: 40px; padding: 0 14px; font-size: var(--small); }
+
+    /* Trust: the route, said in words. */
+    .trust { padding-top: 240px; }
+    .route { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 64px; font-size: clamp(28px, 3.4vw, 46px); font-weight: 600; letter-spacing: -.035em; }
+    .route i { display: inline-flex; align-items: center; gap: 12px; color: var(--text-sec); font: 500 var(--small) var(--mono); letter-spacing: 0; }
+    .route i::before, .route i::after { content: ""; width: 36px; border-top: 1px solid var(--border-strong); }
+    .route .home { color: var(--accent); }
+    .trust-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 56px; }
+    .trust-notes p { color: var(--text-sec); }
+    .trust-notes b { display: block; margin-bottom: 6px; color: var(--text); font-weight: 600; }
+
+    /* The end of the day. */
+    .back { padding-top: 260px; }
+    .back h2 { max-width: 12em; font-size: var(--huge); letter-spacing: -.055em; line-height: .98; }
+    html[lang^="zh"] .back h2 { letter-spacing: -.03em; line-height: 1.1; }
+    .back p { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: 19px; }
+    .back .btns { margin-top: 40px; }
+    .thanks { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 40px; margin-top: 160px; padding-top: 28px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
+    .thanks a { color: var(--text); font-weight: 600; }
+    .thanks details summary { cursor: pointer; color: var(--text-sec); }
+    .thanks details[open] summary { color: var(--text); }
+    .thanks .qr { margin-top: 16px; }
+
+    @media (max-width: 960px) {
+      .day-grid { grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: 120px; }
+      .clock { display: none; }
+      .hour .when { display: block; }
+      .hour { padding-bottom: 160px; }
+      .three, .agent-notes, .trust-notes, .steps-line { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    }
+    @media (max-width: 700px) {
+      .hero { padding-top: 56px; }
+      .hero .lead { font-size: 18px; }
+      .film { margin-top: 56px; }
+      .day, .rest, .agents, .setup, .trust { padding-top: 160px; }
+      .back { padding-top: 180px; }
+      .hour > p { font-size: 17px; }
+      .shot { flex-direction: column; align-items: center; gap: 28px; margin-top: 44px; }
+      .fz { margin: 44px calc(var(--gutter) * -1) 0; border-radius: 0; }
+      .index { grid-template-columns: minmax(0, 1fr); margin-top: 44px; }
+      .three > div > b { font-size: 56px; }
+      .route i::before, .route i::after { width: 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .fz-win, .fz-app { transition: none; }
+      .fz-app.bounce .ico { animation: none; }
+      .clock .now { transition: none; }
     }
   </style>
 </head>
@@ -682,6 +764,7 @@
       <nav>
         <a class="intent" href="en/claude-code/" data-page-link="claude-code">Claude Code</a>
         <a class="intent" href="en/codex/" data-page-link="codex">Codex</a>
+        <a class="intent" href="en/#fusion">Fusion</a>
         <a href="en/docs/" data-page-link="docs">Docs</a>
         <a href="en/pricing/" data-page-link="pricing">Pricing</a>
         <a class="wide" href="https://github.com/LiuTianjie/LinkShell">GitHub</a>
@@ -701,20 +784,11 @@
         <div class="hero-top">
           <div>
             <h1>Leave your desk. <span class="nb">Your agents keep going.</span></h1>
-            <p class="lead">
-              
-              Claude Code, Codex and other coding agents keep running on your computer while you follow them, approve with a tap and cut in from your phone, your watch or the Lock Screen.
-            </p>
+            <p class="lead">Claude Code, Codex and other coding agents keep running on your computer while you follow them, approve with a tap and cut in from your phone, your watch or the Lock Screen. And another Mac&#39;s apps can open right on the one in front of you.</p>
             <div class="btns">
-              <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>
-                Get it for iPhone
-              </a>
-              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-                Android APK
-              </a>
-              <a class="btn btn-s" href="#install">Mac and computer setup</a>
+              <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg>Get it for iPhone</a>
+              <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>Android APK</a>
+              <a class="btn btn-s" href="#install">For your computer</a>
             </div>
           </div>
           <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="A request on your phone">
@@ -739,7 +813,7 @@
           </div>
         </div>
 
-        <div class="stage" id="film-stage">
+        <div class="stage film" id="film-stage">
           <figure class="media">
             <picture>
               <source media="(max-width: 700px)" srcset="assets/promo/film-en-vertical.jpg" width="720" height="1280" />
@@ -752,251 +826,173 @@
       </div>
     </section>
 
-    <section class="sec" id="features">
+    <section class="day">
       <div class="wrap">
-
-        <article class="feature split">
-          <div class="text">
+        <p class="day-say">You don&#39;t have to sit by your computer. <span>Here is a day away from it.</span></p>
+        <div class="day-grid">
+          <aside class="clock" aria-hidden="true"><span class="now">08:50</span><span class="where">Out the door</span><ol><li><a href="#features"><time>08:50</time>Out the door</a></li><li><a href="#glance"><time>09:20</time>On the train</a></li><li><a href="#queue"><time>12:40</time>Lunch</a></li><li><a href="#remote-desktop"><time>15:10</time>Between meetings</a></li><li><a href="#computer-use"><time>16:30</time>Still in the meeting</a></li><li><a href="#iphone-duo"><time>18:30</time>Ride home</a></li><li><a href="#fusion"><time>21:30</time>Living room</a></li></ol></aside>
+          <div class="hours">
+          <article class="hour" id="features" data-time="08:50" data-where-zh="出门" data-where-en="Out the door">
+            <p class="when">08:50 · Out the door</p>
             <h2>It works on your computer. <span class="nb">You watch from your phone.</span></h2>
-            <p>Replies stream in word by word; what it read, changed and ran updates live, with a diff for every file. When it needs permission, or wants you to choose, the request comes to your phone: one tap.</p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="A session on the phone: the agent reads files, edits code and lays out a plan, then asks permission to run the tests" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video>
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature band center" id="glance">
-          <div class="text">
-            <h2>Approve from the Lock Screen <span class="nb">or your wrist</span></h2>
-            <p>A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</p>
-          </div>
-          <div class="stage feature-stage">
-          <div class="pair">
-            <figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny / Allow" /></figure>
-            <figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="LinkShell on Apple Watch: a pending request with Deny and Allow" /></figure>
-          </div>
-          </div>
-          <p class="note-small">Live Activities need iOS 16.2 or later, and buttons on the card iOS 17. The watch app needs watchOS 10 or later.</p>
-        </article>
-
-        <article class="feature split flip">
-          <div class="text">
-            <h2>Cut in while it is busy</h2>
-            <p>A message sent mid-turn waits in a queue: reorder it, take it back to rewrite, or send it now, straight into the running turn for Codex and Claude. A turn running on the computer can be stopped from the phone too.</p>
-            <p>Wherever the session was opened: <code>linkshell claude</code> and <code>linkshell codex</code> in a terminal, a plain <code>claude</code> or <code>codex</code>, the Claude and Codex desktop apps. Carry on from the phone and pick it back up at your desk, with all of its context.</p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="While the agent is building, a queued message is sent at once and joins the current turn" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video>
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature field split" id="computer-use">
-          <div class="text">
-            <h2>Computer Use, <span class="nb">from your phone</span></h2>
-            <p>Ask Codex to use the browser or desktop apps on your computer, right from your phone. Preview its actions live in a floating window while you keep chatting and steering. Drag it aside, enlarge it or collapse it. Currently supports Codex on macOS. <a href="en/docs/#d-computer-use">How to use it</a>.</p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone">
-            <img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="Computer Use live preview in a Codex conversation" />
-          </figure>
-          </div>
-        </article>
-
-        <article class="feature center" id="remote-desktop">
-          <div class="text">
-            <h2>Your Mac. <span class="nb">In your pocket.</span></h2>
-            <p>Bring the whole workspace with you. When an agent finishes a change, open the actual desktop to check a browser, work in your editor or handle a dialog. Turn the phone to landscape, go full screen and pinch to zoom. Take over wherever a human touch is needed. Full control requires macOS 13 or later.</p>
-          </div>
-          <div class="stage feature-stage">
-          <figure class="phone side">
-            <img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="The computer's screen on a phone held sideways: a web page and a terminal, with a pointer once trackpad mode is on" />
-            <video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video>
-          </figure>
-          </div>
-          <dl class="more points">
-            <div><dt>4K detail. Ready for high refresh.</dt><dd>A picture up to 3840 pixels wide, with iOS display support up to 120 Hz. Resolution, frame rate and responsiveness depend on devices and network conditions.</dd></div>
-            <div><dt>Precision at your fingertips</dt><dd>Move slowly for precision or swipe across the desktop. Choose trackpad control or direct touch, with right click, scrolling and dragging.</dd></div>
-            <div><dt>Your displays and shortcuts, too</dt><dd>Switch displays, copy, paste and change apps with a tap. Send longer text and your phone's clipboard straight to the computer.</dd></div>
-          </dl>
-        </article>
-
-        <article class="feature intro-row" id="iphone-duo">
-          <div class="text">
-            <h2>iPhone Duo.<br />Room to do more.</h2>
-            <p>Open it up and the conversation sits beside the changes or a preview. Fold it and the interface rearranges around the available screen, without leaving the session. A regular iPhone gets a single column with the same controls.</p>
-          </div>
+            <p>Replies stream in word by word; what it read, changed and ran updates live, with a diff for every file. When it needs permission or a choice from you, the request comes to your phone: one tap.</p>
+            <div class="shot"><figure class="phone"><img src="assets/promo/clip-follow.jpg" width="540" height="1174" loading="lazy" alt="A session on the phone: the agent reads files, edits code and lays out a plan, then asks permission to run the tests" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-follow.mp4"></video></figure></div>
+          </article>
+          <article class="hour" id="glance" data-time="09:20" data-where-zh="地铁上" data-where-en="On the train">
+            <p class="when">09:20 · On the train</p>
+            <h2>One tap on the Lock Screen. <span class="nb">Approved.</span></h2>
+            <p>A Live Activity keeps the agent&#39;s progress on the Lock Screen and in the Dynamic Island; when it asks for permission, the card carries Deny and Allow. On Apple Watch you can follow sessions, answer requests and send a short reply.</p><p class="fine">Live Activities need iOS 16.2 or later, buttons on the card iOS 17. The watch app needs watchOS 10 or later.</p>
+            <div class="shot"><figure class="phone"><img src="assets/promo/lock-screen.jpg" width="540" height="1174" loading="lazy" alt="A LinkShell Live Activity on the iPhone Lock Screen with a pending request and Deny / Allow" /></figure><figure class="watch"><img src="assets/promo/watch-approval.jpg" width="416" height="496" loading="lazy" alt="LinkShell on Apple Watch: a pending request with Deny and Allow" /></figure></div>
+          </article>
+          <article class="hour" id="queue" data-time="12:40" data-where-zh="午饭" data-where-en="Lunch">
+            <p class="when">12:40 · Lunch</p>
+            <h2>It is busy. <span class="nb">Cut in anyway.</span></h2>
+            <p>A message sent mid-turn waits in a queue: reorder it, take it back to rewrite, or send it now, straight into Codex&#39;s or Claude&#39;s running turn. A turn running on the computer can be stopped from the phone too.</p><p>Wherever the session was opened: <code>linkshell claude</code> or <code>linkshell codex</code> in a terminal, a plain <code>claude</code> or <code>codex</code>, or their desktop apps.</p>
+            <div class="shot"><figure class="phone"><img src="assets/promo/clip-queue.jpg" width="540" height="1174" loading="lazy" alt="While the agent is building, a queued message is sent at once and joins the current turn" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-queue.mp4"></video></figure></div>
+          </article>
+          <article class="hour" id="remote-desktop" data-time="15:10" data-where-zh="会议间隙" data-where-en="Between meetings">
+            <p class="when">15:10 · Between meetings</p>
+            <h2>Your Mac&#39;s desktop. <span class="nb">In your pocket.</span></h2>
+            <p>When an agent finishes, open the actual desktop on your phone: check a page, touch the editor, dismiss a dialog. Turn it sideways, go full screen, pinch to zoom; switch between trackpad and direct touch, and send long text or your clipboard across.</p><p class="fine">Up to 3840 pixels wide and 120 Hz on iOS; real results depend on devices and network. Full control needs macOS 13 or later.</p>
+            <div class="shot"><figure class="phone side"><img src="assets/promo/clip-screen.jpg" width="1280" height="588" loading="lazy" alt="The computer&#39;s screen on a phone held sideways: a web page and a terminal, with a pointer once trackpad mode is on" /><video muted loop playsinline preload="none" data-wide="assets/promo/clip-screen.mp4"></video></figure></div>
+          </article>
+          <article class="hour" id="computer-use" data-time="16:30" data-where-zh="还在开会" data-where-en="Still in the meeting">
+            <p class="when">16:30 · Still in the meeting</p>
+            <h2>Let Codex <span class="nb">do the clicking.</span></h2>
+            <p>From your phone, ask Codex to use the browser and desktop apps on your computer, and watch it work in a small window above the conversation. Keep talking while it works; drag the window aside, enlarge it or tuck it away. Codex on macOS for now. <a href="en/docs/#d-computer-use">How to use it</a>.</p>
+            <div class="shot"><figure class="phone"><img src="assets/promo/computer-use.png" width="1206" height="2622" style="aspect-ratio: 1206 / 2622" loading="lazy" alt="Computer Use live preview in a Codex conversation" /></figure></div>
+          </article>
+          <article class="hour" id="iphone-duo" data-time="18:30" data-where-zh="回家路上" data-where-en="Ride home">
+            <p class="when">18:30 · Ride home</p>
+            <h2>Unfold iPhone Duo. <span class="nb">Chat beside the changes.</span></h2>
+            <p>Open it up and the conversation sits beside the changes or a preview. Fold it and the layout rearranges around the screen, without leaving the session. A regular iPhone gets one column with the same controls.</p>
           <figure class="duo-figure">
-            <div class="duo-viewer" id="duo-viewer" data-state="idle">
-              <div class="duo-controls" role="group" aria-label="iPhone Duo">
-                <p class="duo-controls-title">Take a closer look</p>
-                  <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled>Wide</button>
-                  <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled>Tall</button>
-                  <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled>Closed</button>
-                  <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled>Seated</button>
-                  <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled>Standing</button>
-                <label class="duo-fold" for="duo-fold">
-                  <span class="duo-fold-head">Fold<output id="duo-angle">100%</output></span>
-                  <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
-                </label>
+              <div class="duo-viewer" id="duo-viewer" data-state="idle">
+                <div class="duo-controls" role="group" aria-label="iPhone Duo">
+                  <p class="duo-controls-title">Take a closer look</p>
+                    <button type="button" data-pose="PT_Landscape" aria-pressed="true" disabled>Wide</button>
+                    <button type="button" data-pose="PT_Portrait" aria-pressed="false" disabled>Tall</button>
+                    <button type="button" data-pose="PT_Closed" aria-pressed="false" disabled>Closed</button>
+                    <button type="button" data-pose="PT_Laptop" aria-pressed="false" disabled>Seated</button>
+                    <button type="button" data-pose="PT_Tent" aria-pressed="false" disabled>Standing</button>
+                  <label class="duo-fold" for="duo-fold">
+                    <span class="duo-fold-head">Fold<output id="duo-angle">100%</output></span>
+                    <input id="duo-fold" class="control-detent-slider--input" data-slider-aria='{"0":"Closed","1":"Open","default":"Fold"}' type="range" min="0" max="1" value="1" step="0.001" disabled />
+                  </label>
+                </div>
+                <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
+                  <div class="duo-poster">
+                    <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
+                    <button class="duo-start" type="button">Explore in 3D</button>
+                  </div>
+                </div>
+                <p class="duo-hint" id="duo-status" aria-live="polite">Choose a pose. Drag to rotate.</p>
               </div>
-              <div class="duo-stage" id="duo-stage" role="group" aria-label="iPhone Duo 3D · LinkShell">
-                <div class="duo-poster">
-                  <img src="assets/promo/iphone-duo-expanded-dark.png" width="2853" height="2007" loading="lazy" alt="LinkShell dark-mode screenshot: chat and code changes side by side on iPhone Duo" />
-                  <button class="duo-start" type="button">Explore in 3D</button>
+              <figcaption>Screen content captured from the running app · iPhone Duo simulator.</figcaption>
+            </figure>
+          </article>
+          <article class="hour" id="fusion" data-time="21:30" data-where-zh="客厅" data-where-en="Living room">
+            <p class="when">21:30 · Living room</p>
+            <h2>The Mac in your study. <span class="nb">Its apps, on the MacBook in your lap.</span></h2>
+            <p>Fusion Mode brings another Mac&#39;s apps over one at a time. They show up in this Mac&#39;s Dock and ⌘Tab, marked bottom right with the computer they come from, each in its own windows among your local apps.</p>
+            <div class="fz" id="fz" role="img" aria-label="This Mac&#39;s Dock: beside the local apps, Safari, Xcode and Photos from the Mac mini wear a MINI badge bottom right, and Safari&#39;s window is open on the desktop">
+              <div class="fz-canvas">
+                <svg class="fz-wall" viewBox="0 0 1120 560" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="1120" height="560" fill="#15173a"/><path d="M520 0C660 140 920 170 1120 110V0Z" fill="#1a1d47"/><path d="M0 290C220 210 440 380 700 290S1040 170 1120 190V560H0Z" fill="#1f2459"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300V560H0Z" fill="#283084"/><path d="M0 460C320 380 600 540 1120 400V560H0Z" fill="#3741b0"/><path d="M0 520C340 460 700 590 1120 490V560H0Z" fill="#4a56d6"/><path d="M0 380C280 290 520 470 820 360S1080 290 1120 300" fill="none" stroke="#8d9bff" stroke-opacity=".35" stroke-width="1.5"/></svg>
+                <div class="fz-win fz-notes"><header><i></i><i></i><i></i></header><div class="tx"><b>Tonight</b><span style="width:80%"></span><span style="width:64%"></span><span style="width:72%"></span><span style="width:40%"></span></div></div>
+                <div class="fz-win fz-safari"><header><i></i><i></i><i></i><span class="url">localhost:3000</span></header><div class="fz-page"><b>Weather</b><p>The weather card, in dark mode</p><div class="row"><span></span><span></span><span></span></div></div></div>
+                <div class="fz-dock">
+                  <span class="fz-app on" data-app="ls"><span class="ico"><img src="assets/adaptive-icon.png" alt="" width="84" height="84" loading="lazy" /></span><span class="name">LinkShell</span></span><span class="fz-app on" data-app="notes"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="n1"><rect x="1" y="1" width="98" height="98" rx="22.5"/></clipPath></defs><g clip-path="url(#n1)"><rect width="100" height="100" fill="#fff"/><rect width="100" height="27" fill="#f8c933"/><path d="M16 46h68M16 60h68M16 74h50" stroke="#d1d1d6" stroke-width="2.5" stroke-linecap="round"/></g></svg></span><span class="name">Notes</span></span><span class="fz-app" data-app="term"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#2a2a2d"/><rect x="9" y="9" width="82" height="82" rx="15" fill="#1c1c1e"/><path d="m27 38 14 12-14 12" fill="none" stroke="#f5f5f7" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M47 64h24" stroke="#f5f5f7" stroke-width="6" stroke-linecap="round"/></svg></span><span class="name">Terminal</span></span><span class="fz-app" data-app="msg"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#34c759"/><ellipse cx="50" cy="47" rx="30" ry="24" fill="#fff"/><path d="M28 62c-2 8-6 12-10 14 9 1 16-3 20-7z" fill="#fff"/></svg></span><span class="name">Messages</span></span><button type="button" tabindex="-1" class="fz-app remote on" data-app="safari"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#ffffff" stroke="#e5e5ea" stroke-width="1"/><circle cx="50" cy="50" r="41" fill="#1a8cff"/><circle cx="50" cy="50" r="41" fill="none" stroke="#0a6fd8" stroke-width="1.5"/><path d="M50.0 17.0L50.0 11.0" stroke="#fff" stroke-width="2.4"/><path d="M55.7 17.5L56.4 13.6" stroke="#fff" stroke-width="1.6"/><path d="M61.3 19.0L62.7 15.2" stroke="#fff" stroke-width="1.6"/><path d="M66.5 21.4L69.5 16.2" stroke="#fff" stroke-width="2.4"/><path d="M71.2 24.7L73.8 21.7" stroke="#fff" stroke-width="1.6"/><path d="M75.3 28.8L78.3 26.2" stroke="#fff" stroke-width="1.6"/><path d="M78.6 33.5L83.8 30.5" stroke="#fff" stroke-width="2.4"/><path d="M81.0 38.7L84.8 37.3" stroke="#fff" stroke-width="1.6"/><path d="M82.5 44.3L86.4 43.6" stroke="#fff" stroke-width="1.6"/><path d="M83.0 50.0L89.0 50.0" stroke="#fff" stroke-width="2.4"/><path d="M82.5 55.7L86.4 56.4" stroke="#fff" stroke-width="1.6"/><path d="M81.0 61.3L84.8 62.7" stroke="#fff" stroke-width="1.6"/><path d="M78.6 66.5L83.8 69.5" stroke="#fff" stroke-width="2.4"/><path d="M75.3 71.2L78.3 73.8" stroke="#fff" stroke-width="1.6"/><path d="M71.2 75.3L73.8 78.3" stroke="#fff" stroke-width="1.6"/><path d="M66.5 78.6L69.5 83.8" stroke="#fff" stroke-width="2.4"/><path d="M61.3 81.0L62.7 84.8" stroke="#fff" stroke-width="1.6"/><path d="M55.7 82.5L56.4 86.4" stroke="#fff" stroke-width="1.6"/><path d="M50.0 83.0L50.0 89.0" stroke="#fff" stroke-width="2.4"/><path d="M44.3 82.5L43.6 86.4" stroke="#fff" stroke-width="1.6"/><path d="M38.7 81.0L37.3 84.8" stroke="#fff" stroke-width="1.6"/><path d="M33.5 78.6L30.5 83.8" stroke="#fff" stroke-width="2.4"/><path d="M28.8 75.3L26.2 78.3" stroke="#fff" stroke-width="1.6"/><path d="M24.7 71.2L21.7 73.8" stroke="#fff" stroke-width="1.6"/><path d="M21.4 66.5L16.2 69.5" stroke="#fff" stroke-width="2.4"/><path d="M19.0 61.3L15.2 62.7" stroke="#fff" stroke-width="1.6"/><path d="M17.5 55.7L13.6 56.4" stroke="#fff" stroke-width="1.6"/><path d="M17.0 50.0L11.0 50.0" stroke="#fff" stroke-width="2.4"/><path d="M17.5 44.3L13.6 43.6" stroke="#fff" stroke-width="1.6"/><path d="M19.0 38.7L15.2 37.3" stroke="#fff" stroke-width="1.6"/><path d="M21.4 33.5L16.2 30.5" stroke="#fff" stroke-width="2.4"/><path d="M24.7 28.8L21.7 26.2" stroke="#fff" stroke-width="1.6"/><path d="M28.8 24.7L26.2 21.7" stroke="#fff" stroke-width="1.6"/><path d="M33.5 21.4L30.5 16.2" stroke="#fff" stroke-width="2.4"/><path d="M38.7 19.0L37.3 15.2" stroke="#fff" stroke-width="1.6"/><path d="M44.3 17.5L43.6 13.6" stroke="#fff" stroke-width="1.6"/><path d="M66 30 54 54 46 46z" fill="#ff3b30"/><path d="M34 70 46 46 54 54z" fill="#f2f2f7"/></svg><span class="badge">MINI</span></span><span class="name">Safari</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="xcode"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#147efb"/><path d="M22 22h56v56H22z" fill="none" stroke="#5aa5ff" stroke-width="1.4"/><path d="M50 22v56M22 50h56M22 36h56M22 64h56M36 22v56M64 22v56" stroke="#3d93fc" stroke-width="1"/><g transform="rotate(-38 52 54)"><rect x="47" y="36" width="10" height="50" rx="4" fill="#fff"/><path d="M33 26h38a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H33l-8-8z" fill="#e8f1ff"/></g></svg><span class="badge">MINI</span></span><span class="name">Xcode</span></button><button type="button" tabindex="-1" class="fz-app remote on" data-app="photos"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="#ffffff" stroke="#e5e5ea" stroke-width="1"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ff9500" fill-opacity=".82" transform="rotate(0 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ffcc00" fill-opacity=".82" transform="rotate(45 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#a5d63a" fill-opacity=".82" transform="rotate(90 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#34c759" fill-opacity=".82" transform="rotate(135 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#30b0c7" fill-opacity=".82" transform="rotate(180 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#5e5ce6" fill-opacity=".82" transform="rotate(225 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#bf5af2" fill-opacity=".82" transform="rotate(270 50 50)"/><ellipse cx="50" cy="31" rx="11" ry="19" fill="#ff375f" fill-opacity=".82" transform="rotate(315 50 50)"/></svg><span class="badge">MINI</span></span><span class="name">Photos</span></button><hr /><span class="fz-app" data-app="trash"><span class="ico"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="22.5" fill="rgba(255,255,255,.1)"/><path d="M30 34h40l-4 46H34z" fill="rgba(255,255,255,.2)" stroke="rgba(255,255,255,.85)" stroke-width="2.5" stroke-linejoin="round"/><path d="M25 30h50M42 30v-6h16v6M42 44v26M50 44v26M58 44v26" stroke="rgba(255,255,255,.85)" stroke-width="2.5" stroke-linecap="round"/></svg></span><span class="name">Trash</span></span>
                 </div>
               </div>
-              <p class="duo-hint" id="duo-status" aria-live="polite">Choose a pose. Drag to rotate.</p>
             </div>
-            <figcaption>Screen content captured from the running app · iPhone Duo simulator.</figcaption>
-          </figure>
-          <dl class="more points">
-            <div><dt>Chat beside your tools</dt><dd>With enough room, review changes or a preview beside the conversation.</dd></div>
-            <div><dt>Aware of the fold</dt><dd>Adapt to posture and orientation, preserving usable space for input and controls.</dd></div>
-            <div><dt>Still at home on iPhone</dt><dd>Narrower screens use an appropriate single-column layout with familiar controls.</dd></div>
-          </dl>
-        </article>
-
-        <article class="feature intro-row">
-          <div class="text">
-            <h2>And the rest</h2>
-            <dl class="more">
-              <div><dt>A real terminal on your computer</dt><dd>Run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</dd></div>
-              <div><dt>Open localhost on your phone</dt><dd>Your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included: no open ports, no shared Wi-Fi.</dd></div>
-              <div><dt>Forks and worktrees</dt><dd>Fork a new session from any reply to try another direction, in a new git worktree if you like, away from what you are working on.</dd></div>
-              <div><dt>Side conversations</dt><dd>Ask something without interrupting the turn under way, the agent's own way: Codex's <code>/side</code>, Claude's and Grok's <code>/btw</code>. Nothing of it enters the session.</dd></div>
-              <div><dt>Sub-agents and Workflows</dt><dd>Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</dd></div>
-              <div><dt>Slash commands and skills</dt><dd>Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</dd></div>
-              <div><dt>A full workspace on the Mac</dt><dd>The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</dd></div>
-              <div><dt>Files and tidy sessions</dt><dd>Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</dd></div>
-            </dl>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section class="sec" id="agents">
-      <div class="wrap">
-        <div class="text">
-          <h2>Each agent, as far as it can go</h2>
-          <div class="agent-strip" aria-hidden="true"><div class="agent-track"></div></div>
-          <p>Agents run as the copies already installed and signed in on your computer. LinkShell never touches their accounts or keys.</p>
-
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span></div><h3>Codex</h3></div>
-            <p>The terminal opened with <code>linkshell codex</code> and your phone stay live together; either side can send, interrupt, and approve.</p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span></div><h3>Claude Code</h3></div> <!-- taste-skill-ignore: Claude's own logo colour in its agent mark -->
-            <p>Run Claude&#39;s own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, and any key on the computer takes it back.</p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span></div><h3>Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok</h3></div>
-            <p>Start and continue sessions from the phone over the Agent Client Protocol, with live output, approvals, modes, and models.</p>
-          </div>
-          <div class="agent">
-            <div class="agent-name"><div class="marks"><span class="av plain" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 16 5-4-5-4M13 17h6"/></svg></span></div><h3>Any CLI</h3></div>
-            <p>Open a terminal on the computer, viewed and typed into from the phone.</p>
+            <ol class="steps-line">
+              <li><b>Pick the other Mac in LinkShell</b> and choose Fusion.</li>
+              <li><b>Choose one of its apps</b>, by category or by search.</li>
+              <li><b>It is in your Dock</b>, in ⌘Tab, with one clipboard for both Macs.</li>
+            </ol>
+            <p class="fine">Both Macs need the LinkShell desktop app (macOS 13 or later), and the one you connect to needs Screen Recording and Accessibility. They connect directly when they can, otherwise through the end-to-end encrypted tunnel. Audio, drag and drop and notifications are not there yet. <a href="en/docs/#d-fusion">How it works</a></p>
+          </article>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="sec" id="install">
+    <section class="rest">
       <div class="wrap">
-        <div class="text">
-          <div class="install-intro">
-          <h2>Three steps to your computer</h2>
-          <p>On Mac or Windows, download the desktop app. The CLI supports macOS / Linux with Node.js 22.13 or newer.</p>
+        <h2>More you can do from the phone.</h2>
+        <dl class="index"><div><dt>A real terminal on your computer</dt><dd>Run a dev server, tail logs or use git, with a Ctrl / Esc / Tab / arrow-key bar. It keeps running when you close the app.</dd></div><div><dt>Open localhost on your phone</dt><dd>Your computer&#39;s <code>localhost:3000</code> right on the phone, hot reload included: no open ports, no shared Wi-Fi.</dd></div><div><dt>Forks and worktrees</dt><dd>Fork a new session from any reply to try another direction, in a new git worktree if you like, away from what you are working on.</dd></div><div><dt>Side conversations</dt><dd>Ask something without interrupting the turn under way, the agent's own way: Codex's <code>/side</code>, Claude's and Grok's <code>/btw</code>. Nothing of it enters the session.</dd></div><div><dt>Sub-agents and Workflows</dt><dd>Follow Claude Workflows by phase and open each Agent’s conversation and tool results. Background runs stay above the composer; the header lists all Workflows and sub-agents.</dd></div><div><dt>Slash commands and skills</dt><dd>Type <code>/</code> for the agent&#39;s commands and your skills. <code>/compact</code> and <code>/review</code> work for Codex too.</dd></div><div><dt>A full workspace on the Mac</dt><dd>The Mac app continues conversations, handles approvals and opens terminals and remote desktops, on this Mac or another computer. It also shows token usage by agent, launches at login and comes in light and dark.</dd></div><div><dt>Files and tidy sessions</dt><dd>Browse the project&#39;s files and send photos and files from your phone to the agent. Rename, archive or delete sessions; <code>claude --resume</code> shows the new name.</dd></div></dl>
+      </div>
+    </section>
 
-          </div>
-          <div class="install-steps">
-          <div class="step">
-            <h3>Install and start</h3>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-arm64.dmg">Mac · Apple Silicon</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-x64.dmg">Mac · Intel</a></p>
-            <p>macOS 13 or later: drag it into Applications, open it and sign in, then turn on Screen Recording and Accessibility in its Settings. The app brings its own CLI, Host and Node, and updates them together.</p>
-            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-Setup-0.10.105-windows-x64.exe">Windows · Installer</a> <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-windows-x64.zip">Windows · ZIP</a></p>
-            <p>Windows 10 1809+ / Windows 11 x64: includes CLI, Host and Node, with the same workspace as Mac for conversations, terminals, files and port previews. The window is the same Electron app as on Mac and needs no WebView2 Runtime. Packages are unsigned and may show unknown-publisher or SmartScreen prompts.</p>
-            <p>On Linux, or if you prefer the command line: install the CLI and run the setup once. It starts LinkShell in the background, takes you to the two permissions the screen needs, and connects your phone.</p>
+    <section class="agents" id="agents">
+      <div class="wrap">
+        <h2>The agents already installed and signed in on your computer.</h2>
+        <p class="agent-line"><span><span class="av full" role="img" aria-label="Codex"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"/><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_-t)"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_-t" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span>Codex</span><span><span class="av" role="img" aria-label="Claude Code" style="--bl:#F4F1EA;--bd:#2A2926"><svg aria-hidden="true" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"/></svg></span>Claude Code</span><span><span class="av full" role="img" aria-label="Gemini CLI"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M0 4.391A4.391 4.391 0 014.391 0h15.217A4.391 4.391 0 0124 4.391v15.217A4.391 4.391 0 0119.608 24H4.391A4.391 4.391 0 010 19.608V4.391z" fill="url(#lobe-icons-gemini-cli-_R_0_-t)"/><path clip-rule="evenodd" d="M19.74 1.444a2.816 2.816 0 012.816 2.816v15.48a2.816 2.816 0 01-2.816 2.816H4.26a2.816 2.816 0 01-2.816-2.816V4.26A2.816 2.816 0 014.26 1.444h15.48zM7.236 8.564l7.752 3.728-7.752 3.727v2.802l9.557-4.596v-3.866L7.236 5.763v2.801z" fill="#1E1E2E" fill-rule="evenodd"/><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-gemini-cli-_R_0_-t" x1="24" x2="0" y1="6.587" y2="16.494"><stop stop-color="#EE4D5D"></stop><stop offset=".328" stop-color="#B381DD"></stop><stop offset=".476" stop-color="#207CFE"></stop></linearGradient></defs></svg></span>Gemini CLI</span><span><span class="av" role="img" aria-label="GitHub Copilot" style="--bl:#0D1117;--bd:#F0F3F6;--fl:#FFFFFF;--fd:#0D1117"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 00-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 00.51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 01-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 01-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 00-.84-.044z"/></svg></span>GitHub Copilot</span><span><span class="av" role="img" aria-label="OpenCode" style="--bl:#131010;--bd:#F1ECEC;--fl:#F1ECEC;--fd:#131010"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>OpenCode</span><span><span class="av" role="img" aria-label="Cursor" style="--bl:#14120B;--bd:#EDECEC;--fl:#EDECEC;--fd:#14120B"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M22.106 5.68L12.5.135a.998.998 0 00-.998 0L1.893 5.68a.84.84 0 00-.419.726v11.186c0 .3.16.577.42.727l9.607 5.547a.999.999 0 00.998 0l9.608-5.547a.84.84 0 00.42-.727V6.407a.84.84 0 00-.42-.726zm-.603 1.176L12.228 22.92c-.063.108-.228.064-.228-.061V12.34a.59.59 0 00-.295-.51l-9.11-5.26c-.107-.062-.063-.228.062-.228h18.55c.264 0 .428.286.296.514z"/></svg></span>Cursor</span><span><span class="av" role="img" aria-label="Grok" style="--bl:#000000;--bd:#FFFFFF;--fl:#FFFFFF;--fd:#000000"><svg aria-hidden="true" fill="currentColor" fill-rule="evenodd" viewBox="0 0 24 24"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg></span>Grok</span><span class="any">and any CLI</span></p>
+        <div class="agent-notes">
+          <p><b>Codex</b>The terminal opened with <code>linkshell codex</code> and your phone stay live together; either can send, interrupt and approve.</p>
+          <p><b>Claude Code</b>Claude&#39;s own UI at your desk (<code>linkshell claude</code>); a message from the phone takes over, any key on the computer takes it back.</p>
+          <p><b>The others</b>Start and continue sessions over the Agent Client Protocol, with live output, approvals, modes and models. LinkShell never touches an agent&#39;s accounts or keys.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="setup" id="install">
+      <div class="wrap">
+        <h2>Three steps to your computer.</h2>
+        <p>On Mac or Windows, download the desktop app. On Linux, or if you prefer the command line, install the CLI (Node.js 22.13 or newer).</p>
+        <div class="three">
+          <div>
+            <b>1</b>
+            <h3>Install</h3>
+            <p>The desktop app brings its own CLI, Host and Node and updates them together. On a Mac (macOS 13 or later), turn on Screen Recording and Accessibility in its Settings.</p>
+            <p class="btns"><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-arm64.dmg">Mac · Apple silicon</a><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-0.10.105-x64.dmg">Mac · Intel</a><a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v0.10.105/LinkShell-Setup-0.10.105-windows-x64.exe">Windows</a></p>
             <pre><code><span class="pr">$ </span>npm i -g linkshell-cli
 <span class="pr">$ </span>linkshell setup</code></pre>
-            <p>Without npm, install it with Homebrew or the install script:</p>
-            <pre><code><span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
-<span class="cm"># or</span>
-<span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
           </div>
-          <div class="step">
+          <div>
+            <b>2</b>
             <h3>Connect your phone</h3>
-            <p>Official gateway: new accounts include a 7-day free trial on sign-up (no credit card required) — sign in with the same account on the computer and in the app, and the computer just appears; invite a friend and both get 14 / 30 days. Own gateway: pair once with a QR code.</p>
-            <pre><code><span class="cm"># official gateway (7-day free trial)</span>
-<span class="pr">$ </span>linkshell login
-<span class="cm"># your own gateway</span>
+            <p>Official gateway: sign in with the same account on the computer and in the app, and the computer appears; new accounts get a 7-day free trial, no card needed. Your own gateway: pair once with a QR code.</p>
+            <pre><code><span class="pr">$ </span>linkshell login
+<span class="cm"># or your own gateway</span>
 <span class="pr">$ </span>linkshell host --gateway wss://gw.you
 <span class="pr">$ </span>linkshell pair</code></pre>
           </div>
-          <div class="step">
+          <div>
+            <b>3</b>
             <h3>Get going</h3>
-            <p>Start a session on the phone, or launch agents from your terminal like this to hand them over any time.</p>
+            <p>Start a session on the phone, or launch from your terminal like this and hand it over any time. The <a href="en/docs/">docs</a> have the details.</p>
             <pre><code><span class="pr">$ </span>linkshell claude
 <span class="pr">$ </span>linkshell codex</code></pre>
-            <p>The <a href="en/docs/">docs</a> have the details.</p>
           </div>
-        </div>
         </div>
       </div>
     </section>
 
-    <section class="sec" id="how">
+    <section class="trust" id="how">
       <div class="wrap">
-        <div class="text">
-          <h2>The agents stay on your computer</h2>
-          <p>Your phone reaches the computer through a gateway. The code and the agents never leave the computer, and the connection is end-to-end encrypted.</p>
-          <dl class="more">
-            <div><dt>Your computer</dt><dd>LinkShell on your computer holds every session, keeps its history and decides who is driving right now.</dd></div>
-            <div><dt>The gateway</dt><dd>Gateways only relay ciphertext, the official one and yours alike. Pair once and it stays paired.</dd></div>
-            <div><dt>Official or your own</dt><dd>New accounts get a 7-day free trial of the official gateway (no card needed), and iTool yearly covers every iTool product. Or run your own gateway with one command or Docker, free.</dd></div>
-            <div><dt>Screen and previews</dt><dd>They go peer to peer when they can; the gateway only introduces the two sides. Where they can't, the screen's video goes through the official TURN relay, still encrypted end to end.</dd></div>
-          </dl>
+        <h2>Your code and agents never leave your computer.</h2>
+        <p class="route"><span>Your phone</span><i>ciphertext</i><span>Gateway</span><i>ciphertext</i><span class="home">Your computer</span></p>
+        <div class="trust-notes">
+          <p><b>Gateways relay ciphertext only</b>Neither the official gateway nor yours can read your code or conversations. Pair once and it stays paired.</p>
+          <p><b>Official or your own</b>New accounts get a 7-day trial of the official gateway, then an iTool membership. Or run your own with one command or Docker, free.</p>
+          <p><b>Screen and previews go direct</b>Peer to peer when they can, with the gateway only introducing the two sides; otherwise through the official TURN relay, still end-to-end encrypted.</p>
         </div>
       </div>
     </section>
 
-    <section class="sec">
+    <section class="back">
       <div class="wrap">
-        <h2>Supporting LinkShell</h2>
-        <div class="support-row">
-        <div class="support">
-          <h3>Sponsors</h3>
-          <p>Thanks to our sponsors for supporting LinkShell.</p>
-          <p class="sponsor"><a href="https://ai18n.chat/">AI18N</a> · Unified AI API Gateway</p>
+        <h2>Back at your desk, <span class="nb">it is all there.</span></h2>
+        <p>Sessions, context and history stay on the computer; press any key to take them back. Every feature is free: new accounts get a 7-day trial of the official gateway, or start your own with one command.</p>
+        <div class="btns">
+          <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">Get it for iPhone</a>
+          <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
+          <a class="btn btn-s" href="#install">Set up your computer</a>
         </div>
-        <div class="support">
-          <h3>Buy me a coffee</h3>
-          <p>If LinkShell helps you, you can buy the author a coffee.</p>
-          <div class="qr">
-            <figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay QR code" width="148" height="148" loading="lazy" /><figcaption>WeChat Pay</figcaption></figure>
-            <figure><img src="assets/pay_ali.jpg" alt="Alipay QR code" width="148" height="148" loading="lazy" /><figcaption>Alipay</figcaption></figure>
-          </div>
-        </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="close">
-      <div class="wrap">
-        <div class="close-card">
-          <h2>Next time you leave your desk, take the session along</h2>
-          <p>Every feature is free: sign in for a 7-day free trial of the official gateway (no card required), or start your own gateway with one command.</p>
-          <div class="btns">
-            <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516">Get it for iPhone</a>
-            <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
-            <a class="btn btn-s" href="#install">Set up your computer</a>
-          </div>
+        <div class="thanks">
+          <span>Sponsored by <a href="https://ai18n.chat/">AI18N</a> · Unified AI API Gateway</span>
+          <details><summary>Buy the author a coffee</summary><div class="qr"><figure><img src="assets/pay_wechat.jpg" alt="WeChat Pay QR code" width="148" height="148" loading="lazy" /><figcaption>WeChat Pay</figcaption></figure><figure><img src="assets/pay_ali.jpg" alt="Alipay QR code" width="148" height="148" loading="lazy" /><figcaption>Alipay</figcaption></figure></div></details>
         </div>
       </div>
     </section>
@@ -1203,6 +1199,52 @@
     })();
 
 
+    // ── The day: the clock on the left keeps the hour of the chapter being read ──
+    (() => {
+      const clock = document.querySelector('.clock');
+      if (!clock || !('IntersectionObserver' in window)) return;
+      const now = clock.querySelector('.now'), where = clock.querySelector('.where');
+      const links = [...clock.querySelectorAll('ol a')];
+      const lang = document.documentElement.dataset.lang === 'zh' ? 'zh' : 'en';
+      let shown = '';
+      const watch = new IntersectionObserver((entries) => entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const hour = entry.target;
+        if (shown === hour.id) return;
+        shown = hour.id;
+        now.classList.add('tick');
+        requestAnimationFrame(() => {
+          now.textContent = hour.dataset.time;
+          where.textContent = hour.dataset['where' + (lang === 'zh' ? 'Zh' : 'En')];
+          requestAnimationFrame(() => now.classList.remove('tick'));
+        });
+        links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + hour.id));
+      }), { rootMargin: '-40% 0px -55% 0px' });
+      document.querySelectorAll('.hour').forEach((h) => watch.observe(h));
+    })();
+
+    // ── Fusion: the other Mac's apps slide into this Dock, badge and all ──
+    (() => {
+      const fz = document.getElementById('fz');
+      if (!fz) return;
+      const fit = () => fz.style.setProperty('--fz-s', fz.clientWidth / 1120);
+      fit();
+      if ('ResizeObserver' in window) new ResizeObserver(fit).observe(fz); else addEventListener('resize', fit);
+      const bounce = (el) => { el.classList.remove('bounce'); void el.offsetWidth; el.classList.add('bounce'); };
+      const remote = [...fz.querySelectorAll('.fz-app.remote')];
+      remote.forEach((el) => el.addEventListener('click', () => bounce(el)));
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) { fz.classList.add('played'); return; }
+      // Played once, when most of it is on screen: one app at a time, as if chosen in LinkShell.
+      const seen = new IntersectionObserver(([entry]) => {
+        if (!entry.isIntersecting) return;
+        seen.disconnect();
+        remote.forEach((el) => el.classList.add('away'));
+        fz.classList.add('played');
+        remote.forEach((el, i) => setTimeout(() => { el.classList.remove('away'); setTimeout(() => bounce(el), 450); }, 500 + i * 1300));
+      }, { threshold: 0.6 });
+      seen.observe(fz);
+    })();
+
     // ── The agents row: each agent's mark and name, once ──
     (() => {
       const track = document.querySelector('.agent-track');
@@ -1224,13 +1266,13 @@
       if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       const film = document.getElementById('film-stage');
       if (film) { film.classList.add('shutter'); requestAnimationFrame(() => setTimeout(() => film.classList.add('in'), 120)); }
-      const parts = '.hero h1, .hero .lead, .hero .btns, .ask, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .duo-figure, .agent, .step, .support, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
+      const parts = '.hero h1, .hero .lead, .hero .btns, .ask, .day-say, .hour h2, .hour > p, .shot, .fz, .steps-line li, .duo-figure, .rest h2, .index > div, .agents h2, .agent-line, .agent-notes > p, .setup h2, .setup .wrap > p, .three > div, .trust h2, .route, .trust-notes > p, .back h2, .back p, .back .btns, .sec h2, .sec .text > p, .sec .text > dl > div, .phone, .pair, .watch, .note-small, .agent, .step, .close-card, .plan, .pricing h1, .pricing .lead, .faq h3';
       const seen = new IntersectionObserver((entries) => entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         entry.target.classList.add('in');
         seen.unobserve(entry.target);
       }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
-      document.querySelectorAll('.hero, .sec, .feature, .close, .pricing').forEach((section) => {
+      document.querySelectorAll('.hero, .day-say, .hour, .rest, .agents, .setup, .trust, .back, .sec, .feature, .close, .pricing').forEach((section) => {
         let n = 0;
         section.querySelectorAll(parts).forEach((el) => {
           if (el.closest('.rise') || el.closest('#film-stage')) return;

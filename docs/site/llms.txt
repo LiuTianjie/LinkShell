@@ -1,6 +1,6 @@
 # LinkShell
 
-> LinkShell lets you follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini CLI, GitHub Copilot and other ACP agents) from an iPhone, Android phone or Apple Watch, with remote desktop control of a Mac, a terminal and local web previews. Traffic between phone and computer is end-to-end encrypted; the relay gateway can be self-hosted.
+> LinkShell lets you follow, steer and approve the coding agents running on your computer (Claude Code, Codex, Gemini CLI, GitHub Copilot and other ACP agents) from an iPhone, Android phone or Apple Watch, with remote desktop control of a Mac, a terminal and local web previews. Between two Macs, Fusion Mode opens the other Mac's apps as local windows. Traffic between phone and computer is end-to-end encrypted; the relay gateway can be self-hosted.
 
 - Website: https://linkshell.itool.tech/ (English: https://linkshell.itool.tech/en/)
 - Docs: https://linkshell.itool.tech/en/docs/ (Chinese: https://linkshell.itool.tech/docs/)
@@ -17,6 +17,7 @@
 - The app (iOS / Android) is a client of the host.
 - The gateway relays between them. Everything it routes is end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305); it only authenticates peers by key and brokers pairing.
 - Remote desktop on a Mac: LinkShell.app captures the screen with ScreenCaptureKit and sends H.264 video over WebRTC directly to the phone.
+- Fusion Mode (Mac to Mac, desktop app): another Mac's apps open on this Mac as their own apps, in the Dock and ⌘Tab. The remote Mac puts each app's windows on virtual displays matching the local ones and sends each window as its own WebRTC video; the clipboard is shared. The two Macs connect directly over LAN or Tailscale when they can, otherwise through the end-to-end encrypted tunnel. Docs: https://linkshell.itool.tech/en/docs/#d-fusion
 
 ## Install
 
