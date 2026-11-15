@@ -36,7 +36,8 @@ export function openPathPlan(platform: NodeJS.Platform, app: OpenPathApp, path: 
   const scheme = URL_SCHEMES[app];
   // Editors register a URL handler on Windows and Linux; their command-line launchers are .cmd
   // scripts on Windows, which Node can only run through a shell.
-  if (scheme) return { kind: "url", url: `${scheme}://file${pathToFileURL(path).pathname}` };
+  // `platform`'s path rules, not this process's: a POSIX path must not pick up a drive letter.
+  if (scheme) return { kind: "url", url: `${scheme}://file${pathToFileURL(path, { windows: platform === "win32" }).pathname}` };
   if (platform === "win32") return { kind: "spawn", file: "wt.exe", args: ["-d", path] };
   return { kind: "spawn", file: "x-terminal-emulator", args: [`--working-directory=${path}`] };
 }

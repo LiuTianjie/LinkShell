@@ -87,5 +87,6 @@ test("open-in-editor never goes through a shell and accepts only the allow-liste
   assert.deepEqual(openPathPlan("darwin", "xcode", "/tmp/a b;rm -rf"), { kind: "spawn", file: "/usr/bin/open", args: ["-a", "Xcode", "--", "/tmp/a b;rm -rf"] });
   assert.deepEqual(openPathPlan("darwin", "reveal", "/tmp"), { kind: "reveal" });
   assert.deepEqual(openPathPlan("linux", "vscode", "/tmp/a b"), { kind: "url", url: "vscode://file/tmp/a%20b" });
+  assert.deepEqual(openPathPlan("win32", "vscode", "C:\\Users\\a b\\x"), { kind: "url", url: "vscode://file/C:/Users/a%20b/x" });
   assert.throws(() => openPathPlan("win32", "xcode", "C:\\x"));
 });
