@@ -1990,7 +1990,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   static func describeClose(_ reason: String) -> String {
     switch reason {
     case "timeout": return "远端 Mac 已无响应（可能已睡眠或网络中断）"
-    case "tls", "token": return "融合连接的会话凭据已失效，请重新开启融合模式"
+    case "tls", "token": return "无法与远端 Mac 的融合服务完成加密握手（直连可能被代理或 VPN 拦截），请重新开启融合模式"
     case "unreachable", "failed": return "无法连接到远端 Mac 的融合服务"
     case "stopped": return "融合模式已停止"
     default: return "与远端 Mac 的融合连接已断开"

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createServer } from "node:net";
 import test from "node:test";
 import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "../dist/main/fusion-probe.js";
 
@@ -59,4 +60,24 @@ test("fusionSlug matches the Swift side's shared vector and never derives from a
   assert.ok(isFusionSlug(fusionSlug("anything")));
   assert.equal(isFusionSlug("../etc"), false);
   assert.equal(isFusionSlug("m4"), false);
+});
+
+test("pickDirectFusionHost rejects an address that accepts TCP but never answers TLS, as a proxy TUN does", async () => {
+  // A proxy accepts locally, fails to dial onward, and closes: the old TCP-only probe took that as reachable.
+  const fake = createServer((sock) => sock.once("data", () => sock.end()));
+  // FusionRemote answers a ClientHello with a TLS record (here an alert: handshake failure).
+  const real = createServer((sock) => sock.once("data", (hello) => {
+    assert.equal(hello[0], 0x16);
+    sock.end(Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28]));
+  }));
+  await Promise.all([fake, real].map((server) => new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))));
+  try {
+    const fakePort = fake.address().port;
+    const realPort = real.address().port;
+    assert.equal(await pickDirectFusionHost(["127.0.0.1"], fakePort, { timeoutMs: 500 }), undefined);
+    assert.equal(await pickDirectFusionHost(["127.0.0.1"], realPort, { timeoutMs: 500 }), "127.0.0.1");
+  } finally {
+    fake.close();
+    real.close();
+  }
 });

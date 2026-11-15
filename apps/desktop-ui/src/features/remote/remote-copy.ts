@@ -678,6 +678,7 @@ const REMOTE_MESSAGES: Phrase[] = [
   { zh: "直连断开了：已改用兼容方式传画面，延迟会高一些", en: "The direct connection dropped: the picture now comes the compatible way, with more delay.", ja: "直接接続が切れたため、互換方式で画面を送っています（遅延が増えます）。" },
   { zh: "没能和电脑直连：已改用兼容方式传画面，延迟会高一些", en: "No direct connection to the computer: the picture comes the compatible way, with more delay.", ja: "コンピュータと直接接続できないため、互換方式で画面を送っています（遅延が増えます）。" },
   { zh: "与远端 Mac 的融合连接已断开", en: "The Fusion connection to the remote Mac dropped.", ja: "リモート Mac との融合接続が切れました。" },
+  { zh: "无法与远端 Mac 的融合服务完成加密握手（直连可能被代理或 VPN 拦截），请重新开启融合模式", en: "Couldn't complete the encrypted handshake with Fusion on the remote Mac (a proxy or VPN may be intercepting the direct connection). Start Fusion Mode again.", ja: "リモート Mac の融合サービスと暗号化ハンドシェイクを完了できませんでした（プロキシまたは VPN が直接接続を妨げている可能性があります）。融合モードをもう一度開始してください。" },
   { zh: "远端电脑的 LinkShell 版本较旧，请先更新远端 LinkShell 后再开启融合模式", en: "LinkShell on the remote computer is too old. Update it there, then start Fusion Mode.", ja: "リモートコンピュータの LinkShell が古いため、更新してから融合モードを開始してください。" },
   { zh: "未找到对应的远端电脑，请先打开 LinkShell 检查连接", en: "That remote computer wasn't found. Open LinkShell and check the connection.", ja: "リモートコンピュータが見つかりません。LinkShell を開いて接続を確認してください。" },
   { zh: "远端电脑设置了访问密码，请先在 LinkShell 中解锁", en: "The remote computer has an access password. Unlock it in LinkShell first.", ja: "リモートコンピュータにアクセスパスワードが設定されています。先に LinkShell でロックを解除してください。" },

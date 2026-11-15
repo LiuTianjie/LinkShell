@@ -17,17 +17,23 @@ function isTailscaleCGNAT(ip: string): boolean {
   return parts.length === 4 && parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127;
 }
 
+/** 198.18.0.0/15: what Clash and Surge give their TUN interface. Every Mac running one has the same address, so it never leads here. */
+function isProxyTun(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  return parts.length === 4 && parts[0] === 198 && (parts[1] === 18 || parts[1] === 19);
+}
+
 /** Non-loopback IPv4 addresses of this Mac, ordered with physical LAN (`en*`) and Tailscale (`100.64/10`) first. */
-export function reachableHostAddresses(): string[] {
+export function reachableHostAddresses(interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces()): string[] {
   const found: Array<{ ip: string; score: number }> = [];
   const seen = new Set<string>();
-  for (const [name, list] of Object.entries(networkInterfaces())) {
+  for (const [name, list] of Object.entries(interfaces)) {
     const lower = name.toLowerCase();
     if (EXCLUDED_IFACE_PREFIXES.some((prefix) => lower.startsWith(prefix))) continue;
     for (const entry of list ?? []) {
       if (entry.internal || entry.family !== "IPv4") continue;
       const ip = entry.address;
-      if (!ip || ip.startsWith("127.") || ip.startsWith("169.254.") || seen.has(ip)) continue;
+      if (!ip || ip.startsWith("127.") || ip.startsWith("169.254.") || isProxyTun(ip) || seen.has(ip)) continue;
       seen.add(ip);
       let score = 10;
       if (lower.startsWith("en")) score = 30;

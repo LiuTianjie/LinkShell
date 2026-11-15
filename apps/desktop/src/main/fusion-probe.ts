@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
 
 /**
@@ -16,10 +17,56 @@ export function isFusionSlug(value: unknown): value is string {
 
 
 /**
+ * A TLS 1.2 ClientHello offering only TLS_PSK_WITH_AES_128_GCM_SHA256, FusionRemote's one suite.
+ * The probe never finishes the handshake, so the single-use token (spent by `hello`) stays intact.
+ */
+function fusionClientHello(): Buffer {
+  const body = Buffer.concat([
+    Buffer.from([0x03, 0x03]),
+    randomBytes(32),
+    Buffer.from([0x00]), // no session id
+    Buffer.from([0x00, 0x04, 0x00, 0xa8, 0x00, 0xff]), // PSK_AES_128_GCM_SHA256, renegotiation SCSV
+    Buffer.from([0x01, 0x00]), // null compression
+  ]);
+  const handshake = Buffer.concat([Buffer.from([0x01, 0x00, body.length >> 8, body.length & 0xff]), body]);
+  return Buffer.concat([Buffer.from([0x16, 0x03, 0x01, handshake.length >> 8, handshake.length & 0xff]), handshake]);
+}
+
+/**
+ * A proxy's TUN interface (Clash, Surge: 198.18.0.0/15) accepts every TCP connection locally and
+ * only then dials out, so a bare `connect` proves nothing: an unreachable LAN address "connects" in
+ * 0 ms and the real attempt dies later as a TLS failure. A candidate counts only once the far end
+ * answers with a TLS record (ServerHello or alert); a proxy that could not reach it just closes.
+ */
+function connectSpeaksTls(host: string, port: number): Socket {
+  const raw = createConnection({ host, port });
+  const probe = new EventEmitter() as Socket;
+  let done = false;
+  const settle = (event: "connect" | "error") => {
+    if (done) return;
+    done = true;
+    raw.destroy();
+    probe.emit(event, event === "error" ? new Error("no TLS answer") : undefined);
+  };
+  raw.once("connect", () => raw.write(fusionClientHello()));
+  raw.once("data", (chunk: Buffer) => settle(chunk[0] === 0x15 || chunk[0] === 0x16 ? "connect" : "error"));
+  raw.once("end", () => settle("error"));
+  raw.once("close", () => settle("error"));
+  raw.once("error", () => settle("error"));
+  probe.destroy = () => {
+    done = true;
+    raw.destroy();
+    return probe;
+  };
+  return probe;
+}
+
+/**
  * Probes candidate direct fusion hosts in parallel while preserving preference order:
- * - Resolves immediately when candidate `i` connects and all higher-priority `0..i-1` have failed.
+ * - Resolves immediately when candidate `i` answers and all higher-priority `0..i-1` have failed.
  * - Grants higher-priority still-pending candidates a brief `graceMs` window when a lower-priority
- *   candidate connects first, so dead subnet IPs never add `650ms * N` serial latency before tunnel setup.
+ *   candidate answers first, so dead subnet IPs never add `650ms * N` serial latency before tunnel setup.
+ * The budget covers a TLS round trip on top of TCP's, over a WAN path such as Tailscale.
  */
 export function pickDirectFusionHost(
   hosts: readonly string[],
@@ -28,9 +75,9 @@ export function pickDirectFusionHost(
 ): Promise<string | undefined> {
   const candidates = hosts.filter((h) => h.length > 0);
   if (candidates.length === 0) return Promise.resolve(undefined);
-  const timeoutMs = options.timeoutMs ?? 400;
-  const graceMs = options.graceMs ?? 60;
-  const connect = options.connect ?? ((host: string, p: number) => createConnection({ host, port: p }));
+  const timeoutMs = options.timeoutMs ?? 1500;
+  const graceMs = options.graceMs ?? 150;
+  const connect = options.connect ?? connectSpeaksTls;
 
   return new Promise((resolve) => {
     let settled = false;

@@ -1,7 +1,7 @@
 import { createConnection, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
-import { FusionShare } from "../src/fusion.js";
+import { FusionShare, reachableHostAddresses } from "../src/fusion.js";
 
 type Access = { recording: boolean | null; control: boolean | null; app?: string };
 
@@ -105,5 +105,20 @@ describe("FusionShare", () => {
     while (remote.seen.tokens.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
     remote.seen.socket?.destroy();
     await expect(started).rejects.toThrow(/意外退出/);
+  });
+});
+
+describe("reachableHostAddresses", () => {
+  it("never offers a proxy TUN address, which every Mac running Clash or Surge shares", () => {
+    const iface = (address: string) => [{ address, family: "IPv4", internal: false, netmask: "255.255.255.0", mac: "", cidr: null }] as never;
+    const found = reachableHostAddresses({
+      en1: iface("192.168.10.229"),
+      utun4: iface("100.121.94.123"),
+      utun1024: iface("198.18.0.1"),
+      utun1025: iface("198.19.0.1"),
+      bridge100: iface("192.168.2.1"),
+      en10: iface("169.254.106.5"),
+    });
+    expect(found).toEqual(["192.168.10.229", "100.121.94.123"]);
   });
 });

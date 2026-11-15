@@ -145,7 +145,7 @@ final class FusionLogicTests: XCTestCase {
 
   func testCloseReasonsAreExplained() {
     XCTAssertTrue(FusionLocal.describeClose("timeout").contains("无响应"))
-    XCTAssertTrue(FusionLocal.describeClose("tls").contains("凭据"))
+    XCTAssertTrue(FusionLocal.describeClose("tls").contains("加密握手"))
     XCTAssertFalse(FusionLocal.describeClose("whatever").isEmpty)
   }
 
