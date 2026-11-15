@@ -532,8 +532,8 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
         ".ls-fusion-active-card__actions button",
       ),
     );
-    const quitBtn = activeButtons.find((btn) =>
-      btn.textContent?.includes("退出应用"),
+    const quitBtn = activeButtons.find(
+      (btn) => btn.getAttribute("aria-label") === "退出应用 Xcode",
     );
     expect(quitBtn).toBeDefined();
     await act(async () => {

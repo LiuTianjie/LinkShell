@@ -62,6 +62,7 @@ export interface RemoteCopy {
   fusionLaunchApp: string;
   fusionActivateApp: string;
   fusionQuitApp: string;
+  fusionMoreActions: (name: string) => string;
   fusionForceQuitApp: string;
   fusionForceQuitConfirmTitle: (appName: string) => string;
   fusionForceQuitConfirmDesc: (appName: string) => string;
@@ -202,6 +203,7 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   fusionLaunchApp: "启动应用",
   fusionActivateApp: "前置窗口",
   fusionQuitApp: "退出应用",
+  fusionMoreActions: (name) => `${name} 的更多操作`,
   fusionForceQuitApp: "强制退出",
   fusionForceQuitConfirmTitle: (appName) => `强制退出「${appName}」？`,
   fusionForceQuitConfirmDesc: (appName) =>
@@ -384,6 +386,7 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
   fusionLaunchApp: "Launch App",
   fusionActivateApp: "Bring to Front",
   fusionQuitApp: "Quit App",
+  fusionMoreActions: (name) => `More actions for ${name}`,
   fusionForceQuitApp: "Force Quit",
   fusionForceQuitConfirmTitle: (appName) => `Force quit "${appName}"?`,
   fusionForceQuitConfirmDesc: (appName) =>
@@ -557,6 +560,7 @@ const JA_COPY = (locale: Locale): RemoteCopy => ({
   fusionLaunchApp: "起動",
   fusionActivateApp: "前面に表示",
   fusionQuitApp: "終了",
+  fusionMoreActions: (name) => `${name} のその他の操作`,
   fusionForceQuitApp: "強制終了",
   fusionRetry: "再接続",
   fusionOffTitle: "融合モードはオフです",

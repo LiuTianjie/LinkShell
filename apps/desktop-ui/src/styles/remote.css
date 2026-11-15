@@ -662,6 +662,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    flex: 1 1 auto;
     min-inline-size: 0;
   }
 
@@ -681,12 +682,13 @@
     font-size: 11px;
     color: var(--ls-fg-3);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .ls-fusion-active-card__actions {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     flex-shrink: 0;
   }
 

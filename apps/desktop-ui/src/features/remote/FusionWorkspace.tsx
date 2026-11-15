@@ -125,6 +125,15 @@ function appMonogram(name: string): string {
 
 const SKELETON_SLOTS = Array.from({ length: 12 }, (_, idx) => idx);
 
+/** A running app has at least one window; the remote's own count wins when it has one. */
+function runningWindowCount(
+  app: { bundle: string; windows?: number },
+  windowCounts: Record<string, number>,
+): number {
+  const reported = windowCounts[app.bundle];
+  return Math.max(1, Number.isFinite(reported) ? reported! : app.windows ?? 1);
+}
+
 function FusionAppIcon({
   name,
   src,
@@ -457,13 +466,12 @@ export function FusionWorkspace({
     [enrichedApps, runningSet],
   );
 
-  const totalWindowCount = useMemo(() => {
-    const fromCounts = Object.values(fusion.windowCounts).reduce(
-      (sum, n) => sum + (Number.isFinite(n) ? n : 0),
-      0,
-    );
-    return fromCounts > 0 ? fromCounts : runningApps.length;
-  }, [fusion.windowCounts, runningApps.length]);
+  // Counted per running app, the same way each card counts: the remote reports counts only for
+  // some apps, and may still list ones that have quit.
+  const totalWindowCount = useMemo(
+    () => runningApps.reduce((sum, app) => sum + runningWindowCount(app, fusion.windowCounts), 0),
+    [runningApps, fusion.windowCounts],
+  );
 
   const categoryCounts = useMemo(() => {
     const counts: Record<FusionCategoryKey, number> = {
@@ -835,10 +843,7 @@ export function FusionWorkspace({
 
               <div className="ls-fusion-active-list">
                 {runningApps.map((app) => {
-                  const winCount = Math.max(
-                    1,
-                    fusion.windowCounts[app.bundle] ?? app.windows ?? 1,
-                  );
+                  const winCount = runningWindowCount(app, fusion.windowCounts);
                   const isBusy = Boolean(fusion.busyBundles[app.bundle]);
                   const iconSrc = fusion.icons[app.bundle]?.src;
 
@@ -852,7 +857,7 @@ export function FusionWorkspace({
                           showRemoteBadge
                         />
                         <div className="ls-fusion-active-card__text">
-                          <span className="ls-fusion-active-card__name">
+                          <span className="ls-fusion-active-card__name" title={app.name}>
                             {app.name}
                           </span>
                           <span className="ls-fusion-active-card__sub">
@@ -871,14 +876,13 @@ export function FusionWorkspace({
                         >
                           {copy.fusionActivateApp}
                         </Button>
-                        <Button
-                          size="xs"
-                          variant="ghost"
+                        <IconButton
+                          size="icon-sm"
+                          icon="close"
+                          label={`${copy.fusionQuitApp} ${app.name}`}
                           disabled={isBusy}
                           onClick={() => void handleQuit(app, false)}
-                        >
-                          {copy.fusionQuitApp}
-                        </Button>
+                        />
                         <Menu
                           placement="bottom-end"
                           label={app.name}
@@ -886,8 +890,7 @@ export function FusionWorkspace({
                             <IconButton
                               size="icon-sm"
                               icon="more-horizontal"
-                              label={app.name}
-                              hideTooltip
+                              label={copy.fusionMoreActions(app.name)}
                             />
                           }
                         >
