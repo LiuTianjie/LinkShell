@@ -27,6 +27,51 @@ final class EncoderSpeedBenchTests: XCTestCase {
     }
   }
 
+  /// How large the frames at a change of scene and at a key frame come out, and what a key
+  /// frame budget (`LINKSHELL_BENCH_KEY_BUDGET`, bytes) makes of the key frames.
+  func testFrameSizesAtASceneChange() throws {
+    try XCTSkipUnless(ProcessInfo.processInfo.environment["LINKSHELL_ENCODER_BENCH"] == "1", "a benchmark, run on request")
+    let width = 1920, height = 1080, fps = 60
+    let bitrate = ProcessInfo.processInfo.environment["LINKSHELL_BENCH_BITRATE"].flatMap(Int.init) ?? 8_000_000
+    // LINKSHELL_BENCH_KEY_BUDGET: bytes a key frame may take (`VideoCompressor.keyPlan`).
+    let budget = ProcessInfo.processInfo.environment["LINKSHELL_BENCH_KEY_BUDGET"].flatMap(Int.init)
+    let first = try Self.pictures(width: width, height: height, seed: 1)
+    let second = try Self.pictures(width: width, height: height, seed: 2)
+    for codec in [kCMVideoCodecType_H264, kCMVideoCodecType_HEVC] {
+      for cap in [Int?.none] {
+        let compressor = try VideoCompressor(.init(width: width, height: height, fps: fps, bitrate: bitrate, codec: codec))
+        if let budget { compressor.keyPlan = .init(budget: budget, finest: nil) }
+        let sizes = Locked([Int: (bytes: Int, key: Bool, dropped: Bool)]())
+        let group = DispatchGroup()
+        let start = CACurrentMediaTime()
+        for index in 0..<240 {
+          let wait = start + Double(index) / Double(fps) - CACurrentMediaTime()
+          if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+          // A new page every half second; a key frame asked for at two and three seconds.
+          let page = (index / 30) % 2 == 0 ? first : second
+          group.enter()
+          compressor.encode(page[index % page.count], at: CMTime(value: Int64(index), timescale: Int32(fps)), key: index == 0 || index == 120 || index == 180) { result in
+            sizes.withLock { all in
+              if case .success(let frame?) = result { all[index] = (CMSampleBufferGetTotalSampleSize(frame.sample), frame.key, false) }
+              else { all[index] = (0, false, true) }
+            }
+            group.leave()
+          }
+        }
+        group.wait()
+        let all = sizes.withLock { $0 }
+        let changes = stride(from: 30, to: 240, by: 30).filter { $0 != 120 && $0 != 180 }.compactMap { all[$0]?.bytes }
+        let keys = [120, 180].compactMap { all[$0] }.map { "\($0.bytes / 1024)KB\($0.key ? "" : "(not key)")" }
+        let steady = all.filter { $0.key % 30 > 5 }.map(\.value.bytes)
+        let dropped = all.values.filter(\.dropped).count
+        // The most any tenth of a second carried.
+        var most = 0
+        for from in 30..<234 { most = max(most, (from..<from + 6).reduce(0) { $0 + (all[$1]?.bytes ?? 0) }) }
+        print("SIZES \(codec == kCMVideoCodecType_H264 ? "H264" : "HEVC") cap=\(cap.map { "\($0 / 1000)KB/0.1s" } ?? "none") scene changes: \(changes.map { "\($0 / 1024)KB" }.joined(separator: " ")) keys: \(keys.joined(separator: " ")) steady mean \(steady.reduce(0, +) / max(1, steady.count) / 1024)KB most in 0.1s \(most / 1024)KB dropped \(dropped)")
+      }
+    }
+  }
+
   private static func run(_ pictures: [CVPixelBuffer], width: Int, height: Int, fps: Int, bitrate: Int, codec: CMVideoCodecType, speedFirst: Bool) throws -> String {
     let compressor = try VideoCompressor(.init(width: width, height: height, fps: fps, bitrate: bitrate, codec: codec, speedFirst: speedFirst))
     let results = Locked((times: [Double](), bytes: 0, quantizers: [Int](), largest: 0, dropped: 0))
@@ -67,10 +112,10 @@ final class EncoderSpeedBenchTests: XCTestCase {
   }
 
   /// A page of dark marks on a light ground, at sixty scroll positions (down, then back up).
-  private static func pictures(width: Int, height: Int) throws -> [CVPixelBuffer] {
+  private static func pictures(width: Int, height: Int, seed start: UInt64 = 0) throws -> [CVPixelBuffer] {
     let tall = height + 600
     var page = [UInt8](repeating: 235, count: width * tall)
-    var seed: UInt64 = 0x9E3779B97F4A7C15
+    var seed: UInt64 = 0x9E3779B97F4A7C15 &+ start &* 0x2545F4914F6CDD1D
     func next() -> UInt64 { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; return seed }
     var y = 12
     while y + 14 < tall {

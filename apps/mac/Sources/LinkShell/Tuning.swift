@@ -153,6 +153,33 @@ enum Tuning {
   static let frameRateEase = 0.5
   static let frameRateEaseFloor = 1_000_000
 
+  // MARK: The sender's queue (`SendQueue`, `VideoCompressor.KeyPlan`)
+
+  /// libwebrtc's pacer sends at this multiple of the rate it gives the encoder (M154:
+  /// `kDefaultPaceMultiplier`).
+  static let pacerFactor = 2.5
+  /// A key frame may take this long to leave at the pacer's rate: a fifth of a second of the
+  /// encoder's rate. Left to itself the low-latency encoder made a 1080p page's key frame 470 KB
+  /// at 8 Mbit/s and 370–390 KB at 2 Mbit/s (a second and a half of that rate), then dropped the
+  /// frames after it to pay for it. Held to a budget, a key frame comes coarser and the frames
+  /// after it sharpen the picture. A change of scene that is not a key frame can't be held this
+  /// way: the low-latency rate control ignores `DataRateLimits`, and those frames are for
+  /// `SendQueue` to make room after.
+  static let keyFrameSendSeconds = 0.08
+  static func keyFrameBudget(bitrate: Int) -> Int {
+    max(1024, Int(Double(bitrate) * pacerFactor * keyFrameSendSeconds / 8))
+  }
+  /// With more than this reckoned to be waiting to be sent, a picture is not encoded. The same
+  /// 50 ms that, standing for seconds, costs the frame rate and the floor.
+  static let sendQueueAdmitMs = 50.0
+  /// The pacer is not reckoned slower than this rate allows, whatever the encoder is told.
+  static let sendQueueLowestRate = 300_000
+  /// Both are on unless said otherwise, by flag or by a default
+  /// (`defaults write com.bd.linkshell.host screenKeyBudget -bool NO`, `screenQueueAdmission`):
+  /// to compare the picture with and without them on a real network.
+  static let keyBudget = !Launch.has("--no-key-budget") && UserDefaults.standard.object(forKey: "screenKeyBudget") as? Bool != false
+  static let queueAdmission = !Launch.has("--no-queue-admission") && UserDefaults.standard.object(forKey: "screenQueueAdmission") as? Bool != false
+
   // MARK: Capture
 
   /// Surfaces ScreenCaptureKit may have out at once: one being encoded, one kept for repeating,

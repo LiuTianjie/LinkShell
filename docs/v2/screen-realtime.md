@@ -436,8 +436,29 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 - 因「发包等待」降帧 57 次，等待的中位数约 135 ms，有 6 次在 1.5–2.1 秒：包在发送端排了两秒才出去，这是 libwebrtc pacer 默认 2 秒队列上限的样子。降到 30 fps 后十几秒升回 60，再降，反复。
 - 机制：pacer 按带宽估计的倍数匀速发，一帧的大小没有上限（WebRTC 这条路径上 `setRates` 不给 `DataRateLimits`，关键帧预算只在 `--budget-keyframes` 下才有），所以一个大帧（切窗口、PLI 之后的关键帧）要排「帧大小 ÷ pacer 速率」这么久，后面的帧都排在它后面。下限在时 pacer 至少 20 Mbit/s，一个 400 KB 的帧要 160 ms；下限取消、估计掉到 1–2 Mbit/s 之后，同一个帧要一秒以上。
 - 值得注意的一点：发送等待是发送端自己的队列，一个大帧就能让一秒的平均值过 50 ms，`LanFloor` 把它当成「网络不接受这个速率」而取消下限（两次之后整通电话不再设），反而让之后的大帧排得更久。
-- **已改（2026-11-16）**：下限因发送等待而取消，要求连续 3 秒（`lanFloorLiftSendDelaySeconds`，与降帧的 `frameRateDownAfter` 相同）都超过 50 ms，单独一秒不算；往返时间和丢包仍然立刻取消。日志行改为 `packets waited N ms to be sent, for 3 s running`。有单元测试（一秒的突发反复出现也保留下限、持续排队在第 3 秒取消），没有在实机上对比改前改后的排队。
-- §9 的窄带实验已经确认过「拥塞时媒体队列没有解决」；这里补充的是它在真实局域网 Wi-Fi 上出现的频率，以及下限被自己的大帧取消这条路径。仍然只是候选（都没有实测）：给自有编码器一个按 pacer 速率折算的单帧上限，突变帧先粗后细；编码准入看发送队列，队列长时在编码前丢帧（不破坏参考链）。
+- §9 的窄带实验已经确认过「拥塞时媒体队列没有解决」；这里补充的是它在真实局域网 Wi-Fi 上出现的频率，以及下限被自己的大帧取消这条路径。
+
+**编码器实测（`EncoderSpeedBenchTests`，M4、macOS 26、低延迟模式、1080p60、一页密集文字，每半秒换一页）**
+
+| | H.264 | HEVC |
+|---|---|---|
+| 换页那一帧，8 Mbit/s | 260–308 KB | 269–388 KB |
+| 关键帧，8 Mbit/s | 468 KB | 480 KB |
+| 关键帧，2 Mbit/s | 368 KB（一秒半的码率） | 386 KB |
+| 2 Mbit/s 下 240 帧里被编码器自己丢掉的 | 209 | 180 |
+
+- 帧的大小由内容决定，几乎不随码率变小；码率低时编码器靠**之后丢帧**来还账。这就是日志里「only 1 of 60 frames a second were sent」和一两秒排队的来历：估计一掉，一个关键帧或一次换页就是一两秒没有画面。
+- `DataRateLimits`（0.1 秒窗口的硬上限）在低延迟模式下完全不起作用，开与不开输出逐字节相同。所以换页那一帧没法在编码前限制大小。
+- 对非关键帧逐帧改量化值范围（`MinAllowedFrameQP` / `MaxAllowedFrameQP`）让 `VTCompressionSessionEncodeFrame` 卡死过一次，没有再用；关键帧上按现有做法（编码前设、出帧后在另一个队列恢复）两种编码都正常。
+
+**已做（2026-11-16，都没有在实机网络上对比过，发版后实测）**
+
+1. **下限不被单个大帧取消**：因发送等待而取消，要求连续 3 秒（`lanFloorLiftSendDelaySeconds`）都超过 50 ms；往返时间和丢包仍然立刻取消。日志行是 `packets waited N ms to be sent, for 3 s running`。
+2. **关键帧预算默认开启**（`Tuning.keyFrameBudget`：编码器码率的五分之一秒，按 pacer 的 2.5 倍速率是 80 ms 发完）。原来只有 `--budget-keyframes` 才有，而且只对 H.264 有效。HEVC 的量化值读不出来，所以把计划内的关键帧固定在一个量化值上，这个值就是已知的；会话的第一个关键帧不限制（按猜的值固定时比编码器自己的还大，随后丢了一秒的帧），之后第一次超预算时用最粗的 46，再往后按上一次的大小推算。基准里 8 Mbit/s、预算 200 KB：H.264 468 → 279 → 204 KB，HEVC 480 → 192 KB，都没有丢帧。代价是丢包恢复后的那一帧先粗后细。每个关键帧在日志里有一行 `key frame: N KB, for a budget of M KB`。
+3. **编码前按发送队列准入**（`SendQueue`）：编码器把出帧的字节数记进一个漏桶，按「给编码器的码率 × 2.5」流出；估算还有超过 50 ms（`sendQueueAdmitMs`）没发完时，新来的画面不编码，等队列空出来再编当时的屏幕。在编码前跳过，不破坏参考链；期间被请求的关键帧记着，有空位再做。换页那一帧（上表的 260–388 KB，8 Mbit/s 下约 105–155 ms）之后会少编三五帧，换来后面的帧不再排在它后面。跳过的帧数每几秒在日志里汇总一行 `N pictures were not encoded while earlier ones waited to be sent (up to M ms, reckoned)`。
+   - 这是估算：pacer 实际可能更快（探测、队列超过两秒时加速），不会慢很多，所以偏向多跳一帧而不是让队列留着。跳得多了会被 `FrameRate` 当作「帧没发出去」而降档，这是持续过载时本来就该有的反应。
+   - 要对照的话：`defaults write com.bd.linkshell.host screenQueueAdmission -bool NO`、`screenKeyBudget -bool NO`（或启动参数 `--no-queue-admission`、`--no-key-budget`），重启 LinkShell.app 生效；删掉这两项即恢复默认。
+- 实测时看 `host.log`：`floor lifted: packets waited` 和 `frame rate 60 → 30: packets waited` 的次数、等待的毫秒数是否下降；`pictures were not encoded` 是否只在换页或网络差时出现；关键帧大小是否接近预算；文字在丢包恢复后的那一下模糊是否可以接受。
 
 **桌面端默认多一段缓冲**：桌面查看端默认「流畅优先」（`screen-client.ts` 的 `pacing: "smooth"`），应答里去掉 playout-delay 扩展，走 libwebrtc 的自适应抖动缓冲。日志里 Mac → Mac 的会话都是「playout-delay extension dropped by the answer」。按 §9 的测量，这在干净链路上约多 18 ms，类 Wi-Fi 抖动下中位延迟 21 → 72 ms。这是产品选择，要低延迟需在画面设置里改成「延迟优先」。
 

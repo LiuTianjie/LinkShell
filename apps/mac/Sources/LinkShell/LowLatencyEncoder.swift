@@ -59,14 +59,25 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   /// Set on the encoder's thread when a frame fails; read on libwebrtc's before the next.
   /// Old callbacks must not break a replacement session or publish its stale pictures.
   private let state = Locked((generation: 0, failure: String?.none, pending: 0, keyWanted: false))
+  /// What has been made and is reckoned not yet sent, and what was skipped for it since last said.
+  private let queue = Locked((model: SendQueue(), skipped: 0, longest: 0.0, since: 0.0))
+  private let keyBudget: Bool
+  private let queueAdmission: Bool
+  private let clock: () -> Double
 
   init(info: RTCVideoCodecInfo, maximumFrameRate: Int = Tuning.fullFps,
        maxPendingFrames: Int = Tuning.encoderPendingFrames,
+       keyBudget: Bool = Tuning.keyBudget || Launch.has("--budget-keyframes"),
+       queueAdmission: Bool = Tuning.queueAdmission,
+       clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
        makeCompressor: @escaping (VideoCompressor.Setup) throws -> ScreenCompression = { try VideoCompressor($0) },
        makeStock: @escaping (RTCVideoCodecInfo, Int) -> RTCVideoEncoder = { H264ScreenEncoder(info: $0, maximumFrameRate: $1) }) {
     self.info = info
     self.maximumFrameRate = maximumFrameRate
     self.maxPendingFrames = max(1, maxPendingFrames)
+    self.keyBudget = keyBudget
+    self.queueAdmission = queueAdmission
+    self.clock = clock
     self.makeCompressor = makeCompressor
     self.makeStock = makeStock
     // 42…: (Constrained) Baseline; anything else offered is Constrained High.
@@ -101,9 +112,9 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       // Without its rate control this encoder has nothing over libwebrtc's.
       guard made.mode == "low-latency" else { return fallBack("no low-latency encoder on this Mac") }
       compressor = made
-      if Launch.has("--budget-keyframes") {
-        made.keyPlan = .init(budget: max(1024, Int(settings.startBitrate) * 1000 / 8 / 5), finest: nil)
-      }
+      let rate = Int(settings.startBitrate) * 1000
+      if keyBudget { made.keyPlan = .init(budget: Tuning.keyFrameBudget(bitrate: rate), finest: nil) }
+      queue.withLock { $0.model.reset(); $0.model.set(encoderRate: Double(rate), now: clock()) }
       return Code.ok
     } catch {
       return fallBack("\(error)")
@@ -145,6 +156,32 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     let rotation = frame.rotation
     let packetization = self.packetization
     let hevc = self.hevc
+    // A picture is not encoded behind a queue of earlier ones (`SendQueue`): it would wait too.
+    // A key frame asked for meanwhile is remembered, and made when there is room for it.
+    if queueAdmission {
+      let now = clock()
+      let report: String?
+      let skip: Bool
+      (skip, report) = queue.withLock { queue in
+        let wait = queue.model.wait(now: now)
+        let skip = wait * 1000 > Tuning.sendQueueAdmitMs
+        if skip {
+          if queue.skipped == 0 { queue.since = now }
+          queue.skipped += 1
+          queue.longest = max(queue.longest, wait)
+        }
+        // Said a few seconds after the first of them, with what came since.
+        guard queue.skipped > 0, now - queue.since >= 5 else { return (skip, nil) }
+        defer { queue.skipped = 0; queue.longest = 0 }
+        return (skip, String(format: "%d pictures were not encoded while earlier ones waited to be sent (up to %.0f ms, reckoned)", queue.skipped, queue.longest * 1000))
+      }
+      if let report { Engine.report(report) }
+      if skip {
+        if key { state.withLock { $0.keyWanted = true } }
+        FrameTrace.mark("queueSkip")
+        return Code.ok
+      }
+    }
     // A hardware encoder can accept frames faster than it finishes them. Bound raw input
     // instead of queuing old screen contents or discarding compressed reference frames later.
     let job: (generation: Int, key: Bool)? = state.withLock { state in
@@ -162,7 +199,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       MediaStageProbe.shared.reference(native.pixelBuffer, began: began)
     }
     let fusion = FusionMetadata.layout(of: native.pixelBuffer)
-    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state] result in
+    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state, queue, clock] result in
       guard state.withLock({ state in
         guard state.generation == job.generation else { return false }
         state.pending -= 1
@@ -177,6 +214,11 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
         break
       case .success(let encoded?):
         FrameTrace.mark(encoded.key ? "encodeOutKey" : "encodeOut")
+        let bytes = CMSampleBufferGetTotalSampleSize(encoded.sample)
+        let now = clock()
+        queue.withLock { $0.model.made(bytes: bytes, now: now) }
+        // Rare, and what a field comparison wants to see: how large key frames come out.
+        if encoded.key { Engine.report("key frame: \(bytes / 1024) KB" + (compressor.keyPlan.map { ", for a budget of \($0.budget / 1024) KB" } ?? "")) }
         guard let data = encoded.accessUnit() else {
           state.withLock { if $0.generation == job.generation { $0.failure = "an encoded frame had no access unit" } }
           return
@@ -212,9 +254,8 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     latestRates = (bitrateKbit, framerate)
     if let stock { return stock.setBitrate(bitrateKbit, framerate: framerate) }
     compressor?.setRates(bitrate: Int(bitrateKbit) * 1000, ceiling: nil, fps: Int(framerate))
-    if Launch.has("--budget-keyframes") {
-      compressor?.keyPlan = .init(budget: max(1024, Int(bitrateKbit) * 1000 / 8 / 5), finest: nil)
-    }
+    if keyBudget { compressor?.keyPlan = .init(budget: Tuning.keyFrameBudget(bitrate: Int(bitrateKbit) * 1000), finest: nil) }
+    queue.withLock { $0.model.set(encoderRate: Double(bitrateKbit) * 1000, now: clock()) }
     return Int32(Code.ok)
   }
 

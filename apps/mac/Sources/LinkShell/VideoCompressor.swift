@@ -106,6 +106,10 @@ final class VideoCompressor {
     var lastKey: (quantizer: Int, bytes: Int)?
     /// A key frame is on its way with its quantizer held: let go when it is out.
     var holding = false
+    /// The one quantizer it is held to, where that is how its quantizer is known (HEVC).
+    var heldTo: Int?
+    /// The size of the last key frame whose quantizer is not known (HEVC, not held).
+    var freeKeyBytes: Int?
     var reader = SliceQuantizer()
   }
 
@@ -120,6 +124,12 @@ final class VideoCompressor {
   private static let stepsPerFold = 12.0
   /// No key frame is asked to be coarser than this: beyond it text can't be read.
   private static let coarsestKey = 46
+  /// HEVC's quantizer isn't read from the stream (`SliceQuantizer` is H.264's), so a planned key
+  /// frame is held to one quantizer exactly, which is then known; none is asked to be finer
+  /// than text needs to be crisp. The session's first key frame is the encoder's own: held to a
+  /// guess (32 was tried) it came out larger than the encoder would have made it, and the rate
+  /// control dropped the next second of frames to pay for it.
+  private static let finestHeldKey = 24
 
   init(_ setup: Setup) throws {
     var made: (session: VTCompressionSession, lowLatency: Bool, profile: Profile)?
@@ -272,8 +282,27 @@ final class VideoCompressor {
   // MARK: The size of a key frame
 
   private func holdKeyQuantizer() {
+    let exact = codec != kCMVideoCodecType_H264
     let range: ClosedRange<Int>? = state.withLock { state in
-      guard let plan = state.keyPlan, plan.budget > 0, let last = state.lastKey else { return nil }
+      guard let plan = state.keyPlan, plan.budget > 0 else { return nil }
+      if exact {
+        var quantizer: Int
+        if let last = state.lastKey {
+          let steps = VideoCompressor.stepsPerFold * log(Double(max(1, last.bytes)) / Double(plan.budget))
+          quantizer = last.quantizer + Int(steps.rounded())
+        } else if let free = state.freeKeyBytes, free > plan.budget {
+          // Nothing to work a quantizer out from yet, and the encoder's own key frame was over
+          // the budget: the coarsest, which is no larger than its own and is then known.
+          quantizer = VideoCompressor.coarsestKey
+        } else {
+          return nil
+        }
+        quantizer = min(max(quantizer, plan.finest ?? VideoCompressor.finestHeldKey), VideoCompressor.coarsestKey)
+        state.holding = true
+        state.heldTo = quantizer
+        return quantizer...quantizer
+      }
+      guard let last = state.lastKey else { return nil }
       state.holding = true
       let steps = VideoCompressor.stepsPerFold * log(Double(last.bytes) / Double(plan.budget))
       let fitting = last.quantizer + Int(steps.rounded())
@@ -293,8 +322,8 @@ final class VideoCompressor {
 
   private func keyCameOut(quantizer: Int?, bytes: Int) {
     let held: Bool = state.withLock { state in
-      if let quantizer { state.lastKey = (quantizer, bytes) }
-      defer { state.holding = false }
+      if let quantizer = quantizer ?? state.heldTo { state.lastKey = (quantizer, bytes) } else { state.freeKeyBytes = bytes }
+      defer { state.holding = false; state.heldTo = nil }
       return state.holding
     }
     // The frames after it are the rate control's again. Not from here: this is the encoder's
