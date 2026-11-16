@@ -42,6 +42,8 @@ final class VideoCompressor {
     /// HEVC only in the low-latency mode: the usual one reorders unless told otherwise, and
     /// its parameter sets aren't rewritten to say it doesn't (`SequenceParameters` is H.264's).
     var codec: CMVideoCodecType = kCMVideoCodecType_H264
+    /// Ask the encoder to be quick before it is thorough (`PrioritizeEncodingSpeedOverQuality`).
+    var speedFirst = false
   }
 
   struct Failure: Error, CustomStringConvertible {
@@ -200,6 +202,7 @@ final class VideoCompressor {
       (kVTCompressionPropertyKey_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_709_2),
     ]
     for (key, value) in wished { VTSessionSetProperty(session, key: key, value: value as CFTypeRef) }
+    if setup.speedFirst { VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue) }
     return session
   }
 
