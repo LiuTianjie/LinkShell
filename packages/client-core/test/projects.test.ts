@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ProjectSummary, SessionSummary } from "@linkshell/wire";
-import { groupProjects, projectLocation } from "../src/projects.js";
+import { groupProjects, projectLocation, sameProjectDirectory } from "../src/projects.js";
 
 const project = (cwd: string, count = 1): ProjectSummary => ({ cwd, name: cwd.split(/[\\/]/).pop()!, sessionCount: count, lastActiveAt: count });
 
@@ -44,4 +44,20 @@ it("retains the first project creation across grouped chats and partial session 
   expect(creation(sessions)).toEqual({ [root]: 100, "/legacy": 150 });
   expect(creation(sessions.map((session) => ({ ...session, updatedAt: session.updatedAt + 1000 })).reverse()))
     .toEqual({ [root]: 100, "/legacy": 150 });
+});
+
+it("lists a Windows folder once, however its drive letter and slashes are written", () => {
+  const session = (id: string, cwd: string) => ({ id, cwd, updatedAt: 5 }) as SessionSummary;
+  const groups = groupProjects(
+    [project("C:\\Users\\me\\shop", 2), project("c:\\Users\\me\\shop", 1), project("C:/Users/me/Shop/", 1), project("C:\\Users\\me\\other")],
+    [session("a", "c:\\users\\me\\shop"), session("b", "C:\\Users\\me\\shop")],
+  );
+  expect(groups.map((group) => group.cwd).sort()).toEqual(["C:\\Users\\me\\other", "C:\\Users\\me\\shop"]);
+  const shop = groups.find((group) => group.name === "shop")!;
+  expect(shop.sessionCount).toBe(4);
+  expect(shop.sessions.map((s) => s.id).sort()).toEqual(["a", "b"]);
+  expect(sameProjectDirectory("c:\\users\\ME\\shop\\", shop.cwd)).toBe(true);
+  // Elsewhere a name's case is part of it.
+  expect(groupProjects([project("/Users/me/shop"), project("/Users/me/Shop")])).toHaveLength(2);
+  expect(sameProjectDirectory("/Users/me/shop", "/Users/me/Shop")).toBe(false);
 });

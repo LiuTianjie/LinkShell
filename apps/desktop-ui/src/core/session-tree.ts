@@ -260,8 +260,77 @@ function isTwoLevelHomeContainer(first: string, second: string | undefined): boo
   const b = second.toLowerCase();
   return (
     (a === "documents" && (b === "github" || b === "projects")) ||
-    (a === "developer" && b === "projects")
+    (a === "developer" && b === "projects") ||
+    // Visual Studio's default: %USERPROFILE%\source\repos\<solution>.
+    (a === "source" && b === "repos")
   );
+}
+
+/** OneDrive moves Desktop and Documents under itself ("OneDrive", "OneDrive - Company"). */
+function isCloudHomeSegment(segment: string | undefined): boolean {
+  return segment !== undefined && /^onedrive(?:\s*-\s*.+)?$/i.test(segment);
+}
+
+/**
+ * How many leading segments a project's root has at least: a path is never cut shorter than this,
+ * and a directory shorter than this (the home directory, Desktop, a drive's top-level `code`,
+ * `/tmp`) never takes the projects below it as its own, even with a session opened in it.
+ */
+function minimumProjectDepth(parsed: ParsedOsPath): number {
+  const { segments } = parsed;
+  const homeLen = detectHomeSegmentLength(parsed);
+  if (homeLen !== undefined) {
+    let at = homeLen;
+    if (parsed.kind === "win-drive" && isCloudHomeSegment(segments[at])) at += 1;
+    const s1 = segments[at];
+    const s2 = segments[at + 1];
+    const s3 = segments[at + 2];
+    if (s1 === undefined) return at + 1;
+    if (parsed.kind === "win-drive" && s1.toLowerCase() === "appdata" && s2?.toLowerCase() === "local" && s3?.toLowerCase() === "temp") return at + 4;
+    if (isTwoLevelHomeContainer(s1, s2)) return at + 3;
+    if (HOME_CONTAINER_DIRS.has(s1.toLowerCase())) return at + 2;
+    return at + 1;
+  }
+  if (parsed.kind === "posix") {
+    if (segments[0] === "tmp") return 2;
+    if (segments[0] === "private" && segments[1] === "tmp") return 3;
+    if (segments[0] === "var" && segments[1] === "folders") return 6;
+    if (segments[0] === "Volumes") return 3;
+    return 2;
+  }
+  if (parsed.kind === "win-drive") {
+    const first = segments[0]?.toLowerCase();
+    const second = segments[1]?.toLowerCase();
+    if (first === "windows" && second === "temp") return 3;
+    // D:\code\shop: a top-level folder named like a place for projects is one, not a project.
+    if (first !== undefined && (first === "temp" || first === "tmp" || HOME_CONTAINER_DIRS.has(first))) return 2;
+    return 1;
+  }
+  return 1;
+}
+
+/**
+ * A working directory without what is only a run of the project in it: cut at the first
+ * `runs` / `output` / `.claude` / `.worktrees` / dated or numbered folder, to the folder that
+ * holds it. (Not to a folder a fixed number of levels below the home directory: that made
+ * `OneDrive`, or Visual Studio's `source\repos`, the project of everything inside it.)
+ */
+function projectBaseSegments(parsed: ParsedOsPath): string[] {
+  const { segments } = parsed;
+  const floor = minimumProjectDepth(parsed);
+  if (segments.length <= floor) return segments;
+  let cut = segments.length;
+  for (let idx = floor; idx < segments.length; idx++) {
+    const seg = segments[idx]!;
+    if (isEphemeralMarker(seg) || isShardOrDatedSegment(seg)) { cut = idx; break; }
+  }
+  const base = segments.slice(0, cut);
+  while (base.length > floor) {
+    const tail = base[base.length - 1]!;
+    if (isEphemeralMarker(tail) || isShardOrDatedSegment(tail) || isNumericShardSegment(tail)) base.pop();
+    else break;
+  }
+  return base;
 }
 
 function isEphemeralMarker(segment: string): boolean {
@@ -284,17 +353,27 @@ export interface ConsolidatedProjectRoot {
   cwd: string;
   name: string;
   generated: boolean;
+  /** The directory without its run folders, before any ancestor took it in. */
   candidateRootCwd?: string;
   candidateRootKey?: string;
 }
 
 /**
- * Consolidates ephemeral run directories, numeric/dated shards, worktrees, and explicit repo
- * descendants into a single logical project root without mutating any `SessionSummary.cwd`.
+ * The project a working directory is shown under, without mutating any `SessionSummary.cwd`.
+ *
+ * Two steps, the same on every system and wherever the directory is:
+ * 1. Run folders are cut off (`projectBaseSegments`): `shop/runs/20261112-x/03` is `shop`.
+ * 2. With `explicitRoots` (every project's and live session's directory after step 1), it goes
+ *    to the topmost of its ancestors that is one of them and is deep enough to be a project
+ *    (`minimumProjectDepth`): a session in `shop/web` is in `shop` once `shop` has one of its own.
+ *
+ * Nothing is guessed about where a repository's root is. The host knows that (git) and the
+ * summaries do not carry it yet; until they do, a subfolder with no session at its root stays
+ * a project of its own.
  */
 export function consolidateProjectRoot(
   cwd: string,
-  explicitCandidateRoots?: ReadonlySet<string>,
+  explicitRoots?: ReadonlySet<string>,
 ): ConsolidatedProjectRoot {
   const location = projectLocation(cwd);
   if (location.generated) {
@@ -307,145 +386,30 @@ export function consolidateProjectRoot(
   }
 
   const parsed = parseOsPath(cwd);
-  const { segments } = parsed;
-  if (segments.length === 0) {
-    const rootCwd = formatParsedPath(parsed, segments) || cwd;
-    return {
-      key: rootCwd,
-      cwd: rootCwd,
-      name: rootCwd,
-      generated: false,
-    };
+  if (parsed.segments.length === 0) {
+    const rootCwd = formatParsedPath(parsed, parsed.segments) || cwd;
+    return { key: rootCwd, cwd: rootCwd, name: rootCwd, generated: false };
   }
 
-  const homeLen = detectHomeSegmentLength(parsed);
-  let repoRootLen: number | undefined;
-  let minNonAbsorbingLen: number | undefined;
-
-  if (homeLen !== undefined) {
-    if (segments.length > homeLen) {
-      const s1 = segments[homeLen]!;
-      const s2 = segments[homeLen + 1];
-      const s3 = segments[homeLen + 2];
-      if (
-        parsed.kind === "win-drive" &&
-        s1.toLowerCase() === "appdata" &&
-        s2?.toLowerCase() === "local" &&
-        s3?.toLowerCase() === "temp"
-      ) {
-        if (segments.length > homeLen + 3) {
-          repoRootLen = homeLen + 4;
-        }
-      } else if (isTwoLevelHomeContainer(s1, s2)) {
-        if (segments.length > homeLen + 2) {
-          repoRootLen = homeLen + 3;
-        }
-      } else if (HOME_CONTAINER_DIRS.has(s1.toLowerCase())) {
-        if (segments.length > homeLen + 1) {
-          repoRootLen = homeLen + 2;
-        }
-      } else {
-        repoRootLen = homeLen + 1;
-      }
-    }
-  } else if (parsed.kind === "posix") {
-    if (segments[0] === "tmp") {
-      minNonAbsorbingLen = 2;
-    } else if (segments[0] === "private" && segments[1] === "tmp") {
-      minNonAbsorbingLen = 3;
-    } else if (segments[0] === "var" && segments[1] === "folders") {
-      minNonAbsorbingLen = 6;
-    } else if (segments[0] === "Volumes") {
-      minNonAbsorbingLen = 3;
-    } else {
-      minNonAbsorbingLen = 2;
-    }
-  } else if (parsed.kind === "win-drive") {
-    const first = segments[0]?.toLowerCase();
-    const second = segments[1]?.toLowerCase();
-    if (first === "temp") {
-      minNonAbsorbingLen = 2;
-    } else if (first === "windows" && second === "temp") {
-      minNonAbsorbingLen = 3;
-    } else {
-      minNonAbsorbingLen = 2;
+  const base = projectBaseSegments(parsed);
+  const baseCwd = formatParsedPath(parsed, base);
+  let resolved = base;
+  if (explicitRoots !== undefined && explicitRoots.size > 0) {
+    const floor = minimumProjectDepth(parsed);
+    for (let length = Math.max(1, floor); length < base.length; length++) {
+      const ancestor = base.slice(0, length);
+      if (explicitRoots.has(normalizeProjectPathKey(formatParsedPath(parsed, ancestor)))) { resolved = ancestor; break; }
     }
   }
 
-  let resolvedSegments = segments;
-  let candidateRootCwd: string | undefined;
-  let candidateRootKey: string | undefined;
-
-  if (repoRootLen !== undefined && segments.length >= repoRootLen) {
-    const candidateSegs = segments.slice(0, repoRootLen);
-    candidateRootCwd = formatParsedPath(parsed, candidateSegs);
-    candidateRootKey = normalizeProjectPathKey(candidateRootCwd);
-
-    if (segments.length > repoRootLen) {
-      const leaf = segments[segments.length - 1]!;
-      let matchesRuleA =
-        isNumericShardSegment(leaf) || isShardOrDatedSegment(leaf);
-
-      if (!matchesRuleA) {
-        for (let idx = repoRootLen; idx < segments.length; idx++) {
-          const seg = segments[idx]!;
-          if (isEphemeralMarker(seg) || isShardOrDatedSegment(seg)) {
-            matchesRuleA = true;
-            break;
-          }
-        }
-      }
-
-      const matchesRuleB =
-        !matchesRuleA &&
-        explicitCandidateRoots !== undefined &&
-        explicitCandidateRoots.size > 0 &&
-        (explicitCandidateRoots.has(candidateRootKey) ||
-          explicitCandidateRoots.has(candidateRootCwd));
-
-      if (matchesRuleA || matchesRuleB) {
-        resolvedSegments = candidateSegs;
-      }
-    }
-  } else if (
-    minNonAbsorbingLen !== undefined &&
-    segments.length > minNonAbsorbingLen
-  ) {
-    let cutIndex = segments.length;
-    for (let idx = minNonAbsorbingLen; idx < segments.length; idx++) {
-      const seg = segments[idx]!;
-      if (isEphemeralMarker(seg) || isShardOrDatedSegment(seg)) {
-        cutIndex = idx;
-        break;
-      }
-    }
-    const next = segments.slice(0, cutIndex);
-    while (next.length > minNonAbsorbingLen) {
-      const tail = next[next.length - 1]!;
-      if (
-        isEphemeralMarker(tail) ||
-        isShardOrDatedSegment(tail) ||
-        isNumericShardSegment(tail)
-      ) {
-        next.pop();
-      } else {
-        break;
-      }
-    }
-    resolvedSegments = next;
-  }
-
-  const resolvedCwd = formatParsedPath(parsed, resolvedSegments);
-  const resolvedName =
-    resolvedSegments[resolvedSegments.length - 1] || resolvedCwd;
-
+  const resolvedCwd = formatParsedPath(parsed, resolved);
   return {
     key: resolvedCwd,
     cwd: resolvedCwd,
-    name: resolvedName,
+    name: resolved[resolved.length - 1] || resolvedCwd,
     generated: false,
-    candidateRootCwd,
-    candidateRootKey,
+    candidateRootCwd: baseCwd,
+    candidateRootKey: normalizeProjectPathKey(baseCwd),
   };
 }
 
@@ -476,17 +440,12 @@ export function desktopSessionTree(
 ): DesktopSessionTree {
   const live = sessions.filter((session) => !session.archived);
 
-  // Pass 1: Collect Candidate Repo Roots explicitly present in inputs or derived via Rule A.
+  // Pass 1: every project's and live session's directory, without its run folders. A directory
+  // goes to the topmost of these above it (`consolidateProjectRoot`).
   const explicitCandidateRoots = new Set<string>();
   const registerExplicitRoot = (rawCwd: string) => {
     const firstPass = consolidateProjectRoot(rawCwd);
-    if (
-      !firstPass.generated &&
-      firstPass.candidateRootKey &&
-      normalizeProjectPathKey(firstPass.cwd) === firstPass.candidateRootKey
-    ) {
-      explicitCandidateRoots.add(firstPass.candidateRootKey);
-    }
+    if (!firstPass.generated && firstPass.candidateRootKey) explicitCandidateRoots.add(firstPass.candidateRootKey);
   };
   for (const project of projects) {
     registerExplicitRoot(project.cwd);

@@ -1,5 +1,5 @@
 import { RpcError, type SessionSummary, type WorktreeEntry } from "@linkshell/wire";
-import { groupProjects, projectLocation } from "@linkshell/client-core";
+import { groupProjects, projectLocation, sameProjectDirectory } from "@linkshell/client-core";
 import { router, Stack, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
@@ -141,7 +141,7 @@ export function ProjectDetailScreen() {
   const { loadMoreSessions, refresh } = useActions();
   const [loadingMore, setLoadingMore] = useState(false);
   const generated = generatedParam === "1";
-  const group = useMemo(() => groupProjects(projects, Object.values(sessionsById)).find((project) => project.cwd === cwd && project.generated === generated), [projects, sessionsById, cwd, generated]);
+  const group = useMemo(() => groupProjects(projects, Object.values(sessionsById)).find((project) => sameProjectDirectory(project.cwd, cwd) && project.generated === generated), [projects, sessionsById, cwd, generated]);
   const now = useNow();
   const branch = group?.branch;
   const { terminals } = useTerminals();

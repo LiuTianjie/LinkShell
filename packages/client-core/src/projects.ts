@@ -14,17 +14,34 @@ export function projectLocation(cwd: string): { key: string; generated: boolean;
   return generated ? { key: generated[1]!, generated: true, name: "Codex Chats" } : { key: cwd, generated: false };
 }
 
+/**
+ * One directory, however it is spelled. Windows names are not case-sensitive and are written with
+ * either slash: the same folder reaches a host as `C:\Users\me\shop` from one terminal and as
+ * `c:\Users\me\shop` from another (an editor's), and was listed as two projects.
+ */
+function sameDirectoryKey(key: string): string {
+  if (!/^(?:[A-Za-z]:(?:[\\/]|$)|\\\\)/.test(key)) return key;
+  return key.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/** Whether two working directories are the same folder (a route keeps one spelling, a group another). */
+export function sameProjectDirectory(a: string, b: string): boolean {
+  return a === b || sameDirectoryKey(a) === sameDirectoryKey(b);
+}
+
 /** Presentation only: session working directories and project actions keep their original paths. */
 export function groupProjects(projects: ProjectSummary[], sessions: SessionSummary[] = []): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
   const ensure = (project: ProjectSummary) => {
     const location = projectLocation(project.cwd);
     const key = location.generated ? `codex-chats:${location.key}` : location.key;
-    let group = groups.get(key);
+    // Found by what the directory is; `key` stays the first spelling seen, as routes hold it.
+    const found = sameDirectoryKey(key);
+    let group = groups.get(found);
     if (!group) {
       group = { ...project, key, cwd: location.key, name: location.name ?? project.name, generated: location.generated,
         branch: location.generated ? undefined : project.branch, paths: [], sessions: [], sessionCount: 0, lastActiveAt: 0 };
-      groups.set(key, group);
+      groups.set(found, group);
     }
     if (project.createdAt !== undefined) group.createdAt = Math.min(group.createdAt ?? project.createdAt, project.createdAt);
     if (!group.paths.includes(project.cwd)) {

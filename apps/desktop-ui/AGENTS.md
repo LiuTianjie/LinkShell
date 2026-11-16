@@ -28,3 +28,16 @@ Dedicated frontend package for the LinkShell Desktop client on **macOS** and **W
    - Unsaved file drafts live in `inspector-tabs-store`, so a session switch keeps them and closing a dirty tab asks first.
 6. **Shortcuts come from one table**: `bridge/shortcuts.ts` (`DESKTOP_SHORTCUTS`) is what the shell binds and what the shortcuts sheet lists. A feature claims ⌘W through the cancelable `CLOSE_TAB_EVENT`; add a binding to the table, never as a stray `keydown` handler.
 7. **Every string goes through a dictionary** in all three languages (`core/i18n.tsx`, `features/*/…i18n…`, `primitives/labels.ts` for the primitives' fallbacks, `apps/desktop/src/main/locale.ts` for native menus and dialogs). No hard-coded Chinese or English in TSX.
+
+## How sessions are grouped into projects (`src/core/session-tree.ts`)
+
+The sidebar and the projects page show sessions under projects. A session's working directory is never changed; only which project it is shown under is worked out, in two steps, the same on every system:
+
+1. **Run folders are cut off.** The directory is cut at the first `runs` / `output` / `logs` / `tmp` / `.claude` / `.codex` / `.agents` / `.worktrees` / dated (`20261112-…`) or numbered (`run-3`, `07`) folder, to the folder that holds it: `shop/runs/20261112-x/03` is `shop`.
+2. **It goes to the topmost ancestor that has a session or project of its own** (after step 1): a session in `shop/web` is shown under `shop` once something was opened in `shop` itself. With nothing at `shop`, `shop/web` is a project of its own.
+
+Neither step goes above `minimumProjectDepth`: the home directory, the folders people keep projects in (`Desktop`, `Documents`, `Projects`, `code`, `source\repos`, … and `OneDrive` in front of them), a drive's root, `/tmp`. A session opened in one of those is listed under it and takes nothing below it.
+
+Windows paths are compared without case and with either slash (`normalizeProjectPathKey`); the phone and the web console list each working directory as its own project and only merge spellings of one folder (`packages/client-core/src/projects.ts`).
+
+What this does not know is where a repository's root is. The host does (git) and the summaries do not carry it. Until they do, do not go back to guessing it by depth: the earlier rule took "the folder N levels below the home directory" for the root, and one session in a run folder made `OneDrive`, or Visual Studio's `source\repos`, the project of everything inside it, while on another drive a project's subfolders never joined it.

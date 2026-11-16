@@ -192,6 +192,45 @@ describe("consolidateProjectRoot & desktopSessionTree smart root consolidation",
     expect(tree.groups[0]!.sessionCount).toBe(11);
   });
 
+  it("keeps Windows projects apart and whole: OneDrive, Visual Studio's source\\repos, another drive", () => {
+    const groupsOf = (...cwds: string[]) => {
+      const tree = desktopSessionTree([], cwds.map((cwd, index) => makeSession(`s${index}`, cwd, 1_000 + index)));
+      return Object.fromEntries(tree.groups.map((group) => [group.cwd, group.sessions.map((session) => session.cwd).sort()]));
+    };
+    // One session in a run folder used to make "OneDrive" the project of everything in it.
+    expect(groupsOf(
+      "C:\\Users\\me\\OneDrive\\Desktop\\projA",
+      "C:\\Users\\me\\OneDrive\\Desktop\\projB",
+      "C:\\Users\\me\\OneDrive\\Desktop\\projA\\output\\x",
+    )).toEqual({
+      "C:\\Users\\me\\OneDrive\\Desktop\\projA": ["C:\\Users\\me\\OneDrive\\Desktop\\projA", "C:\\Users\\me\\OneDrive\\Desktop\\projA\\output\\x"],
+      "C:\\Users\\me\\OneDrive\\Desktop\\projB": ["C:\\Users\\me\\OneDrive\\Desktop\\projB"],
+    });
+    // And "repos" the project of every Visual Studio solution.
+    expect(Object.keys(groupsOf(
+      "C:\\Users\\me\\source\\repos\\A",
+      "C:\\Users\\me\\source\\repos\\B",
+      "C:\\Users\\me\\source\\repos\\A\\logs",
+      "C:\\Users\\me\\source\\repos",
+    )).sort()).toEqual(["C:\\Users\\me\\source\\repos", "C:\\Users\\me\\source\\repos\\A", "C:\\Users\\me\\source\\repos\\B"]);
+    // Off the home directory a project's subfolders were each a project of their own.
+    expect(groupsOf("D:\\code\\shop", "D:\\code\\shop\\web", "d:\\code\\shop\\server\\api", "D:\\code\\other")).toEqual({
+      "D:\\code\\shop": ["D:\\code\\shop", "D:\\code\\shop\\web", "d:\\code\\shop\\server\\api"],
+      "D:\\code\\other": ["D:\\code\\other"],
+    });
+    // A drive, and a folder on it named for holding projects, take nothing below them.
+    expect(Object.keys(groupsOf("D:\\", "D:\\code", "D:\\code\\shop", "D:\\tool\\tmp\\1")).sort()).toEqual(["D:\\", "D:\\code", "D:\\code\\shop", "D:\\tool"]);
+  });
+
+  it("goes by where the run folder is, not by a depth below the home directory", () => {
+    const tree = desktopSessionTree([], [
+      makeSession("a", "/Users/me/code/org/repoA", 1_000),
+      makeSession("b", "/Users/me/code/org/repoB", 1_001),
+      makeSession("c", "/Users/me/code/org/repoA/.claude/worktrees/x", 1_002),
+    ]);
+    expect(tree.groups.map((group) => group.cwd).sort()).toEqual(["/Users/me/code/org/repoA", "/Users/me/code/org/repoB"]);
+  });
+
   it("preserves Codex generated chat grouping (Documents/Codex/YYYY-MM-DD/<id> -> Codex Chats)", () => {
     const projects: ProjectSummary[] = [
       makeProject("/Users/turning4th/Documents/Codex/2026-11-12/chat-a", {
