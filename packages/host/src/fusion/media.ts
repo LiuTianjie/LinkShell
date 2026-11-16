@@ -80,7 +80,20 @@ interface Stream {
   replayedAt: number;
   replayTimer?: ReturnType<typeof setTimeout>;
   sending: Promise<void>;
+  /** Encoders that ended one after another without lasting; a lasting one starts the count again. */
+  failures: number;
+  sourceAt: number;
+  restartTimer?: ReturnType<typeof setTimeout>;
 }
+
+/**
+ * An encoder that ends is started again (the window's monitor changed, the desktop was locked,
+ * the capture failed once): after this many in a row that did not last, the stream is reported.
+ */
+const RESTART_LIMIT = 5;
+const RESTART_LASTED_MS = 20_000;
+/** An offer nobody answers must not keep every later window from being offered. */
+const ANSWER_TIMEOUT_MS = 10_000;
 
 /** A replay longer than this is given up: the receiver waits for the next key picture, as it did before. */
 const REPLAY_MAX_UNITS = 240;
@@ -105,6 +118,7 @@ export class FusionNodeMedia {
   /** The streams of the offer the receiver is answering. */
   private offered: Stream[] = [];
   private negotiating = false;
+  private answerTimer?: ReturnType<typeof setTimeout>;
   private offerWanted = false;
   private offerTimer?: ReturnType<typeof setTimeout>;
   private serial: Promise<void> = Promise.resolve();
@@ -169,14 +183,36 @@ export class FusionNodeMedia {
     }
     const stream: Stream = {
       key, transceiver, rtp: this.rtp.get(transceiver)!, layout, needsKey: true, announced: false, parameterSets: new Map(),
-      replay: [], replayBytes: 0, replayedAt: 0, sending: Promise.resolve(),
+      replay: [], replayBytes: 0, replayedAt: 0, sending: Promise.resolve(), failures: 0, sourceAt: 0,
     };
     this.streams.set(key, stream);
-    stream.source = start(
-      (unit, isKey) => this.frame(stream, unit, isKey),
-      (reason) => { if (this.streams.get(key) === stream) this.events.error(key, reason); },
-    );
+    this.startSource(stream, start);
     this.wantOffer();
+  }
+
+  private startSource(stream: Stream, start: Parameters<FusionNodeMedia["open"]>[1]): void {
+    const current = () => !this.closed && this.streams.get(stream.key) === stream;
+    stream.sourceAt = performance.now();
+    let over = false;
+    const ended = (reason: string) => {
+      if (over || !current()) return;
+      over = true;
+      stream.failures = performance.now() - stream.sourceAt > RESTART_LASTED_MS ? 1 : stream.failures + 1;
+      if (stream.failures > RESTART_LIMIT) return this.events.error(stream.key, reason);
+      this.events.log(`[fusion] stream ${stream.key} ended (${reason.slice(0, 200)}); starting it again`);
+      stream.restartTimer = setTimeout(() => {
+        if (!current()) return;
+        // The new encoder's pictures do not follow the old one's.
+        stream.replay = []; stream.replayBytes = 0; stream.needsKey = true;
+        this.startSource(stream, start);
+      }, Math.min(8_000, 500 * 2 ** (stream.failures - 1)));
+      stream.restartTimer.unref?.();
+    };
+    try {
+      stream.source = start((unit, isKey) => { if (!over) this.frame(stream, unit, isKey); }, ended);
+    } catch (error) {
+      ended(error instanceof Error ? error.message : String(error));
+    }
   }
 
   close(key: string): void {
@@ -184,6 +220,7 @@ export class FusionNodeMedia {
     if (!stream) return;
     this.streams.delete(key);
     clearTimeout(stream.replayTimer);
+    clearTimeout(stream.restartTimer);
     stream.replay = [];
     stream.source?.stop();
     stream.transceiver.setDirection("inactive");
@@ -201,8 +238,10 @@ export class FusionNodeMedia {
     this.serial = this.serial.then(async () => {
       if (this.closed) return;
       if (m.t === "answer" && typeof m.sdp === "string") {
-        await this.pc.setRemoteDescription({ type: "answer", sdp: m.sdp });
-        this.negotiating = false;
+        clearTimeout(this.answerTimer);
+        // Whatever becomes of this answer, the next offer must be free to go.
+        try { await this.pc.setRemoteDescription({ type: "answer", sdp: m.sdp }); }
+        finally { this.negotiating = false; }
         // The receiver has these streams' mids now: each starts from a key picture.
         for (const stream of this.offered) {
           if (stream.announced || this.streams.get(stream.key) !== stream) continue;
@@ -245,6 +284,14 @@ export class FusionNodeMedia {
     const streams = this.offered.map((s) => ({ k: s.key, mid: s.transceiver.mid! }));
     this.events.signal({ t: "streams", streams });
     this.events.signal({ t: "offer", sdp: offer.sdp });
+    clearTimeout(this.answerTimer);
+    this.answerTimer = setTimeout(() => {
+      if (this.closed || !this.negotiating) return;
+      this.events.log("[fusion] media offer was not answered; offering again");
+      this.negotiating = false;
+      this.wantOffer();
+    }, ANSWER_TIMEOUT_MS);
+    this.answerTimer.unref?.();
   }
 
   /** An access unit from a stream's encoder: kept for a replay, and sent when the receiver can use it. */
@@ -321,7 +368,8 @@ export class FusionNodeMedia {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.offerTimer);
-    for (const stream of this.streams.values()) { clearTimeout(stream.replayTimer); stream.source?.stop(); }
+    clearTimeout(this.answerTimer);
+    for (const stream of this.streams.values()) { clearTimeout(stream.replayTimer); clearTimeout(stream.restartTimer); stream.source?.stop(); }
     this.streams.clear();
     void this.pc.close().catch(() => undefined);
   }

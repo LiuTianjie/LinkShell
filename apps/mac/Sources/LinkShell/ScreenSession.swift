@@ -76,6 +76,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// The matched display is being made: the displays are between two arrangements, so a
   /// configuration that arrives now is applied once the picture has a display.
   private var matching = false
+  private var startTries = 0
   private var heldConfiguration: [String: Any]?
   private var connection: RTCPeerConnection?
   private var peerFactory: RTCPeerConnectionFactory?
@@ -164,7 +165,19 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func start() {
     // Asking ScreenCaptureKit without the permission makes the system ask the user: don't.
     guard Permissions.recording() else { return fail(Permissions.notRecording) }
-    guard let chosen = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
+    guard let chosen = Display.at(request.screen) else {
+      // A viewer that comes as another leaves, on a Mac with no screen: the display made for the
+      // one that left is on its way out and the system's stand-in is not back yet.
+      if request.screen == 0, startTries < 20 {
+        startTries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+          guard let self, !self.closed else { return }
+          self.start()
+        }
+        return
+      }
+      return fail("there is no display \(request.screen)")
+    }
     if let wanted = request.match, let size = ScreenMatch.size(for: wanted, watching: chosen.bounds.size) {
       let link = self.link
       matching = true
@@ -311,6 +324,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     closed = true
     match?.end()
     match = nil
+    // Still being made for this viewer: it must not come up after the viewer has gone.
+    if matching { ScreenMatch.current?.end() }
     captureGeneration += 1
     configurations.cancel()
     inputGate.suspended = true

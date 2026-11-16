@@ -274,7 +274,10 @@ host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusi
 - **截取**：每个窗口一个 ffmpeg：`gfxcapture=hwnd=<h>:capture_border=1:capture_cursor=0:width=W:height=H:resize_mode=crop:max_framerate=60`（FFmpeg 8.1 起有，随包的就是 8.1），之后走远程桌面同样的硬件 H.264 编码器选择。有的驱动拒绝零拷贝路径（Intel UHD 615：`vpp_qsv` 建帧池失败），每次都要先失败一次再走 CPU 转换，在小电脑上多花一秒；助手程序把成功的路径报给 host（`[video] encoder=… path=native|compatible`），host 记住并通过 `LINKSHELL_WINDOWS_VIDEO_HINT` 让下一次先试它。`capture_border=1` 截整个可见窗口（含标题栏，不含不可见的缩放边框）；画布固定为窗口所在显示器的大小，窗口在左上角，缩放窗口不必重启编码器。host 在每一帧前插入与 Mac 相同格式的 SEI。
 - **弹出菜单、下拉框、提示**：在 Windows 上是独立的顶层窗口。每块显示器一路 ddagrab 流作为 `d<i>`，SEI 列出其中的弹出窗口；本地按 `offset` 把它们放在父窗口旁边。
 - **坐标**：远端没有虚拟屏幕，窗口留在原地。本地位置由本地决定，远端记住每个窗口最后一次 `place` 的本地位置，用于 `wopen` / `layout`；只同步尺寸：本地点数 × 远端显示器缩放 = 远端像素。
-- **features**：`clipboard`、`keys`；没有 `menubar`、`dockmenu`、`virtual-displays`。
+- **features**：`clipboard`（文字与图片，没有 RTF）；没有 `keys`（按键按名字输入）、`menubar`、`dockmenu`、`virtual-displays`。
+- **剪贴板**：助手程序在它的 STA 线程上每 0.5 秒看一次 `GetClipboardSequenceNumber`；前台窗口属于已融合的应用时，把变化读成文字和 PNG（`Clipboard.GetImage` 转码）发给 host，写入对方发来的内容后记下序号，不回送。带 `ExcludeClipboardContentFromMonitorProcessing` 的内容（密码管理器）不读。host 只在本地端声明了 `clipboard`、并且用户进过一次窗口（第一个 `focus`）之后才转发，两个方向都是，与 Mac 相同；上限同样是 8 MiB。给助手程序的一行超过 64 KB 时只有 `{"t":"clip"` 开头的才收。
+- **助手程序的节奏**：输入一到就处理（不再等 33 ms 的窗口轮询）；没有已融合的应用时每 0.5 秒才看一次窗口；每个窗口属于哪个应用缓存 1.5 秒，目录整份建好后再换上（半份目录会把已经在运行的应用永久认成它的可执行文件）；对别的进程的窗口用 `SWP_ASYNCWINDOWPOS` 和 `ShowWindowAsync`，一个没有响应的应用不会卡住所有窗口。助手程序退出后 host 重新启动它，间隔逐次加倍到 30 秒。
+- **编码器结束**（窗口所在显示器变了、锁屏、一次截取失败）：host 把这一路重新启动，间隔 0.5 秒起逐次加倍，连续 5 次都撑不过 20 秒才报错；此前是只提示一次，窗口一直空白。offer 10 秒没有 answer 时重新发，不再卡住之后所有窗口。
 - **限制**：锁屏、UAC 安全桌面时不可用；窗口重叠时，只有前台窗口的悬停是准的（一操作就切到前台）；显卡同时硬件编码的路数有限，非聚焦窗口降到 30 fps，超过上限时只编码最近使用的几个窗口。
 
 ### 8.3 Mac 本地端显示 Windows 窗口
@@ -310,7 +313,11 @@ host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusi
 
 未验证（需要 Windows 实机或 Windows CI）：`Fusion.cs` 的 P/Invoke 与窗口分类、`gfxcapture` 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、Mac 本地端连 Windows 远端的整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
 
-尚未实现：Electron 本地端的剪贴板同步、Windows 远端的光标形状、Windows 远端的剪贴板。
+尚未实现：Windows 远端的光标形状；剪贴板里的文件（协议里没有文件消息，要做得另加分块传输）；Windows 两侧的 RTF。
+
+Electron 本地端的剪贴板（`apps/desktop/src/main/fusion/clipboard.ts`）：Electron 没有剪贴板变化计数，所以在远端的窗口得到焦点时看一次（读文字和 PNG，按内容摘要判断是否变过），停留在窗口里时每 0.7 秒只比较文字和格式；连续两张图片格式相同，要到下一次窗口得到焦点才会发现。远端发来的内容写入后记下摘要，不回送。
+
+状态（2026-11-16）：Windows 远端与 Electron 本地端的剪贴板有单元测试（规则、大小上限、不回送）和 host 模拟远端的测试；Electron 44 的 `clipboard.read()` 在 Mac 上读过一次。C# 一侧（读写剪贴板、PNG 转码）没有在 Windows 上编译或运行过。
 
 已知限制：Windows 远端的每帧元数据（`ack`、窗口大小）是在 host 发出这一帧时取的最新值，不是截取时刻的值（Mac 远端用 4 ms 采样环按截取时间对齐），缩放过程中裁剪会有短暂错位；`MAX_WINDOW_STREAMS`（6）个窗口以上不再出画面，并提示一次。
 

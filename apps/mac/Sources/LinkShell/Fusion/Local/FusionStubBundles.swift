@@ -132,6 +132,9 @@ extension FusionLocal {
   /// answer queued behind them. `first`: an app being opened now does not wait its turn.
   func requestIconIfNeeded(_ bundle: String, first: Bool = false) {
     guard !bundle.isEmpty else { return }
+    // An icon kept from an earlier session is asked for again only when its app is opened: every
+    // connect, and every resume after a drop, asked for all of them ahead of the first picture.
+    if !first, realIconBundles.contains(bundle) { return }
     if iconRequested.contains(bundle) {
       if first, let index = iconQueue.firstIndex(of: bundle), index > 0 {
         iconQueue.remove(at: index)
@@ -148,7 +151,8 @@ extension FusionLocal {
     guard iconInFlight == nil, !iconQueue.isEmpty, let wire else { return }
     let bundle = iconQueue.removeFirst()
     iconInFlight = bundle
-    wire.send(["t": "icon", "app": bundle])
+    // No Dock draws one larger, and a 1024 px icon is four times the bytes.
+    wire.send(["t": "icon", "app": bundle, "size": 512])
     // A remote that has no icon for it answers without one; an older remote does not answer at all.
     iconTimer?.invalidate()
     iconTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.iconAnswered(bundle) }

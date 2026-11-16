@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { BrowserWindow, Menu, nativeImage, screen, shell, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { BrowserWindow, ClipboardItem, Menu, clipboard, nativeImage, screen, shell, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { connectFusion, type FusionConnection, type FusionMessage } from "./wire.js";
+import { FusionClipboard, type ClipboardPort } from "./clipboard.js";
 import { fusionAppId, fusionIconFile, pngToIco } from "./naming.js";
 
 export { fusionAppId, fusionIconFile, pngToIco };
@@ -18,7 +19,7 @@ export { fusionAppId, fusionIconFile, pngToIco };
 export const FUSION_PROTO = 2;
 const RESUME_GRACE_MS = 30_000;
 // No `clipboard` yet: syncing it from the desktop app is a follow-up.
-const LOCAL_FEATURES = ["keys"];
+const LOCAL_FEATURES = ["keys", "clipboard"];
 /** What a taskbar and the app grid need; a Mac's Dock icon (1024) is thirty times the bytes. */
 const ICON_PIXELS = 256;
 
@@ -70,6 +71,29 @@ const rect = (value: unknown): Rect => {
   return { x: num(r.x), y: num(r.y), w: num(r.w), h: num(r.h) };
 };
 
+/** Raw clipboard formats password managers set on what must not be watched (Windows, macOS). */
+const CONCEALED = ["ExcludeClipboardContentFromMonitorProcessing", "org.nspasteboard.ConcealedType"];
+
+const systemClipboard: ClipboardPort = {
+  async read() {
+    const item = (await clipboard.read())[0];
+    const types = item?.types ?? [];
+    const text = item && types.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
+    let concealed = false;
+    for (const format of CONCEALED) {
+      concealed ||= await clipboard.has(`electron application/osclipboard;format="${format}"`).catch(() => false);
+    }
+    return {
+      text, types: types.join(","), concealed,
+      png: async () => (item && types.includes("image/png") ? Buffer.from(await (await item.getType("image/png")).arrayBuffer()) : undefined),
+    };
+  },
+  write: (clip) => clipboard.write([new ClipboardItem({
+    ...(clip.text ? { "text/plain": clip.text } : {}),
+    ...(clip.png ? { "image/png": new Blob([new Uint8Array(clip.png)], { type: "image/png" }) } : {}),
+  })]),
+};
+
 export class FusionElectronHub {
   private connection?: FusionConnection;
   private page?: BrowserWindow;
@@ -84,6 +108,8 @@ export class FusionElectronHub {
   private remoteFeatures = new Set<string>();
   private suspendTimer?: ReturnType<typeof setTimeout>;
   private pingTimer?: ReturnType<typeof setInterval>;
+  private clipboardTimer?: ReturnType<typeof setInterval>;
+  private readonly clipboard = new FusionClipboard(systemClipboard, (message) => { if (this.remoteFeatures.has("clipboard")) this.send(message); });
   private rtt = 0;
   private apps: AppEntry[] = [];
   private windows = new Map<number, WindowRecord>();
@@ -179,7 +205,7 @@ export class FusionElectronHub {
       case "app.exited": return this.appExited(String(m.app ?? ""));
       case "icon": return this.icon(m);
       case "menu": return this.menuReply(m);
-      case "clip": return; // Clipboard sync on Electron is a follow-up: the remote only sends while armed.
+      case "clip": return void this.clipboard.received(m);
       case "pong": this.rtt = Date.now() - num(m.ts); return;
       case "alert": {
         const key = `${m.kind}:${m.subject ?? ""}`;
@@ -242,6 +268,8 @@ export class FusionElectronHub {
     this.stopping = true;
     clearTimeout(this.suspendTimer);
     clearInterval(this.pingTimer);
+    clearInterval(this.clipboardTimer);
+    this.clipboardTimer = undefined;
     const connection = this.connection;
     this.connection = undefined;
     connection?.close(reason === "user" ? "bye" : reason);
@@ -469,7 +497,15 @@ export class FusionElectronHub {
     this.brand(win, record.app);
     win.on("move", () => this.userMoved(record, false));
     win.on("resize", () => this.userMoved(record, true));
-    win.on("focus", () => this.send({ t: "focus", id: record.id }));
+    win.on("focus", () => {
+      this.send({ t: "focus", id: record.id });
+      // After `focus`: the remote takes a clipboard only once the user has been in a window.
+      void this.clipboard.focused();
+      this.clipboardTimer ??= setInterval(() => {
+        if ([...this.windows.values()].some((w) => w.win?.isFocused())) void this.clipboard.tick();
+      }, 700);
+      this.clipboardTimer.unref?.();
+    });
     win.on("blur", () => setTimeout(() => {
       if (![...this.windows.values()].some((w) => w.win?.isFocused())) this.send({ t: "app.active", on: false });
     }, 80).unref?.());

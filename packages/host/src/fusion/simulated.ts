@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { processSource, type FusionAppInfo, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
+import { processSource, type FusionAppInfo, type FusionClip, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
 
 /**
  * A remote with one app whose window shows ffmpeg's test picture: any computer with ffmpeg (and
@@ -49,6 +49,14 @@ export class SimulatedFusionPlatform implements FusionPlatform {
     }];
     this.emit();
   }
+
+  /** What the local side put on this computer's clipboard, for tests to read. */
+  clipboard?: FusionClip;
+  private clipListener?: (clip: FusionClip) => void;
+  watchClipboard(onClip: (clip: FusionClip) => void): void { this.clipListener = onClip; }
+  setClipboard(clip: FusionClip): void { this.clipboard = clip; }
+  /** A fused app copies something. */
+  copy(clip: FusionClip): void { this.clipListener?.(clip); }
 
   quit(app: string): void {
     this.windows = this.windows.filter((w) => w.app !== app);

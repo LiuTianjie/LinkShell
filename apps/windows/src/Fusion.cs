@@ -34,6 +34,7 @@ namespace LinkShell.Windows {
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int command);
+        [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd, int command);
         [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint attach, uint to, bool on);
@@ -94,6 +95,18 @@ namespace LinkShell.Windows {
         /// <summary>Launches whose window has not been seen yet; a slow computer takes its time.</summary>
         static readonly Dictionary<string, PendingLaunch> Launches = new Dictionary<string, PendingLaunch>(StringComparer.OrdinalIgnoreCase);
         static readonly HashSet<IntPtr> SeenWindows = new HashSet<IntPtr>();
+        static readonly AutoResetEvent CommandArrived = new AutoResetEvent(false);
+        /// <summary>Set once the first catalog is whole: before that an executable's app is not known yet.</summary>
+        static volatile bool CatalogReady;
+        /// <summary>Counts catalogs: what was worked out from an older one is worked out again.</summary>
+        static volatile int CatalogVersion;
+        static int CatalogUsed = -1;
+        static object[] CatalogResult;
+        static DateTime CatalogAt;
+        sealed class WindowApp { public uint Pid; public string App; public int At; }
+        /// <summary>A window's app, for a moment: asking the shell for every window 30 times a second is the loop's cost.</summary>
+        static readonly Dictionary<IntPtr, WindowApp> AppByWindow = new Dictionary<IntPtr, WindowApp>();
+        static int PidsClearedAt = Environment.TickCount;
         const int LaunchWaitSeconds = 180;
         /// <summary>Title bar measurements by window and size: probing is cheap, but not 30 times a second.</summary>
         static readonly Dictionary<IntPtr, KeyValuePair<string, object>> ChromeCache = new Dictionary<IntPtr, KeyValuePair<string, object>>();
@@ -107,13 +120,92 @@ namespace LinkShell.Windows {
         static readonly object CatalogLock = new object();
 
         static void ShellWorker() {
+            // What was copied before the session is not the session's to send.
+            ClipSeen = GetClipboardSequenceNumber();
             try { Catalog(); } catch (Exception error) { Write(new { t = "log", message = "catalog: " + error.Message }); }
-            foreach (var request in ShellRequests.GetConsumingEnumerable()) {
+            while (!ended) {
+                Dictionary<string, object> request;
+                // The clipboard needs an STA thread too: it is looked at between requests.
+                if (!ShellRequests.TryTake(out request, 500)) { ClipboardTick(); continue; }
                 object rid = request.ContainsKey("rid") ? request["rid"] : null;
                 try {
-                    if (Str(request, "t") == "apps") Write(new { rid = rid, apps = Catalog() });
+                    string type = Str(request, "t");
+                    if (type == "clip") SetClipboard(request);
+                    // The catalog made at start answers the first session; a new one takes seconds on a slow computer.
+                    else if (type == "apps") Write(new { rid = rid, apps = CatalogResult != null && (DateTime.UtcNow - CatalogAt).TotalSeconds < 60 ? CatalogResult : Catalog() });
                     else Write(new { rid = rid, png = Icon(Str(request, "app")) });
-                } catch (Exception error) { Write(new { rid = rid, error = error.Message }); }
+                } catch (Exception error) {
+                    if (rid != null) Write(new { rid = rid, error = error.Message });
+                    else Write(new { t = "log", message = "clipboard: " + error.Message });
+                }
+            }
+        }
+
+        [DllImport("user32.dll")] static extern uint GetClipboardSequenceNumber();
+        /// <summary>The clipboard as last sent or written here (its sequence number). The shell thread's.</summary>
+        static uint ClipSeen;
+        /// <summary>A fused app's window is the foreground window: what is copied now is copied in it.</summary>
+        static volatile bool FusedInFront;
+        const int MaxClipboardBytes = 8 << 20;
+
+        /// <summary>
+        /// What a fused app copied, to the host: text and a picture (as PNG). Each change once, and
+        /// only one made while a fused window is in front; a change made elsewhere waits until one is.
+        /// </summary>
+        static void ClipboardTick() {
+            uint now = GetClipboardSequenceNumber();
+            if (now == ClipSeen || !FusedInFront) return;
+            ClipSeen = now;
+            try {
+                // Password managers mark what must not be read by clipboard watchers.
+                if (System.Windows.Forms.Clipboard.ContainsData("ExcludeClipboardContentFromMonitorProcessing")) return;
+                string text = System.Windows.Forms.Clipboard.ContainsText() ? System.Windows.Forms.Clipboard.GetText() : "";
+                int size = Encoding.UTF8.GetByteCount(text);
+                if (size > MaxClipboardBytes) return;
+                string png = null;
+                if (System.Windows.Forms.Clipboard.ContainsImage()) {
+                    using (var image = System.Windows.Forms.Clipboard.GetImage()) {
+                        if (image != null) using (var stream = new MemoryStream()) {
+                            image.Save(stream, ImageFormat.Png);
+                            if (size + stream.Length <= MaxClipboardBytes) png = Convert.ToBase64String(stream.ToArray());
+                        }
+                    }
+                }
+                if (text == "" && png == null) return;
+                var message = new Dictionary<string, object> { { "t", "clip" } };
+                if (text != "") message["text"] = text;
+                if (png != null) message["png"] = png;
+                Write(message);
+            } catch (Exception error) {
+                // Another program holds the clipboard open: the next copy is sent.
+                Write(new { t = "log", message = "clipboard: " + error.Message });
+            }
+        }
+
+        static void SetClipboard(Dictionary<string, object> c) {
+            string text = Str(c, "text"), png = Str(c, "png");
+            var data = new System.Windows.Forms.DataObject();
+            MemoryStream stream = null, copy = null;
+            Image image = null;
+            try {
+                if (text != "") data.SetData(System.Windows.Forms.DataFormats.UnicodeText, text);
+                if (png != "") {
+                    byte[] bytes = Convert.FromBase64String(png);
+                    stream = new MemoryStream(bytes);
+                    image = Image.FromStream(stream);
+                    data.SetData(System.Windows.Forms.DataFormats.Bitmap, true, image);
+                    // Programs that keep transparency ask for the PNG itself.
+                    copy = new MemoryStream(bytes);
+                    data.SetData("PNG", false, copy);
+                }
+                if (text == "" && png == "") return;
+                System.Windows.Forms.Clipboard.SetDataObject(data, true, 5, 100);
+                // What was just written is not sent back.
+                ClipSeen = GetClipboardSequenceNumber();
+            } finally {
+                if (image != null) image.Dispose();
+                if (stream != null) stream.Dispose();
+                if (copy != null) copy.Dispose();
             }
         }
 
@@ -123,26 +215,39 @@ namespace LinkShell.Windows {
             shell.SetApartmentState(ApartmentState.STA);
             shell.Start();
             var reading = new System.Web.Script.Serialization.JavaScriptSerializer();
+            // A copied picture is megabytes of base64; the default stops at two.
+            reading.MaxJsonLength = 32 << 20; Json.MaxJsonLength = 32 << 20;
             var reader = new Thread(() => {
                 try {
                     string line;
                     while ((line = Console.ReadLine()) != null) {
-                        if (line.Length > 64000) continue;
+                        // Only a clipboard is this long: a picture, base64.
+                        if (line.Length > 64000 && !(line.StartsWith("{\"t\":\"clip\"") && line.Length < (24 << 20))) continue;
                         // Its own serializer: the main loop writes with the shared one at the same time.
-                        try { FusionCommands.Enqueue(reading.Deserialize<Dictionary<string, object>>(line)); } catch { }
+                        try { FusionCommands.Enqueue(reading.Deserialize<Dictionary<string, object>>(line)); CommandArrived.Set(); } catch { }
                     }
-                } finally { ended = true; }
+                } finally { ended = true; CommandArrived.Set(); }
             }) { IsBackground = true };
             reader.Start();
             WriteMonitors();
             string last = null;
             var monitorsAt = Stopwatch.StartNew();
+            var scannedAt = Stopwatch.StartNew();
+            bool scanned = false;
             while (!ended) {
                 Dictionary<string, object> command;
                 while (FusionCommands.TryDequeue(out command)) {
                     try { FusionCommand(command); }
                     catch (Exception error) { Write(new { t = "log", message = error.Message, rid = command.ContainsKey("rid") ? command["rid"] : null }); }
                 }
+                // With no app fused there is nothing to find: the windows are looked at twice a
+                // second, so a host that keeps this helper after a session costs next to nothing.
+                bool idle;
+                lock (Fused) idle = Fused.Count == 0;
+                int every = idle && Launches.Count == 0 ? 500 : 33;
+                // Input does not wait for the next look at the windows: it is typed as it arrives.
+                if (scanned && scannedAt.ElapsedMilliseconds < every) { CommandArrived.WaitOne((int)Math.Max(1, every - scannedAt.ElapsedMilliseconds)); continue; }
+                scanned = true; scannedAt.Restart();
                 try {
                     EnsureDesktop();
                     var list = Json.Serialize(FusionWindowsJson());
@@ -155,7 +260,6 @@ namespace LinkShell.Windows {
                     Write(new { t = "log", message = "windows: " + error.Message });
                 }
                 if (monitorsAt.ElapsedMilliseconds > 2000) { WriteMonitors(); monitorsAt.Restart(); }
-                Thread.Sleep(33);
             }
             Release();
         }
@@ -184,13 +288,14 @@ namespace LinkShell.Windows {
             object rid = c.ContainsKey("rid") ? c["rid"] : null;
             IntPtr hwnd = c.ContainsKey("hwnd") ? new IntPtr(Convert.ToInt64(c["hwnd"])) : IntPtr.Zero;
             switch (type) {
-                case "apps": case "icon": ShellRequests.Add(c); return;
+                case "apps": case "icon": case "clip": ShellRequests.Add(c); return;
                 case "launch": {
                     string app = Str(c, "app");
                     lock (Fused) Fused.Add(app);
                     Launches[app] = new PendingLaunch { At = DateTime.UtcNow, Before = new HashSet<IntPtr>(SeenWindows) };
                     try {
-                        Process.Start(new ProcessStartInfo("explorer.exe", "shell:AppsFolder\\" + app) { UseShellExecute = false });
+                        // Quoted: a classic app's id is a path, with spaces and sometimes commas.
+                        Process.Start(new ProcessStartInfo("explorer.exe", "\"shell:AppsFolder\\" + app + "\"") { UseShellExecute = false });
                         Write(new { rid = rid, ok = true });
                     } catch (Exception error) { Write(new { rid = rid, ok = false, error = error.Message }); }
                     return;
@@ -198,10 +303,14 @@ namespace LinkShell.Windows {
                 case "fuse": {
                     // The whole set, the current session's: a later session starts from nothing.
                     object raw;
+                    bool none;
                     lock (Fused) {
                         Fused.Clear();
                         if (c.TryGetValue("apps", out raw) && raw != null) foreach (object app in (System.Collections.IEnumerable)raw) Fused.Add(Convert.ToString(app));
+                        none = Fused.Count == 0;
                     }
+                    // What was learned at one session's launches is not the next session's.
+                    if (none) { AppAliases.Clear(); Launches.Clear(); AppByWindow.Clear(); }
                     return;
                 }
                 case "quit": {
@@ -218,7 +327,7 @@ namespace LinkShell.Windows {
                     if (!GetWindowRect(hwnd, out window) || !WindowFrame(hwnd, out frame)) return;
                     // The size asked for is the visible frame's; SetWindowPos also counts the invisible resize borders.
                     int extraW = (window.Right - window.Left) - (frame.Right - frame.Left), extraH = (window.Bottom - window.Top) - (frame.Bottom - frame.Top);
-                    SetWindowPos(hwnd, IntPtr.Zero, 0, 0, (int)Number(c, "w") + extraW, (int)Number(c, "h") + extraH, 0x0002 | 0x0004 | 0x0010);
+                    SetWindowPos(hwnd, IntPtr.Zero, 0, 0, (int)Number(c, "w") + extraW, (int)Number(c, "h") + extraH, 0x0002 | 0x0004 | 0x0010 | 0x4000);
                     return;
                 }
                 case "focus": Focus(hwnd); return;
@@ -261,7 +370,8 @@ namespace LinkShell.Windows {
         /// </summary>
         static void Focus(IntPtr hwnd) {
             if (!IsWindow(hwnd)) return;
-            if (IsIconic(hwnd)) ShowWindow(hwnd, 9);
+            // Async: an app that is not answering must not stop every other window's input.
+            if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9);
             if (GetForegroundWindow() == hwnd) return;
             if (!HeldKeys.Contains(0x12)) { Key(0x12, false); Key(0x12, true); }
             if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
@@ -300,6 +410,12 @@ namespace LinkShell.Windows {
             lock (Fused) fused = new HashSet<string>(Fused, StringComparer.OrdinalIgnoreCase);
             var found = new List<FusionWindow>();
             var screens = System.Windows.Forms.Screen.AllScreens;
+            int version = CatalogVersion;
+            // A process id is used again by another program before long.
+            if (version != CatalogUsed || unchecked(Environment.TickCount - PidsClearedAt) > 60000) {
+                CatalogUsed = version; PidsClearedAt = Environment.TickCount;
+                AppByPid.Clear(); AppByWindow.Clear();
+            }
             EnumWindows((hwnd, _) => {
                 if (!IsWindowVisible(hwnd)) return true;
                 int cloaked;
@@ -338,6 +454,8 @@ namespace LinkShell.Windows {
                 p.Owner = owner.Handle; p.App = owner.App;
                 result.Add(p);
             }
+            IntPtr inFront = GetForegroundWindow();
+            FusedInFront = result.Any(w => w.Handle == inFront);
             return result;
         }
 
@@ -349,7 +467,7 @@ namespace LinkShell.Windows {
         static void AdoptLaunched(List<FusionWindow> found) {
             if (Launches.Count == 0) return;
             // Before the catalog is in, every window looks like it belongs to no app.
-            lock (CatalogLock) if (CatalogIds.Count == 0) return;
+            if (!CatalogReady) return;
             foreach (string app in Launches.Keys.ToList()) {
                 var launch = Launches[app];
                 if ((DateTime.UtcNow - launch.At).TotalSeconds > LaunchWaitSeconds || found.Any(w => !w.Popup && String.Equals(w.App, app, StringComparison.OrdinalIgnoreCase))) { Launches.Remove(app); continue; }
@@ -362,6 +480,7 @@ namespace LinkShell.Windows {
                     if (known || AppAliases.ContainsKey(w.App)) continue;
                     if (w.Handle != front && !StartedSince(w.Pid, launch.At)) continue;
                     AppAliases[w.App] = app;
+                    AppByWindow.Clear();
                     Write(new { t = "log", message = "fusion: windows of " + w.App + " belong to " + app });
                     string was = w.App;
                     foreach (var other in found) if (String.Equals(other.App, was, StringComparison.OrdinalIgnoreCase)) other.App = app;
@@ -443,6 +562,16 @@ namespace LinkShell.Windows {
         /// process's id or its executable's entry, else whatever it was learned to be at a launch.
         /// </summary>
         static string AppOf(IntPtr hwnd, uint pid) {
+            WindowApp known;
+            int now = Environment.TickCount;
+            if (AppByWindow.TryGetValue(hwnd, out known) && known.Pid == pid && unchecked(now - known.At) < 1500) return known.App;
+            string app = AppOfNow(hwnd, pid);
+            if (AppByWindow.Count > 1024) AppByWindow.Clear();
+            AppByWindow[hwnd] = new WindowApp { Pid = pid, App = app, At = now };
+            return app;
+        }
+
+        static string AppOfNow(IntPtr hwnd, uint pid) {
             string id = WindowAppId(hwnd);
             bool listed = false;
             if (!String.IsNullOrEmpty(id)) lock (CatalogLock) listed = CatalogIds.Contains(id);
@@ -476,9 +605,7 @@ namespace LinkShell.Windows {
             }
             if (AppByPid.Count > 512) AppByPid.Clear();
             // An executable's id may still change once the catalog is in: only remember a final answer.
-            bool final;
-            lock (CatalogLock) final = AppByExe.Count > 0;
-            if (final) AppByPid[pid] = result;
+            if (CatalogReady) AppByPid[pid] = result;
             return result;
         }
 
@@ -509,6 +636,10 @@ namespace LinkShell.Windows {
             int count = (int)items.GetType().InvokeMember("Count", BindingFlags.GetProperty, null, items, null);
             var apps = new List<Dictionary<string, object>>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Built apart and put in place whole: the window loop reads these all the while, and a
+            // half-made catalog would name a running app by its executable for good.
+            var byExe = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < count && i < 2000; i++) {
                 object item = items.GetType().InvokeMember("Item", BindingFlags.InvokeMethod, null, items, new object[] { i });
                 string name = Convert.ToString(item.GetType().InvokeMember("Name", BindingFlags.GetProperty, null, item, null));
@@ -517,7 +648,7 @@ namespace LinkShell.Windows {
                 // Uninstallers, help files and links to web pages are in the folder too.
                 if (id.StartsWith("http", StringComparison.OrdinalIgnoreCase) || name.IndexOf("uninstall", StringComparison.OrdinalIgnoreCase) >= 0 || name.Contains("卸载")) continue;
                 string exe = ResolveKnownFolder(id);
-                if (exe != null && exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) lock (CatalogLock) AppByExe[exe] = id;
+                if (exe != null && exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) byExe[exe] = id;
                 else if (exe != null && !id.Contains("!")) continue;
                 // A shortcut with an id of its own (most installers write one): the executable it
                 // starts is the only thing its windows have in common with it.
@@ -525,14 +656,22 @@ namespace LinkShell.Windows {
                     string target = null;
                     try { target = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.TargetParsingPath" })); } catch { }
                     if (String.IsNullOrEmpty(target) && id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(id)) target = id;
-                    if (!String.IsNullOrEmpty(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) lock (CatalogLock) { if (!AppByExe.ContainsKey(target)) AppByExe[target] = id; }
+                    if (!String.IsNullOrEmpty(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) { if (!byExe.ContainsKey(target)) byExe[target] = id; }
                 }
-                lock (CatalogLock) CatalogIds.Add(id);
+                ids.Add(id);
                 bool system = id.StartsWith("Microsoft.Windows", StringComparison.OrdinalIgnoreCase) || id.StartsWith("windows.", StringComparison.OrdinalIgnoreCase) || id.IndexOf("\\WINDOWS\\", StringComparison.OrdinalIgnoreCase) >= 0;
                 apps.Add(new Dictionary<string, object> { { "app", id }, { "name", name }, { "category", "" }, { "system", system } });
             }
             Marshal.ReleaseComObject(shell);
-            return apps.OrderBy(a => (string)a["name"], StringComparer.CurrentCulture).Cast<object>().ToArray();
+            lock (CatalogLock) {
+                AppByExe.Clear(); foreach (var pair in byExe) AppByExe[pair.Key] = pair.Value;
+                CatalogIds.Clear(); foreach (string listed in ids) CatalogIds.Add(listed);
+            }
+            CatalogReady = true;
+            CatalogVersion = CatalogVersion + 1;
+            CatalogResult = apps.OrderBy(a => (string)a["name"], StringComparer.CurrentCulture).Cast<object>().ToArray();
+            CatalogAt = DateTime.UtcNow;
+            return CatalogResult;
         }
 
         static string ResolveKnownFolder(string id) {

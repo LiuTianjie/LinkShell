@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { noteWindowsVideo, windowsHelper, windowsVideoEnv } from "../windows-screen.js";
 import { windowsMedia } from "../windows-video.js";
-import { processSource, type FusionAppInfo, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
+import { processSource, type FusionAppInfo, type FusionClip, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
 
 /**
  * Windows' half of a Fusion remote (docs/v2/fusion.md §8.2): `LinkShell.Screen.exe --fusion`
@@ -16,6 +16,8 @@ export class WindowsFusionPlatform implements FusionPlatform {
   private monitorList: FusionMonitor[] = [{ index: 0, rect: { x: 0, y: 0, w: 1920, h: 1080 }, scale: 1 }];
   private listener?: (windows: FusionWindowInfo[]) => void;
   private latest: FusionWindowInfo[] = [];
+  private clipListener?: (clip: FusionClip) => void;
+  private respawns = 0;
   private readonly fused = new Set<string>();
   private readonly replies = new Map<number, (message: Record<string, unknown>) => void>();
   private nextRequest = 1;
@@ -27,6 +29,7 @@ export class WindowsFusionPlatform implements FusionPlatform {
     if (!this.helper) throw new Error("请安装 Windows 桌面版（缺少 LinkShell.Screen.exe）");
     const child = spawn(this.helper, ["--fusion"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
+    const started = Date.now();
     child.stdin?.on("error", () => undefined);
     createInterface({ input: child.stdout! }).on("line", (line) => {
       let message: Record<string, unknown>;
@@ -38,7 +41,10 @@ export class WindowsFusionPlatform implements FusionPlatform {
       for (const reply of this.replies.values()) reply({ t: "error", message: "Windows 屏幕组件已退出" });
       this.replies.clear();
       // A session is watching: the helper comes back by itself (it exits on a locked desktop's errors, say).
-      if (this.listener) setTimeout(() => { if (this.listener && !this.child) { try { this.ensure(); } catch { /* No helper: nothing to watch. */ } } }, 1_000).unref?.();
+      // Slower each time it does not last (a locked computer ends it at once, all night long).
+      this.respawns = Date.now() - started > 30_000 ? 0 : this.respawns + 1;
+      const wait = Math.min(30_000, 1_000 * 2 ** Math.min(this.respawns, 5));
+      if (this.listener) setTimeout(() => { if (this.listener && !this.child) { try { this.ensure(); } catch { /* No helper: nothing to watch. */ } } }, wait).unref?.();
     });
     child.stdin?.write(`${JSON.stringify({ t: "fuse", apps: [...this.fused] })}\n`);
     return child;
@@ -68,6 +74,11 @@ export class WindowsFusionPlatform implements FusionPlatform {
     }
     // Which window was taken for which app is the first thing to read when an app shows nothing.
     if (message.t === "log" && typeof message.message === "string") console.error(`[fusion] ${message.message.slice(0, 500)}`);
+    if (message.t === "clip") {
+      const text = typeof message.text === "string" && message.text ? message.text : undefined;
+      const png = typeof message.png === "string" && message.png ? Buffer.from(message.png, "base64") : undefined;
+      if (text || png) this.clipListener?.({ ...(text ? { text } : {}), ...(png ? { png } : {}) });
+    }
     if (message.t === "monitors" && Array.isArray(message.monitors)) {
       this.monitorList = message.monitors.map((m) => {
         const mon = m as Record<string, number>;
@@ -110,6 +121,13 @@ export class WindowsFusionPlatform implements FusionPlatform {
     if (reply.ok !== true) throw new Error(typeof reply.error === "string" ? reply.error : "无法启动");
   }
 
+  watchClipboard(onClip: (clip: FusionClip) => void): void { this.clipListener = onClip; }
+
+  setClipboard(clip: FusionClip): void {
+    // `t` first: the helper lets a line this long through only when it starts as a clipboard.
+    this.write({ t: "clip", ...(clip.text ? { text: clip.text } : {}), ...(clip.png ? { png: clip.png.toString("base64") } : {}) });
+  }
+
   quit(app: string, force: boolean): void { this.write({ t: "quit", app, force }); }
   resize(id: number, w: number, h: number): void { this.write({ t: "resize", hwnd: id, w, h }); }
   focus(id: number): void { this.write({ t: "focus", hwnd: id }); }
@@ -136,6 +154,7 @@ export class WindowsFusionPlatform implements FusionPlatform {
 
   stop(): void {
     this.listener = undefined;
+    this.clipListener = undefined;
     const child = this.child;
     this.child = undefined;
     child?.stdin?.end();

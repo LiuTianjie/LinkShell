@@ -108,6 +108,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   /// What the remote (or a protocol mismatch) said, shown instead of a generic reason.
   var exitMessage: String?
   var mediaRestarts: [Double] = []
+  var mediaRetryWaiting = false
   /// How the hub leaves once its session is over; tests stay alive.
   var terminate: () -> Void = { NSApp.terminate(nil) }
   var windows: [CGWindowID: WindowRecord] = [:]
@@ -544,6 +545,19 @@ extension FusionLocal {
     mediaRestarts = mediaRestarts.filter { now - $0 < 60 } + [now]
     guard connected, welcomed, mediaRestarts.count <= 3 else {
       setAlert("webrtc", message: message)
+      // Not given up for good: a bad minute of Wi-Fi left every window frozen until the person
+      // reconnected by hand. Tried again once the minute's count has room.
+      guard connected, welcomed, !mediaRetryWaiting, let oldest = mediaRestarts.first else { return }
+      mediaRetryWaiting = true
+      DispatchQueue.main.asyncAfter(deadline: .now() + max(5, 61 - (now - oldest))) { [weak self] in
+        guard let self else { return }
+        self.mediaRetryWaiting = false
+        guard self.connected, self.welcomed else { return }
+        Fusion.log("media failed earlier: trying it again")
+        self.mediaRestarts.removeAll()
+        self.startMedia()
+        self.wire?.send(["t": "rtc", "m": ["t": "restart"]])
+      }
       return
     }
     Fusion.log("media failed (\(message)): restarting it")

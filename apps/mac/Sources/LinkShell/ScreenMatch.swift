@@ -79,11 +79,15 @@ final class ScreenMatch {
   /// The display a match display stands in for, while it does: itself, on a Mac whose only
   /// display left when it came.
   static func watched(by id: CGDirectDisplayID) -> CGDirectDisplayID? {
+    guard made else { return id }
     guard let current, current.displayID == id else { return nil }
     return current.alone ? id : current.physical
   }
 
   private(set) static var current: ScreenMatch?
+  /// This process has made such a display. In another process (a Fusion remote) one that is
+  /// there is somebody's desktop like any other, not a stand-in to be left out of the list.
+  private(set) static var made = false
   /// Displays on their way out: released a moment after the mirroring is undone.
   private static var retiring: [CGVirtualDisplay] = []
   private static var serial: UInt32 = 0
@@ -95,6 +99,8 @@ final class ScreenMatch {
   private var ended = false
   /// The watched display left when this one came (a Mac with no screen): nothing mirrors it.
   private(set) var alone = false
+  /// The mirroring was asked for: it is undone even if the system has not reported it yet.
+  private var mirrored = false
 
   var displayID: CGDirectDisplayID { display?.displayID ?? 0 }
 
@@ -137,6 +143,7 @@ final class ScreenMatch {
     }
     let match = ScreenMatch(physical: physical, size: size, display: display, log: log)
     current = match
+    made = true
     // Not answered before the display has left the list: until then the watched display, on a Mac
     // with no screen, has not come back, and a capture of the one that was there finds nothing.
     let failed = {
@@ -194,7 +201,8 @@ final class ScreenMatch {
     CGConfigureDisplayMirrorOfDisplay(config, physical, displayID)
     let done = CGCompleteDisplayConfiguration(config, .forAppOnly)
     if done != .success { log("the viewer's resolution is not matched: mirroring failed (\(done.rawValue))") }
-    return done == .success
+    mirrored = done == .success
+    return mirrored
   }
 
   /// The watched display is itself again. Safe to call twice.
@@ -205,7 +213,7 @@ final class ScreenMatch {
     guard let display else { return }
     self.display = nil
     if alone { log("the viewer's display is gone") }
-    else if CGDisplayMirrorsDisplay(physical) == display.displayID {
+    else if mirrored || CGDisplayMirrorsDisplay(physical) == display.displayID {
       var config: CGDisplayConfigRef?
       if CGBeginDisplayConfiguration(&config) == .success {
         CGConfigureDisplayMirrorOfDisplay(config, physical, kCGNullDirectDisplay)

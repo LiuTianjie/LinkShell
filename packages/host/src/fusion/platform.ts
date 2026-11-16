@@ -41,6 +41,9 @@ export interface FusionVideoSource {
   stop(): void;
 }
 
+/** What was copied: text, and a picture as PNG. */
+export interface FusionClip { text?: string; png?: Buffer }
+
 export type InputTarget = { window: number } | { monitor: number };
 
 export interface FusionPlatform {
@@ -62,6 +65,9 @@ export interface FusionPlatform {
   /** A window at the top left of a fixed `canvas`, so resizing it never restarts the encoder. */
   windowVideo(id: number, canvas: { w: number; h: number }, fps: number, bitrate: number, onUnit: (unit: Buffer, key: boolean) => void, onEnd: (reason: string) => void): FusionVideoSource;
   monitorVideo(index: number, fps: number, bitrate: number, onUnit: (unit: Buffer, key: boolean) => void, onEnd: (reason: string) => void): FusionVideoSource;
+  /** What a fused app copies, as it is copied. Absent where the clipboard is not synchronised. */
+  watchClipboard?(onClip: (clip: FusionClip) => void): void;
+  setClipboard?(clip: FusionClip): void;
   stop(): void;
 }
 

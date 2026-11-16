@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTCPeerConnection, useH264, type RTCDataChannel } from "werift";
 import { FusionNodeRemote } from "../src/fusion/remote.js";
 import { SIMULATED_APP, SimulatedFusionPlatform } from "../src/fusion/simulated.js";
@@ -215,4 +215,35 @@ describe("Fusion remote in the host (simulated platform)", () => {
     await new Promise((r) => setTimeout(r, 800));
     expect(second.messages.some((m) => m.t === "wopen")).toBe(false);
   });
+
+  it("shares the clipboard, text and pictures, once the user has been in a window", async () => {
+    const platform = new SimulatedFusionPlatform();
+    const remote = new FusionNodeRemote(platform, { log: () => {}, port: 0 });
+    cleanups.push(() => remote.stop());
+    const local = new Local(await remote.issue("tok-clip", []), "tok-clip");
+    cleanups.push(() => local.close());
+    expect((await local.next((m) => m.t === "welcome")).features).toContain("clipboard");
+    await local.next((m) => m.t === "ready");
+    local.connection.send({ t: "launch", app: SIMULATED_APP });
+    const opened = await local.next((m) => m.t === "wopen");
+    // Before the user has been in a window, neither side's clipboard is the other's.
+    local.connection.send({ t: "clip", text: "too early" });
+    platform.copy({ text: "also too early" });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(platform.clipboard).toBeUndefined();
+    expect(local.messages.some((m) => m.t === "clip")).toBe(false);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    local.connection.send({ t: "focus", id: opened.id });
+    local.connection.send({ t: "clip", text: "from the Mac", png: png.toString("base64") });
+    await vi.waitFor(() => expect(platform.clipboard?.text).toBe("from the Mac"));
+    expect(platform.clipboard?.png?.equals(png)).toBe(true);
+    platform.copy({ text: "from Windows", png });
+    const clip = await local.next((m) => m.t === "clip");
+    expect(clip.text).toBe("from Windows");
+    expect(clip.png).toBe(png.toString("base64"));
+    // More than the frame is made for stays where it is.
+    local.connection.send({ t: "clip", text: "x".repeat((8 << 20) + 1) });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(platform.clipboard?.text).toBe("from the Mac");
+  }, 30_000);
 });

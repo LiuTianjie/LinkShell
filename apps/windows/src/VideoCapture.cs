@@ -59,7 +59,9 @@ namespace LinkShell.Windows {
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
             fps = Math.Max(1, Math.Min(60, fps));
             bitrate = Math.Max(300000, Math.Min(12000000, bitrate));
-            if (vendor == 0) { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; }
+            // A window's capture only wants to know whose encoder to try first: a display that
+            // can't be duplicated (rotated, on another adapter) must not stop the window's picture.
+            if (vendor == 0) { try { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; } catch (Exception) { vendor = 0; } }
             string preferred = vendor == 0x1002 ? "h264_amf" : vendor == 0x10de ? "h264_nvenc" : vendor == 0x8086 ? "h264_qsv" : "h264_mf";
             string selected = Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_ENCODER");
             var encoders = String.IsNullOrEmpty(selected) ? new[] { preferred, "h264_mf" }.Distinct().ToArray() : new[] { selected };

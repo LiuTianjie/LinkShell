@@ -166,9 +166,8 @@ final class FusionWire {
       let b = [UInt8](data)
       let length = Int(b[0]) << 24 | Int(b[1]) << 16 | Int(b[2]) << 8 | Int(b[3])
       guard length > 0, length < FusionProtocol.maxFrame else { return self.close(reason: "protocol") }
-      self.connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, error in
-        guard error == nil, let body, body.count == length else { return self.close(reason: "closed") }
-        self.lastHeard = CACurrentMediaTime()
+      self.lastHeard = CACurrentMediaTime()
+      self.readBody(length, Data()) { body in
         if let message = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
           if self.answersPings, message["t"] as? String == "ping" {
             self.send(["t": "pong", "ts": message["ts"] ?? 0])
@@ -178,6 +177,21 @@ final class FusionWire {
         }
         self.readHeader()
       }
+    }
+  }
+
+  /// A message's body, a piece at a time. Each piece counts as hearing from the peer: a copied
+  /// picture or an icon takes seconds through a relay, with the pings waiting behind it, and the
+  /// watchdog would take a connection that is busy for one that is dead.
+  private func readBody(_ remaining: Int, _ sofar: Data, done: @escaping (Data) -> Void) {
+    if remaining == 0 { return done(sofar) }
+    connection.receive(minimumIncompleteLength: 1, maximumLength: min(remaining, 64 << 10)) { [weak self] piece, _, _, error in
+      guard let self else { return }
+      guard error == nil, let piece, !piece.isEmpty else { return self.close(reason: "closed") }
+      self.lastHeard = CACurrentMediaTime()
+      var body = sofar
+      body.append(piece)
+      self.readBody(remaining - piece.count, body, done: done)
     }
   }
 

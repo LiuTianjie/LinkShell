@@ -1,8 +1,8 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server } from "node:tls";
-import { FUSION_PORT, FUSION_PROTO } from "@linkshell/wire";
+import { FUSION_MAX_CLIPBOARD, FUSION_PORT, FUSION_PROTO } from "@linkshell/wire";
 import { FusionNodeMedia, type FusionLayout } from "./media.js";
-import type { FusionPlatform, FusionWindowInfo } from "./platform.js";
+import type { FusionClip, FusionPlatform, FusionWindowInfo } from "./platform.js";
 import { listenFusion, type FusionConnection, type FusionMessage } from "./wire.js";
 
 /**
@@ -15,8 +15,11 @@ import { listenFusion, type FusionConnection, type FusionMessage } from "./wire.
  * decides where they are there (`place`); this side remembers that and changes only the size.
  */
 const RESUME_GRACE_MS = 30_000;
-/** No `keys`: the Windows helper types named keys and text, not physical key codes. */
-const FEATURES: string[] = [];
+/**
+ * No `keys`: the Windows helper types named keys and text, not physical key codes. `clipboard`
+ * where the platform has one to share (text and pictures; no RTF).
+ */
+const features = (platform: FusionPlatform): string[] => (platform.setClipboard ? ["clipboard"] : []);
 /** Hardware encoders run only so many sessions at once (consumer NVENC: a handful). */
 const MAX_WINDOW_STREAMS = 6;
 
@@ -154,6 +157,9 @@ export class FusionNodeSession {
   onResumed?: (session: FusionNodeSession) => void;
   private authenticated = false;
   private paused = false;
+  private clipboardArmed = false;
+  /** The local side said it shares its clipboard (`hello.features`). */
+  private localClipboard = false;
   private media?: FusionNodeMedia;
   private displays: LocalDisplay[] = [];
   private localPlatform = "macos";
@@ -182,13 +188,16 @@ export class FusionNodeSession {
       case "focus": {
         const state = this.windows.get(Number(m.id));
         if (state) { this.userActions.set(state.info.app, Date.now()); this.platform.focus(state.info.id); }
+        // The clipboard is shared from the first time the user is in one of the windows, as on a Mac.
+        this.clipboardArmed = true;
         return;
       }
+      case "clip": return this.pasted(m);
       case "place": return this.place(m);
       case "wclose.req": this.platform.close(Number(m.id)); return;
       case "displays": if (Array.isArray(m.displays)) this.displays = m.displays as LocalDisplay[]; return;
       case "rtc": if (m.m && typeof m.m === "object") this.rtc(m.m as Record<string, unknown>); return;
-      default: return; // app.active, prewarm, clip: nothing to do on this remote yet.
+      default: return; // app.active, prewarm: nothing to do on this remote yet.
     }
   }
 
@@ -220,15 +229,34 @@ export class FusionNodeSession {
     this.send({ t: "apps", apps });
     this.ready();
     this.platform.watch((windows) => this.track(windows));
+    this.platform.watchClipboard?.((clip) => this.copied(clip));
+  }
+
+  /** The local computer copied something: it is this computer's clipboard too. */
+  private pasted(m: FusionMessage): void {
+    if (!this.clipboardArmed || !this.platform.setClipboard) return;
+    const text = typeof m.text === "string" && m.text ? m.text : undefined;
+    const png = typeof m.png === "string" && m.png ? Buffer.from(m.png, "base64") : undefined;
+    if (!text && !png) return;
+    if (Buffer.byteLength(text ?? "") + (png?.length ?? 0) > FUSION_MAX_CLIPBOARD) return;
+    this.platform.setClipboard({ ...(text ? { text } : {}), ...(png ? { png } : {}) });
+  }
+
+  /** A fused app copied something. */
+  private copied(clip: FusionClip): void {
+    if (!this.clipboardArmed || !this.authenticated || this.ended || !this.localClipboard) return;
+    if (Buffer.byteLength(clip.text ?? "") + (clip.png?.length ?? 0) > FUSION_MAX_CLIPBOARD) return;
+    this.send({ t: "clip", ...(clip.text ? { text: clip.text } : {}), ...(clip.png ? { png: clip.png.toString("base64") } : {}) });
   }
 
   private adopt(m: FusionMessage): void {
     this.displays = Array.isArray(m.displays) ? (m.displays as LocalDisplay[]) : [];
     this.localPlatform = m.platform === "windows" ? "windows" : "macos";
+    this.localClipboard = Array.isArray(m.features) && m.features.includes("clipboard");
   }
 
   private welcome(resumed: boolean): void {
-    this.send({ t: "welcome", proto: FUSION_PROTO, platform: "windows", features: FEATURES, session: this.id, resumed });
+    this.send({ t: "welcome", proto: FUSION_PROTO, platform: "windows", features: features(this.platform), session: this.id, resumed });
   }
 
   /** Each monitor's popup layer is a "display" on the wire, in this computer's points. */
