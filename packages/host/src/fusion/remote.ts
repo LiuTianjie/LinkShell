@@ -16,6 +16,13 @@ import { listenFusion, type FusionConnection, type FusionMessage } from "./wire.
  */
 const RESUME_GRACE_MS = 30_000;
 /**
+ * Multi-stage Windows apps (Chrome's Profile Picker → browser window, splash/login → main window,
+ * IDE welcome → project window) destroy their first window moments before showing the next: wait
+ * before declaring the app exited, while keeping explicit user close/quit responsive.
+ */
+const APP_EXIT_TRANSITION_MS = 2_000;
+const APP_EXIT_EXPLICIT_MS = 200;
+/**
  * No `keys`: the Windows helper types named keys and text, not physical key codes. `clipboard`
  * where the platform has one to share (text and pictures; no RTF).
  */
@@ -74,9 +81,12 @@ export class FusionNodeRemote {
     session.onAuthenticated = () => {
       this.pending.delete(session);
       clearTimeout(deadline);
-      this.suspended?.end();
-      this.suspended = undefined;
-      if (this.current && this.current !== session) this.current.finish("replaced", "另一台电脑开启了与这台电脑的融合模式");
+      if (this.suspended) { this.suspended.ownsPlatform = false; this.suspended.end(); this.suspended = undefined; }
+      if (this.current && this.current !== session) {
+        this.current.ownsPlatform = false;
+        this.current.finish("replaced", "另一台电脑开启了与这台电脑的融合模式");
+      }
+      session.ownsPlatform = true;
       this.current = session;
       connection.startWatchdog(8_000);
     };
@@ -95,7 +105,11 @@ export class FusionNodeRemote {
     session.onResumed = (old) => {
       this.pending.delete(session);
       clearTimeout(deadline);
-      if (this.current && this.current !== old) this.current.finish("replaced");
+      if (this.current && this.current !== old) {
+        this.current.ownsPlatform = false;
+        this.current.finish("replaced");
+      }
+      old.ownsPlatform = true;
       this.current = old;
       this.attach(old, connection);
       connection.startWatchdog(8_000);
@@ -151,6 +165,8 @@ interface WindowState {
 export class FusionNodeSession {
   readonly id = `s-${randomUUID().slice(0, 8)}`;
   ended = false;
+  /** Only the active or suspended session drives the shared OS helper; unauthenticated probes never clear it. */
+  ownsPlatform = false;
   authorize: (token: string) => boolean = () => false;
   onAuthenticated?: () => void;
   resumeTarget?: (id: string) => FusionNodeSession | undefined;
@@ -166,6 +182,8 @@ export class FusionNodeSession {
   private readonly windows = new Map<number, WindowState>();
   private readonly fusedApps = new Set<string>();
   private readonly userActions = new Map<string, number>();
+  private readonly exitTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly explicitCloseApps = new Set<string>();
   private lastLayout = "";
   private grace?: ReturnType<typeof setTimeout>;
   private cascade = 0;
@@ -176,6 +194,19 @@ export class FusionNodeSession {
 
   private send(message: FusionMessage): void { if (!this.paused) this.connection.send(message); }
 
+  private syncFused(): void { if (this.ownsPlatform) this.platform.setFused([...this.fusedApps]); }
+
+  private clearExitTimer(app: string): void {
+    const timer = this.exitTimers.get(app);
+    if (timer) { clearTimeout(timer); this.exitTimers.delete(app); }
+  }
+
+  private clearAllExitTimers(): void {
+    for (const timer of this.exitTimers.values()) clearTimeout(timer);
+    this.exitTimers.clear();
+    this.explicitCloseApps.clear();
+  }
+
   receive(m: FusionMessage): void {
     if (m.t === "hello") return void this.hello(m);
     if (!this.authenticated || this.ended) return;
@@ -183,7 +214,12 @@ export class FusionNodeSession {
       case "bye": this.end(); this.connection.close("bye"); return;
       case "ping": this.send({ t: "pong", ts: m.ts ?? 0 }); return;
       case "launch": return void this.launch(String(m.app ?? ""));
-      case "quit": this.platform.quit(String(m.app ?? ""), m.force === true); return;
+      case "quit": {
+        const app = String(m.app ?? "");
+        if (app) this.explicitCloseApps.add(app);
+        this.platform.quit(app, m.force === true);
+        return;
+      }
       case "icon": return void this.icon(String(m.app ?? ""));
       case "focus": {
         const state = this.windows.get(Number(m.id));
@@ -194,7 +230,13 @@ export class FusionNodeSession {
       }
       case "clip": return this.pasted(m);
       case "place": return this.place(m);
-      case "wclose.req": this.platform.close(Number(m.id)); return;
+      case "wclose.req": {
+        const id = Number(m.id);
+        const state = this.windows.get(id);
+        if (state) this.explicitCloseApps.add(state.info.app);
+        this.platform.close(id);
+        return;
+      }
       case "displays": if (Array.isArray(m.displays)) this.displays = m.displays as LocalDisplay[]; return;
       case "rtc": if (m.m && typeof m.m === "object") this.rtc(m.m as Record<string, unknown>); return;
       default: return; // app.active, prewarm: nothing to do on this remote yet.
@@ -222,7 +264,7 @@ export class FusionNodeSession {
     this.onAuthenticated?.();
     this.adopt(m);
     this.welcome(false);
-    this.platform.setFused([]);
+    this.syncFused();
     const apps = await this.platform.apps().catch(() => []);
     // The catalog can take seconds on Windows: the session may have ended (bye, replaced) meanwhile.
     if (this.ended) return;
@@ -301,8 +343,10 @@ export class FusionNodeSession {
 
   private async launch(app: string): Promise<void> {
     if (!app) return;
+    this.clearExitTimer(app);
+    this.explicitCloseApps.delete(app);
     this.fusedApps.add(app);
-    this.platform.setFused([...this.fusedApps]);
+    this.syncFused();
     this.userActions.set(app, Date.now());
     try {
       await this.platform.launch(app);
@@ -328,6 +372,8 @@ export class FusionNodeSession {
       if (info.popup || !this.fusedApps.has(info.app)) continue;
       live.add(info.id);
       appsWithWindows.add(info.app);
+      this.clearExitTimer(info.app);
+      this.explicitCloseApps.delete(info.app);
       const state = this.windows.get(info.id);
       if (state) {
         state.info = info;
@@ -341,13 +387,25 @@ export class FusionNodeSession {
     for (const [id, state] of this.windows) {
       if (live.has(id)) continue;
       this.windows.delete(id);
+      this.capped.delete(id);
       if (state.streamed) {
         this.media?.close(`w${id}`);
         this.send({ t: "wclose", id });
       }
-      // Windows apps quit with their last window: the local app goes with it.
-      if (!appsWithWindows.has(state.info.app) && ![...this.windows.values()].some((w) => w.info.app === state.info.app)) {
-        this.send({ t: "app.exited", app: state.info.app });
+      const app = state.info.app;
+      // Windows apps quit with their last window, unless they are handing off to a new one
+      // (Profile Picker → browser window, splash/login → main window): wait briefly before `app.exited`.
+      if (!appsWithWindows.has(app) && ![...this.windows.values()].some((w) => w.info.app === app) && !this.exitTimers.has(app)) {
+        const waitMs = this.explicitCloseApps.has(app) ? APP_EXIT_EXPLICIT_MS : APP_EXIT_TRANSITION_MS;
+        const timer = setTimeout(() => {
+          this.exitTimers.delete(app);
+          this.explicitCloseApps.delete(app);
+          if (this.ended || this.paused) return;
+          if ([...this.windows.values()].some((w) => w.info.app === app)) return;
+          this.send({ t: "app.exited", app });
+        }, waitMs);
+        timer.unref?.();
+        this.exitTimers.set(app, timer);
       }
     }
     if (this.resumeKnown) {
@@ -497,6 +555,7 @@ export class FusionNodeSession {
   /** The connection dropped without a `bye`: pictures stop, windows stay, for a while. */
   suspend(onExpired: () => void): void {
     this.paused = true;
+    this.clearAllExitTimers();
     this.media?.end();
     this.media = undefined;
     this.grace = setTimeout(() => { onExpired(); this.end(); }, RESUME_GRACE_MS);
@@ -509,6 +568,7 @@ export class FusionNodeSession {
     this.connection.onClose = undefined;
     this.connection.close("replaced");
     this.paused = true;
+    this.clearAllExitTimers();
     this.media?.end();
     this.media = undefined;
   }
@@ -521,6 +581,7 @@ export class FusionNodeSession {
     this.authenticated = true;
     this.adopt(m);
     this.welcome(true);
+    this.syncFused();
     void this.platform.apps().then((apps) => this.send({ t: "apps", apps })).catch(() => undefined);
     // Every window still open is announced again; those that closed meanwhile get `wclose`.
     this.resumeKnown = new Set([...this.windows.values()].filter((w) => w.streamed).map((w) => w.info.id));
@@ -542,6 +603,7 @@ export class FusionNodeSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.grace);
+    this.clearAllExitTimers();
     this.media?.end();
     this.media = undefined;
     // Sizes the local computer changed go back; positions were never touched.
@@ -550,7 +612,10 @@ export class FusionNodeSession {
     }
     this.windows.clear();
     this.fusedApps.clear();
-    this.platform.setFused([]);
+    if (this.ownsPlatform) {
+      this.ownsPlatform = false;
+      this.platform.setFused([]);
+    }
     this.log(`[fusion] session ${this.id} ended`);
   }
 }

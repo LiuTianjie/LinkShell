@@ -468,6 +468,17 @@ final class FusionStubApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
       if let w = windows[id]?.window, w.isVisible {
         if NSApp.isActive { w.makeKeyAndOrderFront(nil) } else { w.orderFront(nil) }
       }
+    case "activate":
+      if NSApp.isHidden { NSApp.unhide(nil) }
+      NSApp.activate(ignoringOtherApps: true)
+      let visible = windows.values.filter { $0.window.isVisible && !$0.window.isMiniaturized }
+      if !visible.isEmpty {
+        for w in visible { w.window.makeKeyAndOrderFront(nil) }
+      } else {
+        for w in windows.values where w.window.isMiniaturized {
+          w.window.deminiaturize(nil)
+        }
+      }
     case "popup.hide":
       let id = CGWindowID(DesktopScreenBridge.integer(m["id"]) ?? 0)
       closedIDs.insert(id)

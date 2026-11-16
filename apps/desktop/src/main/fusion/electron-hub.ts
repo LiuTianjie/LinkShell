@@ -46,6 +46,7 @@ interface WindowRecord {
   app: string;
   title: string;
   stream: string;
+  activate: boolean;
   /** Local global points. */
   frame: Rect;
   chrome: Record<string, unknown>;
@@ -297,7 +298,9 @@ export class FusionElectronHub {
     if (!Array.isArray(raw)) return;
     const parsed = raw.flatMap((item) => {
       const entry = item as Record<string, unknown>;
-      return typeof entry.app === "string" && entry.app ? [{ app: entry.app, name: String(entry.name ?? ""), category: String(entry.category ?? ""), system: entry.system === true }] : [];
+      const id = typeof entry.app === "string" ? entry.app : "";
+      if (!id || id.startsWith("LinkShell.") || id.startsWith("com.bd.linkshell.")) return [];
+      return [{ app: id, name: String(entry.name ?? ""), category: String(entry.category ?? ""), system: entry.system === true }];
     });
     if (parsed.length || !this.apps.length) this.apps = parsed;
     writeFileSync(join(this.iconsDir, "catalog.json"), JSON.stringify({
@@ -376,6 +379,13 @@ export class FusionElectronHub {
     this.requestIcon(app, true);
     this.send({ t: "launch", app });
     this.shortcut(app);
+    for (const record of this.windows.values()) {
+      if (record.app === app && record.win && !record.win.isDestroyed()) {
+        if (record.win.isMinimized()) record.win.restore();
+        record.win.show();
+        record.win.focus();
+      }
+    }
   }
 
   quitApp(app: string, force: boolean): void {
@@ -434,12 +444,14 @@ export class FusionElectronHub {
   private windowOpened(m: FusionMessage): void {
     const id = num(m.id);
     const app = String(m.app ?? "");
+    const activate = m.activate === true;
     this.quitting.delete(app);
     const existing = this.windows.get(id);
     const record: WindowRecord = existing ?? {
-      id, app, title: String(m.title ?? ""), stream: String(m.stream ?? `w${id}`), frame: rect(m.frame),
+      id, app, title: String(m.title ?? ""), stream: String(m.stream ?? `w${id}`), activate, frame: rect(m.frame),
       chrome: (m.chrome ?? {}) as Record<string, unknown>, seq: 0, ack: 0, applying: false, pendingResize: false,
     };
+    record.activate = activate;
     record.title = String(m.title ?? record.title);
     record.chrome = (m.chrome ?? record.chrome) as Record<string, unknown>;
     record.stream = String(m.stream ?? record.stream);
@@ -450,7 +462,7 @@ export class FusionElectronHub {
       return;
     }
     // The page opens the window (window.open) so it can draw into it; `windowOpenOptions` sizes it.
-    this.toPage({ t: "open", id, key: record.stream, chrome: record.chrome, title: record.title, activate: m.activate === true });
+    this.toPage({ t: "open", id, key: record.stream, chrome: record.chrome, title: record.title, activate });
   }
 
   /** What `window.open("", "w<id>")` from the hub page becomes. */
@@ -519,8 +531,12 @@ export class FusionElectronHub {
       event.preventDefault();
       void this.showAppMenu(record, point);
     });
-    win.once("ready-to-show", () => win.show());
-    setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 300).unref?.();
+    const show = () => {
+      if (win.isDestroyed() || win.isVisible()) return;
+      if (record.activate) win.show(); else win.showInactive();
+    };
+    win.once("ready-to-show", show);
+    setTimeout(show, 300).unref?.();
     // Opened smaller than the remote window (to fit this screen): the remote must know, or its
     // picture and every click would be laid out for a size this window doesn't have.
     const b = win.getBounds();

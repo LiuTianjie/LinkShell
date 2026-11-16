@@ -17,9 +17,11 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
   final class Stream {
     let key: String
     let kind: Kind
+    let windowID: CGWindowID
+    var group: Set<CGWindowID>
     let transceiver: RTCRtpTransceiver
     let source: RTCVideoSource
-    let capturer: ScreenCapturer
+    var capturer: ScreenCapturer
     var control: Control
     var display: Display
     var size: (width: Int, height: Int)
@@ -27,9 +29,14 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     var focused = false
     var boost: DispatchSourceTimer?
     var overlayActive = false
-    init(key: String, kind: Kind, transceiver: RTCRtpTransceiver, source: RTCVideoSource, capturer: ScreenCapturer,
-         control: Control, display: Display, size: (width: Int, height: Int), maxFps: Int) {
-      self.key = key; self.kind = kind; self.transceiver = transceiver; self.source = source; self.capturer = capturer
+    var failures = 0
+    var sourceStartedAt = 0.0
+    var restartTimer: DispatchSourceTimer?
+    init(key: String, kind: Kind, windowID: CGWindowID = 0, group: Set<CGWindowID> = [], transceiver: RTCRtpTransceiver,
+         source: RTCVideoSource, capturer: ScreenCapturer, control: Control, display: Display,
+         size: (width: Int, height: Int), maxFps: Int) {
+      self.key = key; self.kind = kind; self.windowID = windowID; self.group = group
+      self.transceiver = transceiver; self.source = source; self.capturer = capturer
       self.control = control; self.display = display; self.size = size; self.maxFps = maxFps
     }
     var active: Bool { kind == .window ? (focused || boost != nil) : overlayActive }
@@ -42,6 +49,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
   var onScroll: ((String) -> Void)?
   /// A stream's capture stopped on its own, for an alert.
   var onStreamError: ((String, String) -> Void)?
+  var onStreamRecovered: ((String) -> Void)?
 
   private let factory: RTCPeerConnectionFactory
   private var connection: RTCPeerConnection?
@@ -127,6 +135,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     restartTimer?.cancel(); shapeTimer?.cancel(); statsTimer?.cancel()
     for stream in streams.values {
       stream.boost?.cancel()
+      stream.restartTimer?.cancel()
       stream.control.releaseAll()
       stream.capturer.stop()
     }
@@ -148,15 +157,11 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     guard !closed, streams[key] == nil else { return }
     let size = display.pictureSize(maxWidth: min(display.pixelWidth, 5120))
     let maxFps = Self.refreshRate(display) >= 90 ? 120 : 60
-    guard let stream = makeStream(key: key, kind: .window, display: display, size: size, maxFps: maxFps, bounds: bounds) else { return }
+    let normalizedGroup = group.isEmpty ? [id] : group
+    guard let stream = makeStream(key: key, kind: .window, windowID: id, group: normalizedGroup, display: display, size: size, maxFps: maxFps, bounds: bounds) else { return }
     stream.focused = true
     apply(stream)
-    stream.capturer.start(fusionDisplay: display, rootWindow: id, windowIDs: group.isEmpty ? [id] : group, width: size.width, height: size.height, fps: fps(stream)) { [weak self] error in
-      DispatchQueue.main.async {
-        guard let error else { return }
-        self?.onStreamError?(key, "窗口画面无法采集：\(error)")
-      }
-    }
+    startStreamCapture(stream)
     wantOffer()
   }
 
@@ -167,19 +172,15 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     let size = display.pictureSize(maxWidth: width)
     guard let stream = makeStream(key: key, kind: .overlay, display: display, size: size, maxFps: 60, bounds: { CGDisplayBounds(display.id) }) else { return }
     apply(stream)
-    stream.capturer.start(display: display, width: size.width, height: size.height, fps: fps(stream)) { [weak self] error in
-      DispatchQueue.main.async {
-        guard let error else { return }
-        self?.onStreamError?(key, "弹出菜单画面无法采集：\(error)")
-      }
-    }
-    stream.capturer.refreshDisplayFilterNow(idle: true)
+    startStreamCapture(stream)
     wantOffer()
   }
 
   func closeStream(_ key: String) {
     guard let stream = streams.removeValue(forKey: key) else { return }
     stream.boost?.cancel()
+    stream.restartTimer?.cancel()
+    stream.restartTimer = nil
     stream.control.releaseAll()
     stream.capturer.stop()
     stream.transceiver.sender.track = nil
@@ -192,7 +193,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     wantOffer()
   }
 
-  private func makeStream(key: String, kind: Kind, display: Display, size: (width: Int, height: Int), maxFps: Int, bounds: @escaping () -> CGRect) -> Stream? {
+  private func makeStream(key: String, kind: Kind, windowID: CGWindowID = 0, group: Set<CGWindowID> = [], display: Display, size: (width: Int, height: Int), maxFps: Int, bounds: @escaping () -> CGRect) -> Stream? {
     guard let connection else { return nil }
     let source = factory.videoSource(forScreenCast: true)
     let track = factory.videoTrack(with: source, trackId: key)
@@ -216,19 +217,81 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
       transceiver = added
     }
     let capturer = ScreenCapturer(delegate: source)
-    capturer.onStop = { [weak self] reason in
-      DispatchQueue.main.async { self?.onStreamError?(key, "画面采集已停止：\(reason)") }
-    }
     let control = Control(id: key, link: Self.quiet, bounds: bounds)
-    let stream = Stream(key: key, kind: kind, transceiver: transceiver, source: source, capturer: capturer,
-                        control: control, display: display, size: size, maxFps: maxFps)
+    let stream = Stream(key: key, kind: kind, windowID: windowID, group: group, transceiver: transceiver,
+                        source: source, capturer: capturer, control: control, display: display, size: size, maxFps: maxFps)
     streams[key] = stream
     return stream
+  }
+
+  private func startStreamCapture(_ stream: Stream) {
+    let key = stream.key
+    let capturer = stream.capturer
+    stream.sourceStartedAt = CACurrentMediaTime()
+    capturer.onPicture = { [weak self, weak stream, weak capturer] _, _ in
+      DispatchQueue.main.async {
+        guard let self, !self.closed, let stream, stream.capturer === capturer, stream.failures > 0 else { return }
+        stream.failures = 0
+        self.onStreamRecovered?(key)
+      }
+    }
+    capturer.onStop = { [weak self, weak capturer] reason in
+      DispatchQueue.main.async {
+        guard let self, let current = self.streams[key], current.capturer === capturer else { return }
+        self.handleCaptureStop(stream: current, reason: reason)
+      }
+    }
+    switch stream.kind {
+    case .window:
+      let group = stream.group.isEmpty ? [stream.windowID] : stream.group
+      capturer.start(fusionDisplay: stream.display, rootWindow: stream.windowID, windowIDs: group,
+                     width: stream.size.width, height: stream.size.height, fps: fps(stream)) { [weak self, weak capturer] error in
+        DispatchQueue.main.async {
+          guard let error, let self, let current = self.streams[key], current.capturer === capturer else { return }
+          self.handleCaptureStop(stream: current, reason: error)
+        }
+      }
+    case .overlay:
+      capturer.start(display: stream.display, width: stream.size.width, height: stream.size.height, fps: fps(stream)) { [weak self, weak capturer] error in
+        DispatchQueue.main.async {
+          guard let error, let self, let current = self.streams[key], current.capturer === capturer else { return }
+          self.handleCaptureStop(stream: current, reason: error)
+        }
+      }
+      capturer.refreshDisplayFilterNow(idle: !stream.overlayActive)
+    }
+  }
+
+  /// macOS `replayd` can interrupt an active `SCStream` transiently: restart it with backoff, and
+  /// only surface an error alert if repeated restarts fail to hold.
+  private func handleCaptureStop(stream: Stream, reason: String) {
+    guard !closed, streams[stream.key] === stream, stream.restartTimer == nil else { return }
+    let key = stream.key
+    stream.failures = CACurrentMediaTime() - stream.sourceStartedAt > 20.0 ? 1 : stream.failures + 1
+    guard stream.failures <= 5 else {
+      onStreamError?(key, "画面采集已停止：\(reason)")
+      return
+    }
+    Fusion.log("media: \(key) capture ended (\(reason)); restarting (\(stream.failures))")
+    let delay = min(8.0, 0.5 * pow(2.0, Double(stream.failures - 1)))
+    let timer = DispatchSource.makeTimerSource(queue: .main)
+    timer.schedule(deadline: .now() + delay)
+    timer.setEventHandler { [weak self, weak stream] in
+      guard let self, !self.closed, let stream, self.streams[key] === stream else { return }
+      stream.restartTimer?.cancel()
+      stream.restartTimer = nil
+      stream.capturer.stop()
+      stream.capturer = ScreenCapturer(delegate: stream.source)
+      self.startStreamCapture(stream)
+    }
+    timer.resume()
+    stream.restartTimer = timer
   }
 
   /// A window moved to another virtual display: same sender, new capture size.
   func moveWindow(_ key: String, to display: Display, group: Set<CGWindowID>) {
     guard let stream = streams[key], stream.kind == .window else { return }
+    stream.group = group
     stream.display = display
     stream.size = display.pictureSize(maxWidth: min(display.pixelWidth, 5120))
     stream.maxFps = Self.refreshRate(display) >= 90 ? 120 : 60
@@ -238,6 +301,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
   }
 
   func updateGroup(_ key: String, _ group: Set<CGWindowID>) {
+    streams[key]?.group = group
     streams[key]?.capturer.updateFusionWindowGroup(group)
   }
 
@@ -344,6 +408,9 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
           guard let self, !self.closed else { return }
           if let error { Fusion.log("media: the answer was not taken: \(error.localizedDescription)") }
           self.negotiating = false
+          if self.connection?.connectionState == .connected {
+            self.streams.values.forEach { $0.capturer.resendLatest() }
+          }
           if self.offerWanted { self.wantOffer() }
         }
       }
@@ -531,6 +598,7 @@ final class FusionMedia: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
         self.everConnected = true
         self.restartTimer?.cancel()
         self.restartTimer = nil
+        self.streams.values.forEach { $0.capturer.resendLatest() }
       }
       if [.disconnected, .failed, .closed].contains(newState) { self.releaseAll() }
     }

@@ -73,6 +73,8 @@ extension FusionLocal {
     client.pid = pid
     client.port = port
     let wasExplicitLaunch = launchingStubs.remove(bundle) != nil
+    launchingStubAt.removeValue(forKey: bundle)
+    exitingStubPids.removeValue(forKey: bundle)
     if !wasExplicitLaunch, isQuitting(bundle) {
       client.closedByHub = true
       client.send(["t": "app.exited"])
@@ -116,8 +118,14 @@ extension FusionLocal {
           "t": "wopen", "id": Int(rec.id), "title": rec.title, "toolbar": rec.toolbar, "r": rec.cornerRadius,
           "frame": Fusion.dict(rec.frame), "control": ctrl, "keys": keys,
           "buttons": rec.buttons, "hitrects": rec.hitrects, "ack": rec.ackSeq,
-          "activate": false,
+          "activate": wasExplicitLaunch || rec.activate,
         ])
+        fastLock.lock()
+        let cachedFrame = latestWindowFrames[rec.id]
+        fastLock.unlock()
+        if let (buffer, surface, meta) = cachedFrame {
+          client.deliver(windowKey: rec.id, buffer: buffer, surface: surface, metadata: meta)
+        }
       }
     }
     reloadGrid()
@@ -135,7 +143,10 @@ extension FusionLocal {
     fastDisplays = displays
     fastQuitting = quittingBundles
     fastWindows = winSnap
-    for wid in removedWindowIDs { fastWindowSEI.removeValue(forKey: wid) }
+    for wid in removedWindowIDs {
+      fastWindowSEI.removeValue(forKey: wid)
+      latestWindowFrames.removeValue(forKey: wid)
+    }
     fastLock.unlock()
   }
 
@@ -176,6 +187,7 @@ extension FusionLocal {
     guard !bundle.isEmpty else { return }
     quittingBundles[bundle] = CACurrentMediaTime() + 6.0
     launchingStubs.remove(bundle)
+    launchingStubAt.removeValue(forKey: bundle)
     wire?.send(["t": "quit", "app": bundle, "force": force])
     reloadGrid()
     saveCatalogToDisk()
@@ -215,7 +227,7 @@ extension FusionLocal {
         quittingBundles.removeValue(forKey: client.bundle)
         syncFastState()
         let now = CACurrentMediaTime()
-        if now - (launchSentAt[client.bundle] ?? 0) >= 2.0 {
+        if now - (launchSentAt[client.bundle] ?? 0) >= 0.35 {
           launchSentAt[client.bundle] = now
           wire?.send(["t": "launch", "app": client.bundle])
         }

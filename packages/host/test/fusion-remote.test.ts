@@ -246,4 +246,60 @@ describe("Fusion remote in the host (simulated platform)", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(platform.clipboard?.text).toBe("from the Mac");
   }, 30_000);
+
+  it("keeps an app fused across a Profile Picker → main window handoff, and ignores unauthenticated probes", async () => {
+    class HandoffPlatform extends SimulatedFusionPlatform {
+      private currentWindows: Array<{ id: number; pid: number; app: string; title: string; rect: { x: number; y: number; w: number; h: number }; monitor: number; popup: boolean }> = [];
+      private onChange?: (w: typeof this.currentWindows) => void;
+      readonly fusedNow = new Set<string>();
+      override watch(onWindows: (w: typeof this.currentWindows) => void): void {
+        this.onChange = onWindows;
+        onWindows(this.currentWindows.filter((w) => this.fusedNow.has(w.app)));
+      }
+      override setFused(apps: string[]): void {
+        this.fusedNow.clear();
+        for (const app of apps) this.fusedNow.add(app);
+        this.onChange?.(this.currentWindows.filter((w) => this.fusedNow.has(w.app)));
+      }
+      override async launch(app: string): Promise<void> {
+        this.currentWindows = [{ id: 5001, pid: 42, app, title: "选择 Chrome 用户资料", rect: { x: 100, y: 100, w: 720, h: 520 }, monitor: 0, popup: false }];
+        this.onChange?.(this.currentWindows.filter((w) => this.fusedNow.has(w.app)));
+      }
+      setWindows(next: typeof this.currentWindows): void {
+        this.currentWindows = next;
+        this.onChange?.(this.currentWindows.filter((w) => this.fusedNow.has(w.app)));
+      }
+      override windowVideo(): { stop(): void } { return { stop() {} }; }
+      override monitorVideo(): { stop(): void } { return { stop() {} }; }
+    }
+
+    const platform = new HandoffPlatform();
+    const remote = new FusionNodeRemote(platform, { log: () => {}, port: 0 });
+    cleanups.push(() => remote.stop());
+    const port = await remote.issue("tok-handoff", []);
+    const local = new Local(port, "tok-handoff");
+    cleanups.push(() => local.close());
+    await local.next((m) => m.t === "ready");
+
+    local.connection.send({ t: "launch", app: SIMULATED_APP });
+    const picker = await local.next((m) => m.t === "wopen" && m.id === 5001);
+    expect(picker.title).toBe("选择 Chrome 用户资料");
+
+    // An unauthenticated TLS probe connects and drops without `hello`: active `fused` must survive.
+    const stray = connectFusion("127.0.0.1", port, "tok-handoff");
+    await new Promise<void>((resolve) => { stray.onReady = () => { stray.close(); resolve(); }; stray.onClose = () => resolve(); });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(platform.fusedNow.has(SIMULATED_APP)).toBe(true);
+
+    // Picker closes on its own after profile selection; 350 ms later the profile browser window opens.
+    platform.setWindows([]);
+    await local.next((m) => m.t === "wclose" && m.id === 5001);
+    await new Promise((r) => setTimeout(r, 350));
+    expect(local.messages.some((m) => m.t === "app.exited")).toBe(false);
+
+    platform.setWindows([{ id: 5002, pid: 42, app: SIMULATED_APP, title: "新标签页 - Google Chrome", rect: { x: 120, y: 80, w: 1280, h: 820 }, monitor: 0, popup: false }]);
+    const browserWin = await local.next((m) => m.t === "wopen" && m.id === 5002);
+    expect(browserWin).toMatchObject({ id: 5002, app: SIMULATED_APP, title: "新标签页 - Google Chrome" });
+    expect(local.messages.some((m) => m.t === "app.exited")).toBe(false);
+  });
 });

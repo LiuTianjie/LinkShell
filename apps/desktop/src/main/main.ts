@@ -1196,16 +1196,19 @@ async function readCachedFusionState(name: string, hostSlug: string, computerKey
     }
   } catch { /* No icon cache yet. */ }
 
+  const isOwnFusionBundle = (bundle: unknown) =>
+    typeof bundle === "string" && (bundle.startsWith("LinkShell.") || bundle.startsWith("com.bd.linkshell."));
   try {
     const raw = JSON.parse(await readFile(join(iconDir, "catalog.json"), "utf8")) as {
       apps?: Array<Record<string, unknown>>;
       appsDir?: string;
     };
-    if (Array.isArray(raw.apps) && raw.apps.length > 0) {
+    const filtered = Array.isArray(raw.apps) ? raw.apps.filter((item) => !isOwnFusionBundle(item?.bundle)) : [];
+    if (filtered.length > 0) {
       return {
         appsDir: typeof raw.appsDir === "string" && raw.appsDir ? raw.appsDir : appsDir,
         iconBundles,
-        apps: raw.apps,
+        apps: filtered,
       };
     }
   } catch { /* Fallback to scanning materialized Stub bundles if catalog.json is not written yet. */ }
@@ -1224,7 +1227,7 @@ async function readCachedFusionState(name: string, hostSlug: string, computerKey
           return m?.[1]?.trim() ?? "";
         };
         const bundle = field("LSFusionBundleID");
-        if (!bundle) continue;
+        if (!bundle || isOwnFusionBundle(bundle)) continue;
         const display = field("CFBundleDisplayName") || entry.slice(0, -4);
         const cleanName = display.endsWith(suffix) ? display.slice(0, -suffix.length) : display;
         const rawCategory = field("LSApplicationCategoryType");

@@ -44,6 +44,9 @@ extension FusionRemoteSession {
       Fusion.log("\(key): \(message)")
       self?.wire.send(["t": "alert", "kind": "webrtc", "subject": key, "message": message])
     }
+    media.onStreamRecovered = { [weak self] key in
+      self?.wire.send(["t": "alert", "kind": "webrtc", "subject": key, "clear": true])
+    }
     self.media = media
     media.start()
     for mirror in mirrors { openOverlay(mirror) }
@@ -128,6 +131,7 @@ extension FusionRemoteSession {
     nonAXWindowStamps[id] = nil
     rescuingWindowIDs[id] = nil
     offDisplayStamps[id] = nil
+    spaceRescueStamps[id] = nil
     axDeferStamps[id] = nil
     placeLock.lock()
     pendingPlaces[id] = nil

@@ -56,10 +56,14 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
 
   private static let contentLock = NSLock()
   private static var cachedContent: (content: SCShareableContent, at: Double)?
+  private static var contentQueryRunning = false
   private static var contentWaiters: [(SCShareableContent?, Error?) -> Void] = []
+  private static var nextContentWaiters: [(SCShareableContent?, Error?) -> Void] = []
 
   /// Single-flight `SCShareableContent` coalescer so concurrent streams and filter refreshes
-  /// never pile up XPC requests inside macOS `replayd`.
+  /// never pile up XPC requests inside macOS `replayd`. A `maxAge == 0` caller that arrives while
+  /// an earlier query is already in flight joins the next wave so it never gets a snapshot taken
+  /// before its newly created window existed!
   static func fetchShareableContent(maxAge: Double = 0.08, completion: @escaping (SCShareableContent?, Error?) -> Void) {
     let now = CACurrentMediaTime()
     contentLock.lock()
@@ -69,19 +73,35 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
       completion(val, nil)
       return
     }
-    let isFirst = contentWaiters.isEmpty
+    if contentQueryRunning {
+      if maxAge <= 0 {
+        nextContentWaiters.append(completion)
+      } else {
+        contentWaiters.append(completion)
+      }
+      contentLock.unlock()
+      return
+    }
+    contentQueryRunning = true
     contentWaiters.append(completion)
     contentLock.unlock()
-    guard isFirst else { return }
+    runContentQuery()
+  }
+
+  private static func runContentQuery() {
     SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { content, error in
       contentLock.lock()
       if let content {
         cachedContent = (content, CACurrentMediaTime())
       }
       let waiters = contentWaiters
-      contentWaiters.removeAll()
+      contentWaiters = nextContentWaiters
+      nextContentWaiters.removeAll()
+      let runAgain = !contentWaiters.isEmpty
+      if !runAgain { contentQueryRunning = false }
       contentLock.unlock()
       for w in waiters { w(content, error) }
+      if runAgain { runContentQuery() }
     }
   }
 
@@ -211,7 +231,35 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
             guard !self.stopped else { self.stopStream(); return done("the capture was stopped") }
             self.configuration = configuration
             if self.timer == nil { self.startRepeating() }
+            if !group.contains(where: { $0.windowID == self.windowID }) {
+              self.retryMissingRootWindowFilter(attempt: 0)
+            }
             done(nil)
+          }
+        }
+      }
+    }
+  }
+
+  /// `replayd` can lag WindowServer by tens of milliseconds on a brand-new `CGWindowID`: refresh
+  /// `exceptingWindows` until the root window appears so the stream never stays empty.
+  private func retryMissingRootWindowFilter(attempt: Int) {
+    let delays: [Double] = [0.08, 0.2, 0.5, 1.2]
+    guard attempt < delays.count else { return }
+    queue.asyncAfter(deadline: .now() + delays[attempt]) { [weak self] in
+      guard let self, !self.stopped, self.windowID != 0, self.stream != nil else { return }
+      let displayID = self.displayID
+      Self.fetchShareableContent(maxAge: 0) { content, _ in
+        self.queue.async {
+          guard !self.stopped, let content, let stream = self.stream,
+                let target = content.displays.first(where: { $0.displayID == displayID }) else { return }
+          let group = content.windows.filter { self.fusionGroupIDs.contains($0.windowID) }
+          self.lastExcludedPIDs = Set(content.applications.map(\.processID))
+          let filter = SCContentFilter(display: target, excludingApplications: content.applications, exceptingWindows: group)
+          if #available(macOS 14.2, *) { filter.includeMenuBar = false }
+          stream.updateContentFilter(filter) { _ in }
+          if !group.contains(where: { $0.windowID == self.windowID }) {
+            self.retryMissingRootWindowFilter(attempt: attempt + 1)
           }
         }
       }
@@ -275,6 +323,23 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
       self.configuration = nil
       previous?.stopCapture { _ in }
       self.startFusionGroupStream(displayID: display.id, width: width, height: height) { _ in }
+    }
+  }
+
+  /// Re-sends the latest captured frame once WebRTC connects or finishes answering, so an idle
+  /// overlay (`d0`) or still window that captured its initial frame before ICE connected delivers
+  /// a picture right away instead of going silent.
+  func resendLatest() {
+    queue.async {
+      guard !self.stopped else { return }
+      self.initialRepeatsSent = 0
+      guard let last = self.last else { return }
+      let now = HostClock.nanoseconds()
+      if self.windowID == 0 {
+        Self.fusionAnnotate?(self.displayID, last, mach_absolute_time())
+      }
+      self.counts.repeated += 1
+      self.send(last, at: now, now: now)
     }
   }
 

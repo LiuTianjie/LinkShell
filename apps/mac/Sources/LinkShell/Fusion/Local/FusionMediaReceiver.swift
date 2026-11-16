@@ -132,7 +132,10 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
       self?.queue.async { [weak self] in self?.status(status) }
     }, onFailure: { [weak self] message in
       Fusion.log("media: decoder failed: \(message)")
-      self?.queue.async { [weak self] in self?.status(["decoderError": message]) }
+      self?.queue.async { [weak self] in
+        self?.status(["decoderError": message])
+        self?.fail(message)
+      }
     })
     guard !decoder.supportedCodecs().isEmpty else { return fail("此 Mac 不支持远程桌面硬件解码") }
     let factory = RTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: decoder)
@@ -282,7 +285,11 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
   private func checkConnection() {
     guard !closed else { return }
     let now = CACurrentMediaTime()
-    if !receivedAny, !outputs.isEmpty, now - startedAt > 25 { return fail("融合视频连接超时，请检查网络后重新连接") }
+    let hasWindow = outputs.keys.contains { $0.hasPrefix("w") }
+    let iceUp = peer?.iceConnectionState == .connected || peer?.iceConnectionState == .completed
+    if !receivedAny, !outputs.isEmpty, (!iceUp || hasWindow), now - startedAt > 25 {
+      return fail("融合视频连接超时，请检查网络后重新连接")
+    }
     if let disconnectedAt, now - disconnectedAt > 6 { fail("融合视频连接已中断") }
   }
 
@@ -350,7 +357,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
       }
       self.channels[dataChannel.label] = dataChannel
       dataChannel.delegate = self
-      if dataChannel.label == "input", self.receivedAny { self.requestControl() }
+      if dataChannel.label == "input", dataChannel.readyState == .open { self.requestControl() }
       self.outputs.keys.forEach(self.publishControl)
     }
   }
@@ -379,7 +386,7 @@ final class FusionMediaReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataCha
   func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
     queue.async {
       guard !self.closed, self.channels[dataChannel.label] === dataChannel else { return }
-      if dataChannel.label == "input", dataChannel.readyState == .open, self.receivedAny { self.requestControl() }
+      if dataChannel.label == "input", dataChannel.readyState == .open { self.requestControl() }
       self.outputs.keys.forEach(self.publishControl)
     }
   }

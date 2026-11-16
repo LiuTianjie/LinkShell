@@ -68,6 +68,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
     var ackSeq: Int
     /// Its stream key on the shared media connection (`wopen.stream`).
     var stream: String
+    var activate: Bool
   }
 
   struct PopupRecord {
@@ -118,6 +119,8 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   var pendingStubs: [Int32: StubClient] = [:]
   var stubs: [String: StubClient] = [:]
   var launchingStubs: Set<String> = []
+  var launchingStubAt: [String: Double] = [:]
+  var exitingStubPids: [String: (pid: pid_t, at: Double)] = [:]
   var stubHadRealIconOnLaunch: Set<String> = []
   var launchSentAt: [String: Double] = [:]
   var quittingBundles: [String: Double] = [:]
@@ -156,6 +159,7 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   var fastDisplays: [Int: (local: CGRect, scale: Int)] = [:]
   var fastQuitting: [String: Double] = [:]
   var fastWindowSEI: [CGWindowID: [Double]] = [:]
+  var latestWindowFrames: [CGWindowID: (CVPixelBuffer, IOSurface, Data)] = [:]
 
   // State & disk caches for LinkShell Desktop's embedded Fusion tab
   let uiIconCacheDir: URL
@@ -627,9 +631,14 @@ extension FusionLocal {
       if let bundle = m["app"] as? String {
         quittingBundles.removeValue(forKey: bundle)
         purgeLocalState(forBundle: bundle)
-        if let stub = stubs[bundle] {
+        if let stub = stubs.removeValue(forKey: bundle) {
+          exitingStubPids[bundle] = (stub.pid, CACurrentMediaTime())
+          stubHadRealIconOnLaunch.remove(bundle)
+          setStubActive(bundle, false)
           stub.closedByHub = true
           stub.send(["t": "app.exited"])
+          stub.close()
+          syncFastState()
         }
         reloadGrid()
         refreshStatus()
@@ -680,7 +689,8 @@ extension FusionLocal {
 
   static func parseApps(_ raw: Any?) -> [AppEntry] {
     ((raw as? [[String: Any]]) ?? []).compactMap { item in
-      guard let bundle = item["app"] as? String, !bundle.isEmpty else { return nil }
+      guard let bundle = item["app"] as? String, !bundle.isEmpty,
+            !bundle.hasPrefix("LinkShell."), !bundle.hasPrefix("com.bd.linkshell.") else { return nil }
       let rawCat = item["category"] as? String ?? ""
       return AppEntry(
         name: item["name"] as? String ?? "",
@@ -843,6 +853,9 @@ extension FusionLocal {
     lastWindowSEI.removeAll()
     popups.removeAll()
     shownPopupsByDisplay.removeAll()
+    fastLock.lock()
+    latestWindowFrames.removeAll()
+    fastLock.unlock()
     for stub in stubs.values {
       stub.closedByHub = true
       stub.send(["t": "app.exited"])

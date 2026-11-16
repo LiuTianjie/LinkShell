@@ -36,8 +36,9 @@ final class FusionRemoteSession: @unchecked Sendable {
     let exists: Bool
     let isStandardRoot: Bool
     let checkedAt: Double
-    /// Times running that Accessibility did not list it.
+    /// Times running that Accessibility did not list it, or listed it before titlebar buttons attached.
     var misses = 0
+    var rechecks = 0
   }
 
   struct PendingPlace {
@@ -65,6 +66,7 @@ final class FusionRemoteSession: @unchecked Sendable {
   var media: FusionMedia?
   var mirrors: [Mirror] = []
   var pidToBundle: [pid_t: String] = [:]
+  var fusedBundles: Set<String> = []
   var fused: Set<pid_t> = [] { didSet { sampler.set(pids: fused) } }
   var moved: Set<CGWindowID> = []
   /// Where each window this session moved was before it, so `end()` can put it back.
@@ -115,6 +117,8 @@ final class FusionRemoteSession: @unchecked Sendable {
   var restartAfterRebuild = false
   /// When a shown window was last brought back onto a virtual display.
   var offDisplayStamps: [CGWindowID: Double] = [:]
+  /// When a shown window vanished from `.optionOnScreenOnly` while still alive in `kAXWindowsAttribute` (e.g. another Space).
+  var spaceRescueStamps: [CGWindowID: Double] = [:]
   /// When a shown, off-screen window's app first failed to answer AX.
   var axDeferStamps: [CGWindowID: Double] = [:]
   var onAuthenticated: (() -> Void)?
@@ -253,6 +257,15 @@ extension FusionRemoteSession {
       guard let self, !self.ended else { return }
       let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
       guard app?.activationPolicy != .prohibited else { return }
+      if let app, let bundle = app.bundleIdentifier, self.fusedBundles.contains(bundle) {
+        let pid = app.processIdentifier
+        self.pidToBundle[pid] = bundle
+        self.fused.insert(pid)
+        self.noteUserAction(pid: pid)
+        Fusion.log("adopted relaunched process \(bundle) (\(pid))")
+        self.track()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.rescueOffDesktopWindows() }
+      }
       self.media?.refreshGroupApps()
     })
     workspaceObservers.append(wsCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
@@ -446,6 +459,8 @@ extension FusionRemoteSession {
     media = nil
     restoreWindows()
     streams.removeAll()
+    fusedBundles.removeAll()
+    spaceRescueStamps.removeAll()
     if dockHiddenByUs { FusionDock.restore(home: Self.home); dockHiddenByUs = false }
     mirrors.removeAll()
     statusItem?.remove()

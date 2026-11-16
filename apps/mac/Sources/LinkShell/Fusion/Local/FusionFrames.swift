@@ -45,14 +45,13 @@ extension FusionLocal {
     let buttons = chrome.buttons
     let hitrects = chrome.hitrects
     let key = m["stream"] as? String ?? "w\(id)"
-    windows[id] = WindowRecord(
-      id: id, bundle: bundle, title: title, toolbar: toolbar, cornerRadius: radius,
-      frame: frame, buttons: buttons, hitrects: hitrects, ackSeq: 0, stream: key
-    )
-
     // Only a window that follows something the person did in that app takes the focus here;
     // windows replayed on reconnect or opened by the app on its own never steal it.
     let activate = m["activate"] as? Bool == true
+    windows[id] = WindowRecord(
+      id: id, bundle: bundle, title: title, toolbar: toolbar, cornerRadius: radius,
+      frame: frame, buttons: buttons, hitrects: hitrects, ackSeq: 0, stream: key, activate: activate
+    )
     receiver(key) { [weak self] buffer, sei in
       self?.handleWindowPicture(id: id, key: key, buffer: buffer, sei: sei)
     }
@@ -183,10 +182,9 @@ extension FusionLocal {
 
   func handleWindowPictureFast(id: CGWindowID, key: String, buffer: CVPixelBuffer, sei: Data?) {
     let parsedSEI = sei.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [Double] }
-    let now = CACurrentMediaTime()
     fastLock.lock()
     guard let winInfo = fastWindows[id], !winInfo.bundle.isEmpty else { fastLock.unlock(); return }
-    guard let stub = fastStubs[winInfo.bundle] else { fastLock.unlock(); return }
+    let stub = fastStubs[winInfo.bundle]
     var resolved: [Double]?
     // A reused transceiver may still deliver what it carried before: another window (its id is in
     // the frame) or a popup layer (whose metadata is a list of windows, not one window).
@@ -233,7 +231,14 @@ extension FusionLocal {
       "fack": fack,
     ]
     guard let meta = try? JSONSerialization.data(withJSONObject: metaObj), meta.count < 1024 else { return }
-    stub.deliver(windowKey: id, buffer: buffer, surface: surface, metadata: meta)
+    // Keep the newest cropped frame per window even while its Stub `.app` is still launching or
+    // signing on disk: a still remote window (e.g. Windows gfxcapture) may not send another frame!
+    fastLock.lock()
+    if fastWindows[id] != nil {
+      latestWindowFrames[id] = (buffer, surface, meta)
+    }
+    fastLock.unlock()
+    stub?.deliver(windowKey: id, buffer: buffer, surface: surface, metadata: meta)
   }
 
   func handleWindowPicture(id: CGWindowID, key: String, buffer: CVPixelBuffer, sei: Data?) {

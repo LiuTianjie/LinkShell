@@ -559,6 +559,7 @@ bridge?.onMessage((message) => {
       const view = views.get(key);
       views.delete(key);
       view?.releaseAll();
+      view?.detach();
       return;
     }
     case "popups":

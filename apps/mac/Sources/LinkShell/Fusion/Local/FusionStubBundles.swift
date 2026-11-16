@@ -231,13 +231,25 @@ extension FusionLocal {
   /// the main thread that routes frames and control messages, and never twice at once for a bundle.
   func ensureStubRunning(bundle: String, activate: Bool) {
     if let active = stubs[bundle] {
-      if activate, let running = NSRunningApplication(processIdentifier: active.pid) {
-        running.activate(options: [.activateIgnoringOtherApps])
+      if active.closed || FusionProtocol.processEnded(active.pid) {
+        stubs.removeValue(forKey: bundle)
+        setStubActive(bundle, false)
+        syncFastState()
+      } else {
+        if activate {
+          if let running = NSRunningApplication(processIdentifier: active.pid) {
+            _ = running.activate(options: [.activateIgnoringOtherApps])
+          }
+          active.send(["t": "activate"])
+        }
+        return
       }
-      return
     }
-    guard !launchingStubs.contains(bundle) else { return }
+    let now = CACurrentMediaTime()
+    if launchingStubs.contains(bundle), now - (launchingStubAt[bundle] ?? 0) < 6.0 { return }
     launchingStubs.insert(bundle)
+    launchingStubAt[bundle] = now
+    let launchStamp = now
     let entry = apps.first(where: { $0.bundle == bundle }) ?? AppEntry(name: bundle.split(separator: ".").last.map(String.init) ?? bundle, bundle: bundle, rawCategory: "", category: "其他", isSystem: false)
     let cached: ResolvedIcon? = (realIconBundles.contains(bundle) ? icons[bundle] : nil).map {
       ResolvedIcon(image: $0, isReal: true, hash: iconHashes[bundle] ?? "cached", png: iconPNGs[bundle], fromCache: false)
@@ -254,22 +266,51 @@ extension FusionLocal {
         iconHash: resolved.hash,
         preserveRunningBinary: false
       )
-      DispatchQueue.main.async {
+      DispatchQueue.main.async { [self] in
         self.adopt(resolved, for: bundle)
         guard let appURL, self.launchingStubs.contains(bundle) else {
           self.launchingStubs.remove(bundle)
+          self.launchingStubAt.removeValue(forKey: bundle)
           return
         }
         if resolved.isReal { self.stubHadRealIconOnLaunch.insert(bundle) }
         self.stubURLs[bundle] = appURL
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = activate
-        NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { [weak self] _, error in
+        // If a previous Stub process for this bundle just received `app.exited` and is still inside
+        // `NSApp.terminate(nil)`, LaunchServices would hand a normal open to the dying process and
+        // never spawn a new one: force a fresh instance when the exiting PID is still alive.
+        if let exiting = self.exitingStubPids[bundle],
+           CACurrentMediaTime() - exiting.at < 3.0,
+           !FusionProtocol.processEnded(exiting.pid) {
+          cfg.createsNewApplicationInstance = true
+        }
+        NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { [weak self] app, error in
           DispatchQueue.main.async {
+            guard let self else { return }
             if let error {
               Fusion.log("failed to launch stub \(appURL.path): \(error.localizedDescription)")
-              self?.launchingStubs.remove(bundle)
+              self.launchingStubs.remove(bundle)
+              self.launchingStubAt.removeValue(forKey: bundle)
+              return
             }
+            if let app, app.isTerminated {
+              Fusion.log("stub \(appURL.lastPathComponent) was already terminating on launch; retrying")
+              self.launchingStubs.remove(bundle)
+              self.launchingStubAt.removeValue(forKey: bundle)
+              if self.connected, self.windows.values.contains(where: { $0.bundle == bundle }) {
+                self.relaunchStubAfterCrash(bundle)
+              }
+            }
+          }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+          guard let self, self.launchingStubAt[bundle] == launchStamp, self.stubs[bundle] == nil else { return }
+          Fusion.log("stub \(bundle) did not register within 6 s; clearing launch lock")
+          self.launchingStubs.remove(bundle)
+          self.launchingStubAt.removeValue(forKey: bundle)
+          if self.connected, self.windows.values.contains(where: { $0.bundle == bundle }) {
+            self.relaunchStubAfterCrash(bundle)
           }
         }
       }
@@ -326,7 +367,8 @@ extension FusionLocal {
       for appURL in items where appURL.pathExtension == "app" {
         let plistURL = appURL.appendingPathComponent("Contents/Info.plist")
         if let dict = NSDictionary(contentsOf: plistURL) as? [String: Any],
-           let bundle = dict["LSFusionBundleID"] as? String, !bundle.isEmpty {
+           let bundle = dict["LSFusionBundleID"] as? String, !bundle.isEmpty,
+           !bundle.hasPrefix("LinkShell."), !bundle.hasPrefix("com.bd.linkshell.") {
           existingStubBundles.insert(bundle)
           stubURLs[bundle] = appURL
         }
@@ -442,6 +484,7 @@ extension FusionLocal {
     _ = icnsURL
 
     let existingPlist = NSDictionary(contentsOf: plistURL) as? [String: Any]
+    let existingBundle = (existingPlist?["LSFusionBundleID"] as? String) ?? ""
     let existingSchema = (existingPlist?["LSFusionIconSchema"] as? Int) ?? 0
     let existingReal = (existingPlist?["LSFusionRealIcon"] as? Bool) == true
     let existingHash = (existingPlist?["LSFusionIconHash"] as? String) ?? ""
@@ -457,7 +500,8 @@ extension FusionLocal {
       && existingReal == isRealIcon
       && (!isRealIcon || existingHash == iconHash)
     let hubPath = Self.preferredHubAppPath
-    let metaMatches = existingSocket == socketPath
+    let metaMatches = existingBundle == entry.bundle
+      && existingSocket == socketPath
       && existingHub == hubPath
       && (computerKey.isEmpty || existingCompKey == computerKey)
 

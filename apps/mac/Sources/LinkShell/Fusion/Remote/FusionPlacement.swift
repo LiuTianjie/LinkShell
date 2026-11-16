@@ -25,6 +25,7 @@ final class FusionSampler {
   var mirrors: [Mirror] = []
   var ring: [(time: UInt64, windows: [CGWindowID: Window])] = []
   var peakAlpha: [CGWindowID: Double] = [:]
+  var fadeStartedAt: [CGWindowID: UInt64] = [:]
   var previousVisibleIDs: Set<CGWindowID> = []
   var disappearancePending = false
   var onWindowDisappeared: (() -> Void)?
@@ -118,15 +119,25 @@ final class FusionSampler {
             let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.width > 1, frame.height > 1 else { continue }
       rawOnScreenIDs.insert(id)
       let alpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
-      let peak = max(peakAlpha[id] ?? 0, alpha)
-      peakAlpha[id] = peak
-      // Drop closing windows on Frame #1 of macOS's close fade-out (`1.0 -> 0.86 -> ... -> 0.0`)
-      // so `SCContentFilter` never composites a fading window over its black void background!
-      guard alpha > 0.05, alpha >= peak - 0.04 else { continue }
+      guard alpha > 0.05 else { continue }
+      let prevPeak = peakAlpha[id] ?? alpha
+      // Drop closing windows during macOS's ~150ms close fade-out (`1.0 -> 0.85 -> ... -> 0.0`),
+      // while adopting genuinely translucent windows (e.g. Ghostty / iTerm2 opacity) once settled!
+      if alpha < prevPeak - 0.04 && alpha < 0.88 {
+        let start = fadeStartedAt[id] ?? time
+        fadeStartedAt[id] = start
+        if HostClock.seconds(mach: time &- start) < 0.22 { continue }
+        peakAlpha[id] = alpha
+        fadeStartedAt[id] = nil
+      } else {
+        fadeStartedAt[id] = nil
+        peakAlpha[id] = alpha < prevPeak - 0.04 ? alpha : max(prevPeak, alpha)
+      }
       windows[id] = Window(id: id, pid: pid, layer: info[kCGWindowLayer as String] as? Int ?? 0, frame: frame)
     }
     if peakAlpha.count > rawOnScreenIDs.count {
       peakAlpha = peakAlpha.filter { rawOnScreenIDs.contains($0.key) }
+      fadeStartedAt = fadeStartedAt.filter { rawOnScreenIDs.contains($0.key) }
     }
     let currentIDs = Set(windows.keys)
     if !previousVisibleIDs.subtracting(currentIDs).isEmpty, !disappearancePending {

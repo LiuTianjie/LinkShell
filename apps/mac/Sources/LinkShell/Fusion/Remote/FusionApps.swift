@@ -24,7 +24,7 @@ extension FusionRemoteSession {
         let resolvedURL = rawURL.resolvingSymlinksInPath()
         guard let bundle = Bundle(url: resolvedURL) ?? Bundle(url: rawURL),
               let id = bundle.bundleIdentifier, !seen.contains(id),
-              id != "com.bd.linkshell.host", !id.hasPrefix("com.bd.linkshell."),
+              id != "com.bd.linkshell.host", !id.hasPrefix("com.bd.linkshell."), !id.hasPrefix("LinkShell."),
               bundle.object(forInfoDictionaryKey: "LSUIElement") as? Bool != true,
               bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool != true else { continue }
         seen.insert(id)
@@ -87,28 +87,85 @@ extension FusionRemoteSession {
     return rep.representation(using: .png, properties: [:])
   }
 
+  func resetWindowTracking(for pids: Set<pid_t>) {
+    guard !pids.isEmpty else { return }
+    let list = (CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+    var appWinIDs: Set<CGWindowID> = []
+    for info in list {
+      if let pid = info[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
+         let id = info[kCGWindowNumber as String] as? CGWindowID {
+        appWinIDs.insert(id)
+      }
+    }
+    for id in appWinIDs {
+      offDisplayStamps[id] = nil
+      spaceRescueStamps[id] = nil
+      peakWindowAlpha[id] = nil
+      if streams[id] == nil {
+        moved.remove(id)
+        if windowKinds[id]?.isStandardRoot != true { windowKinds[id] = nil }
+      }
+    }
+  }
+
   func launch(_ bundle: String) {
     guard let url = Self.resolvedApplicationURL(for: bundle) else {
       return wire.send(["t": "alert", "kind": "launch", "subject": bundle, "message": "远端 Mac 上找不到这个应用（\(bundle)）"])
+    }
+    fusedBundles.insert(bundle)
+    let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
+    let wasRunning = !existing.isEmpty
+    var existingPids: Set<pid_t> = []
+    for running in existing {
+      let pid = running.processIdentifier
+      existingPids.insert(pid)
+      if running.isHidden { _ = running.unhide() }
+      pidToBundle[pid] = bundle
+      fused.insert(pid)
+      noteUserAction(pid: pid)
+    }
+    resetWindowTracking(for: existingPids)
+    // When an app is already frontmost on the remote Mac with zero windows, `openApplication` alone
+    // may skip `applicationShouldHandleReopen`: yielding frontmost first makes AppKit deliver reopen.
+    if existing.contains(where: \.isActive) {
+      let hasAnyAXWindow = existing.contains { proc in
+        var ref: CFTypeRef?
+        return AXUIElementCopyAttributeValue(Self.axApp(proc.processIdentifier), kAXWindowsAttribute as CFString, &ref) == .success
+          && ((ref as? [AXUIElement])?.isEmpty == false)
+      }
+      if !hasAnyAXWindow { NSApp.activate(ignoringOtherApps: true) }
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
     NSWorkspace.shared.openApplication(at: url, configuration: configuration) { [weak self] app, error in
       DispatchQueue.main.async {
-        guard let self else { return }
+        guard let self, !self.ended else { return }
         guard let app else {
           Fusion.log("launch \(bundle) failed: \(error?.localizedDescription ?? "?")")
           self.wire.send(["t": "alert", "kind": "launch", "subject": bundle, "message": "远端应用启动失败：\(error?.localizedDescription ?? "未知原因")"])
           return
         }
         self.wire.send(["t": "alert", "kind": "launch", "subject": bundle, "clear": true])
-        self.pidToBundle[app.processIdentifier] = bundle
-        self.fused.insert(app.processIdentifier)
-        self.noteUserAction(pid: app.processIdentifier)
+        var allPids: Set<pid_t> = [app.processIdentifier]
+        for proc in NSRunningApplication.runningApplications(withBundleIdentifier: bundle) where !proc.isTerminated {
+          if proc.isHidden { _ = proc.unhide() }
+          self.pidToBundle[proc.processIdentifier] = bundle
+          self.fused.insert(proc.processIdentifier)
+          self.noteUserAction(pid: proc.processIdentifier)
+          allPids.insert(proc.processIdentifier)
+        }
+        self.resetWindowTracking(for: allPids)
         _ = app.activate(options: [.activateIgnoringOtherApps])
         Fusion.log("fused \(bundle) (\(app.processIdentifier))")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        self.track()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
           self?.rescueOffDesktopWindows()
+          self?.track()
+        }
+        if wasRunning {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self] in
+            self?.openNewWindowIfStillWindowless(bundle: bundle, preferredPid: app.processIdentifier)
+          }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
           self?.syncDockMenuIfNeeded(pid: app.processIdentifier, bundle: bundle, force: true)
@@ -117,7 +174,36 @@ extension FusionRemoteSession {
     }
   }
 
+  /// A running Mac app that stayed windowless after reopen (some background/Electron/browser states
+  /// ignore LaunchServices reopen from an accessory process): press its first "New Window" menu item.
+  private func openNewWindowIfStillWindowless(bundle: String, preferredPid: pid_t) {
+    guard !ended, fusedBundles.contains(bundle) else { return }
+    if streams.values.contains(where: { $0.app == bundle }) { return }
+    let pids = Array(Set([preferredPid] + fused.filter { pidToBundle[$0] == bundle }))
+    axQueue.async { [weak self] in
+      guard let self else { return }
+      for pid in pids {
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(Self.axApp(pid), kAXWindowsAttribute as CFString, &ref) == .success,
+           let wins = ref as? [AXUIElement], !wins.isEmpty {
+          DispatchQueue.main.async { [weak self] in self?.rescueOffDesktopWindows(); self?.track() }
+          return
+        }
+      }
+      let items = self.extractDockMenu(pid: preferredPid)
+      guard let action = items.first(where: { ($0["section"] as? String) == "action" }),
+            let path = (action["path"] as? [Any])?.compactMap({ ($0 as? Int) ?? ($0 as? NSNumber)?.intValue }),
+            path.count >= 2 else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.ended, self.streams.values.allSatisfy({ $0.app != bundle }) else { return }
+        Fusion.log("launch \(bundle): still 0 AX windows, pressing menu \(action["title"] ?? "New Window")")
+        self.performDockAction(bundle: bundle, path: path)
+      }
+    }
+  }
+
   func quit(_ bundle: String, force: Bool) {
+    fusedBundles.remove(bundle)
     let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
     if running.isEmpty {
       wire.send(["t": "app.exited", "app": bundle])
