@@ -7,6 +7,10 @@ import LinkShellFusionShim
 /// while the viewer watches. The desktop is laid out for it, so the picture fills the viewer's
 /// screen with no bars; whoever sits at the Mac sees the same desktop, with the bars there.
 ///
+/// A Mac with no screen attached has only the system's stand-in display, which goes the moment any
+/// other display exists: there the matched display is not mirrored, it simply is the desktop
+/// (`alone`), and the stand-in comes back, under a new number, when the viewer leaves.
+///
 /// One at a time, and it belongs to the viewer that asked. The display configuration is made for
 /// this app only (`.forAppOnly`): should the app end without undoing it, the system does.
 final class ScreenMatch {
@@ -72,9 +76,11 @@ final class ScreenMatch {
     return Array(ids.prefix(Int(count)))
   }
 
-  /// The display a match display stands in for, while it does.
+  /// The display a match display stands in for, while it does: itself, on a Mac whose only
+  /// display left when it came.
   static func watched(by id: CGDirectDisplayID) -> CGDirectDisplayID? {
-    current?.displayID == id ? current?.physical : nil
+    guard let current, current.displayID == id else { return nil }
+    return current.alone ? id : current.physical
   }
 
   private(set) static var current: ScreenMatch?
@@ -87,6 +93,8 @@ final class ScreenMatch {
   private var display: CGVirtualDisplay?
   private let log: (String) -> Void
   private var ended = false
+  /// The watched display left when this one came (a Mac with no screen): nothing mirrors it.
+  private(set) var alone = false
 
   var displayID: CGDirectDisplayID { display?.displayID ?? 0 }
 
@@ -129,21 +137,43 @@ final class ScreenMatch {
     }
     let match = ScreenMatch(physical: physical, size: size, display: display, log: log)
     current = match
+    // Not answered before the display has left the list: until then the watched display, on a Mac
+    // with no screen, has not come back, and a capture of the one that was there finds nothing.
+    let failed = {
+      match.end()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { ready(nil) }
+    }
+    let settled = {
+      // The window server finishes laying the desktop out before the capture looks for it.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { match.ended ? ready(nil) : ready(match) }
+    }
+    let gone = { !online().contains(physical) }
     // The display comes up a moment after it is made; mirroring one that is not there fails.
     match.wait(until: { online().contains(display.displayID) }, tries: 30) { up in
-      guard up, !match.ended else { match.end(); return ready(nil) }
-      guard match.mirror() else { match.end(); return ready(nil) }
-      match.wait(until: { CGDisplayMirrorsDisplay(physical) == display.displayID }, tries: 30) { mirrored in
-        guard mirrored, !match.ended else {
-          if !match.ended { log("the viewer's resolution is not matched: display \(physical) did not start mirroring") }
-          match.end()
-          return ready(nil)
+      guard up, !match.ended else { return failed() }
+      // With no screen attached, the display being watched was the system's stand-in, and it goes
+      // once there is another: a moment is given for that before mirroring is tried.
+      match.wait(until: gone, tries: 3) { left in
+        guard !match.ended else { return failed() }
+        if left { return match.standAlone(settled) }
+        guard match.mirror() else { return gone() ? match.standAlone(settled) : failed() }
+        match.wait(until: { CGDisplayMirrorsDisplay(physical) == display.displayID || gone() }, tries: 30) { done in
+          guard done, !match.ended else {
+            if !match.ended { log("the viewer's resolution is not matched: display \(physical) did not start mirroring") }
+            return failed()
+          }
+          if gone() { return match.standAlone(settled) }
+          log("display \(physical) mirrors a \(size.width)×\(size.height) @\(size.scale)x display for the viewer")
+          settled()
         }
-        log("display \(physical) mirrors a \(size.width)×\(size.height) @\(size.scale)x display for the viewer")
-        // The window server finishes laying the desktop out before the capture looks for it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { ready(match.ended ? nil : match) }
       }
     }
+  }
+
+  private func standAlone(_ settled: () -> Void) {
+    alone = true
+    log("this Mac has no screen of its own: its desktop is a \(size.width)×\(size.height) @\(size.scale)x display for the viewer")
+    settled()
   }
 
   private func wait(until done: @escaping () -> Bool, tries: Int, then: @escaping (Bool) -> Void) {
@@ -174,7 +204,8 @@ final class ScreenMatch {
     if ScreenMatch.current === self { ScreenMatch.current = nil }
     guard let display else { return }
     self.display = nil
-    if CGDisplayMirrorsDisplay(physical) == display.displayID {
+    if alone { log("the viewer's display is gone") }
+    else if CGDisplayMirrorsDisplay(physical) == display.displayID {
       var config: CGDisplayConfigRef?
       if CGBeginDisplayConfiguration(&config) == .success {
         CGConfigureDisplayMirrorOfDisplay(config, physical, kCGNullDirectDisplay)

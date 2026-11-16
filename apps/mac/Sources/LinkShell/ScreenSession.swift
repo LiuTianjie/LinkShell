@@ -73,6 +73,10 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var display = Display.main
   /// The display made at the viewer's resolution, which the chosen one mirrors meanwhile.
   private var match: ScreenMatch?
+  /// The matched display is being made: the displays are between two arrangements, so a
+  /// configuration that arrives now is applied once the picture has a display.
+  private var matching = false
+  private var heldConfiguration: [String: Any]?
   private var connection: RTCPeerConnection?
   private var peerFactory: RTCPeerConnectionFactory?
   private var transceiver: RTCRtpTransceiver?
@@ -163,10 +167,17 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard let chosen = Display.at(request.screen) else { return fail("there is no display \(request.screen)") }
     if let wanted = request.match, let size = ScreenMatch.size(for: wanted, watching: chosen.bounds.size) {
       let link = self.link
+      matching = true
       ScreenMatch.begin(watching: chosen.id, size: size, hz: Double(request.maxFps), log: { link.log($0) }) { [weak self] match in
         guard let self, !self.closed else { match?.end(); return }
         self.match = match
-        self.begin(self.shown(chosen))
+        self.matching = false
+        // Unmatched, the display is looked up again: on a Mac with no screen it has a new number.
+        guard let display = match == nil ? Display.at(self.request.screen) : self.shown(chosen) else {
+          return self.fail("there is no display \(self.request.screen)")
+        }
+        self.begin(display)
+        if let held = self.heldConfiguration { self.heldConfiguration = nil; self.configure(held) }
       }
       return
     }
@@ -332,6 +343,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   /// Replaces only the capture. The negotiated track, channels and ICE path remain in place.
   func configure(_ message: [String: Any]) {
     guard !closed else { return }
+    if matching { heldConfiguration = message; return }
     guard let configuration = ScreenConfiguration(message, defaultMaxFps: appliedConfiguration?.maxFps ?? request.maxFps),
           Display.at(configuration.screen) != nil else {
       link.emit(["t": "rtc.configure.error", "v": viewer, "requestId": message["requestId"] ?? NSNull(), "message": "屏幕配置无效，或所选显示器已断开"])
